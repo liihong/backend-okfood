@@ -1,0 +1,47 @@
+from pydantic import BaseModel, Field
+
+from app.constants import UNASSIGNED_DELIVERY_AREA
+from app.schemas.user import Location
+
+
+class MemberAddressOut(BaseModel):
+    id: int
+    member_id: int
+    contact_name: str
+    contact_phone: str
+    area: str
+    area_manual: bool = False
+    detail_address: str
+    remarks: str | None
+    location: Location | None
+    is_default: bool
+    created_at: str
+    updated_at: str
+
+    model_config = {"from_attributes": False}
+
+
+class MemberAddressCreateIn(BaseModel):
+    contact_name: str = Field(..., min_length=1, max_length=100)
+    contact_phone: str = Field(..., min_length=5, max_length=20)
+    area: str = Field(default=UNASSIGNED_DELIVERY_AREA, max_length=64)
+    detail_address: str = Field(..., min_length=1, max_length=500)
+    remarks: str | None = Field(None, max_length=500)
+    is_default: bool = False
+    location: Location | None = Field(
+        None,
+        description="地图选点坐标；若提供则保存该经纬度并据此自动划区，不再对详细地址做地理编码",
+    )
+
+
+class MemberAddressUpdateIn(BaseModel):
+    contact_name: str | None = Field(None, min_length=1, max_length=100)
+    contact_phone: str | None = Field(None, min_length=5, max_length=20)
+    area: str | None = Field(None, max_length=64)
+    detail_address: str | None = Field(None, min_length=1, max_length=500)
+    remarks: str | None = Field(None, max_length=500)
+    is_default: bool | None = None
+    location: Location | None = Field(
+        None,
+        description="更新地图选点；提交则刷新经纬度并按坐标重算片区（area_manual 为真时保留手工片区）",
+    )

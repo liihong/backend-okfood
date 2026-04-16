@@ -1,0 +1,13 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.idea/
+.vscode/
+
+# 本地上传的图片（磁盘：data/static/uploads/images/...）
+data/static/uploads/*
+!data/static/uploads/.gitkeep

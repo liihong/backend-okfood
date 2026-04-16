@@ -1,0 +1,61 @@
+# Backend API 开发规范
+
+# 全栈开发与联调守则
+
+## 角色定义
+你是一个严谨的全栈工程师。在执行任何修改前，必须遵循以下流程：
+
+## 1. 强制性预检 (Pre-check)
+- 修改后端接口前，必须搜索前端引用的位置 (@shared/types 或 API 调用处)。
+- 严禁修改已存在的 API 字段名称，除非显式要求重构。
+- 如果发现前后端类型定义 (Typescript Interface) 不匹配，必须优先修复定义。
+
+## 2. 编码规范
+- **禁止使用 any**：所有数据必须有明确的 Interface 或 Type。
+- **防御性编程**：API 返回必须包含错误处理逻辑和 Loading 状态控制。
+- **最小化改动**：不要重写整个文件，只修改必要的逻辑。
+
+## 3. 联调验证 (Joint Debugging)
+- 每次完成接口开发，自动生成一个对应的 `curl` 测试脚本或简单的单元测试。
+- 检查 JSON 序列化格式（如驼峰与下划线的转换）。
+
+## 统一响应格式要求
+
+**所有后端接口必须返回统一格式：`{code, data, msg}`**
+
+### 响应格式规范：
+- 成功响应：使用 `from utils.response import success`，返回 `success(data=..., msg=...)`
+- 失败响应：使用 `from utils.response import fail`，返回 `fail(msg=..., code=...)`
+- 分页响应：使用 `from utils.response import page_response`，返回 `page_response(items=..., total=...)`
+
+### 禁止行为：
+- ❌ 直接返回原始数据（如 `return {"id": 1}`）
+- ❌ 使用 FastAPI 的默认响应格式
+- ❌ 返回不包含 `code`、`data`、`msg` 字段的响应
+
+### 示例：
+from utils.response import success, fail, ResponseCode
+
+# ✅ 正确
+@router.get("/users")
+async def get_users():
+    users = await get_all_users()
+    return success(data=users, msg="获取成功")
+
+# ❌ 错误
+@router.get("/users")
+async def get_users():
+    users = await get_all_users()
+    return users  # 缺少统一格式### 异常处理：
+- 使用自定义异常类（如 `APIException`, `BadRequestException` 等）
+- 全局异常处理器会自动转换为统一格式
+- 无需手动包装异常响应
+
+## 技术栈
+- FastAPI + SQLAlchemy 2.0 (异步)
+- 所有数据库操作必须使用异步方式
+- 使用 Pydantic v2 进行数据验证
+
+- 要求能复用的代码不要重复写
+- 写代码时要求有注释，注释要清晰，注释要使用中文
+- 修改时不要影响现有功能，保证现有功能代码的健壮性

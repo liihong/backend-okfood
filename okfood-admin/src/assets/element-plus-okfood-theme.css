@@ -1,0 +1,66 @@
+/* Element Plus tokens aligned with admin-ui.css (forest green #0e5a44, slate neutrals). Load after Element base styles. */
+:root {
+  --el-color-primary: #0e5a44;
+  --el-color-primary-rgb: 14, 90, 68;
+  --el-color-primary-light-3: #3d7561;
+  --el-color-primary-light-5: #618a7a;
+  --el-color-primary-light-7: #8ba096;
+  --el-color-primary-light-8: #a3b0a9;
+  --el-color-primary-light-9: #d2dcd8;
+  --el-color-primary-dark-2: #084232;
+
+  --el-color-success: #059669;
+  --el-color-success-rgb: 5, 150, 105;
+  --el-color-success-light-3: #39a883;
+  --el-color-success-light-5: #67bba0;
+  --el-color-success-light-7: #94cebd;
+  --el-color-success-light-8: #aad8ca;
+  --el-color-success-light-9: #ecfdf5;
+  --el-color-success-dark-2: #047857;
+
+  --el-color-warning: #d97706;
+  --el-color-warning-rgb: 217, 119, 6;
+  --el-color-warning-light-3: #e1963c;
+  --el-color-warning-light-5: #eab26f;
+  --el-color-warning-light-7: #f3cea2;
+  --el-color-warning-light-8: #f7ddb9;
+  --el-color-warning-light-9: #fffbeb;
+  --el-color-warning-dark-2: #b45309;
+
+  --el-color-danger: #e11d48;
+  --el-color-danger-rgb: 225, 29, 72;
+  --el-color-danger-light-3: #e8556f;
+  --el-color-danger-light-5: #ee7d92;
+  --el-color-danger-light-7: #f4a6b5;
+  --el-color-danger-light-8: #f7bac5;
+  --el-color-danger-light-9: #fff1f2;
+  --el-color-danger-dark-2: #be123c;
+
+  --el-color-error: #e11d48;
+  --el-color-error-rgb: 225, 29, 72;
+  --el-color-error-light-3: #e8556f;
+  --el-color-error-light-5: #ee7d92;
+  --el-color-error-light-7: #f4a6b5;
+  --el-color-error-light-8: #f7bac5;
+  --el-color-error-light-9: #fff1f2;
+  --el-color-error-dark-2: #be123c;
+
+  --el-font-family:
+    -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+
+  --el-border-radius-base: 12px;
+  --el-border-radius-small: 8px;
+
+  --el-bg-color-page: #f8fafc;
+  --el-fill-color-light: #f1f5f9;
+  --el-fill-color-lighter: #f8fafc;
+  --el-border-color: #e2e8f0;
+  --el-border-color-light: #e2e8f0;
+  --el-border-color-lighter: #f1f5f9;
+  --el-border-color-extra-light: #f8fafc;
+
+  --el-text-color-primary: #1e293b;
+  --el-text-color-regular: #475569;
+  --el-text-color-secondary: #64748b;
+  --el-text-color-placeholder: #94a3b8;
+}
