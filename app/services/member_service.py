@@ -602,6 +602,8 @@ def get_tomorrow_menu(db: Session) -> dict:
 
             "pic": dish.image_url,
 
+            "price": _member_menu_price(dish),
+
         }
 
     row2 = db.execute(
@@ -628,6 +630,8 @@ def get_tomorrow_menu(db: Session) -> dict:
 
             "pic": None,
 
+            "price": None,
+
         }
 
     _, dish = row2
@@ -644,6 +648,8 @@ def get_tomorrow_menu(db: Session) -> dict:
 
         "pic": dish.image_url,
 
+        "price": _member_menu_price(dish),
+
     }
 
 
@@ -653,6 +659,18 @@ def get_tomorrow_menu(db: Session) -> dict:
 def _monday_of_week(d: date) -> date:
 
     return d - timedelta(days=d.weekday())
+
+
+
+
+
+def _member_menu_price(dish: MenuDish | None) -> float | None:
+
+    if dish is None or dish.single_order_price_yuan is None:
+
+        return None
+
+    return float(dish.single_order_price_yuan)
 
 
 
@@ -671,6 +689,8 @@ def _dish_to_member_card(*, menu_date: date, dish: MenuDish | None, slot: int | 
         "title": dish.name if dish else None,
 
         "desc": dish.description if dish else None,
+
+        "price": _member_menu_price(dish),
 
     }
 
@@ -753,6 +773,8 @@ def get_menu_detail_by_dish_id(db: Session, dish_id: int) -> dict:
         "is_enabled": dish.is_enabled,
 
         "category_id": dish.category_id,
+
+        "price": _member_menu_price(dish),
 
     }
 

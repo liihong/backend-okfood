@@ -14,6 +14,7 @@ const RegionsView = () => import('../views/RegionsView.vue')
 const CouriersView = () => import('../views/CouriersView.vue')
 const FinanceView = () => import('../views/FinanceView.vue')
 const MenuView = () => import('../views/MenuView.vue')
+const WeeklyMenuView = () => import('../views/WeeklyMenuView.vue')
 const CardOrdersView = () => import('../views/CardOrdersView.vue')
 
 const router = createRouter({
@@ -45,10 +46,16 @@ const router = createRouter({
           meta: { title: '开卡工单' },
         },
         { path: 'delivery', name: 'delivery', component: DeliveryView, meta: { title: '智能配送大表' } },
-        { path: 'regions', name: 'regions', component: RegionsView, meta: { title: '配送区域' } },
+        { path: 'regions', name: 'regions', component: RegionsView, meta: { title: '配送区域管理' } },
         { path: 'couriers', name: 'couriers', component: CouriersView, meta: { title: '配送员管理' } },
         { path: 'finance', name: 'finance', component: FinanceView, meta: { title: '财务中心' } },
         { path: 'menu', name: 'menu', component: MenuView, meta: { title: '菜品管理' } },
+        {
+          path: 'weekly-menu',
+          name: 'weekly-menu',
+          component: WeeklyMenuView,
+          meta: { title: '本周菜单' },
+        },
       ],
     },
   ],

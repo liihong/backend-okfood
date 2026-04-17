@@ -43,6 +43,7 @@ const dishForm = reactive({
   id: null,
   name: '',
   description: '',
+  single_order_price_yuan: '',
   image_url: '',
   is_enabled: true,
   category_id: '',
@@ -90,6 +91,7 @@ function resetDishForm() {
   dishForm.id = null
   dishForm.name = ''
   dishForm.description = ''
+  dishForm.single_order_price_yuan = ''
   dishForm.image_url = ''
   dishForm.is_enabled = true
   dishForm.category_id = ''
@@ -106,6 +108,10 @@ const openDishEditorEdit = (row) => {
   dishForm.id = row.id
   dishForm.name = row.name || ''
   dishForm.description = row.description || ''
+  dishForm.single_order_price_yuan =
+    row.single_order_price_yuan != null && String(row.single_order_price_yuan).trim() !== ''
+      ? String(row.single_order_price_yuan).trim()
+      : ''
   dishForm.image_url = row.image_url || ''
   dishForm.is_enabled = row.is_enabled !== false
   dishForm.category_id = row.category_id != null ? String(row.category_id) : ''
@@ -167,12 +173,23 @@ async function saveDish() {
     dishForm.category_id === '' || dishForm.category_id == null
       ? null
       : parseInt(String(dishForm.category_id), 10)
+  const priceStr = String(dishForm.single_order_price_yuan ?? '').trim()
+  let single_order_price_yuan = null
+  if (priceStr !== '') {
+    const n = Number(priceStr)
+    if (!Number.isFinite(n) || n < 0) {
+      showToast('单点价格需为大于等于 0 的数字', 'error')
+      return
+    }
+    single_order_price_yuan = n
+  }
   const body = {
     name: dishForm.name.trim(),
     description: (dishForm.description || '').trim() || null,
     image_url: (dishForm.image_url || '').trim() || null,
     is_enabled: Boolean(dishForm.is_enabled),
     category_id: Number.isFinite(categoryId) ? categoryId : null,
+    single_order_price_yuan,
   }
   if (isEditingDish.value && dishForm.id != null) {
     body.id = dishForm.id
@@ -246,6 +263,12 @@ onMounted(() => {
         <div class="menu-card-body">
           <h4 class="menu-dish-title">【 {{ d.name }} 】</h4>
           <p class="menu-dish-desc">{{ d.description || '—' }}</p>
+          <p
+            v-if="d.single_order_price_yuan != null && String(d.single_order_price_yuan).trim() !== ''"
+            class="menu-dish-price"
+          >
+            单点 {{ '\u00a5' }}{{ d.single_order_price_yuan }}
+          </p>
           <div class="menu-card-actions menu-card-actions--spread">
             <button type="button" class="menu-btn-ghost" @click="openDishEditorEdit(d)">编辑</button>
             <button type="button" class="menu-btn-danger" @click="deleteDish(d)">
@@ -347,6 +370,17 @@ onMounted(() => {
             rows="3"
             placeholder="原切鸡腿肉、秘制盐葱酱、杂粮基底、时令蔬果。"
           ></textarea>
+
+          <label class="menu-editor-label" for="dish-single-price">单点价格（元，可选）</label>
+          <input
+            id="dish-single-price"
+            v-model="dishForm.single_order_price_yuan"
+            type="number"
+            min="0"
+            step="0.01"
+            class="menu-editor-input"
+            placeholder="留空表示未定价，会员端显示「待公布」"
+          />
 
           <div class="menu-editor-footer-btns">
             <button type="button" class="menu-btn-draft" @click="closeDishModal">取消</button>

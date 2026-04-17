@@ -17,7 +17,7 @@ def test_weekly_menu_returns_envelope_and_seven_items():
     assert "week_start" in data
     assert len(data["items"]) == 7
     first = data["items"][0]
-    for key in ("date", "pic", "title", "desc", "dish_id", "slot"):
+    for key in ("date", "pic", "title", "desc", "dish_id", "slot", "price"):
         assert key in first
 
 

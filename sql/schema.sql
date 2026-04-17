@@ -185,6 +185,7 @@ CREATE TABLE IF NOT EXISTS `menu_dish` (
   `image_url` TEXT NULL,
   `is_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
   `category_id` BIGINT UNSIGNED NULL COMMENT '所属分类（商品库）',
+  `single_order_price_yuan` DECIMAL(12, 2) NULL COMMENT '单点售价(元)',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),

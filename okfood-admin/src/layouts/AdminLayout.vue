@@ -1,6 +1,6 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
 import {
   Users,
   Truck,
@@ -22,16 +22,7 @@ const { showToast } = useToast()
 
 const pageTitle = computed(() => route.meta.title || 'OK Fine Admin')
 
-const navItems = [
-  { name: 'dashboard', label: '营业概览', icon: BarChart3 },
-  { name: 'users', label: '会员档案', icon: Users },
-  { name: 'card-orders', label: '开卡工单', icon: ClipboardList },
-  { name: 'delivery', label: '配送大表', icon: Truck },
-  { name: 'regions', label: '配送区域', icon: MapPin },
-  { name: 'couriers', label: '配送员', icon: Bike },
-  { name: 'finance', label: '财务中心', icon: DollarSign },
-  { name: 'menu', label: '菜品管理', icon: Utensils },
-]
+const activeMenuPath = computed(() => route.path)
 
 const showOrderModal = ref(false)
 const regionOptionsForOrder = ref([{ value: '未分配', label: '未分配' }])
@@ -96,20 +87,69 @@ const handleFastOrder = () => {
         </div>
       </div>
 
-      <nav class="nav-list">
-        <RouterLink
-          v-for="item in navItems"
-          :key="item.name"
-          v-slot="{ navigate, isActive }"
-          :to="{ name: item.name }"
-          custom
-        >
-          <button type="button" :class="{ active: isActive }" @click="navigate">
-            <component :is="item.icon" :size="18" />
-            {{ item.label }}
-          </button>
-        </RouterLink>
-      </nav>
+      <el-menu
+        class="sidebar-menu"
+        :default-active="activeMenuPath"
+        router
+        :ellipsis="false"
+        background-color="transparent"
+        text-color="rgba(255, 255, 255, 0.72)"
+        active-text-color="#facc15"
+      >
+        <el-menu-item index="/dashboard">
+          <span class="menu-item-inner">
+            <BarChart3 :size="18" stroke-width="2" />
+            <span>营业概览</span>
+          </span>
+        </el-menu-item>
+        <el-menu-item index="/users">
+          <span class="menu-item-inner">
+            <Users :size="18" stroke-width="2" />
+            <span>会员档案</span>
+          </span>
+        </el-menu-item>
+        <el-menu-item index="/card-orders">
+          <span class="menu-item-inner">
+            <ClipboardList :size="18" stroke-width="2" />
+            <span>开卡工单</span>
+          </span>
+        </el-menu-item>
+        <el-menu-item index="/delivery">
+          <span class="menu-item-inner">
+            <Truck :size="18" stroke-width="2" />
+            <span>配送大表</span>
+          </span>
+        </el-menu-item>
+
+        <el-sub-menu index="sub-delivery">
+          <template #title>
+            <span class="menu-item-inner">
+              <MapPin :size="18" stroke-width="2" />
+              <span>配送管理</span>
+            </span>
+          </template>
+          <el-menu-item index="/regions">配送区域管理</el-menu-item>
+          <el-menu-item index="/couriers">配送员管理</el-menu-item>
+        </el-sub-menu>
+
+        <el-menu-item index="/finance">
+          <span class="menu-item-inner">
+            <DollarSign :size="18" stroke-width="2" />
+            <span>财务中心</span>
+          </span>
+        </el-menu-item>
+
+        <el-sub-menu index="sub-menu-mgmt">
+          <template #title>
+            <span class="menu-item-inner">
+              <Utensils :size="18" stroke-width="2" />
+              <span>菜单管理</span>
+            </span>
+          </template>
+          <el-menu-item index="/menu">菜品管理</el-menu-item>
+          <el-menu-item index="/weekly-menu">本周菜单</el-menu-item>
+        </el-sub-menu>
+      </el-menu>
 
       <button type="button" class="sidebar-footer" @click="handleAdminLogout">
         <div class="admin-info">

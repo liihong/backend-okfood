@@ -31,6 +31,13 @@ class DishUpsertIn(BaseModel):
     image_url: str | None = Field(None, max_length=2_000_000)
     is_enabled: bool = True
     category_id: int | None = Field(default=None, description="商品分类主键，可空")
+    single_order_price_yuan: Decimal | None = Field(
+        None,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="单点售价(元)，可空表示未定价",
+    )
 
 
 class DishAdminOut(BaseModel):
@@ -40,6 +47,7 @@ class DishAdminOut(BaseModel):
     image_url: str | None
     is_enabled: bool
     category_id: int | None
+    single_order_price_yuan: str | None = Field(None, description="单点售价(元)，字符串保留两位小数")
     created_at: str
 
 

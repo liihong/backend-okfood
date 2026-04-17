@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 
 from fastapi import HTTPException
 from sqlalchemy import and_, func, literal, not_, or_, select
@@ -33,6 +34,12 @@ from app.schemas.admin import (
 from app.services.member_address_service import effective_routing_area, get_default_address
 from app.services.member_service import _monday_of_week, _to_member_out
 from app.schemas.user import MemberOut
+
+
+def _dish_price_yuan_str(v: Decimal | None) -> str | None:
+    if v is None:
+        return None
+    return format(v, "f")
 
 
 def _member_on_leave_today(m: Member, today: date) -> bool:
@@ -173,6 +180,7 @@ def upsert_dish(db: Session, body: DishUpsertIn) -> DishAdminOut:
         row.image_url = body.image_url
         row.is_enabled = body.is_enabled
         row.category_id = body.category_id
+        row.single_order_price_yuan = body.single_order_price_yuan
     else:
         row = MenuDish(
             name=body.name,
@@ -180,6 +188,7 @@ def upsert_dish(db: Session, body: DishUpsertIn) -> DishAdminOut:
             image_url=body.image_url,
             is_enabled=body.is_enabled,
             category_id=body.category_id,
+            single_order_price_yuan=body.single_order_price_yuan,
         )
         db.add(row)
     db.commit()
@@ -191,6 +200,7 @@ def upsert_dish(db: Session, body: DishUpsertIn) -> DishAdminOut:
         image_url=row.image_url,
         is_enabled=row.is_enabled,
         category_id=row.category_id,
+        single_order_price_yuan=_dish_price_yuan_str(row.single_order_price_yuan),
         created_at=row.created_at.isoformat() if row.created_at else "",
     )
 
@@ -210,6 +220,7 @@ def list_dishes_admin(db: Session, *, enabled_only: bool, q: str | None = None) 
             image_url=r.image_url,
             is_enabled=r.is_enabled,
             category_id=r.category_id,
+            single_order_price_yuan=_dish_price_yuan_str(r.single_order_price_yuan),
             created_at=r.created_at.isoformat() if r.created_at else "",
         )
         for r in rows
