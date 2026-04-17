@@ -1,0 +1,168 @@
+{
+  "pages": [
+    {
+      "path": "pages/order/index",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#f8fafc",
+        "disableScroll": true
+      }
+    },
+    {
+      "path": "pages/mine/index",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#f8fafc",
+        "disableScroll": true
+      }
+    },
+    {
+      "path": "pages/courier/home",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    {
+      "path": "pages/courier/dashboard",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    {
+      "path": "pages/courier/login",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    {
+      "path": "pages/courier/profile",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#f8fafc"
+      }
+    },
+    {
+      "path": "pages/rider/home",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    {
+      "path": "pages/rider/dashboard",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#ffffff"
+      }
+    }
+  ],
+  "preloadRule": {
+    "pages/mine/index": {
+      "network": "all",
+      "packages": ["packageUser"]
+    }
+  },
+  "subPackages": [
+    {
+      "root": "packageOrder",
+      "pages": [
+        {
+          "path": "pages/detail/detail",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#ffffff"
+          }
+        },
+        {
+          "path": "pages/singleConfirm/singleConfirm",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#ffffff"
+          }
+        }
+      ]
+    },
+    {
+      "root": "packageUser",
+      "pages": [
+        {
+          "path": "pages/leave/leave",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
+        },
+        {
+          "path": "pages/address/list",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
+        },
+        {
+          "path": "pages/address/address",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#ffffff"
+          }
+        },
+        {
+          "path": "pages/address/mapPick",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#ffffff"
+          }
+        },
+        {
+          "path": "pages/memberSetup/memberSetup",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
+        }
+      ]
+    }
+  ],
+  "tabBar": {
+    "custom": true,
+    "color": "#999999",
+    "selectedColor": "#0e5a44",
+    "borderStyle": "black",
+    "backgroundColor": "#ffffff",
+    "list": [
+      {
+        "pagePath": "pages/order/index",
+        "text": "菜单",
+        "iconPath": "static/caidan-nor.png",
+        "selectedIconPath": "static/caidan-sel.png"
+      },
+      {
+        "pagePath": "pages/mine/index",
+        "text": "我的",
+        "iconPath": "static/mine-nor.png",
+        "selectedIconPath": "static/mine-sel.png"
+      },
+      {
+        "pagePath": "pages/courier/dashboard",
+        "text": "配送单",
+        "iconPath": "static/caidan-nor.png",
+        "selectedIconPath": "static/caidan-sel.png"
+      },
+      {
+        "pagePath": "pages/courier/profile",
+        "text": "我的",
+        "iconPath": "static/mine-nor.png",
+        "selectedIconPath": "static/mine-sel.png"
+      }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "OK 饭",
+    "navigationBarBackgroundColor": "#ffffff",
+    "backgroundColor": "#f8fafc"
+  }
+}

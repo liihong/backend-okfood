@@ -1,0 +1,37 @@
+{
+  "description": "小程序源码在 miniprogramRoot。请先 npm run build:mp-weixin；日常 dev:mp-weixin 时请把 miniprogramRoot 改成 dist/dev/mp-weixin/ 或直接用开发者工具打开该子目录。",
+  "miniprogramRoot": "dist/build/mp-weixin/",
+  "packOptions": {
+    "ignore": []
+  },
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "postcss": false,
+    "minified": false,
+    "newFeature": true,
+    "bigPackageSizeSupport": true
+  },
+  "compileType": "miniprogram",
+  "libVersion": "",
+  "appid": "wx1b55ef2f7ba7035d",
+  "projectname": "OK饭",
+  "condition": {
+    "search": {
+      "current": -1,
+      "list": []
+    },
+    "conversation": {
+      "current": -1,
+      "list": []
+    },
+    "game": {
+      "current": -1,
+      "list": []
+    },
+    "miniprogram": {
+      "current": -1,
+      "list": []
+    }
+  }
+}
