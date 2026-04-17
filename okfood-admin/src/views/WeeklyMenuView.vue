@@ -11,11 +11,18 @@ const preview = ref(null)
 const dishes = ref([])
 
 const dishOptions = computed(() =>
-  (dishes.value || []).map((d) => ({
-    value: d.id,
-    label: d.is_enabled === false ? `${d.name}（已停用）` : d.name,
-    disabled: d.is_enabled === false,
-  })),
+  (dishes.value || []).map((d) => {
+    const priceStr =
+      d.single_order_price_yuan != null && String(d.single_order_price_yuan).trim() !== ''
+        ? `¥${String(d.single_order_price_yuan).trim()}`
+        : ''
+    const priceHint = priceStr ? `（${priceStr}）` : '（未定价，会员端显示待公布）'
+    return {
+      value: d.id,
+      label: d.is_enabled === false ? `${d.name}（已停用）` : `${d.name}${priceHint}`,
+      disabled: d.is_enabled === false,
+    }
+  }),
 )
 
 function slotsToRows(slotList, weekStartIso) {
@@ -26,7 +33,15 @@ function slotsToRows(slotList, weekStartIso) {
     weekStart: weekStartIso,
     dish_id: bySlot[slot]?.dish_id ?? null,
     name: bySlot[slot]?.name ?? '',
+    single_order_price_yuan: bySlot[slot]?.single_order_price_yuan ?? null,
   }))
+}
+
+/** @param {unknown} v */
+function formatSlotPriceHint(v) {
+  if (v == null) return '—'
+  const s = String(v).trim()
+  return s !== '' ? `¥${s}` : '—'
 }
 
 const thisWeekRows = computed(() => {
@@ -124,6 +139,23 @@ onMounted(() => {
         </template>
         <el-table :data="thisWeekRows" stripe border class="weekly-table">
           <el-table-column prop="weekday" label="星期" width="88" />
+          <el-table-column label="单点价" width="100">
+            <template #default="{ row }">
+              <span
+                :class="
+                  row.dish_id && (!row.single_order_price_yuan || !String(row.single_order_price_yuan).trim())
+                    ? 'weekly-price-missing'
+                    : ''
+                "
+              >
+                {{
+                  row.dish_id
+                    ? formatSlotPriceHint(row.single_order_price_yuan)
+                    : '—'
+                }}
+              </span>
+            </template>
+          </el-table-column>
           <el-table-column label="菜品">
             <template #default="{ row }">
               <el-select
@@ -157,6 +189,23 @@ onMounted(() => {
         </template>
         <el-table :data="nextWeekRows" stripe border class="weekly-table">
           <el-table-column prop="weekday" label="星期" width="88" />
+          <el-table-column label="单点价" width="100">
+            <template #default="{ row }">
+              <span
+                :class="
+                  row.dish_id && (!row.single_order_price_yuan || !String(row.single_order_price_yuan).trim())
+                    ? 'weekly-price-missing'
+                    : ''
+                "
+              >
+                {{
+                  row.dish_id
+                    ? formatSlotPriceHint(row.single_order_price_yuan)
+                    : '—'
+                }}
+              </span>
+            </template>
+          </el-table-column>
           <el-table-column label="菜品">
             <template #default="{ row }">
               <el-select
@@ -219,5 +268,10 @@ onMounted(() => {
 .weekly-select {
   width: 100%;
   min-width: 0;
+}
+
+.weekly-price-missing {
+  color: var(--el-color-danger);
+  font-weight: 600;
 }
 </style>

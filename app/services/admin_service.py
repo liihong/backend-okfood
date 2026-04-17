@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import and_, func, literal, not_, or_, select
+from sqlalchemy import and_, func, literal, not_, or_, select, true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -88,22 +88,50 @@ def list_members_paged(
     page_size: int,
     validity: str | None = None,
 ) -> tuple[list[MemberAdminOut], int]:
-    count_stmt = select(func.count()).select_from(Member)
-    count_stmt = _apply_member_list_filters(count_stmt, q_phone=q_phone, validity=validity)
-    total = int(db.scalar(count_stmt) or 0)
+    # 每人至多一条「默认地址」：避免多条 is_default=1 时 JOIN 放大行数、拖慢 ORDER BY + LIMIT
+    default_addr_pick = (
+        select(
+            MemberAddress.member_id.label("mid"),
+            func.max(MemberAddress.id).label("addr_id"),
+        )
+        .where(MemberAddress.is_default.is_(True))
+        .group_by(MemberAddress.member_id)
+    ).subquery("def_addr")
 
-    addr_on_default = and_(
-        MemberAddress.member_id == Member.id,
-        MemberAddress.is_default.is_(True),
+    # 单次往返：总计数子查询 + 分页 id 子查询 LEFT JOIN，避免 COUNT 与列表各查一次（高延迟库上可省一整轮 RTT）
+    count_sq = _apply_member_list_filters(
+        select(func.count().label("total")).select_from(Member),
+        q_phone=q_phone,
+        validity=validity,
+    ).subquery("cnt")
+    page_sq = _apply_member_list_filters(
+        select(Member.id.label("pid")).select_from(Member),
+        q_phone=q_phone,
+        validity=validity,
     )
-    list_stmt = select(Member, MemberAddress).outerjoin(MemberAddress, addr_on_default)
-    list_stmt = _apply_member_list_filters(list_stmt, q_phone=q_phone, validity=validity)
+    page_sq = (
+        page_sq.order_by(Member.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .subquery("page")
+    )
     list_stmt = (
-        list_stmt.order_by(Member.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+        select(count_sq.c.total, Member, MemberAddress)
+        .select_from(count_sq)
+        .outerjoin(page_sq, true())
+        .outerjoin(Member, Member.id == page_sq.c.pid)
+        .outerjoin(default_addr_pick, default_addr_pick.c.mid == Member.id)
+        .outerjoin(MemberAddress, MemberAddress.id == default_addr_pick.c.addr_id)
     )
     biz_today = today_shanghai()
     out: list[MemberAdminOut] = []
-    for m, addr in db.execute(list_stmt).all():
+    rows = db.execute(list_stmt).all()
+    if not rows:
+        return [], 0
+    total = int(rows[0][0] or 0)
+    for _total_col, m, addr in rows:
+        if m is None:
+            continue
         if addr:
             detail = (addr.detail_address or "").strip()
             ar = effective_routing_area(addr)
@@ -307,6 +335,7 @@ def _weekly_slots_payload(db: Session, anchor: date) -> list[dict]:
             "name": d.name,
             "is_enabled": d.is_enabled,
             "category_id": d.category_id,
+            "single_order_price_yuan": _dish_price_yuan_str(d.single_order_price_yuan),
         }
         for w, d in rows
     ]

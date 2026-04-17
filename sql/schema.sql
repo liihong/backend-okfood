@@ -14,6 +14,10 @@
 --  11) member_card_orders 开卡工单（见 migration_017_member_card_orders.sql）
 --  12) members.delivery_start_date / 工单起送日（见 migration_018_members_delivery_start_date.sql）
 --  13) members 自增 id 主键、子表 member_id（见 migration_019_members_surrogate_id.sql）
+--  14) members.wx_mini_openid小程序登录标识（见 migration_022_members_wx_mini_openid.sql）
+--  15) 移除短信登录表 sms_verification（见 migration_023_drop_sms_verification.sql）
+--  16) single_meal_orders 单次点餐（见 migration_024_single_meal_orders.sql）
+--  17) single_meal_orders 微信字段（见 migration_025_single_meal_orders_wechat.sql）
 
 SET NAMES utf8mb4;
 
@@ -22,6 +26,7 @@ CREATE TABLE IF NOT EXISTS `members` (
   `phone` VARCHAR(20) NOT NULL COMMENT '手机号，登录与检索用，唯一',
   `name` VARCHAR(100) NOT NULL,
   `wechat_name` VARCHAR(100) NULL COMMENT '微信小程序昵称',
+  `wx_mini_openid` VARCHAR(64) NULL COMMENT '微信小程序 openid',
   `remarks` VARCHAR(500) NULL COMMENT '忌口/备注',
   `avatar_url` VARCHAR(512) NULL COMMENT '头像 URL',
   `balance` INT NOT NULL DEFAULT 0 COMMENT '剩余配送次数',
@@ -35,6 +40,7 @@ CREATE TABLE IF NOT EXISTS `members` (
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_members_phone` (`phone`),
+  UNIQUE KEY `uk_members_wx_mini_openid` (`wx_mini_openid`),
   KEY `idx_members_active_balance` (`is_active`, `balance`),
   KEY `idx_members_balance_created` (`balance`, `created_at`),
   KEY `idx_members_leave_range` (`leave_range_start`, `leave_range_end`),
@@ -241,12 +247,34 @@ INSERT INTO `app_settings` (`id`, `leave_deadline_time`)
 VALUES (1, '21:00:00')
 ON DUPLICATE KEY UPDATE `id` = `id`;
 
--- 登录短信验证码（UTC 时间的 expire_at，与代码中 datetime.utc一致）
-CREATE TABLE IF NOT EXISTS `sms_verification` (
-  `phone` VARCHAR(20) NOT NULL,
-  `code` VARCHAR(10) NOT NULL,
-  `expire_at` DATETIME NOT NULL,
+CREATE TABLE IF NOT EXISTS `single_meal_orders` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `out_trade_no` VARCHAR(32) NOT NULL COMMENT '商户订单号，微信统一下单',
+  `member_id` BIGINT UNSIGNED NOT NULL COMMENT 'members.id',
+  `dish_id` BIGINT UNSIGNED NOT NULL COMMENT 'menu_dish.id',
+  `member_address_id` BIGINT UNSIGNED NOT NULL COMMENT 'member_addresses.id',
+  `delivery_date` DATE NOT NULL COMMENT '供餐/配送业务日(上海)',
+  `routing_area` VARCHAR(64) NOT NULL COMMENT '下单时片区快照',
+  `amount_yuan` DECIMAL(12, 2) NOT NULL,
+  `pay_status` ENUM('未支付', '已支付') NOT NULL DEFAULT '未支付',
+  `pay_channel` VARCHAR(16) NULL,
+  `wx_transaction_id` VARCHAR(32) NULL COMMENT '微信支付订单号',
+  `fulfillment_status` VARCHAR(20) NOT NULL DEFAULT 'pending',
+  `courier_id` VARCHAR(50) NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`phone`),
-  KEY `idx_sms_verification_expire` (`expire_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='短信登录验证码';
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_smo_out_trade_no` (`out_trade_no`),
+  KEY `idx_smo_member_created` (`member_id`, `created_at`),
+  KEY `idx_smo_date_area` (`delivery_date`, `routing_area`),
+  KEY `idx_smo_courier_date_status` (`courier_id`, `delivery_date`, `fulfillment_status`),
+  CONSTRAINT `fk_smo_member` FOREIGN KEY (`member_id`) REFERENCES `members` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_smo_dish` FOREIGN KEY (`dish_id`) REFERENCES `menu_dish` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_smo_address` FOREIGN KEY (`member_address_id`) REFERENCES `member_addresses` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_smo_courier` FOREIGN KEY (`courier_id`) REFERENCES `couriers` (`courier_id`)
+    ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员单次点餐订单';
+

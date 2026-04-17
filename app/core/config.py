@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import quote_plus
 
 from pydantic import model_validator
@@ -24,9 +24,8 @@ class Settings(BaseSettings):
 
     JWT_SECRET: str = "change-me"
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES_MEMBER: int = 60 * 24 * 7
-    # 微信小程序一键登录专用：宜长于「短信登录」令牌，减少用户反复授权手机号（仍随卸载/清缓存失效）
-    JWT_EXPIRE_MINUTES_MEMBER_WX_MINI: int = 60 * 24 * 365 * 10
+    # 小程序登录签发会员 JWT；默认约 10 年，可按安全策略改短
+    JWT_EXPIRE_MINUTES_MEMBER: int = 60 * 24 * 365 * 10
     JWT_EXPIRE_MINUTES_COURIER: int = 60 * 24 * 30
     JWT_EXPIRE_MINUTES_ADMIN: int = 60 * 24
 
@@ -37,24 +36,25 @@ class Settings(BaseSettings):
 
     LOW_BALANCE_THRESHOLD: int = 2
 
-    # 关闭时不校验短信通道配置、不注册验证码清理任务、短信登录接口返回 503
-    SMS_ENABLED: bool = False
-
-    # 短信：aliyun=阿里云短信；webhook=POST 到自建网关（JSON: phone, code）
-    SMS_PROVIDER: Literal["aliyun", "webhook"] = "webhook"
-    SMS_CODE_TTL_MINUTES: int = 5
-    SMS_WEBHOOK_URL: str = ""
-    SMS_WEBHOOK_TOKEN: str = ""
-
-    ALIYUN_ACCESS_KEY_ID: str = ""
-    ALIYUN_ACCESS_KEY_SECRET: str = ""
-    ALIYUN_SMS_SIGN_NAME: str = ""
-    ALIYUN_SMS_TEMPLATE_CODE: str = ""
-    ALIYUN_SMS_ENDPOINT: str = "dysmsapi.aliyuncs.com"
-
     # 微信小程序：用于 code2Session + getuserphonenumber（手机号快速登录）
     WX_MINI_APPID: str = ""
     WX_MINI_SECRET: str = ""
+    # 配送员确认送达后给会员下发订阅消息（需在公众平台申请模板，与下列字段名一致；留空则不下发）
+    WX_MINI_SUBSCRIBE_DELIVERY_TMPL_ID: str = ""
+    # 与模板中占位符 id 一致，逗号分隔，顺序对应：摘要、时间、说明（按你的模板增删）
+    WX_MINI_SUBSCRIBE_DELIVERY_DATA_KEYS: str = "thing1,time2,thing3"
+    # 点击通知打开的小程序路径（无开头 /）
+    WX_MINI_SUBSCRIBE_PAGE: str = "pages/order/index"
+    # formal | developer | trial
+    WX_MINI_SUBSCRIBE_MINIPROGRAM_STATE: str = "formal"
+
+    # 微信支付 v2（小程序 JSAPI）：商户平台 API密钥为32 位
+    WECHAT_PAY_MCH_ID: str = ""
+    WECHAT_PAY_API_KEY: str = ""
+    # 异步通知完整 URL，须公网可访问，与商户平台配置一致，如 https://api.example.com/api/pay/wechat/notify
+    WECHAT_PAY_NOTIFY_URL: str = ""
+    # 微信回调来源 IP 段，逗号分隔 CIDR 或单 IP；留空则不做校验（仅建议开发环境）
+    WECHAT_PAY_IP_WHITELIST: str = ""
 
     # 本地图片上传：静态资源根目录（磁盘上为 {UPLOAD_DIR}/static/uploads/images/...，URL 为 /static/uploads/images/...）
     UPLOAD_DIR: str = "data"
@@ -63,6 +63,30 @@ class Settings(BaseSettings):
     BASE_URL: str = ""
     # 兼容旧配置；仅当 BASE_URL 为空时生效
     PUBLIC_BASE_URL: str = ""
+
+    # 对象存储：local=仅本地磁盘；aliyun=阿里云 OSS（已实现）；tencent/qiniu 等可后续扩展
+    OSS_PROVIDER: str = "local"
+    OSS_ENDPOINT: str = ""
+    OSS_BUCKET: str = ""
+    OSS_ACCESS_KEY_ID: str = ""
+    OSS_ACCESS_KEY_SECRET: str = ""
+    # 腾讯云等区域（当前仅 Aliyun 上传不使用，预留）
+    OSS_REGION: str = ""
+    # 自定义访问域名（无尾部 /），如 https://okoss.example.com；与 OSS_PUBLIC_BASE_URL 二选一，优先 OSS_PUBLIC_BASE_URL
+    OSS_DOMAIN: str = ""
+    # 对象键前缀，勿以 / 开头，勿以 / 结尾，如 okfood-prod
+    OSS_KEY_PREFIX: str = "okfood"
+    # 与 OSS_DOMAIN 等价用途（历史字段）；任一非空则作为文件对外 URL 前缀
+    OSS_PUBLIC_BASE_URL: str = ""
+
+    @property
+    def oss_public_url_prefix(self) -> str:
+        """头像等资源对外 URL 前缀（无尾部 /）。"""
+        for raw in (self.OSS_PUBLIC_BASE_URL, self.OSS_DOMAIN):
+            s = raw.strip().rstrip("/")
+            if s:
+                return s
+        return ""
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -101,27 +125,6 @@ class Settings(BaseSettings):
         if not base:
             return path
         return f"{base}{path}"
-
-    @model_validator(mode="after")
-    def validate_sms_config(self) -> Any:
-        if not self.SMS_ENABLED:
-            return self
-        if self.SMS_PROVIDER == "webhook":
-            if not self.SMS_WEBHOOK_URL.strip():
-                raise ValueError("SMS_PROVIDER=webhook 时必须配置非空的 SMS_WEBHOOK_URL")
-        elif self.SMS_PROVIDER == "aliyun":
-            missing = []
-            if not self.ALIYUN_ACCESS_KEY_ID.strip():
-                missing.append("ALIYUN_ACCESS_KEY_ID")
-            if not self.ALIYUN_ACCESS_KEY_SECRET.strip():
-                missing.append("ALIYUN_ACCESS_KEY_SECRET")
-            if not self.ALIYUN_SMS_SIGN_NAME.strip():
-                missing.append("ALIYUN_SMS_SIGN_NAME")
-            if not self.ALIYUN_SMS_TEMPLATE_CODE.strip():
-                missing.append("ALIYUN_SMS_TEMPLATE_CODE")
-            if missing:
-                raise ValueError(f"SMS_PROVIDER=aliyun 时必须配置: {', '.join(missing)}")
-        return self
 
     @model_validator(mode="after")
     def validate_production_jwt_secret(self) -> Any:

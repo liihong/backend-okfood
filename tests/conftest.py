@@ -5,5 +5,3 @@ import os
 # 必须在导入 `app` 包之前执行
 os.environ["DEBUG"] = "true"
 os.environ["JWT_SECRET"] = "pytest-jwt-secret-key-min-16-chars"
-os.environ["SMS_PROVIDER"] = "webhook"
-os.environ["SMS_WEBHOOK_URL"] = "http://127.0.0.1:9/sms-webhook-stub"

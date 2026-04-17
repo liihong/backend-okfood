@@ -17,7 +17,7 @@ def test_health_returns_envelope():
 
 
 def test_validation_error_returns_envelope():
-    r = client.post("/api/user/sms/send", json={})
+    r = client.post("/api/user/wx/mini/login", json={})
     assert r.status_code == 422
     body = r.json()
     assert body["code"] == 422

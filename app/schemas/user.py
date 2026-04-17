@@ -71,15 +71,6 @@ class LeaveIn(BaseModel):
     end: date | None = None
 
 
-class SmsSendIn(BaseModel):
-    phone: str
-
-
-class SmsLoginIn(BaseModel):
-    phone: str
-    code: str
-
-
 class WxMiniLoginIn(BaseModel):
     """小程序 `wx.login` 的 js_code + `getPhoneNumber` 返回的 code。"""
 

@@ -11,7 +11,7 @@ from app.models.delivery_region import DeliveryRegion, DeliveryRegionCourier
 from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.models.member_card_order import MemberCardOrder
-from app.models.sms_verification import SmsVerification
+from app.models.single_meal_order import SingleMealOrder
 
 __all__ = [
     "AdminUser",
@@ -28,5 +28,5 @@ __all__ = [
     "Member",
     "MemberAddress",
     "MemberCardOrder",
-    "SmsVerification",
+    "SingleMealOrder",
 ]

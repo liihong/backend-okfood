@@ -17,6 +17,7 @@ class Member(Base):
     phone: Mapped[str] = mapped_column(String(20), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(100))
     wechat_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    wx_mini_openid: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     remarks: Mapped[str | None] = mapped_column(String(500), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     balance: Mapped[int] = mapped_column(Integer, default=0)

@@ -32,8 +32,8 @@ def ensure_upload_root() -> Path:
     return root
 
 
-def save_image_bytes(data: bytes, content_type: str | None, filename: str | None) -> str:
-    """校验类型与大小，写入 UPLOAD_DIR，返回可用于 image_url 的 URL 字符串。"""
+def validate_image_bytes(data: bytes, content_type: str | None, filename: str | None) -> tuple[str, str]:
+    """校验大小、MIME 与扩展名；返回 (规范化 content_type, 扩展名如 .jpg)。"""
     max_b = settings.MAX_UPLOAD_BYTES
     if len(data) > max_b:
         raise HTTPException(
@@ -54,6 +54,12 @@ def save_image_bytes(data: bytes, content_type: str | None, filename: str | None
     ext = _CT_TO_EXT[ct]
     if ext_by_name and ext_by_name != ext:
         raise HTTPException(status_code=400, detail="文件扩展名与图片格式不一致")
+    return ct, ext
+
+
+def save_image_bytes(data: bytes, content_type: str | None, filename: str | None) -> str:
+    """校验类型与大小，写入 UPLOAD_DIR，返回可用于 image_url 的 URL 字符串。"""
+    _, ext = validate_image_bytes(data, content_type, filename)
 
     root = ensure_upload_root()
     now = datetime.now()

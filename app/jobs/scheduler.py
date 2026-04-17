@@ -1,14 +1,13 @@
 import logging
-from datetime import date, datetime, timezone
+from datetime import date
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from sqlalchemy import delete, select, update
+from sqlalchemy import select, update
 
 from app.core.config import settings
 from app.core.timeutil import today_shanghai
 from app.db.session import SessionLocal
 from app.models.member import Member
-from app.models.sms_verification import SmsVerification
 
 logger = logging.getLogger(__name__)
 
@@ -33,20 +32,6 @@ def job_reset_leave_flags() -> None:
         logger.info("请假标记重置任务完成: today=%s", today.isoformat())
     except Exception:
         logger.exception("请假标记重置任务失败")
-        db.rollback()
-    finally:
-        db.close()
-
-
-def job_cleanup_sms_codes() -> None:
-    """清理已过期的短信验证码记录，避免表无限增长。"""
-    db = SessionLocal()
-    try:
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        db.execute(delete(SmsVerification).where(SmsVerification.expire_at < now))
-        db.commit()
-    except Exception:
-        logger.exception("短信验证码清理任务失败")
         db.rollback()
     finally:
         db.close()
@@ -84,8 +69,6 @@ def setup_scheduler() -> None:
         return
     scheduler.add_job(job_reset_leave_flags, "cron", hour=0, minute=1, id="reset_leave", replace_existing=True)
     scheduler.add_job(job_low_balance_notify, "cron", hour=18, minute=0, id="low_balance", replace_existing=True)
-    if settings.SMS_ENABLED:
-        scheduler.add_job(job_cleanup_sms_codes, "cron", minute="*/30", id="sms_cleanup", replace_existing=True)
     scheduler.start()
 
 

@@ -72,19 +72,11 @@ def admin_subject(creds: HTTPAuthorizationCredentials | None = Depends(bearer_sc
 
 
 def issue_member_token(member_id: int) -> str:
+    """会员 JWT（当前仅微信小程序登录签发）；`sub` 为 members.id。"""
     return create_access_token(
         subject=str(member_id),
         role=ROLE_MEMBER,
         expires_delta=timedelta(minutes=settings.JWT_EXPIRE_MINUTES_MEMBER),
-    )
-
-
-def issue_member_token_wx_mini(member_id: int) -> str:
-    """微信小程序登录：单独配置有效期，默认远长于短信登录。"""
-    return create_access_token(
-        subject=str(member_id),
-        role=ROLE_MEMBER,
-        expires_delta=timedelta(minutes=settings.JWT_EXPIRE_MINUTES_MEMBER_WX_MINI),
     )
 
 

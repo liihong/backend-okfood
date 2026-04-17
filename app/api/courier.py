@@ -7,7 +7,7 @@ from app.core.limiter import limiter
 from app.core.timeutil import today_shanghai
 from app.schemas.common import TokenResponse
 from app.models.courier import Courier
-from app.schemas.courier import ConfirmDeliveryIn, CourierLoginIn, CourierPhoneLoginIn, CourierSelfOut
+from app.schemas.courier import ConfirmDeliveryIn, ConfirmSingleOrderIn, CourierLoginIn, CourierPhoneLoginIn, CourierSelfOut
 from app.services.courier_admin_service import regions_for_courier
 from app.services.courier_service import (
     confirm_delivery,
@@ -15,8 +15,8 @@ from app.services.courier_service import (
     courier_login_by_phone,
     group_task_rows,
     list_tasks_for_courier,
-    list_today_tasks,
 )
+from app.services.single_meal_order_service import confirm_single_order_delivery
 from app.utils.response import dump_model, success
 
 router = APIRouter(prefix="/courier", tags=["配送端"])
@@ -71,15 +71,13 @@ def tasks(
     allowed_names = {(r.name or "").strip() for r in assigned if r.name and (r.name or "").strip()}
     d = delivery_date or today_shanghai()
 
+    rows, d = list_tasks_for_courier(db, courier_id, delivery_date=delivery_date)
     if area is not None and (area or "").strip() != "":
         an = area.strip()
         if an not in allowed_names:
             raise HTTPException(status_code=403, detail="无权查看该片区")
-        rows = list_today_tasks(db, an, delivery_date=d)
-        groups = [{"area": an, "items": [m.model_dump(mode="json") for m in rows]}]
-    else:
-        rows, d = list_tasks_for_courier(db, courier_id, delivery_date=delivery_date)
-        groups = group_task_rows(rows)
+        rows = [m for m in rows if (m.area or "").strip() == an]
+    groups = group_task_rows(rows)
 
     payload = {
         "delivery_date": d.isoformat(),
@@ -94,3 +92,10 @@ def confirm(body: ConfirmDeliveryIn, db: SessionDep, courier_id: str = Depends(c
     """确认送达：扣减 1 次并记账；已送达重复提交幂等。"""
     confirm_delivery(db, courier_id, body.member_id, body.delivery_date)
     return success(msg="送达已确认")
+
+
+@router.post("/single-order/confirm")
+def confirm_single_order(body: ConfirmSingleOrderIn, db: SessionDep, courier_id: str = Depends(courier_subject)):
+    """单次点餐确认送达：不扣会员次卡，仅更新订单履约状态。"""
+    confirm_single_order_delivery(db, courier_id, body.order_id)
+    return success(msg="单次订单已确认送达")

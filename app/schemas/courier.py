@@ -22,6 +22,10 @@ class ConfirmDeliveryIn(BaseModel):
     delivery_date: date | None = Field(None, alias="date")
 
 
+class ConfirmSingleOrderIn(BaseModel):
+    order_id: int = Field(..., ge=1, description="single_meal_orders.id")
+
+
 class CourierTaskMemberOut(BaseModel):
     member_id: int
     phone: str
@@ -33,6 +37,9 @@ class CourierTaskMemberOut(BaseModel):
     remarks: str | None
     sort_distance_m: float | None = None
     is_delivered: bool = Field(False, description="该业务日是否已确认送达")
+    task_kind: str = Field("subscription", description="subscription 订阅配送 | single 单次点餐")
+    single_order_id: int | None = None
+    dish_title: str | None = Field(None, description="单次点餐餐品名")
 
 
 class CourierSelfOut(BaseModel):

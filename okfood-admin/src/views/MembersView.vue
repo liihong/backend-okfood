@@ -9,6 +9,7 @@ import {
   handleAdminLogout,
   planDefaultTotal,
 } from '../admin/core.js'
+import { showToast } from '../composables/useToast.js'
 
 const membersPage = ref(1)
 const membersPageSize = ref(20)
@@ -46,7 +47,7 @@ async function fetchMembers() {
       handleAdminLogout()
       return
     }
-    alert(e instanceof Error ? e.message : '加载会员列表失败')
+    showToast(e instanceof Error ? e.message : '加载会员列表失败', 'error')
   } finally {
     membersLoading.value = false
   }
@@ -63,6 +64,7 @@ watch(searchQuery, () => {
 })
 
 watch(membersValidityTab, () => {
+  if (!adminAccessToken.value) return
   membersPage.value = 1
   void fetchMembers()
 })
@@ -197,7 +199,13 @@ async function submitEditMember() {
     showEditModal.value = false
     await fetchMembers()
   } catch (e) {
-    alert(e instanceof Error ? e.message : '保存失败')
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '保存失败', 'error')
   } finally {
     editSaving.value = false
   }
@@ -258,7 +266,13 @@ async function submitRecharge() {
     showRechargeModal.value = false
     await fetchMembers()
   } catch (e) {
-    alert(e instanceof Error ? e.message : '续卡失败')
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '续卡失败', 'error')
   } finally {
     rechargeSaving.value = false
   }

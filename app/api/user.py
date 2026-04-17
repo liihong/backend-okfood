@@ -1,14 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 
 
-from app.core.config import settings
-
-from app.core.deps import SessionDep, issue_member_token, issue_member_token_wx_mini, member_subject
+from app.core.deps import SessionDep, issue_member_token, member_subject
 
 from app.core.limiter import limiter
-
-from app.integrations.sms_dispatch import SmsDispatchError
 
 from app.integrations.wechat_mini import (
 
@@ -26,9 +22,11 @@ from app.schemas.common import TokenResponse
 
 from app.schemas.member_address import MemberAddressCreateIn, MemberAddressUpdateIn
 
-from app.schemas.user import ActivateIn, LeaveIn, ProfilePatchIn, RegisterIn, SmsLoginIn, SmsSendIn, WxMiniLoginIn
+from app.schemas.admin import FileUploadOut
 
-from app.services import sms as sms_service
+from app.schemas.user import ActivateIn, LeaveIn, ProfilePatchIn, RegisterIn, WxMiniLoginIn
+
+from app.services.oss_upload_service import upload_member_avatar_bytes
 
 from app.services.member_address_service import create_address, delete_address, list_addresses, update_address
 
@@ -48,37 +46,17 @@ from app.services.member_service import (
 
 )
 
+from app.schemas.single_meal_order import SingleMealOrderCreateIn
+
+from app.services.single_meal_order_service import create_single_meal_order, prepare_wechat_jsapi_for_order
+
+from app.integrations.wechat_pay_v2 import resolve_request_client_ip
+
 from app.utils.response import dump_model, success
 
 
 
 router = APIRouter(prefix="/user", tags=["会员端"])
-
-
-
-
-
-@router.post("/sms/send")
-
-@limiter.limit("6/minute")
-
-def send_sms(request: Request, body: SmsSendIn, db: SessionDep):
-
-    """发送短信验证码：经 SMS_PROVIDER 调用真实通道；响应中不包含验证码。"""
-
-    if not settings.SMS_ENABLED:
-
-        raise HTTPException(status_code=503, detail="短信验证码功能暂未开放")
-
-    try:
-
-        sms_service.send_login_code(db, body.phone)
-
-    except SmsDispatchError:
-
-        raise HTTPException(status_code=502, detail="短信发送失败，请稍后重试或联系管理员")
-
-    return success(msg="验证码已发送")
 
 
 
@@ -104,7 +82,7 @@ def login_wx_mini(request: Request, body: WxMiniLoginIn, db: SessionDep):
 
     try:
 
-        jscode2session(body.js_code)
+        sess = jscode2session(body.js_code)
 
         phone = get_phone_pure_number(body.phone_code)
 
@@ -112,31 +90,9 @@ def login_wx_mini(request: Request, body: WxMiniLoginIn, db: SessionDep):
 
         raise HTTPException(status_code=e.status_code, detail=str(e))
 
-    member_id = ensure_member_stub(db, phone)
+    openid = str(sess.get("openid") or "").strip() or None
 
-    token = TokenResponse(access_token=issue_member_token_wx_mini(member_id))
-
-    return success(data=dump_model(token), msg="登录成功")
-
-
-
-
-
-@router.post("/sms/login")
-
-@limiter.limit("30/minute")
-
-def login_via_sms(request: Request, body: SmsLoginIn, db: SessionDep):
-
-    if not settings.SMS_ENABLED:
-
-        raise HTTPException(status_code=503, detail="短信验证码功能暂未开放")
-
-    if not sms_service.verify_login_code(db, body.phone, body.code):
-
-        raise HTTPException(status_code=400, detail="验证码错误或已过期")
-
-    member_id = ensure_member_stub(db, body.phone)
+    member_id = ensure_member_stub(db, phone, wx_mini_openid=openid)
 
     token = TokenResponse(access_token=issue_member_token(member_id))
 
@@ -268,6 +224,61 @@ def remove_address_me(address_id: int, db: SessionDep, member_id: int = Depends(
 
 
 
+@router.post("/single-orders")
+
+@limiter.limit("30/minute")
+
+def create_single_order_me(
+
+    request: Request,
+
+    body: SingleMealOrderCreateIn,
+
+    db: SessionDep,
+
+    member_id: int = Depends(member_subject),
+
+):
+
+    """单次点餐：创建未支付订单；支付与派单在微信支付回调中完成。随后调 `POST .../pay/wechat-jsapi` 调起支付。"""
+
+    _ = request
+
+    out = create_single_meal_order(db, member_id, body)
+
+    return success(data=dump_model(out), msg="订单已创建，请继续支付")
+
+
+@router.post("/single-orders/{order_id}/pay/wechat-jsapi")
+
+@limiter.limit("30/minute")
+
+def prepay_single_order_wechat(
+
+    request: Request,
+
+    order_id: int,
+
+    db: SessionDep,
+
+    member_id: int = Depends(member_subject),
+
+):
+
+    """微信统一下单（JSAPI），返回小程序 `uni.requestPayment` / `wx.requestPayment` 所需字段。"""
+
+    xf = request.headers.get("x-forwarded-for")
+
+    ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
+
+    params = prepare_wechat_jsapi_for_order(db, member_id, order_id, ip)
+
+    return success(data=params, msg="获取支付参数成功")
+
+
+
+
+
 @router.patch("/profile")
 
 def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends(member_subject)):
@@ -343,4 +354,34 @@ def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends
     )
 
     return success(data=dump_model(member), msg="资料已更新")
+
+
+
+
+
+@router.post("/me/avatar")
+
+@limiter.limit("30/minute")
+
+async def upload_member_avatar_me(
+
+    request: Request,
+
+    file: UploadFile = File(..., description="头像图片"),
+
+    member_id: int = Depends(member_subject),
+
+):
+
+    """上传会员头像至 OSS（未配置 OSS 时写入本地磁盘，行为与管理端上传一致）。"""
+
+    _ = request
+
+    _ = member_id
+
+    data = await file.read()
+
+    url = upload_member_avatar_bytes(data, file.content_type, file.filename)
+
+    return success(data=dump_model(FileUploadOut(url=url)), msg="上传成功")
 

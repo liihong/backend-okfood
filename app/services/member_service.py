@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 from fastapi import HTTPException
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from sqlalchemy.orm import Session
 
@@ -74,15 +74,41 @@ def _is_placeholder_profile(db: Session, m: Member) -> bool:
 
 
 
-def ensure_member_stub(db: Session, phone: str) -> int:
+def ensure_member_stub(
+    db: Session,
+    phone: str,
+    *,
+    wx_mini_openid: str | None = None,
+) -> int:
 
-    """登录成功时保证存在会员行；返回 members.id 用于签发 JWT。"""
+    """登录成功时保证存在会员行；返回 members.id 用于签发 JWT。
 
-    m = _member_by_phone(db, phone)
+    仅按手机号解析 id，避免加载整行（与历史库结构更易兼容）。
 
-    if m:
+    微信登录可对已存在会员更新 wx_mini_openid；新号则创建占位档案并写入 openid。
+    """
 
-        return m.id
+    row_id = db.scalar(select(Member.id).where(Member.phone == phone))
+
+    if row_id is not None:
+
+        mid = int(row_id)
+
+        if wx_mini_openid:
+
+            db.execute(
+
+                update(Member)
+
+                .where(Member.id == mid)
+
+                .values(wx_mini_openid=wx_mini_openid)
+
+            )
+
+            db.commit()
+
+        return mid
 
     member = Member(
 
@@ -105,6 +131,8 @@ def ensure_member_stub(db: Session, phone: str) -> int:
         leave_range_start=None,
 
         leave_range_end=None,
+
+        wx_mini_openid=wx_mini_openid,
 
     )
 

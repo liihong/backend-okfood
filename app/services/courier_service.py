@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import date
+import logging
 import re
 
 from fastapi import HTTPException
@@ -18,6 +19,9 @@ from app.services.courier_admin_service import regions_for_courier
 from app.services.geo import haversine_m
 from app.services.leave import is_absent_on_delivery_date
 from app.services.member_address_service import effective_routing_area, load_default_address_map
+from app.services.single_meal_order_service import list_courier_single_order_tasks
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_cn_mobile(raw: str) -> str:
@@ -173,13 +177,15 @@ def list_tasks_for_courier(
     regions = regions_for_courier(db, courier_id)
     area_names = sorted({(r.name or "").strip() for r in regions if r.name and (r.name or "").strip()})
     if not area_names:
-        return [], d
+        singles = list_courier_single_order_tasks(db, courier_id, d)
+        return singles, d
     by_member: dict[int, CourierTaskMemberOut] = {}
     for an in area_names:
         for row in list_today_tasks(db, an, delivery_date=d):
             by_member[row.member_id] = row
     out = list(by_member.values())
     out.sort(key=lambda x: (x.sort_distance_m is None, x.sort_distance_m or 0.0))
+    out.extend(list_courier_single_order_tasks(db, courier_id, d))
     return out, d
 
 
@@ -266,3 +272,12 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
         )
     )
     db.commit()
+
+    try:
+        from app.integrations.wechat_mini import try_notify_member_delivery_confirmed
+
+        openid = (member.wx_mini_openid or "").strip()
+        if openid:
+            try_notify_member_delivery_confirmed(openid, delivery_date=d)
+    except Exception:
+        logger.exception("送达后订阅消息调度失败 member_id=%s", member_id)
