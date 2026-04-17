@@ -14,7 +14,7 @@ from app.integrations.wechat_pay_v2 import (
     build_miniprogram_pay_params,
     unified_order_jsapi,
     verify_response_sign,
-    wechat_pay_configured,
+    wechat_pay_misconfiguration_detail,
     yuan_decimal_to_fen,
 )
 from app.models.courier import Courier
@@ -152,8 +152,9 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
 
 def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, client_ip: str) -> dict[str, str]:
     """调微信统一下单并返回小程序调起支付参数。"""
-    if not wechat_pay_configured():
-        raise HTTPException(status_code=503, detail="微信支付未配置或配置不完整（商户号、32位 API v2 密钥、回调 URL、小程序 AppId）")
+    pay_cfg = wechat_pay_misconfiguration_detail()
+    if pay_cfg:
+        raise HTTPException(status_code=503, detail=pay_cfg)
 
     order = db.get(SingleMealOrder, order_id)
     if not order or int(order.member_id) != int(member_id):

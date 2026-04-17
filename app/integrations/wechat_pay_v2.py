@@ -21,12 +21,30 @@ logger = logging.getLogger(__name__)
 UNIFIED_ORDER_URL = "https://api.mch.weixin.qq.com/pay/unifiedorder"
 
 
-def wechat_pay_configured() -> bool:
+def wechat_pay_misconfiguration_detail() -> str | None:
+    """若微信支付环境未就绪，返回可读原因；就绪则返回 None。"""
     mch = (settings.WECHAT_PAY_MCH_ID or "").strip()
     key = (settings.WECHAT_PAY_API_KEY or "").strip()
     notify = (settings.WECHAT_PAY_NOTIFY_URL or "").strip()
     appid = (settings.WX_MINI_APPID or "").strip()
-    return bool(mch and key and len(key) == 32 and notify and appid)
+    if not mch:
+        return "未配置 WECHAT_PAY_MCH_ID（微信支付商户号）"
+    if not key:
+        return "未配置 WECHAT_PAY_API_KEY（商户平台「API 安全」中的 APIv2 密钥）"
+    if len(key) != 32:
+        return (
+            f"WECHAT_PAY_API_KEY 必须为 32 位（微信 APIv2 密钥），当前 {len(key)} 位。"
+            "请勿填入64 位 hex 或其它长度；请到 pay.weixin.qq.com 账户中心核对后重新设置"
+        )
+    if not notify:
+        return "未配置 WECHAT_PAY_NOTIFY_URL（须为公网可访问的完整 URL，如 https://你的域名/api/pay/wechat/notify）"
+    if not appid:
+        return "未配置 WX_MINI_APPID（小程序 AppId）"
+    return None
+
+
+def wechat_pay_configured() -> bool:
+    return wechat_pay_misconfiguration_detail() is None
 
 
 def _api_key() -> str:
@@ -111,8 +129,9 @@ def unified_order_jsapi(
     spbill_create_ip: str,
 ) -> str:
     """统一下单 JSAPI，返回 prepay_id。失败抛 WeChatPayV2Error。"""
-    if not wechat_pay_configured():
-        raise WeChatPayV2Error(503, "微信支付未配置完整")
+    cfg = wechat_pay_misconfiguration_detail()
+    if cfg:
+        raise WeChatPayV2Error(503, cfg)
     appid = (settings.WX_MINI_APPID or "").strip()
     mch_id = (settings.WECHAT_PAY_MCH_ID or "").strip()
     notify_url = (settings.WECHAT_PAY_NOTIFY_URL or "").strip()
