@@ -86,6 +86,7 @@ import {
   addressListRow,
 } from '@/utils/addressApi.js'
 import { createSingleMealOrder, fetchWechatJsapiPayParams } from '@/utils/singleOrderApi.js'
+import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
 
 const dish = ref(null)
 const loading = ref(true)
@@ -249,6 +250,7 @@ async function handlePay() {
   paying.value = true
   uni.showLoading({ title: '创建订单…', mask: true })
   try {
+    await syncWxMiniOpenidFromLogin()
     const out = await createSingleMealOrder({
       dish_id: Number(dish.value.dishId),
       member_address_id: Number(addressId),

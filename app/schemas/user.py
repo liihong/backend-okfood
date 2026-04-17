@@ -76,3 +76,9 @@ class WxMiniLoginIn(BaseModel):
 
     js_code: str = Field(..., min_length=8, max_length=256)
     phone_code: str = Field(..., min_length=8, max_length=512)
+
+
+class WxMiniJsCodeIn(BaseModel):
+    """仅 `wx.login` 的 js_code：已登录会员绑定/刷新小程序 openid（用于支付等）。"""
+
+    js_code: str = Field(..., min_length=8, max_length=256)

@@ -24,7 +24,18 @@ from app.schemas.member_address import MemberAddressCreateIn, MemberAddressUpdat
 
 from app.schemas.admin import FileUploadOut
 
-from app.schemas.user import ActivateIn, LeaveIn, ProfilePatchIn, RegisterIn, WxMiniLoginIn
+from sqlalchemy import select
+
+from app.models.member import Member
+
+from app.schemas.user import (
+    ActivateIn,
+    LeaveIn,
+    ProfilePatchIn,
+    RegisterIn,
+    WxMiniJsCodeIn,
+    WxMiniLoginIn,
+)
 
 from app.services.oss_upload_service import upload_member_avatar_bytes
 
@@ -99,7 +110,37 @@ def login_wx_mini(request: Request, body: WxMiniLoginIn, db: SessionDep):
     return success(data=dump_model(token), msg="登录成功")
 
 
-
+@router.post("/wx/mini/sync-openid")
+@limiter.limit("30/minute")
+def sync_wx_mini_openid(
+    request: Request,
+    body: WxMiniJsCodeIn,
+    db: SessionDep,
+    member_id: int = Depends(member_subject),
+):
+    """已持会员 JWT 时，用当前小程序会话的 `js_code` 写入 `members.wx_mini_openid`，便于 JSAPI 支付。"""
+    _ = request
+    if not wx_mini_configured():
+        raise HTTPException(status_code=503, detail="微信小程序登录未配置或未开放")
+    try:
+        sess = jscode2session(body.js_code)
+    except WeChatMiniError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    openid = str(sess.get("openid") or "").strip()
+    if not openid:
+        raise HTTPException(status_code=400, detail="微信未返回用户标识，请稍后重试")
+    bound_id = db.scalar(select(Member.id).where(Member.wx_mini_openid == openid))
+    if bound_id is not None and int(bound_id) != int(member_id):
+        raise HTTPException(
+            status_code=400,
+            detail="当前微信已绑定其他会员账号，请使用对应账号登录或联系客服",
+        )
+    member = db.get(Member, member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    member.wx_mini_openid = openid
+    db.commit()
+    return success(msg="已同步微信标识")
 
 
 @router.post("/register")

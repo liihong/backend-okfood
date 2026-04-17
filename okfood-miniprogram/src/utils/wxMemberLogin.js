@@ -76,6 +76,20 @@ export function hasWxPhoneAuthDetail(detail) {
 /**
  * uni.login 取 js_code + 用户授权手机号的 detail，换会员 token。
  */
+/**
+ * 已登录会员：用当前小程序会话绑定 wx_mini_openid（单次点餐支付等依赖服务端存有 openid）。
+ */
+export async function syncWxMiniOpenidFromLogin() {
+  const loginRes = await new Promise((resolve, reject) => {
+    uni.login({ provider: 'weixin', success: resolve, fail: reject })
+  })
+  const jsCode = loginRes.code
+  if (!jsCode) {
+    throw new Error('未取得微信登录 code')
+  }
+  return request('/api/user/wx/mini/sync-openid', { method: 'POST', data: { js_code: jsCode } })
+}
+
 export async function wxMiniMemberLogin(phoneAuthDetail) {
   const loginRes = await new Promise((resolve, reject) => {
     uni.login({ provider: 'weixin', success: resolve, fail: reject })

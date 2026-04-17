@@ -17,8 +17,8 @@ function hasNonEmptyField(v) {
 }
 
 /**
- * 是否需要引导「完善资料」页：占位姓名、缺展示用昵称或头像、未选套餐意向或未选起送日
- * 说明：`name` 与 `wechat_name` 任一可用即可（后台常只写 name）；头像以 `avatar_url` 为准。
+ * 是否需要引导「完善资料」页：占位姓名、缺展示用昵称、未选套餐意向或未选起送日
+ * 说明：`name` 与 `wechat_name` 任一可用即可（后台常只写 name）；头像可选，与资料页文案一致。
  * @param {object | null | undefined} profile GET /api/user/me 的 data
  */
 export function shouldOpenMemberSetup(profile) {
@@ -28,8 +28,7 @@ export function shouldOpenMemberSetup(profile) {
   const wn = (profile.wechat_name != null ? String(profile.wechat_name) : '').trim()
   const wxOk = wn !== '' && wn !== WX_DEFAULT_NICK
   const hasUsableName = wxOk || (!stub && nm !== '')
-  const noAvatar = !hasNonEmptyField(profile.avatar_url)
   const noPlan = !hasNonEmptyField(profile.plan_type)
   const noDeliveryStart = !hasNonEmptyField(profile.delivery_start_date)
-  return !hasUsableName || noAvatar || noPlan || noDeliveryStart
+  return !hasUsableName || noPlan || noDeliveryStart
 }

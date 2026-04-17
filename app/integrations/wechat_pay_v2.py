@@ -175,6 +175,12 @@ def unified_order_jsapi(
     if (data.get("result_code") or "").upper() != "SUCCESS":
         err = data.get("err_code_des") or data.get("err_code") or "下单失败"
         logger.warning("微信统一下单业务失败: %s", data)
+        err_code = (data.get("err_code") or "").strip().upper()
+        if err_code == "APPID_MCHID_NOT_MATCH" or "appid和mch_id不匹配" in str(err):
+            err = (
+                f"{err}。请在微信支付商户平台确认：发起支付的小程序 AppId（须与 .env 的 WX_MINI_APPID 一致）"
+                "已关联当前商户号（.env 的 WECHAT_PAY_MCH_ID），勿混用其它小程序或公众号 AppId。"
+            )
         raise WeChatPayV2Error(400, err)
 
     prepay_id = (data.get("prepay_id") or "").strip()

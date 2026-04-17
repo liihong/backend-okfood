@@ -18,12 +18,25 @@
           </view>
         </button>
         <view v-else-if="needsMemberSetupPage" class="user-header user-header--setup" @click="goMemberSetup">
-          <view class="avatar-box avatar-box--setup">
-            <text class="avatar-txt">填</text>
-          </view>
+          <button
+            class="avatar-btn"
+            open-type="chooseAvatar"
+            @chooseavatar="onChooseAvatar"
+            @tap.stop
+          >
+            <view class="avatar-box avatar-box--setup">
+              <image
+                v-if="setupRowAvatarUrl"
+                class="avatar-img"
+                :src="setupRowAvatarUrl"
+                mode="aspectFill"
+              />
+              <text v-else class="avatar-txt">填</text>
+            </view>
+          </button>
           <view class="user-name-box user-name-box--flex">
-            <text class="nick-name nick-name--action">完善开卡资料</text>
-            <text class="level-text">头像、昵称、套餐与起送日</text>
+            <text class="nick-name nick-name--action">{{ setupRowTitle }}</text>
+            <text class="level-text">{{ setupRowPhoneLine }}</text>
           </view>
           <text class="setup-chevron">›</text>
         </view>
@@ -88,6 +101,7 @@ import {
   getCourierToken,
   setAppUserMode,
   reLaunchIfCourierModePreferred,
+  uploadMemberAvatarFile,
 } from '@/utils/api.js'
 import { wxMiniMemberLoginAndStore, hasWxPhoneAuthDetail } from '@/utils/wxMemberLogin.js'
 import {
@@ -225,6 +239,39 @@ const needsMemberSetupPage = computed(() => {
   return shouldOpenMemberSetup(memberProfileRaw.value)
 })
 
+function isHttpAvatarUrl(u) {
+  const s = String(u || '').trim()
+  return /^https?:\/\//i.test(s)
+}
+
+/** 待完善资料横幅：优先展示已同步的 http(s) 头像 */
+const setupRowAvatarUrl = computed(() => {
+  if (!needsMemberSetupPage.value) return ''
+  const w = wxProfile.value?.avatarUrl
+  if (isHttpAvatarUrl(w)) return String(w).trim()
+  const raw = memberProfileRaw.value?.avatar_url
+  if (raw != null && isHttpAvatarUrl(raw)) return String(raw).trim()
+  return ''
+})
+
+const setupRowTitle = computed(() => {
+  if (!needsMemberSetupPage.value) return ''
+  const w = wxProfile.value?.nickName?.trim()
+  if (w && w !== WX_DEFAULT_NICK) return w
+  const un = userName.value?.trim()
+  if (un && un !== MEMBER_STUB_NAME) return un
+  const p = memberPhone.value
+  if (p && p.length === 11) return `${p.slice(0, 3)}****${p.slice(-4)}`
+  return '完善开卡资料'
+})
+
+const setupRowPhoneLine = computed(() => {
+  if (!needsMemberSetupPage.value) return ''
+  const p = memberPhone.value?.trim() || ''
+  if (p.length === 11) return `${p.slice(0, 3)}****${p.slice(-4)}`
+  return p || '请绑定手机号'
+})
+
 const displayNick = computed(() => {
   const w = wxProfile.value?.nickName?.trim()
   if (w && w !== WX_DEFAULT_NICK) return w
@@ -295,8 +342,12 @@ function persistWxProfile(p) {
   }
 }
 
-/** 将会员微信昵称/头像同步到服务端 members.wechat_name、avatar_url */
-async function pushWechatProfileToServer(partial) {
+/**
+ * 将会员微信昵称/头像同步到服务端 members.wechat_name、avatar_url
+ * @param {{ showErrorToast?: boolean }} [options]
+ */
+async function pushWechatProfileToServer(partial, options = {}) {
+  const { showErrorToast = true } = options
   if (!getMemberToken()) return
   const body = {}
   if (partial.wechat_name !== undefined) body.wechat_name = partial.wechat_name
@@ -306,29 +357,52 @@ async function pushWechatProfileToServer(partial) {
     await request('/api/user/profile', { method: 'PATCH', data: body })
   } catch (err) {
     console.warn('pushWechatProfileToServer', err)
-    uni.showToast({ title: err?.message || '资料同步失败', icon: 'none' })
+    if (showErrorToast) {
+      uni.showToast({ title: err?.message || '资料同步失败', icon: 'none' })
+      return
+    }
+    throw err
   }
 }
 
-function onChooseAvatar(e) {
-  const url = e.detail?.avatarUrl
-  if (!url) return
-  const nick = String(wxNickDraft.value || '').trim()
-  const prev = wxProfile.value || { nickName: '', avatarUrl: '' }
-  let mergedNick = nick && nick !== WX_DEFAULT_NICK ? nick : ''
-  if (!mergedNick && prev.nickName && prev.nickName !== WX_DEFAULT_NICK) {
-    mergedNick = prev.nickName.trim()
-  }
-  const p = { nickName: mergedNick, avatarUrl: url }
-  wxProfile.value = p
-  persistWxProfile(p)
-  const syncPayload = { avatar_url: url }
-  if (mergedNick && mergedNick !== WX_DEFAULT_NICK) syncPayload.wechat_name = mergedNick
-  void pushWechatProfileToServer(syncPayload)
-  if (isPlaceholderWxProfile(p)) {
-    uni.showToast({ title: '请填写昵称', icon: 'none' })
-  } else {
-    uni.showToast({ title: '已保存', icon: 'success' })
+async function onChooseAvatar(e) {
+  const localPath = e.detail?.avatarUrl
+  if (!localPath) return
+  uni.showLoading({ title: '上传头像…', mask: true })
+  try {
+    const permanentUrl = await uploadMemberAvatarFile(localPath)
+    const nick = String(wxNickDraft.value || '').trim()
+    const prev = wxProfile.value || { nickName: '', avatarUrl: '' }
+    let mergedNick = nick && nick !== WX_DEFAULT_NICK ? nick : ''
+    if (!mergedNick && prev.nickName && prev.nickName !== WX_DEFAULT_NICK) {
+      mergedNick = prev.nickName.trim()
+    }
+    if (!mergedNick && userName.value?.trim() && userName.value.trim() !== MEMBER_STUB_NAME) {
+      mergedNick = userName.value.trim()
+    }
+    const p = { nickName: mergedNick, avatarUrl: permanentUrl }
+    wxProfile.value = p
+    persistWxProfile(p)
+    const syncPayload = { avatar_url: permanentUrl }
+    if (mergedNick && mergedNick !== WX_DEFAULT_NICK) syncPayload.wechat_name = mergedNick
+    await pushWechatProfileToServer(syncPayload, { showErrorToast: false })
+    if (memberProfileRaw.value && typeof memberProfileRaw.value === 'object') {
+      memberProfileRaw.value = { ...memberProfileRaw.value, avatar_url: permanentUrl }
+    }
+    void refreshMember()
+    if (!mergedNick || mergedNick === WX_DEFAULT_NICK) {
+      uni.showToast({ title: '头像已上传，请完善昵称', icon: 'none', duration: 2200 })
+    } else {
+      uni.showToast({ title: '头像已更新', icon: 'success' })
+    }
+  } catch (err) {
+    uni.showToast({
+      title: err?.message || '头像上传失败',
+      icon: 'none',
+      duration: 2800,
+    })
+  } finally {
+    uni.hideLoading()
   }
 }
 
