@@ -4,8 +4,8 @@ from datetime import date, timedelta
 
 from fastapi import HTTPException
 
-from sqlalchemy import select, update
-
+from sqlalchemy import func, literal, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 
@@ -40,6 +40,8 @@ from app.services.member_address_service import (
 
     admin_set_default_address_detail,
 
+    apply_auto_area_from_coords_or_geocode,
+
     get_default_address,
 
     upsert_default_address_after_register,
@@ -48,8 +50,27 @@ from app.services.member_address_service import (
 
 from app.services.region_assignment import assign_area_name_for_coords
 
+# 与 DB chk_members_daily_meal_units 上限一致
+MAX_DAILY_MEAL_UNITS = 50
 
 
+def effective_daily_meal_units(m: Member) -> int:
+    """每配送日份数：备餐、清单与扣次用（非法值按 1，封顶 MAX_DAILY_MEAL_UNITS）。"""
+
+    try:
+        u = int(m.daily_meal_units)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(u, MAX_DAILY_MEAL_UNITS))
+
+
+def sql_effective_daily_meal_units_column():
+    """与 effective_daily_meal_units 一致的 SQL 列表达式（用于 eligibility / SUM）。"""
+
+    return func.least(
+        literal(MAX_DAILY_MEAL_UNITS),
+        func.greatest(literal(1), func.coalesce(Member.daily_meal_units, 1)),
+    )
 
 
 def _member_by_phone(db: Session, phone: str) -> Member | None:
@@ -121,6 +142,8 @@ def ensure_member_stub(
         avatar_url=None,
 
         balance=0,
+
+        daily_meal_units=1,
 
         plan_type=None,
 
@@ -219,6 +242,10 @@ def _to_member_out(m: Member, default_addr: MemberAddress | None = None) -> Memb
         remarks=m.remarks,
 
         balance=m.balance,
+
+        daily_meal_units=effective_daily_meal_units(m),
+
+        meal_quota_total=m.meal_quota_total,
 
         plan_type=plan_out,
 
@@ -323,6 +350,8 @@ def register_member(db: Session, body: RegisterIn) -> MemberOut:
         avatar_url=body.avatar_url,
 
         balance=0,
+
+        daily_meal_units=1,
 
         plan_type=None,
 
@@ -444,6 +473,8 @@ def patch_member_profile(
 
             m.balance = int(m.balance or 0) + add
 
+            m.meal_quota_total = int(m.meal_quota_total or 0) + add
+
             m.is_active = True
 
             db.add(
@@ -500,7 +531,15 @@ def activate_member(db: Session, member_id: int) -> MemberOut:
 
 
 
-def leave_request(db: Session, member_id: int, typ: LeaveType, start: date | None, end: date | None) -> MemberOut:
+def leave_request(
+    db: Session,
+    member_id: int,
+    typ: LeaveType,
+    start: date | None,
+    end: date | None,
+    *,
+    skip_leave_deadline: bool = False,
+) -> MemberOut:
 
     m = db.get(Member, member_id)
 
@@ -536,7 +575,9 @@ def leave_request(db: Session, member_id: int, typ: LeaveType, start: date | Non
 
     elif typ == LeaveType.TOMORROW:
 
-        if is_leave_deadline_passed(now.time(), settings_row.leave_deadline_time):
+        if not skip_leave_deadline and is_leave_deadline_passed(
+            now.time(), settings_row.leave_deadline_time
+        ):
 
             raise HTTPException(status_code=400, detail="已超过当日请假截止时间")
 
@@ -571,7 +612,21 @@ def leave_request(db: Session, member_id: int, typ: LeaveType, start: date | Non
     return _to_member_out(m, get_default_address(db, member_id))
 
 
+def admin_member_leave(
+    db: Session,
+    *,
+    phone: str,
+    typ: LeaveType,
+    start: date | None,
+    end: date | None,
+) -> MemberOut:
+    """管理端代会员设置请假：明日请假不校验当日截止时间（小程序端仍受截止时间限制）。"""
 
+    p = (phone or "").strip()
+    m = _member_by_phone(db, p)
+    if not m:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return leave_request(db, m.id, typ, start, end, skip_leave_deadline=True)
 
 
 def _week_start_and_slot(d: date) -> tuple[date, int]:
@@ -864,6 +919,10 @@ def admin_patch_member_profile(
 
     operator: str,
 
+    daily_meal_units: int | None = None,
+
+    plan_type: PlanType | None = None,
+
 ) -> MemberOut:
 
     _ = operator
@@ -877,6 +936,10 @@ def admin_patch_member_profile(
         and address is None
 
         and delivery_area is None
+
+        and daily_meal_units is None
+
+        and plan_type is None
 
         and not use_auto_area
 
@@ -940,15 +1003,7 @@ def admin_patch_member_profile(
 
             raise HTTPException(status_code=400, detail="该会员暂无默认配送地址，无法自动划区")
 
-        if addr.lng is not None and addr.lat is not None:
-
-            lng_f, lat_f = float(addr.lng), float(addr.lat)
-
-            addr.area = assign_area_name_for_coords(db, lng_f, lat_f)
-
-        else:
-
-            addr.area = UNASSIGNED_DELIVERY_AREA
+        apply_auto_area_from_coords_or_geocode(db, addr)
 
         addr.area_manual = False
 
@@ -966,9 +1021,29 @@ def admin_patch_member_profile(
 
         addr.area_manual = True
 
-    db.commit()
+    if daily_meal_units is not None:
+        if daily_meal_units < 1 or daily_meal_units > MAX_DAILY_MEAL_UNITS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"每配送日份数须在 1～{MAX_DAILY_MEAL_UNITS} 之间",
+            )
+        m.daily_meal_units = daily_meal_units
 
-    db.refresh(m)
+    if plan_type is not None:
+        m.plan_type = plan_type.value
+
+    try:
+        db.commit()
+        db.refresh(m)
+    except OperationalError as e:
+        db.rollback()
+        err_txt = (str(e.orig) if getattr(e, "orig", None) else str(e)).lower()
+        if "daily_meal_units" in err_txt or "unknown column" in err_txt:
+            raise HTTPException(
+                status_code=400,
+                detail="数据库尚未添加 daily_meal_units 字段，请在业务库执行 sql/migration_026_members_daily_meal_units.sql 后重试",
+            ) from e
+        raise
 
     return _to_member_out(m, get_default_address(db, mid))
 

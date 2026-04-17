@@ -265,6 +265,7 @@ def list_courier_single_order_tasks(
                 lat=float(a.lat) if a.lat is not None else None,
                 area=ar,
                 remarks=member.remarks,
+                daily_meal_units=1,
                 sort_distance_m=None,
                 is_delivered=False,
                 task_kind="single",

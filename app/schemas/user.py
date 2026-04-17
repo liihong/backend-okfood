@@ -22,6 +22,12 @@ class MemberOut(BaseModel):
     area_manual: bool = Field(False, description="默认地址片区是否为后台手工指定（改地址时不自动重算）")
     remarks: str | None
     balance: int
+    daily_meal_units: int = Field(1, ge=1, description="每配送日份数（订阅）；确认送达时按此倍数扣次")
+    meal_quota_total: int = Field(
+        0,
+        ge=0,
+        description="周卡/月卡累计总次数（与 balance 组成剩余/总）；次卡或未启用可为 0",
+    )
     plan_type: PlanType | None
     delivery_start_date: date | None = Field(None, description="起送业务日（上海）")
     is_active: bool

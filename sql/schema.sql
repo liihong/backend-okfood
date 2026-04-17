@@ -18,6 +18,8 @@
 --  15) 移除短信登录表 sms_verification（见 migration_023_drop_sms_verification.sql）
 --  16) single_meal_orders 单次点餐（见 migration_024_single_meal_orders.sql）
 --  17) single_meal_orders 微信字段（见 migration_025_single_meal_orders_wechat.sql）
+--  18) members.daily_meal_units每配送日份数（见 migration_026_members_daily_meal_units.sql）
+--  19) members.meal_quota_total周卡月卡累计总次数展示（见 migration_028_members_meal_quota_total.sql）
 
 SET NAMES utf8mb4;
 
@@ -30,6 +32,8 @@ CREATE TABLE IF NOT EXISTS `members` (
   `remarks` VARCHAR(500) NULL COMMENT '忌口/备注',
   `avatar_url` VARCHAR(512) NULL COMMENT '头像 URL',
   `balance` INT NOT NULL DEFAULT 0 COMMENT '剩余配送次数',
+  `daily_meal_units` INT NOT NULL DEFAULT 1 COMMENT '每配送日需送达份数；确认送达时按此倍数扣减 balance',
+  `meal_quota_total` INT NOT NULL DEFAULT 0 COMMENT '周卡/月卡累计套餐总次数（展示分母）；工单入账与 balance 同额累加',
   `plan_type` ENUM('次卡','周卡','月卡') NULL,
   `is_active` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '计划是否开启',
   `is_leaved_tomorrow` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '仅明天请假',
@@ -44,7 +48,8 @@ CREATE TABLE IF NOT EXISTS `members` (
   KEY `idx_members_active_balance` (`is_active`, `balance`),
   KEY `idx_members_balance_created` (`balance`, `created_at`),
   KEY `idx_members_leave_range` (`leave_range_start`, `leave_range_end`),
-  CONSTRAINT `chk_members_balance_nonneg` CHECK (`balance` >= 0)
+  CONSTRAINT `chk_members_balance_nonneg` CHECK (`balance` >= 0),
+  CONSTRAINT `chk_members_daily_meal_units` CHECK (`daily_meal_units` >= 1 AND `daily_meal_units` <= 50)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员';
 
 CREATE TABLE IF NOT EXISTS `member_addresses` (
@@ -140,6 +145,7 @@ CREATE TABLE IF NOT EXISTS `balance_logs` (
   `change` INT NOT NULL COMMENT '正数充值/退款增加，负数扣减',
   `reason` ENUM('recharge','delivery','refund') NOT NULL,
   `operator` VARCHAR(50) NOT NULL COMMENT 'admin 用户名、courier_id或 system',
+  `detail` VARCHAR(500) NULL COMMENT '业务说明：如开卡工单号、备注摘要等',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_balance_member_created` (`member_id`, `created_at`),

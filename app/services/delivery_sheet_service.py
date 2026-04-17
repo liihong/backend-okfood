@@ -17,6 +17,7 @@ from app.models.member_address import MemberAddress
 from app.schemas.admin import DeliverySheetGroupOut, DeliverySheetMemberOut, DeliverySheetOut, DeliverySheetStopOut
 from app.services.courier_service import eligible_members_for_delivery
 from app.services.member_address_service import effective_routing_area, load_default_address_map
+from app.services.member_service import effective_daily_meal_units
 
 
 def _normalize_address_key(s: str) -> str:
@@ -122,6 +123,7 @@ def build_delivery_sheet(
                     DeliverySheetMemberOut(
                         phone=mem.phone,
                         name=mem.name,
+                        daily_meal_units=effective_daily_meal_units(mem),
                         remarks=rmk,
                         area_issue=_member_area_issue(addr, known),
                     )
@@ -139,9 +141,10 @@ def build_delivery_sheet(
                 or _area_needs_attention(resolved.area, known)
                 or _area_needs_attention(area_name, known)
             )
+            stop_meals = sum(effective_daily_meal_units(mem) for mem in ms_sorted)
             stops.append(
                 DeliverySheetStopOut(
-                    meal_count=len(ms_sorted),
+                    meal_count=stop_meals,
                     address_line=resolved.address_line,
                     area=resolved.area,
                     members=lines,

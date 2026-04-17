@@ -814,6 +814,14 @@
   border-bottom: 1px solid #e2e8f0;
 }
 
+.members-recharge-hint {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.55;
+  max-width: 52rem;
+}
+
 .table-header--couriers-row {
   flex-direction: row;
   align-items: center;
@@ -1743,6 +1751,22 @@
   font-weight: 700;
   color: #64748b;
   line-height: 1.5;
+}
+
+.modal-hint--tight {
+  margin-bottom: 0.65rem;
+}
+
+.modal-form .leave-range-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1rem;
+}
+
+@media (max-width: 520px) {
+  .modal-form .leave-range-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .modal-form .input-delivery-area {

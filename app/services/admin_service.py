@@ -11,7 +11,7 @@ from app.core.timeutil import today_shanghai, tomorrow_shanghai
 from app.models.admin_user import AdminUser
 from app.models.app_settings import AppSettings
 from app.models.balance_log import BalanceLog
-from app.models.enums import BalanceReason
+from app.models.enums import BalanceReason, PlanType
 from app.constants import UNASSIGNED_DELIVERY_AREA
 from app.models.member import Member
 from app.models.member_address import MemberAddress
@@ -31,9 +31,12 @@ from app.schemas.admin import (
     SettingsIn,
     WeeklySlotAssignIn,
 )
-from app.services.member_address_service import effective_routing_area, get_default_address
-from app.services.member_service import _monday_of_week, _to_member_out
-from app.schemas.user import MemberOut
+from app.services.member_address_service import effective_routing_area
+from app.services.member_service import (
+    _monday_of_week,
+    effective_daily_meal_units,
+    sql_effective_daily_meal_units_column,
+)
 
 
 def _dish_price_yuan_str(v: Decimal | None) -> str | None:
@@ -154,6 +157,8 @@ def list_members_paged(
                 area_manual=bool(addr.area_manual) if addr else False,
                 remarks=m.remarks,
                 balance=m.balance,
+                daily_meal_units=effective_daily_meal_units(m),
+                meal_quota_total=m.meal_quota_total,
                 plan_type=m.plan_type,
                 is_active=m.is_active,
                 is_leaved_tomorrow=m.is_leaved_tomorrow,
@@ -166,7 +171,13 @@ def list_members_paged(
     return out, total
 
 
-def apply_member_recharge_delta(db: Session, body: RechargeIn, *, operator: str) -> Member:
+def apply_member_recharge_delta(
+    db: Session,
+    body: RechargeIn,
+    *,
+    operator: str,
+    log_detail: str | None = None,
+) -> Member:
     """调整会员剩余次数并写入 balance_logs；由调用方 commit。"""
     if body.amount == 0:
         raise HTTPException(status_code=400, detail="调整幅度不能为 0")
@@ -178,22 +189,26 @@ def apply_member_recharge_delta(db: Session, body: RechargeIn, *, operator: str)
         raise HTTPException(status_code=400, detail="次数不足，无法扣减到负数")
     if body.plan_type is not None:
         m.plan_type = body.plan_type.value
+    # 周卡/月卡正向入账：剩余次数与累计总次数同步增加（续卡叠加）
+    if (
+        body.amount > 0
+        and body.plan_type is not None
+        and body.plan_type in (PlanType.WEEK, PlanType.MONTH)
+    ):
+        m.meal_quota_total = int(m.meal_quota_total or 0) + body.amount
+    detail = (log_detail or "").strip() or None
+    if detail and len(detail) > 500:
+        detail = detail[:500]
     db.add(
         BalanceLog(
             member_id=m.id,
             change=body.amount,
             reason=BalanceReason.RECHARGE.value if body.amount > 0 else BalanceReason.REFUND.value,
             operator=operator,
+            detail=detail,
         )
     )
     return m
-
-
-def recharge_member(db: Session, body: RechargeIn, *, operator: str) -> MemberOut:
-    m = apply_member_recharge_delta(db, body, operator=operator)
-    db.commit()
-    db.refresh(m)
-    return _to_member_out(m, get_default_address(db, m.id))
 
 
 def upsert_dish(db: Session, body: DishUpsertIn) -> DishAdminOut:
@@ -408,10 +423,11 @@ def update_settings(db: Session, body: SettingsIn) -> None:
 def dashboard_meal_summary(db: Session) -> DashboardMealSummaryOut:
     """
     今日/明日请假人数与备餐份数。
-    口径与 `list_today_tasks` 一致：is_active 且 balance>0 且已达起送日；缺席含区间请假与「仅明天请假」（仅对配送日为明天生效）。
+    口径与 `list_today_tasks` 一致：is_active 且 balance>=当日应付份数 且已达起送日；缺席含区间请假与「仅明天请假」（仅对配送日为明天生效）。
     """
     anchor_today = today_shanghai()
     tomorrow_as_date = tomorrow_shanghai()
+    units_sql = sql_effective_daily_meal_units_column()
 
     def counts_for_delivery_day(d: date) -> tuple[int, int]:
         in_leave_range = and_(
@@ -429,9 +445,14 @@ def dashboard_meal_summary(db: Session) -> DashboardMealSummaryOut:
             Member.delivery_start_date.is_(None),
             Member.delivery_start_date <= d,
         )
-        base = and_(Member.is_active.is_(True), Member.balance > 0, started)
+        base = and_(Member.is_active.is_(True), Member.balance >= units_sql, started)
         leave_n = int(db.scalar(select(func.count()).select_from(Member).where(base, absent)) or 0)
-        prep_n = int(db.scalar(select(func.count()).select_from(Member).where(base, not_(absent))) or 0)
+        prep_n = int(
+            db.scalar(
+                select(func.coalesce(func.sum(units_sql), 0)).select_from(Member).where(base, not_(absent))
+            )
+            or 0
+        )
         return leave_n, prep_n
 
     tl, tp = counts_for_delivery_day(anchor_today)

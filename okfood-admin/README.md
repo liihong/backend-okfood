@@ -22,9 +22,7 @@
 - **配送区域**：`GET/POST/PATCH/DELETE /api/admin/delivery-regions`，地图需配置高德 `VITE_AMAP_KEY`（及建议的 `VITE_AMAP_SECURITY_CODE`）  
 - **配送员管理**：`/api/admin/couriers` 等  
 - **财务中心**：金额与流水占位，待对接财务接口  
-- **餐谱管理**：本地列表编辑 UI；与后端 `POST /api/admin/menu` 的联调可按需接入  
-
-顶部 **极速开单**：需后端提供管理员创建会员等接口后再对接；提交时会提示当前未接 API。
+- **餐谱管理**：本地列表编辑 UI；与后端 `POST /api/admin/menu` 的联调可按需接入
 
 ---
 

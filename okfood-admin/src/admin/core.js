@@ -203,7 +203,15 @@ export function mapAdminUserToRow(raw, idx) {
 
   const plan = raw.plan_type || '次卡'
   const totalQuota = planDefaultTotal(plan)
-  const balanceLabel = totalQuota != null ? `${balance} / ${totalQuota}` : String(balance)
+  const mealQuotaTotal = Number(raw.meal_quota_total)
+  const hasPersistedTotal = Number.isFinite(mealQuotaTotal) && mealQuotaTotal > 0
+  // 有 meal_quota_total 时与 balance 组成「剩余/总」；否则沿用原周卡/月卡展示规则
+  const displayTotal = hasPersistedTotal
+    ? mealQuotaTotal
+    : totalQuota != null
+      ? Math.max(totalQuota, balance)
+      : null
+  const balanceLabel = displayTotal != null ? `${balance} / ${displayTotal}` : String(balance)
 
   return {
     id: raw.id != null ? raw.id : raw.phone || `row-${idx}`,
@@ -218,6 +226,8 @@ export function mapAdminUserToRow(raw, idx) {
     detail_address: typeof raw.detail_address === 'string' ? raw.detail_address : '',
     plan,
     remarks: raw.remarks ?? '',
+    daily_meal_units: Math.max(1, Math.min(50, Number(raw.daily_meal_units) || 1)),
+    meal_quota_total: hasPersistedTotal ? mealQuotaTotal : 0,
     wechat_name: raw.wechat_name ?? '',
     is_active: active,
     is_on_leave_today: onLeaveToday,

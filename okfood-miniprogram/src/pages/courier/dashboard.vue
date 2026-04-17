@@ -39,6 +39,9 @@
                 <text class="task-phone">{{ t.phone }}</text>
                 <text class="task-addr">{{ t.address }}</text>
                 <text v-if="t.dish_title" class="task-remarks">单次点餐：{{ t.dish_title }}</text>
+                <text v-else-if="Number(t.daily_meal_units) > 1" class="task-remarks"
+                  >订阅：{{ t.daily_meal_units }} 份/日</text
+                >
                 <text v-if="t.remarks" class="task-remarks">备注：{{ t.remarks }}</text>
               </view>
               <view class="task-footer">

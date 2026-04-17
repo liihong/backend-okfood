@@ -19,6 +19,7 @@ from app.services.courier_admin_service import regions_for_courier
 from app.services.geo import haversine_m
 from app.services.leave import is_absent_on_delivery_date
 from app.services.member_address_service import effective_routing_area, load_default_address_map
+from app.services.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
 from app.services.single_meal_order_service import list_courier_single_order_tasks
 
 logger = logging.getLogger(__name__)
@@ -92,9 +93,10 @@ def eligible_members_for_delivery(
         Member.delivery_start_date.is_(None),
         Member.delivery_start_date <= delivery_date,
     )
+    units_sql = sql_effective_daily_meal_units_column()
     q = select(Member).where(
         Member.is_active.is_(True),
-        Member.balance > 0,
+        Member.balance >= units_sql,
         not_(absent),
         started,
     )
@@ -109,7 +111,7 @@ def eligible_members_for_delivery(
 def list_today_tasks(db: Session, area: str | None, *, delivery_date: date | None = None) -> list[CourierTaskMemberOut]:
     """
     当日配送清单：
-    - is_active 且 balance>0；
+    - is_active 且 balance>=当日应付份数（daily_meal_units，封顶 50）；
     - 若设置了 delivery_start_date，仅当配送日>=该日；
     - 配送日不在请假区间，且「明天请假」不影响「今日」配送；
     - 可选按 area 过滤；
@@ -148,6 +150,7 @@ def list_today_tasks(db: Session, area: str | None, *, delivery_date: date | Non
         ar = effective_routing_area(addr)
         detail = (addr.detail_address if addr else "") or ""
         display_addr = f"{ar} {detail}".strip() or "（未设置默认配送地址）"
+        units = effective_daily_meal_units(m)
         rows.append(
             CourierTaskMemberOut(
                 member_id=m.id,
@@ -158,6 +161,7 @@ def list_today_tasks(db: Session, area: str | None, *, delivery_date: date | Non
                 lat=float(addr.lat) if addr is not None and addr.lat is not None else None,
                 area=ar,
                 remarks=m.remarks,
+                daily_meal_units=units,
                 sort_distance_m=dist,
                 is_delivered=m.id in delivered_ids,
             )
@@ -235,8 +239,11 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
     if ma not in allowed_areas:
         raise HTTPException(status_code=403, detail="该会员不在您负责的片区")
 
+    deduct = effective_daily_meal_units(member)
     if not member.is_active or member.balance <= 0:
         raise HTTPException(status_code=400, detail="用户未激活或次数不足")
+    if member.balance < deduct:
+        raise HTTPException(status_code=400, detail="次数不足，无法满足当日份数扣减")
     if is_absent_on_delivery_date(member, d, today=today):
         raise HTTPException(status_code=400, detail="该日用户请假，无法确认送达")
     if member.delivery_start_date is not None and d < member.delivery_start_date:
@@ -259,14 +266,12 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
         log.status = DeliveryStatus.DELIVERED.value
         log.courier_id = courier_id
 
-    if member.balance < 1:
-        raise HTTPException(status_code=400, detail="次数不足")
-    member.balance -= 1
+    member.balance -= deduct
 
     db.add(
         BalanceLog(
             member_id=member_id,
-            change=-1,
+            change=-deduct,
             reason=BalanceReason.DELIVERY.value,
             operator=courier_id,
         )

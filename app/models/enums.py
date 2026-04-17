@@ -35,6 +35,13 @@ class CardOrderKind(str, Enum):
     MONTH = "月卡"
 
 
+class CardOpenMode(str, Enum):
+    """开卡工单：新会员建档开卡 vs 老会员续卡（仅手机号匹配，不覆盖档案姓名/微信）。"""
+
+    NEW_MEMBER = "new_member"
+    RENEW = "renew"
+
+
 class CardPayChannel(str, Enum):
     WECHAT = "微信"
     ALIPAY = "支付宝"

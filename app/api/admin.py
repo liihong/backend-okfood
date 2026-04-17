@@ -1,13 +1,14 @@
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.core.deps import SessionDep, admin_subject, issue_admin_token
 from app.core.limiter import limiter
 from app.schemas.admin import (
     AdminAddressIn,
     AdminLoginIn,
+    AdminMemberLeaveIn,
     AdminMemberPatchIn,
     CardOrderCreateIn,
     CardOrderPatchIn,
@@ -30,12 +31,15 @@ from app.services.admin_service import (
     list_categories_admin,
     list_dishes_admin,
     list_members_paged,
-    recharge_member,
     update_settings,
     upsert_dish,
 )
 from app.services.delivery_sheet_service import build_delivery_sheet
-from app.services.member_service import admin_patch_member_profile, admin_update_member_address
+from app.services.member_service import (
+    admin_member_leave,
+    admin_patch_member_profile,
+    admin_update_member_address,
+)
 from app.services.member_card_order_service import (
     create_card_order,
     list_card_orders_paged,
@@ -99,9 +103,17 @@ def users(
 
 
 @router.post("/recharge")
-def recharge(body: RechargeIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
-    member = recharge_member(db, body, operator=admin_username)
-    return success(data=dump_model(member), msg="充值成功")
+def recharge(
+    body: RechargeIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """已废弃：次数入账须走开卡工单并同步，以便留存工单与 balance_logs.detail。"""
+    _ = body, db, admin_username
+    raise HTTPException(
+        status_code=400,
+        detail="续卡与次数调整请使用「开卡工单」：创建工单、标记已缴后执行同步入账；不再支持档案页直连接口。",
+    )
 
 
 @router.get("/card-orders")
@@ -158,8 +170,24 @@ def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_usernam
         delivery_area=body.delivery_area,
         use_auto_area=body.use_auto_area,
         operator=admin_username,
+        daily_meal_units=body.daily_meal_units,
+        plan_type=body.plan_type,
     )
     return success(data=dump_model(member), msg="会员信息已更新")
+
+
+@router.post("/member/leave")
+def member_leave(body: AdminMemberLeaveIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+    """代会员设置请假（明日 / 区间 / 取消），不受小程序当日请假截止时间限制。"""
+    _ = admin_username
+    member = admin_member_leave(
+        db,
+        phone=body.phone,
+        typ=body.type,
+        start=body.start,
+        end=body.end,
+    )
+    return success(data=dump_model(member), msg="请假状态已更新")
 
 
 @router.get("/dishes")

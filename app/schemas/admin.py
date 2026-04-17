@@ -1,12 +1,14 @@
 from datetime import date, time
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from app.models.enums import (
+    CardOpenMode,
     CardOrderKind,
     CardOrderPayStatus,
     CardPayChannel,
+    LeaveType,
     PlanType,
 )
 
@@ -107,6 +109,12 @@ class MemberAdminOut(BaseModel):
     area_manual: bool = Field(False, description="默认地址片区是否为后台手工指定")
     remarks: str | None = None
     balance: int
+    daily_meal_units: int = Field(1, ge=1, description="每配送日份数；与配送扣次、备餐统计一致")
+    meal_quota_total: int = Field(
+        0,
+        ge=0,
+        description="周卡/月卡累计总次数（展示分母）；0 表示未启用或与次卡同源仅用 balance",
+    )
     plan_type: str | None
     is_active: bool
     is_leaved_tomorrow: bool = Field(False, description="已勾选仅明天请假（不影响今日配送）")
@@ -119,6 +127,15 @@ class MemberAdminOut(BaseModel):
 class AdminAddressIn(BaseModel):
     phone: str
     address: str = Field(..., min_length=1, max_length=500)
+
+
+class AdminMemberLeaveIn(BaseModel):
+    """管理端手工请假：与小程序 `/api/user/leave` 类型一致；后台代操作不校验当日请假截止时间。"""
+
+    phone: str = Field(..., min_length=5, max_length=20)
+    type: LeaveType
+    start: date | None = None
+    end: date | None = None
 
 
 class AdminMemberPatchIn(BaseModel):
@@ -135,8 +152,41 @@ class AdminMemberPatchIn(BaseModel):
     )
     use_auto_area: bool = Field(
         False,
-        description="按当前坐标重新自动划区并取消手工锁定；与 delivery_area 互斥",
+        description="取消手工锁定并按坐标自动划区；若无坐标则先按当前片区+详细地址尝试高德地理编码再划区；与 delivery_area 互斥",
     )
+    daily_meal_units: int | None = Field(
+        None,
+        ge=1,
+        le=50,
+        validation_alias=AliasChoices("daily_meal_units", "dailyMealUnits"),
+        description="每配送日需送达份数；不传则不修改（可与前端约定 snake_case 或 camelCase）",
+    )
+    plan_type: PlanType | None = Field(
+        None,
+        description="仅更新档案套餐标签（周卡/月卡/次卡），不改动余额；与开卡工单入账互补",
+    )
+
+    @field_validator("daily_meal_units", mode="before")
+    @classmethod
+    def _coerce_daily_meal_units(cls, v: object) -> int | None:
+        """兼容 JSON 数字串、空串；避免校验失败导致整单422。"""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            if s == "":
+                return None
+            try:
+                v = int(s, 10)
+            except ValueError as e:
+                raise ValueError("每配送日份数须为 1～50 的整数") from e
+        if isinstance(v, bool):
+            raise ValueError("每配送日份数格式无效")
+        if isinstance(v, float):
+            if abs(v - round(v)) > 1e-9:
+                raise ValueError("每配送日份数须为整数")
+            v = int(round(v))
+        return v
 
 
 class DashboardMealSummaryOut(BaseModel):
@@ -151,6 +201,7 @@ class DashboardMealSummaryOut(BaseModel):
 class DeliverySheetMemberOut(BaseModel):
     phone: str
     name: str
+    daily_meal_units: int = Field(1, ge=1, description="该会员当日计入份数")
     remarks: str | None = None
     area_issue: bool = Field(False, description="会员主档或默认地址片区为空、未分配或与启用区域表不一致")
 
@@ -188,6 +239,21 @@ class DeliverySheetOut(BaseModel):
 
 class CardOrderCreateIn(BaseModel):
     phone: str = Field(..., min_length=5, max_length=20)
+    open_mode: CardOpenMode = Field(
+        CardOpenMode.NEW_MEMBER,
+        description="新会员开卡：可写姓名/微信；老会员续卡：仅手机号匹配，不覆盖档案",
+    )
+    # 开卡时一并写入会员档案（与小程序 wechat_name / name 同源）
+    name: str | None = Field(
+        None,
+        max_length=100,
+        description="会员姓名：有值则创建工单前写入 members.name",
+    )
+    wechat_name: str | None = Field(
+        None,
+        max_length=100,
+        description="微信昵称：有值则写入 members.wechat_name；传空串可清空",
+    )
     delivery_start_date: date = Field(
         ...,
         description="起送业务日（上海）：此前不参与配送大表；同步入账时写入会员并激活计划",
@@ -205,6 +271,10 @@ class CardOrderCreateIn(BaseModel):
 
 class CardOrderPatchIn(BaseModel):
     delivery_start_date: date | None = None
+    card_kind: CardOrderKind | None = Field(
+        None,
+        description="未入账前可更正卡类型；已同步的工单不可改，以免与已入次数不一致",
+    )
     pay_status: CardOrderPayStatus | None = None
     pay_channel: CardPayChannel | None = None
     amount_yuan: Decimal | None = Field(None, ge=0, max_digits=12, decimal_places=2)
@@ -220,6 +290,7 @@ class CardOrderOut(BaseModel):
     member_id: int
     member_phone: str
     member_name: str
+    member_wechat_name: str | None = Field(None, description="会员微信昵称")
     delivery_start_date: str | None = Field(None, description="起送业务日 ISO")
     card_kind: str
     pay_channel: str

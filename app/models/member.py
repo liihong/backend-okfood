@@ -21,6 +21,10 @@ class Member(Base):
     remarks: Mapped[str | None] = mapped_column(String(500), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     balance: Mapped[int] = mapped_column(Integer, default=0)
+    # 每配送日份数：确认送达一次按该倍数扣 balance（默认 1）
+    daily_meal_units: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # 周卡/月卡累计「总次数」分母；入账时与 balance 同步按卡型 +6 / +24（剩余/总 展示）
+    meal_quota_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # 与 MySQL ENUM 取值一致，业务校验在 Pydantic / Service
     plan_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)

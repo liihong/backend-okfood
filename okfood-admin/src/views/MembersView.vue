@@ -7,7 +7,6 @@ import {
   memberList,
   mapAdminUserToRow,
   handleAdminLogout,
-  planDefaultTotal,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
@@ -94,16 +93,75 @@ function planTagClass(plan) {
   return 't-plan--count'
 }
 
+/** --- 手工请假（管理端，不受小程序当日截止时间限制） --- */
+const showLeaveModal = ref(false)
+const leaveSaving = ref(false)
+const leaveTarget = ref(null)
+const leaveMode = ref('tomorrow')
+const leaveRangeStart = ref('')
+const leaveRangeEnd = ref('')
+
+function openLeaveMember(u) {
+  leaveTarget.value = u
+  leaveMode.value = 'tomorrow'
+  leaveRangeStart.value = ''
+  leaveRangeEnd.value = ''
+  showLeaveModal.value = true
+}
+
+async function submitLeaveMember() {
+  const u = leaveTarget.value
+  if (!u || !u.phone) return
+  if (leaveMode.value === 'range') {
+    if (!leaveRangeStart.value || !leaveRangeEnd.value) {
+      showToast('区间请假请填写开始与结束日期', 'error')
+      return
+    }
+  }
+  leaveSaving.value = true
+  try {
+    const payload = { phone: u.phone, type: leaveMode.value }
+    if (leaveMode.value === 'range') {
+      payload.start = leaveRangeStart.value
+      payload.end = leaveRangeEnd.value
+    }
+    await apiJson(
+      '/api/admin/member/leave',
+      { method: 'POST', body: JSON.stringify(payload) },
+      { auth: true },
+    )
+    showLeaveModal.value = false
+    showToast('请假状态已更新', 'success')
+    await fetchMembers()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '保存失败', 'error')
+  } finally {
+    leaveSaving.value = false
+  }
+}
+
 /** --- 修改会员 --- */
 const showEditModal = ref(false)
 const editSaving = ref(false)
 const deliveryRegionOptions = ref([])
 const initialDeliveryArea = ref('未分配')
+/** 打开编辑弹窗时的套餐类型，用于判断是否与档案一致、是否提交 plan_type */
+const editInitialPlanType = ref('次卡')
 const editForm = ref({
   phone: '',
   name: '',
   address: '',
   remarks: '',
+  /** 每配送日份数（多张周卡等） */
+  daily_meal_units: 1,
+  /** 档案套餐标签：与列表「周卡/月卡」角标一致；仅改展示与统计口径，不自动改余额 */
+  plan_type: '次卡',
   delivery_area: '未分配',
   delivery_area_override: '',
   use_auto_area: false,
@@ -156,11 +214,15 @@ async function openEditMember(u) {
   await ensureDeliveryRegions()
   const area0 = normalizeAreaForForm(u.area)
   initialDeliveryArea.value = area0
+  const p0 = u.plan && u.plan !== '—' ? u.plan : '次卡'
+  editInitialPlanType.value = p0
   editForm.value = {
     phone: u.phone,
     name: u.name || '',
     address: defaultAddressDetailForEdit(u),
     remarks: u.remarks || '',
+    daily_meal_units: Math.max(1, Math.min(50, Number(u.daily_meal_units) || 1)),
+    plan_type: p0,
     delivery_area: area0,
     delivery_area_override: '',
     use_auto_area: false,
@@ -177,6 +239,7 @@ async function submitEditMember() {
       name: editForm.value.name.trim(),
       remarks: editForm.value.remarks.trim() || null,
       address: editForm.value.address.trim(),
+      daily_meal_units: Math.max(1, Math.min(50, Number(editForm.value.daily_meal_units) || 1)),
     }
     if (editForm.value.use_auto_area) {
       payload.use_auto_area = true
@@ -187,6 +250,10 @@ async function submitEditMember() {
       if (eff !== initialDeliveryArea.value) {
         payload.delivery_area = eff
       }
+    }
+    const pt = String(editForm.value.plan_type || '次卡').trim() || '次卡'
+    if (pt !== editInitialPlanType.value) {
+      payload.plan_type = pt
     }
     await apiJson(
       '/api/admin/member/profile',
@@ -211,73 +278,6 @@ async function submitEditMember() {
   }
 }
 
-/** --- 续卡（充值次数） --- */
-const showRechargeModal = ref(false)
-const rechargeSaving = ref(false)
-const rechargeForm = ref({
-  phone: '',
-  plan: '次卡',
-  amount: 1,
-})
-
-function defaultRechargeAmount(plan) {
-  if (plan === '周卡') return 6
-  if (plan === '月卡') return 24
-  return 1
-}
-
-function openRechargeMember(u) {
-  const plan = u.plan || '次卡'
-  rechargeForm.value = {
-    phone: u.phone,
-    plan,
-    amount: defaultRechargeAmount(plan),
-  }
-  showRechargeModal.value = true
-}
-
-watch(
-  () => rechargeForm.value.plan,
-  (p) => {
-    rechargeForm.value.amount = defaultRechargeAmount(p)
-  },
-)
-
-async function submitRecharge() {
-  const amt = Number(rechargeForm.value.amount)
-  if (!rechargeForm.value.phone || !Number.isFinite(amt) || amt <= 0) {
-    alert('请填写有效的续卡次数（正整数）')
-    return
-  }
-  rechargeSaving.value = true
-  try {
-    await apiJson(
-      '/api/admin/recharge',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          phone: rechargeForm.value.phone,
-          amount: Math.floor(amt),
-          plan_type: rechargeForm.value.plan,
-        }),
-      },
-      { auth: true },
-    )
-    showRechargeModal.value = false
-    await fetchMembers()
-  } catch (e) {
-    const status = e && typeof e.status === 'number' ? e.status : 0
-    if (status === 401) {
-      alert('登录已过期，请重新登录')
-      handleAdminLogout()
-      return
-    }
-    showToast(e instanceof Error ? e.message : '续卡失败', 'error')
-  } finally {
-    rechargeSaving.value = false
-  }
-}
-
 onMounted(() => {
   void fetchMembers()
 })
@@ -291,6 +291,9 @@ onMounted(() => {
           <Search :size="18" />
           <input v-model="searchQuery" placeholder="搜索姓名、电话或片区地址..." />
         </div>
+        <p class="members-recharge-hint">
+          续卡与加次数请至侧栏「开卡工单」办理：工单标记已缴后使用「同步入账」；次数流水会写入余额日志并附带工单说明。
+        </p>
         <div class="members-validity-tabs" role="tablist" aria-label="会员有效期">
           <button
             type="button"
@@ -366,10 +369,12 @@ onMounted(() => {
             <td class="td-remarks">{{ u.remarks || '—' }}</td>
             <td class="text-right">
               <div class="members-row-actions">
+                <button type="button" class="btn-sm secondary" @click="openLeaveMember(u)">
+                  请假
+                </button>
                 <button type="button" class="btn-sm secondary" @click="openEditMember(u)">
                   修改会员信息
                 </button>
-                <button type="button" class="btn-sm" @click="openRechargeMember(u)">续卡</button>
               </div>
             </td>
           </tr>
@@ -390,6 +395,48 @@ onMounted(() => {
         >
           下一页
         </button>
+      </div>
+    </div>
+
+    <div v-if="showLeaveModal" class="modal-overlay" @click.self="showLeaveModal = false">
+      <div class="modal-card modal-card--leave">
+        <div class="modal-header">
+          <div class="header-info">
+            <h3>手工请假</h3>
+            <p>ADMIN LEAVE</p>
+          </div>
+          <button type="button" class="close-btn" @click="showLeaveModal = false">
+            <X :size="20" />
+          </button>
+        </div>
+        <form class="modal-form" @submit.prevent="submitLeaveMember">
+          <p v-if="leaveTarget" class="modal-hint modal-hint--tight">
+            {{ leaveTarget.name || '—' }} · {{ leaveTarget.phone || '' }}
+          </p>
+          <div class="form-group">
+            <label>操作类型</label>
+            <select v-model="leaveMode" class="input-delivery-area">
+              <option value="tomorrow">明日配送请假（与小程序「明天有事」一致）</option>
+              <option value="range">区间请假（多天）</option>
+              <option value="clear_tomorrow">仅取消「明日请假」</option>
+              <option value="cancel">清空全部请假（明日 + 区间）</option>
+            </select>
+            <p class="modal-hint">后台代操作不校验当日请假截止时间；日期均为上海业务日。</p>
+          </div>
+          <div v-if="leaveMode === 'range'" class="form-group leave-range-row">
+            <div>
+              <label>开始日期</label>
+              <input v-model="leaveRangeStart" type="date" required />
+            </div>
+            <div>
+              <label>结束日期</label>
+              <input v-model="leaveRangeEnd" type="date" required />
+            </div>
+          </div>
+          <button type="submit" class="btn-submit-order" :disabled="leaveSaving">
+            {{ leaveSaving ? '提交中…' : '确认' }}
+          </button>
+        </form>
       </div>
     </div>
 
@@ -443,6 +490,29 @@ onMounted(() => {
             </p>
           </div>
           <div class="form-group">
+            <label>每配送日份数</label>
+            <input
+              v-model.number="editForm.daily_meal_units"
+              type="number"
+              min="1"
+              max="50"
+              step="1"
+              required
+            />
+            <p class="modal-hint">例如购 2 张周卡、同日需送 2 份时填 2；确认送达将按该倍数扣减剩余次数。</p>
+          </div>
+          <div class="form-group">
+            <label>套餐类型（档案标签）</label>
+            <select v-model="editForm.plan_type" class="input-delivery-area">
+              <option value="周卡">周卡</option>
+              <option value="月卡">月卡</option>
+              <option value="次卡">次卡</option>
+            </select>
+            <p class="modal-hint">
+              仅同步列表与小程序展示的套餐角标，不会增减剩余次数；次数增减须通过「开卡工单」同步入账。若续月卡后角标仍为周卡，可在此改为月卡。
+            </p>
+          </div>
+          <div class="form-group">
             <label>备注（忌口等）</label>
             <textarea v-model="editForm.remarks" rows="2" maxlength="500" placeholder="可留空"></textarea>
           </div>
@@ -453,51 +523,5 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-if="showRechargeModal" class="modal-overlay" @click.self="showRechargeModal = false">
-      <div class="modal-card">
-        <div class="modal-header">
-          <div class="header-info">
-            <h3>续卡 · 增加次数</h3>
-            <p>RECHARGE / RENEWAL</p>
-          </div>
-          <button type="button" class="close-btn" @click="showRechargeModal = false">
-            <X :size="20" />
-          </button>
-        </div>
-        <form class="modal-form" @submit.prevent="submitRecharge">
-          <div class="form-group">
-            <label>手机号</label>
-            <input :value="rechargeForm.phone" type="text" disabled class="input-disabled" />
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>卡类型</label>
-              <select v-model="rechargeForm.plan">
-                <option value="次卡">次卡</option>
-                <option value="周卡">周卡（默认 +6 次）</option>
-                <option value="月卡">月卡（默认 +24 次）</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>增加次数</label>
-              <input
-                v-model.number="rechargeForm.amount"
-                type="number"
-                min="1"
-                step="1"
-                required
-              />
-            </div>
-          </div>
-          <p class="modal-hint">
-            当前套餐默认：
-            周卡 {{ planDefaultTotal('周卡') }} 次 / 月卡 {{ planDefaultTotal('月卡') }} 次；可自行修改「增加次数」。
-          </p>
-          <button type="submit" class="btn-submit-order" :disabled="rechargeSaving">
-            {{ rechargeSaving ? '提交中…' : '确认续卡' }}
-          </button>
-        </form>
-      </div>
-    </div>
   </section>
 </template>

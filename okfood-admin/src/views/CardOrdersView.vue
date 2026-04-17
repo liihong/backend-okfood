@@ -97,7 +97,10 @@ const goNext = () => {
 const showCreateModal = ref(false)
 const createSubmitting = ref(false)
 const createForm = ref({
+  open_mode: 'new_member',
   phone: '',
+  name: '',
+  wechat_name: '',
   delivery_start_date: todayInputDate(),
   card_kind: '周卡',
   pay_channel: '微信',
@@ -107,9 +110,82 @@ const createForm = ref({
   sync_member: false,
 })
 
+/** 续卡：按手机号预查会员档案 */
+const renewPreview = ref(null)
+const renewPreviewLoading = ref(false)
+let renewDebounce = 0
+
+function scheduleRenewPreview() {
+  window.clearTimeout(renewDebounce)
+  renewDebounce = window.setTimeout(() => {
+    void loadRenewPreview()
+  }, 380)
+}
+
+async function loadRenewPreview() {
+  if (createForm.value.open_mode !== 'renew') return
+  const phone = (createForm.value.phone || '').trim()
+  if (phone.length < 5) {
+    renewPreview.value = null
+    return
+  }
+  if (!adminAccessToken.value) return
+  renewPreviewLoading.value = true
+  try {
+    const params = new URLSearchParams({ page: '1', page_size: '10', q: phone })
+    const data = await apiJson(`/api/admin/users?${params}`, {}, { auth: true })
+    const items = Array.isArray(data.items) ? data.items : []
+    renewPreview.value = items.find((x) => String(x.phone || '') === phone) || null
+  } catch {
+    renewPreview.value = null
+  } finally {
+    renewPreviewLoading.value = false
+  }
+}
+
+function onCreatePhoneInput() {
+  if (createForm.value.open_mode === 'renew') scheduleRenewPreview()
+}
+
+/** 续卡同步入账后：剩余、总次数均 +本次卡次数 */
+const renewSyncPreview = computed(() => {
+  const p = renewPreview.value
+  if (!p || createForm.value.open_mode !== 'renew') return null
+  const bal = Number(p.balance) || 0
+  const add = planDefaultTotal(createForm.value.card_kind)
+  if (add == null) return null
+  const mqt = Number(p.meal_quota_total)
+  const planBase = planDefaultTotal(p.plan_type)
+  const curTotal =
+    Number.isFinite(mqt) && mqt > 0
+      ? mqt
+      : planBase != null
+        ? Math.max(planBase, bal)
+        : bal
+  return {
+    curBal: bal,
+    curTotal,
+    add,
+    nextBal: bal + add,
+    nextTotal: curTotal + add,
+  }
+})
+
+watch(
+  () => createForm.value.open_mode,
+  (mode) => {
+    renewPreview.value = null
+    if (mode === 'renew') scheduleRenewPreview()
+  },
+)
+
 function openCreateModal() {
+  renewPreview.value = null
   createForm.value = {
+    open_mode: 'new_member',
     phone: '',
+    name: '',
+    wechat_name: '',
     delivery_start_date: todayInputDate(),
     card_kind: '周卡',
     pay_channel: '微信',
@@ -127,6 +203,19 @@ async function submitCreate() {
     showToast('请填写会员手机号', 'error')
     return
   }
+  const openMode = createForm.value.open_mode === 'renew' ? 'renew' : 'new_member'
+  if (openMode === 'new_member') {
+    const memberName = (createForm.value.name || '').trim()
+    if (!memberName) {
+      showToast('请填写会员姓名', 'error')
+      return
+    }
+    const wxNick = (createForm.value.wechat_name || '').trim()
+    if (!wxNick) {
+      showToast('请填写微信昵称', 'error')
+      return
+    }
+  }
   const startD = (createForm.value.delivery_start_date || '').trim()
   if (!startD) {
     showToast('请选择开始配送日期', 'error')
@@ -136,11 +225,16 @@ async function submitCreate() {
   try {
     const body = {
       phone,
+      open_mode: openMode,
       delivery_start_date: startD,
       card_kind: createForm.value.card_kind,
       pay_channel: createForm.value.pay_channel,
       pay_status: createForm.value.pay_status,
       sync_member: !!createForm.value.sync_member,
+    }
+    if (openMode === 'new_member') {
+      body.name = (createForm.value.name || '').trim()
+      body.wechat_name = (createForm.value.wechat_name || '').trim()
     }
     const ay = String(createForm.value.amount_yuan || '').trim()
     if (ay !== '') {
@@ -171,6 +265,7 @@ const editForm = ref({
   id: 0,
   member_phone: '',
   member_name: '',
+  member_wechat_name: '',
   card_kind: '',
   delivery_start_date: '',
   pay_channel: '微信',
@@ -187,6 +282,7 @@ function openEditModal(row) {
     id: row.id,
     member_phone: row.member_phone || '',
     member_name: row.member_name || '',
+    member_wechat_name: row.member_wechat_name || '',
     card_kind: row.card_kind || '',
     delivery_start_date: ds || todayInputDate(),
     pay_channel: row.pay_channel || '微信',
@@ -208,6 +304,9 @@ async function submitEdit() {
       pay_channel: editForm.value.pay_channel,
       pay_status: editForm.value.pay_status,
       sync_member: !!editForm.value.sync_member,
+    }
+    if (!editForm.value.applied_to_member) {
+      body.card_kind = editForm.value.card_kind || '周卡'
     }
     const ay = String(editForm.value.amount_yuan || '').trim()
     if (ay !== '') {
@@ -248,7 +347,7 @@ onMounted(() => {
       <div class="table-header table-header--members table-header--couriers-row">
         <div class="search-box search-box--flex">
           <Search :size="18" />
-          <input v-model="searchQuery" placeholder="搜索会员手机或姓名…" />
+          <input v-model="searchQuery" placeholder="搜索手机、姓名或微信昵称…" />
         </div>
         <div class="card-orders-filters">
           <label class="card-orders-filter-label">
@@ -266,8 +365,8 @@ onMounted(() => {
       </div>
       <p class="card-orders-intro">
         <ClipboardList :size="16" class="card-orders-intro-icon" />
-        必选「开始配送日」（上海业务日）：该日及之后才进入配送大表与配送员派单；此前即使有余额也不会出现。
-        勾选「同步入账」且在「已缴」时，将写入次数、套餐类型、激活计划并写入该起送日。
+        新建工单时先选「新会员开卡」或「老会员续卡」。新会员须填写姓名与微信昵称写入档案；续卡仅凭手机号匹配，同步入账时剩余次数与累计总次数均叠加（周卡+6、月卡+24）。
+        必选「开始配送日」（上海业务日）；勾选「同步入账」且在「已缴」时写入套餐并激活计划。
       </p>
       <p v-if="loading" class="members-loading">加载工单中…</p>
       <table v-else class="data-table data-table--members">
@@ -301,6 +400,7 @@ onMounted(() => {
                 <Phone :size="12" class="member-phone-icon" />
                 <span class="member-phone-num">{{ row.member_phone }}</span>
               </div>
+              <div v-if="row.member_wechat_name" class="t-sub t-wechat">微信 {{ row.member_wechat_name }}</div>
             </td>
             <td>{{ row.card_kind }}</td>
             <td class="td-mono">{{ row.delivery_start_date || '—' }}</td>
@@ -351,9 +451,59 @@ onMounted(() => {
           </button>
         </div>
         <form class="modal-form" @submit.prevent="submitCreate">
+          <div class="form-group open-mode-group">
+            <label>办理类型</label>
+            <div class="open-mode-options">
+              <label class="radio-tile">
+                <input v-model="createForm.open_mode" type="radio" value="new_member" />
+                <span class="radio-tile-title">新会员开卡</span>
+                <span class="radio-tile-sub">填写姓名、微信昵称并写入档案</span>
+              </label>
+              <label class="radio-tile">
+                <input v-model="createForm.open_mode" type="radio" value="renew" />
+                <span class="radio-tile-title">老会员续卡</span>
+                <span class="radio-tile-sub">仅核对手机号；入账叠加剩余与总次数</span>
+              </label>
+            </div>
+          </div>
           <div class="form-group">
             <label>会员手机号</label>
-            <input v-model="createForm.phone" required maxlength="20" placeholder="已注册会员的手机号" />
+            <input
+              v-model="createForm.phone"
+              required
+              maxlength="20"
+              placeholder="已注册会员的手机号"
+              @input="onCreatePhoneInput"
+            />
+          </div>
+          <div v-if="createForm.open_mode === 'renew'" class="renew-preview-box">
+            <p v-if="renewPreviewLoading" class="modal-hint">正在查询该手机号会员…</p>
+            <template v-else-if="renewPreview">
+              <p class="modal-hint">
+已匹配：<strong>{{ renewPreview.name || '—' }}</strong>
+                · 套餐 {{ renewPreview.plan_type || '—' }}
+                · 当前剩余 <strong>{{ Number(renewPreview.balance) || 0 }}</strong>
+                次
+              </p>
+              <p v-if="renewSyncPreview" class="modal-hint modal-hint--accent">
+                同步入账后约：<strong>剩余 {{ renewSyncPreview.nextBal }}</strong> /
+                <strong>总 {{ renewSyncPreview.nextTotal }}</strong>
+                （本次 +{{ renewSyncPreview.add }}）
+              </p>
+            </template>
+            <p v-else-if="(createForm.phone || '').trim().length >= 5" class="modal-hint modal-hint--warn">
+              未找到该手机号会员，请确认已注册或改用「新会员开卡」。
+            </p>
+          </div>
+          <div v-if="createForm.open_mode === 'new_member'" class="form-row">
+            <div class="form-group">
+              <label>会员姓名</label>
+              <input v-model="createForm.name" required maxlength="100" placeholder="写入档案 name" />
+            </div>
+            <div class="form-group">
+              <label>微信昵称</label>
+              <input v-model="createForm.wechat_name" required maxlength="100" placeholder="写入档案 wechat_name" />
+            </div>
           </div>
           <div class="form-group">
             <label>开始配送日（业务日）</label>
@@ -419,11 +569,19 @@ onMounted(() => {
           <div class="form-group">
             <label>会员</label>
             <input
-              :value="`${editForm.member_name || '—'}（${editForm.member_phone}）· ${editForm.card_kind}`"
+              :value="`${editForm.member_name || '—'}${editForm.member_wechat_name ? ' / 微信 ' + editForm.member_wechat_name : ''}（${editForm.member_phone}）`"
               type="text"
               disabled
               class="input-disabled"
             />
+          </div>
+          <div class="form-group">
+            <label>卡类型</label>
+            <select v-model="editForm.card_kind" class="input-delivery-area" :disabled="editForm.applied_to_member">
+              <option value="周卡">周卡（同步入账 +{{ planDefaultTotal('周卡') }} 次）</option>
+              <option value="月卡">月卡（同步入账 +{{ planDefaultTotal('月卡') }} 次）</option>
+            </select>
+            <p v-if="editForm.applied_to_member" class="modal-hint">已入账工单不可改卡类型；若档案套餐标签有误请在「会员管理」中修正。</p>
           </div>
           <div class="form-group">
             <label>开始配送日</label>
@@ -509,5 +667,58 @@ onMounted(() => {
 .card-orders-intro-icon {
   flex-shrink: 0;
   margin-top: 2px;
+}
+.t-wechat {
+  margin-top: 2px;
+  font-size: 12px;
+}
+.open-mode-group .open-mode-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+@media (max-width: 560px) {
+  .open-mode-group .open-mode-options {
+    grid-template-columns: 1fr;
+  }
+}
+.radio-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #e2e8f0);
+  background: var(--surface, #fff);
+  cursor: pointer;
+}
+.radio-tile:has(input:checked) {
+  border-color: var(--primary, #3b82f6);
+  background: rgba(59, 130, 246, 0.06);
+}
+.radio-tile input {
+  margin-right: 6px;
+}
+.radio-tile-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.radio-tile-sub {
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  line-height: 1.35;
+}
+.renew-preview-box {
+  margin-bottom: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-2, #f8fafc);
+  border: 1px dashed var(--border, #e2e8f0);
+}
+.modal-hint--accent {
+  color: var(--primary, #2563eb);
+}
+.modal-hint--warn {
+  color: #b45309;
 }
 </style>
