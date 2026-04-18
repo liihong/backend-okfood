@@ -90,10 +90,12 @@
 
 .admin-layout .sidebar .sidebar-menu .el-menu-item .menu-item-inner,
 .admin-layout .sidebar .sidebar-menu .el-sub-menu__title .menu-item-inner {
+  /* inline-flex + div：避免被 el-menu--collapse 的 >span 规则整块隐藏（Lucide 图标在 span 内会一起消失） */
   display: inline-flex;
   align-items: center;
   gap: 0.85rem;
   width: 100%;
+  box-sizing: border-box;
 }
 
 .admin-layout .sidebar .sidebar-menu .el-menu-item.is-active {
@@ -122,6 +124,36 @@
 
 .admin-layout .sidebar .sidebar-menu .el-icon {
   margin-right: 0;
+}
+
+/* 侧栏收起：仅图标，子菜单通过悬浮层展开 */
+.admin-layout .sidebar .sidebar-menu.el-menu.el-menu--collapse {
+  width: 100%;
+}
+
+.admin-layout .sidebar .sidebar-menu.el-menu.el-menu--collapse .el-menu-item,
+.admin-layout .sidebar .sidebar-menu.el-menu.el-menu--collapse .el-sub-menu__title {
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+  justify-content: center;
+}
+
+.admin-layout .sidebar .sidebar-menu.el-menu.el-menu--collapse .menu-item-inner {
+  gap: 0;
+  justify-content: center;
+  width: auto;
+}
+
+.admin-layout .sidebar .sidebar-menu.el-menu.el-menu--collapse .menu-item-label {
+  display: none !important;
+}
+
+.admin-layout .sidebar .sidebar-menu.el-menu.el-menu--collapse .el-menu-item.is-active .menu-item-inner {
+  transform: none;
+}
+
+.admin-layout .sidebar .sidebar-menu.el-menu.el-menu--collapse .el-sub-menu__icon-arrow {
+  display: none;
 }
 
 @media (max-width: 900px) {

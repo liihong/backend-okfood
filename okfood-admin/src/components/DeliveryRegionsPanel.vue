@@ -21,9 +21,13 @@ const loading = ref(false)
 const saving = ref(false)
 
 const mapEl = ref(null)
+/** 内联表单挂载后滚动进可视区，避免长列表下「编辑区已开但看不见」 */
+const inlineFormEl = ref(null)
 let map = null
 let mouseTool = null
 let mapPolygon = null
+/** 多边形折点拖拽编辑（高德 AMap.PolygonEditor） */
+let polygonEditor = null
 
 const editingId = ref(null)
 const formName = ref('')
@@ -35,6 +39,8 @@ const primaryCourierId = ref('')
 const formDrawerOpen = ref(false)
 /** 新建流程：已在地图画好多边形、等待抽屉里填名称保存 */
 const newRegionAwaitingMeta = ref(false)
+/** 当前多边形是否处于可拖折点编辑（供界面提示；mapPolygon 非响应式） */
+const vertexEditActive = ref(false)
 
 function showToast(msg, kind = 'success') {
   emit('toast', msg, kind)
@@ -81,7 +87,7 @@ function loadAmapScript() {
       window.AMapLoader.load({
         key: amapKey,
         version: '2.0',
-        plugins: ['AMap.MouseTool', 'AMap.Geolocation'],
+        plugins: ['AMap.MouseTool', 'AMap.Geolocation', 'AMap.PolygonEditor'],
       })
         .then((AMap) => {
           window.AMap = AMap
@@ -111,6 +117,15 @@ async function initMap() {
   try {
     await loadAmapScript()
     if (map) {
+      closePolygonEditor()
+      if (mapPolygon) {
+        try {
+          map.remove(mapPolygon)
+        } catch {
+          /* 地图销毁过程中覆盖物可能已无效 */
+        }
+        mapPolygon = null
+      }
       map.destroy()
       map = null
     }
@@ -159,14 +174,56 @@ function centerMapToUserOrXinxiang() {
   })
 }
 
+function closePolygonEditor() {
+  if (polygonEditor) {
+    try {
+      polygonEditor.close()
+    } catch {
+      /* ignore */
+    }
+    polygonEditor = null
+  }
+}
+
 function clearMapPolygon() {
+  closePolygonEditor()
   if (mapPolygon && map) {
     map.remove(mapPolygon)
     mapPolygon = null
   }
+  vertexEditActive.value = false
 }
 
-function showPolygonOnMap(path) {
+/** 打开多边形折点编辑（拖拽顶点；增删节点以高德 PolygonEditor 为准） */
+function openPolygonEditor() {
+  if (!map || !mapPolygon || !window.AMap) return
+  const AMap = window.AMap
+  const run = () => {
+    if (typeof AMap.PolygonEditor !== 'function') {
+      showToast('当前地图版本未提供多边形编辑器，请刷新或检查 Key 配置', 'error')
+      return
+    }
+    closePolygonEditor()
+    try {
+      polygonEditor = new AMap.PolygonEditor(map, mapPolygon)
+      polygonEditor.open()
+    } catch (e) {
+      console.error(e)
+      showToast('无法启动折点编辑，请刷新页面重试', 'error')
+    }
+  }
+  if (typeof AMap.PolygonEditor === 'function') {
+    run()
+  } else {
+    AMap.plugin('AMap.PolygonEditor', run)
+  }
+}
+
+/**
+ * @param {Array<[number, number]>} path
+ * @param {boolean} [enableVertexEdit] 为 true 时展示可拖拽折点（编辑已有区域、或画完后微调）
+ */
+function showPolygonOnMap(path, enableVertexEdit = false) {
   if (!map || !path.length) return
   clearMapPolygon()
   mapPolygon = new window.AMap.Polygon({
@@ -175,9 +232,15 @@ function showPolygonOnMap(path) {
     fillColor: '#0e5a44',
     fillOpacity: 0.2,
     strokeWeight: 2,
+    bubble: true,
+    zIndex: 120,
   })
   map.add(mapPolygon)
   map.setFitView([mapPolygon], false, [40, 40, 40, 40])
+  if (enableVertexEdit) {
+    vertexEditActive.value = true
+    nextTick(() => openPolygonEditor())
+  }
 }
 
 function startDrawPolygon() {
@@ -223,7 +286,18 @@ function startDrawPolygon() {
       }
       newRegionAwaitingMeta.value = true
       formDrawerOpen.value = true
-      showToast('请填写区域名称并保存', 'success')
+      vertexEditActive.value = true
+      nextTick(() => openPolygonEditor())
+      showToast('请填写区域名称并保存；可拖动折点微调边界', 'success')
+    } else {
+      if (!path) {
+        showToast('区域至少需要三个顶点，请重新绘制', 'error')
+        clearMapPolygon()
+        return
+      }
+      vertexEditActive.value = true
+      nextTick(() => openPolygonEditor())
+      showToast('可拖动折点调整边界，完成后点击保存', 'success')
     }
   })
 }
@@ -290,7 +364,7 @@ function selectRegion(r) {
   const p = (r.couriers || []).find((c) => c.is_primary)
   primaryCourierId.value = p ? p.courier_id : selectedCourierIds.value[0] || ''
   const path = pathFromPolygonJson(r.polygon_json)
-  showPolygonOnMap(path)
+  showPolygonOnMap(path, true)
 }
 
 function toggleCourier(id) {
@@ -374,9 +448,12 @@ async function deleteRegion(r) {
   }
 }
 
-watch(formDrawerOpen, () => {
+watch(formDrawerOpen, (open) => {
   nextTick(() => {
     setTimeout(() => map?.resize?.(), 320)
+    if (open) {
+      inlineFormEl.value?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
+    }
   })
 })
 
@@ -387,11 +464,13 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  closePolygonEditor()
   if (mouseTool) mouseTool.close()
   if (map) {
     map.destroy()
     map = null
   }
+  mapPolygon = null
 })
 </script>
 
@@ -429,36 +508,15 @@ onUnmounted(() => {
             </button>
           </li>
         </ul>
-      </aside>
-      <div class="regions-main">
-        <div
-          v-if="newRegionAwaitingMeta && !formDrawerOpen"
-          class="regions-map-resume"
-        >
-          <span>已在地图上框选区域</span>
-          <button type="button" class="btn-resume" @click="resumeNewRegionDrawer">
-            填写信息并保存
-          </button>
-        </div>
-        <div ref="mapEl" class="regions-map"></div>
-      </div>
-    </div>
 
-    <Teleport to="body">
-      <div
-        class="regions-drawer-backdrop"
-        :class="{ 'regions-drawer-backdrop--open': formDrawerOpen }"
-        aria-hidden="true"
-        @click="closeFormDrawer"
-      />
-      <aside class="regions-drawer" :class="{ 'regions-drawer--open': formDrawerOpen }">
-        <div class="regions-drawer-head">
-          <h4>{{ editingId == null ? '保存新区域' : '编辑配送区域' }}</h4>
-          <button type="button" class="btn-icon" title="关闭" @click="closeFormDrawer">
-            <X :size="18" />
-          </button>
-        </div>
-        <div class="regions-drawer-body">
+        <!-- 内联编辑区：与列表、地图同屏，避免右侧全屏抽屉遮挡与层级问题 -->
+        <div v-if="formDrawerOpen" ref="inlineFormEl" class="regions-inline-form">
+          <div class="regions-inline-form-head">
+            <h4>{{ editingId == null ? '保存新区域' : '编辑配送区域' }}</h4>
+            <button type="button" class="btn-icon" title="收起编辑区" @click="closeFormDrawer">
+              <X :size="18" />
+            </button>
+          </div>
           <div class="regions-form">
             <div class="form-row-2">
               <label class="field">
@@ -511,8 +569,26 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
+        <p v-else class="regions-side-footnote">
+          点选列表中的区域即可在下方编辑；点「+」在地图上绘制新区域。收起编辑区后仍可再次点选同一区域打开。
+        </p>
       </aside>
-    </Teleport>
+      <div class="regions-main">
+        <div v-if="formDrawerOpen && vertexEditActive" class="regions-map-edit-hint">
+          拖动多边形上的<strong>折点</strong>即可调整边界；编辑完成后点击左侧「保存」。
+        </div>
+        <div
+          v-if="newRegionAwaitingMeta && !formDrawerOpen"
+          class="regions-map-resume"
+        >
+          <span>已在地图上框选区域</span>
+          <button type="button" class="btn-resume" @click="resumeNewRegionDrawer">
+            填写信息并保存
+          </button>
+        </div>
+        <div ref="mapEl" class="regions-map"></div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -536,7 +612,7 @@ onUnmounted(() => {
 }
 .regions-layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: minmax(280px, 340px) 1fr;
   gap: 1.25rem;
   min-height: calc(100vh - 11rem);
   align-items: stretch;
@@ -547,12 +623,15 @@ onUnmounted(() => {
   }
 }
 .regions-side {
+  display: flex;
+  flex-direction: column;
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 1.25rem;
   padding: 1rem;
-  max-height: min(70vh, calc(100vh - 8rem));
+  max-height: min(85vh, calc(100vh - 8rem));
   overflow: auto;
+  min-height: 0;
 }
 .regions-side-head {
   display: flex;
@@ -569,6 +648,9 @@ onUnmounted(() => {
   list-style: none;
   margin: 0;
   padding: 0;
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
 }
 .regions-list li {
   display: grid;
@@ -601,6 +683,28 @@ onUnmounted(() => {
   min-height: calc(100vh - 11rem);
   min-width: 0;
   position: relative;
+}
+.regions-map-edit-hint {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  padding: 8px 14px;
+  background: rgba(236, 253, 245, 0.97);
+  border: 1px solid #a7f3d0;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 650;
+  color: #0f172a;
+  line-height: 1.45;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+  pointer-events: none;
+  text-align: center;
+}
+.regions-map-edit-hint strong {
+  color: #0e5a44;
 }
 .regions-map-resume {
   position: absolute;
@@ -647,58 +751,31 @@ onUnmounted(() => {
   border: 1px solid #e2e8f0;
   background: #f1f5f9;
 }
-.regions-drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1090;
-  background: rgba(15, 23, 42, 0.25);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.25s ease;
+.regions-inline-form {
+  flex-shrink: 0;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
 }
-.regions-drawer-backdrop--open {
-  opacity: 1;
-  pointer-events: auto;
-}
-.regions-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  z-index: 1100;
-  width: min(420px, 100vw);
-  height: 100vh;
-  max-height: 100dvh;
-  background: #fff;
-  box-shadow: -12px 0 40px rgba(15, 23, 42, 0.12);
-  transform: translateX(100%);
-  transition: transform 0.28s cubic-bezier(0.23, 1, 0.32, 1);
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid #e2e8f0;
-}
-.regions-drawer--open {
-  transform: translateX(0);
-}
-.regions-drawer-head {
+.regions-inline-form-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid #e2e8f0;
-  flex-shrink: 0;
+  margin-bottom: 0.75rem;
 }
-.regions-drawer-head h4 {
+.regions-inline-form-head h4 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 900;
   color: #0f172a;
 }
-.regions-drawer-body {
-  flex: 1;
-  overflow: auto;
-  padding: 1.25rem;
-  -webkit-overflow-scrolling: touch;
+.regions-side-footnote {
+  flex-shrink: 0;
+  margin: 0.75rem 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #94a3b8;
 }
 .regions-form {
   background: transparent;

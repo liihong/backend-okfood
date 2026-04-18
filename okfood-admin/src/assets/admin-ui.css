@@ -421,6 +421,15 @@
   height: 100vh;
   z-index: 100;
   box-shadow: 10px 0 30px rgba(0, 0, 0, 0.1);
+  transition:
+    width 0.22s ease,
+    padding 0.22s ease;
+}
+
+/* 桌面下窄侧栏：与 el-menu collapse 宽度对齐，仅显示图标 */
+.sidebar.sidebar--collapsed {
+  width: 80px;
+  padding: 2.5rem 0.65rem;
 }
 
 .logo-area {
@@ -429,6 +438,40 @@
   gap: 1rem;
   margin-bottom: 4rem;
   padding: 0 0.5rem;
+}
+
+.sidebar.sidebar--collapsed .logo-area {
+  flex-direction: column;
+  margin-bottom: 2rem;
+  padding: 0;
+  gap: 0.65rem;
+}
+
+.sidebar-collapse-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: none;
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+
+.sidebar-collapse-toggle:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+.sidebar.sidebar--collapsed .sidebar-collapse-toggle {
+  margin-left: 0;
 }
 
 .logo-box {
@@ -514,6 +557,15 @@
   opacity: 0.75;
 }
 
+.sidebar-footer.sidebar-footer--icon-only {
+  justify-content: center;
+  gap: 0;
+}
+
+.sidebar-footer.sidebar-footer--icon-only .admin-info {
+  display: none;
+}
+
 .admin-info {
   display: flex;
   align-items: center;
@@ -537,6 +589,11 @@
   flex: 1;
   margin-left: 280px;
   padding: 3rem 4rem;
+  transition: margin-left 0.22s ease;
+}
+
+.admin-layout.admin-layout--sidebar-collapsed .main-body {
+  margin-left: 80px;
 }
 
 .top-header {
