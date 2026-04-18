@@ -2,6 +2,10 @@ import { ref, computed } from 'vue'
 import { apiJson, adminAccessToken } from '../admin/core.js'
 import { assignAreaForCoords, UNASSIGNED_AREA_LABEL } from '../utils/regionAssignment.js'
 
+/** 图钉：当日已送达 / 默认（未送达或其它） */
+const MARKER_DELIVERED = '#22c55e'
+const MARKER_DEFAULT = '#eab308'
+
 const REGION_FILL_PALETTE = [
   '#0e5a44',
   '#2563eb',
@@ -22,6 +26,8 @@ export function useDeliveryRegionMapOverview() {
   const loading = ref(false)
   const regions = ref([])
   const members = ref([])
+  /** @type {import('vue').Ref<{ store_name?: string | null, store_logo_url?: string | null, store_lng?: number | null, store_lat?: number | null } | null>} */
+  const storeAnchor = ref(null)
   const error = ref(null)
 
   async function load() {
@@ -32,10 +38,24 @@ export function useDeliveryRegionMapOverview() {
       const data = await apiJson('/api/admin/delivery-region-map-overview', {}, { auth: true })
       regions.value = Array.isArray(data?.regions) ? data.regions : []
       members.value = Array.isArray(data?.members) ? data.members : []
+      const st = data?.store
+      if (st && typeof st === 'object') {
+        const ln = st.store_lng != null ? Number(st.store_lng) : null
+        const lt = st.store_lat != null ? Number(st.store_lat) : null
+        storeAnchor.value = {
+          store_name: st.store_name != null ? String(st.store_name) : null,
+          store_logo_url: st.store_logo_url != null ? String(st.store_logo_url) : null,
+          store_lng: ln != null && !Number.isNaN(ln) ? ln : null,
+          store_lat: lt != null && !Number.isNaN(lt) ? lt : null,
+        }
+      } else {
+        storeAnchor.value = null
+      }
     } catch (e) {
       error.value = e instanceof Error ? e.message : '加载失败'
       regions.value = []
       members.value = []
+      storeAnchor.value = null
     } finally {
       loading.value = false
     }
@@ -66,16 +86,18 @@ export function useDeliveryRegionMapOverview() {
 
   const memberPoints = computed(() => {
     const act = activeRegionsSorted.value
-    const byId = regionColorById.value
     return members.value.map((m) => {
+      const deliveredToday = m.delivered_today === true || m.delivered_today === 1
+      const pinColor = deliveredToday ? MARKER_DELIVERED : MARKER_DEFAULT
       const lng = m.lng != null ? Number(m.lng) : null
       const lat = m.lat != null ? Number(m.lat) : null
       if (lng == null || lat == null || Number.isNaN(lng) || Number.isNaN(lat)) {
         return {
           ...m,
           plotStatus: 'no_coords',
-          markerColor: '#94a3b8',
+          markerColor: pinColor,
           expectedArea: null,
+          deliveredToday,
         }
       }
       const expected = assignAreaForCoords(lng, lat, act)
@@ -83,26 +105,22 @@ export function useDeliveryRegionMapOverview() {
       const exp = String(expected || '').trim() || UNASSIGNED_AREA_LABEL
 
       if (exp === actual) {
-        const rid = act.find((r) => r.name === exp)?.id
-        const col =
-          exp === UNASSIGNED_AREA_LABEL
-            ? '#64748b'
-            : rid != null && byId[rid]
-              ? byId[rid]
-              : '#22c55e'
-        return { ...m, plotStatus: 'matched', markerColor: col, expectedArea: exp }
+        return { ...m, plotStatus: 'matched', markerColor: pinColor, expectedArea: exp, deliveredToday }
       }
       if (exp === UNASSIGNED_AREA_LABEL && actual !== UNASSIGNED_AREA_LABEL) {
-        return { ...m, plotStatus: 'outside_assigned', markerColor: '#ef4444', expectedArea: exp }
+        return { ...m, plotStatus: 'outside_assigned', markerColor: pinColor, expectedArea: exp, deliveredToday }
       }
-      return { ...m, plotStatus: 'mismatch', markerColor: '#f59e0b', expectedArea: exp }
+      return { ...m, plotStatus: 'mismatch', markerColor: pinColor, expectedArea: exp, deliveredToday }
     })
   })
 
   const stats = computed(() => {
     const pts = memberPoints.value
+    const deliveredToday = pts.filter((p) => p.deliveredToday).length
     return {
       total: pts.length,
+      deliveredToday,
+      pendingToday: pts.length - deliveredToday,
       matched: pts.filter((p) => p.plotStatus === 'matched').length,
       mismatch: pts.filter((p) => p.plotStatus === 'mismatch').length,
       outsideAssigned: pts.filter((p) => p.plotStatus === 'outside_assigned').length,
@@ -124,6 +142,7 @@ export function useDeliveryRegionMapOverview() {
     error,
     regions,
     members,
+    storeAnchor,
     load,
     regionsSorted,
     activeRegionsSorted,

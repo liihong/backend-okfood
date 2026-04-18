@@ -17,6 +17,7 @@ from app.services.courier_service import (
     list_tasks_for_courier,
 )
 from app.services.single_meal_order_service import confirm_single_order_delivery
+from app.services.store_config_service import get_store_config
 from app.utils.response import dump_model, success
 
 router = APIRouter(prefix="/courier", tags=["配送端"])
@@ -79,10 +80,17 @@ def tasks(
         rows = [m for m in rows if (m.area or "").strip() == an]
     groups = group_task_rows(rows)
 
+    sc = get_store_config(db)
     payload = {
         "delivery_date": d.isoformat(),
         "assigned_areas": sorted(allowed_names),
         "groups": groups,
+        "store": {
+            "store_name": sc.store_name,
+            "store_logo_url": sc.store_logo_url,
+            "store_lng": sc.store_lng,
+            "store_lat": sc.store_lat,
+        },
     }
     return success(data=payload, msg="获取成功")
 

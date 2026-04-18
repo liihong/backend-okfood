@@ -632,6 +632,16 @@
   color: #1e293b;
 }
 
+/* 无大号标题时收紧顶栏，把空间留给地图等内容 */
+.top-header.top-header--compact {
+  margin-bottom: 1rem;
+  align-items: center;
+}
+
+.top-header.top-header--compact .live-indicator {
+  margin-bottom: 0;
+}
+
 .btn-primary {
   background-color: #0e5a44;
   color: white;

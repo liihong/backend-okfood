@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import date
+from decimal import Decimal
 import re
 
 from fastapi import HTTPException
@@ -7,6 +8,8 @@ from sqlalchemy import and_, literal, not_, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import verify_password
+from app.core.courier_delivery_fee import courier_delivery_fee_yuan_for_meal_units
+from app.core.delivery_calendar import is_subscription_delivery_day
 from app.core.timeutil import today_shanghai
 from app.constants import UNASSIGNED_DELIVERY_AREA
 from app.models.balance_log import BalanceLog
@@ -14,11 +17,17 @@ from app.models.courier import Courier
 from app.models.delivery_log import DeliveryLog
 from app.models.enums import BalanceReason, DeliveryStatus
 from app.models.member import Member
+from app.models.member_address import MemberAddress
 from app.schemas.courier import CourierTaskMemberOut
 from app.services.courier_admin_service import regions_for_courier
-from app.services.geo import haversine_m
+from app.services.courier_task_sorting import (
+    distance_from_anchor_m,
+    reference_lng_lat_for_task_sorting,
+    task_sort_key,
+)
+from app.services.store_config_service import load_store_coordinates_for_sorting
 from app.services.leave import is_absent_on_delivery_date
-from app.services.member_address_service import load_default_address_map
+from app.services.member_address_service import default_address_pick_subquery, load_default_address_map
 from app.services.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
 from app.services.single_meal_order_service import list_courier_single_order_tasks
 
@@ -68,12 +77,17 @@ def eligible_members_for_delivery(
     *,
     delivery_date: date,
     delivery_region_id: int | None = None,
-) -> list[Member]:
+) -> tuple[list[Member], dict[int, MemberAddress | None]]:
     """
-    应配送会员（Member 行），与 is_absent_on_delivery_date / 配送清单同一规则。
+    应配送会员（Member 行）及每人默认地址（与 is_absent_on_delivery_date / 配送清单同一规则）。
     「仅明天请假」相对业务 today（上海），与 delivery_date 比较。
     若会员设置了 delivery_start_date，仅当 delivery_date 不早于该日才入选。
+    周日与法定节假日不配送，直接返回空列表（与配送大表、备餐口径一致）。
+
+    单次查询 OUTER JOIN 默认地址；按片区筛选时在 SQL 中过滤，避免「全员查完再内存过滤」的二次往返。
     """
+    if not is_subscription_delivery_day(delivery_date):
+        return [], {}
     today = today_shanghai()
     tomorrow = date.fromordinal(today.toordinal() + 1)
     in_leave_range = and_(
@@ -92,21 +106,26 @@ def eligible_members_for_delivery(
         Member.delivery_start_date <= delivery_date,
     )
     units_sql = sql_effective_daily_meal_units_column()
-    q = select(Member).where(
-        Member.is_active.is_(True),
-        Member.balance >= units_sql,
-        not_(absent),
-        started,
+    daf = default_address_pick_subquery()
+    q = (
+        select(Member, MemberAddress)
+        .outerjoin(daf, daf.c.mid == Member.id)
+        .outerjoin(MemberAddress, MemberAddress.id == daf.c.addr_id)
+        .where(
+            Member.is_active.is_(True),
+            Member.balance >= units_sql,
+            not_(absent),
+            started,
+        )
     )
-    eligible = list(db.scalars(q).all())
-    if delivery_region_id is None:
-        return eligible
-    defaults = load_default_address_map(db, [m.id for m in eligible])
-    return [
-        m
-        for m in eligible
-        if (a := defaults.get(m.id)) is not None and a.delivery_region_id == delivery_region_id
-    ]
+    if delivery_region_id is not None:
+        q = q.where(MemberAddress.delivery_region_id == delivery_region_id)
+    members: list[Member] = []
+    defaults: dict[int, MemberAddress | None] = {}
+    for m, addr in db.execute(q).all():
+        members.append(m)
+        defaults[m.id] = addr
+    return members, defaults
 
 
 def list_today_tasks(
@@ -121,12 +140,12 @@ def list_today_tasks(
     - is_active 且 balance>=当日应付份数（daily_meal_units，封顶 50）；
     - 若设置了 delivery_start_date，仅当配送日>=该日；
     - 配送日不在请假区间，且「明天请假」不影响「今日」配送；
+    - 周日与法定节假日不生成订阅清单；
     - 按 delivery_region_id 过滤默认地址；
     - 组内按与坐标均值的直线距离排序。
     """
     d = delivery_date or today_shanghai()
-    eligible = eligible_members_for_delivery(db, delivery_date=d, delivery_region_id=delivery_region_id)
-    defaults = load_default_address_map(db, [m.id for m in eligible])
+    eligible, defaults = eligible_members_for_delivery(db, delivery_date=d, delivery_region_id=delivery_region_id)
 
     mids = [m.id for m in eligible]
     delivered_ids: set[int] = set()
@@ -141,20 +160,18 @@ def list_today_tasks(
             ).all()
         )
 
-    ref_lng, ref_lat = _reference_point_with_defaults(eligible, defaults)
+    store_lng, store_lat = load_store_coordinates_for_sorting(db)
+    ref_lng, ref_lat = reference_lng_lat_for_task_sorting(store_lng, store_lat, eligible, defaults)
     rows: list[CourierTaskMemberOut] = []
     ar = delivery_region_display
     for m in eligible:
         addr = defaults.get(m.id)
-        dist = None
-        if (
-            ref_lng is not None
-            and ref_lat is not None
-            and addr is not None
-            and addr.lng is not None
-            and addr.lat is not None
-        ):
-            dist = haversine_m(ref_lng, ref_lat, float(addr.lng), float(addr.lat))
+        dist = distance_from_anchor_m(
+            ref_lng,
+            ref_lat,
+            float(addr.lng) if addr is not None and addr.lng is not None else None,
+            float(addr.lat) if addr is not None and addr.lat is not None else None,
+        )
         detail = (addr.detail_address if addr else "") or ""
         display_addr = f"{ar} {detail}".strip() or "（未设置默认配送地址）"
         units = effective_daily_meal_units(m)
@@ -173,7 +190,7 @@ def list_today_tasks(
                 is_delivered=m.id in delivered_ids,
             )
         )
-    rows.sort(key=lambda x: (x.sort_distance_m is None, x.sort_distance_m or 0.0))
+    rows.sort(key=lambda x: task_sort_key(x.sort_distance_m))
     return rows
 
 
@@ -188,6 +205,7 @@ def list_tasks_for_courier(
     regions = regions_for_courier(db, courier_id)
     if not regions:
         singles = list_courier_single_order_tasks(db, courier_id, d)
+        singles.sort(key=lambda x: task_sort_key(x.sort_distance_m))
         return singles, d
     by_member: dict[int, CourierTaskMemberOut] = {}
     for reg in regions:
@@ -200,8 +218,9 @@ def list_tasks_for_courier(
         ):
             by_member[row.member_id] = row
     out = list(by_member.values())
-    out.sort(key=lambda x: (x.sort_distance_m is None, x.sort_distance_m or 0.0))
-    out.extend(list_courier_single_order_tasks(db, courier_id, d))
+    singles = list_courier_single_order_tasks(db, courier_id, d)
+    out.extend(singles)
+    out.sort(key=lambda x: task_sort_key(x.sort_distance_m))
     return out, d
 
 
@@ -210,22 +229,6 @@ def group_task_rows(rows: list[CourierTaskMemberOut]) -> list[dict]:
     for m in rows:
         grouped[m.area].append(m.model_dump(mode="json"))
     return [{"area": k, "items": grouped[k]} for k in sorted(grouped.keys())]
-
-
-def _reference_point_with_defaults(
-    members: list[Member],
-    defaults: dict,
-) -> tuple[float | None, float | None]:
-    pts: list[tuple[float, float]] = []
-    for m in members:
-        a = defaults.get(m.id)
-        if a is not None and a.lng is not None and a.lat is not None:
-            pts.append((float(a.lng), float(a.lat)))
-    if not pts:
-        return None, None
-    lng = sum(p[0] for p in pts) / len(pts)
-    lat = sum(p[1] for p in pts) / len(pts)
-    return lng, lat
 
 
 def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date: date | None) -> None:
@@ -256,6 +259,8 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
         raise HTTPException(status_code=400, detail="该日用户请假，无法确认送达")
     if member.delivery_start_date is not None and d < member.delivery_start_date:
         raise HTTPException(status_code=400, detail="未到约定的开始配送日，无法确认送达")
+    if not is_subscription_delivery_day(d):
+        raise HTTPException(status_code=400, detail="该日为周日或法定节假日，订阅配送不履约")
 
     log = db.execute(
         select(DeliveryLog).where(DeliveryLog.member_id == member_id, DeliveryLog.delivery_date == d).with_for_update()
@@ -284,4 +289,10 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
             detail=None,
         )
     )
+    fee_yuan = courier_delivery_fee_yuan_for_meal_units(deduct)
+    courier_row = db.execute(select(Courier).where(Courier.courier_id == courier_id).with_for_update()).scalar_one_or_none()
+    if not courier_row:
+        raise HTTPException(status_code=500, detail="配送员账户异常")
+    prev = courier_row.fee_pending if courier_row.fee_pending is not None else Decimal("0.00")
+    courier_row.fee_pending = prev + fee_yuan
     db.commit()

@@ -17,6 +17,7 @@ from app.schemas.admin import (
     MenuScheduleAssignIn,
     RechargeIn,
     SettingsIn,
+    StoreConfigUpdateIn,
     WeeklySlotAssignIn,
 )
 from app.schemas.common import TokenResponse
@@ -34,6 +35,7 @@ from app.services.admin_service import (
     update_settings,
     upsert_dish,
 )
+from app.services.store_config_service import get_store_config, update_store_config
 from app.services.delivery_sheet_service import build_delivery_sheet
 from app.services.member_service import (
     admin_member_leave,
@@ -60,7 +62,7 @@ def login(request: Request, body: AdminLoginIn, db: SessionDep):
 
 @router.get("/dashboard-summary")
 def dashboard_summary(db: SessionDep, admin_username: str = Depends(admin_subject)):
-    """今日/明日请假会员数与需准备餐品数（与配送任务同一口径）。"""
+    """今日/明日请假会员数与需准备餐品数（与配送任务同一口径；周日与法定节假日为 0）。"""
     _ = admin_username
     summary = dashboard_meal_summary(db)
     return success(data=dump_model(summary), msg="获取成功")
@@ -73,7 +75,7 @@ def delivery_sheet(
     delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
     area: Annotated[str | None, Query(description="按默认配送地址所属片区筛选，可选")] = None,
 ):
-    """配送大表：激活且有余额、已达起送日、排除请假；收件信息仅默认 member_addresses；同址聚合餐数。"""
+    """配送大表：激活且有余额、已达起送日、排除请假；周日与法定节假日不生成订阅派单；收件信息仅默认 member_addresses；同址聚合餐数。"""
     _ = admin_username
     area_key = (area or "").strip() or None
     payload = build_delivery_sheet(db, delivery_date=delivery_date, area=area_key)
@@ -285,6 +287,26 @@ def update_app_settings(body: SettingsIn, db: SessionDep, admin_username: str = 
     _ = admin_username
     update_settings(db, body)
     return success(msg="设置已更新")
+
+
+@router.get("/store-config")
+def admin_store_config_get(db: SessionDep, admin_username: str = Depends(admin_subject)):
+    """门店基础信息：名称、Logo、地图锚点坐标（GCJ-02）。"""
+    _ = admin_username
+    cfg = get_store_config(db)
+    return success(data=dump_model(cfg), msg="获取成功")
+
+
+@router.put("/store-config")
+def admin_store_config_put(
+    body: StoreConfigUpdateIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """更新门店配置；未传的字段保持不变（PATCH 语义）。"""
+    _ = admin_username
+    cfg = update_store_config(db, body)
+    return success(data=dump_model(cfg), msg="已保存")
 
 
 @router.post("/member/address")

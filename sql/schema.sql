@@ -247,6 +247,10 @@ CREATE TABLE IF NOT EXISTS `menu_schedule` (
 CREATE TABLE IF NOT EXISTS `app_settings` (
   `id` TINYINT UNSIGNED NOT NULL DEFAULT 1,
   `leave_deadline_time` TIME NOT NULL DEFAULT '21:00:00' COMMENT '每日请假截止时间（仅对「明天请假」等需当日截止的场景校验）',
+  `store_name` VARCHAR(128) NULL DEFAULT NULL COMMENT '门店展示名称',
+  `store_logo_url` VARCHAR(512) NULL DEFAULT NULL COMMENT '门店 Logo 图片 URL',
+  `store_lng` DECIMAL(11, 8) NULL DEFAULT NULL COMMENT '门店 GCJ-02 经度（骑手排序与地图锚点）',
+  `store_lat` DECIMAL(11, 8) NULL DEFAULT NULL COMMENT '门店 GCJ-02 纬度',
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   CONSTRAINT `chk_singleton_settings` CHECK (`id` = 1)

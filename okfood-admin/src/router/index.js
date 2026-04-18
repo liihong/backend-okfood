@@ -16,6 +16,7 @@ const FinanceView = () => import('../views/FinanceView.vue')
 const MenuView = () => import('../views/MenuView.vue')
 const WeeklyMenuView = () => import('../views/WeeklyMenuView.vue')
 const CardOrdersView = () => import('../views/CardOrdersView.vue')
+const StoreConfigView = () => import('../views/StoreConfigView.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -36,7 +37,7 @@ const router = createRouter({
           path: 'dashboard',
           name: 'dashboard',
           component: DashboardView,
-          meta: { title: '今日营业概览' },
+          meta: { title: '今日营业概览', hidePageTitle: true },
         },
         { path: 'users', name: 'users', component: MembersView, meta: { title: '会员档案库' } },
         {
@@ -55,6 +56,12 @@ const router = createRouter({
           name: 'weekly-menu',
           component: WeeklyMenuView,
           meta: { title: '本周菜单' },
+        },
+        {
+          path: 'store-config',
+          name: 'store-config',
+          component: StoreConfigView,
+          meta: { title: '门店配置' },
         },
       ],
     },

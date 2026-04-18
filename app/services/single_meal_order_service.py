@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.courier_delivery_fee import courier_delivery_fee_yuan_for_meal_units
 from app.integrations.wechat_pay_v2 import (
     WeChatPayV2Error,
     build_miniprogram_pay_params,
@@ -27,7 +28,9 @@ from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.schemas.courier import CourierTaskMemberOut
 from app.schemas.single_meal_order import SingleMealOrderCreateIn, SingleMealOrderOut
+from app.services.courier_task_sorting import distance_from_anchor_m, task_sort_key
 from app.services.member_address_service import delivery_region_name_map, routing_area_label
+from app.services.store_config_service import load_store_coordinates_for_sorting
 
 logger = logging.getLogger(__name__)
 
@@ -251,12 +254,19 @@ def list_courier_single_order_tasks(
             SingleMealOrder.courier_id == courier_id,
         )
     )
+    store_lng, store_lat = load_store_coordinates_for_sorting(db)
     out: list[CourierTaskMemberOut] = []
     for order, member, a, dsh in db.execute(stmt).all():
         nm = delivery_region_name_map(db, {int(a.delivery_region_id)} if a.delivery_region_id else set())
         ar = (order.routing_area or "").strip() or routing_area_label(a, nm)
         detail = (a.detail_address or "").strip()
         display_addr = f"{ar} {detail}".strip()
+        sort_m = distance_from_anchor_m(
+            store_lng,
+            store_lat,
+            float(a.lng) if a.lng is not None else None,
+            float(a.lat) if a.lat is not None else None,
+        )
         out.append(
             CourierTaskMemberOut(
                 member_id=int(member.id),
@@ -268,13 +278,14 @@ def list_courier_single_order_tasks(
                 area=ar,
                 remarks=member.remarks,
                 daily_meal_units=1,
-                sort_distance_m=None,
+                sort_distance_m=sort_m,
                 is_delivered=False,
                 task_kind="single",
                 single_order_id=int(order.id),
                 dish_title=(dsh.name or "").strip() or None,
             )
         )
+    out.sort(key=lambda x: task_sort_key(x.sort_distance_m))
     return out
 
 
@@ -288,5 +299,12 @@ def confirm_single_order_delivery(db: Session, courier_id: str, order_id: int) -
         raise HTTPException(status_code=400, detail="订单未支付")
     if row.fulfillment_status == "delivered":
         return
+    # 单次点餐每单1 份，计价同「首份」口径
+    fee_yuan = courier_delivery_fee_yuan_for_meal_units(1)
+    courier_row = db.execute(select(Courier).where(Courier.courier_id == courier_id).with_for_update()).scalar_one_or_none()
+    if not courier_row:
+        raise HTTPException(status_code=500, detail="配送员账户异常")
+    prev = courier_row.fee_pending if courier_row.fee_pending is not None else Decimal("0.00")
+    courier_row.fee_pending = prev + fee_yuan
     row.fulfillment_status = "delivered"
     db.commit()

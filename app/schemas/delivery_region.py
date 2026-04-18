@@ -75,8 +75,20 @@ class MapOverviewMemberMarkerOut(BaseModel):
     area: str
     lng: float | None = None
     lat: float | None = None
+    # 上海业务日当天是否已标记送达：订阅见 delivery_logs.delivered；单次点餐见 single_meal_orders 履约
+    delivered_today: bool = False
+
+
+class StoreMapAnchorOut(BaseModel):
+    """营业概览地图：门店锚点（名称 / Logo / 坐标），未配置时各字段可为空。"""
+
+    store_name: str | None = None
+    store_logo_url: str | None = None
+    store_lng: float | None = None
+    store_lat: float | None = None
 
 
 class DeliveryRegionMapOverviewOut(BaseModel):
     regions: list[DeliveryRegionOut]
     members: list[MapOverviewMemberMarkerOut]
+    store: StoreMapAnchorOut | None = None
