@@ -19,8 +19,12 @@ class MemberAddress(Base):
     )
     contact_name: Mapped[str] = mapped_column(String(100))
     contact_phone: Mapped[str] = mapped_column(String(20))
-    area: Mapped[str] = mapped_column(String(64))
-    area_manual: Mapped[bool] = mapped_column(Boolean, default=False)
+    delivery_region_id: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("delivery_regions.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     detail_address: Mapped[str] = mapped_column(String(500))
     remarks: Mapped[str | None] = mapped_column(String(500), nullable=True)
     lng: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)

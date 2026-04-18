@@ -16,6 +16,11 @@ const membersTotal = ref(0)
 const membersLoading = ref(false)
 const searchQuery = ref('')
 const membersValidityTab = ref('active')
+/** 片区：'' | 'unassigned' | 区域 id 字符串 */
+const membersRegionFilter = ref('')
+/** 仅未开卡 is_active=false */
+const membersInactiveOnly = ref(false)
+const regionFilterOptions = ref([])
 
 const membersTotalPages = computed(() =>
   Math.max(1, Math.ceil(membersTotal.value / membersPageSize.value)),
@@ -23,6 +28,25 @@ const membersTotalPages = computed(() =>
 
 function validityQuery() {
   return membersValidityTab.value === 'expired' ? 'expired' : 'active'
+}
+
+async function loadRegionFilterOptions() {
+  try {
+    const data = await apiJson('/api/admin/delivery-regions', {}, { auth: true })
+    const list = Array.isArray(data) ? data : []
+    regionFilterOptions.value = list
+      .filter((r) => r && (r.is_active === true || r.is_active === 1))
+      .map((r) => ({ id: r.id, name: typeof r.name === 'string' ? r.name : '' }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+  } catch {
+    regionFilterOptions.value = []
+  }
+}
+
+function toggleInactiveOnly() {
+  membersInactiveOnly.value = !membersInactiveOnly.value
+  membersPage.value = 1
+  void fetchMembers()
 }
 
 async function fetchMembers() {
@@ -36,6 +60,9 @@ async function fetchMembers() {
     })
     const q = searchQuery.value.trim()
     if (q) params.set('q', q)
+    if (membersInactiveOnly.value) params.set('inactive_only', 'true')
+    if (membersRegionFilter.value === 'unassigned') params.set('unassigned_region', 'true')
+    else if (membersRegionFilter.value) params.set('delivery_region_id', membersRegionFilter.value)
     const data = await apiJson(`/api/admin/users?${params.toString()}`, {}, { auth: true })
     memberList.value = (data.items || []).map(mapAdminUserToRow)
     membersTotal.value = Number(data.total) || 0
@@ -63,6 +90,12 @@ watch(searchQuery, () => {
 })
 
 watch(membersValidityTab, () => {
+  if (!adminAccessToken.value) return
+  membersPage.value = 1
+  void fetchMembers()
+})
+
+watch(membersRegionFilter, () => {
   if (!adminAccessToken.value) return
   membersPage.value = 1
   void fetchMembers()
@@ -149,8 +182,8 @@ async function submitLeaveMember() {
 /** --- 修改会员 --- */
 const showEditModal = ref(false)
 const editSaving = ref(false)
-const deliveryRegionOptions = ref([])
-const initialDeliveryArea = ref('未分配')
+/** 弹窗内只读展示的当前片区（接口解析名） */
+const editAreaDisplay = ref('—')
 /** 打开编辑弹窗时的套餐类型，用于判断是否与档案一致、是否提交 plan_type */
 const editInitialPlanType = ref('次卡')
 const editForm = ref({
@@ -162,16 +195,8 @@ const editForm = ref({
   daily_meal_units: 1,
   /** 档案套餐标签：与列表「周卡/月卡」角标一致；仅改展示与统计口径，不自动改余额 */
   plan_type: '次卡',
-  delivery_area: '未分配',
-  delivery_area_override: '',
   use_auto_area: false,
 })
-
-function normalizeAreaForForm(a) {
-  const s = String(a || '').trim()
-  if (!s || s === '—') return '未分配'
-  return s
-}
 
 /** 编辑框仅填详细地址：优先 API 的 detail_address，否则从旧版「片区 + 详细」展示串回推 */
 function defaultAddressDetailForEdit(u) {
@@ -179,41 +204,16 @@ function defaultAddressDetailForEdit(u) {
   if (detail) return detail
   const rawAddr = String(u.address || '').trim()
   if (!rawAddr || rawAddr.startsWith('（未设置')) return ''
-  const areaTag = normalizeAreaForForm(u.area)
+  const areaTag = String(u.area || '').trim()
   if (areaTag && areaTag !== '—' && rawAddr.startsWith(areaTag)) {
     return rawAddr.slice(areaTag.length).trim()
   }
   return rawAddr
 }
 
-const deliveryAreaSelectOptions = computed(() => {
-  const sorted = [...deliveryRegionOptions.value]
-    .filter((x) => x && x !== '未分配')
-    .sort((a, b) => a.localeCompare(b, 'zh-CN'))
-  const cur = normalizeAreaForForm(editForm.value.delivery_area)
-  const out = ['未分配', ...sorted]
-  if (cur && cur !== '未分配' && !out.includes(cur)) out.push(cur)
-  return out
-})
-
-async function ensureDeliveryRegions() {
-  try {
-    const data = await apiJson('/api/admin/delivery-regions', {}, { auth: true })
-    const list = Array.isArray(data) ? data : []
-    const names = list
-      .filter((r) => r && (r.is_active === true || r.is_active === 1))
-      .map((r) => r.name)
-      .filter((n) => typeof n === 'string' && n.trim())
-    deliveryRegionOptions.value = [...new Set(names)].sort((a, b) => a.localeCompare(b, 'zh-CN'))
-  } catch {
-    deliveryRegionOptions.value = []
-  }
-}
-
 async function openEditMember(u) {
-  await ensureDeliveryRegions()
-  const area0 = normalizeAreaForForm(u.area)
-  initialDeliveryArea.value = area0
+  const ad = typeof u.area === 'string' && u.area.trim() ? u.area.trim() : '未分配'
+  editAreaDisplay.value = ad === '—' ? '未分配' : ad
   const p0 = u.plan && u.plan !== '—' ? u.plan : '次卡'
   editInitialPlanType.value = p0
   editForm.value = {
@@ -223,8 +223,6 @@ async function openEditMember(u) {
     remarks: u.remarks || '',
     daily_meal_units: Math.max(1, Math.min(50, Number(u.daily_meal_units) || 1)),
     plan_type: p0,
-    delivery_area: area0,
-    delivery_area_override: '',
     use_auto_area: false,
   }
   showEditModal.value = true
@@ -243,13 +241,6 @@ async function submitEditMember() {
     }
     if (editForm.value.use_auto_area) {
       payload.use_auto_area = true
-    } else {
-      const eff = normalizeAreaForForm(
-        editForm.value.delivery_area_override.trim() || editForm.value.delivery_area,
-      )
-      if (eff !== initialDeliveryArea.value) {
-        payload.delivery_area = eff
-      }
     }
     const pt = String(editForm.value.plan_type || '次卡').trim() || '次卡'
     if (pt !== editInitialPlanType.value) {
@@ -279,6 +270,7 @@ async function submitEditMember() {
 }
 
 onMounted(() => {
+  void loadRegionFilterOptions()
   void fetchMembers()
 })
 </script>
@@ -294,27 +286,53 @@ onMounted(() => {
         <p class="members-recharge-hint">
           续卡与加次数请至侧栏「开卡工单」办理：工单标记已缴后使用「同步入账」；次数流水会写入余额日志并附带工单说明。
         </p>
-        <div class="members-validity-tabs" role="tablist" aria-label="会员有效期">
-          <button
-            type="button"
-            role="tab"
-            class="members-validity-tab"
-            :class="{ 'members-validity-tab--active': membersValidityTab === 'active' }"
-            :aria-selected="membersValidityTab === 'active'"
-            @click="membersValidityTab = 'active'"
-          >
-            生效中
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="members-validity-tab"
-            :class="{ 'members-validity-tab--active': membersValidityTab === 'expired' }"
-            :aria-selected="membersValidityTab === 'expired'"
-            @click="membersValidityTab = 'expired'"
-          >
-            已过期
-          </button>
+        <div class="members-filter-toolbar">
+          <div class="members-validity-tabs" role="tablist" aria-label="会员有效期">
+            <button
+              type="button"
+              role="tab"
+              class="members-validity-tab"
+              :class="{ 'members-validity-tab--active': membersValidityTab === 'active' }"
+              :aria-selected="membersValidityTab === 'active'"
+              @click="membersValidityTab = 'active'"
+            >
+              生效中
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="members-validity-tab"
+              :class="{ 'members-validity-tab--active': membersValidityTab === 'expired' }"
+              :aria-selected="membersValidityTab === 'expired'"
+              @click="membersValidityTab = 'expired'"
+            >
+              已过期
+            </button>
+          </div>
+          <div class="members-extra-filters" aria-label="片区与开卡筛选">
+            <label class="members-filter-label" for="members-region-filter">片区</label>
+            <select
+              id="members-region-filter"
+              v-model="membersRegionFilter"
+              class="members-region-select"
+            >
+              <option value="">全部</option>
+              <option value="unassigned">未分配</option>
+              <option v-for="r in regionFilterOptions" :key="r.id" :value="String(r.id)">
+                {{ r.name || '—' }}
+              </option>
+            </select>
+            <button
+              type="button"
+              role="tab"
+              class="members-validity-tab"
+              :class="{ 'members-validity-tab--active': membersInactiveOnly }"
+              :aria-selected="membersInactiveOnly"
+              @click="toggleInactiveOnly"
+            >
+              未开卡
+            </button>
+          </div>
         </div>
       </div>
       <p v-if="membersLoading" class="members-loading">加载会员列表中…</p>
@@ -347,7 +365,6 @@ onMounted(() => {
             </td>
             <td>
               <span class="area-tag">{{ u.area }}</span>
-              <span v-if="u.area_manual" class="area-manual-tag" title="片区为后台手工指定">手工</span>
             </td>
             <td class="text-center">
               <div class="balance-cell">
@@ -465,29 +482,15 @@ onMounted(() => {
             <textarea v-model="editForm.address" required rows="3" maxlength="500"></textarea>
           </div>
           <div class="form-group">
-            <label>配送片区（与「配送区域」配置联动）</label>
-            <select
-              v-model="editForm.delivery_area"
-              class="input-delivery-area"
-              :disabled="editForm.use_auto_area"
-            >
-              <option v-for="n in deliveryAreaSelectOptions" :key="n" :value="n">{{ n }}</option>
-            </select>
-            <input
-              v-model="editForm.delivery_area_override"
-              type="text"
-              maxlength="64"
-              class="input-delivery-area input-delivery-area--secondary"
-              placeholder="自定义片区名（可选，填写则覆盖上方下拉）"
-              :disabled="editForm.use_auto_area"
-            />
+            <label>配送片区（只读）</label>
+            <p class="modal-hint modal-hint--tight" style="margin: 0 0 8px; font-weight: 600">
+              {{ editAreaDisplay }}
+            </p>
             <label class="checkbox-row">
               <input v-model="editForm.use_auto_area" type="checkbox" />
-              <span>保存时按坐标重新自动划区（取消手工锁定）</span>
+              <span>保存时按地址/坐标重新自动划区</span>
             </label>
-            <p class="modal-hint">
-              下拉为数据库中已启用的配送区域；手工指定后，仅改详细地址不会自动改写片区。
-            </p>
+            <p class="modal-hint">片区由坐标匹配「配送区域」多边形生成，后台不可手写或下拉指定。</p>
           </div>
           <div class="form-group">
             <label>每配送日份数</label>

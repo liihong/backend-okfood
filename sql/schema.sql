@@ -5,7 +5,7 @@
 --   2) members 增加 last_low_balance_notify_date，低余额提醒去重
 --   3) 新增 admin_users，管理端独立账号（勿与会员 Token 混用）
 --   4) 配送员表注释与语句分离，避免复制执行错误
---   5) delivery_regions / delivery_region_couriers；片区名与 member_addresses.area 对齐
+--   5) delivery_regions / delivery_region_couriers；member_addresses.delivery_region_id 外键对齐
 --   6) 菜单拆为 menu_dish（菜品库，可启用/停用）与 menu_schedule（按日排期）；同月同一菜仅可排一天
 --   7) product_category + menu_dish.category_id；weekly_menu_slot（week_start+slot）承载每周餐品，本周/下周仅差 week_start，无需翻周拷贝
 --   8) menu_dish.image_url 为 TEXT，便于管理端长图链/Data URL
@@ -20,6 +20,7 @@
 --  17) single_meal_orders 微信字段（见 migration_025_single_meal_orders_wechat.sql）
 --  18) members.daily_meal_units每配送日份数（见 migration_026_members_daily_meal_units.sql）
 --  19) members.meal_quota_total周卡月卡累计总次数展示（见 migration_028_members_meal_quota_total.sql）
+--  20) member_addresses.delivery_region_id 外键替代 area/area_manual（见 migration_029_member_addresses_delivery_region_id.sql）
 
 SET NAMES utf8mb4;
 
@@ -57,8 +58,7 @@ CREATE TABLE IF NOT EXISTS `member_addresses` (
   `member_id` BIGINT UNSIGNED NOT NULL COMMENT 'members.id',
   `contact_name` VARCHAR(100) NOT NULL COMMENT '收件人',
   `contact_phone` VARCHAR(20) NOT NULL COMMENT '联系电话',
-  `area` VARCHAR(64) NOT NULL COMMENT '配送区域名，与 delivery_regions.name 或业务片区一致',
-  `area_manual` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1=片区由后台手工指定，管理端改详细地址时不再按坐标重算片区',
+  `delivery_region_id` BIGINT UNSIGNED NULL COMMENT '配送片区 delivery_regions.id；未划区为 NULL',
   `detail_address` VARCHAR(500) NOT NULL COMMENT '详细地址（门牌/楼层等）',
   `remarks` VARCHAR(500) NULL COMMENT '忌口/备注',
   `lng` DECIMAL(11,8) NULL COMMENT '高德经度 GCJ-02',
@@ -69,8 +69,11 @@ CREATE TABLE IF NOT EXISTS `member_addresses` (
   PRIMARY KEY (`id`),
   KEY `idx_member_addresses_member` (`member_id`),
   KEY `idx_member_addresses_member_default` (`member_id`, `is_default`),
+  KEY `idx_member_addresses_delivery_region` (`delivery_region_id`),
   CONSTRAINT `fk_member_addresses_member` FOREIGN KEY (`member_id`) REFERENCES `members` (`id`)
-    ON DELETE CASCADE ON UPDATE CASCADE
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_member_addresses_delivery_region` FOREIGN KEY (`delivery_region_id`) REFERENCES `delivery_regions` (`id`)
+    ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员配送地址（多地址）';
 
 CREATE TABLE IF NOT EXISTS `couriers` (
@@ -87,7 +90,7 @@ CREATE TABLE IF NOT EXISTS `couriers` (
 
 CREATE TABLE IF NOT EXISTS `delivery_regions` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `name` VARCHAR(64) NOT NULL COMMENT '与 member_addresses.area / 管理端片区展示一致',
+  `name` VARCHAR(64) NOT NULL COMMENT '片区展示名；与 member_addresses.delivery_region_id 解析结果一致',
   `code` VARCHAR(32) NULL COMMENT '可选业务编码',
   `polygon_json` JSON NOT NULL COMMENT '多边形外环 GCJ-02',
   `priority` INT NOT NULL DEFAULT 0 COMMENT '重叠时越小越优先',

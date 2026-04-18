@@ -18,8 +18,7 @@ class MemberOut(BaseModel):
     address: str
     avatar_url: str | None
     location: Location | None
-    area: str
-    area_manual: bool = Field(False, description="默认地址片区是否为后台手工指定（改地址时不自动重算）")
+    area: str = Field(..., description="默认地址所属配送片区展示名（由 delivery_regions 解析）")
     remarks: str | None
     balance: int
     daily_meal_units: int = Field(1, ge=1, description="每配送日份数（订阅）；确认送达时按此倍数扣次")

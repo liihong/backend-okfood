@@ -1,6 +1,5 @@
 from collections import defaultdict
 from datetime import date
-import logging
 import re
 
 from fastapi import HTTPException
@@ -9,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import verify_password
 from app.core.timeutil import today_shanghai
+from app.constants import UNASSIGNED_DELIVERY_AREA
 from app.models.balance_log import BalanceLog
 from app.models.courier import Courier
 from app.models.delivery_log import DeliveryLog
@@ -18,11 +18,9 @@ from app.schemas.courier import CourierTaskMemberOut
 from app.services.courier_admin_service import regions_for_courier
 from app.services.geo import haversine_m
 from app.services.leave import is_absent_on_delivery_date
-from app.services.member_address_service import effective_routing_area, load_default_address_map
+from app.services.member_address_service import load_default_address_map
 from app.services.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
 from app.services.single_meal_order_service import list_courier_single_order_tasks
-
-logger = logging.getLogger(__name__)
 
 
 def normalize_cn_mobile(raw: str) -> str:
@@ -69,7 +67,7 @@ def eligible_members_for_delivery(
     db: Session,
     *,
     delivery_date: date,
-    area: str | None = None,
+    delivery_region_id: int | None = None,
 ) -> list[Member]:
     """
     应配送会员（Member 行），与 is_absent_on_delivery_date / 配送清单同一规则。
@@ -101,24 +99,33 @@ def eligible_members_for_delivery(
         started,
     )
     eligible = list(db.scalars(q).all())
-    if not area:
+    if delivery_region_id is None:
         return eligible
-    filt = (area or "").strip()
     defaults = load_default_address_map(db, [m.id for m in eligible])
-    return [m for m in eligible if effective_routing_area(defaults.get(m.id)) == filt]
+    return [
+        m
+        for m in eligible
+        if (a := defaults.get(m.id)) is not None and a.delivery_region_id == delivery_region_id
+    ]
 
 
-def list_today_tasks(db: Session, area: str | None, *, delivery_date: date | None = None) -> list[CourierTaskMemberOut]:
+def list_today_tasks(
+    db: Session,
+    *,
+    delivery_region_id: int,
+    delivery_region_display: str,
+    delivery_date: date | None = None,
+) -> list[CourierTaskMemberOut]:
     """
     当日配送清单：
     - is_active 且 balance>=当日应付份数（daily_meal_units，封顶 50）；
     - 若设置了 delivery_start_date，仅当配送日>=该日；
     - 配送日不在请假区间，且「明天请假」不影响「今日」配送；
-    - 可选按 area 过滤；
+    - 按 delivery_region_id 过滤默认地址；
     - 组内按与坐标均值的直线距离排序。
     """
     d = delivery_date or today_shanghai()
-    eligible = eligible_members_for_delivery(db, delivery_date=d, area=area)
+    eligible = eligible_members_for_delivery(db, delivery_date=d, delivery_region_id=delivery_region_id)
     defaults = load_default_address_map(db, [m.id for m in eligible])
 
     mids = [m.id for m in eligible]
@@ -136,6 +143,7 @@ def list_today_tasks(db: Session, area: str | None, *, delivery_date: date | Non
 
     ref_lng, ref_lat = _reference_point_with_defaults(eligible, defaults)
     rows: list[CourierTaskMemberOut] = []
+    ar = delivery_region_display
     for m in eligible:
         addr = defaults.get(m.id)
         dist = None
@@ -147,7 +155,6 @@ def list_today_tasks(db: Session, area: str | None, *, delivery_date: date | Non
             and addr.lat is not None
         ):
             dist = haversine_m(ref_lng, ref_lat, float(addr.lng), float(addr.lat))
-        ar = effective_routing_area(addr)
         detail = (addr.detail_address if addr else "") or ""
         display_addr = f"{ar} {detail}".strip() or "（未设置默认配送地址）"
         units = effective_daily_meal_units(m)
@@ -179,13 +186,18 @@ def list_tasks_for_courier(
     """当日任务：仅包含该配送员在 delivery_region_couriers 中绑定的片区。"""
     d = delivery_date or today_shanghai()
     regions = regions_for_courier(db, courier_id)
-    area_names = sorted({(r.name or "").strip() for r in regions if r.name and (r.name or "").strip()})
-    if not area_names:
+    if not regions:
         singles = list_courier_single_order_tasks(db, courier_id, d)
         return singles, d
     by_member: dict[int, CourierTaskMemberOut] = {}
-    for an in area_names:
-        for row in list_today_tasks(db, an, delivery_date=d):
+    for reg in regions:
+        rname = (reg.name or "").strip() or UNASSIGNED_DELIVERY_AREA
+        for row in list_today_tasks(
+            db,
+            delivery_region_id=int(reg.region_id),
+            delivery_region_display=rname,
+            delivery_date=d,
+        ):
             by_member[row.member_id] = row
     out = list(by_member.values())
     out.sort(key=lambda x: (x.sort_distance_m is None, x.sort_distance_m or 0.0))
@@ -227,16 +239,12 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
     if not member:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    allowed_areas = {
-        (r.name or "").strip()
-        for r in regions_for_courier(db, courier_id)
-        if r.name and (r.name or "").strip()
-    }
-    if not allowed_areas:
+    allowed_region_ids = {int(r.region_id) for r in regions_for_courier(db, courier_id)}
+    if not allowed_region_ids:
         raise HTTPException(status_code=403, detail="账号未分配配送片区")
     da = load_default_address_map(db, [member_id]).get(member_id)
-    ma = effective_routing_area(da)
-    if ma not in allowed_areas:
+    ma_rid = int(da.delivery_region_id) if da and da.delivery_region_id is not None else None
+    if ma_rid is None or ma_rid not in allowed_region_ids:
         raise HTTPException(status_code=403, detail="该会员不在您负责的片区")
 
     deduct = effective_daily_meal_units(member)
@@ -267,22 +275,13 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
         log.courier_id = courier_id
 
     member.balance -= deduct
-
     db.add(
         BalanceLog(
             member_id=member_id,
             change=-deduct,
             reason=BalanceReason.DELIVERY.value,
-            operator=courier_id,
+            operator=f"courier:{courier_id}",
+            detail=None,
         )
     )
     db.commit()
-
-    try:
-        from app.integrations.wechat_mini import try_notify_member_delivery_confirmed
-
-        openid = (member.wx_mini_openid or "").strip()
-        if openid:
-            try_notify_member_delivery_confirmed(openid, delivery_date=d)
-    except Exception:
-        logger.exception("送达后订阅消息调度失败 member_id=%s", member_id)

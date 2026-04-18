@@ -2,9 +2,9 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import and_, func, literal, not_, or_, select, true
+from sqlalchemy import and_, exists, func, literal, not_, or_, select, true
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.security import verify_password
 from app.core.timeutil import today_shanghai, tomorrow_shanghai
@@ -31,7 +31,7 @@ from app.schemas.admin import (
     SettingsIn,
     WeeklySlotAssignIn,
 )
-from app.services.member_address_service import effective_routing_area
+from app.services.member_address_service import delivery_region_name_map, routing_area_label
 from app.services.member_service import (
     _monday_of_week,
     effective_daily_meal_units,
@@ -56,7 +56,26 @@ def _escape_like_fragment(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _apply_member_list_filters(stmt, *, q_phone: str | None, validity: str | None):
+def _default_address_pick_subq():
+    return (
+        select(
+            MemberAddress.member_id.label("mid"),
+            func.max(MemberAddress.id).label("addr_id"),
+        )
+        .where(MemberAddress.is_default.is_(True))
+        .group_by(MemberAddress.member_id)
+    ).subquery("daf")
+
+
+def _apply_member_list_filters(
+    stmt,
+    *,
+    q_phone: str | None,
+    validity: str | None,
+    inactive_only: bool = False,
+    delivery_region_id: int | None = None,
+    unassigned_region: bool = False,
+):
     if q_phone:
         q = q_phone.strip()
         if q:
@@ -71,6 +90,32 @@ def _apply_member_list_filters(stmt, *, q_phone: str | None, validity: str | Non
         stmt = stmt.where(Member.balance > 0)
     elif validity == "expired":
         stmt = stmt.where(Member.balance == 0)
+    if inactive_only:
+        stmt = stmt.where(Member.is_active.is_(False))
+    if unassigned_region:
+        dap = _default_address_pick_subq()
+        ma = aliased(MemberAddress)
+        has_no_default = ~exists(select(1).select_from(dap).where(dap.c.mid == Member.id))
+        has_null_region = exists(
+            select(1)
+            .select_from(dap)
+            .join(ma, ma.id == dap.c.addr_id)
+            .where(dap.c.mid == Member.id)
+            .where(ma.delivery_region_id.is_(None))
+        )
+        stmt = stmt.where(or_(has_no_default, has_null_region))
+    elif delivery_region_id is not None:
+        dap = _default_address_pick_subq()
+        ma = aliased(MemberAddress)
+        stmt = stmt.where(
+            exists(
+                select(1)
+                .select_from(dap)
+                .join(ma, ma.id == dap.c.addr_id)
+                .where(dap.c.mid == Member.id)
+                .where(ma.delivery_region_id == delivery_region_id)
+            )
+        )
     return stmt
 
 
@@ -90,27 +135,29 @@ def list_members_paged(
     page: int,
     page_size: int,
     validity: str | None = None,
+    inactive_only: bool = False,
+    delivery_region_id: int | None = None,
+    unassigned_region: bool = False,
 ) -> tuple[list[MemberAdminOut], int]:
     # 每人至多一条「默认地址」：避免多条 is_default=1 时 JOIN 放大行数、拖慢 ORDER BY + LIMIT
-    default_addr_pick = (
-        select(
-            MemberAddress.member_id.label("mid"),
-            func.max(MemberAddress.id).label("addr_id"),
-        )
-        .where(MemberAddress.is_default.is_(True))
-        .group_by(MemberAddress.member_id)
-    ).subquery("def_addr")
+    default_addr_pick = _default_address_pick_subq()
 
     # 单次往返：总计数子查询 + 分页 id 子查询 LEFT JOIN，避免 COUNT 与列表各查一次（高延迟库上可省一整轮 RTT）
     count_sq = _apply_member_list_filters(
         select(func.count().label("total")).select_from(Member),
         q_phone=q_phone,
         validity=validity,
+        inactive_only=inactive_only,
+        delivery_region_id=delivery_region_id,
+        unassigned_region=unassigned_region,
     ).subquery("cnt")
     page_sq = _apply_member_list_filters(
         select(Member.id.label("pid")).select_from(Member),
         q_phone=q_phone,
         validity=validity,
+        inactive_only=inactive_only,
+        delivery_region_id=delivery_region_id,
+        unassigned_region=unassigned_region,
     )
     page_sq = (
         page_sq.order_by(Member.created_at.desc())
@@ -132,12 +179,19 @@ def list_members_paged(
     if not rows:
         return [], 0
     total = int(rows[0][0] or 0)
+    region_ids: set[int] = set()
+    for _total_col, m, addr in rows:
+        if m is None:
+            continue
+        if addr and addr.delivery_region_id is not None:
+            region_ids.add(int(addr.delivery_region_id))
+    id_to_name = delivery_region_name_map(db, region_ids)
     for _total_col, m, addr in rows:
         if m is None:
             continue
         if addr:
             detail = (addr.detail_address or "").strip()
-            ar = effective_routing_area(addr)
+            ar = routing_area_label(addr, id_to_name)
             ad_line = f"{ar} {detail}".strip() if detail else ar
         else:
             detail = ""
@@ -154,7 +208,6 @@ def list_members_paged(
                 detail_address=detail,
                 avatar_url=m.avatar_url,
                 area=ar,
-                area_manual=bool(addr.area_manual) if addr else False,
                 remarks=m.remarks,
                 balance=m.balance,
                 daily_meal_units=effective_daily_meal_units(m),

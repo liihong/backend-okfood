@@ -37,18 +37,14 @@ from app.services import amap
 from app.services.leave import is_leave_deadline_passed
 
 from app.services.member_address_service import (
-
     admin_set_default_address_detail,
-
     apply_auto_area_from_coords_or_geocode,
-
+    delivery_region_name_map,
     get_default_address,
-
     upsert_default_address_after_register,
-
 )
 
-from app.services.region_assignment import assign_area_name_for_coords
+from app.services.region_assignment import assign_region_for_coords
 
 # 与 DB chk_members_daily_meal_units 上限一致
 MAX_DAILY_MEAL_UNITS = 50
@@ -171,7 +167,11 @@ def ensure_member_stub(
 
 
 
-def _to_member_out(m: Member, default_addr: MemberAddress | None = None) -> MemberOut:
+def _to_member_out(
+    db: Session,
+    m: Member,
+    default_addr: MemberAddress | None = None,
+) -> MemberOut:
 
     """会员对外资料：地址/坐标/片区以默认配送地址为准。"""
 
@@ -181,17 +181,15 @@ def _to_member_out(m: Member, default_addr: MemberAddress | None = None) -> Memb
 
     area_name = UNASSIGNED_DELIVERY_AREA
 
-    area_manual = False
-
     if default_addr is not None:
 
         address_line = (default_addr.detail_address or "").strip()
 
-        ar = (default_addr.area or "").strip()
+        if default_addr.delivery_region_id is not None:
 
-        area_name = ar if ar else UNASSIGNED_DELIVERY_AREA
+            nm = delivery_region_name_map(db, {int(default_addr.delivery_region_id)})
 
-        area_manual = bool(default_addr.area_manual)
+            area_name = nm.get(int(default_addr.delivery_region_id), UNASSIGNED_DELIVERY_AREA)
 
         if default_addr.lng is not None and default_addr.lat is not None:
 
@@ -237,8 +235,6 @@ def _to_member_out(m: Member, default_addr: MemberAddress | None = None) -> Memb
 
         area=area_name,
 
-        area_manual=area_manual,
-
         remarks=m.remarks,
 
         balance=m.balance,
@@ -273,7 +269,7 @@ def get_member(db: Session, member_id: int) -> MemberOut:
 
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    return _to_member_out(m, get_default_address(db, member_id))
+    return _to_member_out(db, m, get_default_address(db, member_id))
 
 
 
@@ -293,13 +289,13 @@ def register_member(db: Session, body: RegisterIn) -> MemberOut:
 
         lng, lat = coords[0], coords[1]
 
-        area_name = assign_area_name_for_coords(db, lng, lat)
+        r = assign_region_for_coords(db, lng, lat)
+
+        rid = int(r.id) if r else None
 
     else:
 
-        lng, lat = None, None
-
-        area_name = UNASSIGNED_DELIVERY_AREA
+        lng, lat, rid = None, None, None
 
     if existing:
 
@@ -325,7 +321,7 @@ def register_member(db: Session, body: RegisterIn) -> MemberOut:
 
             remarks=body.remarks,
 
-            area=area_name,
+            delivery_region_id=rid,
 
             lng=lng,
 
@@ -337,7 +333,7 @@ def register_member(db: Session, body: RegisterIn) -> MemberOut:
 
         db.refresh(existing)
 
-        return _to_member_out(existing, get_default_address(db, existing.id))
+        return _to_member_out(db, existing, get_default_address(db, existing.id))
 
     member = Member(
 
@@ -385,7 +381,7 @@ def register_member(db: Session, body: RegisterIn) -> MemberOut:
 
         remarks=body.remarks,
 
-        area=area_name,
+        delivery_region_id=rid,
 
         lng=lng,
 
@@ -397,7 +393,7 @@ def register_member(db: Session, body: RegisterIn) -> MemberOut:
 
     db.refresh(member)
 
-    return _to_member_out(member, get_default_address(db, member.id))
+    return _to_member_out(db, member, get_default_address(db, member.id))
 
 
 
@@ -505,7 +501,7 @@ def patch_member_profile(
 
     db.refresh(m)
 
-    return _to_member_out(m, get_default_address(db, member_id))
+    return _to_member_out(db, m, get_default_address(db, member_id))
 
 
 
@@ -525,7 +521,7 @@ def activate_member(db: Session, member_id: int) -> MemberOut:
 
     db.refresh(m)
 
-    return _to_member_out(m, get_default_address(db, member_id))
+    return _to_member_out(db, m, get_default_address(db, member_id))
 
 
 
@@ -609,7 +605,7 @@ def leave_request(
 
     db.refresh(m)
 
-    return _to_member_out(m, get_default_address(db, member_id))
+    return _to_member_out(db, m, get_default_address(db, member_id))
 
 
 def admin_member_leave(
@@ -893,7 +889,7 @@ def admin_update_member_address(db: Session, phone: str, address: str, *, operat
 
     db.refresh(m)
 
-    return _to_member_out(m, get_default_address(db, m.id))
+    return _to_member_out(db, m, get_default_address(db, m.id))
 
 
 
@@ -912,8 +908,6 @@ def admin_patch_member_profile(
     remarks: str | None,
 
     address: str | None,
-
-    delivery_area: str | None,
 
     use_auto_area: bool,
 
@@ -935,8 +929,6 @@ def admin_patch_member_profile(
 
         and address is None
 
-        and delivery_area is None
-
         and daily_meal_units is None
 
         and plan_type is None
@@ -946,10 +938,6 @@ def admin_patch_member_profile(
     ):
 
         raise HTTPException(status_code=400, detail="请至少修改一项内容")
-
-    if use_auto_area and delivery_area is not None:
-
-        raise HTTPException(status_code=400, detail="不能同时指定手工片区与恢复自动划区")
 
     m = _member_by_phone(db, phone)
 
@@ -1005,22 +993,6 @@ def admin_patch_member_profile(
 
         apply_auto_area_from_coords_or_geocode(db, addr)
 
-        addr.area_manual = False
-
-    if delivery_area is not None:
-
-        addr = get_default_address(db, mid)
-
-        if not addr:
-
-            raise HTTPException(status_code=400, detail="该会员暂无默认配送地址，请先填写地址后再指定片区")
-
-        t = delivery_area.strip()
-
-        addr.area = t if t else UNASSIGNED_DELIVERY_AREA
-
-        addr.area_manual = True
-
     if daily_meal_units is not None:
         if daily_meal_units < 1 or daily_meal_units > MAX_DAILY_MEAL_UNITS:
             raise HTTPException(
@@ -1045,5 +1017,5 @@ def admin_patch_member_profile(
             ) from e
         raise
 
-    return _to_member_out(m, get_default_address(db, mid))
+    return _to_member_out(db, m, get_default_address(db, mid))
 

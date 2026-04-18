@@ -221,7 +221,6 @@ export function mapAdminUserToRow(raw, idx) {
     balanceLabel,
     totalQuota,
     area: raw.area || '—',
-    area_manual: raw.area_manual === true,
     address: raw.address || '',
     detail_address: typeof raw.detail_address === 'string' ? raw.detail_address : '',
     plan,

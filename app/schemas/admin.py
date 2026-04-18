@@ -105,8 +105,7 @@ class MemberAdminOut(BaseModel):
         description="默认配送地址详细行（不含片区前缀）；编辑表单应使用本字段，勿用 address 展示列",
     )
     avatar_url: str | None
-    area: str
-    area_manual: bool = Field(False, description="默认地址片区是否为后台手工指定")
+    area: str = Field(..., description="默认地址配送片区展示名")
     remarks: str | None = None
     balance: int
     daily_meal_units: int = Field(1, ge=1, description="每配送日份数；与配送扣次、备餐统计一致")
@@ -144,15 +143,10 @@ class AdminMemberPatchIn(BaseModel):
     phone: str = Field(..., min_length=5, max_length=20)
     name: str | None = Field(None, max_length=100)
     remarks: str | None = Field(None, max_length=500)
-    address: str | None = Field(None, max_length=500, description="默认配送地址详细行，提交则重算坐标；片区是否重算见 area_manual / use_auto_area")
-    delivery_area: str | None = Field(
-        None,
-        max_length=64,
-        description="手工指定默认地址的配送片区名；与 use_auto_area 互斥",
-    )
+    address: str | None = Field(None, max_length=500, description="默认配送地址详细行，提交则重算坐标与自动划区")
     use_auto_area: bool = Field(
         False,
-        description="取消手工锁定并按坐标自动划区；若无坐标则先按当前片区+详细地址尝试高德地理编码再划区；与 delivery_area 互斥",
+        description="按当前详细地址与坐标重新自动划区；若无坐标则先尝试高德地理编码再划区",
     )
     daily_meal_units: int | None = Field(
         None,

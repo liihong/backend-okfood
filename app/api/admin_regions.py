@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 
 from app.core.deps import SessionDep, admin_subject
 from app.schemas.delivery_region import DeliveryRegionCreateIn, DeliveryRegionUpdateIn
+from app.services.delivery_region_map_overview_service import delivery_region_map_overview
 from app.services.delivery_region_service import (
     create_delivery_region,
     delete_delivery_region,
@@ -14,9 +15,21 @@ from app.utils.response import dump_model, success
 router = APIRouter(prefix="/admin", tags=["管理端-配送区域"])
 
 
+@router.get("/delivery-region-map-overview")
+def delivery_region_map_overview_route(db: SessionDep, _admin: str = Depends(admin_subject)):
+    """配送区域 + 有余额会员坐标聚合，供营业概览地图一次性加载。"""
+    payload = delivery_region_map_overview(db)
+    return success(data=dump_model(payload), msg="获取成功")
+
+
 @router.get("/delivery-regions")
-def delivery_regions_list(db: SessionDep, _admin: str = Depends(admin_subject)):
-    items = list_delivery_regions(db)
+def delivery_regions_list(
+    db: SessionDep,
+    include_polygon: bool = False,
+    _admin: str = Depends(admin_subject),
+):
+    """默认不返回 polygon_json（显著减小负载）；需要全量多边形时传 `?include_polygon=true`。"""
+    items = list_delivery_regions(db, include_polygon=include_polygon)
     return success(data=[dump_model(i) for i in items], msg="获取成功")
 
 

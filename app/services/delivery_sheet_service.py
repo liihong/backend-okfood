@@ -16,7 +16,7 @@ from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.schemas.admin import DeliverySheetGroupOut, DeliverySheetMemberOut, DeliverySheetOut, DeliverySheetStopOut
 from app.services.courier_service import eligible_members_for_delivery
-from app.services.member_address_service import effective_routing_area, load_default_address_map
+from app.services.member_address_service import delivery_region_name_map, load_default_address_map, routing_area_label
 from app.services.member_service import effective_daily_meal_units
 
 
@@ -31,10 +31,10 @@ class _ResolvedStopLine:
     address_line: str
 
 
-def _resolve_delivery_line(addr: MemberAddress | None) -> _ResolvedStopLine:
+def _resolve_delivery_line(addr: MemberAddress | None, id_to_name: dict[int, str]) -> _ResolvedStopLine:
     """仅使用默认配送地址；members 表地址字段已废弃。"""
     if addr:
-        area = (addr.area or "").strip() or UNASSIGNED_DELIVERY_AREA
+        area = routing_area_label(addr, id_to_name)
         detail = (addr.detail_address or "").strip()
         line = f"{area} {detail}".strip()
         return _ResolvedStopLine(area=area, detail=detail, address_line=line or detail or "（无详细地址）")
@@ -63,26 +63,29 @@ def _active_region_names_ordered(db: Session) -> list[str]:
     return [str(n).strip() for n in rows if n and str(n).strip()]
 
 
-def _known_active_region_set(names: list[str]) -> set[str]:
-    return set(names)
+def _active_region_id_set(db: Session) -> set[int]:
+    rows = db.scalars(select(DeliveryRegion.id).where(DeliveryRegion.is_active.is_(True))).all()
+    return {int(x) for x in rows}
 
 
-def _area_needs_attention(label: str | None, known_active: set[str]) -> bool:
-    """空、未分配，或在已有启用区域配置时不在目录内。"""
+def _area_needs_attention(label: str | None, known_active_names: set[str]) -> bool:
+    """展示名：空、未分配，或不在当前启用区域名称表内。"""
     a = (label or "").strip()
     if not a:
         return True
     if a == UNASSIGNED_DELIVERY_AREA:
         return True
-    if known_active and a not in known_active:
+    if known_active_names and a not in known_active_names:
         return True
     return False
 
 
-def _member_area_issue(addr: MemberAddress | None, known: set[str]) -> bool:
+def _member_area_issue(addr: MemberAddress | None, active_ids: set[int]) -> bool:
     if addr is None:
         return True
-    return _area_needs_attention(addr.area, known)
+    if addr.delivery_region_id is None:
+        return True
+    return int(addr.delivery_region_id) not in active_ids
 
 
 def build_delivery_sheet(
@@ -93,16 +96,35 @@ def build_delivery_sheet(
 ) -> DeliverySheetOut:
     d = delivery_date or today_shanghai()
     active_region_list = _active_region_names_ordered(db)
-    known = _known_active_region_set(active_region_list)
-    members = eligible_members_for_delivery(db, delivery_date=d, area=area)
+    known_names = set(active_region_list)
+    known_ids = _active_region_id_set(db)
+
+    region_filter_id: int | None = None
+    if area and (a := area.strip()):
+        rid = db.scalar(select(DeliveryRegion.id).where(DeliveryRegion.name == a))
+        if rid is None:
+            return DeliverySheetOut(
+                delivery_date=d.isoformat(),
+                groups=[],
+                active_regions=active_region_list,
+            )
+        region_filter_id = int(rid)
+
+    members = eligible_members_for_delivery(db, delivery_date=d, delivery_region_id=region_filter_id)
     default_by_id = load_default_address_map(db, [m.id for m in members])
 
-    # 分组：片区 = 默认地址 effective_routing_area；配送点 = 规范化 (展示 area, detail)
+    region_ids: set[int] = set()
+    for m in members:
+        addr = default_by_id.get(m.id)
+        if addr and addr.delivery_region_id is not None:
+            region_ids.add(int(addr.delivery_region_id))
+    id_to_name = delivery_region_name_map(db, region_ids)
+
     buckets: dict[str, dict[tuple[str, str], list[Member]]] = defaultdict(lambda: defaultdict(list))
     for m in members:
         addr = default_by_id.get(m.id)
-        routing_area = effective_routing_area(addr)
-        resolved = _resolve_delivery_line(addr)
+        routing_area = routing_area_label(addr, id_to_name)
+        resolved = _resolve_delivery_line(addr, id_to_name)
         key = (_normalize_address_key(resolved.area), _normalize_address_key(resolved.detail))
         buckets[routing_area][key].append(m)
 
@@ -113,7 +135,7 @@ def build_delivery_sheet(
         for (_ka, _kd), ms in stop_map.items():
             ms_sorted = sorted(ms, key=lambda x: x.phone)
             first = ms_sorted[0]
-            resolved = _resolve_delivery_line(default_by_id.get(first.id))
+            resolved = _resolve_delivery_line(default_by_id.get(first.id), id_to_name)
             lines: list[DeliverySheetMemberOut] = []
             combined_parts: list[str] = []
             for mem in ms_sorted:
@@ -125,7 +147,7 @@ def build_delivery_sheet(
                         name=mem.name,
                         daily_meal_units=effective_daily_meal_units(mem),
                         remarks=rmk,
-                        area_issue=_member_area_issue(addr, known),
+                        area_issue=_member_area_issue(addr, known_ids),
                     )
                 )
                 if rmk:
@@ -138,8 +160,8 @@ def build_delivery_sheet(
                     uniq_combined.append(p)
             stop_area_issue = (
                 any(ln.area_issue for ln in lines)
-                or _area_needs_attention(resolved.area, known)
-                or _area_needs_attention(area_name, known)
+                or _area_needs_attention(resolved.area, known_names)
+                or _area_needs_attention(area_name, known_names)
             )
             stop_meals = sum(effective_daily_meal_units(mem) for mem in ms_sorted)
             stops.append(
@@ -154,7 +176,7 @@ def build_delivery_sheet(
             )
         stops.sort(key=lambda s: (s.address_line.casefold(), s.area.casefold()))
         meal_total = sum(s.meal_count for s in stops)
-        group_issue = any(s.has_area_issue for s in stops) or _area_needs_attention(area_name, known)
+        group_issue = any(s.has_area_issue for s in stops) or _area_needs_attention(area_name, known_names)
         groups_out.append(
             DeliverySheetGroupOut(
                 area=area_name,

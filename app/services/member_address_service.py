@@ -3,12 +3,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.constants import UNASSIGNED_DELIVERY_AREA
+from app.models.delivery_region import DeliveryRegion
 from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.schemas.member_address import MemberAddressCreateIn, MemberAddressOut, MemberAddressUpdateIn
 from app.schemas.user import Location
 from app.services import amap
-from app.services.region_assignment import assign_area_name_for_coords
+from app.services.region_assignment import assign_region_for_coords
 
 _MAX_ADDRESSES_PER_MEMBER = 20
 
@@ -40,12 +41,22 @@ def load_default_address_map(db: Session, member_ids: list[int]) -> dict[int, Me
     return {mid: by_mid.get(mid) for mid in uniq}
 
 
-def effective_routing_area(addr: MemberAddress | None) -> str:
-    """配送分组/筛选用片区：仅来自默认地址；无默认地址视为未分配。"""
-    if addr is None:
+def delivery_region_name_map(db: Session, ids: set[int]) -> dict[int, str]:
+    if not ids:
+        return {}
+    rows = db.execute(select(DeliveryRegion.id, DeliveryRegion.name).where(DeliveryRegion.id.in_(ids))).all()
+    out: dict[int, str] = {}
+    for rid, name in rows:
+        n = (name or "").strip()
+        out[int(rid)] = n if n else UNASSIGNED_DELIVERY_AREA
+    return out
+
+
+def routing_area_label(addr: MemberAddress | None, id_to_name: dict[int, str]) -> str:
+    """展示用片区名：仅依赖 delivery_region_id 与名称映射。"""
+    if addr is None or addr.delivery_region_id is None:
         return UNASSIGNED_DELIVERY_AREA
-    a = (addr.area or "").strip()
-    return a if a else UNASSIGNED_DELIVERY_AREA
+    return id_to_name.get(int(addr.delivery_region_id)) or UNASSIGNED_DELIVERY_AREA
 
 
 def upsert_default_address_after_register(
@@ -56,7 +67,7 @@ def upsert_default_address_after_register(
     contact_phone: str,
     detail_address: str,
     remarks: str | None,
-    area: str,
+    delivery_region_id: int | None,
     lng: float | None,
     lat: float | None,
 ) -> None:
@@ -68,8 +79,7 @@ def upsert_default_address_after_register(
         row.contact_phone = contact_phone
         row.detail_address = detail
         row.remarks = remarks
-        row.area = area
-        row.area_manual = False
+        row.delivery_region_id = delivery_region_id
         row.lng = lng
         row.lat = lat
         return
@@ -79,8 +89,7 @@ def upsert_default_address_after_register(
             member_id=member_id,
             contact_name=contact_name,
             contact_phone=contact_phone,
-            area=area,
-            area_manual=False,
+            delivery_region_id=delivery_region_id,
             detail_address=detail,
             remarks=remarks,
             lng=lng,
@@ -100,15 +109,14 @@ def admin_set_default_address_detail(
 ) -> None:
     """管理端修改配送地址：写默认地址行并地理编码+自动划区（不 commit）。"""
     detail = (detail_line or "").strip()
-    lng, lat, area_resolved = _geocode_bundle(db, "", detail)
+    lng, lat, rid = _geocode_bundle(db, detail)
     row = get_default_address(db, member_id)
     if row:
         row.contact_name = contact_name
         row.contact_phone = contact_phone
         row.detail_address = detail
         row.lng, row.lat = lng, lat
-        if not row.area_manual:
-            row.area = area_resolved
+        row.delivery_region_id = rid
         return
     _clear_defaults(db, member_id, except_id=None)
     db.add(
@@ -116,8 +124,7 @@ def admin_set_default_address_detail(
             member_id=member_id,
             contact_name=contact_name,
             contact_phone=contact_phone,
-            area=area_resolved,
-            area_manual=False,
+            delivery_region_id=rid,
             detail_address=detail,
             remarks=None,
             lng=lng,
@@ -127,35 +134,28 @@ def admin_set_default_address_detail(
     )
 
 
-def _compose_geocode_line(area: str, detail: str) -> str:
-    a = (area or "").strip()
-    d = (detail or "").strip()
-    if not a or a == UNASSIGNED_DELIVERY_AREA:
-        return d
-    return f"{a}{d}"
-
-
-def _geocode_bundle(db: Session, area: str, detail: str) -> tuple[float | None, float | None, str]:
-    line = _compose_geocode_line(area, detail)
+def _geocode_bundle(db: Session, detail: str) -> tuple[float | None, float | None, int | None]:
+    line = (detail or "").strip()
     coords = amap.geocode_address(line) if line else None
     if coords:
         lng_f, lat_f = float(coords[0]), float(coords[1])
-        return lng_f, lat_f, assign_area_name_for_coords(db, lng_f, lat_f)
-    fallback_area = (area or "").strip() or UNASSIGNED_DELIVERY_AREA
-    return None, None, fallback_area
+        r = assign_region_for_coords(db, lng_f, lat_f)
+        return lng_f, lat_f, (int(r.id) if r else None)
+    return None, None, None
 
 
 def apply_auto_area_from_coords_or_geocode(db: Session, row: MemberAddress) -> None:
-    """管理端「恢复自动划区」：已有坐标则按多边形划区；无坐标则按片区+详细地址尝试高德地理编码后再划区（不修改 area_manual）。"""
+    """管理端「恢复自动划区」：已有坐标则按多边形划区；无坐标则按详细地址尝试高德地理编码后再划区。"""
     if row.lng is not None and row.lat is not None:
-        row.area = assign_area_name_for_coords(db, float(row.lng), float(row.lat))
+        r = assign_region_for_coords(db, float(row.lng), float(row.lat))
+        row.delivery_region_id = int(r.id) if r else None
         return
-    lng, lat, area_resolved = _geocode_bundle(db, row.area, row.detail_address)
+    lng, lat, rid = _geocode_bundle(db, row.detail_address)
     row.lng, row.lat = lng, lat
-    row.area = area_resolved
+    row.delivery_region_id = rid
 
 
-def _to_out(row: MemberAddress) -> MemberAddressOut:
+def _to_out(row: MemberAddress, id_to_name: dict[int, str]) -> MemberAddressOut:
     loc = None
     if row.lng is not None and row.lat is not None:
         loc = Location(lng=float(row.lng), lat=float(row.lat))
@@ -164,8 +164,8 @@ def _to_out(row: MemberAddress) -> MemberAddressOut:
         member_id=int(row.member_id),
         contact_name=row.contact_name,
         contact_phone=row.contact_phone,
-        area=row.area,
-        area_manual=bool(row.area_manual),
+        delivery_region_id=int(row.delivery_region_id) if row.delivery_region_id is not None else None,
+        area=routing_area_label(row, id_to_name),
         detail_address=row.detail_address,
         remarks=row.remarks,
         location=loc,
@@ -213,7 +213,9 @@ def list_addresses(db: Session, member_id: int) -> list[MemberAddressOut]:
         .where(MemberAddress.member_id == member_id)
         .order_by(MemberAddress.is_default.desc(), MemberAddress.id.desc())
     ).all()
-    return [_to_out(r) for r in rows]
+    ids = {int(r.delivery_region_id) for r in rows if r.delivery_region_id is not None}
+    nm = delivery_region_name_map(db, ids)
+    return [_to_out(r, nm) for r in rows]
 
 
 def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> MemberAddressOut:
@@ -228,9 +230,10 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
     if body.location is not None:
         lng_f, lat_f = float(body.location.lng), float(body.location.lat)
         lng, lat = lng_f, lat_f
-        area_resolved = assign_area_name_for_coords(db, lng_f, lat_f)
+        r = assign_region_for_coords(db, lng_f, lat_f)
+        rid = int(r.id) if r else None
     else:
-        lng, lat, area_resolved = _geocode_bundle(db, body.area, body.detail_address)
+        lng, lat, rid = _geocode_bundle(db, body.detail_address)
 
     if effective_default:
         _clear_defaults(db, member_id, except_id=None)
@@ -239,8 +242,7 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
         member_id=member_id,
         contact_name=body.contact_name,
         contact_phone=body.contact_phone,
-        area=area_resolved,
-        area_manual=False,
+        delivery_region_id=rid,
         detail_address=body.detail_address,
         remarks=body.remarks,
         lng=lng,
@@ -250,7 +252,8 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _to_out(row)
+    nm = delivery_region_name_map(db, {int(row.delivery_region_id)} if row.delivery_region_id else set())
+    return _to_out(row, nm)
 
 
 def update_address(db: Session, member_id: int, address_id: int, body: MemberAddressUpdateIn) -> MemberAddressOut:
@@ -269,11 +272,11 @@ def update_address(db: Session, member_id: int, address_id: int, body: MemberAdd
         lng_f = float(location_patch["lng"])
         lat_f = float(location_patch["lat"])
         row.lng, row.lat = lng_f, lat_f
-        if not row.area_manual:
-            row.area = assign_area_name_for_coords(db, lng_f, lat_f)
-    elif "area" in patch or "detail_address" in patch:
-        lng, lat, area_resolved = _geocode_bundle(db, row.area, row.detail_address)
-        row.lng, row.lat, row.area = lng, lat, area_resolved
+        r = assign_region_for_coords(db, lng_f, lat_f)
+        row.delivery_region_id = int(r.id) if r else None
+    elif "detail_address" in patch:
+        lng, lat, rid = _geocode_bundle(db, row.detail_address)
+        row.lng, row.lat, row.delivery_region_id = lng, lat, rid
 
     if is_default_new is True:
         _clear_defaults(db, member_id, except_id=row.id)
@@ -284,7 +287,8 @@ def update_address(db: Session, member_id: int, address_id: int, body: MemberAdd
 
     db.commit()
     db.refresh(row)
-    return _to_out(row)
+    nm = delivery_region_name_map(db, {int(row.delivery_region_id)} if row.delivery_region_id else set())
+    return _to_out(row, nm)
 
 
 def delete_address(db: Session, member_id: int, address_id: int) -> None:

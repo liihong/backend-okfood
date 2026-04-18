@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, defer, selectinload
 
 from app.models.courier import Courier
 from app.models.delivery_region import DeliveryRegion, DeliveryRegionCourier
 from app.schemas.delivery_region import (
     DeliveryRegionCreateIn,
     DeliveryRegionOut,
+    DeliveryRegionSummaryOut,
     DeliveryRegionUpdateIn,
     RegionCourierOut,
 )
@@ -28,7 +29,7 @@ def _validate_courier_list(db: Session, couriers: list) -> None:
             raise HTTPException(status_code=400, detail=f"配送员不存在: {c.courier_id}")
 
 
-def _to_region_out(r: DeliveryRegion) -> DeliveryRegionOut:
+def _couriers_from_region(r: DeliveryRegion) -> list[RegionCourierOut]:
     couriers_out: list[RegionCourierOut] = []
     for link in sorted(r.courier_links, key=lambda x: (x.sort_order, x.id)):
         nm = link.courier.name if link.courier else None
@@ -40,25 +41,39 @@ def _to_region_out(r: DeliveryRegion) -> DeliveryRegionOut:
                 sort_order=link.sort_order,
             )
         )
-    return DeliveryRegionOut(
+    return couriers_out
+
+
+def _to_region_summary(r: DeliveryRegion) -> DeliveryRegionSummaryOut:
+    return DeliveryRegionSummaryOut(
         id=int(r.id),
         name=r.name,
         code=r.code,
-        polygon_json=r.polygon_json,
         priority=r.priority,
         is_active=r.is_active,
-        couriers=couriers_out,
+        couriers=_couriers_from_region(r),
     )
 
 
-def list_delivery_regions(db: Session) -> list[DeliveryRegionOut]:
+def _to_region_out(r: DeliveryRegion) -> DeliveryRegionOut:
+    return DeliveryRegionOut(**_to_region_summary(r).model_dump(), polygon_json=r.polygon_json)
+
+
+def list_delivery_regions(db: Session, *, include_polygon: bool = False) -> list[DeliveryRegionSummaryOut] | list[DeliveryRegionOut]:
+    load_opts: list = [
+        selectinload(DeliveryRegion.courier_links).selectinload(DeliveryRegionCourier.courier),
+    ]
+    if not include_polygon:
+        load_opts.insert(0, defer(DeliveryRegion.polygon_json))
     stmt = (
         select(DeliveryRegion)
-        .options(selectinload(DeliveryRegion.courier_links).selectinload(DeliveryRegionCourier.courier))
+        .options(*load_opts)
         .order_by(DeliveryRegion.priority.asc(), DeliveryRegion.id.asc())
     )
     rows = db.scalars(stmt).all()
-    return [_to_region_out(r) for r in rows]
+    if include_polygon:
+        return [_to_region_out(r) for r in rows]
+    return [_to_region_summary(r) for r in rows]
 
 
 def get_delivery_region(db: Session, region_id: int) -> DeliveryRegionOut:

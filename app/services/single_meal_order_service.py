@@ -27,7 +27,7 @@ from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.schemas.courier import CourierTaskMemberOut
 from app.schemas.single_meal_order import SingleMealOrderCreateIn, SingleMealOrderOut
-from app.services.member_address_service import effective_routing_area
+from app.services.member_address_service import delivery_region_name_map, routing_area_label
 
 logger = logging.getLogger(__name__)
 
@@ -59,15 +59,12 @@ def dish_planned_for_date(db: Session, dish_id: int, d: date) -> bool:
     return False
 
 
-def primary_courier_for_area(db: Session, area_name: str) -> str | None:
-    """按片区名取启用区域，优先 is_primary 骑手，否则 sort_order 最小且账号启用者。"""
-    a = (area_name or "").strip()
-    if not a:
+def primary_courier_for_region_id(db: Session, region_id: int | None) -> str | None:
+    """按片区主键取绑定骑手：优先 is_primary，否则 sort_order 最小且账号启用者。"""
+    if region_id is None:
         return None
-    rid = db.scalar(
-        select(DeliveryRegion.id).where(DeliveryRegion.is_active.is_(True), DeliveryRegion.name == a).limit(1)
-    )
-    if rid is None:
+    rid = int(region_id)
+    if not db.get(DeliveryRegion, rid):
         return None
     cid = db.scalar(
         select(DeliveryRegionCourier.courier_id).where(
@@ -107,7 +104,8 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
     if not m:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    area = effective_routing_area(addr)
+    nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
+    area = routing_area_label(addr, nm)
     amt = dish.single_order_price_yuan
     if amt is None:
         raise HTTPException(status_code=400, detail="该餐品暂未开放单点")
@@ -228,7 +226,10 @@ def apply_single_meal_order_wechat_notify(db: Session, data: dict[str, str]) -> 
     order.pay_status = "已支付"
     order.pay_channel = "微信"
     order.wx_transaction_id = tx_id or order.wx_transaction_id
-    order.courier_id = primary_courier_for_area(db, order.routing_area)
+    pay_addr = db.get(MemberAddress, order.member_address_id)
+    order.courier_id = primary_courier_for_region_id(
+        db, int(pay_addr.delivery_region_id) if pay_addr and pay_addr.delivery_region_id else None
+    )
     db.commit()
     return True, "paid"
 
@@ -252,7 +253,8 @@ def list_courier_single_order_tasks(
     )
     out: list[CourierTaskMemberOut] = []
     for order, member, a, dsh in db.execute(stmt).all():
-        ar = (order.routing_area or "").strip() or effective_routing_area(a)
+        nm = delivery_region_name_map(db, {int(a.delivery_region_id)} if a.delivery_region_id else set())
+        ar = (order.routing_area or "").strip() or routing_area_label(a, nm)
         detail = (a.detail_address or "").strip()
         display_addr = f"{ar} {detail}".strip()
         out.append(

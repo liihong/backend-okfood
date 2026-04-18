@@ -88,6 +88,15 @@ def users(
     page: int = 1,
     page_size: int = 20,
     validity: Annotated[str | None, Query(description="active=剩余次数>0，expired=剩余次数=0")] = None,
+    inactive_only: Annotated[bool, Query(description="true=仅未开卡 is_active=false")] = False,
+    delivery_region_id: Annotated[
+        int | None,
+        Query(ge=1, description="默认地址 delivery_region_id；与 unassigned_region 互斥"),
+    ] = None,
+    unassigned_region: Annotated[
+        bool,
+        Query(description="true=仅片区未分配（无默认地址或 delivery_region_id 为空）"),
+    ] = False,
 ):
     _ = admin_username
     v = (validity or "").strip().lower()
@@ -95,8 +104,17 @@ def users(
         v = ""
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
+    if delivery_region_id is not None and unassigned_region:
+        raise HTTPException(status_code=400, detail="不能同时指定 delivery_region_id 与 unassigned_region")
     items, total = list_members_paged(
-        db, q_phone=q, page=page, page_size=page_size, validity=v or None
+        db,
+        q_phone=q,
+        page=page,
+        page_size=page_size,
+        validity=v or None,
+        inactive_only=inactive_only,
+        delivery_region_id=delivery_region_id,
+        unassigned_region=unassigned_region,
     )
     serialized = [dump_model(i) for i in items]
     return page_response(items=serialized, total=total, page=page, page_size=page_size, msg="获取成功")
@@ -167,7 +185,6 @@ def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_usernam
         name=body.name,
         remarks=body.remarks,
         address=body.address,
-        delivery_area=body.delivery_area,
         use_auto_area=body.use_auto_area,
         operator=admin_username,
         daily_meal_units=body.daily_meal_units,

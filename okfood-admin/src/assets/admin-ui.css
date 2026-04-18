@@ -935,6 +935,39 @@
   color: #475569;
 }
 
+.members-filter-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.5rem;
+}
+
+.members-extra-filters {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.members-filter-label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: #64748b;
+}
+
+.members-region-select {
+  min-width: 11rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+}
+
 .members-validity-tabs {
   display: flex;
   gap: 0.5rem;

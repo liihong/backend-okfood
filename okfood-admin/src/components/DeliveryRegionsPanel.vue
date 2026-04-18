@@ -49,8 +49,11 @@ function showToast(msg, kind = 'success') {
 async function refreshList() {
   loading.value = true
   try {
-    regions.value = await props.apiRequest('/api/admin/delivery-regions')
-    const c = await props.apiRequest('/api/admin/couriers')
+    const [r, c] = await Promise.all([
+      props.apiRequest('/api/admin/delivery-regions'),
+      props.apiRequest('/api/admin/couriers'),
+    ])
+    regions.value = Array.isArray(r) ? r : []
     couriers.value = Array.isArray(c) ? c : []
   } catch (e) {
     showToast(e instanceof Error ? e.message : '加载失败', 'error')
@@ -65,6 +68,17 @@ function pathFromPolygonJson(json) {
     return json.coordinates[0].map((p) => [Number(p[0]), Number(p[1])])
   }
   return []
+}
+
+/** 列表小字：主责配送员（名称优先，否则工号） */
+function primaryCourierLabel(r) {
+  const list = Array.isArray(r.couriers) ? r.couriers : []
+  const p = list.find((c) => c.is_primary)
+  if (!p) return ''
+  const nm = typeof p.name === 'string' ? p.name.trim() : ''
+  if (nm) return nm
+  const id = p.courier_id != null ? String(p.courier_id).trim() : ''
+  return id
 }
 
 function loadAmapScript() {
@@ -348,7 +362,7 @@ function openNewRegion() {
   nextTick(() => startDrawPolygon())
 }
 
-function selectRegion(r) {
+async function selectRegion(r) {
   newRegionAwaitingMeta.value = false
   if (mouseTool) {
     mouseTool.close()
@@ -363,7 +377,22 @@ function selectRegion(r) {
   selectedCourierIds.value = (r.couriers || []).map((c) => c.courier_id)
   const p = (r.couriers || []).find((c) => c.is_primary)
   primaryCourierId.value = p ? p.courier_id : selectedCourierIds.value[0] || ''
-  const path = pathFromPolygonJson(r.polygon_json)
+
+  let row = r
+  const hasPoly = r.polygon_json != null && r.polygon_json !== undefined
+  if (!hasPoly) {
+    try {
+      row = await props.apiRequest(`/api/admin/delivery-regions/${r.id}`)
+      const idx = regions.value.findIndex((x) => x.id === r.id)
+      if (idx >= 0 && row && row.polygon_json != null) {
+        regions.value[idx] = { ...regions.value[idx], polygon_json: row.polygon_json }
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '加载区域边界失败', 'error')
+      return
+    }
+  }
+  const path = pathFromPolygonJson(row.polygon_json)
   showPolygonOnMap(path, true)
 }
 
@@ -458,9 +487,8 @@ watch(formDrawerOpen, (open) => {
 })
 
 onMounted(async () => {
-  await refreshList()
   await nextTick()
-  await initMap()
+  await Promise.all([refreshList(), initMap()])
 })
 
 onUnmounted(() => {
@@ -496,7 +524,10 @@ onUnmounted(() => {
             :class="{ active: editingId === r.id }"
             @click="selectRegion(r)"
           >
-            <span class="regions-li-name">{{ r.name }}</span>
+            <div class="regions-li-title">
+              <span class="regions-li-name">{{ r.name }}</span>
+              <span v-if="primaryCourierLabel(r)" class="regions-li-primary">主送 {{ primaryCourierLabel(r) }}</span>
+            </div>
             <span class="regions-li-meta">P{{ r.priority }}{{ r.is_active ? '' : ' · 停用' }}</span>
             <button
               type="button"
@@ -670,8 +701,25 @@ onUnmounted(() => {
   background: #ecfdf5;
   border-color: #a7f3d0;
 }
+.regions-li-title {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
 .regions-li-name {
   font-weight: 800;
+}
+.regions-li-primary {
+  font-size: 11px;
+  font-weight: 500;
+  color: #94a3b8;
+  line-height: 1.2;
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .regions-li-meta {
   font-size: 11px;

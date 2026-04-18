@@ -51,11 +51,32 @@ class RegionCourierOut(BaseModel):
     sort_order: int
 
 
-class DeliveryRegionOut(BaseModel):
+class DeliveryRegionSummaryOut(BaseModel):
+    """列表用：不含 polygon，减轻 DB/网络/JSON 体积（多边形仅在详情或编辑时加载）。"""
+
     id: int
     name: str
     code: str | None
-    polygon_json: dict[str, Any] | list[Any]
     priority: int
     is_active: bool
     couriers: list[RegionCourierOut]
+
+
+class DeliveryRegionOut(DeliveryRegionSummaryOut):
+    polygon_json: dict[str, Any] | list[Any]
+
+
+class MapOverviewMemberMarkerOut(BaseModel):
+    """地图会员点：默认地址上的展示片区与 GCJ-02 坐标（可空）。"""
+
+    id: int
+    name: str
+    phone: str
+    area: str
+    lng: float | None = None
+    lat: float | None = None
+
+
+class DeliveryRegionMapOverviewOut(BaseModel):
+    regions: list[DeliveryRegionOut]
+    members: list[MapOverviewMemberMarkerOut]
