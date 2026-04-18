@@ -190,7 +190,7 @@ onMounted(() => {
         />
         <div class="dro-float-legends" aria-label="地图图例">
           <div class="dro-legend-card dro-legend-card--float">
-            <h4 class="dro-legend-h">会员点位颜色</h4>
+            <h4 class="dro-legend-h">会员图钉颜色</h4>
             <ul class="dro-legend-list dro-legend-list--compact">
               <li><span class="dro-dot" style="background: #0e5a44" />档案片区与坐标推算一致（与同片区色块一致）</li>
               <li><span class="dro-dot" style="background: #64748b" />一致且档案为「未分配」</li>

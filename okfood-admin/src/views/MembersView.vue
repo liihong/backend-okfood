@@ -10,6 +10,9 @@ import {
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
+/** 本页表格数据（本地 ref；同步写入 memberList 供登出清空等兼容） */
+const membersRows = ref([])
+
 const membersPage = ref(1)
 const membersPageSize = ref(20)
 const membersTotal = ref(0)
@@ -49,6 +52,11 @@ function toggleInactiveOnly() {
   void fetchMembers()
 }
 
+function onRegionFilterChange() {
+  membersPage.value = 1
+  void fetchMembers()
+}
+
 async function fetchMembers() {
   if (!adminAccessToken.value) return
   membersLoading.value = true
@@ -60,11 +68,17 @@ async function fetchMembers() {
     })
     const q = searchQuery.value.trim()
     if (q) params.set('q', q)
-    if (membersInactiveOnly.value) params.set('inactive_only', 'true')
-    if (membersRegionFilter.value === 'unassigned') params.set('unassigned_region', 'true')
-    else if (membersRegionFilter.value) params.set('delivery_region_id', membersRegionFilter.value)
-    const data = await apiJson(`/api/admin/users?${params.toString()}`, {}, { auth: true })
-    memberList.value = (data.items || []).map(mapAdminUserToRow)
+    if (membersInactiveOnly.value) params.set('inactive_only', '1')
+    if (membersRegionFilter.value === 'unassigned') params.set('unassigned_region', '1')
+    else if (membersRegionFilter.value) {
+      const rid = String(membersRegionFilter.value).trim()
+      if (rid && rid !== 'unassigned') params.set('delivery_region_id', rid)
+    }
+    const qs = params.toString()
+    const data = await apiJson(`/api/admin/users?${qs}`, {}, { auth: true })
+    const rows = (data.items || []).map(mapAdminUserToRow)
+    membersRows.value = rows
+    memberList.value = rows
     membersTotal.value = Number(data.total) || 0
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
@@ -90,12 +104,6 @@ watch(searchQuery, () => {
 })
 
 watch(membersValidityTab, () => {
-  if (!adminAccessToken.value) return
-  membersPage.value = 1
-  void fetchMembers()
-})
-
-watch(membersRegionFilter, () => {
   if (!adminAccessToken.value) return
   membersPage.value = 1
   void fetchMembers()
@@ -269,9 +277,9 @@ async function submitEditMember() {
   }
 }
 
-onMounted(() => {
-  void loadRegionFilterOptions()
-  void fetchMembers()
+onMounted(async () => {
+  await loadRegionFilterOptions()
+  await fetchMembers()
 })
 </script>
 
@@ -315,6 +323,7 @@ onMounted(() => {
               id="members-region-filter"
               v-model="membersRegionFilter"
               class="members-region-select"
+              @change="onRegionFilterChange"
             >
               <option value="">全部</option>
               <option value="unassigned">未分配</option>
@@ -349,7 +358,7 @@ onMounted(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="u in memberList" :key="u.id">
+          <tr v-for="u in membersRows" :key="u.id">
             <td>
               <div class="t-name">
                 {{ u.name }}

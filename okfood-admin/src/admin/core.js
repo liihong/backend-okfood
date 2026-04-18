@@ -111,7 +111,12 @@ export async function apiJson(path, init = {}, { auth = false } = {}) {
   if (auth && adminAccessToken.value) {
     headers.Authorization = `Bearer ${adminAccessToken.value}`
   }
-  const res = await fetch(url, { ...init, headers })
+  const method = String(init.method || 'GET').toUpperCase()
+  const res = await fetch(url, {
+    cache: method === 'GET' ? 'no-store' : 'default',
+    ...init,
+    headers,
+  })
   const text = await res.text()
   let data = null
   try {
