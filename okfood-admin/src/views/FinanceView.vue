@@ -41,33 +41,26 @@ const transactions = ref([])
           <History :size="20" /> 最近交易流水记录
         </div>
       </div>
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>流水号</th>
-            <th>客户</th>
-            <th>支付金额</th>
-            <th>支付时间</th>
-            <th class="text-right">状态</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="!transactions.length">
-            <td colspan="5" class="members-loading">暂无流水；对接财务/支付查询接口后展示。</td>
-          </tr>
-          <template v-else>
-            <tr v-for="t in transactions" :key="t.id">
-              <td class="t-sub">{{ t.id }}</td>
-              <td>
-                <div class="t-name">{{ t.user }}</div>
-              </td>
-              <td class="font-black">¥ {{ t.amount }}</td>
-              <td class="t-sub">{{ t.time }}</td>
-              <td class="text-right td-paid">已支付</td>
-            </tr>
+      <AdminTable variant="default" :data="transactions" row-key="id" empty-text="">
+        <template #empty>
+          <span class="members-loading">暂无流水；对接财务/支付查询接口后展示。</span>
+        </template>
+        <el-table-column prop="id" label="流水号" min-width="120" class-name="t-sub" />
+        <el-table-column label="客户" min-width="120">
+          <template #default="{ row: t }">
+            <div class="t-name">{{ t.user }}</div>
           </template>
-        </tbody>
-      </table>
+        </el-table-column>
+        <el-table-column label="支付金额" min-width="100">
+          <template #default="{ row: t }">
+            <span class="font-black">¥ {{ t.amount }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="time" label="支付时间" min-width="140" class-name="t-sub" />
+        <el-table-column label="状态" align="right" min-width="88" class-name="td-paid">
+          <template #default>已支付</template>
+        </el-table-column>
+      </AdminTable>
     </div>
   </section>
 </template>

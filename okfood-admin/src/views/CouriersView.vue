@@ -183,50 +183,55 @@ onMounted(() => {
           <Plus :size="18" /> 新建配送员
         </button>
       </div>
-      <p v-if="couriersLoading" class="members-loading">加载配送员列表中…</p>
-      <table v-else class="data-table data-table--members">
-        <thead>
-          <tr>
-            <th>工号</th>
-            <th>姓名</th>
-            <th>电话</th>
-            <th class="text-right">待结算(元)</th>
-            <th class="text-right">已结算(元)</th>
-            <th>负责区域</th>
-            <th>状态</th>
-            <th class="text-right">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="c in couriersList" :key="c.courier_id">
-            <td class="td-mono">{{ c.courier_id }}</td>
-            <td>{{ c.name || '—' }}</td>
-            <td class="td-phone">
-              <div class="member-phone-cell">
-                <Phone :size="12" class="member-phone-icon" />
-                <span class="member-phone-num">{{ c.phone || '—' }}</span>
-              </div>
-            </td>
-            <td class="text-right">{{ formatMoneyYuan(c.fee_pending) }}</td>
-            <td class="text-right">{{ formatMoneyYuan(c.fee_settled) }}</td>
-            <td><span class="area-tag area-tag--multi">{{ courierRegionsLabel(c.regions) }}</span></td>
-            <td>
-              <span
-                class="member-pill"
-                :class="c.is_active !== false ? 'member-pill--emerald' : 'member-pill--slate'"
-              >
-                {{ c.is_active !== false ? '在职' : '已停用' }}
-              </span>
-            </td>
-            <td class="text-right couriers-actions">
-              <button type="button" class="btn-sm" @click="openCourierEditModal(c)">编辑</button>
-              <button type="button" class="btn-sm" @click="openCourierPinModal(c.courier_id)">
-                重置 PIN
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <AdminTable
+        variant="members"
+        :data="couriersList"
+        :loading="couriersLoading"
+        row-key="courier_id"
+        empty-text="暂无配送员"
+      >
+        <el-table-column prop="courier_id" label="工号" min-width="88" class-name="td-mono" />
+        <el-table-column label="姓名" min-width="88">
+          <template #default="{ row: c }">{{ c.name || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="电话" min-width="120" class-name="td-phone">
+          <template #default="{ row: c }">
+            <div class="member-phone-cell">
+              <Phone :size="12" class="member-phone-icon" />
+              <span class="member-phone-num">{{ c.phone || '—' }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="待结算(元)" align="right" min-width="100">
+          <template #default="{ row: c }">{{ formatMoneyYuan(c.fee_pending) }}</template>
+        </el-table-column>
+        <el-table-column label="已结算(元)" align="right" min-width="100">
+          <template #default="{ row: c }">{{ formatMoneyYuan(c.fee_settled) }}</template>
+        </el-table-column>
+        <el-table-column label="负责区域" min-width="120">
+          <template #default="{ row: c }">
+            <span class="area-tag area-tag--multi">{{ courierRegionsLabel(c.regions) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" min-width="88">
+          <template #default="{ row: c }">
+            <span
+              class="member-pill"
+              :class="c.is_active !== false ? 'member-pill--emerald' : 'member-pill--slate'"
+            >
+              {{ c.is_active !== false ? '在职' : '已停用' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" align="right" min-width="180" fixed="right" class-name="couriers-actions">
+          <template #default="{ row: c }">
+            <button type="button" class="btn-sm" @click="openCourierEditModal(c)">编辑</button>
+            <button type="button" class="btn-sm" @click="openCourierPinModal(c.courier_id)">
+              重置 PIN
+            </button>
+          </template>
+        </el-table-column>
+      </AdminTable>
     </div>
 
     <div v-if="showCourierModal" class="modal-overlay" @click.self="showCourierModal = false">

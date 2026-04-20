@@ -368,68 +368,73 @@ onMounted(() => {
         新建工单时先选「新会员开卡」或「老会员续卡」。新会员须填写姓名与微信昵称写入档案；续卡仅凭手机号匹配，同步入账时剩余次数与累计总次数均叠加（周卡+6、月卡+24）。
         必选「开始配送日」（上海业务日）；勾选「同步入账」且在「已缴」时写入套餐并激活计划。
       </p>
-      <p v-if="loading" class="members-loading">加载工单中…</p>
-      <table v-else class="data-table data-table--members">
-        <thead>
-          <tr>
-            <th>单号</th>
-            <th>会员</th>
-            <th>卡类型</th>
-            <th>起送日</th>
-            <th>缴费渠道</th>
-            <th>缴费状态</th>
-            <th class="text-right">实收(元)</th>
-            <th>入账</th>
-            <th>备注</th>
-            <th>创建人 / 时间</th>
-            <th class="text-right">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="!list.length">
-            <td colspan="11" class="members-loading">暂无工单</td>
-          </tr>
-          <tr v-for="row in list" :key="row.id">
-            <td class="td-mono">#{{ row.id }}</td>
-            <td>
-              <div class="t-name">
-                {{ row.member_name || '—' }}
-                <span class="t-plan" :class="planTagClass(row.card_kind)">{{ row.card_kind }}</span>
-              </div>
-              <div class="member-phone-cell t-sub">
-                <Phone :size="12" class="member-phone-icon" />
-                <span class="member-phone-num">{{ row.member_phone }}</span>
-              </div>
-              <div v-if="row.member_wechat_name" class="t-sub t-wechat">微信 {{ row.member_wechat_name }}</div>
-            </td>
-            <td>{{ row.card_kind }}</td>
-            <td class="td-mono">{{ row.delivery_start_date || '—' }}</td>
-            <td>{{ row.pay_channel }}</td>
-            <td>
-              <span :class="payStatusClass(row.pay_status)">{{ row.pay_status }}</span>
-            </td>
-            <td class="text-right font-black">
+      <AdminTable
+        variant="members"
+        :data="list"
+        :loading="loading"
+        row-key="id"
+        empty-text="暂无工单"
+      >
+        <el-table-column label="单号" width="90" class-name="td-mono">
+          <template #default="{ row }">#{{ row.id }}</template>
+        </el-table-column>
+        <el-table-column label="会员" min-width="220">
+          <template #default="{ row }">
+            <div class="t-name">
+              {{ row.member_name || '—' }}
+              <span class="t-plan" :class="planTagClass(row.card_kind)">{{ row.card_kind }}</span>
+            </div>
+            <div class="member-phone-cell t-sub">
+              <Phone :size="12" class="member-phone-icon" />
+              <span class="member-phone-num">{{ row.member_phone }}</span>
+            </div>
+            <div v-if="row.member_wechat_name" class="t-sub t-wechat">微信 {{ row.member_wechat_name }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="card_kind" label="卡类型" min-width="88" />
+        <el-table-column label="起送日" width="108" class-name="td-mono">
+          <template #default="{ row }">{{ row.delivery_start_date || '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="pay_channel" label="缴费渠道" min-width="88" />
+        <el-table-column label="缴费状态" min-width="88">
+          <template #default="{ row }">
+            <span :class="payStatusClass(row.pay_status)">{{ row.pay_status }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="实收(元)" align="right" min-width="88">
+          <template #default="{ row }">
+            <span class="font-black">
               {{ row.amount_yuan != null && row.amount_yuan !== '' ? row.amount_yuan : '—' }}
-            </td>
-            <td>
-              <span
-                class="member-pill"
-                :class="row.applied_to_member ? 'member-pill--emerald' : 'member-pill--slate'"
-              >
-                {{ row.applied_to_member ? '已同步' : '未同步' }}
-              </span>
-            </td>
-            <td class="td-remarks">{{ row.remark || '—' }}</td>
-            <td class="t-sub">
-              <div>{{ row.created_by }}</div>
-              <div>{{ row.created_at }}</div>
-            </td>
-            <td class="text-right">
-              <button type="button" class="btn-sm" @click="openEditModal(row)">更新</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="入账" min-width="88">
+          <template #default="{ row }">
+            <span
+              class="member-pill"
+              :class="row.applied_to_member ? 'member-pill--emerald' : 'member-pill--slate'"
+            >
+              {{ row.applied_to_member ? '已同步' : '未同步' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="备注" min-width="100" class-name="td-remarks">
+          <template #default="{ row }">{{ row.remark || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="创建人 / 时间" min-width="140">
+          <template #default="{ row }">
+            <div class="t-sub t-sub--stacked">
+              <span>{{ row.created_by }}</span>
+              <span>{{ row.created_at }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" align="right" width="88" fixed="right">
+          <template #default="{ row }">
+            <button type="button" class="btn-sm" @click="openEditModal(row)">更新</button>
+          </template>
+        </el-table-column>
+      </AdminTable>
       <div v-if="adminAccessToken" class="members-pagination">
         <button type="button" class="btn-sm" :disabled="page <= 1" @click="goPrev">上一页</button>
         <span class="members-page-meta">第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 条</span>

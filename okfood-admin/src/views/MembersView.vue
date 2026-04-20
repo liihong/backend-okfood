@@ -344,68 +344,74 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <p v-if="membersLoading" class="members-loading">加载会员列表中…</p>
-      <table class="data-table data-table--members">
-        <thead>
-          <tr>
-            <th>会员信息</th>
-            <th>电话</th>
-            <th>配送片区</th>
-            <th class="text-center">剩余 / 总次数</th>
-            <th>状态</th>
-            <th>备注</th>
-            <th class="text-right">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="u in membersRows" :key="u.id">
-            <td>
-              <div class="t-name">
-                {{ u.name }}
-                <span class="t-plan" :class="planTagClass(u.plan)">{{ u.plan }}</span>
-              </div>
-              <div v-if="u.wechat_name" class="t-sub t-wechat">微信 {{ u.wechat_name }}</div>
-            </td>
-            <td class="td-phone">
-              <div class="member-phone-cell">
-                <Phone :size="12" class="member-phone-icon" />
-                <span class="member-phone-num">{{ u.phone || '—' }}</span>
-              </div>
-            </td>
-            <td>
-              <span class="area-tag">{{ u.area }}</span>
-            </td>
-            <td class="text-center">
-              <div class="balance-cell">
-                <span class="balance-text" :class="{ warning: u.balance <= 2 && u.is_active }">{{
-                  u.balanceLabel
-                }}</span>
-                <p v-if="u.is_on_leave_today" class="balance-leave-hint">今日配送请假</p>
-                <p
-                  v-else-if="u.tomorrow_leave"
-                  class="balance-leave-hint balance-leave-hint--tomorrow"
-                >
-                  明日配送请假
-                </p>
-              </div>
-            </td>
-            <td>
-              <span :class="memberStatusClass(u.status)">{{ u.status }}</span>
-            </td>
-            <td class="td-remarks">{{ u.remarks || '—' }}</td>
-            <td class="text-right">
-              <div class="members-row-actions">
-                <button type="button" class="btn-sm secondary" @click="openLeaveMember(u)">
-                  请假
-                </button>
-                <button type="button" class="btn-sm secondary" @click="openEditMember(u)">
-                  修改会员信息
-                </button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <AdminTable
+        variant="members"
+        :data="membersRows"
+        :loading="membersLoading"
+        row-key="id"
+        empty-text="暂无会员数据"
+      >
+        <el-table-column label="会员信息" min-width="160">
+          <template #default="{ row: u }">
+            <div class="t-name">
+              {{ u.name }}
+              <span class="t-plan" :class="planTagClass(u.plan)">{{ u.plan }}</span>
+            </div>
+            <div v-if="u.wechat_name" class="t-sub t-wechat">微信 {{ u.wechat_name }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="电话" min-width="120" class-name="td-phone">
+          <template #default="{ row: u }">
+            <div class="member-phone-cell">
+              <Phone :size="12" class="member-phone-icon" />
+              <span class="member-phone-num">{{ u.phone || '—' }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="配送片区" min-width="100">
+          <template #default="{ row: u }">
+            <span class="area-tag">{{ u.area }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="剩余 / 总次数" align="center" min-width="120">
+          <template #default="{ row: u }">
+            <div class="balance-cell">
+              <span class="balance-text" :class="{ warning: u.balance <= 2 && u.is_active }">{{
+                u.balanceLabel
+              }}</span>
+              <p v-if="u.is_on_leave_today" class="balance-leave-hint">今日配送请假</p>
+              <p
+                v-else-if="u.tomorrow_leave"
+                class="balance-leave-hint balance-leave-hint--tomorrow"
+              >
+                明日配送请假
+              </p>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" min-width="88">
+          <template #default="{ row: u }">
+            <span :class="memberStatusClass(u.status)">{{ u.status }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="备注" min-width="100" class-name="td-remarks">
+          <template #default="{ row: u }">
+            {{ u.remarks || '—' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" align="right" min-width="200" fixed="right">
+          <template #default="{ row: u }">
+            <div class="members-row-actions">
+              <button type="button" class="btn-sm secondary" @click="openLeaveMember(u)">
+                请假
+              </button>
+              <button type="button" class="btn-sm secondary" @click="openEditMember(u)">
+                修改会员信息
+              </button>
+            </div>
+          </template>
+        </el-table-column>
+      </AdminTable>
       <div v-if="adminAccessToken" class="members-pagination">
         <button type="button" class="btn-sm" :disabled="membersPage <= 1" @click="goMembersPrev">
           上一页

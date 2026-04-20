@@ -80,6 +80,11 @@ function flatStopsForSheet(sheet) {
 
 const flatStops = computed(() => flatStopsForSheet(sheetToday.value))
 
+/** 配送点行高亮：片区待维护 */
+function deliveryStopRowClassName({ row }) {
+  return row.has_area_issue ? 'delivery-row--area-warn' : ''
+}
+
 async function fetchSheet() {
   if (!adminAccessToken.value) return
   loading.value = true
@@ -148,48 +153,82 @@ onMounted(() => {
 <template>
   <section class="tab-content animate-up delivery-view">
     <div class="delivery-toolbar no-print">
-      <div class="delivery-toolbar__filters">
-        <label class="delivery-field">
-          <span>配送业务日（上海）</span>
-          <input
-            v-model="deliveryDateQuery"
-            type="date"
-            class="delivery-input delivery-date-input"
-            :disabled="loading"
-            @change="fetchSheet"
-          />
-        </label>
-        <label class="delivery-field">
-          <span>片区</span>
-          <select v-model="areaFilter" class="delivery-input delivery-select" @change="fetchSheet">
-            <option value="">全部</option>
-            <option v-for="n in activeRegions" :key="n" :value="n">{{ n }}</option>
-          </select>
-        </label>
-        <button type="button" class="btn-ghost delivery-icon-btn" :disabled="loading" @click="fetchSheet">
-          <RefreshCw :size="18" :class="{ 'spin': loading }" />
-          刷新
-        </button>
-        <button
-          type="button"
-          class="btn-primary delivery-print-btn"
-          :disabled="loading || !flatStops.length"
-          @click="printLabels"
-        >
-          <Printer :size="18" />
-          打印标签
-        </button>
+      <!-- 单行：左日期/片区，右统计文案 + 刷新/打印 -->
+      <div class="delivery-toolbar__row delivery-toolbar__row--primary">
+        <div class="delivery-toolbar__filters">
+          <label class="delivery-field">
+            <span>配送业务日（上海）</span>
+            <el-date-picker
+              v-model="deliveryDateQuery"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="选择日期"
+              :disabled="loading"
+              :clearable="true"
+              class="delivery-el-date"
+              @change="fetchSheet"
+            />
+          </label>
+          <label class="delivery-field">
+            <span>片区</span>
+            <el-select
+              v-model="areaFilter"
+              placeholder="全部"
+              clearable
+              :disabled="loading"
+              class="delivery-el-select"
+              @change="fetchSheet"
+            >
+              <el-option label="全部" value="" />
+              <el-option v-for="n in activeRegions" :key="n" :label="n" :value="n" />
+            </el-select>
+          </label>
+        </div>
+        <div class="delivery-toolbar__actions">
+          <p class="delivery-meta">
+            共 <strong>{{ flatStops.length }}</strong> 个配送点 ·
+            <strong>{{ flatStops.reduce((s, x) => s + (x.meal_count || 0), 0) }}</strong>
+            份（已排除请假区间覆盖该业务日、以及「明天请假」命中该日的会员）
+          </p>
+          <button type="button" class="btn-ghost delivery-icon-btn" :disabled="loading" @click="fetchSheet">
+            <RefreshCw :size="18" :class="{ 'spin': loading }" />
+            刷新
+          </button>
+          <button
+            type="button"
+            class="btn-primary delivery-print-btn"
+            :disabled="loading || !flatStops.length"
+            @click="printLabels"
+          >
+            <Printer :size="18" />
+            打印标签
+          </button>
+        </div>
       </div>
-      <p v-if="sheetIssueStopCount > 0" class="delivery-area-alert no-print">
-        有
-        <strong>{{ sheetIssueStopCount }}</strong>
-        个配送点的会员地址<strong>未分配片区</strong>、为「未分配」或<strong>与已启用配送区域不一致</strong>，请到会员档案或配送区域中维护。
-      </p>
-      <p class="delivery-meta">
-        共 <strong>{{ flatStops.length }}</strong> 个配送点 ·
-        <strong>{{ flatStops.reduce((s, x) => s + (x.meal_count || 0), 0) }}</strong>
-        份（已排除请假区间覆盖该业务日、以及「明天请假」命中该日的会员）
-      </p>
+      <!-- 片区统计与切换：单独一行，右对齐，不占表格区 -->
+      <div
+        v-if="!loading && sheetToday.groups?.length"
+        class="delivery-toolbar__region-tabs"
+      >
+        <div class="delivery-tablist" role="tablist" aria-label="配送片区">
+          <button
+            v-for="group in sheetToday.groups"
+            :key="'t-tab-' + group.area"
+            type="button"
+            role="tab"
+            class="delivery-region-tab"
+            :class="{
+              'delivery-region-tab--active': activeRegionTab === group.area,
+              'delivery-region-tab--warn': group.has_area_issue,
+            }"
+            :aria-selected="activeRegionTab === group.area"
+            @click="activeRegionTab = group.area"
+          >
+            <span class="delivery-region-tab__label">{{ group.area }}</span>
+            <span class="delivery-region-tab__meta">{{ group.meal_total }} 份 · {{ group.stop_count }} 点</span>
+          </button>
+        </div>
+      </div>
     </div>
 
     <p v-if="loading" class="members-loading no-print">加载中…</p>
@@ -209,24 +248,6 @@ onMounted(() => {
           </p>
           <p v-if="!sheetToday.groups?.length" class="members-loading">当日暂无待配送记录（或已全部请假/未激活/无余额）。</p>
           <div v-else class="delivery-region-tabs">
-            <div class="delivery-tablist" role="tablist" aria-label="配送片区">
-              <button
-                v-for="group in sheetToday.groups"
-                :key="'t-tab-' + group.area"
-                type="button"
-                role="tab"
-                class="delivery-region-tab"
-                :class="{
-                  'delivery-region-tab--active': activeRegionTab === group.area,
-                  'delivery-region-tab--warn': group.has_area_issue,
-                }"
-                :aria-selected="activeRegionTab === group.area"
-                @click="activeRegionTab = group.area"
-              >
-                <span class="delivery-region-tab__label">{{ group.area }}</span>
-                <span class="delivery-region-tab__meta">{{ group.meal_total }} 份 · {{ group.stop_count }} 点</span>
-              </button>
-            </div>
             <div v-if="selectedGroup" role="tabpanel" :aria-label="selectedGroup.area" class="delivery-tabpanel">
               <div class="group-card">
                 <div class="group-header" :class="{ 'group-header--area-warn': selectedGroup.has_area_issue }">
@@ -237,46 +258,51 @@ onMounted(() => {
                   </h4>
                   <span class="badge">{{ selectedGroup.meal_total }} 份 · {{ selectedGroup.stop_count }} 点</span>
                 </div>
-                <table class="delivery-table">
-                  <thead>
-                    <tr>
-                      <th class="col-idx">序号</th>
-                      <th class="col-meals">餐数</th>
-                      <th class="col-addr">收件地址</th>
-                      <th class="col-contact">联系人</th>
-                      <th class="col-rmk">备注</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr
-                      v-for="(st, idx) in selectedGroup.stops"
-                      :key="`t-${selectedGroup.area}-${idx}-${st.address_line}`"
-                      :class="{ 'delivery-row--area-warn': st.has_area_issue }"
-                    >
-                      <td class="t-idx">{{ idx + 1 }}</td>
-                      <td>
-                        <span class="meal-pill">{{ st.meal_count }}</span>
-                      </td>
-                      <td class="t-addr">{{ st.address_line }}</td>
-                      <td class="t-contact">
-                        <div
-                          v-for="(m, mi) in st.members"
-                          :key="m.phone + mi"
-                          class="contact-line"
-                          :class="{ 'contact-line--area-warn': m.area_issue }"
-                        >
-                          <span class="t-name">{{ m.name }}</span>
-                          <span v-if="m.area_issue" class="member-area-tag">未分配片区</span>
-                          <span class="t-sub">{{ m.phone }}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <span v-if="st.remarks_combined" class="remark-tag">{{ st.remarks_combined }}</span>
-                        <span v-else class="empty-text">无</span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                <div class="group-card__table-scroll">
+                <AdminTable
+                  variant="delivery"
+                  :data="selectedGroup.stops"
+                  :row-class-name="deliveryStopRowClassName"
+                  :stripe="false"
+                  empty-text="暂无配送点"
+                >
+                  <el-table-column label="序号" width="80" min-width="80" class-name="col-idx">
+                    <template #default="{ $index }">
+                      <span class="t-idx">{{ $index + 1 }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="餐数" width="100" min-width="100" class-name="col-meals">
+                    <template #default="{ row: st }">
+                      <span class="meal-pill">{{ st.meal_count }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="收件地址" min-width="200" class-name="col-addr">
+                    <template #default="{ row: st }">
+                      <span class="t-addr">{{ st.address_line }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="联系人" min-width="200" class-name="col-contact">
+                    <template #default="{ row: st }">
+                      <div
+                        v-for="(m, mi) in st.members"
+                        :key="m.phone + mi"
+                        class="contact-line"
+                        :class="{ 'contact-line--area-warn': m.area_issue }"
+                      >
+                        <span class="t-name">{{ m.name }}</span>
+                        <span v-if="m.area_issue" class="member-area-tag">未分配片区</span>
+                        <span class="t-sub">{{ m.phone }}</span>
+                      </div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="备注" min-width="120" class-name="col-rmk">
+                    <template #default="{ row: st }">
+                      <span v-if="st.remarks_combined" class="remark-tag">{{ st.remarks_combined }}</span>
+                      <span v-else class="empty-text">无</span>
+                    </template>
+                  </el-table-column>
+                </AdminTable>
+                </div>
               </div>
             </div>
           </div>
@@ -301,12 +327,42 @@ onMounted(() => {
 <style scoped>
 .delivery-toolbar {
   margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+/* 顶栏首行：左日期/片区，右统计 + 按钮 */
+.delivery-toolbar__row--primary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
 }
 .delivery-toolbar__filters {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 1rem;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.delivery-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem 1rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.delivery-toolbar__region-tabs {
+  display: flex;
+  justify-content: flex-end;
+}
+.delivery-toolbar__region-tabs .delivery-tablist {
+  justify-content: flex-end;
+  max-width: 100%;
 }
 .delivery-main {
   display: flex;
@@ -414,15 +470,20 @@ onMounted(() => {
   font-weight: 700;
   color: #64748b;
 }
-.delivery-input {
-  min-width: 11rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.75rem;
-  border: 1px solid #e2e8f0;
-  font-size: 0.875rem;
+/* Element Plus：与原先原生控件宽度、圆角风格接近 */
+.delivery-field :deep(.delivery-el-date) {
+  width: 11rem;
+  max-width: 100%;
 }
-.delivery-select {
-  background: white;
+.delivery-field :deep(.delivery-el-date .el-input__wrapper) {
+  border-radius: 0.75rem;
+}
+.delivery-field :deep(.delivery-el-select) {
+  width: 11rem;
+  max-width: 100%;
+}
+.delivery-field :deep(.delivery-el-select .el-select__wrapper) {
+  border-radius: 0.75rem;
 }
 .delivery-icon-btn,
 .delivery-print-btn {
@@ -457,19 +518,17 @@ onMounted(() => {
   }
 }
 .delivery-meta {
-  margin: 0.75rem 0 0;
+  margin: 0;
   font-size: 0.8rem;
   color: #64748b;
+  text-align: right;
+  line-height: 1.4;
+  flex: 1 1 14rem;
+  min-width: min(100%, 12rem);
 }
 .inline-icon {
   vertical-align: -0.2em;
   margin-right: 0.25rem;
-}
-.col-idx {
-  width: 3rem;
-}
-.col-meals {
-  width: 4rem;
 }
 .col-contact {
   min-width: 10rem;
@@ -490,6 +549,8 @@ onMounted(() => {
   background: #d1fae5;
   padding: 0.2rem 0.5rem;
   border-radius: 0.5rem;
+  white-space: nowrap;
+  box-sizing: border-box;
 }
 .t-contact {
   font-size: 0.8rem;
@@ -520,11 +581,6 @@ onMounted(() => {
   background: #fed7aa;
   color: #9a3412;
   vertical-align: middle;
-}
-
-.delivery-row--area-warn td {
-  background: #fffbeb;
-  border-bottom-color: #fde68a;
 }
 
 .contact-line--area-warn .t-name {
