@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from datetime import date, time
 from decimal import Decimal
+from typing import Self
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
@@ -108,7 +111,7 @@ class StoreConfigUpdateIn(BaseModel):
     store_lat: float | None = Field(None, ge=-90, le=90)
 
     @model_validator(mode="after")
-    def _lng_lat_pair(self) -> StoreConfigUpdateIn:
+    def _lng_lat_pair(self) -> Self:
         fs = self.model_fields_set
         has_lng = "store_lng" in fs
         has_lat = "store_lat" in fs
