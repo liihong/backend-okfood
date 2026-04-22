@@ -82,6 +82,7 @@ def delivery_sheet(
 
 @router.get("/users")
 def users(
+    response: Response,
     db: SessionDep,
     admin_username: str = Depends(admin_subject),
     q: str | None = None,
@@ -98,6 +99,7 @@ def users(
         Query(description="true=仅片区未分配（无默认地址或 delivery_region_id 为空）"),
     ] = False,
 ):
+    response.headers["Cache-Control"] = "no-store"
     _ = admin_username
     v = (validity or "").strip().lower()
     if v not in ("", "active", "expired"):
