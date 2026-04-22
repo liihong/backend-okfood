@@ -80,6 +80,7 @@ const {
   regionsSorted,
   regionColorById,
   memberPoints,
+  storeAnchor,
   stats,
   membersCountByArea,
 } = useDeliveryRegionMapOverview()
@@ -114,7 +115,7 @@ onMounted(() => {
         <div>
           <h3 class="dro-h">配送区域总览</h3>
           <p class="dro-sub">
-            下方统计含今日/明日请假与备餐，以及有余额会员默认地址与启用片区的地图配色与坐标核对情况
+            下方统计含今日/明日请假与备餐；地图图钉颜色表示今日是否已在系统中确认送达（绿/黄），点击图钉仍可查看坐标与档案片区是否一致
           </p>
         </div>
       </div>
@@ -122,6 +123,9 @@ onMounted(() => {
         <button type="button" class="dro-btn-ghost" :disabled="loading" @click="load()">
           <RefreshCw :size="16" :class="{ 'dro-spin': loading }" />
           刷新
+        </button>
+        <button type="button" class="dro-btn-link" @click="router.push({ name: 'store-config' })">
+          门店配置 <ChevronRight :size="14" />
         </button>
         <button type="button" class="dro-btn-link" @click="router.push({ name: 'regions' })">
           管理片区 <ChevronRight :size="14" />
@@ -158,20 +162,12 @@ onMounted(() => {
           <span class="dro-stat-label">地图会员（有余额）</span>
         </div>
         <div class="dro-stat dro-stat--ok">
-          <span class="dro-stat-val">{{ stats.matched }}</span>
-          <span class="dro-stat-label">坐标与片区一致</span>
+          <span class="dro-stat-val">{{ stats.deliveredToday }}</span>
+          <span class="dro-stat-label">今日已送达</span>
         </div>
         <div class="dro-stat dro-stat--warn">
-          <span class="dro-stat-val">{{ stats.mismatch }}</span>
-          <span class="dro-stat-label">档案片区与坐标不符</span>
-        </div>
-        <div class="dro-stat dro-stat--danger">
-          <span class="dro-stat-val">{{ stats.outsideAssigned }}</span>
-          <span class="dro-stat-label">坐标不在启用区域内</span>
-        </div>
-        <div class="dro-stat dro-stat--muted">
-          <span class="dro-stat-val">{{ stats.noCoords }}</span>
-          <span class="dro-stat-label">无坐标</span>
+          <span class="dro-stat-val">{{ stats.pendingToday }}</span>
+          <span class="dro-stat-label">今日未送达</span>
         </div>
       </template>
     </div>
@@ -181,22 +177,21 @@ onMounted(() => {
 
     <template v-else-if="showDeliveryMetrics">
       <div class="dro-map-shell">
-        <DeliveryOverviewMap
+               <DeliveryOverviewMap
           :amap-key="amapKey"
           :amap-security="amapSecurity"
           :regions-sorted="regionsSorted"
           :region-color-by-id="regionColorById"
           :member-points="memberPoints"
+          :store-anchor="storeAnchor"
         />
         <div class="dro-float-legends" aria-label="地图图例">
           <div class="dro-legend-card dro-legend-card--float">
-            <h4 class="dro-legend-h">会员图钉颜色</h4>
+            <h4 class="dro-legend-h">会员图钉颜色（今日送达）</h4>
             <ul class="dro-legend-list dro-legend-list--compact">
-              <li><span class="dro-dot" style="background: #0e5a44" />档案片区与坐标推算一致（与同片区色块一致）</li>
-              <li><span class="dro-dot" style="background: #64748b" />一致且档案为「未分配」</li>
-              <li><span class="dro-dot" style="background: #f59e0b" />档案片区与坐标推算不一致</li>
-              <li><span class="dro-dot" style="background: #ef4444" />坐标不在任一启用片区内但档案有片区</li>
-              <li><span class="dro-dot" style="background: #94a3b8" />无经纬度（仅统计、不画点）</li>
+              <li><span class="dro-dot" style="background: #dc2626" />门店位置（后台「门店配置」坐标）</li>
+              <li><span class="dro-dot" style="background: #22c55e" />当日已送达（订阅扣次或单次点餐已履约）</li>
+              <li><span class="dro-dot" style="background: #eab308" />尚未送达或其它（默认）</li>
             </ul>
           </div>
           <div class="dro-legend-card dro-legend-card--float">

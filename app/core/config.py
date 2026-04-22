@@ -1,9 +1,10 @@
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +36,10 @@ class Settings(BaseSettings):
     AMAP_KEY: str = ""
 
     LOW_BALANCE_THRESHOLD: int = 2
+
+    # 骑手配送费（元）：确认送达时累加 couriers.fee_pending；首份基础价 + 同地址每多一份加价
+    COURIER_DELIVERY_BASE_YUAN: Decimal = Field(default=Decimal("4.00"), ge=Decimal("0"))
+    COURIER_DELIVERY_EXTRA_PER_UNIT_YUAN: Decimal = Field(default=Decimal("1.00"), ge=Decimal("0"))
 
     # 微信小程序：用于 code2Session + getuserphonenumber（手机号快速登录）
     WX_MINI_APPID: str = ""

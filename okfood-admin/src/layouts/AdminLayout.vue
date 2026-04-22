@@ -12,6 +12,7 @@ import {
   ClipboardList,
   ChevronsLeft,
   ChevronsRight,
+  Settings,
 } from 'lucide-vue-next'
 import { handleAdminLogout } from '../admin/core.js'
 
@@ -20,6 +21,9 @@ const SIDEBAR_COLLAPSED_KEY = 'okfood-admin-sidebar-collapsed'
 const route = useRoute()
 
 const pageTitle = computed(() => route.meta.title || 'OK Fine Admin')
+
+/** 地图类页面可隐藏大号页标题，节省主内容区纵向空间 */
+const hidePageTitle = computed(() => Boolean(route.meta.hidePageTitle))
 
 const activeMenuPath = computed(() => route.path)
 
@@ -155,6 +159,16 @@ watch(sidebarCollapsedPref, (v) => {
           <el-menu-item index="/menu">菜品管理</el-menu-item>
           <el-menu-item index="/weekly-menu">本周菜单</el-menu-item>
         </el-sub-menu>
+
+        <el-sub-menu index="sub-system">
+          <template #title>
+            <div class="menu-item-inner">
+              <Settings :size="18" stroke-width="2" />
+              <span class="menu-item-label">系统管理</span>
+            </div>
+          </template>
+          <el-menu-item index="/store-config">门店配置</el-menu-item>
+        </el-sub-menu>
       </el-menu>
 
       <button
@@ -172,12 +186,12 @@ watch(sidebarCollapsedPref, (v) => {
     </aside>
 
     <main class="main-body">
-      <header class="top-header">
+      <header class="top-header" :class="{ 'top-header--compact': hidePageTitle }">
         <div class="title-wrap">
           <div class="live-indicator">
             <span class="dot"></span> System Live · New Xiang
           </div>
-          <h2 class="page-title">{{ pageTitle }}</h2>
+          <h2 v-if="!hidePageTitle" class="page-title">{{ pageTitle }}</h2>
         </div>
       </header>
 

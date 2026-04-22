@@ -33,14 +33,27 @@ function plotStatusLabel(st) {
       return '档案片区与坐标推算不一致'
     case 'outside_assigned':
       return '坐标不在启用片区内（档案有片区）'
+    case 'no_coords':
+      return '无坐标（地图上不显示图钉）'
     default:
       return ''
   }
 }
 
+/** 门店锚点图钉（与会员黄/绿区分） */
+function storePinIconDataUrl() {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="38" height="46" viewBox="0 0 38 46">' +
+    '<path fill="#dc2626" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" ' +
+    'd="M19 3C11.8 3 6 8.5 6 15.2c0 7.2 11.2 23.5 13 25.8 1.8-2.3 13-18.6 13-25.8C32 8.5 26.2 3 19 3z"/>' +
+    '<text x="19" y="19" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="700" ' +
+    "font-family=\"system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif\">店</text></svg>"
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+}
+
 /** GCJ-02 会员图钉：白描边 + 中心高光，颜色与图例一致 */
 function memberPinIconDataUrl(hexColor) {
-  const fill = String(hexColor || '#64748b').trim()
+  const fill = String(hexColor || '#eab308').trim()
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="46" viewBox="0 0 36 46"><path fill="${fill}" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" d="M18 3C10.3 3 4 9.1 4 16.4c0 8.5 14 25.6 14 25.6s14-17.1 14-25.6C32 9.1 25.7 3 18 3z"/><circle cx="18" cy="16" r="5" fill="#ffffff" fill-opacity="0.92"/></svg>`
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
 }
@@ -53,6 +66,8 @@ function memberInfoWindowHtml(m) {
   const expected = String(m.expectedArea || '').trim()
   const actual = String(m.area || '').trim()
   const showExpected = expected && actual && expected !== actual
+  const deliveredToday = m.deliveredToday === true || m.deliveredToday === 1
+  const todayDeliveryLabel = deliveredToday ? '今日已送达' : '今日未送达'
   const status = plotStatusLabel(m.plotStatus)
   const statusHtml = status
     ? `<p class="dov-iw-row dov-iw-status">${escapeHtml(status)}</p>`
@@ -64,6 +79,7 @@ function memberInfoWindowHtml(m) {
     <p class="dov-iw-title">${name}</p>
     <p class="dov-iw-row"><span class="dov-iw-k">手机</span><span class="dov-iw-v">${phone}</span></p>
     <p class="dov-iw-row"><span class="dov-iw-k">档案片区</span><span class="dov-iw-v">${area}</span></p>
+    <p class="dov-iw-row"><span class="dov-iw-k">送达</span><span class="dov-iw-v">${escapeHtml(todayDeliveryLabel)}</span></p>
     ${expRow}
     ${statusHtml}
   </div>`
@@ -75,6 +91,8 @@ const props = defineProps({
   regionsSorted: { type: Array, required: true },
   regionColorById: { type: Object, required: true },
   memberPoints: { type: Array, required: true },
+  /** 后台门店配置：有坐标时地图以门店为中心并展示红色「店」标 */
+  storeAnchor: { type: Object, default: null },
 })
 
 const mapEl = ref(null)
@@ -97,6 +115,20 @@ function fitMapToXinxiangCity() {
     map.setCenter([...XINXIANG_CENTER])
     map.setZoom(10.5)
   }
+}
+
+/** 已配置门店坐标时以门店为中心；否则保持新乡市域视野（与历史行为一致） */
+function fitMapViewToStoreOrCity() {
+  if (!map) return
+  const sa = props.storeAnchor
+  const lng = sa?.store_lng != null ? Number(sa.store_lng) : NaN
+  const lat = sa?.store_lat != null ? Number(sa.store_lat) : NaN
+  if (Number.isFinite(lng) && Number.isFinite(lat)) {
+    map.setCenter([lng, lat])
+    map.setZoom(12)
+    return
+  }
+  fitMapToXinxiangCity()
 }
 
 function renderOverlays(AMap) {
@@ -128,13 +160,35 @@ function renderOverlays(AMap) {
     map.add(poly)
     overlays.push(poly)
   }
+  const sa = props.storeAnchor
+  const slng = sa?.store_lng != null ? Number(sa.store_lng) : NaN
+  const slat = sa?.store_lat != null ? Number(sa.store_lat) : NaN
+  if (Number.isFinite(slng) && Number.isFinite(slat)) {
+    const STORE_W = 38
+    const STORE_H = 46
+    const sicon = new AMap.Icon({
+      size: new AMap.Size(STORE_W, STORE_H),
+      image: storePinIconDataUrl(),
+      imageSize: new AMap.Size(STORE_W, STORE_H),
+    })
+    const sname = (typeof sa.store_name === 'string' && sa.store_name.trim()) || '门店'
+    const sm = new AMap.Marker({
+      position: [slng, slat],
+      icon: sicon,
+      title: sname,
+      zIndex: 200,
+      anchor: 'bottom-center',
+    })
+    map.add(sm)
+    overlays.push(sm)
+  }
   const PIN_W = 36
   const PIN_H = 46
   for (const m of props.memberPoints) {
     const lng = m.lng != null ? Number(m.lng) : null
     const lat = m.lat != null ? Number(m.lat) : null
     if (lng == null || lat == null || Number.isNaN(lng) || Number.isNaN(lat)) continue
-    const color = m.markerColor || '#64748b'
+    const color = m.markerColor || '#eab308'
     const icon = new AMap.Icon({
       size: new AMap.Size(PIN_W, PIN_H),
       image: memberPinIconDataUrl(color),
@@ -170,7 +224,7 @@ function renderOverlays(AMap) {
     map.add(marker)
     overlays.push(marker)
   }
-  fitMapToXinxiangCity()
+  fitMapViewToStoreOrCity()
 }
 
 async function initMap() {
@@ -184,9 +238,13 @@ async function initMap() {
       map.destroy()
       map = null
     }
+    const sa0 = props.storeAnchor
+    const cLng = sa0?.store_lng != null ? Number(sa0.store_lng) : NaN
+    const cLat = sa0?.store_lat != null ? Number(sa0.store_lat) : NaN
+    const hasStore = Number.isFinite(cLng) && Number.isFinite(cLat)
     map = new AMap.Map(mapEl.value, {
-      zoom: 10.5,
-      center: [...XINXIANG_CENTER],
+      zoom: hasStore ? 12 : 10.5,
+      center: hasStore ? [cLng, cLat] : [...XINXIANG_CENTER],
       viewMode: '2D',
       mapStyle: 'amap://styles/normal',
     })
@@ -213,7 +271,7 @@ async function initMap() {
 }
 
 watch(
-  () => props.memberPoints,
+  () => [props.memberPoints, props.storeAnchor],
   () => {
     if (map && window.AMap) renderOverlays(window.AMap)
   },

@@ -6,6 +6,7 @@ from sqlalchemy import and_, exists, func, literal, not_, or_, select, true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
+from app.core.delivery_calendar import is_subscription_delivery_day
 from app.core.security import verify_password
 from app.core.timeutil import today_shanghai, tomorrow_shanghai
 from app.models.admin_user import AdminUser
@@ -31,7 +32,11 @@ from app.schemas.admin import (
     SettingsIn,
     WeeklySlotAssignIn,
 )
-from app.services.member_address_service import delivery_region_name_map, routing_area_label
+from app.services.member_address_service import (
+    default_address_pick_subquery,
+    delivery_region_name_map,
+    routing_area_label,
+)
 from app.services.member_service import (
     _monday_of_week,
     effective_daily_meal_units,
@@ -54,17 +59,6 @@ def _member_on_leave_today(m: Member, today: date) -> bool:
 def _escape_like_fragment(s: str) -> str:
     """避免用户输入 % / _ 放大 LIKE 匹配范围。"""
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
-def _default_address_pick_subq():
-    return (
-        select(
-            MemberAddress.member_id.label("mid"),
-            func.max(MemberAddress.id).label("addr_id"),
-        )
-        .where(MemberAddress.is_default.is_(True))
-        .group_by(MemberAddress.member_id)
-    ).subquery("daf")
 
 
 def _apply_member_list_filters(
@@ -93,7 +87,7 @@ def _apply_member_list_filters(
     if inactive_only:
         stmt = stmt.where(Member.is_active.is_(False))
     if unassigned_region:
-        dap = _default_address_pick_subq()
+        dap = default_address_pick_subquery()
         ma = aliased(MemberAddress)
         has_no_default = ~exists(select(1).select_from(dap).where(dap.c.mid == Member.id))
         has_null_region = exists(
@@ -105,7 +99,7 @@ def _apply_member_list_filters(
         )
         stmt = stmt.where(or_(has_no_default, has_null_region))
     elif delivery_region_id is not None:
-        dap = _default_address_pick_subq()
+        dap = default_address_pick_subquery()
         ma = aliased(MemberAddress)
         stmt = stmt.where(
             exists(
@@ -140,7 +134,7 @@ def list_members_paged(
     unassigned_region: bool = False,
 ) -> tuple[list[MemberAdminOut], int]:
     # 每人至多一条「默认地址」：避免多条 is_default=1 时 JOIN 放大行数、拖慢 ORDER BY + LIMIT
-    default_addr_pick = _default_address_pick_subq()
+    default_addr_pick = default_address_pick_subquery()
 
     # 单次往返：总计数子查询 + 分页 id 子查询 LEFT JOIN，避免 COUNT 与列表各查一次（高延迟库上可省一整轮 RTT）
     count_sq = _apply_member_list_filters(
@@ -477,12 +471,15 @@ def dashboard_meal_summary(db: Session) -> DashboardMealSummaryOut:
     """
     今日/明日请假人数与备餐份数。
     口径与 `list_today_tasks` 一致：is_active 且 balance>=当日应付份数 且已达起送日；缺席含区间请假与「仅明天请假」（仅对配送日为明天生效）。
+    周日与法定节假日无订阅备餐，对应日期的请假人数与份数均记 0。
     """
     anchor_today = today_shanghai()
     tomorrow_as_date = tomorrow_shanghai()
     units_sql = sql_effective_daily_meal_units_column()
 
     def counts_for_delivery_day(d: date) -> tuple[int, int]:
+        if not is_subscription_delivery_day(d):
+            return 0, 0
         in_leave_range = and_(
             Member.leave_range_start.is_not(None),
             Member.leave_range_end.is_not(None),

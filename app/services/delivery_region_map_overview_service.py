@@ -6,9 +6,18 @@ from sqlalchemy import func, select
 
 from sqlalchemy.orm import Session
 
+from app.core.timeutil import today_shanghai
+from app.models.delivery_log import DeliveryLog
+from app.models.enums import DeliveryStatus
 from app.models.member import Member
 from app.models.member_address import MemberAddress
-from app.schemas.delivery_region import DeliveryRegionMapOverviewOut, MapOverviewMemberMarkerOut
+from app.models.single_meal_order import SingleMealOrder
+from app.schemas.delivery_region import (
+    DeliveryRegionMapOverviewOut,
+    MapOverviewMemberMarkerOut,
+    StoreMapAnchorOut,
+)
+from app.services.store_config_service import get_store_config
 from app.services.delivery_region_service import list_delivery_regions
 from app.services.member_address_service import delivery_region_name_map, routing_area_label
 
@@ -36,6 +45,33 @@ def delivery_region_map_overview(db: Session) -> DeliveryRegionMapOverviewOut:
     )
     rows = db.execute(stmt).all()
 
+    mids = [int(m.id) for m, _addr in rows]
+    biz_today = today_shanghai()
+    delivered_today_ids: set[int] = set()
+    if mids:
+        # 订阅配送：骑手确认送达写入 delivery_logs
+        delivered_today_ids = set(
+            db.scalars(
+                select(DeliveryLog.member_id).where(
+                    DeliveryLog.delivery_date == biz_today,
+                    DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+                    DeliveryLog.member_id.in_(mids),
+                )
+            ).all()
+        )
+        # 单次点餐：仅更新 single_meal_orders，无 delivery_logs，需一并统计否则地图仍为黄色
+        single_delivered = set(
+            db.scalars(
+                select(SingleMealOrder.member_id).where(
+                    SingleMealOrder.member_id.in_(mids),
+                    SingleMealOrder.delivery_date == biz_today,
+                    SingleMealOrder.pay_status == "已支付",
+                    SingleMealOrder.fulfillment_status == "delivered",
+                )
+            ).all()
+        )
+        delivered_today_ids |= single_delivered
+
     region_ids: set[int] = set()
     for _m, addr in rows:
         if addr.delivery_region_id is not None:
@@ -55,7 +91,15 @@ def delivery_region_map_overview(db: Session) -> DeliveryRegionMapOverviewOut:
                 area=ar,
                 lng=lng,
                 lat=lat,
+                delivered_today=int(m.id) in delivered_today_ids,
             )
         )
 
-    return DeliveryRegionMapOverviewOut(regions=regions, members=markers)
+    sc = get_store_config(db)
+    store_anchor = StoreMapAnchorOut(
+        store_name=sc.store_name,
+        store_logo_url=sc.store_logo_url,
+        store_lng=sc.store_lng,
+        store_lat=sc.store_lat,
+    )
+    return DeliveryRegionMapOverviewOut(regions=regions, members=markers, store=store_anchor)

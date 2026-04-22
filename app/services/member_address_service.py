@@ -14,6 +14,18 @@ from app.services.region_assignment import assign_region_for_coords
 _MAX_ADDRESSES_PER_MEMBER = 20
 
 
+def default_address_pick_subquery():
+    """每人一条默认地址：若存在多条 is_default，取 id 最大者（与管理端会员列表一致）。"""
+    return (
+        select(
+            MemberAddress.member_id.label("mid"),
+            func.max(MemberAddress.id).label("addr_id"),
+        )
+        .where(MemberAddress.is_default.is_(True))
+        .group_by(MemberAddress.member_id)
+    ).subquery("daf")
+
+
 def get_default_address(db: Session, member_id: int) -> MemberAddress | None:
     return db.scalars(
         select(MemberAddress).where(
@@ -28,16 +40,11 @@ def load_default_address_map(db: Session, member_ids: list[int]) -> dict[int, Me
     if not member_ids:
         return {}
     uniq = list(dict.fromkeys(member_ids))
+    daf = default_address_pick_subquery()
     rows = db.scalars(
-        select(MemberAddress).where(
-            MemberAddress.member_id.in_(uniq),
-            MemberAddress.is_default.is_(True),
-        )
+        select(MemberAddress).join(daf, MemberAddress.id == daf.c.addr_id).where(daf.c.mid.in_(uniq))
     ).all()
-    by_mid: dict[int, MemberAddress] = {}
-    for r in rows:
-        if r.member_id not in by_mid:
-            by_mid[r.member_id] = r
+    by_mid: dict[int, MemberAddress] = {int(r.member_id): r for r in rows}
     return {mid: by_mid.get(mid) for mid in uniq}
 
 

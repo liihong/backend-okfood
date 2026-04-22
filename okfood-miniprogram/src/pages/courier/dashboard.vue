@@ -14,15 +14,34 @@
             <text v-if="deliveryDate" class="dash-date">{{ deliveryDate }}</text>
             <text v-if="assignedLine" class="dash-areas">{{ assignedLine }}</text>
           </view>
-          <text class="dash-count">共 {{ taskCount }} 笔</text>
+          <text class="dash-count">共 {{ filteredTaskCount }} 笔</text>
         </view>
 
         <view v-if="loading" class="dash-state">加载中…</view>
         <view v-else-if="!taskCount" class="dash-state dash-state--muted">今日暂无待配送会员（或尚未分配片区）</view>
 
         <template v-else>
-          <view v-for="g in groups" :key="g.area" class="area-block">
-            <text class="area-heading">{{ g.area }}</text>
+          <template v-if="!filteredTaskCount">
+            <view class="area-block">
+              <view class="area-heading-row">
+                <text class="area-heading">{{ primaryAreaLabel }}</text>
+                <view class="list-mode-pill" role="button" @click="toggleListMode">
+                  <text class="list-mode-pill-text">{{ listModeToggleLabel }}</text>
+                </view>
+              </view>
+              <view class="dash-state dash-state--muted dash-state--compact">
+                {{ listMode === 'pending' ? '暂无待配送订单' : '暂无已送达订单' }}
+              </view>
+            </view>
+          </template>
+          <template v-else>
+            <view v-for="(g, gi) in filteredGroups" :key="g.area" class="area-block">
+              <view class="area-heading-row">
+                <text class="area-heading">{{ g.area }}</text>
+                <view v-if="gi === 0" class="list-mode-pill" role="button" @click="toggleListMode">
+                  <text class="list-mode-pill-text">{{ listModeToggleLabel }}</text>
+                </view>
+              </view>
             <view
               v-for="t in g.items"
               :key="t.single_order_id ? 's-' + t.single_order_id : 'm-' + t.member_id"
@@ -37,7 +56,13 @@
                   </view>
                 </view>
                 <text class="task-phone">{{ t.phone }}</text>
-                <text class="task-addr">{{ t.address }}</text>
+                <view class="task-addr-row">
+                  <text class="task-addr">{{ t.address }}</text>
+                  <view class="btn-map-nav" role="button" @click.stop="openMapNav(t)">
+                    <text class="btn-map-nav-icon">{{ MAP_NAV_ICON }}</text>
+                    <text class="btn-map-nav-hint">地图</text>
+                  </view>
+                </view>
                 <text v-if="t.dish_title" class="task-remarks">单次点餐：{{ t.dish_title }}</text>
                 <text v-else-if="Number(t.daily_meal_units) > 1" class="task-remarks"
                   >订阅：{{ t.daily_meal_units }} 份/日</text
@@ -56,7 +81,8 @@
                 <text v-else class="done-text">👌 已送达</text>
               </view>
             </view>
-          </view>
+            </view>
+          </template>
         </template>
 
         <button class="btn-logout" @click="logout">退出登录</button>
@@ -79,6 +105,9 @@ import {
 } from '@/utils/courierApi.js'
 import { syncCustomTabBar, getCustomTabBarBottomReservePx } from '@/utils/customTabBar.js'
 
+/** 世界地图 emoji（避免源码编码损坏） */
+const MAP_NAV_ICON = String.fromCodePoint(0x1f5fa)
+
 const loading = ref(true)
 const profile = ref(null)
 const groups = ref([])
@@ -90,9 +119,45 @@ const confirmingKind = ref('') // 'member' | 'single'
 
 const scrollStyle = ref({})
 
+/** 列表模式：默认仅待配送；可切换查看已送达 */
+const listMode = ref('pending')
+
 const taskCount = computed(() =>
   groups.value.reduce((n, g) => n + (g.items?.length || 0), 0),
 )
+
+function taskMatchesListMode(t) {
+  if (!t) return false
+  if (listMode.value === 'pending') return !t.is_delivered
+  return !!t.is_delivered
+}
+
+const filteredGroups = computed(() => {
+  const out = []
+  for (const g of groups.value) {
+    const items = (g.items || []).filter(taskMatchesListMode)
+    if (items.length) out.push({ area: g.area, items })
+  }
+  return out
+})
+
+const filteredTaskCount = computed(() =>
+  filteredGroups.value.reduce((n, g) => n + (g.items?.length || 0), 0),
+)
+
+/** 当前筛选无数据时，片区标题仍与后端第一条一致，保证切换按钮位置与有单时一致 */
+const primaryAreaLabel = computed(() => {
+  const a = groups.value[0]?.area
+  return (typeof a === 'string' && a.trim()) || '配送单'
+})
+
+const listModeToggleLabel = computed(() =>
+  listMode.value === 'pending' ? '查看已送达' : '查看待配送',
+)
+
+function toggleListMode() {
+  listMode.value = listMode.value === 'pending' ? 'delivered' : 'pending'
+}
 
 const displayName = computed(() => {
   const n = profile.value?.name?.trim()
@@ -164,6 +229,29 @@ async function loadTasks() {
 function call(phone) {
   if (!phone) return
   uni.makePhoneCall({ phoneNumber: String(phone) })
+}
+
+/** 使用收货地址坐标打开系统地图（可继续选第三方导航）；无坐标时提示 */
+function openMapNav(t) {
+  if (!t) return
+  const lat = t.lat != null ? Number(t.lat) : NaN
+  const lng = t.lng != null ? Number(t.lng) : NaN
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    uni.showToast({ title: '该地址暂无坐标，无法打开地图', icon: 'none' })
+    return
+  }
+  const name = (typeof t.name === 'string' && t.name.trim()) || '配送点'
+  const address = typeof t.address === 'string' ? t.address.trim() : ''
+  uni.openLocation({
+    latitude: lat,
+    longitude: lng,
+    name,
+    address,
+    scale: 16,
+    fail: () => {
+      uni.showToast({ title: '打开地图失败', icon: 'none' })
+    },
+  })
 }
 
 function confirmBusy(t) {
@@ -308,8 +396,36 @@ function logout() {
   color: #94a3b8;
 }
 
+.dash-state--compact {
+  padding: 36rpx 20rpx 48rpx;
+}
+
 .area-block {
   margin-bottom: 24rpx;
+}
+
+.area-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-bottom: 16rpx;
+  padding-left: 8rpx;
+}
+
+.list-mode-pill {
+  flex-shrink: 0;
+  background: #fff;
+  padding: 10rpx 22rpx;
+  border-radius: 999rpx;
+  border: 1rpx solid #e2e8f0;
+  box-shadow: 0 4rpx 12rpx rgba(15, 23, 42, 0.06);
+}
+
+.list-mode-pill-text {
+  font-size: 22rpx;
+  font-weight: 900;
+  color: $ok-rider-blue;
 }
 
 .area-heading {
@@ -319,6 +435,13 @@ function logout() {
   color: $ok-forest-green;
   margin-bottom: 16rpx;
   padding-left: 8rpx;
+}
+
+.area-heading-row .area-heading {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+  padding-left: 0;
 }
 
 .rider-task-card {
@@ -397,12 +520,45 @@ function logout() {
   color: $ok-rider-blue;
 }
 
+.task-addr-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+  margin-bottom: 16rpx;
+}
+
 .task-addr {
+  flex: 1;
+  min-width: 0;
   font-size: 24rpx;
   color: #666;
   font-weight: 700;
   line-height: 1.5;
-  margin-bottom: 16rpx;
+}
+
+.btn-map-nav {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rpx;
+  padding: 8rpx 14rpx;
+  border-radius: 16rpx;
+  background: #eff6ff;
+  border: 1rpx solid #dbeafe;
+}
+
+.btn-map-nav-icon {
+  font-size: 28rpx;
+  line-height: 1;
+}
+
+.btn-map-nav-hint {
+  font-size: 18rpx;
+  font-weight: 800;
+  color: $ok-rider-blue;
+  line-height: 1;
 }
 
 .task-remarks {

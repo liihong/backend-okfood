@@ -1,7 +1,7 @@
 from datetime import date, time
 from decimal import Decimal
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 from app.models.enums import (
     CardOpenMode,
@@ -88,6 +88,35 @@ class MenuScheduleAssignIn(BaseModel):
 
 class SettingsIn(BaseModel):
     leave_deadline_time: time
+
+
+class StoreConfigOut(BaseModel):
+    """门店基础信息：用于管理端展示与配送地图锚点。"""
+
+    store_name: str | None = Field(None, max_length=128)
+    store_logo_url: str | None = Field(None, max_length=512)
+    store_lng: float | None = Field(None, description="GCJ-02 经度")
+    store_lat: float | None = Field(None, description="GCJ-02 纬度")
+
+
+class StoreConfigUpdateIn(BaseModel):
+    """PATCH 语义：仅提交需要修改的字段；经纬度须成对出现或成对清空。"""
+
+    store_name: str | None = Field(None, max_length=128)
+    store_logo_url: str | None = Field(None, max_length=512)
+    store_lng: float | None = Field(None, ge=-180, le=180)
+    store_lat: float | None = Field(None, ge=-90, le=90)
+
+    @model_validator(mode="after")
+    def _lng_lat_pair(self) -> StoreConfigUpdateIn:
+        fs = self.model_fields_set
+        has_lng = "store_lng" in fs
+        has_lat = "store_lat" in fs
+        if has_lng ^ has_lat:
+            raise ValueError("更新门店坐标时请同时提交经度与纬度")
+        if has_lng and has_lat and (self.store_lng is None) != (self.store_lat is None):
+            raise ValueError("门店经纬度须同时填写或同时清空")
+        return self
 
 
 class MemberAdminOut(BaseModel):

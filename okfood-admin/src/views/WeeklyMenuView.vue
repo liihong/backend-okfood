@@ -137,7 +137,7 @@ onMounted(() => {
             <el-tag type="success" effect="plain" round>起：{{ preview.this_week_start }}</el-tag>
           </div>
         </template>
-        <el-table :data="thisWeekRows" stripe border class="weekly-table">
+        <AdminTable variant="weekly" :data="thisWeekRows">
           <el-table-column prop="weekday" label="星期" width="88" />
           <el-table-column label="单点价" width="100">
             <template #default="{ row }">
@@ -177,7 +177,7 @@ onMounted(() => {
               </el-select>
             </template>
           </el-table-column>
-        </el-table>
+        </AdminTable>
       </el-card>
 
       <el-card v-if="preview" class="weekly-card" shadow="never">
@@ -187,7 +187,7 @@ onMounted(() => {
             <el-tag type="info" effect="plain" round>起：{{ preview.next_week_start }}</el-tag>
           </div>
         </template>
-        <el-table :data="nextWeekRows" stripe border class="weekly-table">
+        <AdminTable variant="weekly" :data="nextWeekRows">
           <el-table-column prop="weekday" label="星期" width="88" />
           <el-table-column label="单点价" width="100">
             <template #default="{ row }">
@@ -227,7 +227,7 @@ onMounted(() => {
               </el-select>
             </template>
           </el-table-column>
-        </el-table>
+        </AdminTable>
       </el-card>
     </div>
   </section>
@@ -259,10 +259,6 @@ onMounted(() => {
   gap: 0.75rem;
   font-weight: 700;
   color: var(--el-text-color-primary);
-}
-
-.weekly-table {
-  width: 100%;
 }
 
 .weekly-select {

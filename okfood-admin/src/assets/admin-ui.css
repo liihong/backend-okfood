@@ -600,7 +600,7 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  margin-bottom: 3rem;
+  margin-bottom: 1rem;
 }
 
 .live-indicator {
@@ -630,6 +630,16 @@
   letter-spacing: -1px;
   margin: 0;
   color: #1e293b;
+}
+
+/* 无大号标题时收紧顶栏，把空间留给地图等内容 */
+.top-header.top-header--compact {
+  margin-bottom: 1rem;
+  align-items: center;
+}
+
+.top-header.top-header--compact .live-indicator {
+  margin-bottom: 0;
 }
 
 .btn-primary {
@@ -1048,6 +1058,82 @@
   border-bottom: 1px solid #f8fafc;
 }
 
+/* AdminTable（el-table）：与上方 .data-table / .delivery-table 视觉对齐 */
+.admin-table.el-table {
+  width: 100%;
+}
+.admin-table--default.el-table .el-table__header th.el-table__cell {
+  padding: 1.25rem 2rem;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 900;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  background: #f8fafc;
+}
+.admin-table--default.el-table .el-table__body td.el-table__cell {
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid #f8fafc;
+}
+
+.admin-table--members.el-table .el-table__header th.el-table__cell {
+  padding: 0.7rem 1.1rem;
+}
+.admin-table--members.el-table .el-table__body td.el-table__cell {
+  padding: 0.55rem 1.1rem;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: middle;
+}
+.admin-table--members.el-table .el-table__body tr:hover > td.el-table__cell {
+  background: #fafafa;
+}
+
+.admin-table--delivery.el-table {
+  /* 列 min-width 合计约 700px+，避免窄主栏把前几列压成一条 */
+  min-width: 720px;
+}
+.admin-table--delivery.el-table .el-table__header th.el-table__cell {
+  padding: 1rem 2rem;
+  text-align: left;
+  font-size: 12px;
+  color: #94a3b8;
+  background: #f8fafc;
+}
+.admin-table--delivery.el-table .el-table__body td.el-table__cell {
+  padding: 1.25rem 2rem;
+  border-bottom: 1px solid #f8fafc;
+}
+.admin-table--delivery.el-table tr.delivery-row--area-warn > td.el-table__cell {
+  background: #fffbeb;
+  border-bottom-color: #fde68a;
+}
+/* 序号、餐数列：保证最小宽度，且不让 Element Plus .cell 的省略样式裁掉徽章 */
+.admin-table--delivery.el-table .el-table__cell.col-idx {
+  min-width: 80px;
+}
+.admin-table--delivery.el-table .el-table__cell.col-meals {
+  min-width: 100px;
+}
+/* 窄列若沿用 2rem 左右内边距，内容区会被挤没，餐数徽章只剩一条绿边 */
+.admin-table--delivery.el-table .el-table__header th.el-table__cell.col-idx,
+.admin-table--delivery.el-table .el-table__header th.el-table__cell.col-meals,
+.admin-table--delivery.el-table .el-table__body td.el-table__cell.col-idx,
+.admin-table--delivery.el-table .el-table__body td.el-table__cell.col-meals {
+  padding-left: 0.65rem;
+  padding-right: 0.65rem;
+}
+.admin-table--delivery.el-table .el-table__cell.col-idx .cell,
+.admin-table--delivery.el-table .el-table__cell.col-meals .cell {
+  overflow: visible;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+
+.admin-table--weekly.el-table {
+  width: 100%;
+}
+
 .data-table--members th {
   padding: 0.7rem 1.1rem;
 }
@@ -1062,25 +1148,29 @@
   background: #fafafa;
 }
 
-.data-table--members .balance-text {
+.data-table--members .balance-text,
+.admin-table--members .balance-text {
   font-size: 1.125rem;
 }
 
-.data-table--members .balance-cell {
+.data-table--members .balance-cell,
+.admin-table--members .balance-cell {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
 }
 
-.data-table--members .balance-leave-hint {
+.data-table--members .balance-leave-hint,
+.admin-table--members .balance-leave-hint {
   margin: 0;
   font-size: 11px;
   font-weight: 700;
   color: #e11d48;
 }
 
-.data-table--members .balance-leave-hint--tomorrow {
+.data-table--members .balance-leave-hint--tomorrow,
+.admin-table--members .balance-leave-hint--tomorrow {
   color: #c2410c;
 }
 
@@ -1114,12 +1204,14 @@
   letter-spacing: 0.02em;
 }
 
-.data-table--members .area-tag {
+.data-table--members .area-tag,
+.admin-table--members .area-tag {
   padding: 3px 7px;
   font-size: 12px;
 }
 
-.data-table--members .area-manual-tag {
+.data-table--members .area-manual-tag,
+.admin-table--members .area-manual-tag {
   display: inline-block;
   margin-left: 6px;
   padding: 2px 6px;
@@ -1131,7 +1223,8 @@
   vertical-align: middle;
 }
 
-.data-table--members .t-sub {
+.data-table--members .t-sub,
+.admin-table--members .t-sub {
   margin-top: 2px;
 }
 
@@ -1183,6 +1276,14 @@
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* 表格列内上下两行（如创建人 / 时间） */
+.t-sub.t-sub--stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin-top: 0;
 }
 
 .area-tag {
@@ -1250,6 +1351,12 @@
   border-radius: 2.5rem;
   border: 1px solid #f1f5f9;
   overflow: hidden;
+}
+/* 配送等宽表：内部横向滚动，避免 el-table 在窄容器里压扁固定列 */
+.group-card__table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
 }
 .group-header {
   background: #2563eb;

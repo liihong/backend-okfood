@@ -18,7 +18,7 @@ export function courierLoginPhone(phone) {
 
 /**
  * @param {string} [dateYmd] 配送业务日 YYYY-MM-DD，默认后端上海当日
- * @returns {Promise<{ delivery_date: string, assigned_areas: string[], groups: { area: string, items: object[] }[] }>}
+ * @returns {Promise<{ delivery_date: string, assigned_areas: string[], groups: { area: string, items: object[] }[], store?: { store_name?: string | null, store_logo_url?: string | null, store_lng?: number | null, store_lat?: number | null } }>}
  */
 export function fetchCourierTasks(dateYmd) {
   const q = dateYmd ? `?date=${encodeURIComponent(dateYmd)}` : ''

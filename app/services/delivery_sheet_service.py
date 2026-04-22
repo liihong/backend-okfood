@@ -16,7 +16,7 @@ from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.schemas.admin import DeliverySheetGroupOut, DeliverySheetMemberOut, DeliverySheetOut, DeliverySheetStopOut
 from app.services.courier_service import eligible_members_for_delivery
-from app.services.member_address_service import delivery_region_name_map, load_default_address_map, routing_area_label
+from app.services.member_address_service import delivery_region_name_map, routing_area_label
 from app.services.member_service import effective_daily_meal_units
 
 
@@ -54,18 +54,21 @@ def _member_line_remarks(m: Member, addr: MemberAddress | None) -> str | None:
     return "；".join(parts) if parts else None
 
 
-def _active_region_names_ordered(db: Session) -> list[str]:
-    rows = db.scalars(
-        select(DeliveryRegion.name)
+def _active_regions_meta(db: Session) -> tuple[list[str], set[int]]:
+    """启用片区：一次查询同时得到排序后的名称列表与 id 集合（减少高延迟库上的往返）。"""
+    rows = db.execute(
+        select(DeliveryRegion.id, DeliveryRegion.name)
         .where(DeliveryRegion.is_active.is_(True))
         .order_by(DeliveryRegion.priority.asc(), DeliveryRegion.id.asc())
     ).all()
-    return [str(n).strip() for n in rows if n and str(n).strip()]
-
-
-def _active_region_id_set(db: Session) -> set[int]:
-    rows = db.scalars(select(DeliveryRegion.id).where(DeliveryRegion.is_active.is_(True))).all()
-    return {int(x) for x in rows}
+    names: list[str] = []
+    ids: set[int] = set()
+    for rid, n in rows:
+        ids.add(int(rid))
+        s = str(n).strip() if n is not None else ""
+        if s:
+            names.append(s)
+    return names, ids
 
 
 def _area_needs_attention(label: str | None, known_active_names: set[str]) -> bool:
@@ -95,9 +98,8 @@ def build_delivery_sheet(
     area: str | None = None,
 ) -> DeliverySheetOut:
     d = delivery_date or today_shanghai()
-    active_region_list = _active_region_names_ordered(db)
+    active_region_list, known_ids = _active_regions_meta(db)
     known_names = set(active_region_list)
-    known_ids = _active_region_id_set(db)
 
     region_filter_id: int | None = None
     if area and (a := area.strip()):
@@ -110,8 +112,9 @@ def build_delivery_sheet(
             )
         region_filter_id = int(rid)
 
-    members = eligible_members_for_delivery(db, delivery_date=d, delivery_region_id=region_filter_id)
-    default_by_id = load_default_address_map(db, [m.id for m in members])
+    members, default_by_id = eligible_members_for_delivery(
+        db, delivery_date=d, delivery_region_id=region_filter_id
+    )
 
     region_ids: set[int] = set()
     for m in members:
