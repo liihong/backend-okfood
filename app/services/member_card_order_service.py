@@ -140,6 +140,15 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
     ay = _format_amount_yuan(order.amount_yuan)
     if ay is not None:
         parts.append(f"实收{ay}元")
+    id_bits: list[str] = []
+    wn = (m.wechat_name or "").strip()
+    if wn:
+        id_bits.append(f"微信{wn[:100]}")
+    ph = (m.phone or "").strip()
+    if ph:
+        id_bits.append(f"手机{ph}")
+    if id_bits:
+        parts.append("，".join(id_bits))
     rmk = (order.remark or "").strip()
     if rmk:
         parts.append(f"备注{rmk[:180]}")

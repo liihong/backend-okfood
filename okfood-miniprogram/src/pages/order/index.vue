@@ -67,7 +67,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
   addDaysIso,
@@ -163,6 +163,18 @@ async function loadWeekly() {
     if (seq === loadWeeklySeq) loading.value = false
   }
 }
+
+const homeSharePath = '/pages/order/index'
+
+onShareAppMessage(() => ({
+  title: 'OK 饭 — 健康自律餐，每周新鲜菜单',
+  path: homeSharePath,
+}))
+
+onShareTimeline(() => ({
+  title: 'OK 饭 — 健康自律餐，每周新鲜菜单',
+  query: '',
+}))
 
 onShow(() => {
   if (reLaunchIfCourierModePreferred()) return

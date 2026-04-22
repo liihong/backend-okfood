@@ -1,86 +1,140 @@
 <template>
   <view class="page">
-    <OkNavbar show-back title="完善会员资料" />
+   <OkNavbar show-back title="会员资料与开卡" />
     <scroll-view scroll-y class="scroll" :show-scrollbar="false">
-      <view class="wrap">
-        <text class="lead">请填写开卡基本信息，便于为您匹配套餐与配送服务。</text>
+     <view class="wrap">
 
-        <view class="section">
-          <text class="sec-title">头像（可选）</text>
-          <button class="avatar-btn" open-type="chooseAvatar" @chooseavatar="onChooseAvatar">
-            <view class="avatar-box">
-              <image
-                v-if="avatarUrl"
-                class="avatar-img"
-                :src="avatarUrl"
-                mode="aspectFill"
-              />
-              <text v-else class="avatar-hint">点击选择头像</text>
-            </view>
-          </button>
-        </view>
-
-        <view class="section">
-          <text class="sec-title">昵称 / 用户名</text>
-          <view class="nick-wrap">
-            <text v-show="showNickHint" class="nick-hint-overlay">微信昵称或常用称呼</text>
-            <input
-              class="nick-input"
-              type="nickname"
-              :value="nickDraft"
-              placeholder=""
-              placeholder-style="color: #64748b;"
-              @input="onNickInput"
-            />
+      <view class="setup-module">
+          <text class="module-title">一、个人资料与配送</text>
+         <view class="section">
+            <text class="sec-title">头像（可选）</text>
+            <button class="avatar-btn" open-type="chooseAvatar" @chooseavatar="onChooseAvatar">
+              <view class="avatar-box">
+                <image v-if="avatarUrl" class="avatar-img" :src="avatarUrl" mode="aspectFill" />
+                <text v-else class="avatar-hint">点击选择头像</text>
+              </view>
+            </button>
           </view>
-        </view>
 
-        <view v-if="needsCardPayment" class="section">
-          <text class="sec-title">开卡支付状态</text>
-          <radio-group class="pay-radio-group" @change="onCardPayRadioChange">
-            <label class="pay-radio-row">
-              <radio
-                value="unpaid"
-                :checked="cardPayRadio === 'unpaid'"
-                :color="payRadioColor"
-              />
-              <text class="pay-radio-label">未支付</text>
-            </label>
-            <label class="pay-radio-row">
-              <radio value="paid" :checked="cardPayRadio === 'paid'" :color="payRadioColor" />
-              <text class="pay-radio-label">已支付</text>
-            </label>
-          </radio-group>
-        </view>
+        <view class="section">
+            <text class="sec-title">昵称 / 用户名</text>
+            <view class="nick-wrap">
+              <text v-show="showNickHint" class="nick-hint-overlay">微信昵称或常用称呼</text>
+              <input class="nick-input" type="nickname" :value="nickDraft" placeholder=""
+                placeholder-style="color: #64748b;" @input="onNickInput" />
+            </view>
+          </view>
 
-        <view v-if="needsCardPayment" class="section">
-          <text class="sec-title">
-            {{ cardPayRadio === 'unpaid' ? '选择会员卡并完成支付' : '选择会员卡类型' }}
-          </text>
-          <text v-if="cardPayRadio === 'unpaid'" class="sec-sub">
-            新开通或续费均需微信支付；支付成功后剩余次数将自动叠加。
-          </text>
-          <text v-else class="sec-sub">
-            您选择「已支付」时，将保持未开卡，并在后台形成一条开卡工单；请如实选择卡型，工作人员核对后标记已缴并同步剩余次数。
-          </text>
-          <view class="plan-grid">
-            <view
-              :class="['plan-card', selectedPlan === '周卡' ? 'plan-card--on' : '']"
-              @click="pickPlan('周卡')"
-            >
-              <text class="plan-en">WEEKLY</text>
-              <text class="plan-name">6天自律周卡</text>
-              <text class="plan-price"><text class="yen">¥</text>{{ cardPriceWeek }}</text>
-            </view>
-            <view
-              :class="['plan-card', 'plan-card--rec', selectedPlan === '月卡' ? 'plan-card--on' : '']"
-              @click="pickPlan('月卡')"
-            >
-              <text class="rec">推荐</text>
-              <text class="plan-en">MONTHLY</text>
-              <text class="plan-name">24 天全能月卡</text>
-              <text class="plan-price"><text class="yen">¥</text>{{ cardPriceMonth }}</text>
-            </view>
+        <view class="section">
+            <text class="sec-title">开始配送日期</text>
+           <radio-group class="pay-radio-group pay-radio-group--delivery" @change="onDeliveryModeChange">
+              <label class="pay-radio-row">
+                <radio value="date" :checked="deliveryMode === 'date'" :color="payRadioColor" />
+                <text class="pay-radio-label">选择起送日</text>
+              </label>
+              <label class="pay-radio-row">
+                <radio value="defer" :checked="deliveryMode === 'defer'" :color="payRadioColor" />
+                <text class="pay-radio-label">暂不配送</text>
+              </label>
+            </radio-group>
+            <template v-if="deliveryMode === 'date'">
+              <text class="sec-sub">
+                从该业务日起参与配送排期（与后台上海日历一致）。最早可选明天，不可选今天或更早。
+              </text>
+              <picker mode="date" :value="deliveryYmd" :start="minDeliveryYmd" @change="onDeliveryPick">
+                <view class="date-picker-row">
+                  <text :class="['date-picker-text', deliveryYmd ? '' : 'date-picker-text--ph']">
+                    {{ deliveryYmd || '请选择开始配送的日期' }}
+                  </text>
+                  <text class="date-picker-arrow">›</text>
+                </view>
+              </picker>
+            </template>
+            <text v-else class="sec-sub">
+              暂不参与配送排期，将保持未开卡（不参与分拣）。可随时改回「选择起送日」并保存。
+            </text>
+          </view>
+       </view>
+
+        <view v-if="needsCardPayment" class="setup-module setup-module--card">
+          <text class="module-title">二、开卡与支付</text>
+          <view class="section">
+            <text class="sec-title">开卡支付状态</text>
+            <radio-group class="pay-radio-group" @change="onCardPayRadioChange">
+              <label class="pay-radio-row">
+                <radio value="unpaid" :checked="cardPayRadio === 'unpaid'" :color="payRadioColor" />
+                <text class="pay-radio-label">未支付</text>
+              </label>
+              <label class="pay-radio-row">
+                <radio value="paid" :checked="cardPayRadio === 'paid'" :color="payRadioColor" />
+                <text class="pay-radio-label">已支付</text>
+              </label>
+            </radio-group>
+          </view>
+
+          <view v-if="needsCardPayment" class="section">
+            <template v-if="cardPayRadio === 'unpaid'">
+              <text class="sec-title">购买卡种类并完成支付</text>
+              <text class="sec-sub">
+                新开通或续费均需微信支付；支付成功后剩余次数将自动叠加。
+              </text>
+              <view class="plan-premium-wrap">
+                <view class="plan-grid plan-grid--premium">
+                  <view :class="['plan-card', 'plan-card--premium', selectedPlan === '周卡' ? 'plan-card--on' : '']"
+                    @click="pickPlan('周卡')">
+                    <view v-if="selectedPlan === '周卡'" class="plan-picked-pill">
+                      <text class="plan-picked-pill-txt">已选</text>
+                    </view>
+                    <text class="plan-headline">自律周卡 / 6天</text>
+                    <text class="plan-origin">原价 ¥{{ cardOrigWeek }}</text>
+                    <view class="plan-activity">
+                      <view class="plan-activity-tag">
+                        <text class="plan-activity-tag-line">活</text>
+                        <text class="plan-activity-tag-line">动</text>
+                        <text class="plan-activity-tag-line">价</text>
+                      </view>
+                      <view class="plan-activity-amount">
+                        <text class="pa-yen">¥</text>
+                        <text class="pa-num">{{ cardPriceWeek }}</text>
+                      </view>
+                    </view>
+                    <view class="plan-save">立省 ¥{{ saveAmountWeek }}</view>
+                    <view class="plan-card-dash" />
+                    <text class="plan-footnote">轻盈重启首选</text>
+                  </view>
+                  <view
+                    :class="['plan-card', 'plan-card--premium', 'plan-card--rec', selectedPlan === '月卡' ? 'plan-card--on' : '']"
+                    @click="pickPlan('月卡')">
+                    <view v-if="selectedPlan === '月卡'" class="plan-picked-pill">
+                      <text class="plan-picked-pill-txt">已选</text>
+                    </view>
+                    <text class="plan-rec-pill">推荐</text>
+                    <text class="plan-headline">全能月卡 / 24天</text>
+                    <text class="plan-origin">原价 ¥{{ cardOrigMonth }}</text>
+                    <view class="plan-activity">
+                      <view class="plan-activity-tag">
+                        <text class="plan-activity-tag-line">活</text>
+                        <text class="plan-activity-tag-line">动</text>
+                        <text class="plan-activity-tag-line">价</text>
+                      </view>
+                      <view class="plan-activity-amount">
+                        <text class="pa-yen">¥</text>
+                        <text class="pa-num">{{ cardPriceMonth }}</text>
+                      </view>
+                    </view>
+                    <view class="plan-save">立省 ¥{{ saveAmountMonth }}</view>
+                    <view class="plan-card-dash" />
+                    <text class="plan-footnote">终极管理方案</text>
+                  </view>
+                </view>
+              </view>
+            </template>
+            <template v-else>
+              <text class="sec-title">线下已缴说明</text>
+              <text class="sec-sub">
+                将保持未开卡，并在后台形成一条开卡工单；工作人员核对后标记已缴并同步剩余次数。卡种与实收由工作人员在后台工单中确认，无需在此选择会员卡面。
+              </text>
+            </template>
           </view>
         </view>
 
@@ -88,42 +142,6 @@
           <text class="sec-title">会员状态</text>
           <text class="sec-sub">
             您当前仍有剩余订餐次数（{{ serverBalance }} 次），无需再次购买会员卡，完善资料即可。
-          </text>
-        </view>
-
-        <view class="section">
-          <text class="sec-title">开始配送日期</text>
-          <radio-group class="pay-radio-group pay-radio-group--delivery" @change="onDeliveryModeChange">
-            <label class="pay-radio-row">
-              <radio
-                value="date"
-                :checked="deliveryMode === 'date'"
-                :color="payRadioColor"
-              />
-              <text class="pay-radio-label">选择起送日</text>
-            </label>
-            <label class="pay-radio-row">
-              <radio value="defer" :checked="deliveryMode === 'defer'" :color="payRadioColor" />
-              <text class="pay-radio-label">暂不配送</text>
-            </label>
-          </radio-group>
-          <template v-if="deliveryMode === 'date'">
-            <text class="sec-sub">
-              从该业务日起参与配送排期（与后台上海日历一致）。最早可选明天，不可选今天或更早。
-            </text>
-            <picker mode="date" :value="deliveryYmd" :start="minDeliveryYmd" @change="onDeliveryPick">
-              <view class="date-picker-row">
-                <text
-                  :class="['date-picker-text', deliveryYmd ? '' : 'date-picker-text--ph']"
-                >
-                  {{ deliveryYmd || '请选择开始配送的日期' }}
-                </text>
-                <text class="date-picker-arrow">›</text>
-              </view>
-            </picker>
-          </template>
-          <text v-else class="sec-sub">
-            暂不参与配送排期，将保持未开卡（不参与分拣）。可随时改回「选择起送日」并保存。
           </text>
         </view>
 
@@ -142,10 +160,15 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onLoad } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { request, getMemberToken, uploadMemberAvatarFile } from '@/utils/api.js'
-import { shouldOpenMemberSetup, MEMBER_STUB_NAME, WX_DEFAULT_NICK } from '@/utils/memberProfile.js'
+import {
+  shouldOpenMemberSetup,
+  shouldPromptMemberCardPay,
+  MEMBER_STUB_NAME,
+  WX_DEFAULT_NICK,
+} from '@/utils/memberProfile.js'
 import { runMemberCardWechatPay } from '@/utils/memberCardPay.js'
 import { ymdTomorrowShanghai } from '@/utils/menuApi.js'
 
@@ -172,8 +195,22 @@ const serverBalance = ref(0)
 /** 与后台 app_settings 同步，请求失败时用默认展示 */
 const cardPriceWeek = ref('168')
 const cardPriceMonth = ref('669')
+/** 展示用划线价（与活动价对比）；可与接口价同步，缺省为常见标价 */
+const cardOrigWeek = ref('188')
+const cardOrigMonth = ref('699')
 
 const showNickHint = computed(() => !String(nickDraft.value || '').trim())
+
+const saveAmountWeek = computed(() => {
+  const o = Math.floor(Number(cardOrigWeek.value) || 0)
+  const c = Math.floor(Number(cardPriceWeek.value) || 0)
+  return Math.max(0, o - c)
+})
+const saveAmountMonth = computed(() => {
+  const o = Math.floor(Number(cardOrigMonth.value) || 0)
+  const c = Math.floor(Number(cardPriceMonth.value) || 0)
+  return Math.max(0, o - c)
+})
 const needsCardPayment = computed(() => serverBalance.value <= 0)
 
 const submitButtonText = computed(() => {
@@ -196,6 +233,14 @@ function onDeliveryModeChange(e) {
   deliveryMode.value = v === 'defer' ? 'defer' : 'date'
   if (deliveryMode.value === 'defer') deliveryYmd.value = ''
 }
+
+onLoad((options) => {
+  const raw = options?.preCard != null ? String(options.preCard) : ''
+  const k = decodeURIComponent(raw).trim()
+  if (k === '周卡' || k === '月卡') {
+    selectedPlan.value = k
+  }
+})
 
 onShow(() => {
   minDeliveryYmd.value = ymdTomorrowShanghai()
@@ -231,8 +276,8 @@ async function loadProfile() {
   try {
     const data = await request('/api/user/me', { method: 'GET' })
     serverBalance.value = Math.max(0, Math.floor(Number(data.balance) || 0))
-    if (!shouldOpenMemberSetup(data)) {
-      uni.showToast({ title: '资料已完善', icon: 'success' })
+    if (!shouldOpenMemberSetup(data) && !shouldPromptMemberCardPay(data)) {
+      uni.showToast({ title: '资料与餐次已就绪', icon: 'success' })
       setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 600)
       return
     }
@@ -309,8 +354,8 @@ async function onSubmit() {
     uni.showToast({ title: '请填写昵称', icon: 'none' })
     return
   }
-  if (needsCardPayment.value && (cardPayRadio.value === 'unpaid' || cardPayRadio.value === 'paid')) {
-    if (deliveryMode.value === 'date' && !selectedPlan.value) {
+  if (needsCardPayment.value && cardPayRadio.value === 'unpaid' && deliveryMode.value === 'date') {
+    if (!selectedPlan.value) {
       uni.showToast({ title: '请选择周卡或月卡', icon: 'none' })
       return
     }
@@ -353,7 +398,8 @@ async function onSubmit() {
     if (needsCardPayment.value && cardPayRadio.value === 'paid') {
       patch.card_pay_mode = 'offline_paid'
       if (deliveryMode.value === 'date') {
-        patch.plan_type = selectedPlan.value
+        // 已支付不展示卡面：无选择时按周卡建待核工单；若曾选过周/月卡则沿用
+        patch.plan_type = selectedPlan.value === '月卡' ? '月卡' : '周卡'
       }
     }
     const av = String(avatarUrl.value || '').trim()
@@ -469,6 +515,32 @@ async function onSubmit() {
   margin-bottom: 40rpx;
 }
 
+.setup-module {
+  margin-bottom: 32rpx;
+  padding: 28rpx 24rpx 8rpx;
+  background: #fff;
+  border-radius: 24rpx;
+  border: 2rpx solid $ok-slate-100;
+  box-sizing: border-box;
+}
+
+.setup-module--card {
+  padding-bottom: 20rpx;
+}
+
+.module-title {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 950;
+  color: $ok-forest-green;
+  margin-bottom: 8rpx;
+  padding-bottom: 16rpx;
+  border-bottom: 2rpx solid $ok-slate-100;
+}
+
+.setup-module--card .module-title {
+  border-bottom-color: rgba(14, 90, 68, 0.15);
+}
 .section {
   margin-bottom: 44rpx;
 }
@@ -593,69 +665,184 @@ async function onSubmit() {
   margin-bottom: 20rpx;
 }
 
+.plan-premium-wrap {
+  margin-top: 24rpx;
+  background: $ok-forest-green;
+  padding: 32rpx 20rpx;
+  border-radius: 36rpx;
+  box-sizing: border-box;
+}
 .plan-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 24rpx;
+  gap: 20rpx;
 }
 
 .plan-card {
-  background: #fff;
-  border-radius: 36rpx;
-  padding: 36rpx 28rpx;
-  border: 3rpx solid $ok-slate-100;
   position: relative;
-  min-height: 200rpx;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  align-items: stretch;
+    box-sizing: border-box;
+  }
+  
+  .plan-card--premium {
+    background: #fff;
+    border-radius: 48rpx;
+    padding: 32rpx 20rpx 24rpx;
+    border: 3rpx solid rgba(255, 255, 255, 0.55);
+    min-height: 0;
+    transition:
+      border-color 0.18s ease,
+      box-shadow 0.18s ease,
+      background 0.18s ease,
+      transform 0.18s ease;
+  }
+  
+  .plan-card--rec.plan-card--premium {
+    background: #fff;
+  }
+  
+  .plan-card--premium.plan-card--on {
+    border: 6rpx solid #FFD869;
+    background: linear-gradient(180deg, #f4fbf7 0%, #ffffff 42%, #ffffff 100%);
+    box-shadow:
+      0 0 0 4rpx rgba(14, 90, 68, 0.14),
+      0 8rpx 0 rgba(14, 90, 68, 0.06),
+      0 20rpx 40rpx rgba(14, 90, 68, 0.18);
+    transform: scale(1.02);
+    z-index: 1;
 }
 
-.plan-card--rec {
-  background: #fffdf5;
-}
-
-.plan-card--on {
-  border-color: $ok-forest-green;
-  box-shadow: 0 8rpx 24rpx rgba(14, 90, 68, 0.12);
-}
-
-.rec {
+.plan-picked-pill {
   position: absolute;
-  top: -14rpx;
-  right: 16rpx;
+  top: 10rpx;
+  left: 10rpx;
+  z-index: 3;
+  background: $ok-forest-green;
+  padding: 6rpx 16rpx;
+  border-radius: 999rpx;
+  line-height: 1;
+  box-shadow: 0 4rpx 12rpx rgba(14, 90, 68, 0.35);
+}
+
+.plan-picked-pill-txt {
+  font-size: 20rpx;
+  font-weight: 950;
+  color: #fff;
+  letter-spacing: 0.5rpx;
+}
+
+.plan-rec-pill {
+  position: absolute;
+  top: 12rpx;
+    right: 12rpx;
+    z-index: 2;
   background: $ok-sunshine-yellow;
   color: $ok-forest-green;
   font-size: 18rpx;
   font-weight: 950;
   padding: 6rpx 14rpx;
-  border-radius: 12rpx;
+  border-radius: 999rpx;
+  }
+  
+  .plan-headline {
+    display: block;
+    text-align: center;
+    font-size: 28rpx;
+    font-weight: 950;
+    color: $ok-forest-green;
+    line-height: 1.35;
+    padding: 0 8rpx;
+    margin-top: 8rpx;
+  }
+  
+  
+  .plan-origin {
+    display: block;
+    text-align: center;
+    font-size: 24rpx;
+    font-weight: 700;
+    color: #94a3b8;
+    text-decoration: line-through;
+    margin-top: 12rpx;
+  }
+  
+  .plan-activity {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    background: #e6f4ef;
+    border-radius: 20rpx;
+    overflow: hidden;
+    margin-top: 16rpx;
+  }
+  
+  .plan-activity-tag {
+    background: $ok-forest-green;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 12rpx 8rpx;
+    flex-shrink: 0;
+  }
+  
+  .plan-activity-tag-line {
+    font-size: 20rpx;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1.12;
 }
 
-.plan-en {
-  font-size: 18rpx;
-  font-weight: 900;
-  color: $ok-slate-400;
+.plan-activity-amount {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: center;
+  padding: 14rpx 12rpx 18rpx;
 }
 
-.plan-name {
-  font-size: 28rpx;
+.pa-yen {
+  font-size: 30rpx;
   font-weight: 950;
-  color: $ok-slate-800;
-  margin-top: 8rpx;
-}
-
-.plan-price {
-  font-size: 40rpx;
-  font-weight: 1000;
-  font-style: italic;
   color: $ok-forest-green;
-  margin-top: 12rpx;
 }
 
-.yen {
+.pa-num {
+  font-size: 46rpx;
+  font-weight: 1000;
+  color: $ok-forest-green;
+  line-height: 1;
+    margin-left: 4rpx;
+  }
+  
+  .plan-save {
+    align-self: center;
+    margin-top: 16rpx;
+    background: #e63946;
+    color: #fff;
+    font-size: 22rpx;
+    font-weight: 950;
+    padding: 10rpx 32rpx;
+    border-radius: 999rpx;
+    box-shadow: 0 6rpx 16rpx rgba(230, 57, 70, 0.3);
+  }
+  
+  .plan-card-dash {
+    height: 0;
+    border-top: 2rpx dashed #cbd5e1;
+    margin: 20rpx 4rpx 12rpx;
+}
+
+.plan-footnote {
+  display: block;
+  text-align: center;
   font-size: 22rpx;
-  font-style: normal;
+  font-weight: 700;
+    color: #64748b;
+    line-height: 1.4;
 }
 
 .submit-btn {

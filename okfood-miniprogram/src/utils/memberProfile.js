@@ -17,8 +17,8 @@ function hasNonEmptyField(v) {
 }
 
 /**
- * 是否需要引导「完善资料」页：占位姓名、缺展示用昵称、未选套餐意向或未选起送日
- * 说明：`name` 与 `wechat_name` 任一可用即可（后台常只写 name）；头像可选，与资料页文案一致。
+ * 是否需要引导「完善资料」：占位姓名、缺展示用昵称、或既未选起送日又未选「暂不配送」
+ * 与「开卡/支付」解耦，不因剩余次数为 0 而强制进资料页（购卡在独立模块中完成）。
  * @param {object | null | undefined} profile GET /api/user/me 的 data
  */
 export function shouldOpenMemberSetup(profile) {
@@ -32,9 +32,15 @@ export function shouldOpenMemberSetup(profile) {
   const noDeliveryStart =
     !hasNonEmptyField(profile.delivery_start_date) && !deferred
   if (!hasUsableName || noDeliveryStart) return true
+  return false
+}
+
+/**
+ * 是否需开卡/续费提示（剩余餐次为 0，与「我的」、资料页开卡区一致）
+ * @param {object | null | undefined} profile GET /api/user/me 的 data
+ */
+export function shouldPromptMemberCardPay(profile) {
+  if (!profile || typeof profile !== 'object') return false
   const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
-  // 有剩余次数：仅需资料与起送日，不必再购卡
-  if (balance > 0) return false
-  // 无剩余次数：须进入完善页选卡并支付（或续卡），不依赖 plan_type 避免「只保存意向未付款」被当成已完成
-  return true
+  return balance <= 0
 }
