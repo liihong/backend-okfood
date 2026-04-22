@@ -20,6 +20,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 UNIFIED_ORDER_URL = "https://api.mch.weixin.qq.com/pay/unifiedorder"
+ORDER_QUERY_URL = "https://api.mch.weixin.qq.com/pay/orderquery"
 
 
 def wechat_pay_misconfiguration_detail() -> str | None:
@@ -219,6 +220,49 @@ def unified_order_jsapi(
     if not prepay_id:
         raise WeChatPayV2Error(502, "微信未返回 prepay_id")
     return prepay_id
+
+
+def query_order_by_out_trade_no(out_trade_no: str) -> dict[str, str]:
+    """
+    调用微信支付 v2「查询订单」，成功返回与通知类似的字段（需对返回验签）。
+
+    用于异步通知未达服务端时，由小程序主动拉单完成入账（与 /pay/wechat/notify 等效验签后字段）。
+    """
+    cfg = wechat_pay_misconfiguration_detail()
+    if cfg:
+        raise WeChatPayV2Error(503, cfg)
+    otn = (out_trade_no or "").strip()[:32]
+    if not otn:
+        raise WeChatPayV2Error(400, "缺少商户单号")
+    appid = (settings.WX_MINI_APPID or "").strip()
+    mch_id = (settings.WECHAT_PAY_MCH_ID or "").strip()
+    params: dict[str, Any] = {
+        "appid": appid,
+        "mch_id": mch_id,
+        "out_trade_no": otn,
+        "nonce_str": random_nonce_str(),
+    }
+    params["sign"] = sign_params_md5(params)
+    xml_body = dict_to_xml(params)
+    try:
+        resp = httpx.post(
+            ORDER_QUERY_URL,
+            content=xml_body.encode("utf-8"),
+            headers={"Content-Type": "application/xml"},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        logger.warning("微信 orderquery 网络失败: %s", e)
+        raise WeChatPayV2Error(502, "微信查询订单网络失败") from e
+    data = xml_to_dict(resp.text)
+    if (data.get("return_code") or "").upper() != "SUCCESS":
+        msg = (data.get("return_msg") or "通信失败")[:200]
+        raise WeChatPayV2Error(502, f"微信查询订单：{msg}")
+    if not verify_response_sign(data):
+        logger.error("微信 orderquery 响应签名校验失败: %s", {k: data.get(k) for k in data.keys() if k != "sign"})
+        raise WeChatPayV2Error(502, "微信查询订单响应签名校验失败")
+    return data
 
 
 def build_miniprogram_pay_params(prepay_id: str) -> dict[str, str]:

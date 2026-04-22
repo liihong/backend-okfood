@@ -68,6 +68,7 @@ from app.services.member_card_pay_service import (
     create_miniprogram_member_card_order,
     member_card_order_user_dict,
     prepare_wechat_jsapi_for_member_card_order,
+    sync_member_card_from_wechat_or_raise,
 )
 from app.services.single_meal_order_service import create_single_meal_order, prepare_wechat_jsapi_for_order
 
@@ -374,6 +375,25 @@ def prepay_member_card_order_wechat(
     return success(data=params, msg="获取支付参数成功")
 
 
+@router.post("/member-card-orders/{order_id}/sync-wechat-pay")
+@limiter.limit("30/minute")
+def sync_member_card_order_after_pay(
+    request: Request,
+    order_id: int,
+    db: SessionDep,
+    member_id: int = Depends(member_subject),
+):
+    """
+    小程序在 `requestPayment` 成功（`success`）后立即调用：向微信查询订单并执行与支付通知相同的入账逻辑。
+
+    用于弥补异步通知不可达或延迟时「已扣款但次数未到账」。
+    """
+    _ = request
+    sync_member_card_from_wechat_or_raise(db, member_id, order_id)
+    member = get_member(db, member_id)
+    return success(data=dump_model(member), msg="支付结果已同步")
+
+
 @router.patch("/profile")
 
 def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends(member_subject)):
@@ -395,6 +415,10 @@ def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends
     set_plan = "plan_type" in updates
 
     set_delivery = "delivery_start_date" in updates
+
+    set_defer = "delivery_deferred" in updates
+
+    defer_val = body.delivery_deferred if set_defer else None
 
     avatar_val = updates["avatar_url"] if set_avatar else None
 
@@ -419,6 +443,8 @@ def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends
     plan_val = body.plan_type if set_plan else None
 
     delivery_val = body.delivery_start_date if set_delivery else None
+
+    card_pay_mode_val = body.card_pay_mode if "card_pay_mode" in updates else None
 
     member = patch_member_profile(
 
@@ -445,6 +471,12 @@ def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends
         set_delivery_start=set_delivery,
 
         delivery_start_date=delivery_val,
+
+        set_delivery_deferred=set_defer,
+
+        delivery_deferred=defer_val,
+
+        card_pay_mode=card_pay_mode_val,
 
     )
 

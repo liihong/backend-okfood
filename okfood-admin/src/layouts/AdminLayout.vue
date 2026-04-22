@@ -191,7 +191,10 @@ watch(sidebarCollapsedPref, (v) => {
           <div class="live-indicator">
             <span class="dot"></span> System Live · New Xiang
           </div>
-          <h2 v-if="!hidePageTitle" class="page-title">{{ pageTitle }}</h2>
+          <div class="page-title-row">
+            <h2 v-if="!hidePageTitle" class="page-title">{{ pageTitle }}</h2>
+            <div id="admin-page-title-extra" class="page-title-extra" aria-live="polite"></div>
+          </div>
         </div>
       </header>
 

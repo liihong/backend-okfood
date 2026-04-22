@@ -16,6 +16,7 @@ from app.integrations.wechat_pay_v2 import (
     WeChatPayV2Error,
     WechatPayNotifyParsed,
     build_miniprogram_pay_params,
+    query_order_by_out_trade_no,
     unified_order_jsapi,
     wechat_pay_misconfiguration_detail,
     yuan_decimal_to_fen,
@@ -64,8 +65,8 @@ def create_miniprogram_member_card_order(
     k = (card_kind or "").strip()
     if k not in (CardOrderKind.WEEK.value, CardOrderKind.MONTH.value):
         raise HTTPException(status_code=400, detail="无效开卡类型")
-    if delivery_start_date < today_shanghai():
-        raise HTTPException(status_code=400, detail="起送日期不能早于今天（上海）")
+    if delivery_start_date <= today_shanghai():
+        raise HTTPException(status_code=400, detail="起送日期须为明天及之后（上海业务日）")
 
     m = db.get(Member, member_id)
     if not m:
@@ -134,6 +135,94 @@ def prepare_wechat_jsapi_for_member_card_order(
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
 
     return build_miniprogram_pay_params(prepay_id)
+
+
+def sync_member_card_order_from_wechat_query(
+    db: Session, member_id: int, order_id: int
+) -> tuple[bool, str]:
+    """
+    支付成功后由小程序主动拉单：调微信 orderquery，若已支付则与异步通知同路径入账（幂等）。
+
+    解决异步通知 URL 不可达、白名单/漏配等导致「钱已付但库未更」问题。
+    """
+    order = db.get(MemberCardOrder, order_id)
+    if not order or int(order.member_id) != int(member_id):
+        return False, "order_not_found"
+    ch = (order.pay_channel or "").strip()
+    if ch == "线下":
+        return False, "not_wechat_order"
+    cb = (order.created_by or "").strip()
+    if cb == "miniprogram-offline":
+        return False, "not_wechat_order"
+
+    out_no = (order.out_trade_no or "").strip()
+    if not out_no:
+        return False, "missing_out_trade_no"
+
+    if order.applied_to_member and order.pay_status == CardOrderPayStatus.PAID.value:
+        return True, "already_synced"
+
+    try:
+        data = query_order_by_out_trade_no(out_no)
+    except WeChatPayV2Error as e:
+        return False, f"wechat_query:{str(e)}"[:220]
+
+    if (data.get("result_code") or "").upper() != "SUCCESS":
+        err_c = (data.get("err_code") or "").strip().upper()
+        if err_c == "ORDERNOTEXIST":
+            return False, "wechat_order_not_found"
+        err_msg = (data.get("err_code_des") or data.get("err_code") or "query_fail")[:200]
+        return False, err_msg
+
+    ts = (data.get("trade_state") or "").strip().upper()
+    if ts in ("", "NOTPAY"):
+        return False, "not_paid"
+    if ts == "USERPAYING":
+        return False, "PAY_USERPAYING"
+    if ts != "SUCCESS":
+        return False, f"trade_state_{ts}"
+
+    out_p = (data.get("out_trade_no") or "").strip() or out_no
+    tx_id = (data.get("transaction_id") or "").strip()
+    try:
+        total_fee = int((data.get("total_fee") or "0").strip() or 0)
+    except ValueError:
+        return False, "invalid_total_fee"
+    if not out_p:
+        return False, "missing_out_in_response"
+    parsed = WechatPayNotifyParsed(
+        out_trade_no=out_p,
+        transaction_id=tx_id,
+        total_fee=total_fee,
+    )
+    ok, reason = finalize_member_card_order_wechat_pay(db, parsed)
+    if ok:
+        return True, reason
+    return False, reason
+
+
+def sync_member_card_from_wechat_or_raise(db: Session, member_id: int, order_id: int) -> None:
+    """
+    供 HTTP 层调用：拉单成功则已 `commit` 入账；失败时抛出与会员端接口一致的 `HTTPException`。
+    """
+    from fastapi import HTTPException
+
+    ok, reason = sync_member_card_order_from_wechat_query(db, member_id, order_id)
+    if not ok:
+        if reason == "PAY_USERPAYING":
+            raise HTTPException(
+                status_code=400,
+                detail="微信侧支付处理中，请稍候再试或下拉刷新「我的」",
+            )
+        if reason == "order_not_found":
+            raise HTTPException(status_code=404, detail="开卡订单不存在")
+        if reason == "not_wechat_order":
+            raise HTTPException(status_code=400, detail="该工单非微信自助支付，无需此同步")
+        if reason.startswith("wechat_query:"):
+            raise HTTPException(
+                status_code=502, detail=reason.replace("wechat_query:", "", 1)[:200]
+            )
+        raise HTTPException(status_code=400, detail=reason[:200])
 
 
 def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyParsed) -> tuple[bool, str]:

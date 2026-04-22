@@ -244,6 +244,8 @@ def _to_member_out(
 
         delivery_start_date=m.delivery_start_date,
 
+        delivery_deferred=bool(m.delivery_deferred),
+
         is_active=m.is_active,
 
         is_leaved_tomorrow=m.is_leaved_tomorrow,
@@ -424,6 +426,12 @@ def patch_member_profile(
 
     delivery_start_date: date | None = None,
 
+    set_delivery_deferred: bool = False,
+
+    delivery_deferred: bool | None = None,
+
+    card_pay_mode: str | None = None,
+
 ) -> MemberOut:
 
     m = db.get(Member, member_id)
@@ -458,13 +466,89 @@ def patch_member_profile(
 
         m.plan_type = new_val
 
-    if set_delivery_start:
+    defer_applied = set_delivery_deferred and delivery_deferred is True
 
-        if delivery_start_date is not None and delivery_start_date < today_shanghai():
+    if defer_applied:
 
-            raise HTTPException(status_code=400, detail="起送日期不能早于今天（上海）")
+        m.delivery_deferred = True
 
-        m.delivery_start_date = delivery_start_date
+        m.is_active = False
+
+        m.delivery_start_date = None
+
+    elif set_delivery_deferred and delivery_deferred is False:
+
+        m.delivery_deferred = False
+
+    if set_delivery_start and not defer_applied:
+
+        if delivery_start_date is not None:
+
+            if delivery_start_date <= today_shanghai():
+
+                raise HTTPException(status_code=400, detail="起送日期须为明天及之后（上海业务日）")
+
+            m.delivery_start_date = delivery_start_date
+
+            m.delivery_deferred = False
+
+            if m.balance > 0:
+
+                m.is_active = True
+
+        else:
+
+            m.delivery_start_date = None
+
+    want_offline = (card_pay_mode or "").strip() == "offline_paid"
+
+    if want_offline and int(m.balance) > 0:
+
+        raise HTTPException(status_code=400, detail="仅剩余次数为 0 时可登记线下已缴开卡")
+
+    if want_offline:
+
+        m.is_active = False
+
+    if want_offline and not defer_applied:
+
+        if m.delivery_start_date is None:
+
+            raise HTTPException(
+
+                status_code=400,
+
+                detail="已支付(线下)时须先选择起送日；或改为「暂不配送」",
+
+            )
+
+        if (m.plan_type or "") not in ("周卡", "月卡"):
+
+            raise HTTPException(
+
+                status_code=400,
+
+                detail="已支付(线下)时须选择周卡或月卡",
+
+            )
+
+        from app.services.member_card_order_service import (
+
+            ensure_miniprogram_offline_claim_order,
+
+        )
+
+        ensure_miniprogram_offline_claim_order(
+
+            db,
+
+            member_id,
+
+            card_kind=str(m.plan_type).strip(),
+
+            delivery_start_date=m.delivery_start_date,
+
+        )
 
     db.commit()
 
@@ -485,6 +569,8 @@ def activate_member(db: Session, member_id: int) -> MemberOut:
         raise HTTPException(status_code=404, detail="用户不存在")
 
     m.is_active = True
+
+    m.delivery_deferred = False
 
     db.commit()
 

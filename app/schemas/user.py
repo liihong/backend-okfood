@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -29,6 +30,7 @@ class MemberOut(BaseModel):
     )
     plan_type: PlanType | None
     delivery_start_date: date | None = Field(None, description="起送业务日（上海）")
+    delivery_deferred: bool = Field(False, description="用户选择暂不配送，无起送日且未开卡")
     is_active: bool
     is_leaved_tomorrow: bool
     leave_range: dict[str, date | None] | None
@@ -60,6 +62,14 @@ class ProfilePatchIn(BaseModel):
     delivery_start_date: date | None = Field(
         default=None,
         description="会员自选起送业务日（上海）；空表示不限制",
+    )
+    delivery_deferred: bool | None = Field(
+        default=None,
+        description="为 true 时表示暂不配送：清空起送日并 is_active=false；为 false 时取消该标记",
+    )
+    card_pay_mode: Literal["offline_paid"] | None = Field(
+        default=None,
+        description="仅剩余次数为 0 需购卡时：offline_paid 表示用户自报已线下/其他方式缴费；保持未开卡并生成待核开卡工单（不自动入账）",
     )
 
 

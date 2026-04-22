@@ -36,8 +36,33 @@
         </view>
 
         <view v-if="needsCardPayment" class="section">
-          <text class="sec-title">选择会员卡并完成支付</text>
-          <text class="sec-sub">新开通或续费均需微信支付；支付成功后剩余次数将自动叠加。</text>
+          <text class="sec-title">开卡支付状态</text>
+          <radio-group class="pay-radio-group" @change="onCardPayRadioChange">
+            <label class="pay-radio-row">
+              <radio
+                value="unpaid"
+                :checked="cardPayRadio === 'unpaid'"
+                :color="payRadioColor"
+              />
+              <text class="pay-radio-label">未支付</text>
+            </label>
+            <label class="pay-radio-row">
+              <radio value="paid" :checked="cardPayRadio === 'paid'" :color="payRadioColor" />
+              <text class="pay-radio-label">已支付</text>
+            </label>
+          </radio-group>
+        </view>
+
+        <view v-if="needsCardPayment" class="section">
+          <text class="sec-title">
+            {{ cardPayRadio === 'unpaid' ? '选择会员卡并完成支付' : '选择会员卡类型' }}
+          </text>
+          <text v-if="cardPayRadio === 'unpaid'" class="sec-sub">
+            新开通或续费均需微信支付；支付成功后剩余次数将自动叠加。
+          </text>
+          <text v-else class="sec-sub">
+            您选择「已支付」时，将保持未开卡，并在后台形成一条开卡工单；请如实选择卡型，工作人员核对后标记已缴并同步剩余次数。
+          </text>
           <view class="plan-grid">
             <view
               :class="['plan-card', selectedPlan === '周卡' ? 'plan-card--on' : '']"
@@ -59,7 +84,7 @@
           </view>
         </view>
 
-        <view v-else class="section">
+        <view v-else-if="!needsCardPayment" class="section">
           <text class="sec-title">会员状态</text>
           <text class="sec-sub">
             您当前仍有剩余订餐次数（{{ serverBalance }} 次），无需再次购买会员卡，完善资料即可。
@@ -68,17 +93,38 @@
 
         <view class="section">
           <text class="sec-title">开始配送日期</text>
-          <text class="sec-sub">从该业务日起参与配送排期（与后台上海日历一致）。不可早于今天。</text>
-          <picker mode="date" :value="deliveryYmd" :start="minDeliveryYmd" @change="onDeliveryPick">
-            <view class="date-picker-row">
-              <text
-                :class="['date-picker-text', deliveryYmd ? '' : 'date-picker-text--ph']"
-              >
-                {{ deliveryYmd || '请选择开始配送的日期' }}
-              </text>
-              <text class="date-picker-arrow">›</text>
-            </view>
-          </picker>
+          <radio-group class="pay-radio-group pay-radio-group--delivery" @change="onDeliveryModeChange">
+            <label class="pay-radio-row">
+              <radio
+                value="date"
+                :checked="deliveryMode === 'date'"
+                :color="payRadioColor"
+              />
+              <text class="pay-radio-label">选择起送日</text>
+            </label>
+            <label class="pay-radio-row">
+              <radio value="defer" :checked="deliveryMode === 'defer'" :color="payRadioColor" />
+              <text class="pay-radio-label">暂不配送</text>
+            </label>
+          </radio-group>
+          <template v-if="deliveryMode === 'date'">
+            <text class="sec-sub">
+              从该业务日起参与配送排期（与后台上海日历一致）。最早可选明天，不可选今天或更早。
+            </text>
+            <picker mode="date" :value="deliveryYmd" :start="minDeliveryYmd" @change="onDeliveryPick">
+              <view class="date-picker-row">
+                <text
+                  :class="['date-picker-text', deliveryYmd ? '' : 'date-picker-text--ph']"
+                >
+                  {{ deliveryYmd || '请选择开始配送的日期' }}
+                </text>
+                <text class="date-picker-arrow">›</text>
+              </view>
+            </picker>
+          </template>
+          <text v-else class="sec-sub">
+            暂不参与配送排期，将保持未开卡（不参与分拣）。可随时改回「选择起送日」并保存。
+          </text>
         </view>
 
         <button
@@ -87,7 +133,7 @@
           :disabled="avatarUploading"
           @click="onSubmit"
         >
-          {{ needsCardPayment ? '保存资料并支付开卡' : '保存并返回「我的」' }}
+          {{ submitButtonText }}
         </button>
       </view>
     </scroll-view>
@@ -101,14 +147,11 @@ import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { request, getMemberToken, uploadMemberAvatarFile } from '@/utils/api.js'
 import { shouldOpenMemberSetup, MEMBER_STUB_NAME, WX_DEFAULT_NICK } from '@/utils/memberProfile.js'
 import { runMemberCardWechatPay } from '@/utils/memberCardPay.js'
+import { ymdTomorrowShanghai } from '@/utils/menuApi.js'
 
-function todayYmd() {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
+const MINE_PAY_REMINDER_KEY = 'okfood_pending_mine_toast'
+/** 与 uni.scss $ok-forest-green 一致，供 radio 组件 color 使用 */
+const payRadioColor = '#0e5a44'
 
 const nickDraft = ref('')
 /** 展示用：可能是临时路径或已上传的 http(s) 地址 */
@@ -116,8 +159,12 @@ const avatarUrl = ref('')
 /** 服务端已保存的头像 URL，上传失败时用于恢复展示且不写入非法本地路径 */
 const remoteAvatarUrl = ref('')
 const selectedPlan = ref('')
+/** 需购卡时：未支付走微信开卡；已支付则仅保存资料 */
+const cardPayRadio = ref('unpaid')
+/** date=选起送日；defer=暂不配送（服务端 is_active=0） */
+const deliveryMode = ref('date')
 const deliveryYmd = ref('')
-const minDeliveryYmd = ref(todayYmd())
+const minDeliveryYmd = ref(ymdTomorrowShanghai())
 const submitting = ref(false)
 const avatarUploading = ref(false)
 const memberPhone = ref('')
@@ -129,12 +176,29 @@ const cardPriceMonth = ref('669')
 const showNickHint = computed(() => !String(nickDraft.value || '').trim())
 const needsCardPayment = computed(() => serverBalance.value <= 0)
 
+const submitButtonText = computed(() => {
+  if (!needsCardPayment.value) return '保存并返回「我的」'
+  if (cardPayRadio.value === 'paid' || deliveryMode.value === 'defer') return '保存资料'
+  return '保存资料并支付开卡'
+})
+
 function pickPlan(p) {
   selectedPlan.value = p
 }
 
+function onCardPayRadioChange(e) {
+  const v = e?.detail?.value
+  cardPayRadio.value = v === 'paid' ? 'paid' : 'unpaid'
+}
+
+function onDeliveryModeChange(e) {
+  const v = e?.detail?.value
+  deliveryMode.value = v === 'defer' ? 'defer' : 'date'
+  if (deliveryMode.value === 'defer') deliveryYmd.value = ''
+}
+
 onShow(() => {
-  minDeliveryYmd.value = todayYmd()
+  minDeliveryYmd.value = ymdTomorrowShanghai()
   const phone = uni.getStorageSync('memberPhone') || ''
   memberPhone.value = phone
   if (!getMemberToken() || !phone) {
@@ -186,8 +250,16 @@ async function loadProfile() {
     }
     const pt = data.plan_type != null ? String(data.plan_type).trim() : ''
     if (pt === '周卡' || pt === '月卡') selectedPlan.value = pt
-    const ds = data.delivery_start_date != null ? String(data.delivery_start_date).trim() : ''
-    deliveryYmd.value = ds.length >= 10 ? ds.slice(0, 10) : ''
+    if (data.delivery_deferred === true) {
+      deliveryMode.value = 'defer'
+      deliveryYmd.value = ''
+    } else {
+      deliveryMode.value = 'date'
+      const ds = data.delivery_start_date != null ? String(data.delivery_start_date).trim() : ''
+      let dPick = ds.length >= 10 ? ds.slice(0, 10) : ''
+      if (dPick && dPick < minDeliveryYmd.value) dPick = ''
+      deliveryYmd.value = dPick
+    }
   } catch (e) {
     console.warn('loadProfile', e)
   }
@@ -237,18 +309,22 @@ async function onSubmit() {
     uni.showToast({ title: '请填写昵称', icon: 'none' })
     return
   }
-  if (needsCardPayment.value && !selectedPlan.value) {
-    uni.showToast({ title: '请选择周卡或月卡', icon: 'none' })
-    return
+  if (needsCardPayment.value && (cardPayRadio.value === 'unpaid' || cardPayRadio.value === 'paid')) {
+    if (deliveryMode.value === 'date' && !selectedPlan.value) {
+      uni.showToast({ title: '请选择周卡或月卡', icon: 'none' })
+      return
+    }
   }
   const d0 = deliveryYmd.value?.trim()
-  if (!d0) {
-    uni.showToast({ title: '请选择开始配送日期', icon: 'none' })
-    return
-  }
-  if (d0 < minDeliveryYmd.value) {
-    uni.showToast({ title: '起送日不能早于今天', icon: 'none' })
-    return
+  if (deliveryMode.value === 'date') {
+    if (!d0) {
+      uni.showToast({ title: '请选择开始配送日期', icon: 'none' })
+      return
+    }
+    if (d0 < minDeliveryYmd.value) {
+      uni.showToast({ title: '起送日最早为明天（上海业务日）', icon: 'none' })
+      return
+    }
   }
   if (!getMemberToken() || !phone) {
     uni.showToast({ title: '登录已失效', icon: 'none' })
@@ -259,14 +335,26 @@ async function onSubmit() {
     return
   }
   submitting.value = true
+  let profileSavedForPayFlow = false
   try {
     const patch = {
       wechat_name: nick,
       name: nick,
-      delivery_start_date: d0,
     }
-    if (needsCardPayment.value) {
+    if (deliveryMode.value === 'defer') {
+      patch.delivery_deferred = true
+    } else {
+      patch.delivery_deferred = false
+      patch.delivery_start_date = d0
+    }
+    if (needsCardPayment.value && cardPayRadio.value === 'unpaid') {
       patch.plan_type = selectedPlan.value
+    }
+    if (needsCardPayment.value && cardPayRadio.value === 'paid') {
+      patch.card_pay_mode = 'offline_paid'
+      if (deliveryMode.value === 'date') {
+        patch.plan_type = selectedPlan.value
+      }
     }
     const av = String(avatarUrl.value || '').trim()
     if (isPersistableAvatarUrl(av)) {
@@ -276,6 +364,7 @@ async function onSubmit() {
       method: 'PATCH',
       data: patch,
     })
+    profileSavedForPayFlow = true
     const storedAvatar =
       (isPersistableAvatarUrl(av) ? av : remoteAvatarUrl.value || '').trim()
     try {
@@ -287,8 +376,18 @@ async function onSubmit() {
       /*忽略 */
     }
 
-    if (!needsCardPayment.value) {
-      uni.showToast({ title: '已保存', icon: 'success' })
+    if (
+      !needsCardPayment.value ||
+      cardPayRadio.value === 'paid' ||
+      deliveryMode.value === 'defer'
+    ) {
+      const t =
+        needsCardPayment.value &&
+        cardPayRadio.value === 'paid' &&
+        deliveryMode.value === 'date'
+          ? '已保存。后台开卡工单待核对'
+          : '已保存'
+      uni.showToast({ title: t, icon: 'success', duration: needsCardPayment.value && cardPayRadio.value === 'paid' && deliveryMode.value === 'date' ? 2200 : 2000 })
       setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
       return
     }
@@ -314,10 +413,24 @@ async function onSubmit() {
     })
   } catch (err) {
     uni.hideLoading()
+    if (
+      needsCardPayment.value &&
+      cardPayRadio.value === 'unpaid' &&
+      deliveryMode.value !== 'defer' &&
+      profileSavedForPayFlow
+    ) {
+      try {
+        uni.setStorageSync(MINE_PAY_REMINDER_KEY, '未开卡成功，请去支付')
+      } catch {
+        /* ignore */
+      }
+      uni.switchTab({ url: '/pages/mine/index' })
+      return
+    }
     const raw = err && typeof err === 'object' ? err : {}
     const errMsg = typeof raw.errMsg === 'string' ? raw.errMsg : ''
     if (errMsg.includes('cancel') || errMsg.includes('取消')) {
-      uni.showToast({ title: '已取消支付，资料已保存，可稍后继续支付', icon: 'none', duration: 3200 })
+      uni.showToast({ title: '已取消支付', icon: 'none', duration: 2600 })
     } else {
       uni.showToast({ title: err?.message || '保存或支付失败', icon: 'none', duration: 2800 })
     }
@@ -445,6 +558,39 @@ async function onSubmit() {
   color: #0f172a;
   box-sizing: border-box;
   min-height: 88rpx;
+}
+
+.pay-radio-group {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 24rpx;
+}
+
+.pay-radio-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16rpx;
+  background: #fff;
+  border-radius: 999rpx;
+  padding: 20rpx 24rpx;
+  border: 3rpx solid $ok-slate-100;
+  box-sizing: border-box;
+  min-height: 88rpx;
+}
+
+.pay-radio-label {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: $ok-slate-800;
+  flex-shrink: 0;
+}
+
+.pay-radio-group--delivery {
+  margin-bottom: 20rpx;
 }
 
 .plan-grid {

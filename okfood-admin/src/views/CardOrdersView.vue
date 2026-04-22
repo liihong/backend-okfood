@@ -528,6 +528,7 @@ onMounted(() => {
               <select v-model="createForm.pay_channel">
                 <option value="微信">微信</option>
                 <option value="支付宝">支付宝</option>
+                <option value="线下">线下</option>
               </select>
             </div>
           </div>
@@ -599,6 +600,7 @@ onMounted(() => {
               <select v-model="editForm.pay_channel">
                 <option value="微信">微信</option>
                 <option value="支付宝">支付宝</option>
+                <option value="线下">线下</option>
               </select>
             </div>
             <div class="form-group">

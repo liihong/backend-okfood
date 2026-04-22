@@ -149,6 +149,7 @@ import {
   sortAddressesDefaultFirst,
   isAddressItemDefault,
 } from '@/utils/addressApi.js'
+import { ymdTomorrowShanghai } from '@/utils/menuApi.js'
 
 const pageStyle = ref({})
 const scrollStyle = ref({})
@@ -278,21 +279,28 @@ const needsMemberSetupPage = computed(() => {
 const profileReadyForCardPay = computed(() => {
   const p = memberProfileRaw.value
   if (!p || typeof p !== 'object') return false
+  if (p.delivery_deferred === true) return false
   const nm = (p.name != null ? String(p.name) : '').trim()
   const stub = nm === MEMBER_STUB_NAME || nm === ''
   const wn = (p.wechat_name != null ? String(p.wechat_name) : '').trim()
   const wxOk = wn !== '' && wn !== WX_DEFAULT_NICK
   const hasUsableName = wxOk || (!stub && nm !== '')
   const ds = p.delivery_start_date != null ? String(p.delivery_start_date).trim() : ''
-  const hasDelivery = ds.length >= 10
+  const ymd = ds.length >= 10 ? ds.slice(0, 10) : ''
+  const minD = ymdTomorrowShanghai()
+  const hasDelivery = ymd.length >= 10 && ymd >= minD
   return hasUsableName && hasDelivery
 })
 
 const deliveryStartYmdFromProfile = computed(() => {
   const p = memberProfileRaw.value
   if (!p || typeof p !== 'object') return ''
+  if (p.delivery_deferred === true) return ''
   const ds = p.delivery_start_date != null ? String(p.delivery_start_date).trim() : ''
-  return ds.length >= 10 ? ds.slice(0, 10) : ''
+  const ymd = ds.length >= 10 ? ds.slice(0, 10) : ''
+  if (!ymd) return ''
+  const minD = ymdTomorrowShanghai()
+  return ymd >= minD ? ymd : ''
 })
 
 /** 已登录、服务端剩余 0、且资料已齐：在个人中心直接续办开卡支付 */
@@ -661,6 +669,17 @@ onShow(() => {
   if (reLaunchIfCourierModePreferred()) return
   syncCustomTabBar()
   syncTabLayout()
+  try {
+    const pending = uni.getStorageSync('okfood_pending_mine_toast')
+    if (pending) {
+      uni.removeStorageSync('okfood_pending_mine_toast')
+      setTimeout(() => {
+        uni.showToast({ title: String(pending), icon: 'none', duration: 3200 })
+      }, 120)
+    }
+  } catch {
+    /* ignore */
+  }
   void refreshMember()
   void fetchDefaultAddressForCard()
   void loadMineCardPrices()

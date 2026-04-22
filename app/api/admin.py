@@ -32,6 +32,7 @@ from app.services.admin_service import (
     list_categories_admin,
     list_dishes_admin,
     list_members_paged,
+    member_list_overview_counts,
     update_settings,
     upsert_dish,
 )
@@ -80,6 +81,19 @@ def delivery_sheet(
     area_key = (area or "").strip() or None
     payload = build_delivery_sheet(db, delivery_date=delivery_date, area=area_key)
     return success(data=dump_model(payload), msg="获取成功")
+
+
+@router.get("/users/stats")
+def users_stats(
+    response: Response,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """会员档案库顶栏：总会员数、生效中、已过期（与列表 validity 口径一致）。"""
+    response.headers["Cache-Control"] = "no-store"
+    _ = admin_username
+    out = member_list_overview_counts(db)
+    return success(data=dump_model(out), msg="获取成功")
 
 
 @router.get("/users")

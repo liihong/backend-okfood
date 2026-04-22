@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import and_, exists, func, literal, not_, or_, select, true
+from sqlalchemy import and_, case, exists, func, literal, not_, or_, select, true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
@@ -26,6 +26,7 @@ from app.schemas.admin import (
     DishAdminOut,
     DishUpsertIn,
     MemberAdminOut,
+    MemberListStatsOut,
     MenuScheduleAssignIn,
     RechargeIn,
     SettingsIn,
@@ -119,6 +120,22 @@ def admin_login_user(db: Session, username: str, password: str) -> AdminUser:
     if not verify_password(password, u.password_hash):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     return u
+
+
+def member_list_overview_counts(db: Session) -> MemberListStatsOut:
+    """全库会员数：与列表 `validity=active|expired` 口径一致（仅按 balance，不受搜索/片区筛选影响）。"""
+    row = db.execute(
+        select(
+            func.count().label("total"),
+            func.coalesce(func.sum(case((Member.balance > 0, 1), else_=0)), 0).label("active"),
+            func.coalesce(func.sum(case((Member.balance == 0, 1), else_=0)), 0).label("expired"),
+        ).select_from(Member)
+    ).one()
+    return MemberListStatsOut(
+        total=int(row.total or 0),
+        active=int(row.active or 0),
+        expired=int(row.expired or 0),
+    )
 
 
 def list_members_paged(

@@ -45,6 +45,7 @@ class CardOpenMode(str, Enum):
 class CardPayChannel(str, Enum):
     WECHAT = "微信"
     ALIPAY = "支付宝"
+    OFFLINE = "线下"
 
 
 class CardOrderPayStatus(str, Enum):

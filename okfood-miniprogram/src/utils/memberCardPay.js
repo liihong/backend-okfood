@@ -1,5 +1,9 @@
 import { request } from '@/utils/api.js'
-import { createMemberCardOrder, fetchMemberCardWechatJsapiPayParams } from '@/utils/memberCardOrderApi.js'
+import {
+  createMemberCardOrder,
+  fetchMemberCardWechatJsapiPayParams,
+  syncMemberCardWechatPayResult,
+} from '@/utils/memberCardOrderApi.js'
 import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
 
 /**
@@ -48,5 +52,30 @@ export async function runMemberCardWechatPay({
       fail: reject,
     })
   })
+  // 与微信异步通知互补：公网未收到 notify 时仍可按订单号拉单完成入账
+  const maxTries = 6
+  for (let i = 0; i < maxTries; i++) {
+    try {
+      await syncMemberCardWechatPayResult(orderId)
+      break
+    } catch (e) {
+      const m = (e && e.message) || ''
+      const maybeWait =
+        m.includes('处理中') ||
+        m.includes('稍候') ||
+        m.includes('稍后再试') ||
+        m.includes('未支付') ||
+        m.includes('not_paid') ||
+        /PAY_USERPAYING/i.test(m)
+      if (maybeWait && i < maxTries - 1) {
+        await new Promise((r) => setTimeout(r, 1500))
+        continue
+      }
+      if (maybeWait) {
+        throw new Error('支付已提交。若「我的」中次数未更新，请下拉刷新或稍后再看；仍无请联客服。')
+      }
+      throw e
+    }
+  }
   return { order, orderId }
 }

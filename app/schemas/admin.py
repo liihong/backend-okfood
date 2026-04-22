@@ -208,6 +208,14 @@ class MemberAdminOut(BaseModel):
     created_at: str
 
 
+class MemberListStatsOut(BaseModel):
+    """会员档案库顶栏统计：与列表 validity 筛选一致（剩余次数 balance>0 为生效中，=0 为已过期）。"""
+
+    total: int = Field(..., ge=0, description="会员总户数")
+    active: int = Field(..., ge=0, description="生效中：balance>0")
+    expired: int = Field(..., ge=0, description="已过期：balance=0")
+
+
 class AdminAddressIn(BaseModel):
     phone: str
     address: str = Field(..., min_length=1, max_length=500)

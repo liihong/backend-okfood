@@ -25,6 +25,10 @@ const membersRegionFilter = ref('')
 const membersInactiveOnly = ref(false)
 const regionFilterOptions = ref([])
 
+/** 顶栏全库统计（不受当前搜索/筛选影响） */
+const membersStats = ref({ total: null, active: null, expired: null })
+const membersStatsLoading = ref(true)
+
 const membersTotalPages = computed(() =>
   Math.max(1, Math.ceil(membersTotal.value / membersPageSize.value)),
 )
@@ -55,6 +59,28 @@ function toggleInactiveOnly() {
 function onRegionFilterChange() {
   membersPage.value = 1
   void fetchMembers()
+}
+
+async function fetchMemberStats() {
+  if (!adminAccessToken.value) return
+  membersStatsLoading.value = true
+  try {
+    const data = await apiJson('/api/admin/users/stats', {}, { auth: true })
+    membersStats.value = {
+      total: Number(data?.total) || 0,
+      active: Number(data?.active) || 0,
+      expired: Number(data?.expired) || 0,
+    }
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      membersStats.value = { total: null, active: null, expired: null }
+      return
+    }
+    membersStats.value = { total: null, active: null, expired: null }
+  } finally {
+    membersStatsLoading.value = false
+  }
 }
 
 async function fetchMembers() {
@@ -174,6 +200,7 @@ async function submitLeaveMember() {
     showLeaveModal.value = false
     showToast('请假状态已更新', 'success')
     await fetchMembers()
+    await fetchMemberStats()
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -264,6 +291,7 @@ async function submitEditMember() {
     )
     showEditModal.value = false
     await fetchMembers()
+    await fetchMemberStats()
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -279,12 +307,23 @@ async function submitEditMember() {
 
 onMounted(async () => {
   await loadRegionFilterOptions()
-  await fetchMembers()
+  await Promise.all([fetchMembers(), fetchMemberStats()])
 })
 </script>
 
 <template>
   <section class="tab-content animate-up">
+    <Teleport to="#admin-page-title-extra">
+      <div v-if="adminAccessToken" class="members-header-stats">
+        <template v-if="membersStats.total !== null">
+          当前总会员：<strong>{{ membersStats.total }}</strong> 个，生效中
+          <strong>{{ membersStats.active }}</strong> 个，已过期
+          <strong>{{ membersStats.expired }}</strong> 个
+        </template>
+        <span v-else-if="membersStatsLoading" class="members-header-stats--muted">统计加载中…</span>
+        <span v-else class="members-header-stats--muted">统计暂不可用</span>
+      </div>
+    </Teleport>
     <div class="table-container">
       <div class="table-header table-header--members">
         <div class="search-box">

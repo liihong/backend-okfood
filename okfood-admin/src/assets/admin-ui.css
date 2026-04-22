@@ -623,6 +623,19 @@
   animation: pulse 2s infinite;
 }
 
+.page-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem 1.5rem;
+}
+
+.page-title-extra {
+  flex: 1 1 auto;
+  min-width: min(100%, 12rem);
+  min-height: 1.5rem;
+}
+
 .page-title {
   font-size: 2.25rem;
   font-weight: 900;
@@ -630,6 +643,23 @@
   letter-spacing: -1px;
   margin: 0;
   color: #1e293b;
+}
+
+.members-header-stats {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: #475569;
+  line-height: 1.45;
+}
+
+.members-header-stats strong {
+  color: #0e5a44;
+  font-weight: 800;
+}
+
+.members-header-stats--muted {
+  color: #94a3b8;
+  font-size: 0.875rem;
 }
 
 /* 无大号标题时收紧顶栏，把空间留给地图等内容 */

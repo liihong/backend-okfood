@@ -21,6 +21,7 @@
 --  18) members.daily_meal_units每配送日份数（见 migration_026_members_daily_meal_units.sql）
 --  19) members.meal_quota_total周卡月卡累计总次数展示（见 migration_028_members_meal_quota_total.sql）
 --  20) member_addresses.delivery_region_id 外键替代 area/area_manual（见 migration_029_member_addresses_delivery_region_id.sql）
+--  21) members.delivery_deferred 暂不配送标记（见 migrations/20260422_members_delivery_deferred.sql）
 
 SET NAMES utf8mb4;
 
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS `members` (
   `leave_range_end` DATE NULL,
   `last_low_balance_notify_date` DATE NULL COMMENT '最近一次低余额提醒的业务日(上海)，用于去重',
   `delivery_start_date` DATE NULL COMMENT '起送业务日(上海)：非空则仅当配送日>=该日才参与配送',
+  `delivery_deferred` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '暂不配送：无起送日意向且保持未开卡',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_members_phone` (`phone`),

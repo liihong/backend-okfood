@@ -28,7 +28,9 @@ export function shouldOpenMemberSetup(profile) {
   const wn = (profile.wechat_name != null ? String(profile.wechat_name) : '').trim()
   const wxOk = wn !== '' && wn !== WX_DEFAULT_NICK
   const hasUsableName = wxOk || (!stub && nm !== '')
-  const noDeliveryStart = !hasNonEmptyField(profile.delivery_start_date)
+  const deferred = profile.delivery_deferred === true
+  const noDeliveryStart =
+    !hasNonEmptyField(profile.delivery_start_date) && !deferred
   if (!hasUsableName || noDeliveryStart) return true
   const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
   // 有剩余次数：仅需资料与起送日，不必再购卡

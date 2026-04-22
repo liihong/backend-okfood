@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -5,11 +6,14 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import today_shanghai
-from app.models.enums import CardOpenMode, CardOrderKind, CardOrderPayStatus, PlanType
+from app.models.enums import CardOpenMode, CardOrderKind, CardOrderPayStatus, CardPayChannel, PlanType
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
 from app.schemas.admin import CardOrderCreateIn, CardOrderOut, CardOrderPatchIn, RechargeIn
 from app.services.admin_service import apply_member_recharge_delta, _escape_like_fragment
+from app.services.store_config_service import get_member_card_prices_yuan
+
+MINIPROGRAM_OFFLINE_CLAIM_ORDER_CREATOR = "miniprogram-offline"
 
 
 def _quota_for_card_kind(kind: str) -> tuple[PlanType, int]:
@@ -25,6 +29,71 @@ def _format_amount_yuan(v: Decimal | None) -> str | None:
     if v is None:
         return None
     return format(v, "f")
+
+
+def _amount_yuan_for_card_kind_str(db: Session, card_kind: str) -> Decimal:
+    week_p, month_p = get_member_card_prices_yuan(db)
+    k = (card_kind or "").strip()
+    if k == CardOrderKind.WEEK.value:
+        return week_p
+    if k == CardOrderKind.MONTH.value:
+        return month_p
+    raise HTTPException(status_code=400, detail="无效开卡类型")
+
+
+def ensure_miniprogram_offline_claim_order(
+    db: Session,
+    member_id: int,
+    *,
+    card_kind: str,
+    delivery_start_date: date,
+) -> MemberCardOrder:
+    """小程序端「已支付(线下)」：生成或更新一条未缴/渠道为线下的开卡工单，待后台标记已缴后同步入账。"""
+    if delivery_start_date <= today_shanghai():
+        raise HTTPException(status_code=400, detail="起送日期须为明天及之后（上海业务日）")
+    m = db.get(Member, member_id)
+    if not m:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if int(m.balance) > 0:
+        raise HTTPException(status_code=400, detail="仅剩余次数为 0 时可登记线下开卡")
+    k = (card_kind or "").strip()
+    if k not in (CardOrderKind.WEEK.value, CardOrderKind.MONTH.value):
+        raise HTTPException(status_code=400, detail="开卡类型须为周卡或月卡")
+    amt = _amount_yuan_for_card_kind_str(db, k)
+    rmk = "小程序：用户自报已线下/其他方式缴费，待后台核对后标记已缴并同步入账"
+    q = select(MemberCardOrder).where(
+        MemberCardOrder.member_id == int(member_id),
+        MemberCardOrder.pay_status == CardOrderPayStatus.UNPAID.value,
+        MemberCardOrder.applied_to_member.is_(False),
+        MemberCardOrder.pay_channel == CardPayChannel.OFFLINE.value,
+        MemberCardOrder.created_by == MINIPROGRAM_OFFLINE_CLAIM_ORDER_CREATOR,
+    )
+    order = db.scalars(q.order_by(MemberCardOrder.id.desc()).limit(1)).first()
+    if order is not None:
+        order.card_kind = k
+        order.delivery_start_date = delivery_start_date
+        order.amount_yuan = amt
+        order.remark = rmk
+        order.out_trade_no = None
+        order.wx_transaction_id = None
+        db.flush()
+        return order
+    order = MemberCardOrder(
+        member_id=int(member_id),
+        card_kind=k,
+        pay_channel=CardPayChannel.OFFLINE.value,
+        pay_status=CardOrderPayStatus.UNPAID.value,
+        amount_yuan=amt,
+        remark=rmk,
+        delivery_start_date=delivery_start_date,
+        applied_to_member=False,
+        out_trade_no=None,
+        wx_transaction_id=None,
+        created_by=MINIPROGRAM_OFFLINE_CLAIM_ORDER_CREATOR,
+    )
+    db.add(order)
+    db.flush()
+    return order
 
 
 def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
@@ -86,6 +155,7 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
         order.delivery_start_date = start
     m.is_active = True
     m.delivery_start_date = start
+    m.delivery_deferred = False
     order.applied_to_member = True
 
 

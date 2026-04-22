@@ -26,6 +26,32 @@ export function ymdTodayShanghai(now = new Date()) {
   return `${y}-${mo}-${day}`
 }
 
+/** 上海时区「明天」YYYY-MM-DD（最早可开始配送的业务日） */
+export function ymdTomorrowShanghai(now = new Date()) {
+  const today = ymdTodayShanghai(now)
+  const anchor = new Date(`${today}T12:00:00+08:00`)
+  anchor.setUTCDate(anchor.getUTCDate() + 1)
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(anchor)
+    const y = parts.find((p) => p.type === 'year')?.value
+    const m = parts.find((p) => p.type === 'month')?.value
+    const d = parts.find((p) => p.type === 'day')?.value
+    if (y && m && d) return `${y}-${m}-${d}`
+  } catch {
+    /* fallback */
+  }
+  const d2 = new Date(anchor)
+  const yy = d2.getUTCFullYear()
+  const mo = String(d2.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d2.getUTCDate()).padStart(2, '0')
+  return `${yy}-${mo}-${day}`
+}
+
 /** @param {string} isoDate YYYY-MM-DD */
 export function dateToWeekdayLabel(isoDate) {
   if (!isoDate || typeof isoDate !== 'string') return ''
