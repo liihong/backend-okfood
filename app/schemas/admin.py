@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, time
 from decimal import Decimal
+from decimal import Decimal
 from typing import Self
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
@@ -100,6 +101,34 @@ class StoreConfigOut(BaseModel):
     store_logo_url: str | None = Field(None, max_length=512)
     store_lng: float | None = Field(None, description="GCJ-02 经度")
     store_lat: float | None = Field(None, description="GCJ-02 纬度")
+    courier_delivery_base_yuan: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="骑手配送费首份基础价（元）",
+    )
+    courier_delivery_extra_per_unit_yuan: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="同地址每多一份加价（元）",
+    )
+    member_card_week_price_yuan: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="小程序周卡微信支付标价（元）",
+    )
+    member_card_month_price_yuan: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="小程序月卡微信支付标价（元）",
+    )
 
 
 class StoreConfigUpdateIn(BaseModel):
@@ -109,6 +138,30 @@ class StoreConfigUpdateIn(BaseModel):
     store_logo_url: str | None = Field(None, max_length=512)
     store_lng: float | None = Field(None, ge=-180, le=180)
     store_lat: float | None = Field(None, ge=-90, le=90)
+    courier_delivery_base_yuan: Decimal | None = Field(
+        None,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+    )
+    courier_delivery_extra_per_unit_yuan: Decimal | None = Field(
+        None,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+    )
+    member_card_week_price_yuan: Decimal | None = Field(
+        None,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+    )
+    member_card_month_price_yuan: Decimal | None = Field(
+        None,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+    )
 
     @model_validator(mode="after")
     def _lng_lat_pair(self) -> Self:

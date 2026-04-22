@@ -2,7 +2,7 @@ from datetime import date
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import LeaveType, PlanType
+from app.models.enums import CardOrderKind, LeaveType, PlanType
 
 
 class Location(BaseModel):
@@ -87,3 +87,26 @@ class WxMiniJsCodeIn(BaseModel):
     """仅 `wx.login` 的 js_code：已登录会员绑定/刷新小程序 openid（用于支付等）。"""
 
     js_code: str = Field(..., min_length=8, max_length=256)
+
+
+class UserMemberCardOrderCreateIn(BaseModel):
+    """小程序自助开卡/续卡：创建未缴工单，后续调 `.../pay/wechat-jsapi`。"""
+
+    card_kind: CardOrderKind
+    delivery_start_date: date
+
+
+class UserMemberCardOrderOut(BaseModel):
+    id: int
+    card_kind: str
+    amount_yuan: str | None = None
+    pay_status: str
+    delivery_start_date: str | None = None
+    out_trade_no: str | None = None
+
+
+class MemberCardPricesOut(BaseModel):
+    """小程序展示用：当前周卡/月卡标价（与自助开卡下单金额一致，来源于 app_settings）。"""
+
+    week_price_yuan: str
+    month_price_yuan: str

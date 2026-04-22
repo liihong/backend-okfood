@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -10,11 +10,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.courier_delivery_fee import courier_delivery_fee_yuan_for_meal_units
+from app.core.timeutil import now_shanghai, today_shanghai
 from app.integrations.wechat_pay_v2 import (
     WeChatPayV2Error,
+    WechatPayNotifyParsed,
     build_miniprogram_pay_params,
+    parse_wechat_pay_notify,
     unified_order_jsapi,
-    verify_response_sign,
     wechat_pay_misconfiguration_detail,
     yuan_decimal_to_fen,
 )
@@ -107,6 +109,13 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
     if not m:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    # 单点：上海时间当日 10:00 起不可再下「当日供餐」单（与小程序规则一致，不分会员套餐）
+    if body.delivery_date == today_shanghai() and now_shanghai().time() >= time(10, 0, 0):
+        raise HTTPException(
+            status_code=400,
+            detail="每日 10:00 后仅可下次日及之后的单点单",
+        )
+
     nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
     area = routing_area_label(addr, nm)
     amt = dish.single_order_price_yuan
@@ -190,51 +199,50 @@ def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, c
     return build_miniprogram_pay_params(prepay_id)
 
 
-def apply_single_meal_order_wechat_notify(db: Session, data: dict[str, str]) -> tuple[bool, str]:
-    """
-    处理微信支付结果通知。
-    返回 (是否应回复微信 SUCCESS, 日志/失败原因)。
-    """
-    if (data.get("return_code") or "").upper() != "SUCCESS":
-        return False, (data.get("return_msg") or "return_fail")[:200]
-    if not verify_response_sign(data):
-        logger.error("微信回调签名校验失败: %s", {k: data.get(k) for k in ("out_trade_no", "result_code")})
-        return False, "sign"
-    if (data.get("result_code") or "").upper() != "SUCCESS":
-        return False, (data.get("err_code_des") or data.get("err_code") or "result_fail")[:200]
-
-    out_no = (data.get("out_trade_no") or "").strip()
-    tx_id = (data.get("transaction_id") or "").strip()
-    fee_s = (data.get("total_fee") or "").strip()
-    if not out_no or not fee_s:
-        return False, "missing_field"
-    try:
-        total_fee = int(fee_s)
-    except ValueError:
-        return False, "total_fee"
-
-    order = db.scalar(select(SingleMealOrder).where(SingleMealOrder.out_trade_no == out_no).with_for_update())
+def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyParsed) -> tuple[bool, str]:
+    """单笔点餐：根据已验签通知入账；无匹配订单返回 order_not_found。"""
+    order = db.scalar(
+        select(SingleMealOrder)
+        .where(SingleMealOrder.out_trade_no == parsed.out_trade_no)
+        .with_for_update()
+    )
     if not order:
-        logger.warning("微信回调商户单号无匹配订单: %s", out_no)
         return False, "order_not_found"
 
     if order.pay_status == "已支付":
         return True, "already_paid"
 
     expect_fen = yuan_decimal_to_fen(order.amount_yuan)
-    if total_fee != expect_fen:
-        logger.error("微信回调金额不一致 out=%s expect_fen=%s got_fen=%s", out_no, expect_fen, total_fee)
+    if parsed.total_fee != expect_fen:
+        logger.error(
+            "微信回调金额不一致 out=%s expect_fen=%s got_fen=%s",
+            parsed.out_trade_no,
+            expect_fen,
+            parsed.total_fee,
+        )
         return False, "amount_mismatch"
 
     order.pay_status = "已支付"
     order.pay_channel = "微信"
-    order.wx_transaction_id = tx_id or order.wx_transaction_id
+    tid = (parsed.transaction_id or "").strip()
+    order.wx_transaction_id = tid or order.wx_transaction_id
     pay_addr = db.get(MemberAddress, order.member_address_id)
     order.courier_id = primary_courier_for_region_id(
         db, int(pay_addr.delivery_region_id) if pay_addr and pay_addr.delivery_region_id else None
     )
     db.commit()
     return True, "paid"
+
+
+def apply_single_meal_order_wechat_notify(db: Session, data: dict[str, str]) -> tuple[bool, str]:
+    """
+    处理微信支付结果通知（仅单笔点餐订单）。
+    返回 (是否应回复微信 SUCCESS, 日志/失败原因)。
+    """
+    ok, reason, parsed = parse_wechat_pay_notify(data)
+    if not ok or parsed is None:
+        return False, reason
+    return finalize_single_meal_order_wechat_pay(db, parsed)
 
 
 def list_courier_single_order_tasks(
@@ -300,7 +308,7 @@ def confirm_single_order_delivery(db: Session, courier_id: str, order_id: int) -
     if row.fulfillment_status == "delivered":
         return
     # 单次点餐每单1 份，计价同「首份」口径
-    fee_yuan = courier_delivery_fee_yuan_for_meal_units(1)
+    fee_yuan = courier_delivery_fee_yuan_for_meal_units(db, 1)
     courier_row = db.execute(select(Courier).where(Courier.courier_id == courier_id).with_for_update()).scalar_one_or_none()
     if not courier_row:
         raise HTTPException(status_code=500, detail="配送员账户异常")

@@ -10,7 +10,6 @@ from app.core.delivery_calendar import is_subscription_delivery_day
 from app.core.security import verify_password
 from app.core.timeutil import today_shanghai, tomorrow_shanghai
 from app.models.admin_user import AdminUser
-from app.models.app_settings import AppSettings
 from app.models.balance_log import BalanceLog
 from app.models.enums import BalanceReason, PlanType
 from app.constants import UNASSIGNED_DELIVERY_AREA
@@ -458,12 +457,10 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn) -> None:
 
 
 def update_settings(db: Session, body: SettingsIn) -> None:
-    row = db.get(AppSettings, 1)
-    if not row:
-        row = AppSettings(id=1, leave_deadline_time=body.leave_deadline_time)
-        db.add(row)
-    else:
-        row.leave_deadline_time = body.leave_deadline_time
+    from app.services.store_config_service import ensure_app_settings_row
+
+    row = ensure_app_settings_row(db)
+    row.leave_deadline_time = body.leave_deadline_time
     db.commit()
 
 

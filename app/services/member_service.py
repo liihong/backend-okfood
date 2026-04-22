@@ -12,8 +12,6 @@ from sqlalchemy.orm import Session
 
 from app.core.timeutil import now_shanghai, today_shanghai, tomorrow_shanghai
 
-from app.models.app_settings import AppSettings
-
 from app.models.menu_dish import MenuDish
 
 from app.models.menu_schedule import MenuSchedule
@@ -22,9 +20,7 @@ from app.models.weekly_menu_slot import WeeklyMenuSlot
 
 from app.constants import STUB_MEMBER_NAME, UNASSIGNED_DELIVERY_AREA
 
-from app.models.balance_log import BalanceLog
-
-from app.models.enums import BalanceReason, LeaveType, PlanType
+from app.models.enums import LeaveType, PlanType
 
 from app.models.member import Member
 
@@ -45,6 +41,7 @@ from app.services.member_address_service import (
 )
 
 from app.services.region_assignment import assign_region_for_coords
+from app.services.store_config_service import ensure_app_settings_row
 
 # 与 DB chk_members_daily_meal_units 上限一致
 MAX_DAILY_MEAL_UNITS = 50
@@ -457,37 +454,9 @@ def patch_member_profile(
 
     if set_plan_type:
 
-        old_plan = (m.plan_type or "").strip() if isinstance(m.plan_type, str) else ""
-
         new_val = plan_type.value if plan_type is not None else None
 
         m.plan_type = new_val
-
-        if not old_plan and new_val in (PlanType.WEEK.value, PlanType.MONTH.value):
-
-            add = 6 if new_val == PlanType.WEEK.value else 24
-
-            m.balance = int(m.balance or 0) + add
-
-            m.meal_quota_total = int(m.meal_quota_total or 0) + add
-
-            m.is_active = True
-
-            db.add(
-
-                BalanceLog(
-
-                    member_id=m.id,
-
-                    change=add,
-
-                    reason=BalanceReason.RECHARGE.value,
-
-                    operator="miniprogram_plan",
-
-                )
-
-            )
 
     if set_delivery_start:
 
@@ -545,11 +514,7 @@ def leave_request(
 
 
 
-    settings_row = db.get(AppSettings, 1)
-
-    if not settings_row:
-
-        raise HTTPException(status_code=500, detail="系统设置缺失")
+    settings_row = ensure_app_settings_row(db)
 
 
 

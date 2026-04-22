@@ -37,7 +37,7 @@ class Settings(BaseSettings):
 
     LOW_BALANCE_THRESHOLD: int = 2
 
-    # 骑手配送费（元）：确认送达时累加 couriers.fee_pending；首份基础价 + 同地址每多一份加价
+    # 骑手配送费（元）：与 app_settings 表同步；此处为「库中尚无 id=1 行」时的兜底默认（ensure_app_settings_row 会写入库）
     COURIER_DELIVERY_BASE_YUAN: Decimal = Field(default=Decimal("4.00"), ge=Decimal("0"))
     COURIER_DELIVERY_EXTRA_PER_UNIT_YUAN: Decimal = Field(default=Decimal("1.00"), ge=Decimal("0"))
 
@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     WX_MINI_SUBSCRIBE_PAGE: str = "pages/order/index"
     # formal | developer | trial
     WX_MINI_SUBSCRIBE_MINIPROGRAM_STATE: str = "formal"
+
+    # 小程序周卡/月卡标价（元）：以 app_settings 为准；此处为库无行时的兜底（后台「门店配置」可改库内值）
+    MEMBER_CARD_WEEK_PRICE_YUAN: Decimal = Field(default=Decimal("168.00"), ge=Decimal("0"))
+    MEMBER_CARD_MONTH_PRICE_YUAN: Decimal = Field(default=Decimal("669.00"), ge=Decimal("0"))
 
     # 微信支付 v2（小程序 JSAPI）：商户平台 API密钥为32 位
     WECHAT_PAY_MCH_ID: str = ""

@@ -28,7 +28,11 @@ export function shouldOpenMemberSetup(profile) {
   const wn = (profile.wechat_name != null ? String(profile.wechat_name) : '').trim()
   const wxOk = wn !== '' && wn !== WX_DEFAULT_NICK
   const hasUsableName = wxOk || (!stub && nm !== '')
-  const noPlan = !hasNonEmptyField(profile.plan_type)
   const noDeliveryStart = !hasNonEmptyField(profile.delivery_start_date)
-  return !hasUsableName || noPlan || noDeliveryStart
+  if (!hasUsableName || noDeliveryStart) return true
+  const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
+  // 有剩余次数：仅需资料与起送日，不必再购卡
+  if (balance > 0) return false
+  // 无剩余次数：须进入完善页选卡并支付（或续卡），不依赖 plan_type 避免「只保存意向未付款」被当成已完成
+  return true
 }

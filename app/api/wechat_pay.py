@@ -11,7 +11,7 @@ from app.integrations.wechat_pay_v2 import (
     resolve_request_client_ip,
     xml_to_dict,
 )
-from app.services.single_meal_order_service import apply_single_meal_order_wechat_notify
+from app.services.wechat_pay_notify_dispatch import apply_wechat_pay_notify
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ async def wechat_pay_notify(request: Request, db: Session = Depends(get_db)):
         return _notify_xml(False, "xml")
 
     try:
-        ok, reason = apply_single_meal_order_wechat_notify(db, data)
+        ok, reason = apply_wechat_pay_notify(db, data)
     except Exception:
         logger.exception("微信回调处理异常")
         db.rollback()

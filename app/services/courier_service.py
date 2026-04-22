@@ -289,7 +289,7 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
             detail=None,
         )
     )
-    fee_yuan = courier_delivery_fee_yuan_for_meal_units(deduct)
+    fee_yuan = courier_delivery_fee_yuan_for_meal_units(db, deduct)
     courier_row = db.execute(select(Courier).where(Courier.courier_id == courier_id).with_for_update()).scalar_one_or_none()
     if not courier_row:
         raise HTTPException(status_code=500, detail="配送员账户异常")

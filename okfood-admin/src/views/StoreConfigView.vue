@@ -21,6 +21,10 @@ const form = ref({
   store_logo_url: '',
   store_lng: '',
   store_lat: '',
+  courier_delivery_base_yuan: '',
+  courier_delivery_extra_per_unit_yuan: '',
+  member_card_week_price_yuan: '',
+  member_card_month_price_yuan: '',
 })
 
 async function loadConfig() {
@@ -34,6 +38,11 @@ async function loadConfig() {
       d?.store_lng != null && Number.isFinite(Number(d.store_lng)) ? String(d.store_lng) : ''
     form.value.store_lat =
       d?.store_lat != null && Number.isFinite(Number(d.store_lat)) ? String(d.store_lat) : ''
+    const fmtMoney = (v) => (v != null && v !== '' && Number.isFinite(Number(v)) ? String(Number(v)) : '')
+    form.value.courier_delivery_base_yuan = fmtMoney(d?.courier_delivery_base_yuan)
+    form.value.courier_delivery_extra_per_unit_yuan = fmtMoney(d?.courier_delivery_extra_per_unit_yuan)
+    form.value.member_card_week_price_yuan = fmtMoney(d?.member_card_week_price_yuan)
+    form.value.member_card_month_price_yuan = fmtMoney(d?.member_card_month_price_yuan)
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -73,6 +82,32 @@ async function saveConfig() {
     showToast('经度与纬度请成对填写，或同时留空以清除门店坐标', 'error')
     return
   }
+
+  const parseMoney = (raw, label) => {
+    const t = String(raw ?? '').trim()
+    if (t === '') {
+      showToast(`请填写${label}`, 'error')
+      return null
+    }
+    const n = Number(t)
+    if (!Number.isFinite(n) || n < 0) {
+      showToast(`${label}须为非负数字`, 'error')
+      return null
+    }
+    return n
+  }
+  const base = parseMoney(form.value.courier_delivery_base_yuan, '配送费首份基础价')
+  if (base === null) return
+  const extra = parseMoney(form.value.courier_delivery_extra_per_unit_yuan, '配送费每多一份加价')
+  if (extra === null) return
+  const weekP = parseMoney(form.value.member_card_week_price_yuan, '周卡标价')
+  if (weekP === null) return
+  const monthP = parseMoney(form.value.member_card_month_price_yuan, '月卡标价')
+  if (monthP === null) return
+  payload.courier_delivery_base_yuan = base
+  payload.courier_delivery_extra_per_unit_yuan = extra
+  payload.member_card_week_price_yuan = weekP
+  payload.member_card_month_price_yuan = monthP
 
   saving.value = true
   try {
@@ -153,9 +188,11 @@ onMounted(() => {
     <div class="sc-head">
       <Store :size="22" class="sc-head-icon" aria-hidden="true" />
       <div>
-        <h2 class="sc-title">门店基础信息</h2>
+        <h2 class="sc-title">门店与全局计价</h2>
         <p class="sc-desc">
-          请优先用下方地图<strong>搜索或点选</strong>门店位置（与高德一致，自动为 GCJ-02）。保存后营业概览以门店为中心；骑手端任务按<strong>离该点直线距离</strong>由近到远排序。
+          请优先用下方地图<strong>搜索或点选</strong>门店位置（与高德一致，自动为 GCJ-02）。保存后营业概览以门店为中心；骑手端任务按<strong>离该点直线距离</strong>由近到远排序。配送费与小程序会员卡价格保存在数据库
+          <code class="sc-code">app_settings</code>
+          ，修改后立即对骑手结费与自助开卡下单金额生效。
         </p>
       </div>
     </div>
@@ -203,6 +240,60 @@ onMounted(() => {
         </div>
       </div>
 
+      <h3 class="sc-subtitle">骑手配送费（元）</h3>
+      <p class="sc-hint">确认送达时写入骑手待结算：首份基础价 +（份数 − 1）× 每多一份加价。</p>
+      <div class="sc-coord-grid">
+        <div class="sc-field">
+          <label class="sc-label" for="sc-fee-base">首份基础价</label>
+          <input
+            id="sc-fee-base"
+            v-model="form.courier_delivery_base_yuan"
+            type="text"
+            class="sc-input sc-input--mono"
+            inputmode="decimal"
+            placeholder="例：4"
+          />
+        </div>
+        <div class="sc-field">
+          <label class="sc-label" for="sc-fee-extra">同地址每多一份加价</label>
+          <input
+            id="sc-fee-extra"
+            v-model="form.courier_delivery_extra_per_unit_yuan"
+            type="text"
+            class="sc-input sc-input--mono"
+            inputmode="decimal"
+            placeholder="例：1"
+          />
+        </div>
+      </div>
+
+      <h3 class="sc-subtitle">小程序会员卡标价（元）</h3>
+      <p class="sc-hint">会员自助开卡/续卡微信支付金额；与后台开卡工单标价独立，以此处为准。</p>
+      <div class="sc-coord-grid">
+        <div class="sc-field">
+          <label class="sc-label" for="sc-card-week">周卡</label>
+          <input
+            id="sc-card-week"
+            v-model="form.member_card_week_price_yuan"
+            type="text"
+            class="sc-input sc-input--mono"
+            inputmode="decimal"
+            placeholder="例：168"
+          />
+        </div>
+        <div class="sc-field">
+          <label class="sc-label" for="sc-card-month">月卡</label>
+          <input
+            id="sc-card-month"
+            v-model="form.member_card_month_price_yuan"
+            type="text"
+            class="sc-input sc-input--mono"
+            inputmode="decimal"
+            placeholder="例：669"
+          />
+        </div>
+      </div>
+
       <div class="sc-actions">
         <button type="button" class="sc-btn-primary" :disabled="saving" @click="saveConfig">
           {{ saving ? '保存中…' : '保存' }}
@@ -237,6 +328,24 @@ onMounted(() => {
   margin: 0.35rem 0 0;
   font-size: 13px;
   line-height: 1.5;
+  color: #64748b;
+}
+.sc-code {
+  font-size: 12px;
+  padding: 0.1rem 0.35rem;
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+.sc-subtitle {
+  margin: 1.25rem 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+.sc-hint {
+  margin: 0 0 0.75rem;
+  font-size: 12px;
+  line-height: 1.45;
   color: #64748b;
 }
 .sc-muted {

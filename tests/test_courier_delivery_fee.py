@@ -4,38 +4,44 @@ from decimal import Decimal
 
 import pytest
 
-from app.core.config import get_settings
 from app.core.courier_delivery_fee import courier_delivery_fee_yuan_for_meal_units
 
 
-@pytest.fixture(autouse=True)
-def _fresh_settings_cache():
-    """避免用例间共用 get_settings() 的 lru_cache（如 monkeypatch 环境变量后污染后续用例）。"""
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
+@pytest.fixture
+def _patch_delivery_config(monkeypatch):
+    """默认模拟库内配置：首份 4 元，每多一份 +1 元。"""
+
+    def _set(base: str | Decimal, extra: str | Decimal):
+        b = Decimal(base)
+        e = Decimal(extra)
+        monkeypatch.setattr(
+            "app.core.courier_delivery_fee.get_courier_delivery_fee_config",
+            lambda _db: (b, e),
+        )
+
+    return _set
 
 
-def test_fee_one_unit():
-    s = get_settings()
-    assert courier_delivery_fee_yuan_for_meal_units(1) == s.COURIER_DELIVERY_BASE_YUAN
+def test_fee_one_unit(_patch_delivery_config):
+    _patch_delivery_config("4.00", "1.00")
+    assert courier_delivery_fee_yuan_for_meal_units(None, 1) == Decimal("4.00")
 
 
-def test_fee_three_units():
-    assert courier_delivery_fee_yuan_for_meal_units(3) == Decimal("6.00")
+def test_fee_three_units(_patch_delivery_config):
+    _patch_delivery_config("4.00", "1.00")
+    assert courier_delivery_fee_yuan_for_meal_units(None, 3) == Decimal("6.00")
 
 
-def test_fee_invalid_falls_back_to_one_unit():
-    s = get_settings()
-    assert courier_delivery_fee_yuan_for_meal_units(0) == s.COURIER_DELIVERY_BASE_YUAN
-    assert courier_delivery_fee_yuan_for_meal_units(-1) == s.COURIER_DELIVERY_BASE_YUAN
+def test_fee_invalid_falls_back_to_one_unit(_patch_delivery_config):
+    _patch_delivery_config("4.00", "1.00")
+    assert courier_delivery_fee_yuan_for_meal_units(None, 0) == Decimal("4.00")
+    assert courier_delivery_fee_yuan_for_meal_units(None, -1) == Decimal("4.00")
 
 
-def test_fee_respects_env(monkeypatch):
-    monkeypatch.setenv("COURIER_DELIVERY_BASE_YUAN", "5")
-    monkeypatch.setenv("COURIER_DELIVERY_EXTRA_PER_UNIT_YUAN", "2")
-    assert courier_delivery_fee_yuan_for_meal_units(1) == Decimal("5.00")
-    assert courier_delivery_fee_yuan_for_meal_units(3) == Decimal("9.00")
+def test_fee_custom_config(_patch_delivery_config):
+    _patch_delivery_config("5.00", "2.00")
+    assert courier_delivery_fee_yuan_for_meal_units(None, 1) == Decimal("5.00")
+    assert courier_delivery_fee_yuan_for_meal_units(None, 3) == Decimal("9.00")
 
 
 @pytest.mark.parametrize(
@@ -46,5 +52,6 @@ def test_fee_respects_env(monkeypatch):
         (10, Decimal("13.00")),
     ],
 )
-def test_fee_formula(units: int, expected: Decimal):
-    assert courier_delivery_fee_yuan_for_meal_units(units) == expected
+def test_fee_formula(_patch_delivery_config, units: int, expected: Decimal):
+    _patch_delivery_config("4.00", "1.00")
+    assert courier_delivery_fee_yuan_for_meal_units(None, units) == expected

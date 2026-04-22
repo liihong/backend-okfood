@@ -52,6 +52,7 @@ import {
   fetchMenuDetail,
   formatMenuPrice,
   isSingleOrderServiceDate,
+  singleOrderServiceDateError,
 } from '@/utils/menuApi.js'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { getMemberToken } from '@/utils/api.js'
@@ -61,9 +62,7 @@ const loading = ref(true)
 const loadError = ref('')
 /** 供餐日 YYYY-MM-DD，来自周菜单跳转 */
 const serviceDateYmd = ref('')
-const canSubmitSingleOrder = computed(() =>
-  isSingleOrderServiceDate(serviceDateYmd.value),
-)
+const canSubmitSingleOrder = computed(() => isSingleOrderServiceDate(serviceDateYmd.value))
 /** scroll-view 必须用确定 px高度，微信里 flex+calc 易导致子节点不渲染 */
 const scrollStyle = ref({ height: '400px' })
 
@@ -133,7 +132,8 @@ function onImgErr() {
 function handleBuy() {
   if (!dish.value) return
   if (!canSubmitSingleOrder.value) {
-    uni.showToast({ title: '仅当日与次日餐品可单点', icon: 'none' })
+    const msg = singleOrderServiceDateError(serviceDateYmd.value)
+    uni.showToast({ title: msg, icon: 'none' })
     return
   }
   const p = formatMenuPrice(dish.value.price)

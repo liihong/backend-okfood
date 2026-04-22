@@ -72,6 +72,36 @@
           <text class="footer-info">{{ cardFooter }}</text>
         </view>
 
+        <view v-if="showOpenCardRenewPanel" class="open-card-banner">
+          <text class="open-card-banner-title">还未开卡</text>
+          <text class="open-card-banner-desc">
+            上次支付未完成或尚未开通，可选套餐再次发起微信支付；支付成功后餐次将自动到账。
+          </text>
+          <view class="subscription-cards open-card-cards">
+            <view
+              :class="['sub-plan-item', cardPayLoading ? 'sub-plan-item--disabled' : '']"
+              @tap="onMineCardPay('周卡')"
+            >
+              <text class="plan-en">WEEKLY</text>
+              <text class="plan-name">6 天自律周卡</text>
+              <text class="plan-price"><text class="yen">¥</text>{{ cardPriceWeek }}</text>
+            </view>
+            <view
+              :class="['sub-plan-item', 'highlight', cardPayLoading ? 'sub-plan-item--disabled' : '']"
+              @tap="onMineCardPay('月卡')"
+            >
+              <text class="rec-badge">推荐</text>
+              <text class="plan-en">MONTHLY</text>
+              <text class="plan-name">24 天全能月卡</text>
+              <text class="plan-price"><text class="yen">¥</text>{{ cardPriceMonth }}</text>
+            </view>
+          </view>
+          <view class="open-card-foot" @tap="goMemberSetup">
+            <text class="open-card-foot-text">修改昵称、头像或开始配送日期</text>
+            <text class="open-card-foot-arrow">›</text>
+          </view>
+        </view>
+
         <view class="action-list">
           <view v-if="!isLoggedIn" class="menu-row" @click="goCourier">
             <text class="menu-label">配送员工作台</text>
@@ -110,6 +140,7 @@ import {
   MEMBER_STUB_NAME,
   WX_DEFAULT_NICK,
 } from '@/utils/memberProfile.js'
+import { runMemberCardWechatPay } from '@/utils/memberCardPay.js'
 import { getTabPageLayoutStyles } from '@/utils/tabPageLayout.js'
 import { syncCustomTabBar } from '@/utils/customTabBar.js'
 import {
@@ -147,6 +178,10 @@ const displayBalance = ref(0)
 /** 默认配送地址展示行（area + detail，与地址列表一致） */
 const defaultAddrLine = ref('')
 let fetchDefaultAddrSeq = 0
+
+const cardPayLoading = ref(false)
+const cardPriceWeek = ref('168')
+const cardPriceMonth = ref('669')
 
 async function fetchDefaultAddressForCard() {
   const seq = ++fetchDefaultAddrSeq
@@ -237,6 +272,34 @@ const memberProfileRaw = ref(null)
 const needsMemberSetupPage = computed(() => {
   if (!isLoggedIn.value) return false
   return shouldOpenMemberSetup(memberProfileRaw.value)
+})
+
+/** 资料已具备开卡条件：可用昵称 + 起送日（与完善资料页支付前一致） */
+const profileReadyForCardPay = computed(() => {
+  const p = memberProfileRaw.value
+  if (!p || typeof p !== 'object') return false
+  const nm = (p.name != null ? String(p.name) : '').trim()
+  const stub = nm === MEMBER_STUB_NAME || nm === ''
+  const wn = (p.wechat_name != null ? String(p.wechat_name) : '').trim()
+  const wxOk = wn !== '' && wn !== WX_DEFAULT_NICK
+  const hasUsableName = wxOk || (!stub && nm !== '')
+  const ds = p.delivery_start_date != null ? String(p.delivery_start_date).trim() : ''
+  const hasDelivery = ds.length >= 10
+  return hasUsableName && hasDelivery
+})
+
+const deliveryStartYmdFromProfile = computed(() => {
+  const p = memberProfileRaw.value
+  if (!p || typeof p !== 'object') return ''
+  const ds = p.delivery_start_date != null ? String(p.delivery_start_date).trim() : ''
+  return ds.length >= 10 ? ds.slice(0, 10) : ''
+})
+
+/** 已登录、服务端剩余 0、且资料已齐：在个人中心直接续办开卡支付 */
+const showOpenCardRenewPanel = computed(() => {
+  if (!isLoggedIn.value) return false
+  if (serverBalance.value > 0) return false
+  return profileReadyForCardPay.value
 })
 
 function isHttpAvatarUrl(u) {
@@ -600,6 +663,7 @@ onShow(() => {
   syncTabLayout()
   void refreshMember()
   void fetchDefaultAddressForCard()
+  void loadMineCardPrices()
 })
 
 onMounted(() => {
@@ -690,6 +754,68 @@ function goAddress() {
 
 function goMemberSetup() {
   uni.navigateTo({ url: '/packageUser/pages/memberSetup/memberSetup' })
+}
+
+async function loadMineCardPrices() {
+  if (!getMemberToken()) return
+  try {
+    const d = await request('/api/user/member-card-prices', { method: 'GET' })
+    if (d && typeof d === 'object') {
+      const w = d.week_price_yuan != null ? String(d.week_price_yuan).trim() : ''
+      const m = d.month_price_yuan != null ? String(d.month_price_yuan).trim() : ''
+      if (w) cardPriceWeek.value = w
+      if (m) cardPriceMonth.value = m
+    }
+  } catch {
+    /* 使用默认值 */
+  }
+}
+
+async function onMineCardPay(cardKind) {
+  if (!showOpenCardRenewPanel.value || cardPayLoading.value) return
+  const d0 = deliveryStartYmdFromProfile.value
+  if (!d0) {
+    uni.showToast({ title: '请先到完善资料页选择起送日期', icon: 'none' })
+    goMemberSetup()
+    return
+  }
+  cardPayLoading.value = true
+  uni.showLoading({ title: '支付准备中…', mask: true })
+  try {
+    const { order } = await runMemberCardWechatPay({
+      cardKind,
+      deliveryStartYmd: d0,
+      patchProfile: true,
+    })
+    uni.hideLoading()
+    const amt = order && typeof order.amount_yuan === 'string' ? order.amount_yuan : ''
+    uni.showModal({
+      title: '支付成功',
+      content: amt
+        ? `已支付 ¥${amt}。剩余次数将在微信通知确认后到账，请稍候查看。`
+        : '支付已完成，剩余次数将在微信通知确认后到账。',
+      showCancel: false,
+      success: () => {
+        void refreshMember()
+        void fetchDefaultAddressForCard()
+      },
+    })
+  } catch (err) {
+    uni.hideLoading()
+    const raw = err && typeof err === 'object' ? err : {}
+    const errMsg = typeof raw.errMsg === 'string' ? raw.errMsg : ''
+    if (errMsg.includes('cancel') || errMsg.includes('取消')) {
+      uni.showToast({ title: '已取消支付', icon: 'none' })
+    } else {
+      uni.showToast({
+        title: err instanceof Error ? err.message : errMsg || '支付失败',
+        icon: 'none',
+        duration: 2800,
+      })
+    }
+  } finally {
+    cardPayLoading.value = false
+  }
 }
 </script>
 
@@ -1009,6 +1135,62 @@ function goMemberSetup() {
   margin-top: 20rpx;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   padding-top: 24rpx;
+}
+
+.open-card-banner {
+  margin-bottom: 40rpx;
+  padding: 36rpx 32rpx 28rpx;
+  background: #fff;
+  border-radius: 40rpx;
+  border: 3rpx solid $ok-slate-100;
+  box-shadow: 0 12rpx 40rpx rgba(15, 23, 42, 0.06);
+}
+
+.open-card-banner-title {
+  display: block;
+  font-size: 34rpx;
+  font-weight: 950;
+  color: $ok-slate-800;
+  margin-bottom: 12rpx;
+}
+
+.open-card-banner-desc {
+  display: block;
+  font-size: 24rpx;
+  font-weight: 700;
+  color: $ok-slate-500;
+  line-height: 1.5;
+  margin-bottom: 28rpx;
+}
+
+.open-card-cards {
+  margin-bottom: 8rpx;
+}
+
+.sub-plan-item--disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.open-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 8rpx 0;
+  margin-top: 8rpx;
+  border-top: 1rpx solid $ok-slate-100;
+}
+
+.open-card-foot-text {
+  font-size: 24rpx;
+  font-weight: 800;
+  color: $ok-forest-green;
+}
+
+.open-card-foot-arrow {
+  font-size: 32rpx;
+  color: #cbd5e1;
+  font-weight: 300;
 }
 
 .plan-purchase-title {

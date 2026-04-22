@@ -35,9 +35,9 @@
           </view>
         </view>
 
-        <view class="section">
-          <text class="sec-title">购买卡种类（意向）</text>
-          <text class="sec-sub">后续支付开通以实际下单为准，此处用于登记意向。</text>
+        <view v-if="needsCardPayment" class="section">
+          <text class="sec-title">选择会员卡并完成支付</text>
+          <text class="sec-sub">新开通或续费均需微信支付；支付成功后剩余次数将自动叠加。</text>
           <view class="plan-grid">
             <view
               :class="['plan-card', selectedPlan === '周卡' ? 'plan-card--on' : '']"
@@ -45,7 +45,7 @@
             >
               <text class="plan-en">WEEKLY</text>
               <text class="plan-name">6天自律周卡</text>
-              <!-- <text class="plan-price"><text class="yen">¥</text>168</text> -->
+              <text class="plan-price"><text class="yen">¥</text>{{ cardPriceWeek }}</text>
             </view>
             <view
               :class="['plan-card', 'plan-card--rec', selectedPlan === '月卡' ? 'plan-card--on' : '']"
@@ -54,9 +54,16 @@
               <text class="rec">推荐</text>
               <text class="plan-en">MONTHLY</text>
               <text class="plan-name">24 天全能月卡</text>
-              <!-- <text class="plan-price"><text class="yen">¥</text>669</text> -->
+              <text class="plan-price"><text class="yen">¥</text>{{ cardPriceMonth }}</text>
             </view>
           </view>
+        </view>
+
+        <view v-else class="section">
+          <text class="sec-title">会员状态</text>
+          <text class="sec-sub">
+            您当前仍有剩余订餐次数（{{ serverBalance }} 次），无需再次购买会员卡，完善资料即可。
+          </text>
         </view>
 
         <view class="section">
@@ -80,7 +87,7 @@
           :disabled="avatarUploading"
           @click="onSubmit"
         >
-          保存并返回「我的」
+          {{ needsCardPayment ? '保存资料并支付开卡' : '保存并返回「我的」' }}
         </button>
       </view>
     </scroll-view>
@@ -93,6 +100,7 @@ import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { request, getMemberToken, uploadMemberAvatarFile } from '@/utils/api.js'
 import { shouldOpenMemberSetup, MEMBER_STUB_NAME, WX_DEFAULT_NICK } from '@/utils/memberProfile.js'
+import { runMemberCardWechatPay } from '@/utils/memberCardPay.js'
 
 function todayYmd() {
   const d = new Date()
@@ -113,8 +121,13 @@ const minDeliveryYmd = ref(todayYmd())
 const submitting = ref(false)
 const avatarUploading = ref(false)
 const memberPhone = ref('')
+const serverBalance = ref(0)
+/** 与后台 app_settings 同步，请求失败时用默认展示 */
+const cardPriceWeek = ref('168')
+const cardPriceMonth = ref('669')
 
 const showNickHint = computed(() => !String(nickDraft.value || '').trim())
+const needsCardPayment = computed(() => serverBalance.value <= 0)
 
 function pickPlan(p) {
   selectedPlan.value = p
@@ -129,14 +142,31 @@ onShow(() => {
     setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
     return
   }
+  void loadCardPrices()
   void loadProfile()
 })
+
+async function loadCardPrices() {
+  if (!getMemberToken()) return
+  try {
+    const d = await request('/api/user/member-card-prices', { method: 'GET' })
+    if (d && typeof d === 'object') {
+      const w = d.week_price_yuan != null ? String(d.week_price_yuan).trim() : ''
+      const m = d.month_price_yuan != null ? String(d.month_price_yuan).trim() : ''
+      if (w) cardPriceWeek.value = w
+      if (m) cardPriceMonth.value = m
+    }
+  } catch {
+    /* 使用页面默认值 */
+  }
+}
 
 async function loadProfile() {
   const phone = memberPhone.value || uni.getStorageSync('memberPhone') || ''
   if (!phone) return
   try {
     const data = await request('/api/user/me', { method: 'GET' })
+    serverBalance.value = Math.max(0, Math.floor(Number(data.balance) || 0))
     if (!shouldOpenMemberSetup(data)) {
       uni.showToast({ title: '资料已完善', icon: 'success' })
       setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 600)
@@ -207,8 +237,8 @@ async function onSubmit() {
     uni.showToast({ title: '请填写昵称', icon: 'none' })
     return
   }
-  if (!selectedPlan.value) {
-    uni.showToast({ title: '请选择套餐类型', icon: 'none' })
+  if (needsCardPayment.value && !selectedPlan.value) {
+    uni.showToast({ title: '请选择周卡或月卡', icon: 'none' })
     return
   }
   const d0 = deliveryYmd.value?.trim()
@@ -233,8 +263,10 @@ async function onSubmit() {
     const patch = {
       wechat_name: nick,
       name: nick,
-      plan_type: selectedPlan.value,
       delivery_start_date: d0,
+    }
+    if (needsCardPayment.value) {
+      patch.plan_type = selectedPlan.value
     }
     const av = String(avatarUrl.value || '').trim()
     if (isPersistableAvatarUrl(av)) {
@@ -254,10 +286,41 @@ async function onSubmit() {
     } catch {
       /*忽略 */
     }
-    uni.showToast({ title: '已保存', icon: 'success' })
-    setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+
+    if (!needsCardPayment.value) {
+      uni.showToast({ title: '已保存', icon: 'success' })
+      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+      return
+    }
+
+    uni.showLoading({ title: '拉起支付…', mask: true })
+    const { order } = await runMemberCardWechatPay({
+      cardKind: selectedPlan.value,
+      deliveryStartYmd: d0,
+      patchProfile: false,
+    })
+    uni.hideLoading()
+    const amt =
+      order && typeof order.amount_yuan === 'string' ? order.amount_yuan : ''
+    uni.showModal({
+      title: '支付成功',
+      content: amt
+        ? `已支付 ¥${amt}。剩余次数将在微信通知确认后自动到账，请稍后在「我的」查看。`
+        : '支付已完成。剩余次数将在微信通知确认后自动到账，请稍后在「我的」查看。',
+      showCancel: false,
+      success: () => {
+        uni.switchTab({ url: '/pages/mine/index' })
+      },
+    })
   } catch (err) {
-    uni.showToast({ title: err?.message || '保存失败', icon: 'none' })
+    uni.hideLoading()
+    const raw = err && typeof err === 'object' ? err : {}
+    const errMsg = typeof raw.errMsg === 'string' ? raw.errMsg : ''
+    if (errMsg.includes('cancel') || errMsg.includes('取消')) {
+      uni.showToast({ title: '已取消支付，资料已保存，可稍后继续支付', icon: 'none', duration: 3200 })
+    } else {
+      uni.showToast({ title: err?.message || '保存或支付失败', icon: 'none', duration: 2800 })
+    }
   } finally {
     submitting.value = false
   }

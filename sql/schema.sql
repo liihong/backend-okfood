@@ -166,10 +166,13 @@ CREATE TABLE IF NOT EXISTS `member_card_orders` (
   `remark` VARCHAR(500) NULL,
   `delivery_start_date` DATE NULL COMMENT '约定起送业务日，同步入账时写入 members.delivery_start_date',
   `applied_to_member` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否已按周卡6次/月卡24次写入会员并更新 plan_type',
+  `out_trade_no` VARCHAR(32) NULL DEFAULT NULL COMMENT '微信 JSAPI 商户订单号（小程序自助开卡）',
+  `wx_transaction_id` VARCHAR(32) NULL DEFAULT NULL COMMENT '微信支付订单号',
   `created_by` VARCHAR(64) NOT NULL COMMENT '后台管理员用户名',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_member_card_orders_out_trade_no` (`out_trade_no`),
   KEY `idx_member_card_orders_member` (`member_id`),
   KEY `idx_member_card_orders_status_created` (`pay_status`, `created_at`),
   CONSTRAINT `fk_member_card_orders_member` FOREIGN KEY (`member_id`) REFERENCES `members` (`id`)
@@ -251,13 +254,24 @@ CREATE TABLE IF NOT EXISTS `app_settings` (
   `store_logo_url` VARCHAR(512) NULL DEFAULT NULL COMMENT '门店 Logo 图片 URL',
   `store_lng` DECIMAL(11, 8) NULL DEFAULT NULL COMMENT '门店 GCJ-02 经度（骑手排序与地图锚点）',
   `store_lat` DECIMAL(11, 8) NULL DEFAULT NULL COMMENT '门店 GCJ-02 纬度',
+  `courier_delivery_base_yuan` DECIMAL(12, 2) NOT NULL DEFAULT 4.00 COMMENT '骑手配送费：首份基础价（元）',
+  `courier_delivery_extra_per_unit_yuan` DECIMAL(12, 2) NOT NULL DEFAULT 1.00 COMMENT '骑手配送费：同地址每多一份加价（元）',
+  `member_card_week_price_yuan` DECIMAL(12, 2) NOT NULL DEFAULT 168.00 COMMENT '小程序周卡微信支付标价（元）',
+  `member_card_month_price_yuan` DECIMAL(12, 2) NOT NULL DEFAULT 669.00 COMMENT '小程序月卡微信支付标价（元）',
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   CONSTRAINT `chk_singleton_settings` CHECK (`id` = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='全局设置';
 
-INSERT INTO `app_settings` (`id`, `leave_deadline_time`)
-VALUES (1, '21:00:00')
+INSERT INTO `app_settings` (
+  `id`,
+  `leave_deadline_time`,
+  `courier_delivery_base_yuan`,
+  `courier_delivery_extra_per_unit_yuan`,
+  `member_card_week_price_yuan`,
+  `member_card_month_price_yuan`
+)
+VALUES (1, '21:00:00', 4.00, 1.00, 168.00, 669.00)
 ON DUPLICATE KEY UPDATE `id` = `id`;
 
 CREATE TABLE IF NOT EXISTS `single_meal_orders` (

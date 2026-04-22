@@ -1,40 +1,79 @@
-"""全局 singleton `app_settings` 中的门店展示与地图锚点字段读写。"""
+"""全局 singleton `app_settings`：门店展示、地图锚点、配送费与会员卡标价。"""
 
 from __future__ import annotations
 
+from datetime import time
+from decimal import Decimal
+
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models.app_settings import AppSettings
 from app.schemas.admin import StoreConfigOut, StoreConfigUpdateIn
 
 
-def _ensure_settings_row(db: Session) -> AppSettings:
+def ensure_app_settings_row(db: Session) -> AppSettings:
+    """保证存在 id=1 的全局配置行；新建时数值类字段与当前环境变量默认对齐。"""
     row = db.get(AppSettings, 1)
     if row:
         return row
-    from datetime import time
-
-    row = AppSettings(id=1, leave_deadline_time=time(21, 0, 0))
+    s = get_settings()
+    row = AppSettings(
+        id=1,
+        leave_deadline_time=time(21, 0, 0),
+        courier_delivery_base_yuan=s.COURIER_DELIVERY_BASE_YUAN,
+        courier_delivery_extra_per_unit_yuan=s.COURIER_DELIVERY_EXTRA_PER_UNIT_YUAN,
+        member_card_week_price_yuan=s.MEMBER_CARD_WEEK_PRICE_YUAN,
+        member_card_month_price_yuan=s.MEMBER_CARD_MONTH_PRICE_YUAN,
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
     return row
 
 
-def get_store_config(db: Session) -> StoreConfigOut:
+def get_courier_delivery_fee_config(db: Session) -> tuple[Decimal, Decimal]:
+    """骑手配送费：(首份基础价, 每多一份加价)，优先读库，无行时回退 .env / 代码默认。"""
     row = db.get(AppSettings, 1)
     if not row:
-        return StoreConfigOut()
+        s = get_settings()
+        return s.COURIER_DELIVERY_BASE_YUAN, s.COURIER_DELIVERY_EXTRA_PER_UNIT_YUAN
+    return Decimal(row.courier_delivery_base_yuan), Decimal(row.courier_delivery_extra_per_unit_yuan)
+
+
+def get_member_card_prices_yuan(db: Session) -> tuple[Decimal, Decimal]:
+    """小程序周卡、月卡标价（元）；优先读库。"""
+    row = db.get(AppSettings, 1)
+    if not row:
+        s = get_settings()
+        return s.MEMBER_CARD_WEEK_PRICE_YUAN, s.MEMBER_CARD_MONTH_PRICE_YUAN
+    return Decimal(row.member_card_week_price_yuan), Decimal(row.member_card_month_price_yuan)
+
+
+def get_store_config(db: Session) -> StoreConfigOut:
+    s = get_settings()
+    row = db.get(AppSettings, 1)
+    if not row:
+        return StoreConfigOut(
+            courier_delivery_base_yuan=s.COURIER_DELIVERY_BASE_YUAN,
+            courier_delivery_extra_per_unit_yuan=s.COURIER_DELIVERY_EXTRA_PER_UNIT_YUAN,
+            member_card_week_price_yuan=s.MEMBER_CARD_WEEK_PRICE_YUAN,
+            member_card_month_price_yuan=s.MEMBER_CARD_MONTH_PRICE_YUAN,
+        )
     return StoreConfigOut(
         store_name=row.store_name,
         store_logo_url=row.store_logo_url,
         store_lng=float(row.store_lng) if row.store_lng is not None else None,
         store_lat=float(row.store_lat) if row.store_lat is not None else None,
+        courier_delivery_base_yuan=Decimal(row.courier_delivery_base_yuan),
+        courier_delivery_extra_per_unit_yuan=Decimal(row.courier_delivery_extra_per_unit_yuan),
+        member_card_week_price_yuan=Decimal(row.member_card_week_price_yuan),
+        member_card_month_price_yuan=Decimal(row.member_card_month_price_yuan),
     )
 
 
 def update_store_config(db: Session, body: StoreConfigUpdateIn) -> StoreConfigOut:
-    row = _ensure_settings_row(db)
+    row = ensure_app_settings_row(db)
     data = body.model_dump(exclude_unset=True)
     if "store_name" in data:
         row.store_name = data["store_name"]
@@ -44,6 +83,14 @@ def update_store_config(db: Session, body: StoreConfigUpdateIn) -> StoreConfigOu
         row.store_lng = data["store_lng"]
     if "store_lat" in data:
         row.store_lat = data["store_lat"]
+    if "courier_delivery_base_yuan" in data and data["courier_delivery_base_yuan"] is not None:
+        row.courier_delivery_base_yuan = data["courier_delivery_base_yuan"]
+    if "courier_delivery_extra_per_unit_yuan" in data and data["courier_delivery_extra_per_unit_yuan"] is not None:
+        row.courier_delivery_extra_per_unit_yuan = data["courier_delivery_extra_per_unit_yuan"]
+    if "member_card_week_price_yuan" in data and data["member_card_week_price_yuan"] is not None:
+        row.member_card_week_price_yuan = data["member_card_week_price_yuan"]
+    if "member_card_month_price_yuan" in data and data["member_card_month_price_yuan"] is not None:
+        row.member_card_month_price_yuan = data["member_card_month_price_yuan"]
     db.add(row)
     db.commit()
     db.refresh(row)

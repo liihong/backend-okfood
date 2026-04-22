@@ -56,11 +56,8 @@ def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
     )
 
 
-def _sync_order_to_member(db: Session, order: MemberCardOrder, *, operator: str) -> None:
-    if order.applied_to_member:
-        raise HTTPException(status_code=400, detail="该工单已入账，请勿重复同步")
-    if order.pay_status != CardOrderPayStatus.PAID.value:
-        raise HTTPException(status_code=400, detail="仅「已缴」工单可同步会员次数")
+def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder, *, operator: str) -> None:
+    """已缴且未入账：按卡型叠加次数/总配额并更新起送日（幂等由调用方保证）。"""
     m = db.get(Member, order.member_id)
     if not m:
         raise HTTPException(status_code=404, detail="会员不存在")
@@ -90,6 +87,23 @@ def _sync_order_to_member(db: Session, order: MemberCardOrder, *, operator: str)
     m.is_active = True
     m.delivery_start_date = start
     order.applied_to_member = True
+
+
+def apply_paid_card_order_to_member_if_pending(db: Session, order: MemberCardOrder, *, operator: str) -> None:
+    """支付回调等场景：仅当已缴且未入账时入账（可重复调用）。"""
+    if order.applied_to_member:
+        return
+    if order.pay_status != CardOrderPayStatus.PAID.value:
+        return
+    _apply_paid_card_order_to_member_balance(db, order, operator=operator)
+
+
+def _sync_order_to_member(db: Session, order: MemberCardOrder, *, operator: str) -> None:
+    if order.applied_to_member:
+        raise HTTPException(status_code=400, detail="该工单已入账，请勿重复同步")
+    if order.pay_status != CardOrderPayStatus.PAID.value:
+        raise HTTPException(status_code=400, detail="仅「已缴」工单可同步会员次数")
+    _apply_paid_card_order_to_member_balance(db, order, operator=operator)
 
 
 def list_card_orders_paged(

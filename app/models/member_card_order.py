@@ -27,6 +27,8 @@ class MemberCardOrder(Base):
     remark: Mapped[str | None] = mapped_column(String(500), nullable=True)
     delivery_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     applied_to_member: Mapped[bool] = mapped_column(Boolean, default=False)
+    out_trade_no: Mapped[str | None] = mapped_column(String(32), nullable=True, unique=True)
+    wx_transaction_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_by: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

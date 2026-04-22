@@ -9,6 +9,7 @@ import logging
 import secrets
 import time
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import unquote
 
@@ -73,6 +74,37 @@ def sign_params_hmac_sha256(params: dict[str, Any], api_key: str | None = None) 
     key = api_key if api_key is not None else _api_key()
     s = f"{_string_a(params)}&key={key}"
     return hmac.new(key.encode("utf-8"), s.encode("utf-8"), hashlib.sha256).hexdigest().upper()
+
+
+@dataclass(frozen=True)
+class WechatPayNotifyParsed:
+    """支付结果通知中已通过验签与基础字段校验的数据。"""
+
+    out_trade_no: str
+    transaction_id: str
+    total_fee: int
+
+
+def parse_wechat_pay_notify(data: dict[str, str]) -> tuple[bool, str, WechatPayNotifyParsed | None]:
+    """校验微信异步通知签名与 return/result_code，解析 out_trade_no、transaction_id、total_fee（分）。"""
+    if (data.get("return_code") or "").upper() != "SUCCESS":
+        return False, (data.get("return_msg") or "return_fail")[:200], None
+    if not verify_response_sign(data):
+        logger.error("微信回调签名校验失败: %s", {k: data.get(k) for k in ("out_trade_no", "result_code")})
+        return False, "sign", None
+    if (data.get("result_code") or "").upper() != "SUCCESS":
+        return False, (data.get("err_code_des") or data.get("err_code") or "result_fail")[:200], None
+
+    out_no = (data.get("out_trade_no") or "").strip()
+    tx_id = (data.get("transaction_id") or "").strip()
+    fee_s = (data.get("total_fee") or "").strip()
+    if not out_no or not fee_s:
+        return False, "missing_field", None
+    try:
+        total_fee = int(fee_s)
+    except ValueError:
+        return False, "total_fee", None
+    return True, "", WechatPayNotifyParsed(out_trade_no=out_no, transaction_id=tx_id, total_fee=total_fee)
 
 
 def verify_response_sign(data: dict[str, str]) -> bool:

@@ -104,17 +104,71 @@ export function addDaysIso(isoDate, days) {
   return `${y}-${m}-${day}`
 }
 
+/** 单点：上海时间该时刻起不可再下「当日供餐」单（与后端 `time(10,0,0)` 一致，含 10:00:00 起算） */
+export const SINGLE_ORDER_CUTOFF_HOUR = 10
+
 /**
- * 单次卡 / 单点：仅允许选「当日」「明日」供餐日下单（与周菜单 `serviceDate` 比较）
- * @param {string} [serviceDateYmd] YYYY-MM-DD
+ * 上海时区是否已过单点业务「当日」截单点（与后端 `time(10,0,0)` 一致）
+ * @param {Date} [now]
+ * @param {number} [cutoffHour] 默认 10
  */
-export function isSingleOrderServiceDate(serviceDateYmd) {
+export function isShanghaiPastDailyCutoff(
+  now = new Date(),
+  cutoffHour = SINGLE_ORDER_CUTOFF_HOUR,
+) {
+  const h0 = Math.floor(Number(cutoffHour)) || 0
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Shanghai',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(now)
+    const h = parseInt(parts.find((p) => p.type === 'hour')?.value || '0', 10) || 0
+    const min = parseInt(parts.find((p) => p.type === 'minute')?.value || '0', 10) || 0
+    const sec = parseInt(parts.find((p) => p.type === 'second')?.value || '0', 10) || 0
+    if (h > h0) return true
+    if (h < h0) return false
+    return min > 0 || sec > 0
+  } catch {
+    const d = new Date(now)
+    return d.getHours() > h0 || (d.getHours() === h0 && (d.getMinutes() > 0 || d.getSeconds() > 0))
+  }
+}
+
+/**
+ * 单点：仅「当日」「明日」供餐日可下单；全体会员在当日 10:00（上海）后不可再下「当日」单，仅可次日
+ * @param {string} [serviceDateYmd] YYYY-MM-DD
+ * @param {{ now?: Date }} [opts] 可传 `now` 便于测试
+ */
+export function isSingleOrderServiceDate(serviceDateYmd, opts) {
   if (!serviceDateYmd || typeof serviceDateYmd !== 'string') return false
   const t = serviceDateYmd.trim()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return false
-  const today = ymdTodayShanghai()
+  const now = opts && opts.now != null ? opts.now : new Date()
+  const today = ymdTodayShanghai(now)
   const tomorrow = addDaysIso(today, 1)
-  return t === today || t === tomorrow
+  if (t !== today && t !== tomorrow) return false
+  if (!isShanghaiPastDailyCutoff(now)) return true
+  return t === tomorrow
+}
+
+/**
+ * @param {string} serviceDateYmd
+ * @param {{ now?: Date }} [opts]
+ * @returns {string} 空串表示可下单
+ */
+export function singleOrderServiceDateError(serviceDateYmd, opts) {
+  if (isSingleOrderServiceDate(serviceDateYmd, opts)) return ''
+  const now = opts && opts.now != null ? opts.now : new Date()
+  const t = String(serviceDateYmd || '').trim()
+  const today = ymdTodayShanghai(now)
+  const inWindow = t === today || t === addDaysIso(today, 1)
+  if (inWindow && isShanghaiPastDailyCutoff(now) && t === today) {
+    return '每日 10:00 后仅可下次日及之后的单点单'
+  }
+  return '仅当日与次日餐品可单点'
 }
 
 /**

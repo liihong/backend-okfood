@@ -76,6 +76,7 @@ import {
   fetchMenuDetail,
   formatMenuPrice,
   isSingleOrderServiceDate,
+  singleOrderServiceDateError,
 } from '@/utils/menuApi.js'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { getMemberToken, request } from '@/utils/api.js'
@@ -162,10 +163,9 @@ onLoad((options) => {
   }
   if (!isSingleOrderServiceDate(serviceDateYmd.value)) {
     loading.value = false
-    loadError.value = '仅当日与次日餐品可单点'
+    loadError.value = singleOrderServiceDateError(serviceDateYmd.value)
     return
   }
-
   loadPage()
 })
 

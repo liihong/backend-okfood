@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 
@@ -31,8 +33,11 @@ from app.models.member import Member
 from app.schemas.user import (
     ActivateIn,
     LeaveIn,
+    MemberCardPricesOut,
     ProfilePatchIn,
     RegisterIn,
+    UserMemberCardOrderCreateIn,
+    UserMemberCardOrderOut,
     WxMiniJsCodeIn,
     WxMiniLoginIn,
 )
@@ -59,7 +64,14 @@ from app.services.member_service import (
 
 from app.schemas.single_meal_order import SingleMealOrderCreateIn
 
+from app.services.member_card_pay_service import (
+    create_miniprogram_member_card_order,
+    member_card_order_user_dict,
+    prepare_wechat_jsapi_for_member_card_order,
+)
 from app.services.single_meal_order_service import create_single_meal_order, prepare_wechat_jsapi_for_order
+
+from app.services.store_config_service import get_member_card_prices_yuan
 
 from app.integrations.wechat_pay_v2 import resolve_request_client_ip
 
@@ -198,7 +210,17 @@ def read_member_me(db: SessionDep, member_id: int = Depends(member_subject)):
     return success(data=dump_model(member), msg="获取成功")
 
 
+@router.get("/member-card-prices")
+def read_member_card_prices(db: SessionDep, member_id: int = Depends(member_subject)):
+    """周卡/月卡当前标价（与自助开卡下单金额一致，数据来自后台门店配置）。"""
+    _ = member_id
+    wk, mo = get_member_card_prices_yuan(db)
 
+    def fmt(d: Decimal) -> str:
+        return format(d.quantize(Decimal("0.01")), "f")
+
+    payload = MemberCardPricesOut(week_price_yuan=fmt(wk), month_price_yuan=fmt(mo))
+    return success(data=dump_model(payload), msg="获取成功")
 
 
 @router.get("/me/addresses")
@@ -317,7 +339,39 @@ def prepay_single_order_wechat(
     return success(data=params, msg="获取支付参数成功")
 
 
+@router.post("/member-card-orders")
+@limiter.limit("30/minute")
+def create_member_card_order_me(
+    request: Request,
+    body: UserMemberCardOrderCreateIn,
+    db: SessionDep,
+    member_id: int = Depends(member_subject),
+):
+    """自助开卡/续卡：创建未缴工单；支付成功后在微信回调中叠加剩余次数与总配额。"""
+    _ = request
+    row = create_miniprogram_member_card_order(
+        db,
+        member_id,
+        card_kind=body.card_kind.value,
+        delivery_start_date=body.delivery_start_date,
+    )
+    payload = UserMemberCardOrderOut.model_validate(member_card_order_user_dict(row))
+    return success(data=dump_model(payload), msg="订单已创建，请继续支付")
 
+
+@router.post("/member-card-orders/{order_id}/pay/wechat-jsapi")
+@limiter.limit("30/minute")
+def prepay_member_card_order_wechat(
+    request: Request,
+    order_id: int,
+    db: SessionDep,
+    member_id: int = Depends(member_subject),
+):
+    """开卡工单微信统一下单（JSAPI）。"""
+    xf = request.headers.get("x-forwarded-for")
+    ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
+    params = prepare_wechat_jsapi_for_member_card_order(db, member_id, order_id, ip)
+    return success(data=params, msg="获取支付参数成功")
 
 
 @router.patch("/profile")
