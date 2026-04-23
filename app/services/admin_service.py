@@ -74,10 +74,22 @@ def _apply_member_list_filters(
         q = q_phone.strip()
         if q:
             esc = _escape_like_fragment(q)
+            # 与列表页搜索框「姓名、电话、片区地址」提示一致：默认地址详细行
+            dap = default_address_pick_subquery()
+            ma = aliased(MemberAddress)
+            addr_match = exists(
+                select(1)
+                .select_from(dap)
+                .join(ma, ma.id == dap.c.addr_id)
+                .where(dap.c.mid == Member.id)
+                .where(ma.detail_address.like(f"%{esc}%", escape="\\"))
+            )
             stmt = stmt.where(
                 or_(
                     Member.phone.like(f"{esc}%", escape="\\"),
                     Member.name.like(f"%{esc}%", escape="\\"),
+                    Member.wechat_name.like(f"%{esc}%", escape="\\"),
+                    addr_match,
                 )
             )
     if validity == "active":

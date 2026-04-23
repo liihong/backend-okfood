@@ -17,6 +17,7 @@ class BalanceReason(str, Enum):
     RECHARGE = "recharge"
     DELIVERY = "delivery"
     REFUND = "refund"
+    ADMIN_ADJUST = "admin_adjust"
 
 
 class LeaveType(str, Enum):

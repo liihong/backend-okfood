@@ -197,6 +197,7 @@ def card_orders_patch(
 
 @router.post("/member/profile")
 def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+    fs = body.model_fields_set
     member = admin_patch_member_profile(
         db,
         phone=body.phone,
@@ -207,6 +208,10 @@ def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_usernam
         operator=admin_username,
         daily_meal_units=body.daily_meal_units,
         plan_type=body.plan_type,
+        set_balance="balance" in fs,
+        balance=body.balance,
+        set_delivery_start_date="delivery_start_date" in fs,
+        delivery_start_date=body.delivery_start_date,
     )
     return success(data=dump_model(member), msg="会员信息已更新")
 

@@ -20,7 +20,9 @@ from app.models.weekly_menu_slot import WeeklyMenuSlot
 
 from app.constants import STUB_MEMBER_NAME, UNASSIGNED_DELIVERY_AREA
 
-from app.models.enums import LeaveType, PlanType
+from app.models.balance_log import BalanceLog
+
+from app.models.enums import BalanceReason, LeaveType, PlanType
 
 from app.models.member import Member
 
@@ -968,6 +970,14 @@ def admin_patch_member_profile(
 
     plan_type: PlanType | None = None,
 
+    set_balance: bool = False,
+
+    balance: int | None = None,
+
+    set_delivery_start_date: bool = False,
+
+    delivery_start_date: date | None = None,
+
 ) -> MemberOut:
 
     _ = operator
@@ -985,6 +995,10 @@ def admin_patch_member_profile(
         and plan_type is None
 
         and not use_auto_area
+
+        and not set_balance
+
+        and not set_delivery_start_date
 
     ):
 
@@ -1043,6 +1057,72 @@ def admin_patch_member_profile(
             raise HTTPException(status_code=400, detail="该会员暂无默认配送地址，无法自动划区")
 
         apply_auto_area_from_coords_or_geocode(db, addr)
+
+    if set_balance:
+
+        if balance is None:
+
+            raise HTTPException(status_code=400, detail="剩余次数不能为空")
+
+        new_b = int(balance)
+
+        if new_b < 0 or new_b > 999_999:
+
+            raise HTTPException(status_code=400, detail="剩余次数超出允许范围")
+
+        old_b = int(m.balance)
+
+        if new_b != old_b:
+
+            delta = new_b - old_b
+
+            m.balance = new_b
+
+            op = (operator or "").strip()[:50] or "admin"
+
+            detail = f"档案修改 {old_b}→{new_b}"
+
+            db.add(
+
+                BalanceLog(
+
+                    member_id=m.id,
+
+                    change=delta,
+
+                    reason=BalanceReason.ADMIN_ADJUST.value,
+
+                    operator=op,
+
+                    detail=detail[:500],
+
+                )
+
+            )
+
+        if new_b > 0:
+
+            m.is_active = True
+
+        else:
+
+            m.is_active = False
+
+    if set_delivery_start_date:
+
+        if delivery_start_date is not None:
+
+            m.delivery_start_date = delivery_start_date
+
+            m.delivery_deferred = False
+
+            if int(m.balance) > 0:
+
+                m.is_active = True
+
+        else:
+
+            m.delivery_start_date = None
 
     if daily_meal_units is not None:
         if daily_meal_units < 1 or daily_meal_units > MAX_DAILY_MEAL_UNITS:

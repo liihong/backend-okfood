@@ -102,10 +102,11 @@ async function fetchMembers() {
     }
     const qs = params.toString()
     const data = await apiJson(`/api/admin/users?${qs}`, {}, { auth: true })
-    const rows = (data.items || []).map(mapAdminUserToRow)
+    const rawItems = Array.isArray(data?.items) ? data.items : []
+    const rows = rawItems.map(mapAdminUserToRow)
     membersRows.value = rows
     memberList.value = rows
-    membersTotal.value = Number(data.total) || 0
+    membersTotal.value = Number(data?.total) || 0
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -231,6 +232,10 @@ const editForm = ref({
   /** 档案套餐标签：与列表「周卡/月卡」角标一致；仅改展示与统计口径，不自动改余额 */
   plan_type: '次卡',
   use_auto_area: false,
+  /** 会员剩余订餐次数（管理端直接改数，差值记入 balance_logs） */
+  balance: 0,
+  /** 起送业务日 YYYY-MM-DD，空表示未设置 */
+  delivery_start_date: '',
 })
 
 /** 编辑框仅填详细地址：优先 API 的 detail_address，否则从旧版「片区 + 详细」展示串回推 */
@@ -259,6 +264,11 @@ async function openEditMember(u) {
     daily_meal_units: Math.max(1, Math.min(50, Number(u.daily_meal_units) || 1)),
     plan_type: p0,
     use_auto_area: false,
+    balance: Math.max(0, Math.min(999999, Math.floor(Number(u.balance) || 0))),
+    delivery_start_date:
+      typeof u.delivery_start_date === 'string' && u.delivery_start_date.trim()
+        ? u.delivery_start_date.trim().slice(0, 10)
+        : '',
   }
   showEditModal.value = true
 }
@@ -273,6 +283,10 @@ async function submitEditMember() {
       remarks: editForm.value.remarks.trim() || null,
       address: editForm.value.address.trim(),
       daily_meal_units: Math.max(1, Math.min(50, Number(editForm.value.daily_meal_units) || 1)),
+      balance: Math.max(0, Math.min(999999, Math.floor(Number(editForm.value.balance) || 0))),
+      delivery_start_date: editForm.value.delivery_start_date?.trim()
+        ? editForm.value.delivery_start_date.trim().slice(0, 10)
+        : null,
     }
     if (editForm.value.use_auto_area) {
       payload.use_auto_area = true
@@ -545,6 +559,27 @@ onMounted(async () => {
               <span>保存时按地址/坐标重新自动划区</span>
             </label>
             <p class="modal-hint">片区由坐标匹配「配送区域」多边形生成，后台不可手写或下拉指定。</p>
+          </div>
+          <div class="form-group">
+            <label>开始配送日期（起送业务日）</label>
+            <input v-model="editForm.delivery_start_date" type="date" />
+            <p class="modal-hint">
+              上海业务日：该日及之后才进入配送排期；留空表示未设置起送日。保存时会与「未开卡 / 余额」等规则一并生效。
+            </p>
+          </div>
+          <div class="form-group">
+            <label>会员剩余次数</label>
+            <input
+              v-model.number="editForm.balance"
+              type="number"
+              min="0"
+              max="999999"
+              step="1"
+              required
+            />
+            <p class="modal-hint">
+              直接修改当前剩余订餐次数；与旧值的差额会写入余额流水（原因：管理端调整）。常规续卡仍建议走「开卡工单」入账。
+            </p>
           </div>
           <div class="form-group">
             <label>每配送日份数</label>

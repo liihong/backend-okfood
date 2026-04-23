@@ -196,6 +196,29 @@ export function planDefaultTotal(planType) {
 
 /** GET /api/admin/users 单条映射为表格行 */
 export function mapAdminUserToRow(raw, idx) {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      id: `row-${idx}`,
+      name: '—',
+      phone: '',
+      balance: 0,
+      delivery_start_date: '',
+      balanceLabel: '0',
+      totalQuota: null,
+      area: '—',
+      address: '',
+      detail_address: '',
+      plan: '次卡',
+      remarks: '',
+      daily_meal_units: 1,
+      meal_quota_total: 0,
+      wechat_name: '',
+      is_active: false,
+      is_on_leave_today: false,
+      tomorrow_leave: false,
+      status: '未开卡',
+    }
+  }
   const balance = Number(raw.balance) || 0
   const active = raw.is_active !== false
   const onLeaveToday = raw.is_on_leave_today === true
@@ -218,11 +241,19 @@ export function mapAdminUserToRow(raw, idx) {
       : null
   const balanceLabel = displayTotal != null ? `${balance} / ${displayTotal}` : String(balance)
 
+  const ds = raw.delivery_start_date
+  let deliveryStartYmd = ''
+  if (ds != null && String(ds).trim()) {
+    const s = String(ds).trim()
+    deliveryStartYmd = s.length >= 10 ? s.slice(0, 10) : s
+  }
+
   return {
     id: raw.id != null ? raw.id : raw.phone || `row-${idx}`,
     name: raw.name || '—',
     phone: raw.phone || '',
     balance,
+    delivery_start_date: deliveryStartYmd,
     balanceLabel,
     totalQuota,
     area: raw.area || '—',
