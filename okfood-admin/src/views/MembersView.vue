@@ -158,6 +158,7 @@ const memberStatusClass = (status) => {
   if (status === '请假中') return 'member-pill member-pill--rose'
   if (status === '待续费') return 'member-pill member-pill--amber'
   if (status === '未开卡') return 'member-pill member-pill--slate'
+  if (status === '暂停配送') return 'member-pill member-pill--slate'
   return 'member-pill member-pill--emerald'
 }
 
@@ -242,9 +243,18 @@ const editForm = ref({
   delivery_start_date: '',
   /** 门店自提 */
   store_pickup: false,
+  /** 会员卡停用(暂停配送/先不开卡)，同 members.delivery_deferred；勾选后不参与排期与分拣 */
+  delivery_deferred: false,
   /** 配送片区：'' 表示未分配，否则为区域 id 字符串（与下拉 value 一致） */
   delivery_region_id: '',
 })
+
+watch(
+  () => editForm.value.delivery_deferred,
+  (v) => {
+    if (v) editForm.value.store_pickup = false
+  },
+)
 
 /** 编辑框仅填详细地址：优先 API 的 detail_address，否则从旧版「片区 + 详细」展示串回推 */
 function defaultAddressDetailForEdit(u) {
@@ -280,6 +290,7 @@ async function openEditMember(u) {
         ? u.delivery_start_date.trim().slice(0, 10)
         : '',
     store_pickup: u.store_pickup === true,
+    delivery_deferred: u.delivery_deferred === true,
     delivery_region_id: dr,
   }
   showEditModal.value = true
@@ -300,6 +311,7 @@ async function submitEditMember() {
         ? editForm.value.delivery_start_date.trim().slice(0, 10)
         : null,
       store_pickup: editForm.value.store_pickup === true,
+      delivery_deferred: editForm.value.delivery_deferred === true,
     }
     if (editForm.value.use_auto_area) {
       payload.use_auto_area = true
@@ -599,10 +611,17 @@ onMounted(async () => {
             <label>开始配送日期（起送业务日）</label>
             <input v-model="editForm.delivery_start_date" type="date" />
             <p class="modal-hint">
-              上海业务日：该日及之后才进入配送排期；留空表示未设置起送日。保存时会与「未开卡 / 余额」等规则一并生效。
+              上海业务日：该日及之后才进入配送排期；留空表示未设置起送日。保存时会与「未开卡 / 余额」等规则一并生效；勾选「暂停配送」时保存会清空起送日。
             </p>
             <label class="checkbox-row" style="margin-top: 12px">
-              <input v-model="editForm.store_pickup" type="checkbox" />
+              <input v-model="editForm.delivery_deferred" type="checkbox" />
+              <span>暂停配送（会员卡停用）</span>
+            </label>
+            <p class="modal-hint" style="margin-top: 6px">
+              与小程序「暂不配送 / 先不开卡」为同一数据字段。勾选后不参与配送大表/分拣、不计入开卡分货，并会清空起送日、关闭门店自提。取消勾选且有余额时恢复为在册活跃（是否排期仍取决于起送日等条件）。
+            </p>
+            <label class="checkbox-row" style="margin-top: 12px">
+              <input v-model="editForm.store_pickup" type="checkbox" :disabled="editForm.delivery_deferred" />
               <span>门店自提（不到家配送，仍计入备餐大表「门店自提」分组）</span>
             </label>
           </div>

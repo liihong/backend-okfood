@@ -240,6 +240,7 @@ def list_members_paged(
                 meal_quota_total=m.meal_quota_total,
                 plan_type=m.plan_type,
                 is_active=m.is_active,
+                delivery_deferred=bool(m.delivery_deferred),
                 is_leaved_tomorrow=m.is_leaved_tomorrow,
                 leave_range_start=m.leave_range_start,
                 leave_range_end=m.leave_range_end,

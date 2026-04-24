@@ -214,6 +214,10 @@ class MemberAdminOut(BaseModel):
     )
     plan_type: str | None
     is_active: bool
+    delivery_deferred: bool = Field(
+        False,
+        description="会员卡停用(暂不配送/先不开卡/暂停配送)；与 is_active/起送日 联动，同 members.delivery_deferred",
+    )
     is_leaved_tomorrow: bool = Field(False, description="已勾选仅明天请假（不影响今日配送）")
     leave_range_start: date | None = None
     leave_range_end: date | None = None
@@ -282,6 +286,10 @@ class AdminMemberPatchIn(BaseModel):
     store_pickup: bool | None = Field(
         None,
         description="门店自提；提交则更新；与配送到家互斥",
+    )
+    delivery_deferred: bool | None = Field(
+        None,
+        description="会员卡停用(暂停配送/先不开卡)：与小程序「暂不配送」同字段；为 true 时 is_active=false 并清空起送日；提交则总是更新本项时传入 true/false",
     )
 
     @field_validator("daily_meal_units", mode="before")

@@ -1017,6 +1017,10 @@ def admin_patch_member_profile(
 
     delivery_region_id: int | None = None,
 
+    set_delivery_deferred: bool = False,
+
+    delivery_deferred: bool | None = None,
+
 ) -> MemberOut:
 
     _ = operator
@@ -1042,6 +1046,8 @@ def admin_patch_member_profile(
         and not set_store_pickup
 
         and not set_delivery_region_id
+
+        and not set_delivery_deferred
 
     ):
 
@@ -1194,6 +1200,28 @@ def admin_patch_member_profile(
             raise HTTPException(status_code=400, detail="门店自提标记不能为空")
 
         m.store_pickup = bool(store_pickup)
+
+    if set_delivery_deferred:
+
+        if delivery_deferred is None:
+
+            raise HTTPException(status_code=400, detail="暂停配送(会员卡停用)状态不能为空")
+
+        if delivery_deferred:
+
+            m.delivery_deferred = True
+
+            m.is_active = False
+
+            m.delivery_start_date = None
+
+            m.store_pickup = False
+
+        else:
+
+            m.delivery_deferred = False
+
+            m.is_active = int(m.balance) > 0
 
     if daily_meal_units is not None:
         if daily_meal_units < 1 or daily_meal_units > MAX_DAILY_MEAL_UNITS:

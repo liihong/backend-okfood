@@ -215,6 +215,7 @@ export function mapAdminUserToRow(raw, idx) {
       meal_quota_total: 0,
       wechat_name: '',
       is_active: false,
+      delivery_deferred: false,
       is_on_leave_today: false,
       tomorrow_leave: false,
       status: '未开卡',
@@ -223,12 +224,15 @@ export function mapAdminUserToRow(raw, idx) {
   }
   const balance = Number(raw.balance) || 0
   const active = raw.is_active !== false
+  const deferred = raw.delivery_deferred === true
   const onLeaveToday = raw.is_on_leave_today === true
   const tomorrowLeave = raw.is_leaved_tomorrow === true
 
   let status = '活跃中'
-  if (!active) status = '未开卡'
-  else if (onLeaveToday) status = '请假中'
+  if (!active) {
+    if (deferred) status = '暂停配送'
+    else status = '未开卡'
+  } else if (onLeaveToday) status = '请假中'
   else if (balance <= 2) status = '待续费'
 
   const plan = raw.plan_type || '次卡'
@@ -271,6 +275,7 @@ export function mapAdminUserToRow(raw, idx) {
     meal_quota_total: hasPersistedTotal ? mealQuotaTotal : 0,
     wechat_name: raw.wechat_name ?? '',
     is_active: active,
+    delivery_deferred: deferred,
     is_on_leave_today: onLeaveToday,
     tomorrow_leave: active && !onLeaveToday && tomorrowLeave,
     status,
