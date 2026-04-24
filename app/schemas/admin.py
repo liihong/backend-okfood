@@ -200,6 +200,10 @@ class MemberAdminOut(BaseModel):
     )
     avatar_url: str | None
     area: str = Field(..., description="默认地址配送片区展示名")
+    delivery_region_id: int | None = Field(
+        None,
+        description="默认地址绑定的配送区域 id；未分配时为 null",
+    )
     remarks: str | None = None
     balance: int
     daily_meal_units: int = Field(1, ge=1, description="每配送日份数；与配送扣次、备餐统计一致")
@@ -248,7 +252,11 @@ class AdminMemberPatchIn(BaseModel):
     address: str | None = Field(None, max_length=500, description="默认配送地址详细行，提交则重算坐标与自动划区")
     use_auto_area: bool = Field(
         False,
-        description="按当前详细地址与坐标重新自动划区；若无坐标则先尝试高德地理编码再划区",
+        description="按当前详细地址与坐标重新自动划区；若无坐标则先尝试高德地理编码再划区；为 true 时不采用手动指定的 delivery_region_id",
+    )
+    delivery_region_id: int | None = Field(
+        None,
+        description="手动指定默认地址的配送片区 id；提交 null 表示清空片区。与 use_auto_area 同时为 true 时以自动划区为准",
     )
     daily_meal_units: int | None = Field(
         None,
@@ -364,9 +372,9 @@ class CardOrderCreateIn(BaseModel):
         max_length=100,
         description="微信昵称：有值则写入 members.wechat_name；传空串可清空",
     )
-    delivery_start_date: date = Field(
-        ...,
-        description="起送业务日（上海）：此前不参与配送大表；同步入账时写入会员并激活计划",
+    delivery_start_date: date | None = Field(
+        None,
+        description="起送业务日（上海）；空表示暂不开卡：已缴入账仍加次数/套餐，但不写会员起送日、不强制激活",
     )
     card_kind: CardOrderKind
     pay_channel: CardPayChannel
@@ -375,7 +383,7 @@ class CardOrderCreateIn(BaseModel):
     remark: str | None = Field(None, max_length=500)
     sync_member: bool = Field(
         False,
-        description="当缴费状态为已缴时，是否立即按周卡+6次/月卡+24次入账并更新会员 plan_type",
+        description="已废弃：缴费状态为「已缴」时创建工单将自动同步次数与套餐，无需再传",
     )
 
 
@@ -391,7 +399,7 @@ class CardOrderPatchIn(BaseModel):
     remark: str | None = Field(None, max_length=500)
     sync_member: bool = Field(
         False,
-        description="当工单为已缴且尚未入账时，是否同步会员次数（可与其它字段一并提交）",
+        description="已废弃：工单为「已缴」且尚未入账时，任意保存将自动同步会员次数",
     )
 
 

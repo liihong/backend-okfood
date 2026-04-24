@@ -106,6 +106,23 @@ def upsert_default_address_after_register(
     )
 
 
+def admin_apply_manual_delivery_region(
+    db: Session,
+    *,
+    member_id: int,
+    delivery_region_id: int | None,
+) -> None:
+    """管理端手动指定默认地址的配送片区（不 commit）。``delivery_region_id`` 为 None 表示清空。"""
+    addr = get_default_address(db, member_id)
+    if not addr:
+        raise HTTPException(status_code=400, detail="该会员暂无默认配送地址，无法分配片区")
+    if delivery_region_id is not None:
+        r = db.get(DeliveryRegion, int(delivery_region_id))
+        if r is None:
+            raise HTTPException(status_code=400, detail="配送片区不存在")
+    addr.delivery_region_id = delivery_region_id
+
+
 def admin_set_default_address_detail(
     db: Session,
     *,

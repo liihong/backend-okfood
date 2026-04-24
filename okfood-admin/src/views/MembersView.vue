@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, computed, onMounted } from 'vue'
+import { ref, watch, computed, onMounted, nextTick } from 'vue'
 import { Search, Phone, X } from 'lucide-vue-next'
 import {
   apiJson,
@@ -32,6 +32,11 @@ const membersStatsLoading = ref(true)
 const membersTotalPages = computed(() =>
   Math.max(1, Math.ceil(membersTotal.value / membersPageSize.value)),
 )
+
+/** el-table 行主键：组合 id+phone，避免 bigint/重复 id 导致 Diff 落在已销毁的 DOM 上 */
+function memberRowKey(row) {
+  return `${String(row?.id ?? '')}__${String(row?.phone ?? '')}`
+}
 
 function validityQuery() {
   return membersValidityTab.value === 'expired' ? 'expired' : 'active'
@@ -107,6 +112,7 @@ async function fetchMembers() {
     membersRows.value = rows
     memberList.value = rows
     membersTotal.value = Number(data?.total) || 0
+    await nextTick()
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -218,8 +224,6 @@ async function submitLeaveMember() {
 /** --- 修改会员 --- */
 const showEditModal = ref(false)
 const editSaving = ref(false)
-/** 弹窗内只读展示的当前片区（接口解析名） */
-const editAreaDisplay = ref('—')
 /** 打开编辑弹窗时的套餐类型，用于判断是否与档案一致、是否提交 plan_type */
 const editInitialPlanType = ref('次卡')
 const editForm = ref({
@@ -238,6 +242,8 @@ const editForm = ref({
   delivery_start_date: '',
   /** 门店自提 */
   store_pickup: false,
+  /** 配送片区：'' 表示未分配，否则为区域 id 字符串（与下拉 value 一致） */
+  delivery_region_id: '',
 })
 
 /** 编辑框仅填详细地址：优先 API 的 detail_address，否则从旧版「片区 + 详细」展示串回推 */
@@ -254,10 +260,12 @@ function defaultAddressDetailForEdit(u) {
 }
 
 async function openEditMember(u) {
-  const ad = typeof u.area === 'string' && u.area.trim() ? u.area.trim() : '未分配'
-  editAreaDisplay.value = ad === '—' ? '未分配' : ad
   const p0 = u.plan && u.plan !== '—' ? u.plan : '次卡'
   editInitialPlanType.value = p0
+  const dr =
+    u.delivery_region_id != null && u.delivery_region_id !== ''
+      ? String(u.delivery_region_id)
+      : ''
   editForm.value = {
     phone: u.phone,
     name: u.name || '',
@@ -272,6 +280,7 @@ async function openEditMember(u) {
         ? u.delivery_start_date.trim().slice(0, 10)
         : '',
     store_pickup: u.store_pickup === true,
+    delivery_region_id: dr,
   }
   showEditModal.value = true
 }
@@ -294,6 +303,9 @@ async function submitEditMember() {
     }
     if (editForm.value.use_auto_area) {
       payload.use_auto_area = true
+    } else {
+      const dr = editForm.value.delivery_region_id
+      payload.delivery_region_id = dr === '' || dr == null ? null : Number(dr)
     }
     const pt = String(editForm.value.plan_type || '次卡').trim() || '次卡'
     if (pt !== editInitialPlanType.value) {
@@ -325,31 +337,34 @@ async function submitEditMember() {
 
 onMounted(async () => {
   await loadRegionFilterOptions()
-  await Promise.all([fetchMembers(), fetchMemberStats()])
+  await fetchMemberStats()
+  await fetchMembers()
 })
 </script>
 
 <template>
   <section class="tab-content animate-up">
-    <Teleport to="#admin-page-title-extra">
-      <div v-if="adminAccessToken" class="members-header-stats">
-        <template v-if="membersStats.total !== null">
-          当前总会员：<strong>{{ membersStats.total }}</strong> 个，生效中
-          <strong>{{ membersStats.active }}</strong> 个，已过期
-          <strong>{{ membersStats.expired }}</strong> 个
-        </template>
-        <span v-else-if="membersStatsLoading" class="members-header-stats--muted">统计加载中…</span>
-        <span v-else class="members-header-stats--muted">统计暂不可用</span>
-      </div>
-    </Teleport>
     <div class="table-container">
       <div class="table-header table-header--members">
+        <div
+          v-if="adminAccessToken"
+          class="members-header-stats members-header-stats--inline"
+          aria-live="polite"
+        >
+          <template v-if="membersStats.total !== null">
+            当前总会员：<strong>{{ membersStats.total }}</strong> 个，生效中
+            <strong>{{ membersStats.active }}</strong> 个，已过期
+            <strong>{{ membersStats.expired }}</strong> 个
+          </template>
+          <span v-else-if="membersStatsLoading" class="members-header-stats--muted">统计加载中…</span>
+          <span v-else class="members-header-stats--muted">统计暂不可用</span>
+        </div>
         <div class="search-box">
           <Search :size="18" />
           <input v-model="searchQuery" placeholder="搜索姓名、电话或片区地址..." />
         </div>
         <p class="members-recharge-hint">
-          续卡与加次数请至侧栏「开卡工单」办理：工单标记已缴后使用「同步入账」；次数流水会写入余额日志并附带工单说明。
+          续卡与加次数请至侧栏「开卡工单」办理：工单选「已缴」并保存后会自动入账；次数流水会写入余额日志并附带工单说明。
         </p>
         <div class="members-filter-toolbar">
           <div class="members-validity-tabs" role="tablist" aria-label="会员有效期">
@@ -405,7 +420,7 @@ onMounted(async () => {
         variant="members"
         :data="membersRows"
         :loading="membersLoading"
-        row-key="id"
+        :row-key="memberRowKey"
         empty-text="暂无会员数据"
       >
         <el-table-column label="会员信息" min-width="160">
@@ -561,15 +576,24 @@ onMounted(async () => {
             <textarea v-model="editForm.address" required rows="3" maxlength="500"></textarea>
           </div>
           <div class="form-group">
-            <label>配送片区（只读）</label>
-            <p class="modal-hint modal-hint--tight" style="margin: 0 0 8px; font-weight: 600">
-              {{ editAreaDisplay }}
-            </p>
+            <label>配送片区</label>
+            <select
+              v-model="editForm.delivery_region_id"
+              class="input-delivery-area"
+              :disabled="editForm.use_auto_area"
+            >
+              <option value="">未分配</option>
+              <option v-for="r in regionFilterOptions" :key="r.id" :value="String(r.id)">
+                {{ r.name || '—' }}
+              </option>
+            </select>
             <label class="checkbox-row">
               <input v-model="editForm.use_auto_area" type="checkbox" />
-              <span>保存时按地址/坐标重新自动划区</span>
+              <span>保存时按地址/坐标重新自动划区（勾选后忽略下方手动片区）</span>
             </label>
-            <p class="modal-hint">片区由坐标匹配「配送区域」多边形生成，后台不可手写或下拉指定。</p>
+            <p class="modal-hint">
+              下拉列表与列表筛选一致（仅启用中的配送区域）。未勾选自动划区时，保存会先按地址地理编码划区，再以您选择的片区覆盖。
+            </p>
           </div>
           <div class="form-group">
             <label>开始配送日期（起送业务日）</label>

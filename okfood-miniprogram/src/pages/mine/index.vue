@@ -3,23 +3,23 @@
     <OkNavbar show-brand />
     <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="profile-container">
-        <view v-if="!isLoggedIn" class="user-header">
+        <view v-if="!isLoggedIn" class="user-header user-header--guest">
           <view :class="['avatar-box', 'avatar-box--guest']">
             <text class="avatar-txt avatar-txt--guest">?</text>
           </view>
-          <view class="user-name-box user-name-box--flex">
+          <view class="user-header-guest-main">
+            <button
+              class="wx-login-btn"
+              hover-class="wx-login-btn--hover"
+              open-type="getPhoneNumber"
+              @getphonenumber="onWxGetPhoneNumber"
+            >
+              登录
+            </button>
             <text class="level-text level-text--guest-hint">
               授权手机号后与会员档案、餐次同步
             </text>
           </view>
-          <button
-            class="wx-login-btn"
-            hover-class="wx-login-btn--hover"
-            open-type="getPhoneNumber"
-            @getphonenumber="onWxGetPhoneNumber"
-          >
-            登录
-          </button>
         </view>
         <view v-else-if="needsMemberSetupPage" class="user-header user-header--setup" @click="goMemberSetup">
           <button
@@ -782,6 +782,19 @@ function goMemberSetup() {
   margin-bottom: 50rpx;
 }
 
+.user-header--guest {
+  align-items: center;
+}
+
+.user-header-guest-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16rpx;
+}
+
 .user-header--setup {
   padding: 8rpx 0;
   box-sizing: border-box;
@@ -909,20 +922,21 @@ function goMemberSetup() {
   line-height: 1.45;
 }
 
-/* 微信授权手机号：小号主按钮 */
+/* 微信授权手机号：与说明同宽、偏大的主按钮 */
 .wx-login-btn {
-  margin: 0 0 0 auto;
-  padding: 12rpx 32rpx;
-  flex-shrink: 0;
-  align-self: center;
-  font-size: 26rpx;
+  margin: 0;
+  padding: 26rpx 40rpx;
+  width: 100%;
+  max-width: 420rpx;
+  box-sizing: border-box;
+  font-size: 34rpx;
   font-weight: 800;
   color: #fff;
   background: $ok-forest-green;
   border: none;
   border-radius: 999rpx;
   line-height: 1.35;
-  box-shadow: 0 6rpx 16rpx rgba(14, 90, 68, 0.28);
+  box-shadow: 0 8rpx 22rpx rgba(14, 90, 68, 0.3);
 }
 
 .wx-login-btn::after {

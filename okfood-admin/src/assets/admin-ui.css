@@ -662,6 +662,12 @@
   font-size: 0.875rem;
 }
 
+/* 会员档案：统计在内容区首行，避免 Teleport 与 el-table 同帧更新触发 patch 到已卸载节点 */
+.members-header-stats--inline {
+  width: 100%;
+  margin-bottom: 0.75rem;
+}
+
 /* 无大号标题时收紧顶栏，把空间留给地图等内容 */
 .top-header.top-header--compact {
   margin-bottom: 1rem;
@@ -1888,17 +1894,45 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
+  padding: max(0.75rem, env(safe-area-inset-top, 0px)) 1.5rem
+    max(0.75rem, env(safe-area-inset-bottom, 0px)) 1.5rem;
+  box-sizing: border-box;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal-card {
   background: white;
   width: 100%;
   max-width: 560px;
+  /* 限制高度，避免长表单在视口内垂直居中时顶/底被裁切；由内部滚动 */
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  min-height: 0;
   border-radius: 3rem;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 40px 100px rgba(0, 0, 0, 0.3);
   animation: zoomIn 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.modal-card .modal-form {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.modal-card .modal-header {
+  flex-shrink: 0;
+}
+
+.modal-card .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .modal-header {
@@ -2290,14 +2324,15 @@
 .animate-up {
   animation: slideUp 0.6s cubic-bezier(0.23, 1, 0.32, 1) forwards;
 }
+/* 勿在终态保留 transform：会建立包含块，导致子级 position:fixed 蒙层相对本列表面非视口，出现裁切/假滚动条 */
 @keyframes slideUp {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    margin-top: 1.25rem;
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    margin-top: 0;
   }
 }
 

@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.core.timeutil import min_member_delivery_start_shanghai, today_shanghai
+from app.core.timeutil import min_member_delivery_start_shanghai
 from app.models.enums import CardOpenMode, CardOrderKind, CardOrderPayStatus, CardPayChannel, PlanType
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
@@ -129,7 +129,7 @@ def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
 
 
 def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder, *, operator: str) -> None:
-    """已缴且未入账：按卡型叠加次数/总配额并更新起送日（幂等由调用方保证）。"""
+    """已缴且未入账：按卡型叠加次数/总配额；若工单有起送日则写入会员并激活，否则仅入账（暂不开卡）。"""
     m = db.get(Member, order.member_id)
     if not m:
         raise HTTPException(status_code=404, detail="会员不存在")
@@ -162,12 +162,10 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
         operator=operator,
         log_detail=log_detail,
     )
-    start = order.delivery_start_date or today_shanghai()
-    if order.delivery_start_date is None:
-        order.delivery_start_date = start
-    m.is_active = True
-    m.delivery_start_date = start
-    m.delivery_deferred = False
+    if order.delivery_start_date is not None:
+        m.is_active = True
+        m.delivery_start_date = order.delivery_start_date
+        m.delivery_deferred = False
     order.applied_to_member = True
 
 
@@ -233,9 +231,32 @@ def create_card_order(db: Session, body: CardOrderCreateIn, *, operator: str) ->
     phone = body.phone.strip()
     m = db.execute(select(Member).where(Member.phone == phone)).scalar_one_or_none()
     if not m:
-        raise HTTPException(status_code=404, detail="会员不存在")
-    # 仅「新会员开卡」写入姓名/微信；老会员续卡只认手机号，不覆盖档案
-    if body.open_mode == CardOpenMode.NEW_MEMBER:
+        if body.open_mode == CardOpenMode.RENEW:
+            raise HTTPException(status_code=404, detail="会员不存在")
+        nm = (body.name or "").strip()
+        if not nm:
+            raise HTTPException(status_code=400, detail="新会员开卡须填写会员姓名")
+        wx_raw = (body.wechat_name or "").strip()
+        m = Member(
+            phone=phone[:20],
+            name=nm[:100],
+            wechat_name=wx_raw[:100] if wx_raw else None,
+            remarks=None,
+            avatar_url=None,
+            balance=0,
+            daily_meal_units=1,
+            meal_quota_total=0,
+            plan_type=None,
+            is_active=False,
+            is_leaved_tomorrow=False,
+            leave_range_start=None,
+            leave_range_end=None,
+            wx_mini_openid=None,
+        )
+        db.add(m)
+        db.flush()
+    elif body.open_mode == CardOpenMode.NEW_MEMBER:
+        # 仅「新会员开卡」写入姓名/微信；老会员续卡只认手机号，不覆盖档案
         if body.name is not None:
             nm = body.name.strip()
             if nm:
@@ -243,6 +264,12 @@ def create_card_order(db: Session, body: CardOrderCreateIn, *, operator: str) ->
         if body.wechat_name is not None:
             wx = body.wechat_name.strip()
             m.wechat_name = wx[:100] if wx else None
+    if body.delivery_start_date is not None:
+        if body.delivery_start_date < min_member_delivery_start_shanghai():
+            raise HTTPException(
+                status_code=400,
+                detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早明天，之后最早后天）",
+            )
     order = MemberCardOrder(
         member_id=m.id,
         card_kind=body.card_kind.value,
@@ -255,7 +282,8 @@ def create_card_order(db: Session, body: CardOrderCreateIn, *, operator: str) ->
     )
     db.add(order)
     db.flush()
-    if body.pay_status == CardOrderPayStatus.PAID and body.sync_member:
+    # 已缴即入账：与是否传 sync_member 无关（避免勾选遗漏导致剩余次数仍为 0）
+    if body.pay_status == CardOrderPayStatus.PAID:
         _sync_order_to_member(db, order, operator=operator)
     db.commit()
     db.refresh(order)
@@ -270,7 +298,7 @@ def update_card_order(
         raise HTTPException(status_code=404, detail="工单不存在")
 
     patch = body.model_dump(exclude_unset=True)
-    sync_flag = bool(patch.pop("sync_member", False))
+    patch.pop("sync_member", None)
     updating_card_kind = "card_kind" in body.model_fields_set
     if updating_card_kind:
         patch.pop("card_kind", None)
@@ -280,8 +308,11 @@ def update_card_order(
             raise HTTPException(status_code=400, detail="卡类型无效")
         order.card_kind = body.card_kind.value
 
-    if not patch and not sync_flag and not updating_card_kind:
-        raise HTTPException(status_code=400, detail="请至少提交一项修改")
+    if not patch and not updating_card_kind:
+        if not (
+            order.pay_status == CardOrderPayStatus.PAID.value and not order.applied_to_member
+        ):
+            raise HTTPException(status_code=400, detail="请至少提交一项修改")
 
     if "pay_status" in patch and body.pay_status is not None:
         if order.applied_to_member and body.pay_status == CardOrderPayStatus.UNPAID:
@@ -298,14 +329,20 @@ def update_card_order(
         order.remark = body.remark
 
     if "delivery_start_date" in patch:
-        order.delivery_start_date = body.delivery_start_date
+        ds = body.delivery_start_date
+        if ds is not None and ds < min_member_delivery_start_shanghai():
+            raise HTTPException(
+                status_code=400,
+                detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早明天，之后最早后天）",
+            )
+        order.delivery_start_date = ds
         if order.applied_to_member:
             mem = db.get(Member, order.member_id)
             if mem:
                 mem.delivery_start_date = order.delivery_start_date
 
     db.flush()
-    if sync_flag and order.pay_status == CardOrderPayStatus.PAID.value and not order.applied_to_member:
+    if order.pay_status == CardOrderPayStatus.PAID.value and not order.applied_to_member:
         _sync_order_to_member(db, order, operator=operator)
 
     db.commit()

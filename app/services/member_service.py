@@ -40,6 +40,7 @@ from app.services import amap
 from app.services.leave import is_leave_deadline_passed
 
 from app.services.member_address_service import (
+    admin_apply_manual_delivery_region,
     admin_set_default_address_detail,
     apply_auto_area_from_coords_or_geocode,
     delivery_region_name_map,
@@ -1012,6 +1013,10 @@ def admin_patch_member_profile(
 
     store_pickup: bool | None = None,
 
+    set_delivery_region_id: bool = False,
+
+    delivery_region_id: int | None = None,
+
 ) -> MemberOut:
 
     _ = operator
@@ -1035,6 +1040,8 @@ def admin_patch_member_profile(
         and not set_delivery_start_date
 
         and not set_store_pickup
+
+        and not set_delivery_region_id
 
     ):
 
@@ -1084,6 +1091,9 @@ def admin_patch_member_profile(
 
         )
 
+        # 新建默认地址时尚未 flush，后续 get_default_address（自动/手动划区）可能查不到 pending 行
+        db.flush()
+
     if use_auto_area:
 
         addr = get_default_address(db, mid)
@@ -1093,6 +1103,18 @@ def admin_patch_member_profile(
             raise HTTPException(status_code=400, detail="该会员暂无默认配送地址，无法自动划区")
 
         apply_auto_area_from_coords_or_geocode(db, addr)
+
+    elif set_delivery_region_id:
+
+        admin_apply_manual_delivery_region(
+
+            db,
+
+            member_id=mid,
+
+            delivery_region_id=delivery_region_id,
+
+        )
 
     if set_balance:
 
@@ -1118,6 +1140,11 @@ def admin_patch_member_profile(
 
             detail = f"档案修改 {old_b}→{new_b}"
 
+            # 与仅含 recharge/delivery/refund 的历史库 ENUM 兼容；正差额→recharge，负差额→refund，见 detail
+            log_reason = (
+                BalanceReason.RECHARGE.value if delta > 0 else BalanceReason.REFUND.value
+            )
+
             db.add(
 
                 BalanceLog(
@@ -1126,7 +1153,7 @@ def admin_patch_member_profile(
 
                     change=delta,
 
-                    reason=BalanceReason.ADMIN_ADJUST.value,
+                    reason=log_reason,
 
                     operator=op,
 

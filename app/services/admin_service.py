@@ -220,6 +220,7 @@ def list_members_paged(
             detail = ""
             ad_line = "（未设置默认配送地址）"
             ar = UNASSIGNED_DELIVERY_AREA
+        dr_id = int(addr.delivery_region_id) if addr and addr.delivery_region_id is not None else None
         out.append(
             MemberAdminOut(
                 id=m.id,
@@ -232,6 +233,7 @@ def list_members_paged(
                 detail_address=detail,
                 avatar_url=m.avatar_url,
                 area=ar,
+                delivery_region_id=dr_id,
                 remarks=m.remarks,
                 balance=m.balance,
                 daily_meal_units=effective_daily_meal_units(m),

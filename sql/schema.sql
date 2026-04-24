@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS `balance_logs` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `member_id` BIGINT UNSIGNED NOT NULL,
   `change` INT NOT NULL COMMENT '正数充值/退款增加，负数扣减',
-  `reason` ENUM('recharge','delivery','refund') NOT NULL,
+  `reason` ENUM('recharge','delivery','refund','admin_adjust') NOT NULL COMMENT 'admin_adjust=后台档案直接改剩余次数',
   `operator` VARCHAR(50) NOT NULL COMMENT 'admin 用户名、courier_id或 system',
   `detail` VARCHAR(500) NULL COMMENT '业务说明：如开卡工单号、备注摘要等',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

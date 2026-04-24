@@ -206,6 +206,7 @@ export function mapAdminUserToRow(raw, idx) {
       balanceLabel: '0',
       totalQuota: null,
       area: '—',
+      delivery_region_id: null,
       address: '',
       detail_address: '',
       plan: '次卡',
@@ -258,6 +259,10 @@ export function mapAdminUserToRow(raw, idx) {
     balanceLabel,
     totalQuota,
     area: raw.area || '—',
+    delivery_region_id:
+      raw.delivery_region_id != null && raw.delivery_region_id !== ''
+        ? Number(raw.delivery_region_id)
+        : null,
     address: raw.address || '',
     detail_address: typeof raw.detail_address === 'string' ? raw.detail_address : '',
     plan,

@@ -43,11 +43,16 @@ def get_courier_delivery_fee_config(db: Session) -> tuple[Decimal, Decimal]:
 
 def get_member_card_prices_yuan(db: Session) -> tuple[Decimal, Decimal]:
     """小程序周卡、月卡标价（元）；优先读库。"""
+    s = get_settings()
     row = db.get(AppSettings, 1)
     if not row:
-        s = get_settings()
         return s.MEMBER_CARD_WEEK_PRICE_YUAN, s.MEMBER_CARD_MONTH_PRICE_YUAN
-    return Decimal(row.member_card_week_price_yuan), Decimal(row.member_card_month_price_yuan)
+    wk, mo = row.member_card_week_price_yuan, row.member_card_month_price_yuan
+    # 历史数据或异常导入可能导致列为 NULL，Decimal(None) 会抛错并变成接口 500
+    return (
+        s.MEMBER_CARD_WEEK_PRICE_YUAN if wk is None else Decimal(wk),
+        s.MEMBER_CARD_MONTH_PRICE_YUAN if mo is None else Decimal(mo),
+    )
 
 
 def get_store_config(db: Session) -> StoreConfigOut:
@@ -60,6 +65,7 @@ def get_store_config(db: Session) -> StoreConfigOut:
             member_card_week_price_yuan=s.MEMBER_CARD_WEEK_PRICE_YUAN,
             member_card_month_price_yuan=s.MEMBER_CARD_MONTH_PRICE_YUAN,
         )
+    wk, mo = row.member_card_week_price_yuan, row.member_card_month_price_yuan
     return StoreConfigOut(
         store_name=row.store_name,
         store_logo_url=row.store_logo_url,
@@ -67,8 +73,8 @@ def get_store_config(db: Session) -> StoreConfigOut:
         store_lat=float(row.store_lat) if row.store_lat is not None else None,
         courier_delivery_base_yuan=Decimal(row.courier_delivery_base_yuan),
         courier_delivery_extra_per_unit_yuan=Decimal(row.courier_delivery_extra_per_unit_yuan),
-        member_card_week_price_yuan=Decimal(row.member_card_week_price_yuan),
-        member_card_month_price_yuan=Decimal(row.member_card_month_price_yuan),
+        member_card_week_price_yuan=s.MEMBER_CARD_WEEK_PRICE_YUAN if wk is None else Decimal(wk),
+        member_card_month_price_yuan=s.MEMBER_CARD_MONTH_PRICE_YUAN if mo is None else Decimal(mo),
     )
 
 

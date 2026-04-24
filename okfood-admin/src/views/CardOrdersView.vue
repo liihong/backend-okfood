@@ -101,13 +101,13 @@ const createForm = ref({
   phone: '',
   name: '',
   wechat_name: '',
+  delivery_start_mode: 'date',
   delivery_start_date: todayInputDate(),
   card_kind: '周卡',
   pay_channel: '微信',
   pay_status: '未缴',
   amount_yuan: '',
   remark: '',
-  sync_member: false,
 })
 
 /** 续卡：按手机号预查会员档案 */
@@ -186,13 +186,13 @@ function openCreateModal() {
     phone: '',
     name: '',
     wechat_name: '',
+    delivery_start_mode: 'date',
     delivery_start_date: todayInputDate(),
     card_kind: '周卡',
     pay_channel: '微信',
     pay_status: '未缴',
     amount_yuan: '',
     remark: '',
-    sync_member: false,
   }
   showCreateModal.value = true
 }
@@ -216,21 +216,24 @@ async function submitCreate() {
       return
     }
   }
-  const startD = (createForm.value.delivery_start_date || '').trim()
-  if (!startD) {
-    showToast('请选择开始配送日期', 'error')
-    return
+  const deferStart = createForm.value.delivery_start_mode === 'defer'
+  let startD = null
+  if (!deferStart) {
+    startD = (createForm.value.delivery_start_date || '').trim()
+    if (!startD) {
+      showToast('请选择开始配送日期', 'error')
+      return
+    }
   }
   createSubmitting.value = true
   try {
     const body = {
       phone,
       open_mode: openMode,
-      delivery_start_date: startD,
+      delivery_start_date: deferStart ? null : startD,
       card_kind: createForm.value.card_kind,
       pay_channel: createForm.value.pay_channel,
       pay_status: createForm.value.pay_status,
-      sync_member: !!createForm.value.sync_member,
     }
     if (openMode === 'new_member') {
       body.name = (createForm.value.name || '').trim()
@@ -267,13 +270,13 @@ const editForm = ref({
   member_name: '',
   member_wechat_name: '',
   card_kind: '',
+  delivery_start_mode: 'date',
   delivery_start_date: '',
   pay_channel: '微信',
   pay_status: '未缴',
   amount_yuan: '',
   remark: '',
   applied_to_member: false,
-  sync_member: false,
 })
 
 function openEditModal(row) {
@@ -284,26 +287,34 @@ function openEditModal(row) {
     member_name: row.member_name || '',
     member_wechat_name: row.member_wechat_name || '',
     card_kind: row.card_kind || '',
+    delivery_start_mode: ds ? 'date' : 'defer',
     delivery_start_date: ds || todayInputDate(),
     pay_channel: row.pay_channel || '微信',
     pay_status: row.pay_status || '未缴',
     amount_yuan: row.amount_yuan != null && row.amount_yuan !== '' ? String(row.amount_yuan) : '',
     remark: row.remark || '',
     applied_to_member: !!row.applied_to_member,
-    sync_member: false,
   }
   showEditModal.value = true
 }
 
 async function submitEdit() {
   if (!editForm.value.id) return
+  const deferEdit = editForm.value.delivery_start_mode === 'defer'
+  let editStartD = null
+  if (!deferEdit) {
+    editStartD = (editForm.value.delivery_start_date || '').trim()
+    if (!editStartD) {
+      showToast('请选择开始配送日', 'error')
+      return
+    }
+  }
   editSubmitting.value = true
   try {
     const body = {
-      delivery_start_date: (editForm.value.delivery_start_date || '').trim() || null,
+      delivery_start_date: deferEdit ? null : editStartD,
       pay_channel: editForm.value.pay_channel,
       pay_status: editForm.value.pay_status,
-      sync_member: !!editForm.value.sync_member,
     }
     if (!editForm.value.applied_to_member) {
       body.card_kind = editForm.value.card_kind || '周卡'
@@ -365,8 +376,8 @@ onMounted(() => {
       </div>
       <p class="card-orders-intro">
         <ClipboardList :size="16" class="card-orders-intro-icon" />
-        新建工单时先选「新会员开卡」或「老会员续卡」。新会员须填写姓名与微信昵称写入档案；续卡仅凭手机号匹配，同步入账时剩余次数与累计总次数均叠加（周卡+6、月卡+24）。
-        必选「开始配送日」（上海业务日）；勾选「同步入账」且在「已缴」时写入套餐并激活计划。
+        新建工单时先选「新会员开卡」或「老会员续卡」。新会员须填写姓名与微信昵称写入档案；续卡仅凭手机号匹配。
+        开始配送日可选具体业务日或「暂不开卡」。缴费状态为「已缴」时自动按卡类型入账次数与套餐；仅在选择起送日时同时写入会员起送日并激活配送。选「未缴」则仅建单。
       </p>
       <AdminTable
         variant="members"
@@ -444,8 +455,9 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-if="showCreateModal" class="modal-overlay" @click.self="showCreateModal = false">
-      <div class="modal-card">
+    <Teleport to="body">
+      <div v-if="showCreateModal" class="modal-overlay" @click.self="showCreateModal = false">
+        <div class="modal-card">
         <div class="modal-header">
           <div class="header-info">
             <h3>新建开卡工单</h3>
@@ -510,10 +522,37 @@ onMounted(() => {
               <input v-model="createForm.wechat_name" required maxlength="100" placeholder="写入档案 wechat_name" />
             </div>
           </div>
-          <div class="form-group">
+          <div class="form-group open-mode-group">
             <label>开始配送日（业务日）</label>
-            <input v-model="createForm.delivery_start_date" type="date" required />
-            <p class="modal-hint">该日起参与配送大表；当日及之后日期可查见、可派单。</p>
+            <div class="open-mode-options">
+              <label class="radio-tile">
+                <span class="radio-tile-head">
+                  <input v-model="createForm.delivery_start_mode" type="radio" value="date" />
+                  <span class="radio-tile-title">指定起送日</span>
+                </span>
+                <span class="radio-tile-sub">选择具体业务日起参与配送大表</span>
+              </label>
+              <label class="radio-tile">
+                <span class="radio-tile-head">
+                  <input v-model="createForm.delivery_start_mode" type="radio" value="defer" />
+                  <span class="radio-tile-title">暂不开卡</span>
+                </span>
+                <span class="radio-tile-sub">已缴仍入次数与套餐；暂不写入起送日、不激活配送，可日后在「更新」中补日期</span>
+              </label>
+            </div>
+            <el-date-picker
+              v-if="createForm.delivery_start_mode === 'date'"
+              v-model="createForm.delivery_start_date"
+              type="date"
+              value-format="YYYY-MM-DD"
+              format="YYYY-MM-DD"
+              placeholder="选择开始配送日"
+              class="card-order-date-picker"
+              :clearable="false"
+            />
+            <p v-if="createForm.delivery_start_mode === 'date'" class="modal-hint">
+              须不早于系统允许的最早业务日（上海）；该日起可查见、可派单。
+            </p>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -549,19 +588,21 @@ onMounted(() => {
             <label>备注</label>
             <textarea v-model="createForm.remark" rows="2" maxlength="500" placeholder="可选"></textarea>
           </div>
-          <label class="checkbox-row">
-            <input v-model="createForm.sync_member" type="checkbox" />
-            <span>若状态为「已缴」，立即同步次数与套餐、激活计划并写入起送日</span>
-          </label>
+          <p class="modal-hint">
+            缴费状态为「已缴」时，创建后将自动同步剩余次数（周卡 +{{ planDefaultTotal('周卡') }} / 月卡
+            +{{ planDefaultTotal('月卡') }}）与套餐；仅在选择「指定起送日」时同时写入起送日并激活。选「未缴」则不入账。
+          </p>
           <button type="submit" class="btn-submit-order" :disabled="createSubmitting">
             {{ createSubmitting ? '提交中…' : '创建工单' }}
           </button>
         </form>
+        </div>
       </div>
-    </div>
+    </Teleport>
 
-    <div v-if="showEditModal" class="modal-overlay" @click.self="showEditModal = false">
-      <div class="modal-card">
+    <Teleport to="body">
+      <div v-if="showEditModal" class="modal-overlay" @click.self="showEditModal = false">
+        <div class="modal-card">
         <div class="modal-header">
           <div class="header-info">
             <h3>更新工单 · #{{ editForm.id }}</h3>
@@ -589,10 +630,37 @@ onMounted(() => {
             </select>
             <p v-if="editForm.applied_to_member" class="modal-hint">已入账工单不可改卡类型；若档案套餐标签有误请在「会员管理」中修正。</p>
           </div>
-          <div class="form-group">
+          <div class="form-group open-mode-group">
             <label>开始配送日</label>
-            <input v-model="editForm.delivery_start_date" type="date" required />
-            <p v-if="editForm.applied_to_member" class="modal-hint">已同步的工单修改起送日会同步更新会员档案。</p>
+            <div class="open-mode-options">
+              <label class="radio-tile">
+                <span class="radio-tile-head">
+                  <input v-model="editForm.delivery_start_mode" type="radio" value="date" />
+                  <span class="radio-tile-title">指定起送日</span>
+                </span>
+                <span class="radio-tile-sub">写入或修改具体业务日</span>
+              </label>
+              <label class="radio-tile">
+                <span class="radio-tile-head">
+                  <input v-model="editForm.delivery_start_mode" type="radio" value="defer" />
+                  <span class="radio-tile-title">暂不开卡</span>
+                </span>
+                <span class="radio-tile-sub">工单上不保存起送日；已入账的会员起送日以档案为准</span>
+              </label>
+            </div>
+            <el-date-picker
+              v-if="editForm.delivery_start_mode === 'date'"
+              v-model="editForm.delivery_start_date"
+              type="date"
+              value-format="YYYY-MM-DD"
+              format="YYYY-MM-DD"
+              placeholder="选择开始配送日"
+              class="card-order-date-picker"
+              :clearable="false"
+            />
+            <p v-if="editForm.applied_to_member && editForm.delivery_start_mode === 'date'" class="modal-hint">
+              已同步的工单修改起送日会同步更新会员档案。
+            </p>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -620,16 +688,16 @@ onMounted(() => {
             <label>备注</label>
             <textarea v-model="editForm.remark" rows="2" maxlength="500"></textarea>
           </div>
-          <label class="checkbox-row">
-            <input v-model="editForm.sync_member" type="checkbox" :disabled="editForm.applied_to_member" />
-            <span>同步次数与起送规则（已缴且尚未同步时有效；与续卡次数规则一致）</span>
-          </label>
+          <p v-if="!editForm.applied_to_member" class="modal-hint">
+            缴费状态为「已缴」且尚未入账时，保存将自动同步剩余次数与套餐；仅「指定起送日」时同时写入会员起送日并激活。
+          </p>
           <button type="submit" class="btn-submit-order" :disabled="editSubmitting">
             {{ editSubmitting ? '保存中…' : '保存' }}
           </button>
         </form>
+        </div>
       </div>
-    </div>
+    </Teleport>
   </section>
 </template>
 
@@ -706,6 +774,11 @@ onMounted(() => {
 .radio-tile input {
   margin-right: 6px;
 }
+.radio-tile-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
 .radio-tile-title {
   font-weight: 600;
   font-size: 14px;
@@ -727,5 +800,23 @@ onMounted(() => {
 }
 .modal-hint--warn {
   color: #b45309;
+}
+/* Element Plus 日期选择：与弹窗内原生输入框的圆角、背景一致 */
+.form-group :deep(.card-order-date-picker) {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+.form-group :deep(.card-order-date-picker .el-input__wrapper) {
+  width: 100%;
+  min-height: 3.1rem;
+  background: #f8fafc;
+  border: 2px solid transparent;
+  border-radius: 1.25rem;
+  box-shadow: none;
+}
+.form-group :deep(.card-order-date-picker .el-input__wrapper.is-focus) {
+  border-color: #0e5a44;
+  background: #fff;
 }
 </style>
