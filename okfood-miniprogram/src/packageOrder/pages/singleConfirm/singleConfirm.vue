@@ -7,15 +7,50 @@
       <view class="body">
         <view v-if="dish" class="card dish-card">
           <text class="card-label">餐品</text>
-          <text class="dish-name">{{ dish.name }}</text>
+          <view class="dish-name-row">
+            <text class="dish-name">{{ dish.name }}</text>
+            <view class="dish-price-col">
+              <text v-if="unitPrice != null" class="dish-price">¥ {{ unitPrice }} / 份</text>
+              <text v-else class="dish-price dish-price--muted">待公布</text>
+            </view>
+          </view>
           <view class="dish-meta">
             <text class="meta-tag">{{ dish.day }} · {{ serviceDateYmd }}</text>
-            <text v-if="priceLabel != null" class="dish-price">¥ {{ priceLabel }}</text>
-            <text v-else class="dish-price dish-price--muted">待公布</text>
+          </view>
+          <view v-if="dish && dish.singleStockLimited" class="stock-row">
+            <text>剩余可单点</text>
+            <text class="stock-row-num">{{ dish.singleStockRemaining ?? 0 }}</text>
+            <text> 份</text>
+          </view>
+          <view v-if="unitPrice != null" class="dish-total-row">
+            <view class="dish-total-left">
+              <text class="dish-total-label">小计</text>
+              <view class="qty-inline" @tap.stop>
+                <button type="button" class="qty-btn qty-btn--sm" @tap="decQty">−</button>
+                <text class="qty-num qty-num--sm">{{ quantity }}</text>
+                <button type="button" class="qty-btn qty-btn--sm" @tap="incQty">+</button>
+              </view>
+              <text class="dish-total-unit-hint">份</text>
+            </view>
+            <text class="dish-total-amt">¥ {{ totalPriceText }}</text>
           </view>
         </view>
 
-        <view class="card addr-card">
+      <view class="card mode-card">
+          <text class="card-label">取餐方式</text>
+          <radio-group class="mode-group mode-group--row" @change="onFulfillModeChange">
+            <label class="mode-row">
+              <radio value="delivery" :checked="fulfillMode === 'delivery'" color="#0e5a44" />
+              <text class="mode-label">配送到家</text>
+            </label>
+            <label class="mode-row">
+              <radio value="pickup" :checked="fulfillMode === 'pickup'" color="#0e5a44" />
+              <text class="mode-label">门店自提</text>
+            </label>
+          </radio-group>
+        </view>
+
+        <view v-if="fulfillMode === 'delivery'" class="card addr-card">
           <view class="addr-head">
             <text class="card-label">配送地址</text>
             <text class="addr-manage" @tap="goAddressList">管理地址</text>
@@ -51,7 +86,12 @@
         <view class="hint-box">
           <text class="hint-title">支付说明</text>
           <text class="hint-text">
-            点击「去支付」将调起微信支付。支付成功后，系统会自动确认订单并按配送片区派单给对应骑手，您可在配送端查看进度。
+           <template v-if="fulfillMode === 'delivery'">
+              点击「去支付」将调起微信支付。支付成功后，系统会按配送片区派单给骑手。
+            </template>
+            <template v-else>
+              门店自提：支付成功后订单即完成，请按供餐日到店取餐（无需骑手配送）。
+            </template>
           </text>
         </view>
 
@@ -99,20 +139,61 @@ const rawAddresses = ref([])
 const selectedIndex = ref(0)
 const paying = ref(false)
 const scrollStyle = ref({ height: '400px' })
+/** delivery | pickup */
+const fulfillMode = ref('delivery')
+const quantity = ref(1)
+const QTY_MAX = 50
 
-const priceLabel = computed(() => {
+const qtyMaxEffective = computed(() => {
+  if (!dish.value || !dish.value.singleStockLimited) return QTY_MAX
+  const r = dish.value.singleStockRemaining
+  if (r == null || !Number.isFinite(Number(r))) return QTY_MAX
+  return Math.max(0, Math.min(QTY_MAX, Math.floor(Number(r))))
+})
+
+const unitPrice = computed(() => {
   if (!dish.value) return null
   return formatMenuPrice(dish.value.price)
+})
+
+const totalPriceText = computed(() => {
+  const u = unitPrice.value
+  if (u == null) return '—'
+  const t = Number(u) * Math.max(1, Math.min(qtyMaxEffective.value, quantity.value))
+  return Number.isFinite(t) ? t.toFixed(2) : '—'
 })
 
 const canPay = computed(() => {
   if (!dish.value || !serviceDateYmd.value) return false
   if (!isSingleOrderServiceDate(serviceDateYmd.value)) return false
-  if (priceLabel.value == null) return false
-  if (!addressRows.value.length) return false
-  const row = addressRows.value[selectedIndex.value]
-  return !!(row && row.id)
+  if (unitPrice.value == null) return false
+  if (dish.value.singleStockLimited) {
+    const n = dish.value.singleStockRemaining
+    if (n == null || n <= 0) return false
+  }
+  const q = Math.max(1, Math.min(qtyMaxEffective.value, quantity.value))
+  if (q < 1) return false
+  if (fulfillMode.value === 'delivery') {
+    if (!addressRows.value.length) return false
+    const row = addressRows.value[selectedIndex.value]
+    return !!(row && row.id)
+  }
+  return true
 })
+
+function onFulfillModeChange(e) {
+  const v = e?.detail?.value
+  fulfillMode.value = v === 'pickup' ? 'pickup' : 'delivery'
+}
+
+function decQty() {
+  if (quantity.value > 1) quantity.value -= 1
+}
+
+function incQty() {
+  const cap = qtyMaxEffective.value
+  if (quantity.value < cap) quantity.value += 1
+}
 
 onLoad((options) => {
   try {
@@ -194,25 +275,23 @@ async function loadPage() {
   dish.value = null
   try {
     const [d, raw] = await Promise.all([
-      fetchMenuDetail(dishIdStr.value),
+      fetchMenuDetail(dishIdStr.value, serviceDateYmd.value),
       request('/api/user/me/addresses', { method: 'GET', retry: 1 }),
     ])
     if (!d) throw new Error('暂无餐品数据')
     dish.value = d
+    const cap = d.singleStockLimited
+      ? Math.max(0, Math.min(QTY_MAX, d.singleStockRemaining != null ? Math.floor(Number(d.singleStockRemaining)) : 0))
+      : QTY_MAX
+    if (cap < 1) {
+      loadError.value = '该日单次卡名额已售罄'
+    } else if (quantity.value > cap) {
+      quantity.value = cap
+    }
     const list = sortAddressesDefaultFirst(normalizeAddressList(raw))
     rawAddresses.value = list
     addressRows.value = list.map((it, i) => addressListRow(it, i))
     selectedIndex.value = 0
-    if (!list.length) {
-      uni.showModal({
-        title: '暂无配送地址',
-        content: '请先添加配送地址，以便系统按位置划片并派单。',
-        confirmText: '去添加',
-        success: (r) => {
-          if (r.confirm) uni.navigateTo({ url: '/packageUser/pages/address/list' })
-        },
-      })
-    }
     if (formatMenuPrice(dish.value.price) == null) {
       loadError.value = '该餐品单点价格待公布'
     }
@@ -235,27 +314,37 @@ function goAddressList() {
 
 async function handlePay() {
   if (!canPay.value || paying.value || !dish.value) return
-  const item = rawAddresses.value[selectedIndex.value]
-  const addressId = getAddressRecordId(item)
-  if (!addressId) {
-    uni.showToast({ title: '地址无效', icon: 'none' })
-    return
+  const isPickup = fulfillMode.value === 'pickup'
+  let addressId = null
+  if (!isPickup) {
+    const item = rawAddresses.value[selectedIndex.value]
+    addressId = getAddressRecordId(item)
+    if (!addressId) {
+      uni.showToast({ title: '请选择有效配送地址', icon: 'none' })
+      return
+    }
   }
   const p = formatMenuPrice(dish.value.price)
   if (p == null) {
     uni.showToast({ title: '单点价格待公布', icon: 'none' })
     return
   }
+  const q = Math.max(1, Math.min(qtyMaxEffective.value, quantity.value))
 
   paying.value = true
   uni.showLoading({ title: '创建订单…', mask: true })
   try {
     await syncWxMiniOpenidFromLogin()
-    const out = await createSingleMealOrder({
+    const payload = {
       dish_id: Number(dish.value.dishId),
-      member_address_id: Number(addressId),
       delivery_date: serviceDateYmd.value,
-    })
+      store_pickup: isPickup,
+      quantity: q,
+    }
+    if (!isPickup) {
+      payload.member_address_id = Number(addressId)
+    }
+    const out = await createSingleMealOrder(payload)
     const orderId = out && typeof out === 'object' ? out.id : null
     if (orderId == null) {
       throw new Error('订单创建响应异常')
@@ -275,9 +364,16 @@ async function handlePay() {
       })
     })
     const area = typeof out.routing_area === 'string' ? out.routing_area : '—'
+    const amt =
+      out && typeof out.amount_yuan === 'string'
+        ? out.amount_yuan
+        : (Number(p) * q).toFixed(2)
+    const pickupHint = isPickup
+      ? `\n门店自提，请于供餐日到店取餐。`
+      : `\n微信支付确认后将派单，骑手可在配送端查看。`
     uni.showModal({
       title: '支付成功',
-      content: `¥${p} · ${out.delivery_date || serviceDateYmd.value}\n片区：${area}\n订单已提交。微信支付回调确认后系统将完成派单，骑手可在配送端查看该单。`,
+      content: `¥${amt} · ${out.delivery_date || serviceDateYmd.value}\n${isPickup ? '自提' : '片区'}：${area}${pickupHint}`,
       showCancel: false,
       success: () => {
         uni.navigateBack()
@@ -346,15 +442,43 @@ async function handlePay() {
   margin-bottom: 16rpx;
 }
 
+.dish-name-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24rpx;
+}
+
 .dish-name {
+  flex: 1;
+  min-width: 0;
   font-size: 36rpx;
   font-weight: 950;
   color: $ok-slate-800;
   line-height: 1.35;
 }
 
-.dish-meta {
+.dish-price-col {
+  flex-shrink: 0;
+  max-width: 46%;
+  text-align: right;
+}
+
+.stock-row {
   margin-top: 20rpx;
+  font-size: 26rpx;
+  color: $ok-slate-600;
+  font-weight: 800;
+}
+.stock-row-num {
+  color: $ok-forest-green;
+  font-size: 32rpx;
+  font-weight: 950;
+  margin: 0 4rpx;
+}
+
+.dish-meta {
+  margin-top: 16rpx;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -371,17 +495,136 @@ async function handlePay() {
 }
 
 .dish-price {
-  font-size: 40rpx;
+  font-size: 34rpx;
   font-weight: 1000;
   color: $ok-forest-green;
+  line-height: 1.35;
 }
 
 .dish-price--muted {
-  font-size: 28rpx;
+  font-size: 26rpx;
   color: $ok-slate-400;
   font-weight: 800;
 }
 
+.dish-total-row {
+  margin-top: 20rpx;
+  padding-top: 20rpx;
+  border-top: 2rpx dashed rgba(14, 90, 68, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  flex-wrap: wrap;
+}
+
+.dish-total-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12rpx 16rpx;
+  min-width: 0;
+  flex: 1;
+}
+
+.dish-total-label {
+  font-size: 26rpx;
+  font-weight: 800;
+  color: $ok-slate-600;
+  flex-shrink: 0;
+}
+
+.dish-total-unit-hint {
+  font-size: 26rpx;
+  font-weight: 800;
+  color: $ok-slate-500;
+  flex-shrink: 0;
+}
+
+.dish-total-amt {
+  font-size: 36rpx;
+  font-weight: 1000;
+  color: $ok-forest-green;
+  flex-shrink: 0;
+}
+
+.qty-inline {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.mode-group--row {
+  flex-direction: row;
+  align-items: stretch;
+  gap: 20rpx;
+}
+
+.mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  padding: 20rpx 12rpx;
+  background: #fff;
+  border-radius: 20rpx;
+  border: 2rpx solid $ok-slate-100;
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.mode-label {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: $ok-slate-800;
+}
+
+.qty-btn {
+  width: 72rpx;
+  height: 72rpx;
+  line-height: 72rpx;
+  padding: 0;
+  margin: 0;
+  background: #fff;
+  border: 3rpx solid $ok-forest-green;
+  border-radius: 16rpx;
+  font-size: 40rpx;
+  font-weight: 900;
+  color: $ok-forest-green;
+}
+
+.qty-btn--sm {
+  width: 56rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  font-size: 32rpx;
+  border-radius: 14rpx;
+  border-width: 2rpx;
+}
+
+.qty-btn::after {
+  border: none;
+}
+
+.qty-num {
+  min-width: 48rpx;
+  text-align: center;
+  font-size: 36rpx;
+  font-weight: 950;
+  color: $ok-slate-800;
+}
+
+.qty-num--sm {
+  min-width: 40rpx;
+  font-size: 30rpx;
+}
 .addr-head {
   display: flex;
   justify-content: space-between;

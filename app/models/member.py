@@ -34,4 +34,5 @@ class Member(Base):
     last_low_balance_notify_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     delivery_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     delivery_deferred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    store_pickup: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

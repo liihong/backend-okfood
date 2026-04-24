@@ -156,11 +156,22 @@ export function isShanghaiPastDailyCutoff(
     const sec = parseInt(parts.find((p) => p.type === 'second')?.value || '0', 10) || 0
     if (h > h0) return true
     if (h < h0) return false
-    return min > 0 || sec > 0
+    // 与后端 `time >= time(10, 0, 0)` 一致：10:00:00 起算截单后规则
+    return true
   } catch {
     const d = new Date(now)
-    return d.getHours() > h0 || (d.getHours() === h0 && (d.getMinutes() > 0 || d.getSeconds() > 0))
+    return d.getHours() > h0 || d.getHours() === h0
   }
+}
+
+/**
+ * 会员起送业务日可选的最小 YYYY-MM-DD（上海）：
+ * 未过当日 10:00 最早为明天；10:00 及之后最早为后天。不可选今天或更早。
+ */
+export function minMemberDeliveryStartYmd(now = new Date()) {
+  const today = ymdTodayShanghai(now)
+  const delta = isShanghaiPastDailyCutoff(now) ? 2 : 1
+  return addDaysIso(today, delta)
 }
 
 /**
@@ -260,12 +271,24 @@ export function mapMenuDetail(raw) {
       raw.single_order_price_yuan ??
       raw.singleOrderPriceYuan,
     img: (typeof pic === 'string' && pic) || PLACEHOLDER_IMG,
+    singleStockLimited: raw.single_stock_limited === true,
+    singleStockRemaining:
+      raw.single_stock_remaining != null && raw.single_stock_remaining !== ''
+        ? Math.max(0, Math.floor(Number(raw.single_stock_remaining)))
+        : null,
   }
 }
 
-/** @param {string} dishId */
-export async function fetchMenuDetail(dishId) {
-  const raw = await request(`/api/menu/detail/${encodeURIComponent(dishId)}`, {
+/**
+ * @param {string} dishId
+ * @param {string} [serviceDateYmd] 供餐日 YYYY-MM-DD，与详情/确认页用于剩余库存
+ */
+export async function fetchMenuDetail(dishId, serviceDateYmd) {
+  const s = (serviceDateYmd && String(serviceDateYmd).trim()) || ''
+  const q = s
+    ? `?service_date=${encodeURIComponent(s)}`
+    : ''
+  const raw = await request(`/api/menu/detail/${encodeURIComponent(dishId)}${q}`, {
     method: 'GET',
     retry: 1,
   })

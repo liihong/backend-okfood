@@ -29,6 +29,13 @@ def weekly_menu(
 
 
 @router.get("/detail/{dish_id}")
-def menu_detail(db: SessionDep, dish_id: int):
+def menu_detail(
+    db: SessionDep,
+    dish_id: int,
+    service_date: Annotated[
+        date | None,
+        Query(description="供餐日 YYYY-MM-DD；传则返回该日单次卡剩余库存等字段"),
+    ] = None,
+):
     """餐品详情，dish_id 为菜品库主键，与周列表项中 `dish_id` 一致。无需登录。"""
-    return success(data=get_menu_detail_by_dish_id(db, dish_id), msg="获取成功")
+    return success(data=get_menu_detail_by_dish_id(db, dish_id, service_date=service_date), msg="获取成功")

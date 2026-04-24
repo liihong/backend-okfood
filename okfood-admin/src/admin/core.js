@@ -217,6 +217,7 @@ export function mapAdminUserToRow(raw, idx) {
       is_on_leave_today: false,
       tomorrow_leave: false,
       status: '未开卡',
+      store_pickup: false,
     }
   }
   const balance = Number(raw.balance) || 0
@@ -268,5 +269,6 @@ export function mapAdminUserToRow(raw, idx) {
     is_on_leave_today: onLeaveToday,
     tomorrow_leave: active && !onLeaveToday && tomorrowLeave,
     status,
+    store_pickup: raw.store_pickup === true,
   }
 }

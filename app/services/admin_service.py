@@ -31,6 +31,7 @@ from app.schemas.admin import (
     RechargeIn,
     SettingsIn,
     WeeklySlotAssignIn,
+    MenuDayTotalStockIn,
 )
 from app.services.member_address_service import (
     default_address_pick_subquery,
@@ -226,6 +227,7 @@ def list_members_paged(
                 name=m.name,
                 wechat_name=m.wechat_name,
                 delivery_start_date=m.delivery_start_date,
+                store_pickup=bool(m.store_pickup),
                 address=ad_line,
                 detail_address=detail,
                 avatar_url=m.avatar_url,
@@ -418,7 +420,9 @@ def _weekly_slots_payload(db: Session, anchor: date) -> list[dict]:
         .where(WeeklyMenuSlot.week_start == anchor)
         .order_by(WeeklyMenuSlot.slot)
     ).all()
-    return [
+    from app.services.menu_day_stock_service import weekly_slot_stock_extras
+
+    raw: list[dict] = [
         {
             "slot": w.slot,
             "dish_id": d.id,
@@ -426,9 +430,11 @@ def _weekly_slots_payload(db: Session, anchor: date) -> list[dict]:
             "is_enabled": d.is_enabled,
             "category_id": d.category_id,
             "single_order_price_yuan": _dish_price_yuan_str(d.single_order_price_yuan),
+            "total_stock": int(w.total_stock) if w.total_stock is not None else None,
         }
         for w, d in rows
     ]
+    return weekly_slot_stock_extras(db, anchor, raw)
 
 
 def admin_weekly_menu_preview(db: Session, week_start: date | None) -> dict:
@@ -473,6 +479,8 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn) -> None:
     )
     try:
         if row:
+            if int(row.dish_id) != int(body.dish_id):
+                row.total_stock = None
             row.dish_id = body.dish_id
         else:
             db.add(WeeklyMenuSlot(week_start=anchor, slot=body.slot, dish_id=body.dish_id))
@@ -483,6 +491,14 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn) -> None:
             status_code=409,
             detail="该菜品在本自然月已排在其他日期（周槽位与按日排期共用「一月不重样」规则），请换菜或调整槽位",
         )
+
+
+def set_weekly_slot_menu_total_stock(db: Session, body: MenuDayTotalStockIn) -> None:
+    from app.services.menu_day_stock_service import set_weekly_slot_total_stock
+
+    set_weekly_slot_total_stock(
+        db, _monday_of_week(body.week_start), body.slot, body.total_stock
+    )
 
 
 def update_settings(db: Session, body: SettingsIn) -> None:

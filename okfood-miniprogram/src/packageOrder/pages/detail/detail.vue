@@ -21,12 +21,22 @@
             <text class="limit-tag">{{ dish.day }}限定</text>
           </view>
           <view class="detail-price-card">
-            <view>
+            <view class="price-card-left">
               <text class="p-sub">自律首选价 / Single Order</text>
               <text v-if="formatMenuPrice(dish.price) != null" class="p-val">¥ {{ formatMenuPrice(dish.price) }}</text>
               <text v-else class="p-val p-val--pending">待公布</text>
             </view>
-            <text class="p-hint">包月订阅更优惠 👌</text>
+            <view class="price-card-right">
+              <text class="p-hint">包月订阅更优惠 👌</text>
+              <view v-if="showDayStockBlock" class="day-stock-line">
+                <block v-if="dish.singleStockLimited">
+                  <text class="day-stock-txt">当日剩余</text>
+                  <text class="day-stock-num">{{ dish.singleStockRemaining ?? 0 }}</text>
+                  <text class="day-stock-unit">份</text>
+                </block>
+                <text v-else class="day-stock-unlimited">当日单点不限量</text>
+              </view>
+            </view>
           </view>
           <view class="ingredient-box">
             <text class="ingredient-title">🔍 核心配料明细</text>
@@ -62,7 +72,19 @@ const loading = ref(true)
 const loadError = ref('')
 /** 供餐日 YYYY-MM-DD，来自周菜单跳转 */
 const serviceDateYmd = ref('')
-const canSubmitSingleOrder = computed(() => isSingleOrderServiceDate(serviceDateYmd.value))
+const canSubmitSingleOrder = computed(() => {
+  if (!isSingleOrderServiceDate(serviceDateYmd.value)) return false
+  const d = dish.value
+  if (!d) return true
+  if (d.singleStockLimited) {
+    const n = d.singleStockRemaining
+    if (n == null || n <= 0) return false
+  }
+  return true
+})
+
+/** 有供餐日才展示「当日剩余」与订阅提示同列，否则仅保留原右侧一句提示在下方 v-else 分支 */
+const showDayStockBlock = computed(() => !!(serviceDateYmd.value && dish.value))
 /** scroll-view 必须用确定 px高度，微信里 flex+calc 易导致子节点不渲染 */
 const scrollStyle = ref({ height: '400px' })
 
@@ -104,7 +126,7 @@ async function loadDetail(dishId) {
   loadError.value = ''
   dish.value = null
   try {
-    const d = await fetchMenuDetail(dishId)
+    const d = await fetchMenuDetail(dishId, serviceDateYmd.value)
     if (!d) throw new Error('暂无数据')
     dish.value = d
   } catch (e) {
@@ -247,8 +269,58 @@ function handleBuy() {
   border-radius: 48rpx;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 24rpx;
   margin-bottom: 60rpx;
+}
+
+.price-card-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.price-card-right {
+  flex-shrink: 0;
+  max-width: 44%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 16rpx;
+  text-align: right;
+  padding-top: 4rpx;
+}
+
+.day-stock-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6rpx 8rpx;
+}
+
+.day-stock-txt {
+  font-size: 24rpx;
+  color: $ok-slate-500;
+  font-weight: 800;
+}
+
+.day-stock-num {
+  font-size: 40rpx;
+  font-weight: 950;
+  color: $ok-forest-green;
+  line-height: 1;
+}
+
+.day-stock-unit {
+  font-size: 24rpx;
+  color: $ok-slate-500;
+  font-weight: 800;
+}
+
+.day-stock-unlimited {
+  font-size: 24rpx;
+  color: $ok-slate-400;
+  font-weight: 700;
 }
 
 .p-sub {
@@ -276,8 +348,9 @@ function handleBuy() {
   font-size: 22rpx;
   opacity: 0.5;
   font-weight: 700;
-  max-width: 200rpx;
+  max-width: 220rpx;
   text-align: right;
+  line-height: 1.4;
 }
 
 .ingredient-box {

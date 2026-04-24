@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 
 
 
-from app.core.timeutil import now_shanghai, today_shanghai, tomorrow_shanghai
+from app.core.timeutil import (
+    min_member_delivery_start_shanghai,
+    now_shanghai,
+    today_shanghai,
+    tomorrow_shanghai,
+)
 
 from app.models.menu_dish import MenuDish
 
@@ -248,6 +253,8 @@ def _to_member_out(
 
         delivery_deferred=bool(m.delivery_deferred),
 
+        store_pickup=bool(m.store_pickup),
+
         is_active=m.is_active,
 
         is_leaved_tomorrow=m.is_leaved_tomorrow,
@@ -434,6 +441,10 @@ def patch_member_profile(
 
     card_pay_mode: str | None = None,
 
+    set_store_pickup: bool = False,
+
+    store_pickup: bool | None = None,
+
 ) -> MemberOut:
 
     m = db.get(Member, member_id)
@@ -478,17 +489,30 @@ def patch_member_profile(
 
         m.delivery_start_date = None
 
+        m.store_pickup = False
+
     elif set_delivery_deferred and delivery_deferred is False:
 
         m.delivery_deferred = False
+
+    if set_store_pickup and store_pickup is not None:
+
+        m.store_pickup = bool(store_pickup)
+
+        if m.store_pickup:
+
+            m.delivery_deferred = False
 
     if set_delivery_start and not defer_applied:
 
         if delivery_start_date is not None:
 
-            if delivery_start_date <= today_shanghai():
+            if delivery_start_date < min_member_delivery_start_shanghai():
 
-                raise HTTPException(status_code=400, detail="起送日期须为明天及之后（上海业务日）")
+                raise HTTPException(
+                    status_code=400,
+                    detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早明天，之后最早后天）",
+                )
 
             m.delivery_start_date = delivery_start_date
 
@@ -884,7 +908,7 @@ def get_weekly_menu(db: Session, week_start: date | None) -> dict:
 
 
 
-def get_menu_detail_by_dish_id(db: Session, dish_id: int) -> dict:
+def get_menu_detail_by_dish_id(db: Session, dish_id: int, *, service_date: date | None = None) -> dict:
 
     dish = db.get(MenuDish, dish_id)
 
@@ -892,7 +916,7 @@ def get_menu_detail_by_dish_id(db: Session, dish_id: int) -> dict:
 
         raise HTTPException(status_code=404, detail="餐品不存在")
 
-    return {
+    out: dict = {
 
         "dish_id": dish.id,
 
@@ -909,6 +933,12 @@ def get_menu_detail_by_dish_id(db: Session, dish_id: int) -> dict:
         "price": _member_menu_price(dish),
 
     }
+    if service_date is not None:
+        from app.services.menu_day_stock_service import single_order_stock_for_dish_date
+
+        out.update(single_order_stock_for_dish_date(db, int(dish_id), service_date).to_detail_dict())
+
+    return out
 
 
 
@@ -978,6 +1008,10 @@ def admin_patch_member_profile(
 
     delivery_start_date: date | None = None,
 
+    set_store_pickup: bool = False,
+
+    store_pickup: bool | None = None,
+
 ) -> MemberOut:
 
     _ = operator
@@ -999,6 +1033,8 @@ def admin_patch_member_profile(
         and not set_balance
 
         and not set_delivery_start_date
+
+        and not set_store_pickup
 
     ):
 
@@ -1123,6 +1159,14 @@ def admin_patch_member_profile(
         else:
 
             m.delivery_start_date = None
+
+    if set_store_pickup:
+
+        if store_pickup is None:
+
+            raise HTTPException(status_code=400, detail="门店自提标记不能为空")
+
+        m.store_pickup = bool(store_pickup)
 
     if daily_meal_units is not None:
         if daily_meal_units < 1 or daily_meal_units > MAX_DAILY_MEAL_UNITS:

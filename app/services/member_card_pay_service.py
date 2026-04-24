@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.timeutil import today_shanghai
+from app.core.timeutil import min_member_delivery_start_shanghai
 from app.integrations.wechat_pay_v2 import (
     WeChatPayV2Error,
     WechatPayNotifyParsed,
@@ -65,8 +65,11 @@ def create_miniprogram_member_card_order(
     k = (card_kind or "").strip()
     if k not in (CardOrderKind.WEEK.value, CardOrderKind.MONTH.value):
         raise HTTPException(status_code=400, detail="无效开卡类型")
-    if delivery_start_date <= today_shanghai():
-        raise HTTPException(status_code=400, detail="起送日期须为明天及之后（上海业务日）")
+    if delivery_start_date < min_member_delivery_start_shanghai():
+        raise HTTPException(
+            status_code=400,
+            detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早明天，之后最早后天）",
+        )
 
     m = db.get(Member, member_id)
     if not m:

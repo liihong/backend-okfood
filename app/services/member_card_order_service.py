@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.core.timeutil import today_shanghai
+from app.core.timeutil import min_member_delivery_start_shanghai, today_shanghai
 from app.models.enums import CardOpenMode, CardOrderKind, CardOrderPayStatus, CardPayChannel, PlanType
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
@@ -49,8 +49,11 @@ def ensure_miniprogram_offline_claim_order(
     delivery_start_date: date,
 ) -> MemberCardOrder:
     """小程序端「已支付(线下)」：生成或更新一条未缴/渠道为线下的开卡工单，待后台标记已缴后同步入账。"""
-    if delivery_start_date <= today_shanghai():
-        raise HTTPException(status_code=400, detail="起送日期须为明天及之后（上海业务日）")
+    if delivery_start_date < min_member_delivery_start_shanghai():
+        raise HTTPException(
+            status_code=400,
+            detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早明天，之后最早后天）",
+        )
     m = db.get(Member, member_id)
     if not m:
         raise HTTPException(status_code=404, detail="用户不存在")

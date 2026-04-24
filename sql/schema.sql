@@ -18,10 +18,13 @@
 --  15) 移除短信登录表 sms_verification（见 migration_023_drop_sms_verification.sql）
 --  16) single_meal_orders 单次点餐（见 migration_024_single_meal_orders.sql）
 --  17) single_meal_orders 微信字段（见 migration_025_single_meal_orders_wechat.sql）
+--  18) single_meal_orders 自提与份数（见 migrations/20260424_single_meal_orders_pickup_quantity.sql）
 --  18) members.daily_meal_units每配送日份数（见 migration_026_members_daily_meal_units.sql）
 --  19) members.meal_quota_total周卡月卡累计总次数展示（见 migration_028_members_meal_quota_total.sql）
 --  20) member_addresses.delivery_region_id 外键替代 area/area_manual（见 migration_029_member_addresses_delivery_region_id.sql）
 --  21) members.delivery_deferred 暂不配送标记（见 migrations/20260422_members_delivery_deferred.sql）
+--  22) weekly_menu_slot.total_stock 日总份与单次可售（见 migrations/20260425_weekly_menu_slot_total_stock.sql）
+--  23) members.store_pickup 门店自提（见 migrations/20260424_members_store_pickup.sql）
 
 SET NAMES utf8mb4;
 
@@ -44,6 +47,7 @@ CREATE TABLE IF NOT EXISTS `members` (
   `last_low_balance_notify_date` DATE NULL COMMENT '最近一次低余额提醒的业务日(上海)，用于去重',
   `delivery_start_date` DATE NULL COMMENT '起送业务日(上海)：非空则仅当配送日>=该日才参与配送',
   `delivery_deferred` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '暂不配送：无起送日意向且保持未开卡',
+  `store_pickup` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '门店自提：不参与按地址配送与骑手任务，单独归组备餐',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_members_phone` (`phone`),
@@ -220,6 +224,7 @@ CREATE TABLE IF NOT EXISTS `weekly_menu_slot` (
   `week_start` DATE NOT NULL COMMENT '当周周一',
   `slot` TINYINT NOT NULL COMMENT '1=周一 … 7=周日',
   `dish_id` BIGINT UNSIGNED NOT NULL,
+  `total_stock` INT UNSIGNED NULL DEFAULT NULL COMMENT '日总份(含订阅与单次)；NULL=不限制单次卡',
   `service_date` DATE AS (DATE_ADD(`week_start`, INTERVAL (`slot` - 1) DAY)) STORED,
   `service_ym` CHAR(7) AS (DATE_FORMAT(`service_date`, '%Y-%m')) STORED,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -281,7 +286,9 @@ CREATE TABLE IF NOT EXISTS `single_meal_orders` (
   `out_trade_no` VARCHAR(32) NOT NULL COMMENT '商户订单号，微信统一下单',
   `member_id` BIGINT UNSIGNED NOT NULL COMMENT 'members.id',
   `dish_id` BIGINT UNSIGNED NOT NULL COMMENT 'menu_dish.id',
-  `member_address_id` BIGINT UNSIGNED NOT NULL COMMENT 'member_addresses.id',
+  `member_address_id` BIGINT UNSIGNED NULL COMMENT 'member_addresses.id；门店自提时为 NULL',
+  `store_pickup` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '门店自提：支付后不派骑手',
+  `quantity` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '份数，总价=单价×份数',
   `delivery_date` DATE NOT NULL COMMENT '供餐/配送业务日(上海)',
   `routing_area` VARCHAR(64) NOT NULL COMMENT '下单时片区快照',
   `amount_yuan` DECIMAL(12, 2) NOT NULL,

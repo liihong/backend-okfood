@@ -62,7 +62,7 @@
   "preloadRule": {
     "pages/mine/index": {
       "network": "all",
-      "packages": ["packageUser"]
+      "packages": ["packageUser", "packageOrder"]
     }
   },
   "subPackages": [
@@ -81,6 +81,20 @@
           "style": {
             "navigationStyle": "custom",
             "backgroundColor": "#ffffff"
+          }
+        },
+        {
+          "path": "pages/singleOrderList/singleOrderList",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
+        },
+        {
+          "path": "pages/singleOrderDetail/singleOrderDetail",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
           }
         }
       ]

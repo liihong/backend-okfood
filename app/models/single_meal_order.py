@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Numeric, String
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -16,9 +16,11 @@ class SingleMealOrder(Base):
     out_trade_no: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     member_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("members.id", onupdate="CASCADE"), index=True)
     dish_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("menu_dish.id", onupdate="CASCADE"), index=True)
-    member_address_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("member_addresses.id", onupdate="CASCADE"), index=True
+    member_address_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("member_addresses.id", onupdate="CASCADE"), nullable=True, index=True
     )
+    store_pickup: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     delivery_date: Mapped[date] = mapped_column(Date, index=True)
     routing_area: Mapped[str] = mapped_column(String(64))
     amount_yuan: Mapped[Decimal] = mapped_column(Numeric(12, 2))

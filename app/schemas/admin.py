@@ -85,6 +85,14 @@ class WeeklySlotAssignIn(BaseModel):
     dish_id: int | None = Field(None, ge=1)
 
 
+class MenuDayTotalStockIn(BaseModel):
+    """某日槽位在 menu_date 上的总份数；不传 total_stock 或传 null 表示不限制（删除库存行）。"""
+
+    week_start: date = Field(..., description="该周任意一天，服务端归一为周一")
+    slot: int = Field(..., ge=1, le=7, description="1=周一 … 7=周日")
+    total_stock: int | None = Field(default=None, description="当日该菜总可供应份数；null=取消上限")
+
+
 class MenuScheduleAssignIn(BaseModel):
     date: date
     dish_id: int = Field(..., ge=1)
@@ -184,6 +192,7 @@ class MemberAdminOut(BaseModel):
         None,
         description="起送业务日（上海）：非空则仅当配送日>=该日才进入配送大表；开卡工单同步时写入",
     )
+    store_pickup: bool = Field(False, description="门店自提，不参与骑手任务与按地址配送分组")
     address: str
     detail_address: str = Field(
         "",
@@ -261,6 +270,10 @@ class AdminMemberPatchIn(BaseModel):
     delivery_start_date: date | None = Field(
         None,
         description="起送业务日（上海）：提交则更新；可清空为不参与排期；通常与 is_active/请假等一同生效",
+    )
+    store_pickup: bool | None = Field(
+        None,
+        description="门店自提；提交则更新；与配送到家互斥",
     )
 
     @field_validator("daily_meal_units", mode="before")

@@ -6,7 +6,7 @@ from datetime import date, time, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.courier_delivery_fee import courier_delivery_fee_yuan_for_meal_units
@@ -101,13 +101,31 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
     if not dish_planned_for_date(db, int(dish.id), body.delivery_date):
         raise HTTPException(status_code=400, detail="所选日期未排该餐品")
 
-    addr = db.get(MemberAddress, body.member_address_id)
-    if not addr or int(addr.member_id) != int(member_id):
-        raise HTTPException(status_code=404, detail="配送地址不存在")
+    qty = int(body.quantity)
+    if qty < 1 or qty > 50:
+        raise HTTPException(status_code=400, detail="份数须在 1～50 之间")
 
-    m = db.get(Member, member_id)
-    if not m:
+    addr: MemberAddress | None = None
+    if body.store_pickup:
+        address_summary = "门店自提"
+        area = "门店自提"
+        addr_id: int | None = None
+    else:
+        addr = db.get(MemberAddress, body.member_address_id)
+        if not addr or int(addr.member_id) != int(member_id):
+            raise HTTPException(status_code=404, detail="配送地址不存在")
+        nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
+        area = routing_area_label(addr, nm)
+        detail_line = (addr.detail_address or "").strip()
+        address_summary = f"{area} {detail_line}".strip()
+        addr_id = int(addr.id)
+
+    if not db.get(Member, member_id):
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    from app.services.menu_day_stock_service import assert_single_order_stock_available
+
+    assert_single_order_stock_available(db, int(dish.id), body.delivery_date, qty)
 
     # 单点：上海时间当日 10:00 起不可再下「当日供餐」单（与小程序规则一致，不分会员套餐）
     if body.delivery_date == today_shanghai() and now_shanghai().time() >= time(10, 0, 0):
@@ -116,20 +134,18 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
             detail="每日 10:00 后仅可下次日及之后的单点单",
         )
 
-    nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
-    area = routing_area_label(addr, nm)
-    amt = dish.single_order_price_yuan
-    if amt is None:
+    unit = dish.single_order_price_yuan
+    if unit is None:
         raise HTTPException(status_code=400, detail="该餐品暂未开放单点")
-
-    detail_line = (addr.detail_address or "").strip()
-    address_summary = f"{area} {detail_line}".strip()
+    amt = (Decimal(unit) * Decimal(qty)).quantize(Decimal("0.01"))
 
     row = SingleMealOrder(
         out_trade_no=_new_temp_out_trade_no(),
         member_id=member_id,
         dish_id=int(dish.id),
-        member_address_id=int(addr.id),
+        member_address_id=addr_id,
+        store_pickup=bool(body.store_pickup),
+        quantity=qty,
         delivery_date=body.delivery_date,
         routing_area=area,
         amount_yuan=amt,
@@ -144,20 +160,79 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
     db.commit()
     db.refresh(row)
 
+    return _single_meal_order_row_to_out(db, row, dish_title=str(dish.name), address_summary=address_summary)
+
+
+def _single_meal_order_row_to_out(
+    db: Session,
+    row: SingleMealOrder,
+    *,
+    dish_title: str | None = None,
+    address_summary: str | None = None,
+) -> SingleMealOrderOut:
+    if dish_title is None:
+        dsh = db.get(MenuDish, row.dish_id)
+        dish_title = (dsh.name or "").strip() if dsh else "餐品"
+    if address_summary is None:
+        if bool(getattr(row, "store_pickup", False)):
+            address_summary = "门店自提"
+        else:
+            addr = db.get(MemberAddress, row.member_address_id)
+            if addr:
+                nm = delivery_region_name_map(
+                    db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set()
+                )
+                ar = routing_area_label(addr, nm)
+                detail_line = (addr.detail_address or "").strip()
+                address_summary = f"{ar} {detail_line}".strip()
+            else:
+                address_summary = (row.routing_area or "").strip() or "—"
     return SingleMealOrderOut(
         id=int(row.id),
+        out_trade_no=str(row.out_trade_no or ""),
         dish_id=int(row.dish_id),
-        dish_title=str(dish.name),
-        member_address_id=int(row.member_address_id),
+        dish_title=dish_title,
+        member_address_id=int(row.member_address_id) if row.member_address_id is not None else None,
+        store_pickup=bool(row.store_pickup),
+        quantity=int(row.quantity or 1),
         delivery_date=row.delivery_date,
-        routing_area=row.routing_area,
+        routing_area=str(row.routing_area or ""),
         amount_yuan=_format_amount_yuan(Decimal(row.amount_yuan)),
-        pay_status=row.pay_status,
+        pay_status=str(row.pay_status or ""),
         pay_channel=row.pay_channel,
-        fulfillment_status=row.fulfillment_status,
+        fulfillment_status=str(row.fulfillment_status or ""),
         courier_id=row.courier_id,
         address_summary=address_summary,
+        created_at=row.created_at,
     )
+
+
+def list_member_single_meal_orders(
+    db: Session,
+    member_id: int,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[SingleMealOrderOut], int]:
+    page = max(1, page)
+    page_size = min(50, max(1, page_size))
+    total = int(db.scalar(select(func.count()).where(SingleMealOrder.member_id == member_id)) or 0)
+    offset = (page - 1) * page_size
+    rows = db.scalars(
+        select(SingleMealOrder)
+        .where(SingleMealOrder.member_id == member_id)
+        .order_by(SingleMealOrder.created_at.desc(), SingleMealOrder.id.desc())
+        .offset(offset)
+        .limit(page_size)
+    ).all()
+    return [_single_meal_order_row_to_out(db, r) for r in rows], total
+
+
+def get_member_single_meal_order(db: Session, member_id: int, order_id: int) -> SingleMealOrderOut:
+    row = db.get(SingleMealOrder, order_id)
+    if not row or int(row.member_id) != int(member_id):
+        raise HTTPException(status_code=404, detail="订单不存在")
+    return _single_meal_order_row_to_out(db, row)
 
 
 def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, client_ip: str) -> dict[str, str]:
@@ -226,10 +301,14 @@ def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     order.pay_channel = "微信"
     tid = (parsed.transaction_id or "").strip()
     order.wx_transaction_id = tid or order.wx_transaction_id
-    pay_addr = db.get(MemberAddress, order.member_address_id)
-    order.courier_id = primary_courier_for_region_id(
-        db, int(pay_addr.delivery_region_id) if pay_addr and pay_addr.delivery_region_id else None
-    )
+    if bool(getattr(order, "store_pickup", False)):
+        order.courier_id = None
+        order.fulfillment_status = "delivered"
+    else:
+        pay_addr = db.get(MemberAddress, order.member_address_id)
+        order.courier_id = primary_courier_for_region_id(
+            db, int(pay_addr.delivery_region_id) if pay_addr and pay_addr.delivery_region_id else None
+        )
     db.commit()
     return True, "paid"
 
@@ -285,7 +364,7 @@ def list_courier_single_order_tasks(
                 lat=float(a.lat) if a.lat is not None else None,
                 area=ar,
                 remarks=member.remarks,
-                daily_meal_units=1,
+                daily_meal_units=max(1, int(order.quantity or 1)),
                 sort_distance_m=sort_m,
                 is_delivered=False,
                 task_kind="single",
@@ -307,8 +386,10 @@ def confirm_single_order_delivery(db: Session, courier_id: str, order_id: int) -
         raise HTTPException(status_code=400, detail="订单未支付")
     if row.fulfillment_status == "delivered":
         return
-    # 单次点餐每单1 份，计价同「首份」口径
-    fee_yuan = courier_delivery_fee_yuan_for_meal_units(db, 1)
+    if bool(getattr(row, "store_pickup", False)):
+        raise HTTPException(status_code=400, detail="门店自提订单无需骑手确认")
+    qty = max(1, int(row.quantity or 1))
+    fee_yuan = courier_delivery_fee_yuan_for_meal_units(db, qty)
     courier_row = db.execute(select(Courier).where(Courier.courier_id == courier_id).with_for_update()).scalar_one_or_none()
     if not courier_row:
         raise HTTPException(status_code=500, detail="配送员账户异常")

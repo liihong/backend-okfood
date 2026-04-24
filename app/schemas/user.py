@@ -31,6 +31,7 @@ class MemberOut(BaseModel):
     plan_type: PlanType | None
     delivery_start_date: date | None = Field(None, description="起送业务日（上海）")
     delivery_deferred: bool = Field(False, description="用户选择暂不配送，无起送日且未开卡")
+    store_pickup: bool = Field(False, description="门店自提：不参与配送线路，仍参与起送日与备餐统计")
     is_active: bool
     is_leaved_tomorrow: bool
     leave_range: dict[str, date | None] | None
@@ -66,6 +67,10 @@ class ProfilePatchIn(BaseModel):
     delivery_deferred: bool | None = Field(
         default=None,
         description="为 true 时表示暂不配送：清空起送日并 is_active=false；为 false 时取消该标记",
+    )
+    store_pickup: bool | None = Field(
+        default=None,
+        description="为 true 时门店自提（与配送互斥）；为 false 时恢复配送到家；暂不配送时会由服务端清零",
     )
     card_pay_mode: Literal["offline_paid"] | None = Field(
         default=None,

@@ -1324,6 +1324,19 @@
   padding: 4px 8px;
   border-radius: 6px;
 }
+
+.pickup-tag {
+  font-size: 12px;
+  font-weight: 800;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.pickup-tag--on {
+  color: #0e5a44;
+  background: #e6f4ef;
+}
 .balance-text {
   font-size: 1.5rem;
   font-weight: 900;

@@ -3,20 +3,24 @@
     <OkNavbar show-brand />
     <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="profile-container">
-        <button
-          v-if="!isLoggedIn"
-          class="user-header user-header--wx"
-          open-type="getPhoneNumber"
-          @getphonenumber="onWxGetPhoneNumber"
-        >
+        <view v-if="!isLoggedIn" class="user-header">
           <view :class="['avatar-box', 'avatar-box--guest']">
             <text class="avatar-txt avatar-txt--guest">?</text>
           </view>
-          <view class="user-name-box">
-            <text class="nick-name nick-name--action">微信一键登录</text>
-            <text class="level-text">授权手机号后与会员档案、餐次同步</text>
+          <view class="user-name-box user-name-box--flex">
+            <text class="level-text level-text--guest-hint">
+              授权手机号后与会员档案、餐次同步
+            </text>
           </view>
-        </button>
+          <button
+            class="wx-login-btn"
+            hover-class="wx-login-btn--hover"
+            open-type="getPhoneNumber"
+            @getphonenumber="onWxGetPhoneNumber"
+          >
+            登录
+          </button>
+        </view>
         <view v-else-if="needsMemberSetupPage" class="user-header user-header--setup" @click="goMemberSetup">
           <button
             class="avatar-btn"
@@ -88,6 +92,10 @@
             <text class="menu-label">🏠 地址管理</text>
             <text class="arrow">›</text>
           </view>
+          <view class="menu-row" @click="goSingleOrders">
+            <text class="menu-label">🧾 我的单次订单</text>
+            <text class="arrow">›</text>
+          </view>
         </view>
       </view>
     </scroll-view>
@@ -105,6 +113,8 @@ import {
   setAppUserMode,
   reLaunchIfCourierModePreferred,
   uploadMemberAvatarFile,
+  clearMemberSession,
+  isUserMeNotFoundError,
 } from '@/utils/api.js'
 import { wxMiniMemberLoginAndStore, hasWxPhoneAuthDetail } from '@/utils/wxMemberLogin.js'
 import {
@@ -601,7 +611,10 @@ async function refreshMember(options = {}) {
           /* ignore */
         }
       }
-    } catch (_) {
+    } catch (e) {
+      if (isUserMeNotFoundError(e)) {
+        clearMemberSession()
+      }
       memberProfileRaw.value = null
       serverBalance.value = 0
       userName.value = ''
@@ -609,6 +622,14 @@ async function refreshMember(options = {}) {
       leaveRange.value = null
       isActive.value = false
       createdAt.value = ''
+      const t = getMemberToken()
+      isLoggedIn.value = !!t
+      memberPhone.value = uni.getStorageSync('memberPhone') || ''
+      if (!isLoggedIn.value) {
+        wxProfile.value = null
+        wxNickDraft.value = ''
+        defaultAddrLine.value = ''
+      }
     }
   }
   syncDisplayNoAnim()
@@ -717,6 +738,14 @@ function goLeave() {
 }
 function goAddress() {
   uni.navigateTo({ url: '/packageUser/pages/address/list' })
+}
+
+function goSingleOrders() {
+  if (!getMemberToken()) {
+    uni.showToast({ title: '请先登录', icon: 'none' })
+    return
+  }
+  uni.navigateTo({ url: '/packageOrder/pages/singleOrderList/singleOrderList' })
 }
 
 function goMemberSetup() {
@@ -874,20 +903,34 @@ function goMemberSetup() {
   margin-top: 8rpx;
 }
 
-/* 微信 getPhoneNumber：整行可点，样式与普通头部一致 */
-.user-header--wx {
-  margin: 0 0 50rpx;
-  padding: 0;
-  width: 100%;
-  background: transparent;
-  border: none;
-  line-height: normal;
-  text-align: left;
-  box-sizing: border-box;
+.level-text--guest-hint {
+  font-size: 24rpx;
+  color: $ok-slate-500;
+  line-height: 1.45;
 }
 
-.user-header--wx::after {
+/* 微信授权手机号：小号主按钮 */
+.wx-login-btn {
+  margin: 0 0 0 auto;
+  padding: 12rpx 32rpx;
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 26rpx;
+  font-weight: 800;
+  color: #fff;
+  background: $ok-forest-green;
   border: none;
+  border-radius: 999rpx;
+  line-height: 1.35;
+  box-shadow: 0 6rpx 16rpx rgba(14, 90, 68, 0.28);
+}
+
+.wx-login-btn::after {
+  border: none;
+}
+
+.wx-login-btn--hover {
+  opacity: 0.9;
 }
 
 .avatar-box {

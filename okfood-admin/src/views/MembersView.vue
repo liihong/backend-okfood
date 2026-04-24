@@ -236,6 +236,8 @@ const editForm = ref({
   balance: 0,
   /** 起送业务日 YYYY-MM-DD，空表示未设置 */
   delivery_start_date: '',
+  /** 门店自提 */
+  store_pickup: false,
 })
 
 /** 编辑框仅填详细地址：优先 API 的 detail_address，否则从旧版「片区 + 详细」展示串回推 */
@@ -269,6 +271,7 @@ async function openEditMember(u) {
       typeof u.delivery_start_date === 'string' && u.delivery_start_date.trim()
         ? u.delivery_start_date.trim().slice(0, 10)
         : '',
+    store_pickup: u.store_pickup === true,
   }
   showEditModal.value = true
 }
@@ -287,6 +290,7 @@ async function submitEditMember() {
       delivery_start_date: editForm.value.delivery_start_date?.trim()
         ? editForm.value.delivery_start_date.trim().slice(0, 10)
         : null,
+      store_pickup: editForm.value.store_pickup === true,
     }
     if (editForm.value.use_auto_area) {
       payload.use_auto_area = true
@@ -424,6 +428,13 @@ onMounted(async () => {
         <el-table-column label="配送片区" min-width="100">
           <template #default="{ row: u }">
             <span class="area-tag">{{ u.area }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="自提" align="center" min-width="72">
+          <template #default="{ row: u }">
+            <span :class="u.store_pickup ? 'pickup-tag pickup-tag--on' : 'pickup-tag'">{{
+              u.store_pickup ? '是' : '否'
+            }}</span>
           </template>
         </el-table-column>
         <el-table-column label="剩余 / 总次数" align="center" min-width="120">
@@ -566,6 +577,10 @@ onMounted(async () => {
             <p class="modal-hint">
               上海业务日：该日及之后才进入配送排期；留空表示未设置起送日。保存时会与「未开卡 / 余额」等规则一并生效。
             </p>
+            <label class="checkbox-row" style="margin-top: 12px">
+              <input v-model="editForm.store_pickup" type="checkbox" />
+              <span>门店自提（不到家配送，仍计入备餐大表「门店自提」分组）</span>
+            </label>
           </div>
           <div class="form-group">
             <label>会员剩余次数</label>

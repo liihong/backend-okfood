@@ -15,7 +15,7 @@ from app.models.delivery_region import DeliveryRegion
 from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.schemas.admin import DeliverySheetGroupOut, DeliverySheetMemberOut, DeliverySheetOut, DeliverySheetStopOut
-from app.services.courier_service import eligible_members_for_delivery
+from app.services.courier_service import eligible_members_for_delivery, eligible_members_for_store_pickup
 from app.services.member_address_service import delivery_region_name_map, routing_area_label
 from app.services.member_service import effective_daily_meal_units
 
@@ -187,6 +187,41 @@ def build_delivery_sheet(
                 stop_count=len(stops),
                 meal_total=meal_total,
                 has_area_issue=group_issue,
+            )
+        )
+
+    pu_members, pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d)
+    if pu_members:
+        lines: list[DeliverySheetMemberOut] = []
+        for mem in sorted(pu_members, key=lambda x: x.phone):
+            addr = pu_defaults.get(mem.id)
+            rmk = _member_line_remarks(mem, addr)
+            lines.append(
+                DeliverySheetMemberOut(
+                    phone=mem.phone,
+                    name=mem.name,
+                    daily_meal_units=effective_daily_meal_units(mem),
+                    remarks=rmk,
+                    area_issue=False,
+                )
+            )
+        pu_meal_total = sum(effective_daily_meal_units(m) for m in pu_members)
+        groups_out.append(
+            DeliverySheetGroupOut(
+                area="门店自提",
+                stops=[
+                    DeliverySheetStopOut(
+                        meal_count=pu_meal_total,
+                        address_line="门店自提（到店取餐）",
+                        area="门店自提",
+                        members=lines,
+                        remarks_combined=None,
+                        has_area_issue=False,
+                    )
+                ],
+                stop_count=1,
+                meal_total=pu_meal_total,
+                has_area_issue=False,
             )
         )
 

@@ -5,8 +5,8 @@
      <view class="wrap">
 
       <view class="setup-module">
-          <text class="module-title">一、个人资料与配送</text>
-         <view class="section">
+         <text class="module-title">一、个人资料</text>
+          <view v-if="!skipProfileIdentityEdit" class="section">
             <text class="sec-title">头像（可选）</text>
             <button class="avatar-btn" open-type="chooseAvatar" @chooseavatar="onChooseAvatar">
               <view class="avatar-box">
@@ -16,7 +16,7 @@
             </button>
           </view>
 
-        <view class="section">
+        <view v-if="!skipProfileIdentityEdit" class="section">
             <text class="sec-title">昵称 / 用户名</text>
             <view class="nick-wrap">
               <text v-show="showNickHint" class="nick-hint-overlay">微信昵称或常用称呼</text>
@@ -26,32 +26,41 @@
           </view>
 
         <view class="section">
-            <text class="sec-title">开始配送日期</text>
+           <text class="sec-title">配送或门店自提</text>
            <radio-group class="pay-radio-group pay-radio-group--delivery" @change="onDeliveryModeChange">
               <label class="pay-radio-row">
-                <radio value="date" :checked="deliveryMode === 'date'" :color="payRadioColor" />
-                <text class="pay-radio-label">选择起送日</text>
+               <radio value="delivery" :checked="deliveryMode === 'delivery'" :color="payRadioColor" />
+                <text class="pay-radio-label">配送到家</text>
+              </label>
+              <label class="pay-radio-row">
+                <radio value="pickup" :checked="deliveryMode === 'pickup'" :color="payRadioColor" />
+                <text class="pay-radio-label">门店自提</text>
               </label>
               <label class="pay-radio-row">
                 <radio value="defer" :checked="deliveryMode === 'defer'" :color="payRadioColor" />
                 <text class="pay-radio-label">暂不配送</text>
               </label>
             </radio-group>
-            <template v-if="deliveryMode === 'date'">
+           <template v-if="deliveryMode === 'delivery' || deliveryMode === 'pickup'">
               <text class="sec-sub">
-                从该业务日起参与配送排期（与后台上海日历一致）。最早可选明天，不可选今天或更早。
+               <template v-if="deliveryMode === 'delivery'">
+                 从该业务日起参与配送排期（与后台上海日历一致）。当日 10:00（上海）前最早可选明天，10:00 及之后最早可选后天；不可选今天或更早。
+               </template>
+                <template v-else>
+                  从该业务日起参与订餐排期，到店取餐（不进入骑手配送线路）。当日 10:00（上海）前最早可选明天，10:00 及之后最早可选后天；不可选今天或更早。
+                </template>
               </text>
-              <picker mode="date" :value="deliveryYmd" :start="minDeliveryYmd" @change="onDeliveryPick">
+              <picker mode="date" :value="pickerDeliveryYmd" :start="minDeliveryYmd" @change="onDeliveryPick">
                 <view class="date-picker-row">
                   <text :class="['date-picker-text', deliveryYmd ? '' : 'date-picker-text--ph']">
-                    {{ deliveryYmd || '请选择开始配送的日期' }}
+                   {{ deliveryYmd || '请选择开始的业务日期' }}
                   </text>
                   <text class="date-picker-arrow">›</text>
                 </view>
               </picker>
             </template>
             <text v-else class="sec-sub">
-              暂不参与配送排期，将保持未开卡（不参与分拣）。可随时改回「选择起送日」并保存。
+             暂不参与配送排期，将保持未开卡（不参与分拣）。可随时改回「配送到家」或「门店自提」并保存。
             </text>
           </view>
        </view>
@@ -162,7 +171,13 @@
 import { ref, computed } from 'vue'
 import { onShow, onLoad } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
-import { request, getMemberToken, uploadMemberAvatarFile } from '@/utils/api.js'
+import {
+  request,
+  getMemberToken,
+  uploadMemberAvatarFile,
+  clearMemberSession,
+  isUserMeNotFoundError,
+} from '@/utils/api.js'
 import {
   shouldOpenMemberSetup,
   shouldPromptMemberCardPay,
@@ -170,7 +185,7 @@ import {
   WX_DEFAULT_NICK,
 } from '@/utils/memberProfile.js'
 import { runMemberCardWechatPay } from '@/utils/memberCardPay.js'
-import { ymdTomorrowShanghai } from '@/utils/menuApi.js'
+import { minMemberDeliveryStartYmd } from '@/utils/menuApi.js'
 
 const MINE_PAY_REMINDER_KEY = 'okfood_pending_mine_toast'
 /** 与 uni.scss $ok-forest-green 一致，供 radio 组件 color 使用 */
@@ -184,10 +199,10 @@ const remoteAvatarUrl = ref('')
 const selectedPlan = ref('')
 /** 需购卡时：未支付走微信开卡；已支付则仅保存资料 */
 const cardPayRadio = ref('unpaid')
-/** date=选起送日；defer=暂不配送（服务端 is_active=0） */
-const deliveryMode = ref('date')
+/** delivery=配送到家；pickup=门店自提；defer=暂不配送（服务端 is_active=0） */
+const deliveryMode = ref('delivery')
 const deliveryYmd = ref('')
-const minDeliveryYmd = ref(ymdTomorrowShanghai())
+const minDeliveryYmd = ref(minMemberDeliveryStartYmd())
 const submitting = ref(false)
 const avatarUploading = ref(false)
 const memberPhone = ref('')
@@ -198,8 +213,13 @@ const cardPriceMonth = ref('669')
 /** 展示用划线价（与活动价对比）；可与接口价同步，缺省为常见标价 */
 const cardOrigWeek = ref('188')
 const cardOrigMonth = ref('699')
+/** 资料已完备、仅开卡续费时隐藏头像与昵称编辑（与 shouldOpenMemberSetup 判定一致） */
+const skipProfileIdentityEdit = ref(false)
 
 const showNickHint = computed(() => !String(nickDraft.value || '').trim())
+
+/** 未选日期时让滚轮落在合法最小日上，避免默认停在「今天」却仍受 start 限制 */
+const pickerDeliveryYmd = computed(() => deliveryYmd.value || minDeliveryYmd.value)
 
 const saveAmountWeek = computed(() => {
   const o = Math.floor(Number(cardOrigWeek.value) || 0)
@@ -230,8 +250,14 @@ function onCardPayRadioChange(e) {
 
 function onDeliveryModeChange(e) {
   const v = e?.detail?.value
-  deliveryMode.value = v === 'defer' ? 'defer' : 'date'
-  if (deliveryMode.value === 'defer') deliveryYmd.value = ''
+  if (v === 'defer') {
+    deliveryMode.value = 'defer'
+    deliveryYmd.value = ''
+  } else if (v === 'pickup') {
+    deliveryMode.value = 'pickup'
+  } else {
+    deliveryMode.value = 'delivery'
+  }
 }
 
 onLoad((options) => {
@@ -243,7 +269,10 @@ onLoad((options) => {
 })
 
 onShow(() => {
-  minDeliveryYmd.value = ymdTomorrowShanghai()
+  minDeliveryYmd.value = minMemberDeliveryStartYmd()
+  if (deliveryYmd.value && deliveryYmd.value < minDeliveryYmd.value) {
+    deliveryYmd.value = ''
+  }
   const phone = uni.getStorageSync('memberPhone') || ''
   memberPhone.value = phone
   if (!getMemberToken() || !phone) {
@@ -273,9 +302,13 @@ async function loadCardPrices() {
 async function loadProfile() {
   const phone = memberPhone.value || uni.getStorageSync('memberPhone') || ''
   if (!phone) return
+  skipProfileIdentityEdit.value = false
   try {
     const data = await request('/api/user/me', { method: 'GET' })
+    minDeliveryYmd.value = minMemberDeliveryStartYmd()
     serverBalance.value = Math.max(0, Math.floor(Number(data.balance) || 0))
+    skipProfileIdentityEdit.value =
+      shouldPromptMemberCardPay(data) && !shouldOpenMemberSetup(data)
     if (!shouldOpenMemberSetup(data) && !shouldPromptMemberCardPay(data)) {
       uni.showToast({ title: '资料与餐次已就绪', icon: 'success' })
       setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 600)
@@ -298,20 +331,42 @@ async function loadProfile() {
     if (data.delivery_deferred === true) {
       deliveryMode.value = 'defer'
       deliveryYmd.value = ''
+    } else if (data.store_pickup === true) {
+      deliveryMode.value = 'pickup'
+      const ds = data.delivery_start_date != null ? String(data.delivery_start_date).trim() : ''
+      let dPick = ds.length >= 10 ? ds.slice(0, 10) : ''
+      if (dPick && dPick < minDeliveryYmd.value) dPick = ''
+      deliveryYmd.value = dPick
     } else {
-      deliveryMode.value = 'date'
+      deliveryMode.value = 'delivery'
       const ds = data.delivery_start_date != null ? String(data.delivery_start_date).trim() : ''
       let dPick = ds.length >= 10 ? ds.slice(0, 10) : ''
       if (dPick && dPick < minDeliveryYmd.value) dPick = ''
       deliveryYmd.value = dPick
     }
   } catch (e) {
+    skipProfileIdentityEdit.value = false
+    if (isUserMeNotFoundError(e)) {
+      clearMemberSession()
+      uni.showToast({ title: '登录已失效，请重新登录', icon: 'none' })
+      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+      return
+    }
     console.warn('loadProfile', e)
   }
 }
 
 function onDeliveryPick(e) {
-  deliveryYmd.value = e.detail?.value || ''
+  const v = e.detail?.value || ''
+  if (v && v < minDeliveryYmd.value) {
+    uni.showToast({
+      title: '该时段最早可选日期已更新，请重选',
+      icon: 'none',
+      duration: 2600,
+    })
+    return
+  }
+  deliveryYmd.value = v
 }
 
 function isPersistableAvatarUrl(u) {
@@ -350,24 +405,34 @@ function onNickInput(e) {
 async function onSubmit() {
   const phone = memberPhone.value || uni.getStorageSync('memberPhone') || ''
   const nick = String(nickDraft.value || '').trim()
-  if (!nick || nick === WX_DEFAULT_NICK) {
+  if (
+    !skipProfileIdentityEdit.value &&
+    (!nick || nick === WX_DEFAULT_NICK)
+  ) {
     uni.showToast({ title: '请填写昵称', icon: 'none' })
     return
   }
-  if (needsCardPayment.value && cardPayRadio.value === 'unpaid' && deliveryMode.value === 'date') {
+  if (
+    needsCardPayment.value &&
+    cardPayRadio.value === 'unpaid' &&
+    (deliveryMode.value === 'delivery' || deliveryMode.value === 'pickup')
+  ) {
     if (!selectedPlan.value) {
       uni.showToast({ title: '请选择周卡或月卡', icon: 'none' })
       return
     }
   }
   const d0 = deliveryYmd.value?.trim()
-  if (deliveryMode.value === 'date') {
+  if (deliveryMode.value === 'delivery' || deliveryMode.value === 'pickup') {
     if (!d0) {
-      uni.showToast({ title: '请选择开始配送日期', icon: 'none' })
+      uni.showToast({ title: '请选择开始的业务日期', icon: 'none' })
       return
     }
     if (d0 < minDeliveryYmd.value) {
-      uni.showToast({ title: '起送日最早为明天（上海业务日）', icon: 'none' })
+      uni.showToast({
+        title: '起送日须不早于当前允许的最小业务日（上海 10:00 规则）',
+        icon: 'none',
+      })
       return
     }
   }
@@ -391,13 +456,14 @@ async function onSubmit() {
     } else {
       patch.delivery_deferred = false
       patch.delivery_start_date = d0
+      patch.store_pickup = deliveryMode.value === 'pickup'
     }
     if (needsCardPayment.value && cardPayRadio.value === 'unpaid') {
       patch.plan_type = selectedPlan.value
     }
     if (needsCardPayment.value && cardPayRadio.value === 'paid') {
       patch.card_pay_mode = 'offline_paid'
-      if (deliveryMode.value === 'date') {
+      if (deliveryMode.value === 'delivery' || deliveryMode.value === 'pickup') {
         // 已支付不展示卡面：无选择时按周卡建待核工单；若曾选过周/月卡则沿用
         patch.plan_type = selectedPlan.value === '月卡' ? '月卡' : '周卡'
       }
@@ -430,10 +496,19 @@ async function onSubmit() {
       const t =
         needsCardPayment.value &&
         cardPayRadio.value === 'paid' &&
-        deliveryMode.value === 'date'
+          (deliveryMode.value === 'delivery' || deliveryMode.value === 'pickup')
           ? '已保存。后台开卡工单待核对'
           : '已保存'
-      uni.showToast({ title: t, icon: 'success', duration: needsCardPayment.value && cardPayRadio.value === 'paid' && deliveryMode.value === 'date' ? 2200 : 2000 })
+      uni.showToast({
+        title: t,
+        icon: 'success',
+        duration:
+          needsCardPayment.value &&
+            cardPayRadio.value === 'paid' &&
+            (deliveryMode.value === 'delivery' || deliveryMode.value === 'pickup')
+            ? 2200
+            : 2000,
+      })
       setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
       return
     }
@@ -663,6 +738,16 @@ async function onSubmit() {
 
 .pay-radio-group--delivery {
   margin-bottom: 20rpx;
+  gap: 12rpx;
+  }
+  
+  .pay-radio-group--delivery .pay-radio-row {
+    padding: 18rpx 14rpx;
+    gap: 10rpx;
+  }
+  
+  .pay-radio-group--delivery .pay-radio-label {
+    font-size: 24rpx;
 }
 
 .plan-premium-wrap {

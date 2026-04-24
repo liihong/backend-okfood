@@ -19,6 +19,7 @@ from app.schemas.admin import (
     SettingsIn,
     StoreConfigUpdateIn,
     WeeklySlotAssignIn,
+    MenuDayTotalStockIn,
 )
 from app.schemas.common import TokenResponse
 from app.services.admin_service import (
@@ -26,6 +27,7 @@ from app.services.admin_service import (
     admin_weekly_menu_preview,
     assign_menu_schedule,
     assign_weekly_menu_slot,
+    set_weekly_slot_menu_total_stock,
     create_category_admin,
     dashboard_meal_summary,
     delete_dish,
@@ -212,6 +214,8 @@ def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_usernam
         balance=body.balance,
         set_delivery_start_date="delivery_start_date" in fs,
         delivery_start_date=body.delivery_start_date,
+        set_store_pickup="store_pickup" in fs,
+        store_pickup=body.store_pickup,
     )
     return success(data=dump_model(member), msg="会员信息已更新")
 
@@ -301,6 +305,14 @@ def menu_weekly_slot(body: WeeklySlotAssignIn, db: SessionDep, admin_username: s
     _ = admin_username
     assign_weekly_menu_slot(db, body)
     return success(msg="周槽位已保存")
+
+
+@router.post("/menu/day-total-stock")
+def menu_day_total_stock(body: MenuDayTotalStockIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+    """设置该周某一天对应菜品的日总份数；用于单次卡可售=总份数−当日应配送−已付单次。"""
+    _ = admin_username
+    set_weekly_slot_menu_total_stock(db, body)
+    return success(msg="日总库存已保存")
 
 
 @router.post("/settings")

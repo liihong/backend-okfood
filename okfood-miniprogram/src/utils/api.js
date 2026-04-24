@@ -9,7 +9,7 @@ const viteApiBase =
     : ''
 export const API_BASE =
   viteApiBase ||
-  (import.meta.env.DEV ? 'https://ok.sourcefire.cn' : 'https://ok.sourcefire.cn')
+  (import.meta.env.DEV ? 'http://127.0.0.1:8001' : 'https://ok.sourcefire.cn')
 
 /** 默认超时（ms）。可在 request(path, { timeout })覆盖；弱网可适当加大 */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 120000
@@ -110,6 +110,35 @@ export function getMemberToken() {
   } catch {
     return ''
   }
+}
+
+/**
+ * 清除会员本地会话（token、memberId、memberPhone、当前手机号下的微信资料缓存）。
+ * 在 GET /api/user/me 返回用户不存在（404）等场景调用。
+ */
+export function clearMemberSession() {
+  try {
+    const phone = uni.getStorageSync('memberPhone') || ''
+    uni.removeStorageSync(MEMBER_TOKEN_KEY)
+    uni.removeStorageSync('memberPhone')
+    uni.removeStorageSync('memberId')
+    if (phone) {
+      try {
+        uni.removeStorageSync(`okfood_wx_profile:${phone}`)
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** @param {unknown} err `request` 抛出的 Error（可能含 status / bizCode） */
+export function isUserMeNotFoundError(err) {
+  if (!err || typeof err !== 'object') return false
+  const o = /** @type {{ status?: number, bizCode?: number }} */ (err)
+  return o.status === 404 || o.bizCode === 404
 }
 
 export function getCourierToken() {

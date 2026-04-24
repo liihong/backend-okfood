@@ -49,7 +49,7 @@ import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { getNavbarLayout } from '@/utils/navbar.js'
-import { request } from '@/utils/api.js'
+import { request, clearMemberSession, isUserMeNotFoundError } from '@/utils/api.js'
 
 const isTomorrowLeave = ref(false)
 const rangeStart = ref('')
@@ -110,8 +110,13 @@ async function syncLeaveFromServer() {
       rangeStart.value = ''
       rangeEnd.value = ''
     }
-  } catch {
-    /*未登录或网络失败时保持本地展示 */
+  } catch (e) {
+    if (isUserMeNotFoundError(e)) {
+      clearMemberSession()
+      uni.showToast({ title: '登录已失效，请重新登录', icon: 'none' })
+      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+    }
+    /* 其它：未登录或网络失败时保持本地展示 */
   }
 }
 

@@ -9,6 +9,8 @@ const loading = ref(false)
 const savingSlot = ref(null)
 const preview = ref(null)
 const dishes = ref([])
+/** 日总份本地草稿 key=`weekStart|slot`；el-input 须可写，不能仅靠 computed 的 row 单向绑定 */
+const totalStockDraft = ref(/** @type {Record<string, string>} */ ({}))
 
 const dishOptions = computed(() =>
   (dishes.value || []).map((d) => {
@@ -34,6 +36,9 @@ function slotsToRows(slotList, weekStartIso) {
     dish_id: bySlot[slot]?.dish_id ?? null,
     name: bySlot[slot]?.name ?? '',
     single_order_price_yuan: bySlot[slot]?.single_order_price_yuan ?? null,
+    total_stock: bySlot[slot]?.total_stock ?? null,
+    subscription_meals_for_day: bySlot[slot]?.subscription_meals_for_day ?? null,
+    single_stock_remaining: bySlot[slot]?.single_stock_remaining ?? null,
   }))
 }
 
@@ -72,11 +77,39 @@ async function fetchDishes() {
   }
 }
 
+/** @param {{ weekStart: string, slot: number }} row */
+function totalStockKey(row) {
+  return `${row.weekStart}|${row.slot}`
+}
+
+/**
+ * @param {{ weekStart: string, slot: number, total_stock?: unknown }} row
+ * @returns {string}
+ */
+function totalStockFieldValue(row) {
+  const k = totalStockKey(row)
+  if (Object.prototype.hasOwnProperty.call(totalStockDraft.value, k)) {
+    return totalStockDraft.value[k] ?? ''
+  }
+  if (row.total_stock == null || row.total_stock === '') return ''
+  return String(row.total_stock)
+}
+
+/**
+ * @param {{ weekStart: string, slot: number }} row
+ * @param {string} val
+ */
+function setTotalStockDraft(row, val) {
+  const k = totalStockKey(row)
+  totalStockDraft.value = { ...totalStockDraft.value, [k]: val }
+}
+
 async function loadPreview() {
   if (!adminAccessToken.value) return
   loading.value = true
   try {
     preview.value = await apiJson('/api/admin/menu/weekly-slots', {}, { auth: true })
+    totalStockDraft.value = {}
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -117,6 +150,43 @@ async function onDishChange(row, dishId) {
   }
 }
 
+/**
+ * 失焦或回车时提交日总份（与服务器一致则不打接口）
+ * @param {Record<string, unknown> & { weekStart: string, slot: number, dish_id?: unknown, total_stock?: unknown }} row
+ */
+async function onTotalStockCommit(row) {
+  if (!row.dish_id) {
+    showToast('请先选择菜品', 'error')
+    return
+  }
+  const s = String(totalStockFieldValue(row) ?? '').trim()
+  const body = { week_start: row.weekStart, slot: row.slot, total_stock: null }
+  if (s !== '' && s !== '—') {
+    const n = Math.floor(Number(s))
+    if (!Number.isFinite(n) || n < 0) {
+      showToast('请输入非负整数或留空（不限）', 'error')
+      return
+    }
+    body.total_stock = n
+  }
+  const server = row.total_stock
+  if (body.total_stock == null && (server == null || server === '')) return
+  if (body.total_stock != null && server != null && Number(server) === body.total_stock) return
+
+  const key = `${row.weekStart}-stock-${row.slot}`
+  savingSlot.value = key
+  try {
+    await apiJson('/api/admin/menu/day-total-stock', { method: 'POST', body: JSON.stringify(body) }, { auth: true })
+    showToast('日总份数已保存', 'success')
+    await loadPreview()
+  } catch (e) {
+    showToast(e instanceof Error ? e.message : '保存失败', 'error')
+    await loadPreview()
+  } finally {
+    savingSlot.value = null
+  }
+}
+
 onMounted(() => {
   void fetchDishes()
   void loadPreview()
@@ -126,7 +196,7 @@ onMounted(() => {
 <template>
   <section class="tab-content animate-up weekly-menu-page">
     <p class="weekly-intro">
-      维护每周一至周日的固定槽位菜品；与按日排期共用「同一自然月内同一道菜仅出现一次」规则。
+      维护每周一至周日的固定槽位菜品；与按日排期共用「同一自然月内同一道菜仅出现一次」规则。日总份数：留空为不限制；设置后，单次可售=总份数−当日会员应配送份数−已付单次。同一自然日、同一道菜的日总份数在槽位上维护。
     </p>
 
     <div v-loading="loading" class="weekly-cards">
@@ -154,6 +224,31 @@ onMounted(() => {
                     : '—'
                 }}
               </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="日总份" width="120" align="right">
+            <template #default="{ row }">
+              <el-input
+                v-if="row.dish_id"
+                size="small"
+                class="stock-input"
+                :model-value="totalStockFieldValue(row)"
+                placeholder="留空=不限"
+                :disabled="savingSlot === `${row.weekStart}-stock-${row.slot}`"
+                @update:model-value="(v) => setTotalStockDraft(row, v != null ? String(v) : '')"
+                @blur="() => onTotalStockCommit(row)"
+              />
+              <span v-else>—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="应配送" width="72" align="right">
+            <template #default="{ row }">
+              {{ row.dish_id ? row.subscription_meals_for_day ?? '—' : '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="单次余" width="72" align="right">
+            <template #default="{ row }">
+              {{ row.dish_id ? row.single_stock_remaining ?? '—' : '—' }}
             </template>
           </el-table-column>
           <el-table-column label="菜品">
@@ -204,6 +299,31 @@ onMounted(() => {
                     : '—'
                 }}
               </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="日总份" width="120" align="right">
+            <template #default="{ row }">
+              <el-input
+                v-if="row.dish_id"
+                size="small"
+                class="stock-input"
+                :model-value="totalStockFieldValue(row)"
+                placeholder="留空=不限"
+                :disabled="savingSlot === `${row.weekStart}-stock-${row.slot}`"
+                @update:model-value="(v) => setTotalStockDraft(row, v != null ? String(v) : '')"
+                @blur="() => onTotalStockCommit(row)"
+              />
+              <span v-else>—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="应配送" width="72" align="right">
+            <template #default="{ row }">
+              {{ row.dish_id ? row.subscription_meals_for_day ?? '—' : '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="单次余" width="72" align="right">
+            <template #default="{ row }">
+              {{ row.dish_id ? row.single_stock_remaining ?? '—' : '—' }}
             </template>
           </el-table-column>
           <el-table-column label="菜品">
@@ -269,5 +389,11 @@ onMounted(() => {
 .weekly-price-missing {
   color: var(--el-color-danger);
   font-weight: 600;
+}
+
+.stock-input {
+  width: 100%;
+  max-width: 108px;
+  margin-left: auto;
 }
 </style>

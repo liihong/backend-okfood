@@ -114,12 +114,63 @@ def eligible_members_for_delivery(
         .where(
             Member.is_active.is_(True),
             Member.balance >= units_sql,
+            Member.store_pickup.is_(False),
             not_(absent),
             started,
         )
     )
     if delivery_region_id is not None:
         q = q.where(MemberAddress.delivery_region_id == delivery_region_id)
+    members: list[Member] = []
+    defaults: dict[int, MemberAddress | None] = {}
+    for m, addr in db.execute(q).all():
+        members.append(m)
+        defaults[m.id] = addr
+    return members, defaults
+
+
+def eligible_members_for_store_pickup(
+    db: Session,
+    *,
+    delivery_date: date,
+) -> tuple[list[Member], dict[int, MemberAddress | None]]:
+    """
+    当日应备餐的门店自提会员（与 `eligible_members_for_delivery` 相同的请假、起送日、余额规则；
+    不按片区过滤；不参与骑手线路。
+    """
+    if not is_subscription_delivery_day(delivery_date):
+        return [], {}
+    today = today_shanghai()
+    tomorrow = date.fromordinal(today.toordinal() + 1)
+    in_leave_range = and_(
+        Member.leave_range_start.is_not(None),
+        Member.leave_range_end.is_not(None),
+        Member.leave_range_start <= delivery_date,
+        Member.leave_range_end >= delivery_date,
+    )
+    tomorrow_leave_hit = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        literal(delivery_date) == literal(tomorrow),
+    )
+    absent = or_(in_leave_range, tomorrow_leave_hit)
+    started = or_(
+        Member.delivery_start_date.is_(None),
+        Member.delivery_start_date <= delivery_date,
+    )
+    units_sql = sql_effective_daily_meal_units_column()
+    daf = default_address_pick_subquery()
+    q = (
+        select(Member, MemberAddress)
+        .outerjoin(daf, daf.c.mid == Member.id)
+        .outerjoin(MemberAddress, MemberAddress.id == daf.c.addr_id)
+        .where(
+            Member.is_active.is_(True),
+            Member.balance >= units_sql,
+            Member.store_pickup.is_(True),
+            not_(absent),
+            started,
+        )
+    )
     members: list[Member] = []
     defaults: dict[int, MemberAddress | None] = {}
     for m, addr in db.execute(q).all():

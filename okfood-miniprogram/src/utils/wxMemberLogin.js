@@ -1,4 +1,4 @@
-import { request } from './api.js'
+import { request, clearMemberSession, isUserMeNotFoundError } from './api.js'
 
 function normalizeCnPhone(raw) {
   if (raw == null || raw === '') return ''
@@ -46,8 +46,8 @@ export async function ensureMemberPhoneFromStoredToken() {
     if (profile?.id != null) {
       uni.setStorageSync('memberId', String(profile.id))
     }
-  } catch {
-    /*忽略 */
+  } catch (e) {
+    if (isUserMeNotFoundError(e)) clearMemberSession()
   }
 }
 
@@ -130,7 +130,8 @@ export async function wxMiniMemberLoginAndStore(phoneAuth) {
       uni.setStorageSync('memberId', String(profile.id))
     }
     return { login: data, profile }
-  } catch {
+  } catch (e) {
+    if (isUserMeNotFoundError(e)) clearMemberSession()
     return { login: data, profile: null }
   }
 }

@@ -70,13 +70,18 @@ from app.services.member_card_pay_service import (
     prepare_wechat_jsapi_for_member_card_order,
     sync_member_card_from_wechat_or_raise,
 )
-from app.services.single_meal_order_service import create_single_meal_order, prepare_wechat_jsapi_for_order
+from app.services.single_meal_order_service import (
+    create_single_meal_order,
+    get_member_single_meal_order,
+    list_member_single_meal_orders,
+    prepare_wechat_jsapi_for_order,
+)
 
 from app.services.store_config_service import get_member_card_prices_yuan
 
 from app.integrations.wechat_pay_v2 import resolve_request_client_ip
 
-from app.utils.response import dump_model, success
+from app.utils.response import dump_model, page_response, success
 
 
 
@@ -288,6 +293,35 @@ def remove_address_me(address_id: int, db: SessionDep, member_id: int = Depends(
 
 
 
+@router.get("/single-orders")
+def list_single_orders_me(
+    db: SessionDep,
+    member_id: int = Depends(member_subject),
+    page: int = 1,
+    page_size: int = 20,
+):
+    """当前会员的单次点餐订单列表（按下单时间倒序）。"""
+    items, total = list_member_single_meal_orders(db, member_id, page=page, page_size=page_size)
+    return page_response(
+        items=[dump_model(x) for x in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        msg="获取成功",
+    )
+
+
+@router.get("/single-orders/{order_id}")
+def read_single_order_me(
+    order_id: int,
+    db: SessionDep,
+    member_id: int = Depends(member_subject),
+):
+    """单次点餐订单详情（仅本人）。"""
+    out = get_member_single_meal_order(db, member_id, order_id)
+    return success(data=dump_model(out), msg="获取成功")
+
+
 @router.post("/single-orders")
 
 @limiter.limit("30/minute")
@@ -420,6 +454,10 @@ def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends
 
     defer_val = body.delivery_deferred if set_defer else None
 
+    set_pickup = "store_pickup" in updates
+
+    pickup_val = body.store_pickup if set_pickup else None
+
     avatar_val = updates["avatar_url"] if set_avatar else None
 
     wechat_val: str | None = None
@@ -477,6 +515,10 @@ def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends
         delivery_deferred=defer_val,
 
         card_pay_mode=card_pay_mode_val,
+
+        set_store_pickup=set_pickup,
+
+        store_pickup=pickup_val,
 
     )
 

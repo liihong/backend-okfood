@@ -63,7 +63,14 @@
                     <text class="btn-map-nav-hint">地图</text>
                   </view>
                 </view>
-                <text v-if="t.dish_title" class="task-remarks">单次点餐：{{ t.dish_title }}</text>
+                <text v-if="t.dish_title" class="task-remarks">
+                  单次点餐：{{ t.dish_title
+                  }}{{
+                    t.single_order_id && Number(t.daily_meal_units) > 1
+                      ? ' ×' + t.daily_meal_units + '份'
+                      : ''
+                  }}
+                </text>
                 <text v-else-if="Number(t.daily_meal_units) > 1" class="task-remarks"
                   >订阅：{{ t.daily_meal_units }} 份/日</text
                 >

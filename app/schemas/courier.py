@@ -35,7 +35,11 @@ class CourierTaskMemberOut(BaseModel):
     lat: float | None
     area: str
     remarks: str | None
-    daily_meal_units: int = Field(1, ge=1, description="每配送日份数（订阅）；单次点餐恒为 1")
+    daily_meal_units: int = Field(
+        1,
+        ge=1,
+        description="每配送日份数（订阅）；单次点餐为当单份数",
+    )
     sort_distance_m: float | None = None
     is_delivered: bool = Field(False, description="该业务日是否已确认送达")
     task_kind: str = Field("subscription", description="subscription 订阅配送 | single 单次点餐")
