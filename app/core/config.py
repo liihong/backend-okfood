@@ -13,6 +13,22 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_empty_str_ints(cls, data: Any) -> Any:
+        """避免 .env 中 SF_OPEN_SHOP_TYPE= 等空串导致 int 解析失败、应用无法启动。"""
+        if not isinstance(data, dict):
+            return data
+        for k in (
+            "SF_OPEN_DEV_ID",
+            "SF_OPEN_SHOP_TYPE",
+            "SF_API_VERSION",
+            "SF_DEFAULT_PRODUCT_TYPE",
+        ):
+            if data.get(k) == "":
+                data.pop(k, None)
+        return data
+
     APP_NAME: str = "okfood-api"
     DEBUG: bool = False
 
@@ -87,6 +103,37 @@ class Settings(BaseSettings):
     OSS_KEY_PREFIX: str = "okfood"
     # 与 OSS_DOMAIN 等价用途（历史字段）；任一非空则作为文件对外 URL 前缀
     OSS_PUBLIC_BASE_URL: str = ""
+
+    # 顺丰同城开放平台（https://openic.sf-express.com/open/api/docs）createorder
+    SF_OPEN_DEV_ID: int = 0
+    """开发者 dev_id，与控制台一致。"""
+    SF_OPEN_SHOP_ID: str = ""
+    """店铺 ID（顺丰分配或自维护；配合 SF_OPEN_SHOP_TYPE）。"""
+    SF_OPEN_SECRET: str = ""
+    """开放接口密钥，用于签名字符串拼接；勿提交到仓库。"""
+    SF_OPEN_SHOP_TYPE: int = 1
+    """1=顺丰侧店铺ID；2=商户自维护ID。"""
+    SF_API_BASE: str = "https://openic.sf-express.com"
+    """生产环境 API 根地址；沙箱可改为 commit-openic 等以控制台为准。"""
+    SF_ORDER_SOURCE: str = "OKFOOD"
+    """order_source，文档允许其它填中文字符串或短码，勿含敏感信息。"""
+    SF_API_VERSION: int = 17
+    """API 主版本，如文档 1.7 则填 17。"""
+    SF_PICKUP_PHONE: str = ""
+    """取货联系电话，映射顺丰 shop 与模板列「取货联系电话」；未配则推单时失败提示。"""
+    SF_PICKUP_ADDRESS: str = ""
+    """取货地址文字，映射 shop.shop_address；未配则回退为「上海市」+ 见代码。"""
+    SF_CITY_NAME: str = "上海市"
+    """收件城市名，映射 receive.city_name 与发件地。"""
+    SF_KG_PER_MEAL_UNIT: float = 0.2
+    """预估每份餐品重量(kg)，用于 default 重量与 weight_gram。"""
+    SF_DEFAULT_PRODUCT_TYPE: int = 1
+    """order_detail.product_type，1=快餐 等，见 openic 文档。"""
+    SF_PRODUCT_CATEGORY_LABEL: str = "外韵落地配"
+    """与 Excel 模板「商品类别」列对应，写入备注/货品描述。"""
+    SF_DEFAULT_VEHICLE_TYPE: str = "小轿车"
+    """与模板「车型」列默认，可写进订单备注。"""
+
 
     @property
     def oss_public_url_prefix(self) -> str:

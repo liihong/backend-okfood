@@ -260,6 +260,8 @@ def _to_member_out(
 
         is_leaved_tomorrow=m.is_leaved_tomorrow,
 
+        tomorrow_leave_target_date=m.tomorrow_leave_target_date,
+
         leave_range=lr,
 
         created_at=m.created_at.isoformat() if m.created_at else "",
@@ -446,6 +448,10 @@ def patch_member_profile(
 
     store_pickup: bool | None = None,
 
+    set_daily_meal_units: bool = False,
+
+    daily_meal_units: int | None = None,
+
 ) -> MemberOut:
 
     m = db.get(Member, member_id)
@@ -453,6 +459,16 @@ def patch_member_profile(
     if not m:
 
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    if set_daily_meal_units and daily_meal_units is not None:
+
+        u = int(daily_meal_units)
+
+        if u < 1 or u > 20:
+
+            raise HTTPException(status_code=400, detail="每日送达数量须为 1～20")
+
+        m.daily_meal_units = u
 
     if set_avatar:
 
@@ -512,7 +528,7 @@ def patch_member_profile(
 
                 raise HTTPException(
                     status_code=400,
-                    detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早明天，之后最早后天）",
+                    detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早今天，10:00 及之后最早明天）",
                 )
 
             m.delivery_start_date = delivery_start_date
@@ -639,6 +655,8 @@ def leave_request(
 
         m.is_leaved_tomorrow = False
 
+        m.tomorrow_leave_target_date = None
+
         m.leave_range_start = None
 
         m.leave_range_end = None
@@ -647,6 +665,8 @@ def leave_request(
 
         m.is_leaved_tomorrow = False
 
+        m.tomorrow_leave_target_date = None
+
     elif typ == LeaveType.TOMORROW:
 
         if not skip_leave_deadline and is_leave_deadline_passed(
@@ -654,6 +674,10 @@ def leave_request(
         ):
 
             raise HTTPException(status_code=400, detail="已超过当日请假截止时间")
+
+        t_target = tomorrow_shanghai()
+
+        m.tomorrow_leave_target_date = t_target
 
         m.is_leaved_tomorrow = True
 
@@ -672,6 +696,8 @@ def leave_request(
         m.leave_range_end = end
 
         m.is_leaved_tomorrow = False
+
+        m.tomorrow_leave_target_date = None
 
     else:
 

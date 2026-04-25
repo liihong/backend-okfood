@@ -72,15 +72,12 @@ export function addressListRow(item, index) {
     (typeof item.contact_phone === 'string' && item.contact_phone) ||
     (typeof item.phone === 'string' && item.phone) ||
     ''
-  const area =
-    (typeof item.area === 'string' && item.area) ||
-    (typeof item.district === 'string' && item.district) ||
-    ''
   const addr =
     (typeof item.detail_address === 'string' && item.detail_address) ||
     (typeof item.address === 'string' && item.address) ||
     ''
-  const line = [area, addr].filter(Boolean).join(' ').trim()
+  // 用户端不展示所属片区，仅展示详细地址；片区仍由接口返回供后台/路由使用
+  const line = addr.trim()
   const isDefault = isAddressItemDefault(item)
   return { id, name, phone, line, isDefault }
 }

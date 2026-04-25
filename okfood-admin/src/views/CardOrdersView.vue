@@ -467,18 +467,22 @@ onMounted(() => {
             <X :size="20" />
           </button>
         </div>
-        <form class="modal-form" @submit.prevent="submitCreate">
+        <form class="modal-form modal-form--card-order" @submit.prevent="submitCreate">
           <div class="form-group open-mode-group">
             <label>办理类型</label>
             <div class="open-mode-options">
               <label class="radio-tile">
-                <input v-model="createForm.open_mode" type="radio" value="new_member" />
-                <span class="radio-tile-title">新会员开卡</span>
+                <span class="radio-tile-head">
+                  <input v-model="createForm.open_mode" type="radio" value="new_member" />
+                  <span class="radio-tile-title">新会员开卡</span>
+                </span>
                 <span class="radio-tile-sub">填写姓名、微信昵称并写入档案</span>
               </label>
               <label class="radio-tile">
-                <input v-model="createForm.open_mode" type="radio" value="renew" />
-                <span class="radio-tile-title">老会员续卡</span>
+                <span class="radio-tile-head">
+                  <input v-model="createForm.open_mode" type="radio" value="renew" />
+                  <span class="radio-tile-title">老会员续卡</span>
+                </span>
                 <span class="radio-tile-sub">仅核对手机号；入账叠加剩余与总次数</span>
               </label>
             </div>
@@ -540,19 +544,23 @@ onMounted(() => {
                 <span class="radio-tile-sub">已缴仍入次数与套餐；暂不写入起送日、不激活配送，可日后在「更新」中补日期</span>
               </label>
             </div>
-            <el-date-picker
+            <div
               v-if="createForm.delivery_start_mode === 'date'"
-              v-model="createForm.delivery_start_date"
-              type="date"
-              value-format="YYYY-MM-DD"
-              format="YYYY-MM-DD"
-              placeholder="选择开始配送日"
-              class="card-order-date-picker"
-              :clearable="false"
-            />
-            <p v-if="createForm.delivery_start_mode === 'date'" class="modal-hint">
-              须不早于系统允许的最早业务日（上海）；该日起可查见、可派单。
-            </p>
+              class="card-order-delivery-block"
+            >
+              <el-date-picker
+                v-model="createForm.delivery_start_date"
+                type="date"
+                value-format="YYYY-MM-DD"
+                format="YYYY-MM-DD"
+                placeholder="选择开始配送日"
+                class="card-order-date-picker"
+                :clearable="false"
+              />
+              <p class="modal-hint card-order-delivery-hint">
+                须不早于系统允许的最早业务日（上海）；该日起可查见、可派单。
+              </p>
+            </div>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -612,7 +620,7 @@ onMounted(() => {
             <X :size="20" />
           </button>
         </div>
-        <form class="modal-form" @submit.prevent="submitEdit">
+        <form class="modal-form modal-form--card-order" @submit.prevent="submitEdit">
           <div class="form-group">
             <label>会员</label>
             <input
@@ -648,19 +656,23 @@ onMounted(() => {
                 <span class="radio-tile-sub">工单上不保存起送日；已入账的会员起送日以档案为准</span>
               </label>
             </div>
-            <el-date-picker
+            <div
               v-if="editForm.delivery_start_mode === 'date'"
-              v-model="editForm.delivery_start_date"
-              type="date"
-              value-format="YYYY-MM-DD"
-              format="YYYY-MM-DD"
-              placeholder="选择开始配送日"
-              class="card-order-date-picker"
-              :clearable="false"
-            />
-            <p v-if="editForm.applied_to_member && editForm.delivery_start_mode === 'date'" class="modal-hint">
-              已同步的工单修改起送日会同步更新会员档案。
-            </p>
+              class="card-order-delivery-block"
+            >
+              <el-date-picker
+                v-model="editForm.delivery_start_date"
+                type="date"
+                value-format="YYYY-MM-DD"
+                format="YYYY-MM-DD"
+                placeholder="选择开始配送日"
+                class="card-order-date-picker"
+                :clearable="false"
+              />
+              <p v-if="editForm.applied_to_member" class="modal-hint card-order-delivery-hint">
+                已同步的工单修改起送日会同步更新会员档案。
+              </p>
+            </div>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -747,10 +759,15 @@ onMounted(() => {
   margin-top: 2px;
   font-size: 12px;
 }
+.modal-form--card-order {
+  padding-bottom: 2.85rem;
+  scroll-padding-bottom: 1.5rem;
+}
 .open-mode-group .open-mode-options {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 12px 14px;
+  align-items: stretch;
 }
 @media (max-width: 560px) {
   .open-mode-group .open-mode-options {
@@ -760,8 +777,9 @@ onMounted(() => {
 .radio-tile {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid var(--border, #e2e8f0);
   background: var(--surface, #fff);
@@ -771,22 +789,51 @@ onMounted(() => {
   border-color: var(--primary, #3b82f6);
   background: rgba(59, 130, 246, 0.06);
 }
-.radio-tile input {
-  margin-right: 6px;
-}
 .radio-tile-head {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.radio-tile-head input[type='radio'] {
+  margin: 0.15rem 0 0;
+  flex-shrink: 0;
 }
 .radio-tile-title {
   font-weight: 600;
   font-size: 14px;
+  line-height: 1.35;
+  min-width: 0;
+  word-break: break-word;
 }
 .radio-tile-sub {
   font-size: 12px;
   color: var(--text-muted, #64748b);
-  line-height: 1.35;
+  line-height: 1.45;
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+.card-order-delivery-block {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  min-width: 0;
+  width: 100%;
+  margin-top: 0.15rem;
+  overflow: visible;
+}
+.card-order-delivery-hint {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  line-height: 1.6;
 }
 .renew-preview-box {
   margin-bottom: 4px;
@@ -806,6 +853,12 @@ onMounted(() => {
   display: block;
   width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
+}
+.form-group :deep(.card-order-delivery-block .el-date-editor) {
+  width: 100% !important;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .form-group :deep(.card-order-date-picker .el-input__wrapper) {
   width: 100%;

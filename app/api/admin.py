@@ -7,6 +7,7 @@ from app.core.deps import SessionDep, admin_subject, issue_admin_token
 from app.core.limiter import limiter
 from app.schemas.admin import (
     AdminAddressIn,
+    AdminDeliveryMarkIn,
     AdminLoginIn,
     AdminMemberLeaveIn,
     AdminMemberPatchIn,
@@ -20,6 +21,9 @@ from app.schemas.admin import (
     StoreConfigUpdateIn,
     WeeklySlotAssignIn,
     MenuDayTotalStockIn,
+    SfSameCityPreviewOut,
+    SfSameCityPushIn,
+    SfSameCityPushOut,
 )
 from app.schemas.common import TokenResponse
 from app.services.admin_service import (
@@ -38,8 +42,10 @@ from app.services.admin_service import (
     update_settings,
     upsert_dish,
 )
+from app.services.sf_same_city_service import preview_sf_same_city, push_sf_same_city
 from app.services.store_config_service import get_store_config, update_store_config
 from app.services.delivery_sheet_service import build_delivery_sheet
+from app.services.admin_delivery_fulfillment_service import admin_mark_subscription_fulfilled
 from app.services.member_service import (
     admin_member_leave,
     admin_patch_member_profile,
@@ -77,13 +83,75 @@ def delivery_sheet(
     admin_username: str = Depends(admin_subject),
     delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
     area: Annotated[str | None, Query(description="按默认配送地址所属片区筛选，可选")] = None,
+    phone: Annotated[
+        str | None,
+        Query(description="按会员手机号筛选；可输后几位或完整号码，忽略空格与符号"),
+    ] = None,
 ):
     """配送大表：激活且有余额、已达起送日、排除请假；周日与法定节假日不生成订阅派单；收件信息仅默认 member_addresses；同址聚合餐数。
     配送到家会员带 is_delivered（与 delivery_logs / 骑手确认送达同源）；门店自提不参与到家送达统计。"""
     _ = admin_username
     area_key = (area or "").strip() or None
-    payload = build_delivery_sheet(db, delivery_date=delivery_date, area=area_key)
+    phone_key = (phone or "").strip() or None
+    payload = build_delivery_sheet(
+        db, delivery_date=delivery_date, area=area_key, phone=phone_key
+    )
     return success(data=dump_model(payload), msg="获取成功")
+
+
+@router.get("/delivery-sf/preview", response_model=None)
+def delivery_sf_preview(
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+    delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
+    area: Annotated[str | None, Query(description="同 delivery-sheet 片区筛选")] = None,
+    phone: Annotated[str | None, Query(description="同 delivery-sheet 手机筛选")] = None,
+):
+    """
+    顺丰同城创单前预览：按停靠点合并大表+单点餐，返回 Excel 同结构字段的默认值。
+    需配置：``SF_OPEN_*``、``SF_PICKUP_PHONE``、``SF_PICKUP_ADDRESS``。
+    """
+    _ = admin_username
+    out: SfSameCityPreviewOut = preview_sf_same_city(
+        db, delivery_date=delivery_date, area=area, phone=phone
+    )
+    return success(data=dump_model(out), msg="获取成功")
+
+
+@router.post("/delivery-sf/push", response_model=None)
+def delivery_sf_push(
+    body: SfSameCityPushIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """
+    提交勾选的行到顺丰 ``createorder``；未勾选行忽略；同停靠点同业务日已成功的行会拒绝防重复。
+
+    开发环境若无顺丰账号会失败并写入 ``sf_same_city_pushes`` 的 error_ 字段便于排查。
+    """
+    _ = admin_username
+    try:
+        out: SfSameCityPushOut = push_sf_same_city(db, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=dump_model(out), msg="处理完成")
+
+
+@router.post("/delivery-mark")
+def delivery_mark(
+    body: AdminDeliveryMarkIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """大表人工标记：配送到家 / 门店自提完成（扣次、写 delivery_logs；不增加骑手待结算）。"""
+    admin_mark_subscription_fulfilled(
+        db,
+        member_id=body.member_id,
+        delivery_date=body.delivery_date,
+        admin_username=admin_username,
+        kind=body.kind,
+    )
+    return success(msg="已标记")
 
 
 @router.get("/users/stats")

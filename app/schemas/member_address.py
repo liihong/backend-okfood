@@ -11,6 +11,8 @@ class MemberAddressOut(BaseModel):
     delivery_region_id: int | None = None
     area: str = Field(..., description="片区展示名，由 delivery_region_id 解析；未分配为「未分配」")
     detail_address: str
+    map_location_text: str | None = Field(None, description="地图选点/省市区道路小区等")
+    door_detail: str | None = Field(None, description="楼栋、单元、门牌等")
     remarks: str | None
     location: Location | None
     is_default: bool
@@ -24,6 +26,8 @@ class MemberAddressCreateIn(BaseModel):
     contact_name: str = Field(..., min_length=1, max_length=100)
     contact_phone: str = Field(..., min_length=5, max_length=20)
     detail_address: str = Field(..., min_length=1, max_length=500)
+    map_location_text: str | None = Field(None, max_length=500)
+    door_detail: str | None = Field(None, max_length=500)
     remarks: str | None = Field(None, max_length=500)
     is_default: bool = False
     location: Location | None = Field(
@@ -36,6 +40,8 @@ class MemberAddressUpdateIn(BaseModel):
     contact_name: str | None = Field(None, min_length=1, max_length=100)
     contact_phone: str | None = Field(None, min_length=5, max_length=20)
     detail_address: str | None = Field(None, min_length=1, max_length=500)
+    map_location_text: str | None = Field(None, max_length=500)
+    door_detail: str | None = Field(None, max_length=500)
     remarks: str | None = Field(None, max_length=500)
     is_default: bool | None = None
     location: Location | None = Field(

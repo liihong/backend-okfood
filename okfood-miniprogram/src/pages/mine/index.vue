@@ -62,7 +62,7 @@
           </view>
         </view>
 
-        <view class="vip-card">
+        <view :class="['vip-card', { 'vip-card--month': isVipMonthlyCard }]">
           <view class="vip-card-head">
             <text class="vip-tag">OK 饭 自律计划</text>
             <text v-if="planTypeMemberLabel" class="member-plan-kind">{{ planTypeMemberLabel }}</text>
@@ -73,10 +73,15 @@
             <view v-if="showVipRenewEntry" class="type-label-slot" @tap.stop="goMemberSetup">
               <text class="vip-renew-btn">开卡续费</text>
             </view>
-            <text v-else class="type-label">{{ memberDeliveryStatus }}</text>
+           <text v-else :class="['type-label', { 'type-label--leave-detail': isLeaveCardDetailStatus }]">{{
+              memberDeliveryStatus }}</text>
           </view>
           <text v-if="isLoggedIn" class="today-delivery-addr">{{ todayDeliveryAddressLine }}</text>
-          <text class="footer-info">{{ cardFooter }}</text>
+          <view class="footer-info">
+            <text class="footer-info-left">{{ cardFooter }}</text>
+            <text v-if="isLoggedIn" class="footer-info-right"
+              >每日送达份数：{{ displayDailyMealUnits }}</text>
+          </view>
         </view>
 
         <view class="action-list">
@@ -154,11 +159,17 @@ const serverBalance = ref(0)
 const userName = ref('')
 const planType = ref('')
 const leaveRange = ref(null)
+/** 与后端 is_leaved_tomorrow 同步：仅明日请假（自提交当日至目标日 24:00 前展示「请假中」） */
+const isLeavedTomorrow = ref(false)
+/** 与 backend tomorrow_leave_target_date 一致，用于「明日请假」侧展示目标业务日 */
+const tomorrowLeaveTargetYmd = ref('')
 const isActive = ref(false)
 const createdAt = ref('')
+/** 每配送日需送达份数（与 /api/user/me.daily_meal_units 一致） */
+const dailyMealUnits = ref(1)
 /** 与界面同步的剩余餐次（含滚动动画） */
 const displayBalance = ref(0)
-/** 默认配送地址展示行（area + detail，与地址列表一致） */
+/** 默认配送地址展示行（详细地址，与地址列表一致，不含所属片区） */
 const defaultAddrLine = ref('')
 let fetchDefaultAddrSeq = 0
 
@@ -492,13 +503,55 @@ function isOnLeaveTodayShanghai() {
   return today >= sRaw && today <= eRaw
 }
 
-/** 与后台配送口径一致：区间请假闭区间含「今日」则为请假中；「仅明天请假」不影响今日状态展示 */
+function ymdFromApi(d) {
+  if (d == null || d === '') return ''
+  const s = String(d)
+  return s.length >= 10 ? s.slice(0, 10) : s
+}
+
+/** 展示用：月.日，如 10.12；与 leave 页区间格式一致 */
+function ymdToDotMd(ymd) {
+  const raw = ymdFromApi(ymd)
+  if (!raw) return ''
+  const parts = raw.split('-')
+  if (parts.length < 3) return ''
+  const m = Number(parts[1])
+  const d = Number(parts[2])
+  if (!m || !d) return ''
+  return `${m}.${d}`
+}
+
+/** 与后台一致：区间含上海今日、或仅明日请假（在目标日截止前）；文案展示具体日期 */
+const isLeaveCardDetailStatus = computed(
+  () => isOnLeaveTodayShanghai() || isLeavedTomorrow.value,
+)
+
 const memberDeliveryStatus = computed(() => {
   if (!isLoggedIn.value) return '尚未开启计划'
   if (needsMemberSetupPage.value) return '资料待完善'
-  if (isOnLeaveTodayShanghai()) return '请假中'
+  if (isOnLeaveTodayShanghai() || isLeavedTomorrow.value) {
+    if (isOnLeaveTodayShanghai()) {
+      const lr = leaveRange.value
+      const sRaw = lr?.start != null ? String(lr.start).slice(0, 10) : ''
+      const eRaw = lr?.end != null ? String(lr.end).slice(0, 10) : ''
+      const sm = ymdToDotMd(sRaw)
+      const em = ymdToDotMd(eRaw)
+      if (sm && em) {
+        if (sRaw === eRaw) return `${sm} 请假`
+        return `${sm}-${em} 请假`
+      }
+      return '请假中'
+    }
+    if (isLeavedTomorrow.value) {
+      const t = tomorrowLeaveTargetYmd.value
+      const md = t ? ymdToDotMd(t) : ''
+      if (md) return `明日 ${md} 请假`
+      return '明日请假'
+    }
+    return '请假中'
+  }
   if (showMemberCardModule.value) return '待开卡/续费'
-  return '配送中'
+  return '生效中'
 })
 
 const planTypeMemberLabel = computed(() => {
@@ -507,10 +560,20 @@ const planTypeMemberLabel = computed(() => {
   return p ? `${p}会员` : ''
 })
 
+/** 月卡：会员卡采用独立配色，与周卡绿区形成区分 */
+const isVipMonthlyCard = computed(
+  () => isLoggedIn.value && !needsMemberSetupPage.value && String(planType.value || '').trim() === '月卡',
+)
+
 const cardFooter = computed(() => {
   if (!isLoggedIn.value) return '自律，从今天第一顿 OK 饭开始 👌'
   const d = daysSinceCreated(createdAt.value)
   return `已陪伴您自律生活：${d} 天 👌`
+})
+
+const displayDailyMealUnits = computed(() => {
+  const n = Math.floor(Number(dailyMealUnits.value) || 0)
+  return n >= 1 ? Math.min(50, n) : 1
 })
 
 const todayDeliveryAddressLine = computed(() => {
@@ -534,8 +597,14 @@ function mergeMemberApiProfile(data) {
   planType.value = data.plan_type != null ? String(data.plan_type) : ''
   leaveRange.value =
     data.leave_range && typeof data.leave_range === 'object' ? data.leave_range : null
+  isLeavedTomorrow.value = data.is_leaved_tomorrow === true
+  tomorrowLeaveTargetYmd.value = ymdFromApi(data.tomorrow_leave_target_date)
   isActive.value = !!data.is_active
   createdAt.value = data.created_at != null ? String(data.created_at) : ''
+  {
+    const u = Math.floor(Number(data.daily_meal_units) || 0)
+    dailyMealUnits.value = u >= 1 && u <= 50 ? u : 1
+  }
 
   /** 服务端档案优先：头像 +昵称（wechat_name，缺省用非占位 name）合并进本地展示缓存 */
   const av = data.avatar_url != null ? String(data.avatar_url).trim() : ''
@@ -576,8 +645,11 @@ async function refreshMember(options = {}) {
     userName.value = ''
     planType.value = ''
     leaveRange.value = null
+    isLeavedTomorrow.value = false
+    tomorrowLeaveTargetYmd.value = ''
     isActive.value = false
     createdAt.value = ''
+    dailyMealUnits.value = 1
     wxProfile.value = null
     wxNickDraft.value = ''
     defaultAddrLine.value = ''
@@ -620,8 +692,11 @@ async function refreshMember(options = {}) {
       userName.value = ''
       planType.value = ''
       leaveRange.value = null
+      isLeavedTomorrow.value = false
+      tomorrowLeaveTargetYmd.value = ''
       isActive.value = false
       createdAt.value = ''
+      dailyMealUnits.value = 1
       const t = getMemberToken()
       isLoggedIn.value = !!t
       memberPhone.value = uni.getStorageSync('memberPhone') || ''
@@ -1021,6 +1096,65 @@ function goMemberSetup() {
   box-shadow: 0 40rpx 80rpx rgba(14, 90, 68, 0.25);
 }
 
+/* 月卡：深靛紫渐变 + 香槟金强调，与周卡绿金区分 */
+.vip-card--month {
+  background: linear-gradient(165deg, #1a2744 0%, #2d2248 42%, #121c32 100%);
+  box-shadow:
+    0 40rpx 100rpx rgba(8, 10, 28, 0.52),
+    0 0 0 1rpx rgba(212, 175, 55, 0.22);
+}
+
+.vip-card--month .vip-tag {
+  color: #f5ead6;
+  background: rgba(255, 220, 160, 0.12);
+  border: 1rpx solid rgba(212, 175, 55, 0.38);
+}
+
+.vip-card--month .member-plan-kind {
+  color: #ffd98a;
+  text-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.35);
+}
+
+.vip-card--month .num {
+  color: #ffe082;
+  text-shadow: 0 4rpx 20rpx rgba(255, 200, 90, 0.22);
+}
+
+.vip-card--month .unit {
+  color: #e8e0d5;
+  opacity: 0.95;
+}
+
+.vip-card--month .type-label {
+  color: #ffd98a;
+}
+
+.vip-card--month .type-label--leave-detail {
+  color: #f0c97a;
+}
+
+.vip-card--month .vip-renew-btn {
+  color: #1a1f2e;
+  background: linear-gradient(180deg, #fff0c2 0%, #e8b84a 100%);
+  box-shadow: 0 8rpx 28rpx rgba(0, 0, 0, 0.32);
+  border: 1rpx solid rgba(255, 255, 255, 0.35);
+}
+
+.vip-card--month .today-delivery-addr {
+  color: rgba(255, 248, 235, 0.94);
+}
+
+.vip-card--month .footer-info {
+  color: rgba(230, 215, 190, 0.82);
+  opacity: 0.88;
+  border-top-color: rgba(212, 175, 55, 0.22);
+}
+
+.vip-card--month .footer-info-right {
+  color: rgba(230, 215, 190, 0.88);
+  opacity: 0.9;
+}
+
 .vip-card-head {
   display: flex;
   align-items: center;
@@ -1079,6 +1213,11 @@ function goMemberSetup() {
   min-width: 200rpx;
 }
 
+/* 区间 / 明日 等略长文案，略缩小以免挤压剩余餐次数字 */
+.type-label--leave-detail {
+  font-size: 24rpx;
+  line-height: 1.25;
+}
 .type-label-slot {
   flex: 1;
   display: flex;
@@ -1110,13 +1249,31 @@ function goMemberSetup() {
 }
 
 .footer-info {
-  display: block;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20rpx;
+  flex-wrap: wrap;
   font-size: 22rpx;
   opacity: 0.6;
   font-weight: 800;
   margin-top: 20rpx;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   padding-top: 24rpx;
+}
+
+.footer-info-left {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.footer-info-right {
+  flex-shrink: 0;
+  text-align: right;
+  line-height: 1.35;
+  font-size: 22rpx;
+  font-weight: 800;
 }
 
 .action-list {

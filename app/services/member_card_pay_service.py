@@ -68,7 +68,7 @@ def create_miniprogram_member_card_order(
     if delivery_start_date < min_member_delivery_start_shanghai():
         raise HTTPException(
             status_code=400,
-            detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早明天，之后最早后天）",
+            detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早今天，10:00 及之后最早明天）",
         )
 
     m = db.get(Member, member_id)

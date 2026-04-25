@@ -1218,6 +1218,20 @@
   color: #c2410c;
 }
 
+.data-table--members .member-leave-range,
+.admin-table--members .member-leave-range {
+  font-size: 12px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.data-table--members .member-leave-range--active,
+.admin-table--members .member-leave-range--active {
+  color: #0f172a;
+  font-weight: 600;
+}
+
 .members-row-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1989,6 +2003,74 @@
   grid-template-columns: 1fr 1fr;
   gap: 1.5rem;
 }
+
+/* 会员管理 — 修改会员信息弹窗：两列 + 跨列表单项 */
+.modal-card--member-edit {
+  max-width: min(920px, 100%);
+}
+
+.modal-form.modal-form--member-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.modal-form--member-two-col .form-group--span-full {
+  grid-column: 1 / -1;
+}
+
+.modal-form--member-two-col .btn-submit-order {
+  grid-column: 1 / -1;
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 720px) {
+  .modal-form.modal-form--member-two-col {
+    grid-template-columns: 1fr;
+  }
+  .modal-form--member-two-col .form-group--span-full {
+    grid-column: auto;
+  }
+  .modal-form--member-two-col .btn-submit-order {
+    grid-column: auto;
+  }
+}
+
+/* 会员编辑：起送日 + 暂停配送 + 门店自提 — 同一行主控件，说明在下方 */
+.member-delivery-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+}
+.member-delivery-date-wrap {
+  flex: 1 1 200px;
+  min-width: min(200px, 100%);
+}
+.member-delivery-date-wrap input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.member-delivery-block .member-delivery-check {
+  margin-top: 0;
+  max-width: 100%;
+}
+.member-delivery-block .member-delivery-check span {
+  white-space: normal;
+}
+
+@media (max-width: 640px) {
+  .member-delivery-controls-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .member-delivery-date-wrap {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
 .form-group {
   display: flex;
   flex-direction: column;

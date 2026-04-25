@@ -96,10 +96,17 @@ def eligible_members_for_delivery(
         Member.leave_range_start <= delivery_date,
         Member.leave_range_end >= delivery_date,
     )
-    tomorrow_leave_hit = and_(
+    # target 须与 is_leaved_tomorrow 同时成立（与 model、leave.is_absent 一致；避免撤销后残留 target 误整表排除）
+    target_hit = and_(
         Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date == delivery_date,
+    )
+    legacy_tomorrow = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date.is_(None),
         literal(delivery_date) == literal(tomorrow),
     )
+    tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
     absent = or_(in_leave_range, tomorrow_leave_hit)
     started = or_(
         Member.delivery_start_date.is_(None),
@@ -148,10 +155,16 @@ def eligible_members_for_store_pickup(
         Member.leave_range_start <= delivery_date,
         Member.leave_range_end >= delivery_date,
     )
-    tomorrow_leave_hit = and_(
+    target_hit = and_(
         Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date == delivery_date,
+    )
+    legacy_tomorrow = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date.is_(None),
         literal(delivery_date) == literal(tomorrow),
     )
+    tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
     absent = or_(in_leave_range, tomorrow_leave_hit)
     started = or_(
         Member.delivery_start_date.is_(None),

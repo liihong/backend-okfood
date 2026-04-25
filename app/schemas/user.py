@@ -34,6 +34,9 @@ class MemberOut(BaseModel):
     store_pickup: bool = Field(False, description="门店自提：不参与配送线路，仍参与起送日与备餐统计")
     is_active: bool
     is_leaved_tomorrow: bool
+    tomorrow_leave_target_date: date | None = Field(
+        None, description="仅明日请假：不配送目标业务日（上海）；有值时与配送/统计命中该日"
+    )
     leave_range: dict[str, date | None] | None
     created_at: str
 
@@ -75,6 +78,12 @@ class ProfilePatchIn(BaseModel):
     card_pay_mode: Literal["offline_paid"] | None = Field(
         default=None,
         description="仅剩余次数为 0 需购卡时：offline_paid 表示用户自报已线下/其他方式缴费；保持未开卡并生成待核开卡工单（不自动入账）",
+    )
+    daily_meal_units: int | None = Field(
+        default=None,
+        ge=1,
+        le=20,
+        description="每配送日需送达份数；小程序自助修改范围 1～20，确认送达时按此倍数扣次",
     )
 
 

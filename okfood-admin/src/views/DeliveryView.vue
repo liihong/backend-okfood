@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
-import { Printer, RefreshCw, MapPin } from 'lucide-vue-next'
+import { Printer, RefreshCw, MapPin, Truck } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
@@ -20,6 +20,58 @@ function todayShanghaiStr() {
   return ymdInTimeZone(new Date(), 'Asia/Shanghai')
 }
 
+/** 顺丰弹窗：期望送达 value-format 字符串，默认当日 12:00（与后端预览一致） */
+function defaultSfExpectAt(ymd) {
+  const d = (ymd || '').trim() || todayShanghaiStr()
+  return `${d}T12:00:00`
+}
+
+/** 将接口返回的 expect_delivery_at 规范为 YYYY-MM-DDTHH:mm:ss，供 el-date-picker */
+function expectAtToValueFormat(v, ymd) {
+  if (v == null || v === '') return defaultSfExpectAt(ymd)
+  const s = String(v)
+  const m = s.match(/(\d{4}-\d{2}-\d{2})[Tt\s].*?(\d{1,2}):(\d{2}):(\d{2})/)
+  if (m) {
+    const hh = m[2].padStart(2, '0')
+    return `${m[1]}T${hh}:${m[3]}:${m[4]}`
+  }
+  return defaultSfExpectAt(ymd)
+}
+
+/** 弹窗行：与会员地址 field 名对齐的 map/门牌 + 默认送达时间 */
+function normalizeSfPreviewRows(rows, deliveryYmd) {
+  const y = (deliveryYmd || '').trim() || todayShanghaiStr()
+  return (Array.isArray(rows) ? rows : []).map((r) => {
+    const map0 =
+      r.map_location_text != null && String(r.map_location_text).length
+        ? String(r.map_location_text)
+        : String(r.recv_address ?? '')
+    const door0 =
+      r.door_detail != null && String(r.door_detail).length
+        ? String(r.door_detail)
+        : String(r.recv_building ?? '')
+    return {
+      ...r,
+      map_location_text: map0,
+      door_detail: door0,
+      recv_address: map0,
+      recv_building: door0,
+      expect_delivery_at: expectAtToValueFormat(r.expect_delivery_at, y),
+    }
+  })
+}
+
+const sfExpectDefaultTime = new Date(2000, 0, 1, 12, 0, 0)
+
+function onSfPushImmediatelyChange(row) {
+  if (row && !row.push_immediately) {
+    const ymd = (sfPreview.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
+    if (!row.expect_delivery_at) {
+      row.expect_delivery_at = defaultSfExpectAt(ymd)
+    }
+  }
+}
+
 /** 与 GET /api/admin/delivery-sheet 响应字段对齐（含到家送达汇总） */
 const emptySheet = () => ({
   delivery_date: '',
@@ -28,15 +80,28 @@ const emptySheet = () => ({
   home_pending_meal_total: 0,
   home_delivered_meal_total: 0,
   pickup_meal_total: 0,
+  /** 与后端一致：false 表示周日/法定假等不生成订阅大表 */
+  is_subscription_delivery_day: true,
 })
 
 const areaFilter = ref('')
+/** 按手机号筛选大表（与 GET delivery-sheet ?phone= 一致；可后几位或完整号码） */
+const phoneQuery = ref('')
 /** 查询用的配送业务日（上海日历日 YYYY-MM-DD），可与「今天」不同 */
 const deliveryDateQuery = ref(todayShanghaiStr())
 /** 与后端 delivery_regions 启用列表同源（来自 delivery-sheet 响应） */
 const activeRegions = ref([])
 const sheetToday = ref(emptySheet())
 const loading = ref(false)
+/** 正在提交人工标记的 member_id，用于防重复点按 */
+const markingMemberId = ref(null)
+
+/** 顺丰同城：预览弹窗 */
+const sfDialogOpen = ref(false)
+const sfLoading = ref(false)
+const sfPushSubmitting = ref(false)
+const sfPreview = ref({ delivery_date: '', rows: [], sf_configured: false })
+const sfSelectAll = ref(true)
 
 /** 当前选中的路由分组片区（与 group.area 一致） */
 const activeRegionTab = ref('')
@@ -94,21 +159,29 @@ function groupTabMetaLine(group) {
   const meal = group.meal_total ?? 0
   const stops = group.stop_count ?? 0
   if (group.area === '门店自提') {
-    return `${meal} 份 · 自提`
+    const p = group.pending_meal_total ?? meal
+    const d = group.delivered_meal_total ?? 0
+    return `${meal} 份 · 待${p} · 已${d} · 自提`
   }
   const p = group.pending_meal_total ?? meal
   const d = group.delivered_meal_total ?? 0
   return `${meal} 份 · ${stops} 点 · 待${p} · 已${d}`
 }
 
-/** 联系人旁：到家为待送达/已送达；门店自提为「自提」 */
+/** 联系人旁：到家为待/已送达；自提为待/已取 */
 function deliveryMemberStatusLabel(group, m) {
-  if (!group || group.area === '门店自提') return '自提'
+  if (!group) return '—'
+  if (group.area === '门店自提') {
+    return m.is_delivered ? '已取' : '待自提'
+  }
   return m.is_delivered ? '已送达' : '待送达'
 }
 
 function deliveryMemberStatusClass(group, m) {
-  if (!group || group.area === '门店自提') return 'delivery-status-tag--pickup'
+  if (!group) return 'delivery-status-tag--pending'
+  if (group.area === '门店自提') {
+    return m.is_delivered ? 'delivery-status-tag--done' : 'delivery-status-tag--pickup'
+  }
   return m.is_delivered ? 'delivery-status-tag--done' : 'delivery-status-tag--pending'
 }
 
@@ -135,6 +208,8 @@ async function fetchSheet() {
     const base = new URLSearchParams()
     const a = (areaFilter.value || '').trim()
     if (a) base.set('area', a)
+    const ph = (phoneQuery.value || '').trim()
+    if (ph) base.set('phone', ph)
 
     const q0 = new URLSearchParams(base)
     q0.set('delivery_date', d0)
@@ -153,6 +228,8 @@ async function fetchSheet() {
       home_pending_meal_total: Number(data0?.home_pending_meal_total) || 0,
       home_delivered_meal_total: Number(data0?.home_delivered_meal_total) || 0,
       pickup_meal_total: Number(data0?.pickup_meal_total) || 0,
+      is_subscription_delivery_day:
+        data0?.is_subscription_delivery_day !== false,
     }
     syncDeliveryRegionTabs()
   } catch (e) {
@@ -193,6 +270,129 @@ watch(adminAccessToken, (t) => {
 onMounted(() => {
   if (adminAccessToken.value) fetchSheet()
 })
+
+function markBusy(memberId) {
+  return markingMemberId.value != null && Number(markingMemberId.value) === Number(memberId)
+}
+
+function applySfSelectAll(val) {
+  const rows = sfPreview.value.rows || []
+  for (const r of rows) {
+    r.selected = val
+  }
+}
+
+async function openSfDialog() {
+  if (!adminAccessToken.value) return
+  sfDialogOpen.value = true
+  sfLoading.value = true
+  const d0 = (deliveryDateQuery.value || '').trim() || todayShanghaiStr()
+  const base = new URLSearchParams()
+  base.set('delivery_date', d0)
+  const a = (areaFilter.value || '').trim()
+  if (a) base.set('area', a)
+  const ph = (phoneQuery.value || '').trim()
+  if (ph) base.set('phone', ph)
+  try {
+    const data = await apiJson(`/api/admin/delivery-sf/preview?${base.toString()}`, {}, { auth: true })
+    const d1 = data?.delivery_date || d0
+    sfPreview.value = {
+      delivery_date: d1,
+      rows: normalizeSfPreviewRows(data?.rows, d1),
+      sf_configured: Boolean(data?.sf_configured),
+    }
+    sfSelectAll.value = true
+    applySfSelectAll(true)
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '加载顺丰预览失败', 'error')
+    sfPreview.value = { delivery_date: d0, rows: [], sf_configured: false }
+  } finally {
+    sfLoading.value = false
+  }
+}
+
+async function submitSfPush() {
+  if (sfPushSubmitting.value) return
+  const d0 = (sfPreview.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
+  const rows = (sfPreview.value.rows || []).map((r) => ({ ...r }))
+  if (!rows.length) {
+    showToast('没有可推单的停靠点', 'error')
+    return
+  }
+  sfPushSubmitting.value = true
+  try {
+    const payload = {
+      delivery_date: d0,
+      rows: rows.map((r) => {
+        const mapT = String(r.map_location_text ?? r.recv_address ?? '').trim()
+        const doorD = String(r.door_detail ?? r.recv_building ?? '').trim()
+        let expectAt = r.expect_delivery_at
+        if (!r.push_immediately) {
+          expectAt = expectAt || defaultSfExpectAt(d0)
+        } else {
+          expectAt = null
+        }
+        return {
+          ...r,
+          map_location_text: mapT,
+          door_detail: doorD,
+          recv_address: mapT,
+          recv_building: doorD,
+          goods_value_yuan: r.is_insured ? r.goods_value_yuan : null,
+          expect_delivery_at: expectAt,
+        }
+      }),
+    }
+    const data = await apiJson(
+      '/api/admin/delivery-sf/push',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      { auth: true }
+    )
+    const results = Array.isArray(data?.results) ? data.results : []
+    const fail = results.filter((x) => x && !x.ok)
+    if (fail.length) {
+      const msg = fail.map((f) => `${f.stop_id?.slice(0, 8)}: ${f.message || ''}`).join('；')
+      showToast(`部分失败：${msg}`, 'error')
+    } else {
+      showToast('已全部提交', 'success')
+    }
+    sfDialogOpen.value = false
+  } catch (e) {
+    showToast(e instanceof Error ? e.message : '推单失败', 'error')
+  } finally {
+    sfPushSubmitting.value = false
+  }
+}
+
+async function markDelivery(memberId, kind) {
+  if (markingMemberId.value != null) return
+  const d0 = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
+  markingMemberId.value = memberId
+  try {
+    await apiJson(
+      '/api/admin/delivery-mark',
+      {
+        method: 'POST',
+        body: JSON.stringify({ member_id: Number(memberId), delivery_date: d0, kind }),
+      },
+      { auth: true }
+    )
+    showToast('已标记', 'success')
+    await fetchSheet()
+  } catch (e) {
+    showToast(e instanceof Error ? e.message : '操作失败', 'error')
+  } finally {
+    markingMemberId.value = null
+  }
+}
 </script>
 
 <template>
@@ -228,6 +428,28 @@ onMounted(() => {
               <el-option v-for="n in activeRegions" :key="n" :label="n" :value="n" />
             </el-select>
           </label>
+          <label class="delivery-field delivery-field--phone">
+            <span>手机号</span>
+            <div class="delivery-phone-row">
+              <el-input
+                v-model="phoneQuery"
+                placeholder="后四位或完整号码"
+                clearable
+                :disabled="loading"
+                class="delivery-el-phone"
+                @clear="fetchSheet"
+                @keyup.enter="fetchSheet"
+              />
+              <button
+                type="button"
+                class="btn-ghost delivery-phone-search"
+                :disabled="loading"
+                @click="fetchSheet"
+              >
+                查询
+              </button>
+            </div>
+          </label>
         </div>
         <div class="delivery-toolbar__actions">
           <p class="delivery-meta">
@@ -253,6 +475,16 @@ onMounted(() => {
           >
             <Printer :size="18" />
             打印标签
+          </button>
+          <button
+            type="button"
+            class="btn-ghost delivery-sf-btn"
+            :disabled="loading"
+            :title="!sfPreview.sf_configured ? '请在后端 .env 配置顺丰开发者参数' : ''"
+            @click="openSfDialog"
+          >
+            <Truck :size="18" />
+            顺丰推单
           </button>
         </div>
       </div>
@@ -282,6 +514,157 @@ onMounted(() => {
       </div>
     </div>
 
+    <el-dialog
+      v-model="sfDialogOpen"
+      title="顺丰同城创单：核对后提交"
+      width="min(1200px, 96vw)"
+      class="sf-dialog"
+      destroy-on-close
+    >
+      <p v-if="!sfLoading && !sfPreview.sf_configured" class="sf-warn">
+        未配置顺丰账号：请在 API 的 .env 中设置 <code>SF_OPEN_DEV_ID</code>、<code>SF_OPEN_SHOP_ID</code>、<code>SF_OPEN_SECRET</code> 以及
+        <code>SF_PICKUP_PHONE</code>、<code>SF_PICKUP_ADDRESS</code>（取货电话与取货地址）。
+      </p>
+      <p v-if="sfLoading" class="members-loading">加载推单清单…</p>
+      <template v-else>
+        <div class="sf-bar">
+          <label class="sf-check-all"
+            ><input v-model="sfSelectAll" type="checkbox" @change="applySfSelectAll(sfSelectAll)" />
+            全选</label
+          >
+          <span class="sf-hint"
+            >业务日 <strong>{{ sfPreview.delivery_date || deliveryDateQuery }}</strong> ·
+            共 {{ (sfPreview.rows || []).length }} 个停靠点；取消勾选则该行不推。</span
+          >
+        </div>
+        <div class="sf-table-wrap">
+          <el-table
+            v-if="(sfPreview.rows || []).length"
+            :data="sfPreview.rows"
+            border
+            size="small"
+            stripe
+            class="sf-table"
+            max-height="420"
+          >
+            <el-table-column width="48" label="选" align="center" fixed>
+              <template #default="{ row }">
+                <el-checkbox v-model="row.selected" :disabled="row.already_pushed" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="group_area" label="片区" min-width="88" show-overflow-tooltip />
+            <el-table-column prop="pickup_phone" label="取货电话" min-width="120" show-overflow-tooltip />
+            <el-table-column min-width="120" label="收货地址" show-overflow-tooltip>
+              <template #header>
+                <span title="与会员地址 map_location_text 一致">收货地址</span>
+              </template>
+              <template #default="{ row }">
+                <el-input v-model="row.map_location_text" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column min-width="100" label="门牌" show-overflow-tooltip>
+              <template #header>
+                <span title="与会员地址 door_detail 一致">门牌</span>
+              </template>
+              <template #default="{ row }">
+                <el-input v-model="row.door_detail" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column min-width="80" label="姓名" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-input v-model="row.recv_name" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column min-width="120" label="手机" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-input v-model="row.recv_phone" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column min-width="100" label="品类" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-input v-model="row.product_category" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column width="88" label="重(kg)">
+              <template #default="{ row }">
+                <el-input-number v-model="row.weight_kg" :min="0.1" :max="200" :step="0.1" size="small" controls-position="right" class="sf-num" />
+              </template>
+            </el-table-column>
+            <el-table-column width="100" label="立即推单" align="center">
+              <template #default="{ row }">
+                <el-switch v-model="row.push_immediately" @change="onSfPushImmediatelyChange(row)" />
+              </template>
+            </el-table-column>
+            <el-table-column min-width="160" label="期望送达">
+              <template #default="{ row }">
+                <el-date-picker
+                  v-model="row.expect_delivery_at"
+                  type="datetime"
+                  value-format="YYYY-MM-DDTHH:mm:ss"
+                  :default-time="sfExpectDefaultTime"
+                  placeholder="默认 12:00，可改"
+                  size="small"
+                  class="sf-dt"
+                  :disabled="row.push_immediately"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column min-width="120" label="备注" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-input v-model="row.remark" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column width="88" label="专人" align="center">
+              <template #default="{ row }">
+                <el-checkbox v-model="row.is_direct" />
+              </template>
+            </el-table-column>
+            <el-table-column min-width="80" label="车型" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-input v-model="row.vehicle_type" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column width="72" label="保价" align="center">
+              <template #default="{ row }">
+                <el-checkbox v-model="row.is_insured" />
+              </template>
+            </el-table-column>
+            <el-table-column min-width="88" label="货值(元)">
+              <template #default="{ row }">
+                <el-input-number
+                  v-model="row.goods_value_yuan"
+                  :min="0"
+                  :step="0.01"
+                  :disabled="!row.is_insured"
+                  size="small"
+                  class="sf-num"
+                  controls-position="right"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column width="72" label="已推" align="center">
+              <template #default="{ row }">
+                <span v-if="row.already_pushed" class="sf-bad">是</span>
+                <span v-else>否</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <p v-else class="sf-empty">当前筛选下没有可推单的停靠点（无待送订阅/单点）。</p>
+        </div>
+      </template>
+      <template #footer>
+        <el-button :disabled="sfLoading" @click="sfDialogOpen = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="sfPushSubmitting"
+          :disabled="sfLoading || !(sfPreview.rows || []).length"
+          @click="submitSfPush"
+        >
+          确认推送到顺丰
+        </el-button>
+      </template>
+    </el-dialog>
+
     <p v-if="loading" class="members-loading no-print">加载中…</p>
 
     <template v-else>
@@ -297,7 +680,17 @@ onMounted(() => {
             <strong>{{ sheetIssueStopCount }}</strong>
             个配送点需维护片区，见下表标注。
           </p>
-          <p v-if="!sheetToday.groups?.length" class="members-loading">当日暂无待配送记录（或已全部请假/未激活/无余额）。</p>
+          <p v-if="!sheetToday.groups?.length" class="members-loading">
+            <template v-if="sheetToday.is_subscription_delivery_day === false">
+              该日非订阅配送业务日：周日、国家法定节假日及国务院调休放假日不生成大表，份数不计入该日。请选择其它业务日，或在「营业概览」核对备餐人数是否为 0。
+            </template>
+            <template v-else-if="(phoneQuery || '').trim()">
+              该业务日无与「{{ (phoneQuery || '').trim() }}」匹配的配送记录（或该会员已请假/未在配送名单中）。
+            </template>
+            <template v-else>
+              当日暂无符合大表条件的会员（请假、未激活、余额不足、起送日晚于该日、片区筛选无匹配等）。单点餐在「顺丰同城」预览里与订阅合并，本页仅含订阅与自提。
+            </template>
+          </p>
           <div v-else class="delivery-region-tabs">
             <div v-if="selectedGroup" role="tabpanel" :aria-label="selectedGroup.area" class="delivery-tabpanel">
               <div class="group-card">
@@ -327,7 +720,7 @@ onMounted(() => {
                       <div class="meal-cell">
                         <span class="meal-pill">{{ st.meal_count }}</span>
                         <span
-                          v-if="selectedGroup?.area !== '门店自提' && st.pending_meal_count != null"
+                          v-if="st.pending_meal_count != null"
                           class="meal-pill-sub"
                         >
                           待{{ st.pending_meal_count }} · 已{{ st.delivered_meal_count }}
@@ -361,6 +754,32 @@ onMounted(() => {
                     <template #default="{ row: st }">
                       <span v-if="st.remarks_combined" class="remark-tag">{{ st.remarks_combined }}</span>
                       <span v-else class="empty-text">无</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="140" min-width="120" class-name="col-actions" fixed="right">
+                    <template #default="{ row: st }">
+                      <div
+                        v-for="(m, mi) in st.members"
+                        :key="'op-' + m.member_id + '-' + mi"
+                        class="delivery-action-line"
+                      >
+                        <button
+                          v-if="!m.is_delivered"
+                          type="button"
+                          class="btn-delivery-mark"
+                          :disabled="markBusy(m.member_id) || loading"
+                          @click="markDelivery(m.member_id, selectedGroup?.area === '门店自提' ? 'pickup' : 'home')"
+                        >
+                          {{
+                            markBusy(m.member_id)
+                              ? '提交中'
+                              : selectedGroup?.area === '门店自提'
+                                ? '自提完成'
+                                : '标记送达'
+                          }}
+                        </button>
+                        <span v-else class="delivery-action-done">已标记</span>
+                      </div>
                     </template>
                   </el-table-column>
                 </AdminTable>
@@ -417,6 +836,63 @@ onMounted(() => {
   gap: 0.75rem 1rem;
   flex: 1 1 auto;
   min-width: 0;
+}
+.delivery-sf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.sf-warn {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  color: #b45309;
+  background: #fffbeb;
+  border-radius: 0.5rem;
+}
+.sf-warn code {
+  font-size: 0.75rem;
+}
+.sf-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+}
+.sf-check-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+}
+.sf-hint {
+  color: #64748b;
+}
+.sf-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+.sf-table {
+  min-width: 900px;
+}
+.sf-num {
+  width: 100% !important;
+}
+:deep(.sf-dt) {
+  width: 100%;
+}
+.sf-bad {
+  color: #dc2626;
+  font-weight: 700;
+}
+.sf-empty {
+  margin: 0;
+  padding: 1rem;
+  color: #64748b;
+  font-size: 0.9rem;
 }
 .delivery-toolbar__region-tabs {
   display: flex;
@@ -546,6 +1022,29 @@ onMounted(() => {
 }
 .delivery-field :deep(.delivery-el-select .el-select__wrapper) {
   border-radius: 0.75rem;
+}
+.delivery-field--phone {
+  min-width: 0;
+}
+.delivery-phone-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.delivery-field :deep(.delivery-el-phone) {
+  width: 11rem;
+  max-width: 100%;
+}
+.delivery-field :deep(.delivery-el-phone .el-input__wrapper) {
+  border-radius: 0.75rem;
+}
+.delivery-phone-search {
+  padding: 0.45rem 0.85rem;
+  border-radius: 0.75rem;
+  font-weight: 800;
+  font-size: 0.75rem;
+  white-space: nowrap;
 }
 .delivery-icon-btn,
 .delivery-print-btn {
@@ -789,5 +1288,39 @@ onMounted(() => {
   max-height: 12mm;
   overflow: hidden;
   word-break: break-word;
+}
+
+.delivery-action-line {
+  display: flex;
+  align-items: center;
+  min-height: 1.6rem;
+  margin-bottom: 0.25rem;
+}
+.delivery-action-line:last-child {
+  margin-bottom: 0;
+}
+.btn-delivery-mark {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  cursor: pointer;
+  border: 1px solid #0e5a44;
+  background: #ecfdf3;
+  color: #0e5a44;
+}
+.btn-delivery-mark:hover:not(:disabled) {
+  background: #0e5a44;
+  color: #fff;
+}
+.btn-delivery-mark:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.delivery-action-done {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #0e5a44;
 }
 </style>

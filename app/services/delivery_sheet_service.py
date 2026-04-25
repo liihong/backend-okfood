@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
@@ -14,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.constants import UNASSIGNED_DELIVERY_AREA
+from app.core.delivery_calendar import is_subscription_delivery_day
 from app.core.timeutil import today_shanghai
 from app.models.delivery_log import DeliveryLog
 from app.models.delivery_region import DeliveryRegion
@@ -97,6 +99,19 @@ def _member_area_issue(addr: MemberAddress | None, active_ids: set[int]) -> bool
     return int(addr.delivery_region_id) not in active_ids
 
 
+def _filter_members_by_phone_hint(members: list[Member], phone_hint: str) -> list[Member]:
+    """按手机号筛选：忽略空格与符号，仅比较数字串是否包含输入中的连续数字（可输后四位或完整 11 位）。"""
+    needle = re.sub(r"\D", "", (phone_hint or "").strip())
+    if not needle:
+        return members
+    out: list[Member] = []
+    for m in members:
+        hay = re.sub(r"\D", "", (m.phone or "").strip())
+        if needle in hay:
+            out.append(m)
+    return out
+
+
 def _member_ids_delivered_on_date(db: Session, delivery_date: date, member_ids: list[int]) -> set[int]:
     """查询当日已在 ``delivery_logs`` 标记为送达的会员 id（与 ``courier_service.list_today_tasks`` 同一条件）。"""
     if not member_ids:
@@ -116,8 +131,10 @@ def build_delivery_sheet(
     *,
     delivery_date: date | None = None,
     area: str | None = None,
+    phone: str | None = None,
 ) -> DeliverySheetOut:
     d = delivery_date or today_shanghai()
+    sub_ok = is_subscription_delivery_day(d)
     active_region_list, known_ids = _active_regions_meta(db)
     known_names = set(active_region_list)
 
@@ -129,6 +146,10 @@ def build_delivery_sheet(
                 delivery_date=d.isoformat(),
                 groups=[],
                 active_regions=active_region_list,
+                home_pending_meal_total=0,
+                home_delivered_meal_total=0,
+                pickup_meal_total=0,
+                is_subscription_delivery_day=sub_ok,
             )
         region_filter_id = int(rid)
 
@@ -137,6 +158,10 @@ def build_delivery_sheet(
     )
     # 与到家列表一并拉取自提会员，便于单次查询 delivery_logs（片区筛选不改变自提分组是否出现）
     pu_members, pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d)
+    ph = (phone or "").strip()
+    if ph:
+        members = _filter_members_by_phone_hint(members, ph)
+        pu_members = _filter_members_by_phone_hint(pu_members, ph)
     delivered_set = _member_ids_delivered_on_date(
         db, d, [m.id for m in members] + [m.id for m in pu_members]
     )
@@ -171,6 +196,7 @@ def build_delivery_sheet(
                 rmk = _member_line_remarks(mem, addr)
                 lines.append(
                     DeliverySheetMemberOut(
+                        member_id=int(mem.id),
                         phone=mem.phone,
                         name=mem.name,
                         daily_meal_units=effective_daily_meal_units(mem),
@@ -233,23 +259,28 @@ def build_delivery_sheet(
             rmk = _member_line_remarks(mem, addr)
             lines.append(
                 DeliverySheetMemberOut(
+                    member_id=int(mem.id),
                     phone=mem.phone,
                     name=mem.name,
                     daily_meal_units=effective_daily_meal_units(mem),
                     remarks=rmk,
                     area_issue=False,
-                    is_delivered=False,
+                    is_delivered=mem.id in delivered_set,
                 )
             )
         pu_meal_total = sum(effective_daily_meal_units(m) for m in pu_members)
+        pu_delivered = sum(
+            effective_daily_meal_units(m) for m in pu_members if m.id in delivered_set
+        )
+        pu_pending = pu_meal_total - pu_delivered
         groups_out.append(
             DeliverySheetGroupOut(
                 area="门店自提",
                 stops=[
                     DeliverySheetStopOut(
                         meal_count=pu_meal_total,
-                        pending_meal_count=pu_meal_total,
-                        delivered_meal_count=0,
+                        pending_meal_count=pu_pending,
+                        delivered_meal_count=pu_delivered,
                         address_line="门店自提（到店取餐）",
                         area="门店自提",
                         members=lines,
@@ -259,8 +290,8 @@ def build_delivery_sheet(
                 ],
                 stop_count=1,
                 meal_total=pu_meal_total,
-                pending_meal_total=pu_meal_total,
-                delivered_meal_total=0,
+                pending_meal_total=pu_pending,
+                delivered_meal_total=pu_delivered,
                 has_area_issue=False,
             )
         )
@@ -276,4 +307,5 @@ def build_delivery_sheet(
         home_pending_meal_total=home_pending,
         home_delivered_meal_total=home_delivered,
         pickup_meal_total=pickup_total,
+        is_subscription_delivery_day=sub_ok,
     )

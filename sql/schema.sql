@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS `member_card_orders` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `member_id` BIGINT UNSIGNED NOT NULL COMMENT 'members.id',
   `card_kind` ENUM('周卡','月卡') NOT NULL COMMENT '开卡类型',
-  `pay_channel` ENUM('微信','支付宝') NOT NULL COMMENT '缴费渠道',
+  `pay_channel` ENUM('微信','支付宝','线下') NOT NULL COMMENT '缴费渠道',
   `pay_status` ENUM('未缴','已缴') NOT NULL DEFAULT '未缴' COMMENT '缴费情况',
   `amount_yuan` DECIMAL(12,2) NULL COMMENT '实收金额(元)，可选',
   `remark` VARCHAR(500) NULL,

@@ -29,6 +29,8 @@ class Member(Base):
     plan_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     is_leaved_tomorrow: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 与 is_leaved_tomorrow 同时生效：不配送的「目标业务日」（上海），便于配送命中与请假日全天展示「请假中」
+    tomorrow_leave_target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     leave_range_start: Mapped[date | None] = mapped_column(Date, nullable=True)
     leave_range_end: Mapped[date | None] = mapped_column(Date, nullable=True)
     last_low_balance_notify_date: Mapped[date | None] = mapped_column(Date, nullable=True)

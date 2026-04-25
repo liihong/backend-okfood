@@ -53,7 +53,10 @@ def _dish_price_yuan_str(v: Decimal | None) -> str | None:
 
 def _member_on_leave_today(m: Member, today: date) -> bool:
     if m.leave_range_start and m.leave_range_end:
-        return m.leave_range_start <= today <= m.leave_range_end
+        if m.leave_range_start <= today <= m.leave_range_end:
+            return True
+    if m.tomorrow_leave_target_date is not None and m.is_leaved_tomorrow:
+        return today <= m.tomorrow_leave_target_date
     return False
 
 
@@ -531,10 +534,16 @@ def dashboard_meal_summary(db: Session) -> DashboardMealSummaryOut:
             Member.leave_range_start <= d,
             Member.leave_range_end >= d,
         )
-        tomorrow_leave_hit = and_(
+        target_hit = and_(
             Member.is_leaved_tomorrow.is_(True),
+            Member.tomorrow_leave_target_date == d,
+        )
+        legacy_tomorrow = and_(
+            Member.is_leaved_tomorrow.is_(True),
+            Member.tomorrow_leave_target_date.is_(None),
             literal(d) == literal(tomorrow_as_date),
         )
+        tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
         absent = or_(in_leave_range, tomorrow_leave_hit)
         started = or_(
             Member.delivery_start_date.is_(None),

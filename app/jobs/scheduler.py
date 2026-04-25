@@ -16,13 +16,38 @@ scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
 def job_reset_leave_flags() -> None:
     """
-    每日 00:01：重置「仅明天请假」标记；清理已过期的长期请假区间。
+    每日 00:01：清理「明日请假」——带 target 的业务日若已小于当前业务日则清空；
+    无 target 的旧数据仍全量清空 is_leaved_tomorrow（与旧版跨日 0:01 一致）；清理已过期的长期请假区间。
     业务日统一使用 Asia/Shanghai。
     """
     db = SessionLocal()
     try:
         today: date = today_shanghai()
-        db.execute(update(Member).values(is_leaved_tomorrow=False))
+        db.execute(
+            update(Member)
+            .where(
+                Member.tomorrow_leave_target_date.isnot(None),
+                Member.tomorrow_leave_target_date < today,
+            )
+            .values(is_leaved_tomorrow=False, tomorrow_leave_target_date=None)
+        )
+        db.execute(
+            update(Member)
+            .where(
+                Member.tomorrow_leave_target_date.is_(None),
+                Member.is_leaved_tomorrow.is_(True),
+            )
+            .values(is_leaved_tomorrow=False)
+        )
+        # 已撤销仅明日但 target 残留：清 target，避免历史脏数据与配送名单再次偏离
+        db.execute(
+            update(Member)
+            .where(
+                Member.is_leaved_tomorrow.is_(False),
+                Member.tomorrow_leave_target_date.isnot(None),
+            )
+            .values(tomorrow_leave_target_date=None)
+        )
         rows = db.scalars(select(Member).where(Member.leave_range_end.isnot(None))).all()
         for m in rows:
             if m.leave_range_end is not None and m.leave_range_end < today:

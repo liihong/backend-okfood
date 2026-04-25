@@ -79,7 +79,6 @@
           <view class="form-field">
             <view class="field-label-row">
               <text class="field-title">忌口/备注</text>
-              <text class="field-required">*</text>
             </view>
             <input
               v-model="form.remarks"
@@ -133,27 +132,29 @@ function buildPoiBaseAddress(p) {
   if (city && address.startsWith(city)) {
     address = address.slice(city.length).trim()
   }
-  const parts = [city, name, address].filter(Boolean)
+  // 与后台/列表展示一致：先省市区与道路，再小区/POI 名（微信常把 name 作小区、address 作行政区+路）
+  const region = [city, address].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
+  const parts = []
+  if (region) parts.push(region)
+  if (name && (!region || !region.includes(name))) parts.push(name)
   return parts.join(' ').replace(/\s+/g, ' ').trim()
 }
 
 function setPoiDisplayLines(city, name, address) {
-  const main = (name || address || city || '').trim() || '已选地点'
-  const subParts = []
-  if (city && main !== city && !main.includes(city)) {
-    subParts.push(city)
+  const c = String(city || '').trim()
+  const n = String(name || '').trim()
+  let a = String(address || '').trim()
+  if (c && a.startsWith(c)) {
+    a = a.slice(c.length).trim()
   }
-  if (address) {
-    let a = address.trim()
-    if (city && a.startsWith(city)) {
-      a = a.slice(city.length).trim()
-    }
-    if (a && a !== main && !main.includes(a)) {
-      subParts.push(a)
-    }
+  const region = [c, a].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
+  if (region) {
+    recvLocTitle.value = region
+    recvLocSub.value = n && !region.includes(n) ? n : ''
+    return
   }
-  recvLocTitle.value = main
-  recvLocSub.value = subParts.join(' ').replace(/\s+/g, ' ').trim()
+  recvLocTitle.value = n || c || '已选地点'
+  recvLocSub.value = ''
 }
 
 /** 当前编辑的地址 id；无则 POST 新增，有则 PATCH */
@@ -226,16 +227,31 @@ function applyAddressItem(item) {
   if (hasLoc) {
     coords.value = { lat: latRaw, lng: lngRaw }
     poiMeta.value = null
-    const line =
-      item.detail_address != null
-        ? String(item.detail_address)
-        : item.address != null
-          ? String(item.address)
-          : ''
-    recvLocTitle.value = line
-    recvLocSub.value = ''
-    form.houseNumber = ''
-    form.legacyDetail = ''
+    const mapSaved =
+      item.map_location_text != null && String(item.map_location_text).trim()
+        ? String(item.map_location_text).trim()
+        : ''
+    const doorSaved =
+      item.door_detail != null && String(item.door_detail).trim()
+        ? String(item.door_detail).trim()
+        : ''
+    if (mapSaved || doorSaved) {
+      recvLocTitle.value = mapSaved || (item.detail_address != null ? String(item.detail_address) : '')
+      recvLocSub.value = ''
+      form.houseNumber = doorSaved
+      form.legacyDetail = ''
+    } else {
+      const line =
+        item.detail_address != null
+          ? String(item.detail_address)
+          : item.address != null
+            ? String(item.address)
+            : ''
+      recvLocTitle.value = line
+      recvLocSub.value = ''
+      form.houseNumber = ''
+      form.legacyDetail = ''
+    }
   } else {
     coords.value = null
     poiMeta.value = null
@@ -386,17 +402,24 @@ function buildAddressBody() {
       : (recvLocTitle.value || '').trim()
     const house = (form.houseNumber || '').trim()
     detail_address = house ? `${base} ${house}`.trim() : base
-  } else {
-    detail_address = (form.legacyDetail || '').trim()
+    return {
+      contact_name: form.name.trim(),
+      contact_phone: String(form.phone).replace(/\D/g, ''),
+      detail_address,
+      map_location_text: base || null,
+      door_detail: house || null,
+      remarks: (form.remarks || '').trim(),
+      location: { lng: coords.value.lng, lat: coords.value.lat },
+    }
   }
+  detail_address = (form.legacyDetail || '').trim()
   const body = {
     contact_name: form.name.trim(),
     contact_phone: String(form.phone).replace(/\D/g, ''),
     detail_address,
+    map_location_text: null,
+    door_detail: null,
     remarks: (form.remarks || '').trim(),
-  }
-  if (hasCoords) {
-    body.location = { lng: coords.value.lng, lat: coords.value.lat }
   }
   return body
 }

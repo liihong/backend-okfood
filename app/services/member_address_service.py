@@ -14,6 +14,13 @@ from app.services.region_assignment import assign_region_for_coords
 _MAX_ADDRESSES_PER_MEMBER = 20
 
 
+def _opt_str(v: str | None) -> str | None:
+    if v is None:
+        return None
+    t = v.strip()
+    return t if t else None
+
+
 def default_address_pick_subquery():
     """每人一条默认地址：若存在多条 is_default，取 id 最大者（与管理端会员列表一致）。"""
     return (
@@ -191,6 +198,8 @@ def _to_out(row: MemberAddress, id_to_name: dict[int, str]) -> MemberAddressOut:
         delivery_region_id=int(row.delivery_region_id) if row.delivery_region_id is not None else None,
         area=routing_area_label(row, id_to_name),
         detail_address=row.detail_address,
+        map_location_text=_opt_str(row.map_location_text),
+        door_detail=_opt_str(row.door_detail),
         remarks=row.remarks,
         location=loc,
         is_default=bool(row.is_default),
@@ -268,6 +277,8 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
         contact_phone=body.contact_phone,
         delivery_region_id=rid,
         detail_address=body.detail_address,
+        map_location_text=_opt_str(body.map_location_text),
+        door_detail=_opt_str(body.door_detail),
         remarks=body.remarks,
         lng=lng,
         lat=lat,
@@ -291,6 +302,10 @@ def update_address(db: Session, member_id: int, address_id: int, body: MemberAdd
 
     for k, v in patch.items():
         setattr(row, k, v)
+    if "map_location_text" in patch:
+        row.map_location_text = _opt_str(row.map_location_text)
+    if "door_detail" in patch:
+        row.door_detail = _opt_str(row.door_detail)
 
     if location_patch is not None:
         lng_f = float(location_patch["lng"])
@@ -298,7 +313,7 @@ def update_address(db: Session, member_id: int, address_id: int, body: MemberAdd
         row.lng, row.lat = lng_f, lat_f
         r = assign_region_for_coords(db, lng_f, lat_f)
         row.delivery_region_id = int(r.id) if r else None
-    elif "detail_address" in patch:
+    elif "detail_address" in patch or "map_location_text" in patch or "door_detail" in patch:
         lng, lat, rid = _geocode_bundle(db, row.detail_address)
         row.lng, row.lat, row.delivery_region_id = lng, lat, rid
 

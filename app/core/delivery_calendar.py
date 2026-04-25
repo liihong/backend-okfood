@@ -15,16 +15,24 @@ from datetime import date
 import chinese_calendar as cc
 
 
-def is_subscription_delivery_day(d: date) -> bool:
-    """给定日期是否为会员订阅配送的履约日。"""
-    # 周日一律不配送
+def _is_subscription_delivery_day_with_calendar(d: date) -> bool:
+    """使用 chinese-calendar 的判定；仅应在库支持的年份上调用（见外层的 NotImplemented 降级）。"""
     if d.weekday() == 6:
         return False
-    # 工作日（含补班周末）配送
     if cc.is_workday(d):
         return True
-    # 普通周六：非法定调休放假则仍配送
     if d.weekday() == 5:
         _, holiday_name = cc.get_holiday_detail(d)
         return holiday_name is None
     return False
+
+
+def is_subscription_delivery_day(d: date) -> bool:
+    """给定日期是否为会员订阅配送的履约日。"""
+    try:
+        return _is_subscription_delivery_day_with_calendar(d)
+    except NotImplementedError:
+        # 库无该年国务院安排时，is_workday 会抛错；避免接口 500。口径：至少「周日不送」，其余日先按可配送
+        if d.weekday() == 6:
+            return False
+        return True

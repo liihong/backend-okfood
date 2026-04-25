@@ -464,6 +464,15 @@ onMounted(async () => {
             }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="多天请假" min-width="170" class-name="td-leave-range">
+          <template #default="{ row: u }">
+            <span
+              class="member-leave-range"
+              :class="{ 'member-leave-range--active': u.leave_range_start && u.leave_range_end }"
+              >{{ u.leave_range_label }}</span
+            >
+          </template>
+        </el-table-column>
         <el-table-column label="剩余 / 总次数" align="center" min-width="120">
           <template #default="{ row: u }">
             <div class="balance-cell">
@@ -564,7 +573,7 @@ onMounted(async () => {
     </div>
 
     <div v-if="showEditModal" class="modal-overlay" @click.self="showEditModal = false">
-      <div class="modal-card">
+      <div class="modal-card modal-card--member-edit">
         <div class="modal-header">
           <div class="header-info">
             <h3>修改会员信息</h3>
@@ -574,7 +583,7 @@ onMounted(async () => {
             <X :size="20" />
           </button>
         </div>
-        <form class="modal-form" @submit.prevent="submitEditMember">
+        <form class="modal-form modal-form--member-two-col" @submit.prevent="submitEditMember">
           <div class="form-group">
             <label>手机号</label>
             <input :value="editForm.phone" type="text" disabled class="input-disabled" />
@@ -583,11 +592,11 @@ onMounted(async () => {
             <label>姓名</label>
             <input v-model="editForm.name" required maxlength="100" />
           </div>
-          <div class="form-group">
+          <div class="form-group form-group--span-full">
             <label>默认配送地址</label>
             <textarea v-model="editForm.address" required rows="3" maxlength="500"></textarea>
           </div>
-          <div class="form-group">
+          <div class="form-group form-group--span-full">
             <label>配送片区</label>
             <select
               v-model="editForm.delivery_region_id"
@@ -607,23 +616,31 @@ onMounted(async () => {
               下拉列表与列表筛选一致（仅启用中的配送区域）。未勾选自动划区时，保存会先按地址地理编码划区，再以您选择的片区覆盖。
             </p>
           </div>
-          <div class="form-group">
+          <div class="form-group form-group--span-full member-delivery-block">
             <label>开始配送日期（起送业务日）</label>
-            <input v-model="editForm.delivery_start_date" type="date" />
+            <div class="member-delivery-controls-row">
+              <div class="member-delivery-date-wrap">
+                <input v-model="editForm.delivery_start_date" type="date" />
+              </div>
+              <label class="checkbox-row member-delivery-check">
+                <input v-model="editForm.delivery_deferred" type="checkbox" />
+                <span>暂停配送（会员卡停用）</span>
+              </label>
+              <label class="checkbox-row member-delivery-check">
+                <input
+                  v-model="editForm.store_pickup"
+                  type="checkbox"
+                  :disabled="editForm.delivery_deferred"
+                />
+                <span>门店自提（不到家配送，仍计入备餐大表「门店自提」分组）</span>
+              </label>
+            </div>
             <p class="modal-hint">
               上海业务日：该日及之后才进入配送排期；留空表示未设置起送日。保存时会与「未开卡 / 余额」等规则一并生效；勾选「暂停配送」时保存会清空起送日。
             </p>
-            <label class="checkbox-row" style="margin-top: 12px">
-              <input v-model="editForm.delivery_deferred" type="checkbox" />
-              <span>暂停配送（会员卡停用）</span>
-            </label>
-            <p class="modal-hint" style="margin-top: 6px">
+            <p class="modal-hint">
               与小程序「暂不配送 / 先不开卡」为同一数据字段。勾选后不参与配送大表/分拣、不计入开卡分货，并会清空起送日、关闭门店自提。取消勾选且有余额时恢复为在册活跃（是否排期仍取决于起送日等条件）。
             </p>
-            <label class="checkbox-row" style="margin-top: 12px">
-              <input v-model="editForm.store_pickup" type="checkbox" :disabled="editForm.delivery_deferred" />
-              <span>门店自提（不到家配送，仍计入备餐大表「门店自提」分组）</span>
-            </label>
           </div>
           <div class="form-group">
             <label>会员剩余次数</label>
@@ -664,7 +681,7 @@ onMounted(async () => {
           </div>
           <div class="form-group">
             <label>备注（忌口等）</label>
-            <textarea v-model="editForm.remarks" rows="2" maxlength="500" placeholder="可留空"></textarea>
+            <textarea v-model="editForm.remarks" rows="4" maxlength="500" placeholder="可留空"></textarea>
           </div>
           <button type="submit" class="btn-submit-order" :disabled="editSaving">
             {{ editSaving ? '保存中…' : '保存' }}

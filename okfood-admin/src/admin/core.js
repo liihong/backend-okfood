@@ -218,6 +218,9 @@ export function mapAdminUserToRow(raw, idx) {
       delivery_deferred: false,
       is_on_leave_today: false,
       tomorrow_leave: false,
+      leave_range_start: '',
+      leave_range_end: '',
+      leave_range_label: '—',
       status: '未开卡',
       store_pickup: false,
     }
@@ -234,6 +237,25 @@ export function mapAdminUserToRow(raw, idx) {
     else status = '未开卡'
   } else if (onLeaveToday) status = '请假中'
   else if (balance <= 2) status = '待续费'
+
+  const lrStart = raw.leave_range_start
+  const lrEnd = raw.leave_range_end
+  let leaveRangeStartYmd = ''
+  let leaveRangeEndYmd = ''
+  if (lrStart != null && String(lrStart).trim()) {
+    const s = String(lrStart).trim()
+    leaveRangeStartYmd = s.length >= 10 ? s.slice(0, 10) : s
+  }
+  if (lrEnd != null && String(lrEnd).trim()) {
+    const s = String(lrEnd).trim()
+    leaveRangeEndYmd = s.length >= 10 ? s.slice(0, 10) : s
+  }
+  const leaveRangeLabel =
+    leaveRangeStartYmd && leaveRangeEndYmd
+      ? `${leaveRangeStartYmd}～${leaveRangeEndYmd}`
+      : leaveRangeStartYmd || leaveRangeEndYmd
+        ? [leaveRangeStartYmd, leaveRangeEndYmd].filter(Boolean).join('～')
+        : '—'
 
   const plan = raw.plan_type || '次卡'
   const totalQuota = planDefaultTotal(plan)
@@ -278,6 +300,9 @@ export function mapAdminUserToRow(raw, idx) {
     delivery_deferred: deferred,
     is_on_leave_today: onLeaveToday,
     tomorrow_leave: active && !onLeaveToday && tomorrowLeave,
+    leave_range_start: leaveRangeStartYmd,
+    leave_range_end: leaveRangeEndYmd,
+    leave_range_label: leaveRangeLabel,
     status,
     store_pickup: raw.store_pickup === true,
   }

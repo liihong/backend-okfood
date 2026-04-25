@@ -26,6 +26,8 @@ class MemberAddress(Base):
         index=True,
     )
     detail_address: Mapped[str] = mapped_column(String(500))
+    map_location_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    door_detail: Mapped[str | None] = mapped_column(String(500), nullable=True)
     remarks: Mapped[str | None] = mapped_column(String(500), nullable=True)
     lng: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
     lat: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)

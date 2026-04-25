@@ -5,12 +5,12 @@
       <view class="page-leave">
         <view v-if="isOnLeaveNow" class="leave-block leave-block--active">
           <text class="leave-status-tag">请假中</text>
-          <text class="leave-h3 leave-h3--compact">当前区间请假</text>
-          <text class="leave-range-line">{{ serverLeaveStart }} 至 {{ serverLeaveEnd }}</text>
-          <text class="leave-range-hint">（按上海日期；与配送请假状态一致）</text>
+          <text class="leave-h3 leave-h3--compact">{{ activeLeaveTitle }}</text>
+          <text class="leave-range-line">{{ leaveLineStart }} 至 {{ leaveLineEnd }}</text>
+          <text class="leave-range-hint">{{ activeLeaveHint }}</text>
           <button class="btn-cancel-leave" @click="confirmCancelAllLeave">取消请假</button>
         </view>
-        <view class="leave-block">
+        <view v-if="!isOnLeaveNow" class="leave-block">
           <text class="leave-h3">明天有事 · 快速请假</text>
           <button
             class="btn-fast-leave"
@@ -21,7 +21,7 @@
           </button>
           <text class="leave-tip">* 每日 21:00 前操作，餐次顺延 👌</text>
         </view>
-        <view class="leave-block">
+        <view v-if="!isOnLeaveNow" class="leave-block">
           <text class="leave-h3">多天请假 (出差/旅游等)</text>
           <view class="date-group">
             <picker mode="date" :value="rangeStart" @change="onStart">
@@ -57,6 +57,8 @@ const rangeEnd = ref('')
 /** 服务端区间请假快照（与「我的」页「请假中」口径一致：闭区间含上海今日） */
 const serverLeaveStart = ref('')
 const serverLeaveEnd = ref('')
+/** 仅明日请假：不配送目标业务日（上海），与后端 tomorrow_leave_target_date 一致 */
+const tomorrowTargetYmd = ref('')
 const scrollStyle = ref({})
 
 function shanghaiTodayYmd() {
@@ -78,12 +80,71 @@ function shanghaiTodayYmd() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
+function shanghaiTomorrowYmd() {
+  return addDaysYmdShanghai(shanghaiTodayYmd(), 1)
+}
+
+/** 在「上海日」上增减天数，返回 en-CA yyyy-mm-dd */
+function addDaysYmdShanghai(ymd, deltaDays) {
+  if (!ymd) return ''
+  const t = new Date(`${ymd}T12:00:00+08:00`)
+  const t2 = new Date(t.getTime() + deltaDays * 24 * 60 * 60 * 1000)
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(t2)
+  const y = parts.find((p) => p.type === 'year')?.value
+  const m = parts.find((p) => p.type === 'month')?.value
+  const d = parts.find((p) => p.type === 'day')?.value
+  if (y && m && d) return `${y}-${m}-${d}`
+  return ymd
+}
+
 const isOnLeaveNow = computed(() => {
+  if (isTomorrowLeave.value) return true
   const s = serverLeaveStart.value
   const e = serverLeaveEnd.value
   if (!s || !e) return false
   const today = shanghaiTodayYmd()
   return today >= s && today <= e
+})
+
+const isRangeOnlyLeave = computed(
+  () => Boolean(serverLeaveStart.value && serverLeaveEnd.value),
+)
+
+const activeLeaveTitle = computed(() => {
+  if (isRangeOnlyLeave.value) return '当前区间请假'
+  if (isTomorrowLeave.value) return '明日配送请假'
+  return '当前请假'
+})
+
+const leaveLineStart = computed(() => {
+  if (isRangeOnlyLeave.value) return serverLeaveStart.value
+  if (isTomorrowLeave.value) {
+    const t = tomorrowTargetYmd.value
+    if (t) return addDaysYmdShanghai(t, -1)
+    return shanghaiTodayYmd()
+  }
+  return serverLeaveStart.value
+})
+
+const leaveLineEnd = computed(() => {
+  if (isRangeOnlyLeave.value) return serverLeaveEnd.value
+  if (isTomorrowLeave.value) {
+    return tomorrowTargetYmd.value || shanghaiTomorrowYmd()
+  }
+  return serverLeaveEnd.value
+})
+
+const activeLeaveHint = computed(() => {
+  if (isRangeOnlyLeave.value) return '（按上海日期；与配送请假状态一致）'
+  if (isTomorrowLeave.value) {
+    return '（自提交当日起至目标日 24:00 止，上海时区；不配送日见右端；与「我的」状态一致）'
+  }
+  return '（按上海日期；与配送请假状态一致）'
 })
 
 function ymdFromApi(d) {
@@ -96,6 +157,7 @@ async function syncLeaveFromServer() {
   try {
     const me = await request('/api/user/me', { method: 'GET' })
     isTomorrowLeave.value = Boolean(me?.is_leaved_tomorrow)
+    tomorrowTargetYmd.value = ymdFromApi(me?.tomorrow_leave_target_date)
     const lr = me?.leave_range
     if (lr && lr.start && lr.end) {
       const s = ymdFromApi(lr.start)
@@ -156,7 +218,7 @@ async function toggleTomorrow() {
         method: 'POST',
         data: { type: 'clear_tomorrow' },
       })
-      isTomorrowLeave.value = false
+      await syncLeaveFromServer()
       uni.showToast({ title: '已取消明天请假', icon: 'success' })
     } catch (e) {
       uni.showToast({
@@ -173,7 +235,7 @@ async function toggleTomorrow() {
         type: 'tomorrow',
       },
     })
-    isTomorrowLeave.value = true
+    await syncLeaveFromServer()
     uni.showToast({ title: '已提交明天请假', icon: 'success' })
   } catch (e) {
     uni.showToast({

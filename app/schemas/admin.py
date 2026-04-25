@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, datetime, time
 from decimal import Decimal
 from decimal import Decimal
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
@@ -325,6 +325,7 @@ class DashboardMealSummaryOut(BaseModel):
 
 
 class DeliverySheetMemberOut(BaseModel):
+    member_id: int = Field(..., ge=1, description="会员主键，供大表人工标记")
     phone: str
     name: str
     daily_meal_units: int = Field(1, ge=1, description="该会员当日计入份数")
@@ -332,7 +333,16 @@ class DeliverySheetMemberOut(BaseModel):
     area_issue: bool = Field(False, description="会员主档或默认地址片区为空、未分配或与启用区域表不一致")
     is_delivered: bool = Field(
         False,
-        description="配送到家：骑手对该业务日在 delivery_logs 已确认送达；与小程序骑手任务 is_delivered 同源。门店自提行在接口中恒为 false，前端单独展示「自提」",
+        description="该业务日 delivery_logs 为已送达（骑手或管理员手标；门店自提同口径）",
+    )
+
+
+class AdminDeliveryMarkIn(BaseModel):
+    member_id: int = Field(..., ge=1)
+    delivery_date: date
+    kind: Literal["home", "pickup"] = Field(
+        ...,
+        description="home=配送到家已送达；pickup=门店自提已取/已完成",
     )
 
 
@@ -343,12 +353,12 @@ class DeliverySheetStopOut(BaseModel):
     pending_meal_count: int = Field(
         ...,
         ge=0,
-        description="该配送点尚未确认送达的份数（配送到家）；门店自提聚合点为当日自提总份数",
+        description="配送到家/门店自提：该点未确认份数；自提大表为待自提/待标记",
     )
     delivered_meal_count: int = Field(
         ...,
         ge=0,
-        description="该配送点已确认送达的份数；门店自提恒为 0",
+        description="该配送点已确认送达的份数；门店自提为已自提/已标记份数",
     )
     address_line: str = Field(..., description="收件地址单行展示")
     area: str = Field(..., description="该配送点展示用片区（来自默认地址或会员主档）")
@@ -368,12 +378,12 @@ class DeliverySheetGroupOut(BaseModel):
     pending_meal_total: int = Field(
         0,
         ge=0,
-        description="本片区分组未确认送达份数合计；门店自提分组等于 meal_total",
+        description="本片区分组未确认送达/未自提份数合计",
     )
     delivered_meal_total: int = Field(
         0,
         ge=0,
-        description="本片区分组已确认送达份数合计；门店自提分组恒为 0",
+        description="本片区分组已确认送达/已自提份数合计",
     )
     has_area_issue: bool = Field(False, description="本片区分组存在区域待处理记录")
 
@@ -399,6 +409,10 @@ class DeliverySheetOut(BaseModel):
         0,
         ge=0,
         description="门店自提分组份数合计；不参与骑手到家送达统计",
+    )
+    is_subscription_delivery_day: bool = Field(
+        True,
+        description="该日是否视为订阅配送业务日；false 时（周日/法定及调休等）不生成列表，大表为空属正常",
     )
 
 
@@ -448,6 +462,89 @@ class CardOrderPatchIn(BaseModel):
         False,
         description="已废弃：工单为「已缴」且尚未入账时，任意保存将自动同步会员次数",
     )
+
+
+class SfSameCityRowBase(BaseModel):
+    """
+    与顺丰 Excel 模板及弹窗行一致；提交推单时回传，后端再组 createorder。
+
+    注意：保价为真时须带 ``goods_value_yuan``；非立即推单须带 ``expect_delivery_at``（上海时区，无时区时按上海本地处理）。
+    """
+
+    stop_id: str = Field(..., min_length=8, max_length=64, description="停靠点 id，与预览一致")
+    pickup_phone: str = Field(..., max_length=20, description="取货联系电话：映射 shop/模板")
+    map_location_text: str = Field(
+        default="",
+        max_length=500,
+        description="与 member_addresses.map_location_text 一致；管理端可编辑，提交时与 recv_address 同步",
+    )
+    door_detail: str = Field(
+        default="",
+        max_length=500,
+        description="与 member_addresses.door_detail 一致；管理端可编辑，提交时与 recv_building 同步",
+    )
+    recv_address: str = Field(
+        default="",
+        max_length=500,
+        description="收货大地址(小区/路段)，可与楼号/门牌拆分；与 map_location_text 同源",
+    )
+    recv_building: str = Field(default="", max_length=500, description="楼号-门牌等；与 door_detail 同源")
+    recv_name: str = Field(default="", max_length=100, description="收货人姓名")
+    recv_phone: str = Field(default="", max_length=20, description="收货人电话")
+    product_category: str = Field(
+        default="外韵落地配",
+        max_length=200,
+        description="商品/品类显示名，写入 product_detail 与备注",
+    )
+    weight_kg: float = Field(..., ge=0.01, le=200.0, description="重量(Kg)，将换算为 weight_gram")
+    push_immediately: bool = Field(True, description="是=立即推单；否=预约 expect_time(送达)")
+    expect_delivery_at: datetime | None = Field(
+        default=None, description="期望送达时间(上海)；非立即时必传"
+    )
+    remark: str | None = Field(None, max_length=2000, description="订单备注(骑士可见)")
+    is_direct: bool = Field(
+        False, description="专人直送，映射 is_person_direct"
+    )
+    vehicle_type: str = Field("小轿车", max_length=50, description="车型，目前写入备注补充")
+    is_insured: bool = Field(False, description="是否保价")
+    goods_value_yuan: Decimal | None = Field(
+        default=None, ge=0, max_digits=12, decimal_places=2, description="保价时货值(元)"
+    )
+    subscription_pending_units: int = Field(0, ge=0, description="订阅本点未送达份数(预览写入)")
+    single_meal_count: int = Field(0, ge=0, description="当日本点单点餐份数(预览写入)")
+
+
+class SfSameCityPreviewRow(SfSameCityRowBase):
+    """预览：默认全选、展示是否已推成功。"""
+
+    group_area: str = ""
+    address_line: str = ""
+    selected: bool = True
+    already_pushed: bool = False
+
+
+class SfSameCityPreviewOut(BaseModel):
+    delivery_date: str
+    rows: list[SfSameCityPreviewRow] = Field(default_factory=list)
+    sf_configured: bool = False
+
+
+class SfSameCityPushIn(BaseModel):
+    """推单：逐行回传，仅 ``selected`` 为真的行会调用顺丰。"""
+
+    delivery_date: date
+    rows: list[SfSameCityPreviewRow] = Field(..., min_length=1)
+
+
+class SfSameCityPushItemResult(BaseModel):
+    stop_id: str
+    ok: bool
+    message: str
+    sf_order_id: str | None = None
+
+
+class SfSameCityPushOut(BaseModel):
+    results: list[SfSameCityPushItemResult] = Field(default_factory=list)
 
 
 class CardOrderOut(BaseModel):

@@ -484,6 +484,8 @@ def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends
 
     card_pay_mode_val = body.card_pay_mode if "card_pay_mode" in updates else None
 
+    set_units = "daily_meal_units" in updates
+
     member = patch_member_profile(
 
         db,
@@ -519,6 +521,10 @@ def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends
         set_store_pickup=set_pickup,
 
         store_pickup=pickup_val,
+
+        set_daily_meal_units=set_units,
+
+        daily_meal_units=body.daily_meal_units if set_units else None,
 
     )
 

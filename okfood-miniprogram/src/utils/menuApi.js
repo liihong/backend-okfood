@@ -166,11 +166,11 @@ export function isShanghaiPastDailyCutoff(
 
 /**
  * 会员起送业务日可选的最小 YYYY-MM-DD（上海）：
- * 未过当日 10:00 最早为明天；10:00 及之后最早为后天。不可选今天或更早。
+ * 未过当日 10:00 最早为今天；10:00 及之后最早为明天。不可选早于该最小日。
  */
 export function minMemberDeliveryStartYmd(now = new Date()) {
   const today = ymdTodayShanghai(now)
-  const delta = isShanghaiPastDailyCutoff(now) ? 2 : 1
+  const delta = isShanghaiPastDailyCutoff(now) ? 1 : 0
   return addDaysIso(today, delta)
 }
 

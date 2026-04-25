@@ -12,6 +12,10 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.api import admin, admin_couriers, admin_regions, admin_uploads, courier, menu, user, wechat_pay
 from app.core.config import settings
 from app.core.limiter import limiter
+from app.db.schema_patches import (
+    apply_member_addresses_map_door_columns,
+    apply_members_tomorrow_leave_target_column,
+)
 from app.jobs.scheduler import setup_scheduler, shutdown_scheduler
 from app.services.upload_service import ensure_upload_root
 from app.utils.response import success
@@ -41,6 +45,8 @@ def _http_detail_to_msg(detail: str | list | dict) -> str:
 async def lifespan(app: FastAPI):
     _ = app
     ensure_upload_root()
+    apply_members_tomorrow_leave_target_column()
+    apply_member_addresses_map_door_columns()
     setup_scheduler()
     yield
     shutdown_scheduler()
