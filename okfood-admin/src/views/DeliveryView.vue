@@ -20,7 +20,15 @@ function todayShanghaiStr() {
   return ymdInTimeZone(new Date(), 'Asia/Shanghai')
 }
 
-const emptySheet = () => ({ delivery_date: '', groups: [], active_regions: [] })
+/** 与 GET /api/admin/delivery-sheet 响应字段对齐（含到家送达汇总） */
+const emptySheet = () => ({
+  delivery_date: '',
+  groups: [],
+  active_regions: [],
+  home_pending_meal_total: 0,
+  home_delivered_meal_total: 0,
+  pickup_meal_total: 0,
+})
 
 const areaFilter = ref('')
 /** 查询用的配送业务日（上海日历日 YYYY-MM-DD），可与「今天」不同 */
@@ -80,9 +88,43 @@ function flatStopsForSheet(sheet) {
 
 const flatStops = computed(() => flatStopsForSheet(sheetToday.value))
 
-/** 配送点行高亮：片区待维护 */
+/** 片区 Tab 副文案：到家展示待/已送达份数；自提单独说明 */
+function groupTabMetaLine(group) {
+  if (!group) return ''
+  const meal = group.meal_total ?? 0
+  const stops = group.stop_count ?? 0
+  if (group.area === '门店自提') {
+    return `${meal} 份 · 自提`
+  }
+  const p = group.pending_meal_total ?? meal
+  const d = group.delivered_meal_total ?? 0
+  return `${meal} 份 · ${stops} 点 · 待${p} · 已${d}`
+}
+
+/** 联系人旁：到家为待送达/已送达；门店自提为「自提」 */
+function deliveryMemberStatusLabel(group, m) {
+  if (!group || group.area === '门店自提') return '自提'
+  return m.is_delivered ? '已送达' : '待送达'
+}
+
+function deliveryMemberStatusClass(group, m) {
+  if (!group || group.area === '门店自提') return 'delivery-status-tag--pickup'
+  return m.is_delivered ? 'delivery-status-tag--done' : 'delivery-status-tag--pending'
+}
+
+/** 配送点行：片区告警优先；到家再区分整点已送完 / 部分送达 */
 function deliveryStopRowClassName({ row }) {
-  return row.has_area_issue ? 'delivery-row--area-warn' : ''
+  const classes = []
+  if (row.has_area_issue) classes.push('delivery-row--area-warn')
+  const g = selectedGroup.value
+  if (g?.area === '门店自提') return classes.join(' ')
+  const pending = row.pending_meal_count
+  const delivered = row.delivered_meal_count
+  if (pending != null && delivered != null) {
+    if (delivered > 0 && pending === 0) classes.push('delivery-row--done')
+    else if (delivered > 0 && pending > 0) classes.push('delivery-row--partial')
+  }
+  return classes.join(' ')
 }
 
 async function fetchSheet() {
@@ -108,6 +150,9 @@ async function fetchSheet() {
       delivery_date: resolvedDate,
       groups: Array.isArray(data0?.groups) ? data0.groups : [],
       active_regions: regions0,
+      home_pending_meal_total: Number(data0?.home_pending_meal_total) || 0,
+      home_delivered_meal_total: Number(data0?.home_delivered_meal_total) || 0,
+      pickup_meal_total: Number(data0?.pickup_meal_total) || 0,
     }
     syncDeliveryRegionTabs()
   } catch (e) {
@@ -186,6 +231,12 @@ onMounted(() => {
         </div>
         <div class="delivery-toolbar__actions">
           <p class="delivery-meta">
+            到家：待送达 <strong>{{ sheetToday.home_pending_meal_total }}</strong> 份、已送达
+            <strong>{{ sheetToday.home_delivered_meal_total }}</strong> 份
+            <template v-if="sheetToday.pickup_meal_total > 0">
+              · 门店自提 <strong>{{ sheetToday.pickup_meal_total }}</strong> 份
+            </template>
+            <br />
             共 <strong>{{ flatStops.length }}</strong> 个配送点 ·
             <strong>{{ flatStops.reduce((s, x) => s + (x.meal_count || 0), 0) }}</strong>
             份（已排除请假区间覆盖该业务日、以及「明天请假」命中该日的会员）
@@ -225,7 +276,7 @@ onMounted(() => {
             @click="activeRegionTab = group.area"
           >
             <span class="delivery-region-tab__label">{{ group.area }}</span>
-            <span class="delivery-region-tab__meta">{{ group.meal_total }} 份 · {{ group.stop_count }} 点</span>
+            <span class="delivery-region-tab__meta">{{ groupTabMetaLine(group) }}</span>
           </button>
         </div>
       </div>
@@ -256,7 +307,7 @@ onMounted(() => {
                     {{ selectedGroup.area }}
                     <span v-if="selectedGroup.has_area_issue" class="group-area-badge">区域待维护</span>
                   </h4>
-                  <span class="badge">{{ selectedGroup.meal_total }} 份 · {{ selectedGroup.stop_count }} 点</span>
+                  <span class="badge">{{ groupTabMetaLine(selectedGroup) }}</span>
                 </div>
                 <div class="group-card__table-scroll">
                 <AdminTable
@@ -271,9 +322,17 @@ onMounted(() => {
                       <span class="t-idx">{{ $index + 1 }}</span>
                     </template>
                   </el-table-column>
-                  <el-table-column label="餐数" width="100" min-width="100" class-name="col-meals">
+                  <el-table-column label="餐数" width="120" min-width="120" class-name="col-meals">
                     <template #default="{ row: st }">
-                      <span class="meal-pill">{{ st.meal_count }}</span>
+                      <div class="meal-cell">
+                        <span class="meal-pill">{{ st.meal_count }}</span>
+                        <span
+                          v-if="selectedGroup?.area !== '门店自提' && st.pending_meal_count != null"
+                          class="meal-pill-sub"
+                        >
+                          待{{ st.pending_meal_count }} · 已{{ st.delivered_meal_count }}
+                        </span>
+                      </div>
                     </template>
                   </el-table-column>
                   <el-table-column label="收件地址" min-width="200" class-name="col-addr">
@@ -289,6 +348,9 @@ onMounted(() => {
                         class="contact-line"
                         :class="{ 'contact-line--area-warn': m.area_issue }"
                       >
+                        <span class="delivery-status-tag" :class="deliveryMemberStatusClass(selectedGroup, m)">
+                          {{ deliveryMemberStatusLabel(selectedGroup, m) }}
+                        </span>
                         <span class="t-name">{{ m.name }}</span>
                         <span v-if="m.area_issue" class="member-area-tag">未分配片区</span>
                         <span class="t-sub">{{ m.phone }}</span>
@@ -597,6 +659,41 @@ onMounted(() => {
   background: #ffedd5;
   color: #c2410c;
   vertical-align: middle;
+}
+
+.delivery-status-tag {
+  display: inline-block;
+  margin-right: 0.35rem;
+  font-size: 9px;
+  font-weight: 900;
+  padding: 2px 6px;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+.delivery-status-tag--done {
+  background: #d1fae5;
+  color: #065f46;
+}
+.delivery-status-tag--pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+.delivery-status-tag--pickup {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.meal-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+}
+.meal-pill-sub {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #64748b;
+  white-space: nowrap;
 }
 </style>
 

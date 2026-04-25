@@ -1144,6 +1144,14 @@
   background: #fffbeb;
   border-bottom-color: #fde68a;
 }
+.admin-table--delivery.el-table tr.delivery-row--done:not(.delivery-row--area-warn) > td.el-table__cell {
+  background: #f0fdf4;
+  border-bottom-color: #bbf7d0;
+}
+.admin-table--delivery.el-table tr.delivery-row--partial:not(.delivery-row--area-warn) > td.el-table__cell {
+  background: #f8fafc;
+  border-bottom-color: #e2e8f0;
+}
 /* 序号、餐数列：保证最小宽度，且不让 Element Plus .cell 的省略样式裁掉徽章 */
 .admin-table--delivery.el-table .el-table__cell.col-idx {
   min-width: 80px;

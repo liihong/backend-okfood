@@ -330,12 +330,26 @@ class DeliverySheetMemberOut(BaseModel):
     daily_meal_units: int = Field(1, ge=1, description="该会员当日计入份数")
     remarks: str | None = None
     area_issue: bool = Field(False, description="会员主档或默认地址片区为空、未分配或与启用区域表不一致")
+    is_delivered: bool = Field(
+        False,
+        description="配送到家：骑手对该业务日在 delivery_logs 已确认送达；与小程序骑手任务 is_delivered 同源。门店自提行在接口中恒为 false，前端单独展示「自提」",
+    )
 
 
 class DeliverySheetStopOut(BaseModel):
     """同一收件地址聚合为一配送点；meal_count 为当日该址份数。"""
 
     meal_count: int = Field(..., ge=1)
+    pending_meal_count: int = Field(
+        ...,
+        ge=0,
+        description="该配送点尚未确认送达的份数（配送到家）；门店自提聚合点为当日自提总份数",
+    )
+    delivered_meal_count: int = Field(
+        ...,
+        ge=0,
+        description="该配送点已确认送达的份数；门店自提恒为 0",
+    )
     address_line: str = Field(..., description="收件地址单行展示")
     area: str = Field(..., description="该配送点展示用片区（来自默认地址或会员主档）")
     members: list[DeliverySheetMemberOut]
@@ -351,6 +365,16 @@ class DeliverySheetGroupOut(BaseModel):
     stops: list[DeliverySheetStopOut]
     stop_count: int = Field(..., ge=0)
     meal_total: int = Field(..., ge=0)
+    pending_meal_total: int = Field(
+        0,
+        ge=0,
+        description="本片区分组未确认送达份数合计；门店自提分组等于 meal_total",
+    )
+    delivered_meal_total: int = Field(
+        0,
+        ge=0,
+        description="本片区分组已确认送达份数合计；门店自提分组恒为 0",
+    )
     has_area_issue: bool = Field(False, description="本片区分组存在区域待处理记录")
 
 
@@ -360,6 +384,21 @@ class DeliverySheetOut(BaseModel):
     active_regions: list[str] = Field(
         default_factory=list,
         description="delivery_regions 中 is_active=1 的名称列表，与筛选下拉同源",
+    )
+    home_pending_meal_total: int = Field(
+        0,
+        ge=0,
+        description="配送到家（非门店自提分组）未确认送达份数合计",
+    )
+    home_delivered_meal_total: int = Field(
+        0,
+        ge=0,
+        description="配送到家已确认送达份数合计",
+    )
+    pickup_meal_total: int = Field(
+        0,
+        ge=0,
+        description="门店自提分组份数合计；不参与骑手到家送达统计",
     )
 
 

@@ -1,4 +1,8 @@
-"""管理端配送大表：按请假规则筛选会员，默认收件地址聚合为配送点。"""
+"""管理端配送大表：按请假规则筛选会员，默认收件地址聚合为配送点。
+
+送达状态：配送到家会员与 ``delivery_logs``（DELIVERED、业务日）对齐，与骑手端任务列表一致；
+门店自提仅备餐归组，份数不计入「到家已/未送达」汇总。
+"""
 
 from __future__ import annotations
 
@@ -11,7 +15,9 @@ from sqlalchemy.orm import Session
 
 from app.constants import UNASSIGNED_DELIVERY_AREA
 from app.core.timeutil import today_shanghai
+from app.models.delivery_log import DeliveryLog
 from app.models.delivery_region import DeliveryRegion
+from app.models.enums import DeliveryStatus
 from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.schemas.admin import DeliverySheetGroupOut, DeliverySheetMemberOut, DeliverySheetOut, DeliverySheetStopOut
@@ -91,6 +97,20 @@ def _member_area_issue(addr: MemberAddress | None, active_ids: set[int]) -> bool
     return int(addr.delivery_region_id) not in active_ids
 
 
+def _member_ids_delivered_on_date(db: Session, delivery_date: date, member_ids: list[int]) -> set[int]:
+    """查询当日已在 ``delivery_logs`` 标记为送达的会员 id（与 ``courier_service.list_today_tasks`` 同一条件）。"""
+    if not member_ids:
+        return set()
+    rows = db.scalars(
+        select(DeliveryLog.member_id).where(
+            DeliveryLog.delivery_date == delivery_date,
+            DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+            DeliveryLog.member_id.in_(member_ids),
+        )
+    ).all()
+    return {int(x) for x in rows}
+
+
 def build_delivery_sheet(
     db: Session,
     *,
@@ -114,6 +134,11 @@ def build_delivery_sheet(
 
     members, default_by_id = eligible_members_for_delivery(
         db, delivery_date=d, delivery_region_id=region_filter_id
+    )
+    # 与到家列表一并拉取自提会员，便于单次查询 delivery_logs（片区筛选不改变自提分组是否出现）
+    pu_members, pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d)
+    delivered_set = _member_ids_delivered_on_date(
+        db, d, [m.id for m in members] + [m.id for m in pu_members]
     )
 
     region_ids: set[int] = set()
@@ -151,6 +176,7 @@ def build_delivery_sheet(
                         daily_meal_units=effective_daily_meal_units(mem),
                         remarks=rmk,
                         area_issue=_member_area_issue(addr, known_ids),
+                        is_delivered=mem.id in delivered_set,
                     )
                 )
                 if rmk:
@@ -167,9 +193,15 @@ def build_delivery_sheet(
                 or _area_needs_attention(area_name, known_names)
             )
             stop_meals = sum(effective_daily_meal_units(mem) for mem in ms_sorted)
+            stop_delivered = sum(
+                effective_daily_meal_units(mem) for mem in ms_sorted if mem.id in delivered_set
+            )
+            stop_pending = stop_meals - stop_delivered
             stops.append(
                 DeliverySheetStopOut(
                     meal_count=stop_meals,
+                    pending_meal_count=stop_pending,
+                    delivered_meal_count=stop_delivered,
                     address_line=resolved.address_line,
                     area=resolved.area,
                     members=lines,
@@ -179,6 +211,8 @@ def build_delivery_sheet(
             )
         stops.sort(key=lambda s: (s.address_line.casefold(), s.area.casefold()))
         meal_total = sum(s.meal_count for s in stops)
+        group_pending = sum(s.pending_meal_count for s in stops)
+        group_delivered = sum(s.delivered_meal_count for s in stops)
         group_issue = any(s.has_area_issue for s in stops) or _area_needs_attention(area_name, known_names)
         groups_out.append(
             DeliverySheetGroupOut(
@@ -186,11 +220,12 @@ def build_delivery_sheet(
                 stops=stops,
                 stop_count=len(stops),
                 meal_total=meal_total,
+                pending_meal_total=group_pending,
+                delivered_meal_total=group_delivered,
                 has_area_issue=group_issue,
             )
         )
 
-    pu_members, pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d)
     if pu_members:
         lines: list[DeliverySheetMemberOut] = []
         for mem in sorted(pu_members, key=lambda x: x.phone):
@@ -203,6 +238,7 @@ def build_delivery_sheet(
                     daily_meal_units=effective_daily_meal_units(mem),
                     remarks=rmk,
                     area_issue=False,
+                    is_delivered=False,
                 )
             )
         pu_meal_total = sum(effective_daily_meal_units(m) for m in pu_members)
@@ -212,6 +248,8 @@ def build_delivery_sheet(
                 stops=[
                     DeliverySheetStopOut(
                         meal_count=pu_meal_total,
+                        pending_meal_count=pu_meal_total,
+                        delivered_meal_count=0,
                         address_line="门店自提（到店取餐）",
                         area="门店自提",
                         members=lines,
@@ -221,12 +259,21 @@ def build_delivery_sheet(
                 ],
                 stop_count=1,
                 meal_total=pu_meal_total,
+                pending_meal_total=pu_meal_total,
+                delivered_meal_total=0,
                 has_area_issue=False,
             )
         )
+
+    home_pending = sum(g.pending_meal_total for g in groups_out if g.area != "门店自提")
+    home_delivered = sum(g.delivered_meal_total for g in groups_out if g.area != "门店自提")
+    pickup_total = sum(g.meal_total for g in groups_out if g.area == "门店自提")
 
     return DeliverySheetOut(
         delivery_date=d.isoformat(),
         groups=groups_out,
         active_regions=active_region_list,
+        home_pending_meal_total=home_pending,
+        home_delivered_meal_total=home_delivered,
+        pickup_meal_total=pickup_total,
     )

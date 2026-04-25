@@ -78,7 +78,8 @@ def delivery_sheet(
     delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
     area: Annotated[str | None, Query(description="按默认配送地址所属片区筛选，可选")] = None,
 ):
-    """配送大表：激活且有余额、已达起送日、排除请假；周日与法定节假日不生成订阅派单；收件信息仅默认 member_addresses；同址聚合餐数。"""
+    """配送大表：激活且有余额、已达起送日、排除请假；周日与法定节假日不生成订阅派单；收件信息仅默认 member_addresses；同址聚合餐数。
+    配送到家会员带 is_delivered（与 delivery_logs / 骑手确认送达同源）；门店自提不参与到家送达统计。"""
     _ = admin_username
     area_key = (area or "").strip() or None
     payload = build_delivery_sheet(db, delivery_date=delivery_date, area=area_key)
