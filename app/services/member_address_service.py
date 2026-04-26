@@ -113,6 +113,57 @@ def upsert_default_address_after_register(
     )
 
 
+def upsert_default_address_from_admin_map_pick(
+    db: Session,
+    *,
+    member_id: int,
+    contact_name: str,
+    contact_phone: str,
+    map_location_text: str,
+    door_detail: str | None,
+    lng: float,
+    lat: float,
+) -> None:
+    """
+    管理端地图选点写入或更新默认配送地址（含 map_location_text / door_detail），按坐标自动划区；不 commit。
+    """
+    base = (map_location_text or "").strip()[:500]
+    door_raw = (door_detail or "").strip()[:500]
+    detail = f"{base} {door_raw}".strip() if door_raw else base
+    lng_f, lat_f = float(lng), float(lat)
+    r = assign_region_for_coords(db, lng_f, lat_f)
+    rid = int(r.id) if r else None
+    row = get_default_address(db, member_id)
+    cn = (contact_name or "").strip()[:100]
+    cp = (contact_phone or "").strip()[:20]
+    if row:
+        row.contact_name = cn
+        row.contact_phone = cp
+        row.detail_address = detail[:500]
+        row.map_location_text = base if base else None
+        row.door_detail = door_raw if door_raw else None
+        row.lng = lng_f
+        row.lat = lat_f
+        row.delivery_region_id = rid
+        return
+    _clear_defaults(db, member_id, except_id=None)
+    db.add(
+        MemberAddress(
+            member_id=member_id,
+            contact_name=cn,
+            contact_phone=cp,
+            delivery_region_id=rid,
+            detail_address=detail[:500],
+            map_location_text=base if base else None,
+            door_detail=door_raw if door_raw else None,
+            remarks=None,
+            lng=lng_f,
+            lat=lat_f,
+            is_default=True,
+        )
+    )
+
+
 def admin_apply_manual_delivery_region(
     db: Session,
     *,

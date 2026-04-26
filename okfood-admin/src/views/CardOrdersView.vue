@@ -8,6 +8,7 @@ import {
   planDefaultTotal,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import MemberDeliveryMapPicker from '../components/MemberDeliveryMapPicker.vue'
 
 const list = ref([])
 const loading = ref(false)
@@ -108,6 +109,10 @@ const createForm = ref({
   pay_status: '未缴',
   amount_yuan: '',
   remark: '',
+  delivery_lng: '',
+  delivery_lat: '',
+  map_location_text: '',
+  door_detail: '',
 })
 
 /** 续卡：按手机号预查会员档案 */
@@ -179,6 +184,10 @@ watch(
   },
 )
 
+function onDeliveryMapWarn(msg) {
+  showToast(msg || '地图提示', 'error')
+}
+
 function openCreateModal() {
   renewPreview.value = null
   createForm.value = {
@@ -193,6 +202,10 @@ function openCreateModal() {
     pay_status: '未缴',
     amount_yuan: '',
     remark: '',
+    delivery_lng: '',
+    delivery_lat: '',
+    map_location_text: '',
+    door_detail: '',
   }
   showCreateModal.value = true
 }
@@ -225,6 +238,26 @@ async function submitCreate() {
       return
     }
   }
+
+  const lngS = (createForm.value.delivery_lng || '').trim()
+  const latS = (createForm.value.delivery_lat || '').trim()
+  const mapT = (createForm.value.map_location_text || '').trim()
+  const doorT = (createForm.value.door_detail || '').trim()
+  const lngN = Number(lngS)
+  const latN = Number(latS)
+  const hasCoords = lngS !== '' && latS !== '' && Number.isFinite(lngN) && Number.isFinite(latN)
+  const wantsDelivery = hasCoords || mapT !== '' || doorT !== ''
+  if (wantsDelivery) {
+    if (!hasCoords) {
+      showToast('录入配送地址时请使用地图搜索或点击地图选点', 'error')
+      return
+    }
+    if (!mapT) {
+      showToast('请填写地图详细地址（搜索选点或点击地图后自动填入，可手动修改）', 'error')
+      return
+    }
+  }
+
   createSubmitting.value = true
   try {
     const body = {
@@ -250,6 +283,14 @@ async function submitCreate() {
     }
     const rm = (createForm.value.remark || '').trim()
     if (rm) body.remark = rm
+    if (wantsDelivery && hasCoords && mapT) {
+      body.delivery_address = {
+        lng: lngN,
+        lat: latN,
+        map_location_text: mapT.slice(0, 500),
+        door_detail: doorT ? doorT.slice(0, 500) : null,
+      }
+    }
     await apiJson('/api/admin/card-orders', { method: 'POST', body: JSON.stringify(body) }, { auth: true })
     showToast('工单已创建')
     showCreateModal.value = false
@@ -377,6 +418,7 @@ onMounted(() => {
       <p class="card-orders-intro">
         <ClipboardList :size="16" class="card-orders-intro-icon" />
         新建工单时先选「新会员开卡」或「老会员续卡」。新会员须填写姓名与微信昵称写入档案；续卡仅凭手机号匹配。
+        可同时录入配送位置（地图选点、收货手机、门牌等），保存为会员默认地址并自动划区。
         开始配送日可选具体业务日或「暂不开卡」。缴费状态为「已缴」时自动按卡类型入账次数与套餐；仅在选择起送日时同时写入会员起送日并激活配送。选「未缴」则仅建单。
       </p>
       <AdminTable
@@ -456,7 +498,12 @@ onMounted(() => {
     </div>
 
     <Teleport to="body">
-      <div v-if="showCreateModal" class="modal-overlay" @click.self="showCreateModal = false">
+      <div
+        v-if="showCreateModal"
+        class="modal-overlay"
+        v-esc-close="() => (showCreateModal = false)"
+        @click.self="showCreateModal = false"
+      >
         <div class="modal-card">
         <div class="modal-header">
           <div class="header-info">
@@ -524,6 +571,31 @@ onMounted(() => {
             <div class="form-group">
               <label>微信昵称</label>
               <input v-model="createForm.wechat_name" required maxlength="100" placeholder="写入档案 wechat_name" />
+            </div>
+          </div>
+          <div class="form-group card-order-delivery-address-block">
+            <label>配送位置（可选）</label>
+            <p class="modal-hint card-order-map-hint">
+              与小程序一致：地图搜索或点选后自动填入详细地址（坐标仅后台保存，用于划区）；收货手机号与上方会员手机号相同。门牌号可补充。
+            </p>
+            <MemberDeliveryMapPicker
+              v-model:lng-str="createForm.delivery_lng"
+              v-model:lat-str="createForm.delivery_lat"
+              v-model:map-location-text="createForm.map_location_text"
+              @warn="onDeliveryMapWarn"
+            />
+            <div class="form-group">
+              <label>地图详细地址</label>
+              <textarea
+                v-model="createForm.map_location_text"
+                rows="2"
+                maxlength="500"
+                placeholder="选点后自动填入，可直接修改"
+              />
+            </div>
+            <div class="form-group">
+              <label>门牌号 / 单元楼层</label>
+              <input v-model="createForm.door_detail" maxlength="500" placeholder="如：3 号楼 1202" />
             </div>
           </div>
           <div class="form-group open-mode-group">
@@ -609,7 +681,12 @@ onMounted(() => {
     </Teleport>
 
     <Teleport to="body">
-      <div v-if="showEditModal" class="modal-overlay" @click.self="showEditModal = false">
+      <div
+        v-if="showEditModal"
+        class="modal-overlay"
+        v-esc-close="() => (showEditModal = false)"
+        @click.self="showEditModal = false"
+      >
         <div class="modal-card">
         <div class="modal-header">
           <div class="header-info">
@@ -814,6 +891,15 @@ onMounted(() => {
   min-width: 0;
   word-break: break-word;
   overflow-wrap: break-word;
+}
+.card-order-delivery-address-block {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px dashed var(--border, #e2e8f0);
+  background: var(--surface-2, #fafafa);
+}
+.card-order-map-hint {
+  margin: 0 0 10px;
 }
 .card-order-delivery-block {
   display: flex;

@@ -530,7 +530,12 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="showLeaveModal" class="modal-overlay" @click.self="showLeaveModal = false">
+    <div
+      v-if="showLeaveModal"
+      class="modal-overlay"
+      v-esc-close="() => (showLeaveModal = false)"
+      @click.self="showLeaveModal = false"
+    >
       <div class="modal-card modal-card--leave">
         <div class="modal-header">
           <div class="header-info">
@@ -572,7 +577,12 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="showEditModal" class="modal-overlay" @click.self="showEditModal = false">
+    <div
+      v-if="showEditModal"
+      class="modal-overlay"
+      v-esc-close="() => (showEditModal = false)"
+      @click.self="showEditModal = false"
+    >
       <div class="modal-card modal-card--member-edit">
         <div class="modal-header">
           <div class="header-info">

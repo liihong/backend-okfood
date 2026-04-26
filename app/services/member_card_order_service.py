@@ -11,6 +11,7 @@ from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
 from app.schemas.admin import CardOrderCreateIn, CardOrderOut, CardOrderPatchIn, RechargeIn
 from app.services.admin_service import apply_member_recharge_delta, _escape_like_fragment
+from app.services.member_address_service import upsert_default_address_from_admin_map_pick
 from app.services.store_config_service import get_member_card_prices_yuan
 
 MINIPROGRAM_OFFLINE_CLAIM_ORDER_CREATOR = "miniprogram-offline"
@@ -270,6 +271,19 @@ def create_card_order(db: Session, body: CardOrderCreateIn, *, operator: str) ->
                 status_code=400,
                 detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早今天，10:00 及之后最早明天）",
             )
+    if body.delivery_address is not None:
+        da = body.delivery_address
+        cphone = (da.contact_phone or "").strip() or phone
+        upsert_default_address_from_admin_map_pick(
+            db,
+            member_id=m.id,
+            contact_name=(m.name or "").strip() or phone[:20],
+            contact_phone=cphone[:20],
+            map_location_text=da.map_location_text,
+            door_detail=da.door_detail,
+            lng=float(da.lng),
+            lat=float(da.lat),
+        )
     order = MemberCardOrder(
         member_id=m.id,
         card_kind=body.card_kind.value,

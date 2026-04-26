@@ -234,7 +234,12 @@ onMounted(() => {
       </AdminTable>
     </div>
 
-    <div v-if="showCourierModal" class="modal-overlay" @click.self="showCourierModal = false">
+    <div
+      v-if="showCourierModal"
+      class="modal-overlay"
+      v-esc-close="() => (showCourierModal = false)"
+      @click.self="showCourierModal = false"
+    >
       <div class="modal-card">
         <div class="modal-header">
           <div class="header-info">
@@ -307,7 +312,12 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-if="showCourierPinModal" class="modal-overlay" @click.self="showCourierPinModal = false">
+    <div
+      v-if="showCourierPinModal"
+      class="modal-overlay"
+      v-esc-close="() => (showCourierPinModal = false)"
+      @click.self="showCourierPinModal = false"
+    >
       <div class="modal-card">
         <div class="modal-header">
           <div class="header-info">

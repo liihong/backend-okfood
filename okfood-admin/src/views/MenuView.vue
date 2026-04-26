@@ -283,7 +283,12 @@ onMounted(() => {
       </button>
     </div>
 
-    <div v-if="showDishModal" class="modal-overlay menu-editor-overlay" @click.self="closeDishModal">
+    <div
+      v-if="showDishModal"
+      class="modal-overlay menu-editor-overlay"
+      v-esc-close="closeDishModal"
+      @click.self="closeDishModal"
+    >
       <div class="modal-card menu-editor-card">
         <div class="modal-header">
           <div class="header-info">

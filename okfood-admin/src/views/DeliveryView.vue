@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
-import { Printer, RefreshCw, MapPin, Truck } from 'lucide-vue-next'
+import { Printer, RefreshCw, MapPin, Truck, FileDown } from 'lucide-vue-next'
+import * as XLSX from 'xlsx'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
@@ -257,6 +258,62 @@ async function printLabels() {
   window.print()
 }
 
+/**
+ * 将当前大表导出为 xlsx：一行对应一名会员，地址为停靠点级别（同址多会员时地址重复）。
+ * 数据与页面列表一致（同一配送日 + 当前片区/手机号筛选）；清空筛选即为当日全量。
+ */
+function exportSheetToExcel() {
+  const d = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
+  const out = []
+  for (const st of flatStops.value) {
+    const isPickup = st.groupArea === '门店自提'
+    for (const m of st.members || []) {
+      const status = isPickup
+        ? m.is_delivered
+          ? '已取'
+          : '待自提'
+        : m.is_delivered
+          ? '已送达'
+          : '待送达'
+      out.push({
+        配送业务日: d,
+        线路分组: st.groupArea ?? '',
+        地址片区: st.area ?? '',
+        配送地址: st.address_line ?? '',
+        会员ID: m.member_id,
+        姓名: m.name != null ? String(m.name) : '',
+        手机: m.phone != null ? String(m.phone) : '',
+        当日期数: m.daily_meal_units ?? 0,
+        备注: m.remarks != null && String(m.remarks).length ? String(m.remarks) : '',
+        送达状态: status,
+        片区待核实: m.area_issue || st.has_area_issue ? '是' : '否',
+      })
+    }
+  }
+  if (!out.length) {
+    showToast('没有可导出的配送记录', 'error')
+    return
+  }
+  const ws = XLSX.utils.json_to_sheet(out)
+  ws['!cols'] = [
+    { wch: 12 },
+    { wch: 10 },
+    { wch: 12 },
+    { wch: 40 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 14 },
+    { wch: 8 },
+    { wch: 28 },
+    { wch: 10 },
+    { wch: 10 },
+  ]
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '配送清单')
+  XLSX.writeFile(wb, `配送清单_${d}.xlsx`)
+  showToast(`已导出 ${out.length} 行`, 'success')
+}
+
 /** 标签用：仅姓名，顿号分隔（不印电话、地址） */
 function labelNamesText(st) {
   const names = (st.members || []).map((m) => (m.name || '').trim()).filter(Boolean)
@@ -469,6 +526,16 @@ async function markDelivery(memberId, kind) {
           </button>
           <button
             type="button"
+            class="delivery-excel-btn"
+            :disabled="loading || !flatStops.length"
+            title="与下方列表数据一致；清空片区/手机号可导出该业务日全量"
+            @click="exportSheetToExcel"
+          >
+            <FileDown :size="18" />
+            导出 Excel
+          </button>
+          <button
+            type="button"
             class="btn-primary delivery-print-btn"
             :disabled="loading || !flatStops.length"
             @click="printLabels"
@@ -520,6 +587,7 @@ async function markDelivery(memberId, kind) {
       width="min(1200px, 96vw)"
       class="sf-dialog"
       destroy-on-close
+      :close-on-press-escape="true"
     >
       <p v-if="!sfLoading && !sfPreview.sf_configured" class="sf-warn">
         未配置顺丰账号：请在 API 的 .env 中设置 <code>SF_OPEN_DEV_ID</code>、<code>SF_OPEN_SHOP_ID</code>、<code>SF_OPEN_SECRET</code> 以及
@@ -1047,6 +1115,7 @@ async function markDelivery(memberId, kind) {
   white-space: nowrap;
 }
 .delivery-icon-btn,
+.delivery-excel-btn,
 .delivery-print-btn {
   display: inline-flex;
   align-items: center;
@@ -1061,6 +1130,14 @@ async function markDelivery(memberId, kind) {
 .delivery-icon-btn {
   background: #f1f5f9;
   color: #475569;
+}
+.delivery-excel-btn {
+  background: #e8f5e9;
+  color: #1b5e20;
+}
+.delivery-excel-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .delivery-print-btn {
   background: #0e5a44;

@@ -416,6 +416,29 @@ class DeliverySheetOut(BaseModel):
     )
 
 
+class CardOrderDeliveryAddressIn(BaseModel):
+    """新建开卡工单时可选：与小程序地址字段对齐，写入会员默认配送地址并自动划区。"""
+
+    contact_phone: str | None = Field(
+        None,
+        max_length=20,
+        description="收货手机号；不传则使用工单上的会员手机号",
+    )
+    lng: float = Field(..., ge=-180, le=180, description="GCJ-02 经度（高德）")
+    lat: float = Field(..., ge=-90, le=90, description="GCJ-02 纬度（高德）")
+    map_location_text: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="地图定位/POI 文案，对应 member_addresses.map_location_text",
+    )
+    door_detail: str | None = Field(
+        None,
+        max_length=500,
+        description="门牌号、单元楼层等，对应 member_addresses.door_detail",
+    )
+
+
 class CardOrderCreateIn(BaseModel):
     phone: str = Field(..., min_length=5, max_length=20)
     open_mode: CardOpenMode = Field(
@@ -445,6 +468,10 @@ class CardOrderCreateIn(BaseModel):
     sync_member: bool = Field(
         False,
         description="已废弃：缴费状态为「已缴」时创建工单将自动同步次数与套餐，无需再传",
+    )
+    delivery_address: CardOrderDeliveryAddressIn | None = Field(
+        None,
+        description="可选；有值时创建工单后 upsert 会员默认配送地址（含经纬度、门牌、划区）",
     )
 
 
