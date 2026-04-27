@@ -2,6 +2,7 @@
 
 送达状态：配送到家会员与 ``delivery_logs``（DELIVERED、业务日）对齐，与骑手端任务列表一致；
 门店自提仅备餐归组，份数不计入「到家已/未送达」汇总。
+扣次后无剩余、不再满足应送 SQL 的会员，若当日已有已送达记录，仍并入本大表，避免从当日统计中消失。
 """
 
 from __future__ import annotations
@@ -23,7 +24,11 @@ from app.models.enums import DeliveryStatus
 from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.schemas.admin import DeliverySheetGroupOut, DeliverySheetMemberOut, DeliverySheetOut, DeliverySheetStopOut
-from app.services.courier_service import eligible_members_for_delivery, eligible_members_for_store_pickup
+from app.services.courier_service import (
+    eligible_members_for_delivery,
+    eligible_members_for_store_pickup,
+    extra_delivered_ineligible_subscribers,
+)
 from app.services.member_address_service import delivery_region_name_map, routing_area_label
 from app.services.member_service import effective_daily_meal_units
 
@@ -158,6 +163,19 @@ def build_delivery_sheet(
     )
     # 与到家列表一并拉取自提会员，便于单次查询 delivery_logs（片区筛选不改变自提分组是否出现）
     pu_members, pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d)
+    ex_h, ex_dh, ex_pu, ex_pud = extra_delivered_ineligible_subscribers(
+        db,
+        delivery_date=d,
+        already_home={int(m.id) for m in members},
+        already_pickup={int(m.id) for m in pu_members},
+        delivery_region_id=region_filter_id,
+    )
+    for m in ex_h:
+        members.append(m)
+        default_by_id[m.id] = ex_dh.get(int(m.id))
+    for m in ex_pu:
+        pu_members.append(m)
+        pu_defaults[m.id] = ex_pud.get(int(m.id))
     ph = (phone or "").strip()
     if ph:
         members = _filter_members_by_phone_hint(members, ph)
@@ -186,7 +204,11 @@ def build_delivery_sheet(
         stop_map = buckets[area_name]
         stops: list[DeliverySheetStopOut] = []
         for (_ka, _kd), ms in stop_map.items():
-            ms_sorted = sorted(ms, key=lambda x: x.phone)
+            # 同址多会员：未送达在上、已送达在下；同状态按手机号
+            ms_sorted = sorted(
+                ms,
+                key=lambda x: (x.id in delivered_set, (x.phone or "")),
+            )
             first = ms_sorted[0]
             resolved = _resolve_delivery_line(default_by_id.get(first.id), id_to_name)
             lines: list[DeliverySheetMemberOut] = []
@@ -235,7 +257,14 @@ def build_delivery_sheet(
                     has_area_issue=stop_area_issue,
                 )
             )
-        stops.sort(key=lambda s: (s.address_line.casefold(), s.area.casefold()))
+        # 配送点：仍有待送份数的点在上、已全部送达的在下；同档仍按地址稳定排序
+        stops.sort(
+            key=lambda s: (
+                0 if (s.pending_meal_count or 0) > 0 else 1,
+                s.address_line.casefold(),
+                s.area.casefold(),
+            )
+        )
         meal_total = sum(s.meal_count for s in stops)
         group_pending = sum(s.pending_meal_count for s in stops)
         group_delivered = sum(s.delivered_meal_count for s in stops)
@@ -254,7 +283,10 @@ def build_delivery_sheet(
 
     if pu_members:
         lines: list[DeliverySheetMemberOut] = []
-        for mem in sorted(pu_members, key=lambda x: x.phone):
+        for mem in sorted(
+            pu_members,
+            key=lambda x: (x.id in delivered_set, (x.phone or "")),
+        ):
             addr = pu_defaults.get(mem.id)
             rmk = _member_line_remarks(mem, addr)
             lines.append(

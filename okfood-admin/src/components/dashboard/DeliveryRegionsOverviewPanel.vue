@@ -30,6 +30,7 @@ async function fetchDashboardSummary() {
         icon: UserMinus,
         bg: '#ffe4e6',
         color: '#e11d48',
+        mapFilter: 'today_leave',
       },
       {
         label: '今日需准备餐品',
@@ -38,6 +39,7 @@ async function fetchDashboardSummary() {
         icon: Utensils,
         bg: '#d1fae5',
         color: '#059669',
+        mapFilter: 'today_prep',
       },
       {
         label: '明日请假会员',
@@ -46,6 +48,7 @@ async function fetchDashboardSummary() {
         icon: UserMinus,
         bg: '#ffedd5',
         color: '#ea580c',
+        mapFilter: 'tomorrow_leave',
       },
       {
         label: '明日需准备餐品',
@@ -54,6 +57,7 @@ async function fetchDashboardSummary() {
         icon: Utensils,
         bg: '#e0f2fe',
         color: '#0284c7',
+        mapFilter: 'tomorrow_prep',
       },
     ]
   } catch (e) {
@@ -80,10 +84,24 @@ const {
   regionsSorted,
   regionColorById,
   memberPoints,
+  mapMemberPoints,
+  mapFilterKey,
+  toggleMapFilter,
   storeAnchor,
   stats,
   membersCountByArea,
 } = useDeliveryRegionMapOverview()
+
+function onBizStatClick(mapFilter) {
+  if (!mapFilter) return
+  toggleMapFilter(mapFilter)
+}
+
+function onBizStatKeydown(e, mapFilter) {
+  if (e.key !== 'Enter' && e.key !== ' ') return
+  e.preventDefault()
+  onBizStatClick(mapFilter)
+}
 
 const showDeliveryMetrics = computed(() => {
   if (error.value) return false
@@ -115,7 +133,7 @@ onMounted(() => {
         <div>
           <h3 class="dro-h">配送区域总览</h3>
           <p class="dro-sub">
-            下方统计含今日/明日请假与备餐；地图图钉颜色表示今日是否已在系统中确认送达（绿/黄），点击图钉仍可查看坐标与档案片区是否一致
+            下方四张卡片可点击筛选地图标点（再点一次取消）；默认不显示「暂停配送」会员坐标；玫红点为今日请假、橙点为仅明日请假，绿/黄仍为今日是否已送达
           </p>
         </div>
       </div>
@@ -143,7 +161,18 @@ onMounted(() => {
       class="dro-stats dro-stats--band"
     >
       <template v-if="!dashboardStatsLoading && dashboardStats.length">
-        <div v-for="(s, i) in dashboardStats" :key="'biz-' + i" class="dro-stat dro-stat--biz">
+        <div
+          v-for="(s, i) in dashboardStats"
+          :key="'biz-' + i"
+          class="dro-stat dro-stat--biz dro-stat--clickable"
+          :class="{ 'dro-stat--filter-on': mapFilterKey === s.mapFilter }"
+          role="button"
+          tabindex="0"
+          :aria-pressed="mapFilterKey === s.mapFilter ? 'true' : 'false'"
+          :aria-label="(s.label || '') + '，点击筛选地图'"
+          @click="onBizStatClick(s.mapFilter)"
+          @keydown="onBizStatKeydown($event, s.mapFilter)"
+        >
           <span class="dro-stat-ico" :style="{ backgroundColor: s.bg, color: s.color }">
             <component :is="s.icon" :size="16" aria-hidden="true" />
           </span>
@@ -182,7 +211,7 @@ onMounted(() => {
           :amap-security="amapSecurity"
           :regions-sorted="regionsSorted"
           :region-color-by-id="regionColorById"
-          :member-points="memberPoints"
+          :member-points="mapMemberPoints"
           :store-anchor="storeAnchor"
         />
         <div class="dro-float-legends" aria-label="地图图例">
@@ -190,8 +219,10 @@ onMounted(() => {
             <h4 class="dro-legend-h">会员图钉颜色（今日送达）</h4>
             <ul class="dro-legend-list dro-legend-list--compact">
               <li><span class="dro-dot" style="background: #dc2626" />门店位置（后台「门店配置」坐标）</li>
+              <li><span class="dro-dot" style="background: #e11d48" />今日请假（配送日缺席）</li>
+              <li><span class="dro-dot" style="background: #ea580c" />仅明日请假（今日不请）</li>
               <li><span class="dro-dot" style="background: #22c55e" />当日已送达（订阅扣次或单次点餐已履约）</li>
-              <li><span class="dro-dot" style="background: #eab308" />尚未送达或其它（默认）</li>
+              <li><span class="dro-dot" style="background: #eab308" />尚未送达（非请假）</li>
             </ul>
           </div>
           <div class="dro-legend-card dro-legend-card--float">
@@ -368,6 +399,23 @@ onMounted(() => {
   font-size: 10px;
   line-height: 1.25;
   white-space: normal;
+}
+.dro-stat--clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.dro-stat--clickable:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+.dro-stat--clickable:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #0e5a44;
+}
+.dro-stat--filter-on {
+  border-color: #0e5a44;
+  box-shadow: 0 0 0 1px #0e5a44;
+  background: #f0fdf4;
 }
 .dro-stat-val {
   display: block;

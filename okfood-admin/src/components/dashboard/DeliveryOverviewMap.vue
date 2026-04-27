@@ -58,6 +58,23 @@ function memberPinIconDataUrl(hexColor) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
 }
 
+function memberAbsentSummary(m) {
+  const at =
+    m.absentToday === true ||
+    m.absentToday === 1 ||
+    m.absent_today === true ||
+    m.absent_today === 1
+  const am =
+    m.absentTomorrow === true ||
+    m.absentTomorrow === 1 ||
+    m.absent_tomorrow === true ||
+    m.absent_tomorrow === 1
+  if (at && am) return '今日与明日均请假'
+  if (at) return '今日请假'
+  if (am) return '明日请假'
+  return ''
+}
+
 function memberInfoWindowHtml(m) {
   const name = escapeHtml(m.name || '（未命名）')
   const phoneRaw = String(m.phone || '').trim()
@@ -68,6 +85,10 @@ function memberInfoWindowHtml(m) {
   const showExpected = expected && actual && expected !== actual
   const deliveredToday = m.deliveredToday === true || m.deliveredToday === 1
   const todayDeliveryLabel = deliveredToday ? '今日已送达' : '今日未送达'
+  const leaveSum = memberAbsentSummary(m)
+  const leaveRow = leaveSum
+    ? `<p class="dov-iw-row"><span class="dov-iw-k">请假</span><span class="dov-iw-v dov-iw-leave">${escapeHtml(leaveSum)}</span></p>`
+    : ''
   const status = plotStatusLabel(m.plotStatus)
   const statusHtml = status
     ? `<p class="dov-iw-row dov-iw-status">${escapeHtml(status)}</p>`
@@ -80,6 +101,7 @@ function memberInfoWindowHtml(m) {
     <p class="dov-iw-row"><span class="dov-iw-k">手机</span><span class="dov-iw-v">${phone}</span></p>
     <p class="dov-iw-row"><span class="dov-iw-k">档案片区</span><span class="dov-iw-v">${area}</span></p>
     <p class="dov-iw-row"><span class="dov-iw-k">送达</span><span class="dov-iw-v">${escapeHtml(todayDeliveryLabel)}</span></p>
+    ${leaveRow}
     ${expRow}
     ${statusHtml}
   </div>`
@@ -386,6 +408,10 @@ onUnmounted(() => {
   font-weight: 650;
   color: #334155;
   word-break: break-all;
+}
+.dov-iw-leave {
+  color: #be123c;
+  font-weight: 800;
 }
 .dov-iw-status {
   margin-top: 4px !important;

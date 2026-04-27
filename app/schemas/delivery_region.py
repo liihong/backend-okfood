@@ -77,6 +77,11 @@ class MapOverviewMemberMarkerOut(BaseModel):
     lat: float | None = None
     # 上海业务日当天是否已标记送达：订阅见 delivery_logs.delivered；单次点餐见 single_meal_orders 履约
     delivered_today: bool = False
+    # 会员卡暂停配送（delivery_deferred）；地图默认不展示
+    delivery_deferred: bool = False
+    # 与 `is_absent_on_delivery_date` 一致：当前业务日 / 下一自然日作为配送日是否缺席
+    absent_today: bool = False
+    absent_tomorrow: bool = False
 
 
 class StoreMapAnchorOut(BaseModel):

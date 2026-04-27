@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 
 from sqlalchemy.orm import Session
 
-from app.core.timeutil import today_shanghai
+from app.core.timeutil import today_shanghai, tomorrow_shanghai
 from app.models.delivery_log import DeliveryLog
 from app.models.enums import DeliveryStatus
 from app.models.member import Member
@@ -20,6 +20,7 @@ from app.schemas.delivery_region import (
 from app.services.store_config_service import get_store_config
 from app.services.delivery_region_service import list_delivery_regions
 from app.services.member_address_service import delivery_region_name_map, routing_area_label
+from app.services.leave import is_absent_on_delivery_date
 
 
 def delivery_region_map_overview(db: Session) -> DeliveryRegionMapOverviewOut:
@@ -47,6 +48,7 @@ def delivery_region_map_overview(db: Session) -> DeliveryRegionMapOverviewOut:
 
     mids = [int(m.id) for m, _addr in rows]
     biz_today = today_shanghai()
+    biz_tomorrow = tomorrow_shanghai()
     delivered_today_ids: set[int] = set()
     if mids:
         # 订阅配送：骑手确认送达写入 delivery_logs
@@ -92,6 +94,9 @@ def delivery_region_map_overview(db: Session) -> DeliveryRegionMapOverviewOut:
                 lng=lng,
                 lat=lat,
                 delivered_today=int(m.id) in delivered_today_ids,
+                delivery_deferred=bool(m.delivery_deferred),
+                absent_today=is_absent_on_delivery_date(m, biz_today, today=biz_today),
+                absent_tomorrow=is_absent_on_delivery_date(m, biz_tomorrow, today=biz_today),
             )
         )
 

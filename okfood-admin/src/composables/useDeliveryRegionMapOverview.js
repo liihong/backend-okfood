@@ -5,6 +5,9 @@ import { assignAreaForCoords, UNASSIGNED_AREA_LABEL } from '../utils/regionAssig
 /** 图钉：当日已送达 / 默认（未送达或其它） */
 const MARKER_DELIVERED = '#22c55e'
 const MARKER_DEFAULT = '#eab308'
+/** 与营业概览卡片色一致：今日请假 / 明日请假 */
+const MARKER_LEAVE_TODAY = '#e11d48'
+const MARKER_LEAVE_TOMORROW = '#ea580c'
 
 const REGION_FILL_PALETTE = [
   '#0e5a44',
@@ -29,6 +32,12 @@ export function useDeliveryRegionMapOverview() {
   /** @type {import('vue').Ref<{ store_name?: string | null, store_logo_url?: string | null, store_lng?: number | null, store_lat?: number | null } | null>} */
   const storeAnchor = ref(null)
   const error = ref(null)
+  /** @type {import('vue').Ref<null | 'today_leave' | 'today_prep' | 'tomorrow_leave' | 'tomorrow_prep'>} */
+  const mapFilterKey = ref(null)
+
+  function toggleMapFilter(key) {
+    mapFilterKey.value = mapFilterKey.value === key ? null : key
+  }
 
   async function load() {
     if (!adminAccessToken.value) return
@@ -88,7 +97,12 @@ export function useDeliveryRegionMapOverview() {
     const act = activeRegionsSorted.value
     return members.value.map((m) => {
       const deliveredToday = m.delivered_today === true || m.delivered_today === 1
-      const pinColor = deliveredToday ? MARKER_DELIVERED : MARKER_DEFAULT
+      const absentToday = m.absent_today === true || m.absent_today === 1
+      const absentTomorrow = m.absent_tomorrow === true || m.absent_tomorrow === 1
+      let pinColor = MARKER_DEFAULT
+      if (absentToday) pinColor = MARKER_LEAVE_TODAY
+      else if (absentTomorrow) pinColor = MARKER_LEAVE_TOMORROW
+      else if (deliveredToday) pinColor = MARKER_DELIVERED
       const lng = m.lng != null ? Number(m.lng) : null
       const lat = m.lat != null ? Number(m.lat) : null
       if (lng == null || lat == null || Number.isNaN(lng) || Number.isNaN(lat)) {
@@ -98,6 +112,8 @@ export function useDeliveryRegionMapOverview() {
           markerColor: pinColor,
           expectedArea: null,
           deliveredToday,
+          absentToday,
+          absentTomorrow,
         }
       }
       const expected = assignAreaForCoords(lng, lat, act)
@@ -105,13 +121,57 @@ export function useDeliveryRegionMapOverview() {
       const exp = String(expected || '').trim() || UNASSIGNED_AREA_LABEL
 
       if (exp === actual) {
-        return { ...m, plotStatus: 'matched', markerColor: pinColor, expectedArea: exp, deliveredToday }
+        return {
+          ...m,
+          plotStatus: 'matched',
+          markerColor: pinColor,
+          expectedArea: exp,
+          deliveredToday,
+          absentToday,
+          absentTomorrow,
+        }
       }
       if (exp === UNASSIGNED_AREA_LABEL && actual !== UNASSIGNED_AREA_LABEL) {
-        return { ...m, plotStatus: 'outside_assigned', markerColor: pinColor, expectedArea: exp, deliveredToday }
+        return {
+          ...m,
+          plotStatus: 'outside_assigned',
+          markerColor: pinColor,
+          expectedArea: exp,
+          deliveredToday,
+          absentToday,
+          absentTomorrow,
+        }
       }
-      return { ...m, plotStatus: 'mismatch', markerColor: pinColor, expectedArea: exp, deliveredToday }
+      return {
+        ...m,
+        plotStatus: 'mismatch',
+        markerColor: pinColor,
+        expectedArea: exp,
+        deliveredToday,
+        absentToday,
+        absentTomorrow,
+      }
     })
+  })
+
+  /** 默认不展示暂停配送；点击统计卡片时按请假/备餐口径筛选（与卡片含义一致，仅作用于地图标点） */
+  const mapMemberPoints = computed(() => {
+    const pts = memberPoints.value
+    const base = pts.filter((p) => !(p.delivery_deferred === true || p.delivery_deferred === 1))
+    const f = mapFilterKey.value
+    if (!f) return base
+    switch (f) {
+      case 'today_leave':
+        return base.filter((p) => p.absentToday)
+      case 'today_prep':
+        return base.filter((p) => !p.absentToday)
+      case 'tomorrow_leave':
+        return base.filter((p) => p.absentTomorrow)
+      case 'tomorrow_prep':
+        return base.filter((p) => !p.absentTomorrow)
+      default:
+        return base
+    }
   })
 
   const stats = computed(() => {
@@ -148,6 +208,9 @@ export function useDeliveryRegionMapOverview() {
     activeRegionsSorted,
     regionColorById,
     memberPoints,
+    mapMemberPoints,
+    mapFilterKey,
+    toggleMapFilter,
     stats,
     membersCountByArea,
   }

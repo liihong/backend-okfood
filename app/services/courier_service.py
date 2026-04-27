@@ -192,6 +192,63 @@ def eligible_members_for_store_pickup(
     return members, defaults
 
 
+def extra_delivered_ineligible_subscribers(
+    db: Session,
+    *,
+    delivery_date: date,
+    already_home: set[int],
+    already_pickup: set[int],
+    delivery_region_id: int | None,
+) -> tuple[list[Member], dict[int, MemberAddress | None], list[Member], dict[int, MemberAddress | None]]:
+    """
+    当日 delivery_logs 已为 DELIVERED，但会员不再满足「应配送/应自提」SQL（常见：扣次后 balance
+    低于当日应付份数）而未出现在上一步名单中的会员。补进配送大表与骑手端，使当日已送份数
+    与记录可统计、可复核，不从当日视图中消失。
+    """
+    if not is_subscription_delivery_day(delivery_date):
+        return [], {}, [], {}
+
+    log_ids: set[int] = {
+        int(x)
+        for x in db.scalars(
+            select(DeliveryLog.member_id).where(
+                DeliveryLog.delivery_date == delivery_date,
+                DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+            )
+        ).all()
+    }
+    need = log_ids - already_home - already_pickup
+    if not need:
+        return [], {}, [], {}
+
+    rows = list(db.scalars(select(Member).where(Member.id.in_(need))).all())
+    if not rows:
+        return [], {}, [], {}
+
+    mid_list = [int(m.id) for m in rows]
+    defaults = load_default_address_map(db, mid_list)
+    out_home: list[Member] = []
+    out_pu: list[Member] = []
+    d_home: dict[int, MemberAddress | None] = {}
+    d_pu: dict[int, MemberAddress | None] = {}
+    for m in rows:
+        mid = int(m.id)
+        addr = defaults.get(mid)
+        if m.store_pickup:
+            out_pu.append(m)
+            d_pu[mid] = addr
+            continue
+        if delivery_region_id is not None and (
+            addr is None
+            or addr.delivery_region_id is None
+            or int(addr.delivery_region_id) != int(delivery_region_id)
+        ):
+            continue
+        out_home.append(m)
+        d_home[mid] = addr
+    return out_home, d_home, out_pu, d_pu
+
+
 def list_today_tasks(
     db: Session,
     *,
@@ -207,9 +264,21 @@ def list_today_tasks(
     - 周日与法定节假日不生成订阅清单；
     - 按 delivery_region_id 过滤默认地址；
     - 组内按与坐标均值的直线距离排序。
+    - 当日已送达后余额不足、不再入选应送名单的会员，仍从 delivery_logs 补入本清单（与配送大表一致），便于对账。
     """
     d = delivery_date or today_shanghai()
     eligible, defaults = eligible_members_for_delivery(db, delivery_date=d, delivery_region_id=delivery_region_id)
+    pu_list, _pu_def = eligible_members_for_store_pickup(db, delivery_date=d)
+    ex_h, ex_d, _ex_pu, _ex_pud = extra_delivered_ineligible_subscribers(
+        db,
+        delivery_date=d,
+        already_home={int(m.id) for m in eligible},
+        already_pickup={int(m.id) for m in pu_list},
+        delivery_region_id=delivery_region_id,
+    )
+    for m in ex_h:
+        eligible.append(m)
+        defaults[m.id] = ex_d.get(int(m.id))
 
     mids = [m.id for m in eligible]
     delivered_ids: set[int] = set()
