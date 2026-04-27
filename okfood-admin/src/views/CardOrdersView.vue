@@ -640,6 +640,7 @@ onMounted(() => {
               <select v-model="createForm.card_kind">
                 <option value="周卡">周卡（默认 +{{ planDefaultTotal('周卡') }} 次）</option>
                 <option value="月卡">月卡（默认 +{{ planDefaultTotal('月卡') }} 次）</option>
+                <option value="次卡">次卡（默认 +{{ planDefaultTotal('次卡') }} 次）</option>
               </select>
             </div>
             <div class="form-group">
@@ -670,7 +671,7 @@ onMounted(() => {
           </div>
           <p class="modal-hint">
             缴费状态为「已缴」时，创建后将自动同步剩余次数（周卡 +{{ planDefaultTotal('周卡') }} / 月卡
-            +{{ planDefaultTotal('月卡') }}）与套餐；仅在选择「指定起送日」时同时写入起送日并激活。选「未缴」则不入账。
+            +{{ planDefaultTotal('月卡') }} / 次卡 +{{ planDefaultTotal('次卡') }}）与套餐；仅在选择「指定起送日」时同时写入起送日并激活。选「未缴」则不入账。
           </p>
           <button type="submit" class="btn-submit-order" :disabled="createSubmitting">
             {{ createSubmitting ? '提交中…' : '创建工单' }}
@@ -712,6 +713,7 @@ onMounted(() => {
             <select v-model="editForm.card_kind" class="input-delivery-area" :disabled="editForm.applied_to_member">
               <option value="周卡">周卡（同步入账 +{{ planDefaultTotal('周卡') }} 次）</option>
               <option value="月卡">月卡（同步入账 +{{ planDefaultTotal('月卡') }} 次）</option>
+              <option value="次卡">次卡（同步入账 +{{ planDefaultTotal('次卡') }} 次）</option>
             </select>
             <p v-if="editForm.applied_to_member" class="modal-hint">已入账工单不可改卡类型；若档案套餐标签有误请在「会员管理」中修正。</p>
           </div>

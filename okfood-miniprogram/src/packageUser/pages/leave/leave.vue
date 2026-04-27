@@ -2,7 +2,10 @@
   <view class="page">
     <OkNavbar show-back title="请假管理 👌" />
     <scroll-view scroll-y class="scroll" :style="scrollStyle">
-      <view class="page-leave">
+      <view v-if="leaveSyncing" class="page-leave page-leave--sync">
+        <text class="leave-loading-text">正在同步请假状态…</text>
+      </view>
+      <view v-else class="page-leave">
         <view v-if="isOnLeaveNow" class="leave-block leave-block--active">
           <text class="leave-status-tag">请假中</text>
           <text class="leave-h3 leave-h3--compact">{{ activeLeaveTitle }}</text>
@@ -10,7 +13,10 @@
           <text class="leave-range-hint">{{ activeLeaveHint }}</text>
           <button class="btn-cancel-leave" @click="confirmCancelAllLeave">取消请假</button>
         </view>
-        <view v-if="!isOnLeaveNow" class="leave-block">
+        <view
+          v-if="!isOnLeaveNow && !isLeavePastDeadline"
+          class="leave-block"
+        >
           <text class="leave-h3">明天有事 · 快速请假</text>
           <button
             class="btn-fast-leave"
@@ -19,10 +25,14 @@
           >
             {{ isTomorrowLeave ? '👌 明天已请假 (点击取消)' : '明天有事，点此请假' }}
           </button>
-          <text class="leave-tip">* 每日 21:00 前操作，餐次顺延 👌</text>
+          <text class="leave-tip">* 每日 {{ formatDeadlineHint(leaveDeadlineTime) }} 前操作，餐次顺延 👌</text>
         </view>
-        <view v-if="!isOnLeaveNow" class="leave-block">
+        <view
+          v-if="!isOnLeaveNow && !isLeavePastDeadline"
+          class="leave-block"
+        >
           <text class="leave-h3">多天请假 (出差/旅游等)</text>
+          <text class="leave-tip leave-tip--range">* 须在每日 {{ formatDeadlineHint(leaveDeadlineTime) }} 前提交，与上方快速请假相同 👌</text>
           <view class="date-group">
             <picker mode="date" :value="rangeStart" @change="onStart">
               <view class="date-item">
@@ -38,6 +48,15 @@
             </picker>
             <button class="btn-submit-range" @click="submitRange">提交多天计划</button>
           </view>
+        </view>
+        <view
+          v-if="!isOnLeaveNow && isLeavePastDeadline"
+          class="leave-block leave-block--deadline"
+        >
+          <text class="leave-h3">今日已截止</text>
+          <text class="leave-deadline-copy">
+            已超过当日请假时间（ {{ formatDeadlineHint(leaveDeadlineTime) }} 前可提交新请假）。明日 0:00 起可再次操作 👌
+          </text>
         </view>
       </view>
     </scroll-view>
@@ -60,6 +79,9 @@ const serverLeaveEnd = ref('')
 /** 仅明日请假：不配送目标业务日（上海），与后端 tomorrow_leave_target_date 一致 */
 const tomorrowTargetYmd = ref('')
 const scrollStyle = ref({})
+const leaveSyncing = ref(true)
+/** 与后台 app_settings.leave_deadline_time 一致，默认 21:00:00 */
+const leaveDeadlineTime = ref('21:00:00')
 
 function shanghaiTodayYmd() {
   try {
@@ -102,14 +124,46 @@ function addDaysYmdShanghai(ymd, deltaDays) {
   return ymd
 }
 
+/** 已有「明天请假」或已设置区间（含尚未开始的未来区间）：只展示状态与取消，不展示新提交入口 */
 const isOnLeaveNow = computed(() => {
   if (isTomorrowLeave.value) return true
   const s = serverLeaveStart.value
   const e = serverLeaveEnd.value
-  if (!s || !e) return false
-  const today = shanghaiTodayYmd()
-  return today >= s && today <= e
+  return Boolean(s && e)
 })
+
+function shanghaiSecondsSinceMidnight() {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date())
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value)
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value)
+  const second = Number(parts.find((p) => p.type === 'second')?.value)
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return 0
+  return hour * 3600 + minute * 60 + (Number.isNaN(second) ? 0 : second)
+}
+
+function parseDeadlineToSeconds(str) {
+  const s = String(str || '21:00:00').trim()
+  const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/)
+  if (!m) return 21 * 3600
+  return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] ?? 0)
+}
+
+/** 与后端 is_leave_deadline_passed 一致：当前上海时刻严格晚于截止时刻 */
+const isLeavePastDeadline = computed(() => {
+  return shanghaiSecondsSinceMidnight() > parseDeadlineToSeconds(leaveDeadlineTime.value)
+})
+
+function formatDeadlineHint(t) {
+  const s = String(t || '21:00:00')
+  const m = s.match(/^(\d{1,2}):(\d{2})/)
+  return m ? `${m[1]}:${m[2]}` : '21:00'
+}
 
 const isRangeOnlyLeave = computed(
   () => Boolean(serverLeaveStart.value && serverLeaveEnd.value),
@@ -154,8 +208,12 @@ function ymdFromApi(d) {
 }
 
 async function syncLeaveFromServer() {
+  leaveSyncing.value = true
   try {
     const me = await request('/api/user/me', { method: 'GET' })
+    if (me?.leave_deadline_time) {
+      leaveDeadlineTime.value = String(me.leave_deadline_time).trim()
+    }
     isTomorrowLeave.value = Boolean(me?.is_leaved_tomorrow)
     tomorrowTargetYmd.value = ymdFromApi(me?.tomorrow_leave_target_date)
     const lr = me?.leave_range
@@ -179,6 +237,8 @@ async function syncLeaveFromServer() {
       setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
     }
     /* 其它：未登录或网络失败时保持本地展示 */
+  } finally {
+    leaveSyncing.value = false
   }
 }
 
@@ -271,8 +331,10 @@ async function submitRange() {
       },
     })
     await syncLeaveFromServer()
-    uni.showToast({ title: '已提交' })
-    uni.navigateBack()
+    uni.showToast({ title: '请假成功', icon: 'success' })
+    setTimeout(() => {
+      uni.switchTab({ url: '/pages/mine/index' })
+    }, 1000)
   } catch (e) {
     uni.showToast({
       title: e instanceof Error ? e.message : '提交失败',
@@ -293,6 +355,19 @@ async function submitRange() {
   padding-bottom: 80rpx;
 }
 
+.page-leave--sync {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40vh;
+}
+
+.leave-loading-text {
+  font-size: 28rpx;
+  color: $ok-slate-400;
+  font-weight: 800;
+}
+
 .leave-block {
   background: #fff;
   border-radius: 60rpx;
@@ -304,6 +379,19 @@ async function submitRange() {
 .leave-block--active {
   border-color: rgba(34, 197, 94, 0.35);
   background: linear-gradient(165deg, #f0fdf4 0%, #fff 55%);
+}
+
+.leave-block--deadline {
+  border-color: $ok-slate-200;
+  background: #fafafa;
+}
+
+.leave-deadline-copy {
+  display: block;
+  font-size: 28rpx;
+  line-height: 1.55;
+  color: $ok-slate-500;
+  font-weight: 700;
 }
 
 .leave-status-tag {
@@ -381,6 +469,12 @@ async function submitRange() {
   margin-top: 30rpx;
   text-align: center;
   font-weight: 800;
+}
+
+.leave-tip--range {
+  margin-top: 0;
+  margin-bottom: 24rpx;
+  text-align: left;
 }
 
 .date-group {

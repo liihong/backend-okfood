@@ -136,6 +136,14 @@
             "navigationStyle": "custom",
             "backgroundColor": "#f8fafc"
           }
+        },
+        {
+          "path": "pages/dailyMealUnits/dailyMealUnits",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc",
+            "disableScroll": true
+          }
         }
       ]
     }

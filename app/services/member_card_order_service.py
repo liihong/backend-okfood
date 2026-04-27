@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.timeutil import min_member_delivery_start_shanghai
 from app.models.enums import CardOpenMode, CardOrderKind, CardOrderPayStatus, CardPayChannel, PlanType
 from app.models.member import Member
@@ -23,6 +24,8 @@ def _quota_for_card_kind(kind: str) -> tuple[PlanType, int]:
         return PlanType.WEEK, 6
     if k == CardOrderKind.MONTH.value:
         return PlanType.MONTH, 24
+    if k == CardOrderKind.TIMES.value:
+        return PlanType.TIMES, 1
     raise HTTPException(status_code=400, detail="无效开卡类型")
 
 
@@ -33,12 +36,15 @@ def _format_amount_yuan(v: Decimal | None) -> str | None:
 
 
 def _amount_yuan_for_card_kind_str(db: Session, card_kind: str) -> Decimal:
-    week_p, month_p = get_member_card_prices_yuan(db)
     k = (card_kind or "").strip()
     if k == CardOrderKind.WEEK.value:
+        week_p, _ = get_member_card_prices_yuan(db)
         return week_p
     if k == CardOrderKind.MONTH.value:
+        _, month_p = get_member_card_prices_yuan(db)
         return month_p
+    if k == CardOrderKind.TIMES.value:
+        return get_settings().MEMBER_CARD_TIMES_PRICE_YUAN
     raise HTTPException(status_code=400, detail="无效开卡类型")
 
 
@@ -61,8 +67,8 @@ def ensure_miniprogram_offline_claim_order(
     if int(m.balance) > 0:
         raise HTTPException(status_code=400, detail="仅剩余次数为 0 时可登记线下开卡")
     k = (card_kind or "").strip()
-    if k not in (CardOrderKind.WEEK.value, CardOrderKind.MONTH.value):
-        raise HTTPException(status_code=400, detail="开卡类型须为周卡或月卡")
+    if k not in (CardOrderKind.WEEK.value, CardOrderKind.MONTH.value, CardOrderKind.TIMES.value):
+        raise HTTPException(status_code=400, detail="开卡类型须为周卡、月卡或次卡")
     amt = _amount_yuan_for_card_kind_str(db, k)
     rmk = "小程序：用户自报已线下/其他方式缴费，待后台核对后标记已缴并同步入账"
     q = select(MemberCardOrder).where(

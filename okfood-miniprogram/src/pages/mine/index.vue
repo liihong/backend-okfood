@@ -89,6 +89,10 @@
             <text class="menu-label">配送员工作台</text>
             <text class="arrow">›</text>
           </view>
+          <view class="menu-row" @click="goDailyMealUnits">
+            <text class="menu-label">📦 修改每日送达份数</text>
+            <text class="arrow">›</text>
+          </view>
           <view class="menu-row" @click="goLeave">
             <text class="menu-label">😴 请假管理</text>
             <text class="arrow">›</text>
@@ -503,6 +507,15 @@ function isOnLeaveTodayShanghai() {
   return today >= sRaw && today <= eRaw
 }
 
+/** 已设置区间起止（含「尚未开始」的未来区间），与请假页 isOnLeaveNow 中区间部分一致 */
+function hasLeaveRangeConfigured() {
+  const lr = leaveRange.value
+  if (!lr || typeof lr !== 'object') return false
+  const sRaw = lr.start != null ? String(lr.start).slice(0, 10) : ''
+  const eRaw = lr.end != null ? String(lr.end).slice(0, 10) : ''
+  return Boolean(sRaw && eRaw)
+}
+
 function ymdFromApi(d) {
   if (d == null || d === '') return ''
   const s = String(d)
@@ -521,15 +534,15 @@ function ymdToDotMd(ymd) {
   return `${m}.${d}`
 }
 
-/** 与后台一致：区间含上海今日、或仅明日请假（在目标日截止前）；文案展示具体日期 */
+/** 与后台一致：区间、仅明日请假；含「已提交未来区间」；文案展示具体日期 */
 const isLeaveCardDetailStatus = computed(
-  () => isOnLeaveTodayShanghai() || isLeavedTomorrow.value,
+  () => isOnLeaveTodayShanghai() || isLeavedTomorrow.value || hasLeaveRangeConfigured(),
 )
 
 const memberDeliveryStatus = computed(() => {
   if (!isLoggedIn.value) return '尚未开启计划'
   if (needsMemberSetupPage.value) return '资料待完善'
-  if (isOnLeaveTodayShanghai() || isLeavedTomorrow.value) {
+  if (isOnLeaveTodayShanghai() || isLeavedTomorrow.value || hasLeaveRangeConfigured()) {
     if (isOnLeaveTodayShanghai()) {
       const lr = leaveRange.value
       const sRaw = lr?.start != null ? String(lr.start).slice(0, 10) : ''
@@ -541,6 +554,18 @@ const memberDeliveryStatus = computed(() => {
         return `${sm}-${em} 请假`
       }
       return '请假中'
+    }
+    if (hasLeaveRangeConfigured() && !isOnLeaveTodayShanghai()) {
+      const lr = leaveRange.value
+      const sRaw = lr?.start != null ? String(lr.start).slice(0, 10) : ''
+      const eRaw = lr?.end != null ? String(lr.end).slice(0, 10) : ''
+      const sm = ymdToDotMd(sRaw)
+      const em = ymdToDotMd(eRaw)
+      if (sm && em) {
+        if (sRaw === eRaw) return `${sm} 起请假`
+        return `${sm}-${em} 请假`
+      }
+      return '已预约请假'
     }
     if (isLeavedTomorrow.value) {
       const t = tomorrowLeaveTargetYmd.value
@@ -821,6 +846,14 @@ function goSingleOrders() {
     return
   }
   uni.navigateTo({ url: '/packageOrder/pages/singleOrderList/singleOrderList' })
+}
+
+function goDailyMealUnits() {
+  if (!getMemberToken()) {
+    uni.showToast({ title: '请先登录', icon: 'none' })
+    return
+  }
+  uni.navigateTo({ url: '/packageUser/pages/dailyMealUnits/dailyMealUnits' })
 }
 
 function goMemberSetup() {

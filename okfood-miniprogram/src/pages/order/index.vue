@@ -52,11 +52,11 @@
                 <text v-else class="price-val price-val--pending">待公布</text>
               </view>
               <text class="dish-ingredients">配料：{{ m.ingredients }}</text>
-              <button
+              <!-- <button
                 v-if="isSingleOrderServiceDate(m.serviceDate)"
                 class="btn-quick-buy"
                 @click.stop="goDetail(m)"
-              >立即下单</button>
+              >立即下单</button> -->
             </view>
           </view>
         </view>

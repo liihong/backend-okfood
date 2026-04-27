@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import min_member_delivery_start_shanghai
+from app.core.config import get_settings
 from app.integrations.wechat_pay_v2 import (
     WeChatPayV2Error,
     WechatPayNotifyParsed,
@@ -46,12 +47,15 @@ def _format_amount_yuan(v: Decimal) -> str:
 
 
 def card_order_amount_yuan_for_kind(db: Session, card_kind: str) -> Decimal:
-    week_p, month_p = get_member_card_prices_yuan(db)
     k = (card_kind or "").strip()
     if k == CardOrderKind.WEEK.value:
+        week_p, _ = get_member_card_prices_yuan(db)
         return week_p
     if k == CardOrderKind.MONTH.value:
+        _, month_p = get_member_card_prices_yuan(db)
         return month_p
+    if k == CardOrderKind.TIMES.value:
+        return get_settings().MEMBER_CARD_TIMES_PRICE_YUAN
     raise HTTPException(status_code=400, detail="无效开卡类型")
 
 

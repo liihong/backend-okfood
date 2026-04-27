@@ -256,7 +256,7 @@ CREATE TABLE IF NOT EXISTS `menu_schedule` (
 
 CREATE TABLE IF NOT EXISTS `app_settings` (
   `id` TINYINT UNSIGNED NOT NULL DEFAULT 1,
-  `leave_deadline_time` TIME NOT NULL DEFAULT '21:00:00' COMMENT '每日请假截止时间（仅对「明天请假」等需当日截止的场景校验）',
+  `leave_deadline_time` TIME NOT NULL DEFAULT '21:00:00' COMMENT '每日请假截止时间（小程序「明天请假」与「区间/多天请假」提交时校验；管理端代操作不校验）',
   `store_name` VARCHAR(128) NULL DEFAULT NULL COMMENT '门店展示名称',
   `store_logo_url` VARCHAR(512) NULL DEFAULT NULL COMMENT '门店 Logo 图片 URL',
   `store_lng` DECIMAL(11, 8) NULL DEFAULT NULL COMMENT '门店 GCJ-02 经度（骑手排序与地图锚点）',
@@ -309,7 +309,7 @@ CREATE TABLE IF NOT EXISTS `single_meal_orders` (
   CONSTRAINT `fk_smo_dish` FOREIGN KEY (`dish_id`) REFERENCES `menu_dish` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_smo_address` FOREIGN KEY (`member_address_id`) REFERENCES `member_addresses` (`id`)
-    ON DELETE RESTRICT ON UPDATE CASCADE,
+    ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_smo_courier` FOREIGN KEY (`courier_id`) REFERENCES `couriers` (`courier_id`)
     ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员单次点餐订单';

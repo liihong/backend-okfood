@@ -289,6 +289,7 @@ def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_usernam
         delivery_region_id=body.delivery_region_id,
         set_delivery_deferred="delivery_deferred" in fs,
         delivery_deferred=body.delivery_deferred,
+        set_remarks="remarks" in fs,
     )
     return success(data=dump_model(member), msg="会员信息已更新")
 

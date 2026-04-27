@@ -252,7 +252,9 @@ class AdminMemberPatchIn(BaseModel):
 
     phone: str = Field(..., min_length=5, max_length=20)
     name: str | None = Field(None, max_length=100)
-    remarks: str | None = Field(None, max_length=500)
+    remarks: str | None = Field(
+        None, max_length=500, description="显式传 null 或空串表示清空；不传本字段则不改备注"
+    )
     address: str | None = Field(None, max_length=500, description="默认配送地址详细行，提交则重算坐标与自动划区")
     use_auto_area: bool = Field(
         False,

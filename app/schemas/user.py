@@ -38,6 +38,10 @@ class MemberOut(BaseModel):
         None, description="仅明日请假：不配送目标业务日（上海）；有值时与配送/统计命中该日"
     )
     leave_range: dict[str, date | None] | None
+    leave_deadline_time: str = Field(
+        "21:00:00",
+        description="当日请假截止时刻（HH:MM:SS，与 app_settings 一致；上海日期上的 time）",
+    )
     created_at: str
 
     model_config = {"from_attributes": True}

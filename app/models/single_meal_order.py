@@ -17,7 +17,10 @@ class SingleMealOrder(Base):
     member_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("members.id", onupdate="CASCADE"), index=True)
     dish_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("menu_dish.id", onupdate="CASCADE"), index=True)
     member_address_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("member_addresses.id", onupdate="CASCADE"), nullable=True, index=True
+        BigInteger,
+        ForeignKey("member_addresses.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True,
     )
     store_pickup: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)

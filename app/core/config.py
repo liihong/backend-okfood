@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     # 小程序周卡/月卡标价（元）：以 app_settings 为准；此处为库无行时的兜底（后台「门店配置」可改库内值）
     MEMBER_CARD_WEEK_PRICE_YUAN: Decimal = Field(default=Decimal("168.00"), ge=Decimal("0"))
     MEMBER_CARD_MONTH_PRICE_YUAN: Decimal = Field(default=Decimal("669.00"), ge=Decimal("0"))
+    # 次卡单次标价（元）：用于小程序线下登记工单等场景的默认金额；管理端开卡可另填实收
+    MEMBER_CARD_TIMES_PRICE_YUAN: Decimal = Field(default=Decimal("30.00"), ge=Decimal("0"))
 
     # 微信支付 v2（小程序 JSAPI）：商户平台 API密钥为32 位
     WECHAT_PAY_MCH_ID: str = ""

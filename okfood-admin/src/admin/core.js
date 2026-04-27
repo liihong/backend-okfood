@@ -187,10 +187,11 @@ export function adminApiAuthenticated(path, init = {}) {
   return apiJson(path, init, { auth: true })
 }
 
-/** 月卡 / 周卡周期默认总次数（与充值选项一致） */
+/** 月卡 / 周卡周期默认总次数；次卡为单次 +1（与充值选项一致） */
 export function planDefaultTotal(planType) {
   if (planType === '月卡') return 24
   if (planType === '周卡') return 6
+  if (planType === '次卡') return 1
   return null
 }
 

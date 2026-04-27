@@ -30,10 +30,11 @@ class LeaveType(str, Enum):
 
 
 class CardOrderKind(str, Enum):
-    """开卡工单：套餐类型（仅周卡/月卡）。"""
+    """开卡工单：套餐类型（周卡 / 月卡 / 次卡）。"""
 
     WEEK = "周卡"
     MONTH = "月卡"
+    TIMES = "次卡"
 
 
 class CardOpenMode(str, Enum):

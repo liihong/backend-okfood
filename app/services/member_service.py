@@ -206,7 +206,9 @@ def _to_member_out(
 
         lr = {"start": m.leave_range_start, "end": m.leave_range_end}
 
-
+    settings_row = ensure_app_settings_row(db)
+    ldt = settings_row.leave_deadline_time
+    leave_deadline_str = ldt.isoformat() if ldt is not None else "21:00:00"
 
     plan_out: PlanType | None = None
 
@@ -263,6 +265,8 @@ def _to_member_out(
         tomorrow_leave_target_date=m.tomorrow_leave_target_date,
 
         leave_range=lr,
+
+        leave_deadline_time=leave_deadline_str,
 
         created_at=m.created_at.isoformat() if m.created_at else "",
 
@@ -565,13 +569,13 @@ def patch_member_profile(
 
             )
 
-        if (m.plan_type or "") not in ("周卡", "月卡"):
+        if (m.plan_type or "") not in ("周卡", "月卡", "次卡"):
 
             raise HTTPException(
 
                 status_code=400,
 
-                detail="已支付(线下)时须选择周卡或月卡",
+                detail="已支付(线下)时须选择周卡、月卡或次卡",
 
             )
 
@@ -683,6 +687,12 @@ def leave_request(
 
     elif typ == LeaveType.RANGE:
 
+        if not skip_leave_deadline and is_leave_deadline_passed(
+            now.time(), settings_row.leave_deadline_time
+        ):
+
+            raise HTTPException(status_code=400, detail="已超过当日请假截止时间")
+
         if not start or not end:
 
             raise HTTPException(status_code=400, detail="区间请假需提供 start 与 end")
@@ -720,7 +730,7 @@ def admin_member_leave(
     start: date | None,
     end: date | None,
 ) -> MemberOut:
-    """管理端代会员设置请假：明日请假不校验当日截止时间（小程序端仍受截止时间限制）。"""
+    """管理端代会员设置请假：不校验当日 `leave_deadline_time`（小程序端提交「明天/区间」仍受截止限制）。"""
 
     p = (phone or "").strip()
     m = _member_by_phone(db, p)
@@ -1047,6 +1057,8 @@ def admin_patch_member_profile(
 
     delivery_deferred: bool | None = None,
 
+    set_remarks: bool = False,
+
 ) -> MemberOut:
 
     _ = operator
@@ -1055,7 +1067,7 @@ def admin_patch_member_profile(
 
         name is None
 
-        and remarks is None
+        and not set_remarks
 
         and address is None
 
@@ -1097,9 +1109,9 @@ def admin_patch_member_profile(
 
         m.name = t
 
-    if remarks is not None:
+    if set_remarks:
 
-        m.remarks = remarks.strip() or None
+        m.remarks = (remarks or "").strip() or None
 
     if address is not None:
 
