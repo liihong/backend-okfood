@@ -18,7 +18,10 @@ const membersPageSize = ref(20)
 const membersTotal = ref(0)
 const membersLoading = ref(false)
 const searchQuery = ref('')
-const membersValidityTab = ref('active')
+/** 有效期：全部 | 生效中 | 已过期（默认全部，仅点选后带 validity 参数） */
+const membersValidityTab = ref('all')
+/** 套餐：'' | 周卡 | 月卡 */
+const membersPlanFilter = ref('')
 /** 片区：'' | 'unassigned' | 区域 id 字符串 */
 const membersRegionFilter = ref('')
 /** 仅未开卡 is_active=false */
@@ -39,7 +42,9 @@ function memberRowKey(row) {
 }
 
 function validityQuery() {
-  return membersValidityTab.value === 'expired' ? 'expired' : 'active'
+  if (membersValidityTab.value === 'expired') return 'expired'
+  if (membersValidityTab.value === 'active') return 'active'
+  return ''
 }
 
 async function loadRegionFilterOptions() {
@@ -62,6 +67,11 @@ function toggleInactiveOnly() {
 }
 
 function onRegionFilterChange() {
+  membersPage.value = 1
+  void fetchMembers()
+}
+
+function onPlanFilterChange() {
   membersPage.value = 1
   void fetchMembers()
 }
@@ -95,8 +105,11 @@ async function fetchMembers() {
     const params = new URLSearchParams({
       page: String(membersPage.value),
       page_size: String(membersPageSize.value),
-      validity: validityQuery(),
     })
+    const vq = validityQuery()
+    if (vq) params.set('validity', vq)
+    const pq = membersPlanFilter.value.trim()
+    if (pq) params.set('plan_type', pq)
     const q = searchQuery.value.trim()
     if (q) params.set('q', q)
     if (membersInactiveOnly.value) params.set('inactive_only', '1')
@@ -173,33 +186,19 @@ const showLeaveModal = ref(false)
 const leaveSaving = ref(false)
 const leaveTarget = ref(null)
 const leaveMode = ref('tomorrow')
-const leaveRangeStart = ref('')
-const leaveRangeEnd = ref('')
 
 function openLeaveMember(u) {
   leaveTarget.value = u
   leaveMode.value = 'tomorrow'
-  leaveRangeStart.value = ''
-  leaveRangeEnd.value = ''
   showLeaveModal.value = true
 }
 
 async function submitLeaveMember() {
   const u = leaveTarget.value
   if (!u || !u.phone) return
-  if (leaveMode.value === 'range') {
-    if (!leaveRangeStart.value || !leaveRangeEnd.value) {
-      showToast('区间请假请填写开始与结束日期', 'error')
-      return
-    }
-  }
   leaveSaving.value = true
   try {
     const payload = { phone: u.phone, type: leaveMode.value }
-    if (leaveMode.value === 'range') {
-      payload.start = leaveRangeStart.value
-      payload.end = leaveRangeEnd.value
-    }
     await apiJson(
       '/api/admin/member/leave',
       { method: 'POST', body: JSON.stringify(payload) },
@@ -371,60 +370,80 @@ onMounted(async () => {
           <span v-else-if="membersStatsLoading" class="members-header-stats--muted">统计加载中…</span>
           <span v-else class="members-header-stats--muted">统计暂不可用</span>
         </div>
-        <div class="search-box">
-          <Search :size="18" />
-          <input v-model="searchQuery" placeholder="搜索姓名、电话或片区地址..." />
-        </div>
-        <p class="members-recharge-hint">
-          续卡与加次数请至侧栏「开卡工单」办理：工单选「已缴」并保存后会自动入账；次数流水会写入余额日志并附带工单说明。
-        </p>
-        <div class="members-filter-toolbar">
-          <div class="members-validity-tabs" role="tablist" aria-label="会员有效期">
-            <button
-              type="button"
-              role="tab"
-              class="members-validity-tab"
-              :class="{ 'members-validity-tab--active': membersValidityTab === 'active' }"
-              :aria-selected="membersValidityTab === 'active'"
-              @click="membersValidityTab = 'active'"
-            >
-              生效中
-            </button>
-            <button
-              type="button"
-              role="tab"
-              class="members-validity-tab"
-              :class="{ 'members-validity-tab--active': membersValidityTab === 'expired' }"
-              :aria-selected="membersValidityTab === 'expired'"
-              @click="membersValidityTab = 'expired'"
-            >
-              已过期
-            </button>
+        <div class="members-query-row">
+          <div class="search-box search-box--members-inline">
+            <Search :size="18" />
+            <input v-model="searchQuery" placeholder="搜索姓名、电话或片区地址..." />
           </div>
-          <div class="members-extra-filters" aria-label="片区与开卡筛选">
-            <label class="members-filter-label" for="members-region-filter">片区</label>
-            <select
-              id="members-region-filter"
-              v-model="membersRegionFilter"
-              class="members-region-select"
-              @change="onRegionFilterChange"
-            >
-              <option value="">全部</option>
-              <option value="unassigned">未分配</option>
-              <option v-for="r in regionFilterOptions" :key="r.id" :value="String(r.id)">
-                {{ r.name || '—' }}
-              </option>
-            </select>
-            <button
-              type="button"
-              role="tab"
-              class="members-validity-tab"
-              :class="{ 'members-validity-tab--active': membersInactiveOnly }"
-              :aria-selected="membersInactiveOnly"
-              @click="toggleInactiveOnly"
-            >
-              未开卡
-            </button>
+          <div class="members-filter-toolbar">
+            <div class="members-validity-tabs" role="tablist" aria-label="会员有效期">
+              <button
+                type="button"
+                role="tab"
+                class="members-validity-tab"
+                :class="{ 'members-validity-tab--active': membersValidityTab === 'all' }"
+                :aria-selected="membersValidityTab === 'all'"
+                @click="membersValidityTab = 'all'"
+              >
+                全部
+              </button>
+              <button
+                type="button"
+                role="tab"
+                class="members-validity-tab"
+                :class="{ 'members-validity-tab--active': membersValidityTab === 'active' }"
+                :aria-selected="membersValidityTab === 'active'"
+                @click="membersValidityTab = 'active'"
+              >
+                生效中
+              </button>
+              <button
+                type="button"
+                role="tab"
+                class="members-validity-tab"
+                :class="{ 'members-validity-tab--active': membersValidityTab === 'expired' }"
+                :aria-selected="membersValidityTab === 'expired'"
+                @click="membersValidityTab = 'expired'"
+              >
+                已过期
+              </button>
+            </div>
+            <div class="members-extra-filters" aria-label="片区与开卡筛选">
+              <label class="members-filter-label" for="members-plan-filter">套餐</label>
+              <select
+                id="members-plan-filter"
+                v-model="membersPlanFilter"
+                class="members-region-select"
+                @change="onPlanFilterChange"
+              >
+                <option value="">全部</option>
+                <option value="周卡">周卡</option>
+                <option value="月卡">月卡</option>
+              </select>
+              <label class="members-filter-label" for="members-region-filter">片区</label>
+              <select
+                id="members-region-filter"
+                v-model="membersRegionFilter"
+                class="members-region-select"
+                @change="onRegionFilterChange"
+              >
+                <option value="">全部</option>
+                <option value="unassigned">未分配</option>
+                <option v-for="r in regionFilterOptions" :key="r.id" :value="String(r.id)">
+                  {{ r.name || '—' }}
+                </option>
+              </select>
+              <button
+                type="button"
+                role="tab"
+                class="members-validity-tab"
+                :class="{ 'members-validity-tab--active': membersInactiveOnly }"
+                :aria-selected="membersInactiveOnly"
+                @click="toggleInactiveOnly"
+              >
+                未开卡
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -457,20 +476,16 @@ onMounted(async () => {
             <span class="area-tag">{{ u.area }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="开始配送时间" min-width="120" align="center" class-name="td-delivery-start">
+          <template #default="{ row: u }">
+            {{ u.delivery_start_date || '—' }}
+          </template>
+        </el-table-column>
         <el-table-column label="自提" align="center" min-width="72">
           <template #default="{ row: u }">
             <span :class="u.store_pickup ? 'pickup-tag pickup-tag--on' : 'pickup-tag'">{{
               u.store_pickup ? '是' : '否'
             }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="多天请假" min-width="170" class-name="td-leave-range">
-          <template #default="{ row: u }">
-            <span
-              class="member-leave-range"
-              :class="{ 'member-leave-range--active': u.leave_range_start && u.leave_range_end }"
-              >{{ u.leave_range_label }}</span
-            >
           </template>
         </el-table-column>
         <el-table-column label="剩余 / 总次数" align="center" min-width="120">
@@ -554,21 +569,10 @@ onMounted(async () => {
             <label>操作类型</label>
             <select v-model="leaveMode" class="input-delivery-area">
               <option value="tomorrow">明日配送请假（与小程序「明天有事」一致）</option>
-              <option value="range">区间请假（多天）</option>
               <option value="clear_tomorrow">仅取消「明日请假」</option>
-              <option value="cancel">清空全部请假（明日 + 区间）</option>
+              <option value="cancel">清空全部请假</option>
             </select>
             <p class="modal-hint">后台代操作不校验当日请假截止时间；日期均为上海业务日。</p>
-          </div>
-          <div v-if="leaveMode === 'range'" class="form-group leave-range-row">
-            <div>
-              <label>开始日期</label>
-              <input v-model="leaveRangeStart" type="date" required />
-            </div>
-            <div>
-              <label>结束日期</label>
-              <input v-model="leaveRangeEnd" type="date" required />
-            </div>
           </div>
           <button type="submit" class="btn-submit-order" :disabled="leaveSaving">
             {{ leaveSaving ? '提交中…' : '确认' }}

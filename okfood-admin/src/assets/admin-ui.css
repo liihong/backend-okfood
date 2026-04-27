@@ -588,7 +588,7 @@
 .main-body {
   flex: 1;
   margin-left: 280px;
-  padding: 3rem 4rem;
+  padding: 3rem 1rem;
   transition: margin-left 0.22s ease;
 }
 
@@ -665,7 +665,7 @@
 /* 会员档案：统计在内容区首行，避免 Teleport 与 el-table 同帧更新触发 patch 到已卸载节点 */
 .members-header-stats--inline {
   width: 100%;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.35rem;
 }
 
 /* 无大号标题时收紧顶栏，把空间留给地图等内容 */
@@ -913,8 +913,70 @@
 .table-header--members {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1rem;
   border-bottom: 1px solid #e2e8f0;
+}
+
+/* 会员档案：搜索 + 筛选同一行；极窄屏可横向滑动 */
+.members-query-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem 0.65rem;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+
+.search-box.search-box--members-inline {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 9rem;
+  max-width: 16rem;
+  padding: 0 0.85rem;
+  border-radius: 999px;
+}
+
+.search-box.search-box--members-inline input {
+  padding: 0.6rem 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.members-query-row .members-filter-toolbar {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 0.45rem 0.55rem;
+}
+
+.members-query-row .members-region-select {
+  min-width: 5.75rem;
+  max-width: 9.5rem;
+  padding: 0.4rem 0.65rem;
+  font-size: 12px;
+}
+
+.members-query-row .members-filter-label {
+  font-size: 12px;
+}
+
+.members-query-row .members-validity-tab {
+  padding: 0.45rem 0.85rem;
+  font-size: 12px;
+}
+
+.members-query-row .members-validity-tabs {
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+}
+
+.members-query-row .members-extra-filters {
+  flex-wrap: nowrap;
+  gap: 0.35rem 0.45rem;
 }
 
 .members-recharge-hint {
@@ -985,13 +1047,15 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 1rem 1.5rem;
+  gap: 0.45rem 0.65rem;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .members-extra-filters {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.35rem 0.45rem;
   flex-wrap: wrap;
 }
 
@@ -1003,8 +1067,9 @@
 }
 
 .members-region-select {
-  min-width: 11rem;
-  padding: 0.45rem 0.85rem;
+  min-width: 6.75rem;
+  max-width: 12rem;
+  padding: 0.4rem 0.65rem;
   border-radius: 999px;
   border: 1px solid #e2e8f0;
   background: #fff;
@@ -1016,7 +1081,8 @@
 
 .members-validity-tabs {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.35rem;
+  flex-wrap: wrap;
 }
 
 .members-validity-tab {
@@ -1025,7 +1091,7 @@
   color: #64748b;
   font-size: 13px;
   font-weight: 800;
-  padding: 0.5rem 1.25rem;
+  padding: 0.45rem 0.85rem;
   border-radius: 999px;
   cursor: pointer;
   transition:
@@ -1216,20 +1282,6 @@
 .data-table--members .balance-leave-hint--tomorrow,
 .admin-table--members .balance-leave-hint--tomorrow {
   color: #c2410c;
-}
-
-.data-table--members .member-leave-range,
-.admin-table--members .member-leave-range {
-  font-size: 12px;
-  color: #64748b;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-}
-
-.data-table--members .member-leave-range--active,
-.admin-table--members .member-leave-range--active {
-  color: #0f172a;
-  font-weight: 600;
 }
 
 .members-row-actions {
@@ -2119,18 +2171,6 @@
 
 .modal-hint--tight {
   margin-bottom: 0.65rem;
-}
-
-.modal-form .leave-range-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem 1rem;
-}
-
-@media (max-width: 520px) {
-  .modal-form .leave-range-row {
-    grid-template-columns: 1fr;
-  }
 }
 
 .modal-form .input-delivery-area {

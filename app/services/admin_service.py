@@ -73,6 +73,7 @@ def _apply_member_list_filters(
     inactive_only: bool = False,
     delivery_region_id: int | None = None,
     unassigned_region: bool = False,
+    plan_type: str | None = None,
 ):
     if q_phone:
         q = q_phone.strip()
@@ -100,6 +101,8 @@ def _apply_member_list_filters(
         stmt = stmt.where(Member.balance > 0)
     elif validity == "expired":
         stmt = stmt.where(Member.balance == 0)
+    if plan_type:
+        stmt = stmt.where(Member.plan_type == plan_type)
     if inactive_only:
         stmt = stmt.where(Member.is_active.is_(False))
     if unassigned_region:
@@ -164,6 +167,7 @@ def list_members_paged(
     inactive_only: bool = False,
     delivery_region_id: int | None = None,
     unassigned_region: bool = False,
+    plan_type: str | None = None,
 ) -> tuple[list[MemberAdminOut], int]:
     # 每人至多一条「默认地址」：避免多条 is_default=1 时 JOIN 放大行数、拖慢 ORDER BY + LIMIT
     default_addr_pick = default_address_pick_subquery()
@@ -176,6 +180,7 @@ def list_members_paged(
         inactive_only=inactive_only,
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
+        plan_type=plan_type,
     ).subquery("cnt")
     page_sq = _apply_member_list_filters(
         select(Member.id.label("pid")).select_from(Member),
@@ -184,6 +189,7 @@ def list_members_paged(
         inactive_only=inactive_only,
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
+        plan_type=plan_type,
     )
     page_sq = (
         page_sq.order_by(Member.created_at.desc())

@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from app.core.deps import SessionDep, admin_subject, issue_admin_token
+from app.models.enums import PlanType
 from app.core.limiter import limiter
 from app.schemas.admin import (
     AdminAddressIn,
@@ -175,7 +176,14 @@ def users(
     q: str | None = None,
     page: int = 1,
     page_size: int = 20,
-    validity: Annotated[str | None, Query(description="active=剩余次数>0，expired=剩余次数=0")] = None,
+    validity: Annotated[
+        str | None,
+        Query(description="不传或空=全部；active=剩余次数>0；expired=剩余次数=0"),
+    ] = None,
+    plan_type: Annotated[
+        str | None,
+        Query(description="套餐筛选：周卡 | 月卡；不传或空=不限"),
+    ] = None,
     inactive_only: Annotated[bool, Query(description="true=仅未开卡 is_active=false")] = False,
     delivery_region_id: Annotated[
         int | None,
@@ -191,6 +199,9 @@ def users(
     v = (validity or "").strip().lower()
     if v not in ("", "active", "expired"):
         v = ""
+    pt = (plan_type or "").strip()
+    if pt not in ("", PlanType.WEEK.value, PlanType.MONTH.value):
+        raise HTTPException(status_code=400, detail="plan_type 仅支持 周卡 或 月卡")
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     if delivery_region_id is not None and unassigned_region:
@@ -204,6 +215,7 @@ def users(
         inactive_only=inactive_only,
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
+        plan_type=pt or None,
     )
     serialized = [dump_model(i) for i in items]
     return page_response(items=serialized, total=total, page=page, page_size=page_size, msg="获取成功")

@@ -193,7 +193,6 @@ watch(sidebarCollapsedPref, (v) => {
           </div>
           <div class="page-title-row">
             <h2 v-if="!hidePageTitle" class="page-title">{{ pageTitle }}</h2>
-            <div id="admin-page-title-extra" class="page-title-extra" aria-live="polite"></div>
           </div>
         </div>
       </header>
