@@ -3,7 +3,7 @@ SET NAMES utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `sf_same_city_callbacks` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `route_kind` VARCHAR(64) NOT NULL COMMENT '与 /api/sf-open/notify/* 路由对应，如 delivery_status',
+  `route_kind` VARCHAR(64) NOT NULL COMMENT '与 /api/sf/callback/*、/api/sf/oauth/* 对应，如 delivery_status',
   `sign_ok` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '验签是否通过',
   `error_message` VARCHAR(512) NULL DEFAULT NULL COMMENT '验签失败或解析异常时的说明',
   `shop_order_id` VARCHAR(128) NULL DEFAULT NULL COMMENT '从 JSON 中提取的 merchant 单号（若有）',

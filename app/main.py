@@ -67,7 +67,8 @@ app.add_middleware(
 )
 
 app.include_router(user.router, prefix="/api")
-app.include_router(sf_open_notify.router, prefix="/api")
+app.include_router(sf_open_notify.router_sf_callback, prefix="/api")
+app.include_router(sf_open_notify.router_sf_oauth, prefix="/api")
 app.include_router(wechat_pay.router, prefix="/api")
 app.include_router(menu.router, prefix="/api")
 app.include_router(courier.router, prefix="/api")

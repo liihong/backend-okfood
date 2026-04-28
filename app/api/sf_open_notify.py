@@ -1,4 +1,7 @@
-"""顺丰同城开放平台 HTTP 推送（无 JWT；验签依赖 SF_OPEN_DEV_ID + SF_OPEN_SECRET）。"""
+"""顺丰同城开放平台 HTTP 推送（无 JWT；验签依赖 SF_OPEN_DEV_ID + SF_OPEN_SECRET）。
+
+路由与蜂巢控制台配置一致：/api/sf/callback/*、/api/sf/oauth/*。
+"""
 
 from __future__ import annotations
 
@@ -13,7 +16,8 @@ from app.services.sf_callback_service import persist_oauth_style_callback, proce
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/sf-open", tags=["顺丰同城回调"])
+router_sf_callback = APIRouter(prefix="/sf/callback", tags=["顺丰同城回调"])
+router_sf_oauth = APIRouter(prefix="/sf/oauth", tags=["顺丰同城授权回调"])
 
 
 def _sf_json_ok() -> JSONResponse:
@@ -33,75 +37,96 @@ async def _read_body_async(request: Request) -> str:
         return raw.decode("utf-8", errors="replace")
 
 
-@router.post("/notify/delivery-status")
-async def sf_notify_delivery_status(
+async def _dispatch_sf_notify(
+    request: Request,
+    db: SessionDep,
+    route_kind: str,
+    *,
+    log_tag: str,
+    sign: str | None,
+) -> JSONResponse:
+    raw = await _read_body_async(request)
+    logger.info("顺丰回调 %s len=%s sign=%s", log_tag, len(raw), bool(sign))
+    ok, err = process_sf_notify(db=db, route_kind=route_kind, raw_body=raw, sign_query=sign)
+    if not ok:
+        return _sf_json_err(err or "reject", 500)
+    return _sf_json_ok()
+
+
+@router_sf_callback.post("/delivery-status")
+async def sf_callback_delivery_status(
     request: Request,
     db: SessionDep,
     sign: Annotated[str | None, Query()] = None,
 ):
-    """配送状态更改（例：order_status 10/12/15 等）。顺丰需在控制台填本 URL。"""
-    raw = await _read_body_async(request)
-    logger.info("顺丰回调 delivery-status len=%s sign=%s", len(raw), bool(sign))
-    ok, err = process_sf_notify(db=db, route_kind="delivery_status", raw_body=raw, sign_query=sign)
-    if not ok:
-        return _sf_json_err(err or "reject", 500)
-    return _sf_json_ok()
+    """配送状态更改。"""
+    return await _dispatch_sf_notify(
+        request, db, "delivery_status", log_tag="delivery-status", sign=sign
+    )
 
 
-@router.post("/notify/order-complete")
-async def sf_notify_order_complete(request: Request, db: SessionDep, sign: Annotated[str | None, Query()] = None):
-    raw = await _read_body_async(request)
-    logger.info("顺丰回调 order-complete len=%s", len(raw))
-    ok, err = process_sf_notify(db=db, route_kind="order_complete", raw_body=raw, sign_query=sign)
-    if not ok:
-        return _sf_json_err(err or "reject", 500)
-    return _sf_json_ok()
+@router_sf_callback.post("/order-completed")
+async def sf_callback_order_completed(
+    request: Request,
+    db: SessionDep,
+    sign: Annotated[str | None, Query()] = None,
+):
+    """订单完成（控制台路径为 order-completed）。"""
+    return await _dispatch_sf_notify(
+        request, db, "order_complete", log_tag="order-completed", sign=sign
+    )
 
 
-@router.post("/notify/cancel-by-sf")
-async def sf_notify_cancel_by_sf(request: Request, db: SessionDep, sign: Annotated[str | None, Query()] = None):
-    raw = await _read_body_async(request)
-    ok, err = process_sf_notify(db=db, route_kind="cancel_by_sf", raw_body=raw, sign_query=sign)
-    if not ok:
-        return _sf_json_err(err or "reject", 500)
-    return _sf_json_ok()
+@router_sf_callback.post("/cancel-by-sf")
+async def sf_callback_cancel_by_sf(
+    request: Request,
+    db: SessionDep,
+    sign: Annotated[str | None, Query()] = None,
+):
+    return await _dispatch_sf_notify(
+        request, db, "cancel_by_sf", log_tag="cancel-by-sf", sign=sign
+    )
 
 
-@router.post("/notify/delivery-exception")
-async def sf_notify_delivery_exception(request: Request, db: SessionDep, sign: Annotated[str | None, Query()] = None):
-    raw = await _read_body_async(request)
-    ok, err = process_sf_notify(db=db, route_kind="delivery_exception", raw_body=raw, sign_query=sign)
-    if not ok:
-        return _sf_json_err(err or "reject", 500)
-    return _sf_json_ok()
+@router_sf_callback.post("/delivery-exception")
+async def sf_callback_delivery_exception(
+    request: Request,
+    db: SessionDep,
+    sign: Annotated[str | None, Query()] = None,
+):
+    return await _dispatch_sf_notify(
+        request, db, "delivery_exception", log_tag="delivery-exception", sign=sign
+    )
 
 
-@router.post("/notify/rider-cancel")
-async def sf_notify_rider_cancel(request: Request, db: SessionDep, sign: Annotated[str | None, Query()] = None):
-    raw = await _read_body_async(request)
-    ok, err = process_sf_notify(db=db, route_kind="rider_cancel", raw_body=raw, sign_query=sign)
-    if not ok:
-        return _sf_json_err(err or "reject", 500)
-    return _sf_json_ok()
+@router_sf_callback.post("/rider-cancel")
+async def sf_callback_rider_cancel(
+    request: Request,
+    db: SessionDep,
+    sign: Annotated[str | None, Query()] = None,
+):
+    return await _dispatch_sf_notify(
+        request, db, "rider_cancel", log_tag="rider-cancel", sign=sign
+    )
 
 
-@router.post("/notify/auto-shop")
-async def sf_notify_auto_shop(request: Request, db: SessionDep, sign: Annotated[str | None, Query()] = None):
-    raw = await _read_body_async(request)
-    ok, err = process_sf_notify(db=db, route_kind="auto_shop", raw_body=raw, sign_query=sign)
-    if not ok:
-        return _sf_json_err(err or "reject", 500)
-    return _sf_json_ok()
+@router_sf_callback.post("/auto-shop")
+async def sf_callback_auto_shop(
+    request: Request,
+    db: SessionDep,
+    sign: Annotated[str | None, Query()] = None,
+):
+    return await _dispatch_sf_notify(request, db, "auto_shop", log_tag="auto-shop", sign=sign)
 
 
-@router.get("/oauth/callback")
+@router_sf_oauth.get("/callback")
 def sf_oauth_callback_get(request: Request, db: SessionDep):
     q = dict(request.query_params)
     persist_oauth_style_callback(db, route_kind="oauth_callback", query_params=q, raw_body="")
     return _sf_json_ok()
 
 
-@router.post("/oauth/callback")
+@router_sf_oauth.post("/callback")
 async def sf_oauth_callback_post(request: Request, db: SessionDep):
     q = dict(request.query_params)
     raw = await _read_body_async(request)
@@ -109,14 +134,14 @@ async def sf_oauth_callback_post(request: Request, db: SessionDep):
     return _sf_json_ok()
 
 
-@router.get("/oauth/revoke")
+@router_sf_oauth.get("/revoke")
 def sf_oauth_revoke_get(request: Request, db: SessionDep):
     q = dict(request.query_params)
     persist_oauth_style_callback(db, route_kind="oauth_revoke", query_params=q, raw_body="")
     return _sf_json_ok()
 
 
-@router.post("/oauth/revoke")
+@router_sf_oauth.post("/revoke")
 async def sf_oauth_revoke_post(request: Request, db: SessionDep):
     q = dict(request.query_params)
     raw = await _read_body_async(request)
