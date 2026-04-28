@@ -1,5 +1,5 @@
 <script setup>
-import { computed, useAttrs } from 'vue'
+import { computed, useAttrs, ref } from 'vue'
 
 /**
  * 后台统一表格：封装 el-table，默认斑马纹与边框，并按 variant 套用 admin-ui 风格。
@@ -42,10 +42,19 @@ const passthroughAttrs = computed(() => {
   const { class: _c, ...rest } = attrs
   return rest
 })
+
+const tableRef = ref(null)
+
+function clearSelection() {
+  tableRef.value?.clearSelection()
+}
+
+defineExpose({ clearSelection })
 </script>
 
 <template>
   <el-table
+    ref="tableRef"
     v-loading="loading"
     :data="data"
     :stripe="stripe"

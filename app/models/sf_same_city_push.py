@@ -25,3 +25,6 @@ class SfSameCityPush(Base):
     request_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     response_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_callback_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_callback_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sf_callback_order_status: Mapped[int | None] = mapped_column(Integer, nullable=True)

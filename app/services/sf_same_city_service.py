@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -51,6 +52,17 @@ _SH = ZoneInfo("Asia/Shanghai")
 
 def _stop_key(d: date, group_area: str, address_line: str) -> str:
     return hashlib.sha256(f"{d.isoformat()}|{group_area}|{address_line}".encode()).hexdigest()[:32]
+
+
+def _address_line_without_sheet_area(stop_area: str, address_line: str) -> str:
+    """配送大表 address_line 为「片区 + 空格 + 详细」；顺丰预览/快照仅要详细段，不要片区前缀。"""
+    line = (address_line or "").strip()
+    ar = (stop_area or "").strip()
+    if ar and line.startswith(f"{ar} "):
+        return line[len(ar) + 1 :].strip()
+    if ar and line.startswith(ar):
+        return line[len(ar) :].strip()
+    return line
 
 
 def _to_unix(dtx: datetime | None) -> int:
@@ -131,10 +143,11 @@ def _build_aggs(
         if g.area == "门店自提":
             continue
         for st in g.stops:
-            line = (st.address_line or "").strip()
-            if not line:
+            line_full = (st.address_line or "").strip()
+            if not line_full:
                 continue
-            sk = _stop_key(d, g.area, line)
+            line = _address_line_without_sheet_area(st.area, line_full)
+            sk = _stop_key(d, g.area, line_full)
             a = _Agg(stop_id=sk, group_area=g.area, address_line=line, sub_lines=[])
             for m in st.members:
                 u = 0
@@ -159,10 +172,11 @@ def _build_aggs(
         )
         ra = (o.routing_area or "").strip() or routing_area_label(aaddr, nm)
         rline = _resolve_delivery_line(aaddr, nm)
-        line = (rline.address_line or "").strip()
-        if not line:
+        line_full = (rline.address_line or "").strip()
+        if not line_full:
             continue
-        sk = _stop_key(d, ra, line)
+        line = (rline.detail or "").strip() or _address_line_without_sheet_area(ra, line_full)
+        sk = _stop_key(d, ra, line_full)
         if sk not in aggs:
             aggs[sk] = _Agg(stop_id=sk, group_area=ra, address_line=line, sub_lines=[])
         qty = max(1, int(o.quantity or 1))
@@ -222,7 +236,7 @@ def _agg_to_row(
         recv_addr = ""
         recv_build = ""
     if not recv_addr:
-        recv_addr = (a.group_area or "").strip() or (a.address_line or "")[:80]
+        recv_addr = (a.address_line or "").strip() or (a.group_area or "").strip()
     expect_at_default = datetime(d.year, d.month, d.day, 12, 0, 0)
 
     names: list[str] = []
@@ -253,6 +267,17 @@ def _agg_to_row(
         rmk.append(sng.get("label", ""))
     rmk_s = "；".join([x for x in rmk if x]) or None
 
+    recv_lng_f: float | None = None
+    recv_lat_f: float | None = None
+    if maddr and maddr.lng is not None and maddr.lat is not None:
+        try:
+            lg = float(maddr.lng)
+            lt = float(maddr.lat)
+            if math.isfinite(lg) and math.isfinite(lt):
+                recv_lng_f, recv_lat_f = lg, lt
+        except (TypeError, ValueError):
+            pass
+
     pushed = _has_success(db, d, a.stop_id)
     return SfSameCityPreviewRow(
         stop_id=a.stop_id,
@@ -263,6 +288,8 @@ def _agg_to_row(
         door_detail=recv_build,
         recv_address=recv_addr,
         recv_building=recv_build,
+        recv_lng=recv_lng_f,
+        recv_lat=recv_lat_f,
         recv_name=rname[:100],
         recv_phone=(rphone or "—")[:20],
         product_category=(s.SF_PRODUCT_CATEGORY_LABEL or "餐品").strip(),
@@ -357,8 +384,20 @@ def _create_order_payload(
     rmk2 = f"{rmk0} 车型:{row.vehicle_type} 类别:{row.product_category}" if rmk0 else f"车型:{row.vehicle_type} 类别:{row.product_category}"
 
     recv_lng, recv_lat = 121.4737, 31.2304
+    if row.recv_lng is not None and row.recv_lat is not None:
+        try:
+            lg = float(row.recv_lng)
+            lt = float(row.recv_lat)
+            if math.isfinite(lg) and math.isfinite(lt):
+                recv_lng, recv_lat = lg, lt
+        except (TypeError, ValueError):
+            pass
     s_lng = float(store.store_lng) if store and store.store_lng is not None else 121.4737
     s_lat = float(store.store_lat) if store and store.store_lat is not None else 31.2304
+
+    def _coord_str(v: float) -> str:
+        return f"{float(v):.6f}"
+
     p_phone = (gset.SF_PICKUP_PHONE or "").strip()
     p_addr = (gset.SF_PICKUP_ADDRESS or "").strip() or f"{(getattr(store, 'store_name', None) or '门店')}"
 
@@ -393,8 +432,8 @@ def _create_order_payload(
     body["receive"] = {
         "user_name": (row.recv_name or "收件人")[:64],
         "user_phone": (row.recv_phone or "")[:20],
-        "user_lng": str(recv_lng),
-        "user_lat": str(recv_lat),
+        "user_lng": _coord_str(recv_lng),
+        "user_lat": _coord_str(recv_lat),
         "user_address": rec_full[:1024],
         "city_name": (gset.SF_CITY_NAME or "上海市")[:32],
     }
@@ -402,8 +441,8 @@ def _create_order_payload(
         "shop_name": (getattr(store, "store_name", None) or "门店")[:128],
         "shop_phone": p_phone[:20],
         "shop_address": p_addr[:200],
-        "shop_lng": f"{s_lng:.6f}",
-        "shop_lat": f"{s_lat:.6f}",
+        "shop_lng": _coord_str(s_lng),
+        "shop_lat": _coord_str(s_lat),
     }
     body["order_detail"] = {
         "total_price": int(total_fen),
@@ -466,7 +505,7 @@ def push_sf_same_city(db: Session, body: SfSameCityPushIn) -> SfSameCityPushOut:
         soid = f"OKF{d:%Y%m%d}{item.stop_id[:12]}{uuid.uuid4().hex[:8]}"
         if len(soid) > 64:
             soid = soid[:64]
-        snap: dict = item.model_dump(mode="json", default=str)
+        snap: dict = item.model_dump(mode="json")
         try:
             pld = _create_order_payload(
                 item, shop_order_id=soid, gset=gset, store=store, now_ts=now_ts

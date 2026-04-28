@@ -21,6 +21,48 @@ def _opt_str(v: str | None) -> str | None:
     return t if t else None
 
 
+def _merge_pca_into_map_location(pca: str | None, client_map: str | None) -> str | None:
+    """将逆地理得到的省市区前缀与小程序上传的地图文案合并，避免重复拼接。"""
+    pca_s = (pca or "").strip()
+    client_s = (client_map or "").strip()
+    if not pca_s:
+        return _opt_str(client_s)
+    if not client_s:
+        return _opt_str(pca_s)
+    pn = pca_s.replace(" ", "")
+    cn = client_s.replace(" ", "")
+    if pn and pn in cn:
+        return _opt_str(client_s)
+    merged = f"{pca_s} {client_s}".strip()
+    return _opt_str(merged)
+
+
+def _sync_detail_from_map_and_door(map_text: str | None, door: str | None) -> str:
+    m = (map_text or "").strip()
+    d = (door or "").strip()
+    if not m:
+        return d
+    if not d:
+        return m
+    return f"{m} {d}".strip()
+
+
+def _enrich_map_location_from_coords(lng: float, lat: float, map_text: str | None) -> str | None:
+    pca = amap.regeocode_pca(lng, lat)
+    return _merge_pca_into_map_location(pca, map_text)
+
+
+def _row_coords(row: MemberAddress) -> tuple[float, float] | None:
+    if row.lng is None or row.lat is None:
+        return None
+    try:
+        lng_f = float(row.lng)
+        lat_f = float(row.lat)
+    except (TypeError, ValueError):
+        return None
+    return lng_f, lat_f
+
+
 def default_address_pick_subquery():
     """每人一条默认地址：若存在多条 is_default，取 id 最大者（与管理端会员列表一致）。"""
     return (
@@ -316,8 +358,17 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
         lng, lat = lng_f, lat_f
         r = assign_region_for_coords(db, lng_f, lat_f)
         rid = int(r.id) if r else None
+        map_m = _enrich_map_location_from_coords(lng_f, lat_f, _opt_str(body.map_location_text))
+        map_eff = map_m if map_m else _opt_str(body.map_location_text)
+        door_eff = _opt_str(body.door_detail)
+        detail_eff = _sync_detail_from_map_and_door(map_eff, door_eff)
+        if not detail_eff.strip():
+            detail_eff = body.detail_address.strip()
     else:
         lng, lat, rid = _geocode_bundle(db, body.detail_address)
+        map_eff = _opt_str(body.map_location_text)
+        door_eff = _opt_str(body.door_detail)
+        detail_eff = body.detail_address.strip()
 
     if effective_default:
         _clear_defaults(db, member_id, except_id=None)
@@ -327,9 +378,9 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
         contact_name=body.contact_name,
         contact_phone=body.contact_phone,
         delivery_region_id=rid,
-        detail_address=body.detail_address,
-        map_location_text=_opt_str(body.map_location_text),
-        door_detail=_opt_str(body.door_detail),
+        detail_address=detail_eff,
+        map_location_text=map_eff,
+        door_detail=door_eff,
         remarks=body.remarks,
         lng=lng,
         lat=lat,
@@ -367,6 +418,20 @@ def update_address(db: Session, member_id: int, address_id: int, body: MemberAdd
     elif "detail_address" in patch or "map_location_text" in patch or "door_detail" in patch:
         lng, lat, rid = _geocode_bundle(db, row.detail_address)
         row.lng, row.lat, row.delivery_region_id = lng, lat, rid
+
+    lnglat = _row_coords(row)
+    addr_touched = (
+        location_patch is not None
+        or "map_location_text" in patch
+        or "door_detail" in patch
+        or "detail_address" in patch
+    )
+    if lnglat is not None and addr_touched:
+        lng_f, lat_f = lnglat
+        map_en = _enrich_map_location_from_coords(lng_f, lat_f, row.map_location_text)
+        if map_en:
+            row.map_location_text = map_en
+        row.detail_address = _sync_detail_from_map_and_door(row.map_location_text, row.door_detail)
 
     if is_default_new is True:
         _clear_defaults(db, member_id, except_id=row.id)

@@ -1196,15 +1196,19 @@
   min-width: 720px;
 }
 .admin-table--delivery.el-table .el-table__header th.el-table__cell {
-  padding: 1rem 2rem;
+  padding: 0.5rem 0.65rem;
   text-align: left;
   font-size: 12px;
   color: #94a3b8;
   background: #f8fafc;
 }
 .admin-table--delivery.el-table .el-table__body td.el-table__cell {
-  padding: 1.25rem 2rem;
+  padding: 0.42rem 0.65rem;
   border-bottom: 1px solid #f8fafc;
+}
+.admin-table--delivery.el-table .el-table__cell.col-sel .cell {
+  padding: 0;
+  overflow: visible;
 }
 .admin-table--delivery.el-table tr.delivery-row--area-warn > td.el-table__cell {
   background: #fffbeb;
@@ -1220,10 +1224,10 @@
 }
 /* 序号、餐数列：保证最小宽度，且不让 Element Plus .cell 的省略样式裁掉徽章 */
 .admin-table--delivery.el-table .el-table__cell.col-idx {
-  min-width: 80px;
+  min-width: 56px;
 }
 .admin-table--delivery.el-table .el-table__cell.col-meals {
-  min-width: 100px;
+  min-width: 88px;
 }
 /* 窄列若沿用 2rem 左右内边距，内容区会被挤没，餐数徽章只剩一条绿边 */
 .admin-table--delivery.el-table .el-table__header th.el-table__cell.col-idx,

@@ -115,7 +115,7 @@ const form = reactive({
 
 /** 坐标仅提交接口；界面只展示地名（uni.chooseLocation 地图选点） */
 const coords = ref(null)
-/** 选点返回的结构化字段，用于拼接 detail_address（地图选点时 city 常为空） */
+/** 选点返回的结构化字段，用于拼接 detail_address；省市区由服务端按经纬度高德逆地理编码与小程序文案合并写入 map_location_text */
 const poiMeta = ref(null)
 /** 主标题：多为小区或 POI 名称 */
 const recvLocTitle = ref('')

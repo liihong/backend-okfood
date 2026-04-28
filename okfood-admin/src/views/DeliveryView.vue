@@ -96,6 +96,11 @@ const sheetToday = ref(emptySheet())
 const loading = ref(false)
 /** 正在提交人工标记的 member_id，用于防重复点按 */
 const markingMemberId = ref(null)
+/** 批量标记送达进行中 */
+const batchMarking = ref(false)
+/** 配送大表 el-table 多选 */
+const deliveryTableRef = ref(null)
+const selectedDeliveryStops = ref([])
 
 /** 顺丰同城：预览弹窗 */
 const sfDialogOpen = ref(false)
@@ -103,6 +108,22 @@ const sfLoading = ref(false)
 const sfPushSubmitting = ref(false)
 const sfPreview = ref({ delivery_date: '', rows: [], sf_configured: false })
 const sfSelectAll = ref(true)
+/** 顺丰弹窗内：按收货人手机（表格「手机」列）再筛选，支持后几位或完整号 */
+const sfModalPhoneFilter = ref('')
+
+const sfModalFilteredRows = computed(() => {
+  const rows = sfPreview.value.rows || []
+  const q = (sfModalPhoneFilter.value || '').trim().replace(/\s/g, '')
+  if (!q) return rows
+  return rows.filter((r) => {
+    const phone = String(r.recv_phone ?? '').replace(/\s/g, '')
+    return phone.includes(q)
+  })
+})
+
+const sfModalFilterActive = computed(() =>
+  Boolean((sfModalPhoneFilter.value || '').trim().replace(/\s/g, ''))
+)
 
 /** 当前选中的路由分组片区（与 group.area 一致） */
 const activeRegionTab = ref('')
@@ -233,6 +254,7 @@ async function fetchSheet() {
         data0?.is_subscription_delivery_day !== false,
     }
     syncDeliveryRegionTabs()
+    clearDeliverySelection()
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -329,18 +351,91 @@ onMounted(() => {
 })
 
 function markBusy(memberId) {
-  return markingMemberId.value != null && Number(markingMemberId.value) === Number(memberId)
+  return batchMarking.value || (markingMemberId.value != null && Number(markingMemberId.value) === Number(memberId))
+}
+
+/** el-table row-key：同一片区内按地址区分（与后端停靠点聚合一致） */
+function deliveryStopRowKey(row) {
+  const g = activeRegionTab.value || ''
+  return `${g}\u0001${row.address_line || ''}`
+}
+
+function selectableDeliveryStop(row) {
+  const members = row.members || []
+  return members.some((m) => !m.is_delivered)
+}
+
+function onDeliverySelectionChange(rows) {
+  selectedDeliveryStops.value = rows || []
+}
+
+const batchPendingMemberCount = computed(() => {
+  let n = 0
+  for (const st of selectedDeliveryStops.value) {
+    for (const m of st.members || []) {
+      if (!m.is_delivered) n += 1
+    }
+  }
+  return n
+})
+
+function clearDeliverySelection() {
+  deliveryTableRef.value?.clearSelection?.()
+  selectedDeliveryStops.value = []
+}
+
+watch(activeRegionTab, () => {
+  clearDeliverySelection()
+})
+
+async function markSelectedStopsDelivered() {
+  if (batchMarking.value || !selectedGroup.value) return
+  const kind = selectedGroup.value.area === '门店自提' ? 'pickup' : 'home'
+  const pendingIds = []
+  for (const st of selectedDeliveryStops.value) {
+    for (const m of st.members || []) {
+      if (!m.is_delivered) pendingIds.push(m.member_id)
+    }
+  }
+  if (!pendingIds.length) {
+    showToast('所选行中没有待标记的会员', 'info')
+    return
+  }
+  batchMarking.value = true
+  const d0 = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
+  try {
+    for (const memberId of pendingIds) {
+      await apiJson(
+        '/api/admin/delivery-mark',
+        {
+          method: 'POST',
+          body: JSON.stringify({ member_id: Number(memberId), delivery_date: d0, kind }),
+        },
+        { auth: true }
+      )
+    }
+    showToast(`已标记 ${pendingIds.length} 位会员`, 'success')
+    clearDeliverySelection()
+    await fetchSheet()
+  } catch (e) {
+    showToast(e instanceof Error ? e.message : '批量标记失败', 'error')
+  } finally {
+    batchMarking.value = false
+  }
 }
 
 function applySfSelectAll(val) {
-  const rows = sfPreview.value.rows || []
+  const rows = sfModalFilteredRows.value
   for (const r of rows) {
-    r.selected = val
+    if (!r.already_pushed) {
+      r.selected = val
+    }
   }
 }
 
 async function openSfDialog() {
   if (!adminAccessToken.value) return
+  sfModalPhoneFilter.value = ''
   sfDialogOpen.value = true
   sfLoading.value = true
   const d0 = (deliveryDateQuery.value || '').trim() || todayShanghaiStr()
@@ -430,7 +525,7 @@ async function submitSfPush() {
 }
 
 async function markDelivery(memberId, kind) {
-  if (markingMemberId.value != null) return
+  if (batchMarking.value || markingMemberId.value != null) return
   const d0 = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
   markingMemberId.value = memberId
   try {
@@ -596,19 +691,35 @@ async function markDelivery(memberId, kind) {
       <p v-if="sfLoading" class="members-loading">加载推单清单…</p>
       <template v-else>
         <div class="sf-bar">
-          <label class="sf-check-all"
-            ><input v-model="sfSelectAll" type="checkbox" @change="applySfSelectAll(sfSelectAll)" />
-            全选</label
-          >
-          <span class="sf-hint"
-            >业务日 <strong>{{ sfPreview.delivery_date || deliveryDateQuery }}</strong> ·
-            共 {{ (sfPreview.rows || []).length }} 个停靠点；取消勾选则该行不推。</span
-          >
+          <div class="sf-bar__left">
+            <label class="sf-check-all"
+              ><input v-model="sfSelectAll" type="checkbox" @change="applySfSelectAll(sfSelectAll)" />
+              全选</label
+            >
+            <span class="sf-hint"
+              >业务日 <strong>{{ sfPreview.delivery_date || deliveryDateQuery }}</strong> ·
+              共 {{ sfModalFilteredRows.length }} 个停靠点<span v-if="sfModalFilterActive"
+                >（全量 {{ (sfPreview.rows || []).length }}）</span
+              >；取消勾选则该行不推。</span
+            >
+          </div>
+          <div class="sf-bar__right">
+            <span class="sf-bar__filter-label">收货手机筛选</span>
+            <el-input
+              v-model="sfModalPhoneFilter"
+              clearable
+              placeholder="后几位或完整号"
+              maxlength="20"
+              size="small"
+              class="sf-bar__filter-input"
+              @keydown.stop
+            />
+          </div>
         </div>
         <div class="sf-table-wrap">
           <el-table
-            v-if="(sfPreview.rows || []).length"
-            :data="sfPreview.rows"
+            v-if="(sfPreview.rows || []).length && sfModalFilteredRows.length"
+            :data="sfModalFilteredRows"
             border
             size="small"
             stripe
@@ -717,6 +828,9 @@ async function markDelivery(memberId, kind) {
               </template>
             </el-table-column>
           </el-table>
+          <p v-else-if="(sfPreview.rows || []).length" class="sf-empty">
+            当前「收货手机筛选」下没有匹配的停靠点，请清空或修改筛选项。
+          </p>
           <p v-else class="sf-empty">当前筛选下没有可推单的停靠点（无待送订阅/单点）。</p>
         </div>
       </template>
@@ -770,20 +884,61 @@ async function markDelivery(memberId, kind) {
                   </h4>
                   <span class="badge">{{ groupTabMetaLine(selectedGroup) }}</span>
                 </div>
+                <div class="delivery-batch-bar">
+                  <span class="delivery-batch-bar__hint">
+                    勾选左侧行可批量操作；已选 <strong>{{ selectedDeliveryStops.length }}</strong> 个配送点，待标记
+                    <strong>{{ batchPendingMemberCount }}</strong> 位会员
+                  </span>
+                  <div class="delivery-batch-bar__actions">
+                    <button
+                      type="button"
+                      class="btn-primary delivery-batch-bar__btn"
+                      :disabled="
+                        loading ||
+                        batchMarking ||
+                        !batchPendingMemberCount ||
+                        !selectedDeliveryStops.length
+                      "
+                      @click="markSelectedStopsDelivered"
+                    >
+                      {{ selectedGroup.area === '门店自提' ? '批量自提完成' : '批量标记送达' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-ghost delivery-batch-bar__btn"
+                      :disabled="!selectedDeliveryStops.length || batchMarking"
+                      @click="clearDeliverySelection"
+                    >
+                      清空选择
+                    </button>
+                  </div>
+                </div>
                 <div class="group-card__table-scroll">
                 <AdminTable
+                  ref="deliveryTableRef"
                   variant="delivery"
+                  size="small"
                   :data="selectedGroup.stops"
+                  :row-key="deliveryStopRowKey"
                   :row-class-name="deliveryStopRowClassName"
                   :stripe="false"
                   empty-text="暂无配送点"
+                  @selection-change="onDeliverySelectionChange"
                 >
-                  <el-table-column label="序号" width="80" min-width="80" class-name="col-idx">
+                  <el-table-column
+                    type="selection"
+                    width="44"
+                    align="center"
+                    fixed
+                    class-name="col-sel"
+                    :selectable="selectableDeliveryStop"
+                  />
+                  <el-table-column label="序号" width="64" min-width="56" class-name="col-idx">
                     <template #default="{ $index }">
                       <span class="t-idx">{{ $index + 1 }}</span>
                     </template>
                   </el-table-column>
-                  <el-table-column label="餐数" width="120" min-width="120" class-name="col-meals">
+                  <el-table-column label="餐数" width="108" min-width="96" class-name="col-meals">
                     <template #default="{ row: st }">
                       <div class="meal-cell">
                         <span class="meal-pill">{{ st.meal_count }}</span>
@@ -824,7 +979,7 @@ async function markDelivery(memberId, kind) {
                       <span v-else class="empty-text">无</span>
                     </template>
                   </el-table-column>
-                  <el-table-column label="操作" width="140" min-width="120" class-name="col-actions" fixed="right">
+                  <el-table-column label="操作" width="128" min-width="108" class-name="col-actions" fixed="right">
                     <template #default="{ row: st }">
                       <div
                         v-for="(m, mi) in st.members"
@@ -835,7 +990,7 @@ async function markDelivery(memberId, kind) {
                           v-if="!m.is_delivered"
                           type="button"
                           class="btn-delivery-mark"
-                          :disabled="markBusy(m.member_id) || loading"
+                          :disabled="markBusy(m.member_id) || loading || batchMarking"
                           @click="markDelivery(m.member_id, selectedGroup?.area === '门店自提' ? 'pickup' : 'home')"
                         >
                           {{
@@ -925,9 +1080,32 @@ async function markDelivery(memberId, kind) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: 0.75rem 1rem;
   margin-bottom: 0.75rem;
   font-size: 0.85rem;
+}
+.sf-bar__left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  min-width: 0;
+}
+.sf-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+.sf-bar__filter-label {
+  white-space: nowrap;
+  color: #64748b;
+  font-size: 0.82rem;
+}
+.sf-bar__filter-input {
+  width: 11rem !important;
+  max-width: 40vw;
 }
 .sf-check-all {
   display: inline-flex;
@@ -1172,21 +1350,23 @@ async function markDelivery(memberId, kind) {
   min-width: 10rem;
 }
 .contact-line {
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.15rem;
+  line-height: 1.25;
 }
 .contact-line:last-child {
   margin-bottom: 0;
 }
 .meal-pill {
   display: inline-block;
-  min-width: 2rem;
+  min-width: 1.85rem;
   text-align: center;
   font-weight: 900;
-  font-size: 1.1rem;
+  font-size: 1rem;
+  line-height: 1.2;
   color: #0e5a44;
   background: #d1fae5;
-  padding: 0.2rem 0.5rem;
-  border-radius: 0.5rem;
+  padding: 0.12rem 0.42rem;
+  border-radius: 0.4rem;
   white-space: nowrap;
   box-sizing: border-box;
 }
@@ -1239,10 +1419,10 @@ async function markDelivery(memberId, kind) {
 
 .delivery-status-tag {
   display: inline-block;
-  margin-right: 0.35rem;
+  margin-right: 0.3rem;
   font-size: 9px;
   font-weight: 900;
-  padding: 2px 6px;
+  padding: 1px 5px;
   border-radius: 4px;
   vertical-align: middle;
 }
@@ -1259,11 +1439,40 @@ async function markDelivery(memberId, kind) {
   color: #3730a3;
 }
 
+.delivery-batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding: 0.45rem 1rem;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+.delivery-batch-bar__hint strong {
+  color: #0f172a;
+}
+.delivery-batch-bar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.delivery-batch-bar__btn {
+  padding: 0.35rem 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  border-radius: 0.5rem;
+  white-space: nowrap;
+}
+
 .meal-cell {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.2rem;
+  gap: 0.08rem;
 }
 .meal-pill-sub {
   font-size: 0.65rem;

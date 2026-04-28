@@ -524,6 +524,18 @@ class SfSameCityRowBase(BaseModel):
     recv_building: str = Field(default="", max_length=500, description="楼号-门牌等；与 door_detail 同源")
     recv_name: str = Field(default="", max_length=100, description="收货人姓名")
     recv_phone: str = Field(default="", max_length=20, description="收货人电话")
+    recv_lng: float | None = Field(
+        None,
+        ge=-180,
+        le=180,
+        description="收货经度 GCJ-02；写入顺丰 receive.user_lng，缺省则回退示例坐标",
+    )
+    recv_lat: float | None = Field(
+        None,
+        ge=-90,
+        le=90,
+        description="收货纬度 GCJ-02；写入顺丰 receive.user_lat，缺省则回退示例坐标",
+    )
     product_category: str = Field(
         default="外韵落地配",
         max_length=200,
@@ -551,7 +563,10 @@ class SfSameCityPreviewRow(SfSameCityRowBase):
     """预览：默认全选、展示是否已推成功。"""
 
     group_area: str = ""
-    address_line: str = ""
+    address_line: str = Field(
+        default="",
+        description="不含片区前缀的详细地址行（与配送大表「片区+详细」区分，用于顺丰弹窗/快照展示）",
+    )
     selected: bool = True
     already_pushed: bool = False
 

@@ -110,11 +110,11 @@ class Settings(BaseSettings):
     SF_OPEN_DEV_ID: int = 0
     """开发者 dev_id，与控制台一致。"""
     SF_OPEN_SHOP_ID: str = ""
-    """店铺 ID（顺丰分配或自维护；配合 SF_OPEN_SHOP_TYPE）。"""
+    """顺丰门店编号字符串：类型见 ``SF_OPEN_SHOP_TYPE``。类型=1 时须在开放平台为该 dev_id 已开通的顺丰店铺 ID。"""
     SF_OPEN_SECRET: str = ""
-    """开放接口密钥，用于签名字符串拼接；勿提交到仓库。"""
-    SF_OPEN_SHOP_TYPE: int = 1
-    """1=顺丰侧店铺ID；2=商户自维护ID。"""
+    """开放平台「密钥」字段（截图中的 ``${密钥}``），与开发者 ID 配对的 API Secret / AppSecret；勿与小程序 secret 混淆；勿提交到仓库。"""
+    SF_OPEN_SHOP_TYPE: int = Field(default=1, ge=1, le=2)
+    """店铺 ID 语义：``1``=顺丰平台下发的门店编号（最常见）；``2``=接入方自维护店铺编号（须在顺丰侧完成对应报备/自建店流程后方可用于下单）。"""
     SF_API_BASE: str = "https://openic.sf-express.com"
     """生产环境 API 根地址；沙箱可改为 commit-openic 等以控制台为准。"""
     SF_ORDER_SOURCE: str = "OKFOOD"
@@ -135,6 +135,8 @@ class Settings(BaseSettings):
     """与 Excel 模板「商品类别」列对应，写入备注/货品描述。"""
     SF_DEFAULT_VEHICLE_TYPE: str = "小轿车"
     """与模板「车型」列默认，可写进订单备注。"""
+    SF_CALLBACK_SKIP_SIGN_VERIFY: bool = False
+    """仅本地调试：跳过顺丰推送回调的 sign 校验（勿用于生产）。"""
 
 
     @property

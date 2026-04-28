@@ -67,3 +67,58 @@ def geocode_address(address: str) -> tuple[float, float] | None:
         return lng, lat
     except ValueError:
         return None
+
+
+def regeocode_pca(lng: float, lat: float) -> str | None:
+    """
+    高德逆地理编码：根据 GCJ-02 经纬度解析省/市/区，拼成一条「收货大地址」前缀（不含门牌）。
+    失败或未配置 Key 时返回 None。
+    """
+    key = settings.AMAP_KEY.strip()
+    if not key:
+        logger.warning("AMAP_KEY 未配置，跳过逆地理编码")
+        return None
+    loc = f"{float(lng):.6f},{float(lat):.6f}"
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            r = client.get(
+                "https://restapi.amap.com/v3/geocode/regeo",
+                params={"location": loc, "key": key, "radius": 50, "extensions": "base"},
+            )
+            r.raise_for_status()
+            data: dict[str, Any] = r.json()
+    except Exception as e:
+        logger.exception("高德逆地理编码请求失败: %s", e)
+        return None
+    if str(data.get("status")) != "1":
+        safe = _sanitize_amap_payload(data)
+        logger.warning("高德逆地理编码失败: %s", safe)
+        code = str(data.get("infocode") or "")
+        hint = _GEO_FAIL_HINTS.get(code)
+        if hint:
+            logger.warning("处理建议: %s", hint)
+        return None
+    regeocode = (data.get("regeocode") or {}) if isinstance(data.get("regeocode"), dict) else {}
+    ac = regeocode.get("addressComponent")
+    if not isinstance(ac, dict):
+        return None
+    pca = _format_pca_from_amap_component(ac)
+    return pca if pca else None
+
+
+def _format_pca_from_amap_component(ac: dict[str, Any]) -> str:
+    prov = str(ac.get("province") or "").strip()
+    city_raw = ac.get("city")
+    if isinstance(city_raw, list):
+        city = str(city_raw[0]).strip() if city_raw else ""
+    else:
+        city = str(city_raw or "").strip()
+    district = str(ac.get("district") or "").strip()
+    parts: list[str] = []
+    if prov:
+        parts.append(prov)
+    if city and city not in prov and all(city not in p for p in parts):
+        parts.append(city)
+    if district and all(district not in p for p in parts):
+        parts.append(district)
+    return "".join(parts).strip()
