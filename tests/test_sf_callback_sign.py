@@ -43,3 +43,13 @@ def test_dev_id_from_json_when_env_would_be_wrong() -> None:
     sign = generate_open_sign(body, dev_in_body, key)
     assert verify_sf_callback_signature(body, sign, [999, dev_in_body], key)
     assert not verify_sf_callback_signature(body, sign, [999], key)
+
+
+def test_verify_form_body_cancel_callback_style() -> None:
+    """顺丰取消类回调常见为 ``x-www-form-urlencoded``，摘要放在 query 或与 body 中 ``sign`` 一致。"""
+    dev_id = 4242
+    key = "sek"
+    post_without_sign = "sf_order_id=JSX&shop_order_id=OK1&url_index=sf_cancel&order_status=2"
+    sign_val = generate_open_sign(post_without_sign, dev_id, key)
+    raw_post = post_without_sign + f"&sign={sign_val}"
+    assert verify_sf_callback_signature(raw_post, sign_val, [dev_id], key)

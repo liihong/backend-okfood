@@ -2,8 +2,8 @@
 顺丰同城开放平台：各类 HTTP 推送回调。
 
 验签：`post_data` + ``&`` + ``dev_id`` + ``&`` + 密钥（顺丰与 PHP/Java 示例一致）；
-``dev_id`` 优先取环境 ``SF_OPEN_DEV_ID``，若报文含 ``dev_id``/``devId`` 则一并尝试（与官方「按报文 dev_id」说明一致）；
-``sign`` 在 URL query。
+``dev_id`` 优先取环境 ``SF_OPEN_DEV_ID``，若报文含 ``dev_id``/``devId`` 则一并尝试（与官方「按报文 dev_id」说明一致）。
+部分推送为表单正文；``sign`` 在 URL ``?sign=``，亦可能仅在表单字段中。
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import logging
 import secrets
 from datetime import datetime
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import parse_qsl, unquote, urlencode
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -64,6 +64,83 @@ def _raw_preview_one_line(raw_body: str, max_chars: int = _SF_CB_RAW_PREVIEW_CHA
     if len(one) <= max_chars:
         return one
     return one[:max_chars] + f"...(+{len(raw_body) - max_chars} chars)"
+
+
+def _parse_form_post_body(raw_body: str) -> dict[str, str] | None:
+    """顺丰部分回调为表单 POST（非 JSON）；与 ``parse_qsl`` 解析字段。"""
+    s = raw_body.strip()
+    if not s or "=" not in s:
+        return None
+    pairs = parse_qsl(s, keep_blank_values=True)
+    if not pairs:
+        return None
+    out: dict[str, str] = {}
+    for k, v in pairs:
+        out[str(k)] = v
+    return out
+
+
+def _effective_sign_query(sign_query: str | None, payload: dict[str, Any] | None) -> str | None:
+    """验签摘要：顺丰约定在 Query；表单回调可能只在 body 中携带 ``sign``。"""
+    qs = (sign_query or "").strip()
+    if qs:
+        return qs
+    if not payload:
+        return None
+    for key in ("sign", "Sign"):
+        v = payload.get(key)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return None
+
+
+def _form_sign_string_variants(raw_body: str) -> list[str]:
+    """
+    表单参与签名的待签串候选：常见于「排除 sign」「键序」与_wire 字面量差异。
+    """
+    s = raw_body.strip()
+    if not s:
+        return []
+    pairs = parse_qsl(s, keep_blank_values=True)
+    if not pairs:
+        return []
+    if not any(str(k).lower() != "sign" for k, _ in pairs):
+        return []
+
+    wo = [(str(k), v) for k, v in pairs if str(k).lower() != "sign"]
+    if not wo:
+        return []
+
+    uniq: dict[str, str] = {}
+    for k, v in wo:
+        uniq[k] = str(v)
+
+    cands: list[str] = []
+
+    def add(x: str) -> None:
+        if x and x not in cands:
+            cands.append(x)
+
+    add(urlencode(wo))
+    sk = sorted(uniq.keys())
+    add(urlencode([(k, uniq[k]) for k in sk]))
+
+    parts_no_sign: list[str] = []
+    for segment in s.split("&"):
+        if not segment:
+            continue
+        name = segment.split("=", 1)[0]
+        if name.lower() == "sign":
+            continue
+        parts_no_sign.append(segment)
+    if parts_no_sign:
+        add("&".join(parts_no_sign))
+
+    out: list[str] = []
+    for x in cands:
+        if x and x not in out:
+            out.append(x)
+    return out
 
 
 def _normalize_sign_from_query(sign_query: str) -> list[str]:
@@ -140,6 +217,16 @@ def _dev_ids_for_verify(settings_dev: int, payload: dict[str, Any] | None) -> li
     return out
 
 
+def _dedupe_wire_strings(xs: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for x in xs:
+        if x not in seen:
+            seen.add(x)
+            merged.append(x)
+    return merged
+
+
 def verify_sf_callback_signature(
     raw_body: str,
     sign_query: str | None,
@@ -149,7 +236,9 @@ def verify_sf_callback_signature(
     """用多种待签串、多种 ``dev_id``、规范化后的 sign 尝试验签。"""
     if not sign_query or not raw_body.strip() or not dev_ids:
         return False
-    body_cands = _json_body_string_candidates(raw_body)
+    body_cands = _dedupe_wire_strings(
+        _json_body_string_candidates(raw_body) + _form_sign_string_variants(raw_body)
+    )
     json_cands: list[str] = []
     try:
         obj = json.loads(raw_body)
@@ -172,11 +261,18 @@ def verify_sf_callback_signature(
     return False
 
 
-def _hint_verify_grid(raw_body: str, payload: dict[str, Any] | None) -> str:
+def _hint_verify_grid(raw_body: str, _payload: dict[str, Any] | None) -> str:
     """验签时尝试的 POST 串个数 × dev_id 个数，便于判断搜索空间。"""
-    n_w = len(_json_body_string_candidates(raw_body))
-    n_j = 2 if isinstance(payload, dict) else 0
-    return f"candidates_json_str={n_w} json_reencode_aliases={n_j}"
+    nw = len(_json_body_string_candidates(raw_body))
+    nf = len(_form_sign_string_variants(raw_body))
+    nj = 0
+    try:
+        o = json.loads(raw_body)
+        if isinstance(o, dict):
+            nj = 2
+    except json.JSONDecodeError:
+        pass
+    return f"candidates_wire={nw} form_aliases={nf} json_repr_aliases={nj}"
 
 
 def _extract_ids(payload: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -274,12 +370,17 @@ def process_sf_notify(
             obj = json.loads(raw_body)
             if isinstance(obj, dict):
                 payload = obj
-        except json.JSONDecodeError as e:
-            verify_err = f"invalid json: {e}"
+        except json.JSONDecodeError:
+            form_dict = _parse_form_post_body(raw_body)
+            if form_dict is not None:
+                payload = form_dict
+            else:
+                verify_err = "invalid body (neither JSON nor x-www-form-urlencoded)"
     else:
         verify_err = "empty body"
 
     dev_ids_try = _dev_ids_for_verify(settings_dev, payload)
+    eff_sign = _effective_sign_query(sign_query, payload)
 
     if skip:
         sign_ok = verify_err is None and (payload is not None or raw_body.strip() == "{}")
@@ -288,14 +389,14 @@ def process_sf_notify(
     elif not app_key:
         verify_err = verify_err or "missing SF_OPEN_SECRET"
         sign_ok = False
-    elif not sign_query:
-        verify_err = "missing sign parameter"
+    elif not eff_sign:
+        verify_err = verify_err or "missing sign (URL query or form field sign)"
         sign_ok = False
     elif not dev_ids_try:
         verify_err = "missing dev_id(SF_OPEN_DEV_ID 或与报文 dev_id)"
         sign_ok = False
     else:
-        sign_ok = verify_sf_callback_signature(raw_body, sign_query, dev_ids_try, app_key)
+        sign_ok = verify_sf_callback_signature(raw_body, eff_sign, dev_ids_try, app_key)
         if not sign_ok:
             verify_err = verify_err or "sign mismatch"
 
@@ -320,7 +421,7 @@ def process_sf_notify(
         dev_ids_try,
         bool(app_key),
         grid,
-        _sign_debug_preview(sign_query),
+        _sign_debug_preview(eff_sign or sign_query),
         _body_debug_hints(raw_body or ""),
         _raw_preview_one_line(raw_body or ""),
         shop_tr or "-",
