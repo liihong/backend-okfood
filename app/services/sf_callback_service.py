@@ -1,14 +1,16 @@
 """
 顺丰同城开放平台：各类 HTTP 推送回调。
 
-验签与开放接口下单一致：对请求体 JSON 字符串使用 ``generate_open_sign``；
-``sign`` 在 URL query 中。
+验签：`post_data` + ``&`` + ``dev_id`` + ``&`` + 密钥（顺丰与 PHP/Java 示例一致）；
+``dev_id`` 优先取环境 ``SF_OPEN_DEV_ID``，若报文含 ``dev_id``/``devId`` 则一并尝试（与官方「按报文 dev_id」说明一致）；
+``sign`` 在 URL query。
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import secrets
 from datetime import datetime
 from typing import Any
 from urllib.parse import unquote
@@ -19,32 +21,162 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models.sf_same_city_callback import SfSameCityCallback
 from app.models.sf_same_city_push import SfSameCityPush
-from app.services.sf_open.sign import _canonical_json, generate_open_sign
+from app.services.sf_open.sign import _canonical_json, generate_open_sign, normalize_payload_for_sf_sign
 
 logger = logging.getLogger(__name__)
+
+# INFO 中单条正文预览长度（便于对齐顺丰侧 JSON；不含密钥）
+_SF_CB_RAW_PREVIEW_CHARS = 600
+
+
+def _sign_debug_preview(sign: str | None) -> str:
+    """仅用于日志：长度 + 头尾片段（验签对齐时对照）。"""
+    if not sign:
+        return "(empty)"
+    s = sign.strip()
+    n = len(s)
+    if n <= 36:
+        return f"len={n} whole={s!r}"
+    return f"len={n} head={s[:16]!r} tail={s[-12:]!r}"
+
+
+def _body_debug_hints(raw_body: str) -> str:
+    """正文边界特征：BOM / 首尾若干字符 repr，不换行泄密太多。"""
+    if not raw_body:
+        return "empty=True"
+    parts: list[str] = []
+    if raw_body.startswith("\ufeff"):
+        parts.append("bom=True")
+    head = raw_body[:48]
+    tail = raw_body[-48:] if len(raw_body) > 48 else raw_body
+    parts.append(f"head={head!r}")
+    if tail != head:
+        parts.append(f"tail={tail!r}")
+    parts.append(f"utf8_bytes={len(raw_body.encode('utf-8'))}")
+    return " ".join(parts)
+
+
+def _raw_preview_one_line(raw_body: str, max_chars: int = _SF_CB_RAW_PREVIEW_CHARS) -> str:
+    """单行可检索预览：过长则截断，便于与顺丰开放平台自助验签贴入。"""
+    if not raw_body:
+        return ""
+    one = raw_body.replace("\r\n", "\n").replace("\n", "\\n")
+    if len(one) <= max_chars:
+        return one
+    return one[:max_chars] + f"...(+{len(raw_body) - max_chars} chars)"
+
+
+def _normalize_sign_from_query(sign_query: str) -> list[str]:
+    """
+    顺丰 sign 在 URL query 中；部分网关/框架会把 Base64 里的 ``+`` 变成空格，需与官方串比对。
+    """
+    s = sign_query.strip()
+    out: list[str] = []
+    for v in (s, unquote(s)):
+        if not v:
+            continue
+        if v not in out:
+            out.append(v)
+        fixed = v.replace(" ", "+")
+        if fixed != v and fixed not in out:
+            out.append(fixed)
+    return out
+
+
+def _sign_match_one(expected_b64: str, wanted_candidates: list[str]) -> bool:
+    """``secrets.compare_digest`` 仅接受等长字符串。"""
+    for w in wanted_candidates:
+        if len(expected_b64) != len(w):
+            continue
+        if secrets.compare_digest(expected_b64, w):
+            return True
+    return False
 
 
 def _sign_match(raw_for_sign: str, sign_query: str, dev_id: int, app_key: str) -> bool:
     sig = generate_open_sign(raw_for_sign, dev_id, app_key)
-    wanted = unquote(sign_query.strip())
-    return sig == wanted
+    wanteds = _normalize_sign_from_query(sign_query)
+    return _sign_match_one(sig, wanteds)
 
 
-def verify_sf_callback_signature(raw_body: str, sign_query: str | None, dev_id: int, app_key: str) -> bool:
-    """用原始正文与 canonical JSON 两种串尝试验签。"""
-    if not sign_query or not raw_body.strip():
+def _json_body_string_candidates(raw_body: str) -> list[str]:
+    """
+    待签串须与顺丰侧 ``json_encode`` 字节级一致。
+
+    - 先试原文（顺丰一般无尾换行；若有则须与生成 sign 时一致）
+    - 再试 ``strip()``，避免代理多塞 ``\\n`` 导致与原文不一致
+    - 去 UTF-8 BOM（少数网关会加）
+    """
+    c: list[str] = []
+
+    def add(x: str) -> None:
+        if x and x not in c:
+            c.append(x)
+
+    add(raw_body)
+    add(raw_body.strip())
+    if raw_body.startswith("\ufeff"):
+        add(raw_body.lstrip("\ufeff"))
+    return c
+
+
+def _dev_ids_for_verify(settings_dev: int, payload: dict[str, Any] | None) -> list[int]:
+    """优先环境变量中的 dev_id；若 JSON 内带 dev_id（与官方「按报文 dev_id 取密钥」一致），一并尝试。"""
+    out: list[int] = []
+    if settings_dev:
+        out.append(int(settings_dev))
+    if not payload:
+        return out
+    for k in ("dev_id", "devId"):
+        v = payload.get(k)
+        if v is None or v == "":
+            continue
+        try:
+            d = int(v)
+        except (TypeError, ValueError):
+            continue
+        if d not in out:
+            out.append(d)
+    return out
+
+
+def verify_sf_callback_signature(
+    raw_body: str,
+    sign_query: str | None,
+    dev_ids: list[int],
+    app_key: str,
+) -> bool:
+    """用多种待签串、多种 ``dev_id``、规范化后的 sign 尝试验签。"""
+    if not sign_query or not raw_body.strip() or not dev_ids:
         return False
-    candidates = [raw_body.strip()]
+    body_cands = _json_body_string_candidates(raw_body)
+    json_cands: list[str] = []
     try:
         obj = json.loads(raw_body)
         if isinstance(obj, dict):
-            candidates.append(_canonical_json(obj))
+            json_cands.append(_canonical_json(obj))
+            # 少数推送侧可能对非 ASCII 做 \\uXXXX 转义，与_wire 字面量不同时用此条对齐
+            json_cands.append(
+                json.dumps(
+                    normalize_payload_for_sf_sign(obj),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                )
+            )
     except json.JSONDecodeError:
         pass
-    for cand in candidates:
-        if _sign_match(cand, sign_query, dev_id, app_key):
-            return True
+    for b in body_cands + json_cands:
+        for did in dev_ids:
+            if _sign_match(b, sign_query, did, app_key):
+                return True
     return False
+
+
+def _hint_verify_grid(raw_body: str, payload: dict[str, Any] | None) -> str:
+    """验签时尝试的 POST 串个数 × dev_id 个数，便于判断搜索空间。"""
+    n_w = len(_json_body_string_candidates(raw_body))
+    n_j = 2 if isinstance(payload, dict) else 0
+    return f"candidates_json_str={n_w} json_reencode_aliases={n_j}"
 
 
 def _extract_ids(payload: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -122,11 +254,17 @@ def process_sf_notify(
     route_kind: str,
     raw_body: str,
     sign_query: str | None,
+    request_path: str | None = None,
+    client_host: str | None = None,
+    content_type: str | None = None,
+    forwarded_for: str | None = None,
+    query_param_keys: str | None = None,
+    http_log_tag: str | None = None,
 ) -> tuple[bool, str | None]:
-    """配送类订单回调：验签、落库。"""
+    """配送类订单回调：验签、落库；输出一条可调式 INFO trace（不包含密钥）。"""
     settings = get_settings()
     skip = bool(settings.SF_CALLBACK_SKIP_SIGN_VERIFY)
-    dev_id = int(settings.SF_OPEN_DEV_ID or 0)
+    settings_dev = int(settings.SF_OPEN_DEV_ID or 0)
     app_key = (settings.SF_OPEN_SECRET or "").strip()
 
     verify_err: str | None = None
@@ -141,20 +279,54 @@ def process_sf_notify(
     else:
         verify_err = "empty body"
 
+    dev_ids_try = _dev_ids_for_verify(settings_dev, payload)
+
     if skip:
         sign_ok = verify_err is None and (payload is not None or raw_body.strip() == "{}")
     elif verify_err:
         sign_ok = False
-    elif not dev_id or not app_key:
-        verify_err = verify_err or "missing SF_OPEN_DEV_ID or SF_OPEN_SECRET"
+    elif not app_key:
+        verify_err = verify_err or "missing SF_OPEN_SECRET"
         sign_ok = False
     elif not sign_query:
         verify_err = "missing sign parameter"
         sign_ok = False
+    elif not dev_ids_try:
+        verify_err = "missing dev_id(SF_OPEN_DEV_ID 或与报文 dev_id)"
+        sign_ok = False
     else:
-        sign_ok = verify_sf_callback_signature(raw_body, sign_query, dev_id, app_key)
+        sign_ok = verify_sf_callback_signature(raw_body, sign_query, dev_ids_try, app_key)
         if not sign_ok:
             verify_err = verify_err or "sign mismatch"
+
+    shop_tr, sf_tr = _extract_ids(payload) if payload else (None, None)
+    keys_csv = ",".join(sorted(payload.keys())) if payload else ""
+    grid = _hint_verify_grid(raw_body or "", payload)
+    logger.info(
+        "顺丰回调 trace http_tag=%s route_kind=%s path=%s query_keys=%s client=%s xff=%s content_type=%s "
+        "skip_verify=%s sign_ok=%s err=%s settings_dev=%s dev_ids_try=%s has_secret=%s "
+        "%s sign=%s body_hints=%s raw_preview=%s shop_order_id=%s sf_order_id=%s payload_keys=%s",
+        http_log_tag or "-",
+        route_kind,
+        request_path or "-",
+        query_param_keys or "-",
+        client_host or "-",
+        forwarded_for or "-",
+        content_type or "-",
+        skip,
+        sign_ok,
+        verify_err or "-",
+        settings_dev,
+        dev_ids_try,
+        bool(app_key),
+        grid,
+        _sign_debug_preview(sign_query),
+        _body_debug_hints(raw_body or ""),
+        _raw_preview_one_line(raw_body or ""),
+        shop_tr or "-",
+        sf_tr or "-",
+        keys_csv or "-",
+    )
 
     try:
         persist_sf_callback_and_sync_push(

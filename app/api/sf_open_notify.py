@@ -60,14 +60,34 @@ async def _dispatch_sf_notify(
 ) -> JSONResponse:
     raw = await _read_body_async(request)
     eff_sign = _pick_sign(request, sign)
-    logger.info("顺丰回调 %s len=%s sign_in_query=%s", log_tag, len(raw), bool(eff_sign))
-    ok, err = process_sf_notify(db=db, route_kind=route_kind, raw_body=raw, sign_query=eff_sign)
+    q_keys = ",".join(dict.fromkeys(request.query_params.keys()))
+    client = request.client.host if request.client else None
+    xff = (
+        request.headers.get("x-forwarded-for")
+        or request.headers.get("X-Forwarded-For")
+        or request.headers.get("X-Real-IP")
+    )
+    ct = request.headers.get("content-type") or request.headers.get("Content-Type") or "-"
+    ok, err = process_sf_notify(
+        db=db,
+        route_kind=route_kind,
+        raw_body=raw,
+        sign_query=eff_sign,
+        request_path=request.url.path,
+        client_host=client,
+        content_type=ct,
+        forwarded_for=xff,
+        query_param_keys=q_keys,
+        http_log_tag=log_tag,
+    )
     if not ok:
         logger.warning(
-            "顺丰回调业务校验未通过(响应体 error_code≠0，蜂巢常判为失败): tag=%s err=%s query_param_keys=%s",
+            "顺丰回调接口返回业务失败(蜂巢常读响应体): tag=%s err=%s query_keys=%s len_body=%s sign_present=%s",
             log_tag,
             err,
-            list(dict.fromkeys(request.query_params.keys())),
+            q_keys or "-",
+            len(raw),
+            bool(eff_sign),
         )
         return _sf_json_err(err or "reject", 500)
     return _sf_json_ok()
