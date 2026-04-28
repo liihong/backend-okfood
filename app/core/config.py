@@ -124,9 +124,9 @@ class Settings(BaseSettings):
     SF_PICKUP_PHONE: str = ""
     """取货联系电话，映射顺丰 shop 与模板列「取货联系电话」；未配则推单时失败提示。"""
     SF_PICKUP_ADDRESS: str = ""
-    """取货地址文字，映射 shop.shop_address；未配则回退为「上海市」+ 见代码。"""
-    SF_CITY_NAME: str = "上海市"
-    """收件城市名，映射 receive.city_name 与发件地。"""
+    """取货地址文字，映射 shop.shop_address；未配则回退为门店名等，见代码。"""
+    SF_CITY_NAME: str = "新乡市"
+    """收件默认城市（无地址可解析时的回退）。推单时会从 map_location_text/recv_address 解析「XX市」；与顺丰开城名一致，一般用地级市名勿带省前缀。"""
     SF_KG_PER_MEAL_UNIT: float = 0.2
     """预估每份餐品重量(kg)，用于 default 重量与 weight_gram。"""
     SF_DEFAULT_PRODUCT_TYPE: int = 1

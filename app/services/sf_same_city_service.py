@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -48,6 +49,38 @@ from app.schemas.admin import (
 )
 
 _SH = ZoneInfo("Asia/Shanghai")
+
+
+def _sf_receive_city_name(row: SfSameCityRowBase, env_city: str) -> str:
+    """
+    顺丰 ``receive.city_name`` 一般使用地级市标准名（如「新乡市」）。
+    传入「河南省新乡市」等带省前缀的写法，线上常返回「获取城市信息失败」。
+    """
+    texts: list[str | None] = [
+        row.map_location_text,
+        row.recv_address,
+        getattr(row, "address_line", None),
+    ]
+    for raw in texts:
+        s = (raw or "").strip()
+        if not s:
+            continue
+        for muni in ("北京市", "上海市", "天津市", "重庆市"):
+            if muni in s[:16]:
+                return muni[:32]
+        rm = re.search(r"(?:省|自治区)([\u4e00-\u9fff]{1,12}市)", s)
+        if rm:
+            return rm.group(1)[:32]
+        rm = re.match(r"^([\u4e00-\u9fff]{2,12}市)", s)
+        if rm:
+            return rm.group(1)[:32]
+    base = (env_city or "").strip()
+    if base:
+        rm = re.match(r"^.+省([\u4e00-\u9fff]{1,12}市)$", base)
+        if rm:
+            return rm.group(1)[:32]
+        return base[:32]
+    return "新乡市"
 
 
 def _stop_key(d: date, group_area: str, address_line: str) -> str:
@@ -383,7 +416,8 @@ def _create_order_payload(
     rmk0 = (row.remark or "").strip()
     rmk2 = f"{rmk0} 车型:{row.vehicle_type} 类别:{row.product_category}" if rmk0 else f"车型:{row.vehicle_type} 类别:{row.product_category}"
 
-    recv_lng, recv_lat = 121.4737, 31.2304
+    # 无会员坐标时的回退中心点（河南省新乡市，GCJ-02 约值，与默认 SF_CITY_NAME 一致）
+    recv_lng, recv_lat = 113.883991, 35.303257
     if row.recv_lng is not None and row.recv_lat is not None:
         try:
             lg = float(row.recv_lng)
@@ -392,8 +426,8 @@ def _create_order_payload(
                 recv_lng, recv_lat = lg, lt
         except (TypeError, ValueError):
             pass
-    s_lng = float(store.store_lng) if store and store.store_lng is not None else 121.4737
-    s_lat = float(store.store_lat) if store and store.store_lat is not None else 31.2304
+    s_lng = float(store.store_lng) if store and store.store_lng is not None else 113.883991
+    s_lat = float(store.store_lat) if store and store.store_lat is not None else 35.303257
 
     def _coord_str(v: float) -> str:
         return f"{float(v):.6f}"
@@ -435,7 +469,7 @@ def _create_order_payload(
         "user_lng": _coord_str(recv_lng),
         "user_lat": _coord_str(recv_lat),
         "user_address": rec_full[:1024],
-        "city_name": (gset.SF_CITY_NAME or "上海市")[:32],
+        "city_name": _sf_receive_city_name(row, (gset.SF_CITY_NAME or "").strip()),
     }
     body["shop"] = {
         "shop_name": (getattr(store, "store_name", None) or "门店")[:128],
