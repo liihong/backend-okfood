@@ -219,6 +219,10 @@ class MemberAdminOut(BaseModel):
         description="会员卡停用(暂不配送/先不开卡/暂停配送)；与 is_active/起送日 联动，同 members.delivery_deferred",
     )
     is_leaved_tomorrow: bool = Field(False, description="已勾选仅明天请假（不影响今日配送）")
+    tomorrow_leave_target_date: date | None = Field(
+        None,
+        description="仅明日请假：不配送的目标业务日（上海）；与 is_leaved_tomorrow 同时有效",
+    )
     leave_range_start: date | None = None
     leave_range_end: date | None = None
     is_on_leave_today: bool = Field(False, description="区间请假是否覆盖上海当前业务日")

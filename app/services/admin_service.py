@@ -251,6 +251,7 @@ def list_members_paged(
                 is_active=m.is_active,
                 delivery_deferred=bool(m.delivery_deferred),
                 is_leaved_tomorrow=m.is_leaved_tomorrow,
+                tomorrow_leave_target_date=m.tomorrow_leave_target_date,
                 leave_range_start=m.leave_range_start,
                 leave_range_end=m.leave_range_end,
                 is_on_leave_today=_member_on_leave_today(m, biz_today),

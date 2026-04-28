@@ -488,6 +488,15 @@ onMounted(async () => {
             }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="请假时间" min-width="156" class-name="td-col-leave">
+          <template #default="{ row: u }">
+            <div v-if="!u.leave_kind" class="leave-cell leave-cell--empty">—</div>
+            <div v-else class="leave-cell">
+              <span class="leave-badge" :class="'leave-badge--' + u.leave_kind">{{ u.leave_badge }}</span>
+              <div class="leave-detail">{{ u.leave_detail }}</div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="剩余 / 总次数" align="center" min-width="120">
           <template #default="{ row: u }">
             <div class="balance-cell">

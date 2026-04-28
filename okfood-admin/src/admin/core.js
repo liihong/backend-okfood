@@ -195,6 +195,46 @@ export function planDefaultTotal(planType) {
   return null
 }
 
+/** API 日期字段规范为 YYYY-MM-DD */
+function adminUserYmd(v) {
+  if (v == null || v === '') return ''
+  const s = String(v).trim()
+  return s.length >= 10 ? s.slice(0, 10) : s
+}
+
+/** 列表「请假时间」：区间优先于「仅明日」 */
+function buildLeaveListFields(raw) {
+  const rs = adminUserYmd(raw.leave_range_start)
+  const re = adminUserYmd(raw.leave_range_end)
+  if (rs && re) {
+    if (rs === re) {
+      return {
+        leave_kind: 'range_single',
+        leave_badge: '单日请假',
+        leave_detail: rs,
+      }
+    }
+    return {
+      leave_kind: 'range_multi',
+      leave_badge: '多天请假',
+      leave_detail: `${rs} ～ ${re}`,
+    }
+  }
+  if (raw.is_leaved_tomorrow === true) {
+    const td = adminUserYmd(raw.tomorrow_leave_target_date)
+    return {
+      leave_kind: 'tomorrow',
+      leave_badge: '明日请假',
+      leave_detail: td ? `配送日 ${td}` : '目标日未绑定',
+    }
+  }
+  return {
+    leave_kind: '',
+    leave_badge: '',
+    leave_detail: '',
+  }
+}
+
 /** GET /api/admin/users 单条映射为表格行 */
 export function mapAdminUserToRow(raw, idx) {
   if (!raw || typeof raw !== 'object') {
@@ -219,6 +259,9 @@ export function mapAdminUserToRow(raw, idx) {
       delivery_deferred: false,
       is_on_leave_today: false,
       tomorrow_leave: false,
+      leave_kind: '',
+      leave_badge: '',
+      leave_detail: '',
       status: '未开卡',
       store_pickup: false,
     }
@@ -247,6 +290,8 @@ export function mapAdminUserToRow(raw, idx) {
       ? Math.max(totalQuota, balance)
       : null
   const balanceLabel = displayTotal != null ? `${balance} / ${displayTotal}` : String(balance)
+
+  const leaveList = buildLeaveListFields(raw)
 
   const ds = raw.delivery_start_date
   let deliveryStartYmd = ''
@@ -279,6 +324,9 @@ export function mapAdminUserToRow(raw, idx) {
     delivery_deferred: deferred,
     is_on_leave_today: onLeaveToday,
     tomorrow_leave: active && !onLeaveToday && tomorrowLeave,
+    leave_kind: leaveList.leave_kind,
+    leave_badge: leaveList.leave_badge,
+    leave_detail: leaveList.leave_detail,
     status,
     store_pickup: raw.store_pickup === true,
   }
