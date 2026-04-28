@@ -37,6 +37,19 @@ async def _read_body_async(request: Request) -> str:
         return raw.decode("utf-8", errors="replace")
 
 
+def _pick_sign(request: Request, query_sign: str | None) -> str | None:
+    """顺丰约定：sign 在 URL Query；兼容大小写别名。须保证网关把 ?sign= 原样转到后端。"""
+    for s in (
+        (query_sign or "").strip(),
+        (request.query_params.get("sign") or "").strip(),
+        (request.query_params.get("Sign") or "").strip(),
+        (request.query_params.get("signature") or "").strip(),
+    ):
+        if s:
+            return s
+    return None
+
+
 async def _dispatch_sf_notify(
     request: Request,
     db: SessionDep,
@@ -46,9 +59,16 @@ async def _dispatch_sf_notify(
     sign: str | None,
 ) -> JSONResponse:
     raw = await _read_body_async(request)
-    logger.info("顺丰回调 %s len=%s sign=%s", log_tag, len(raw), bool(sign))
-    ok, err = process_sf_notify(db=db, route_kind=route_kind, raw_body=raw, sign_query=sign)
+    eff_sign = _pick_sign(request, sign)
+    logger.info("顺丰回调 %s len=%s sign_in_query=%s", log_tag, len(raw), bool(eff_sign))
+    ok, err = process_sf_notify(db=db, route_kind=route_kind, raw_body=raw, sign_query=eff_sign)
     if not ok:
+        logger.warning(
+            "顺丰回调业务校验未通过(响应体 error_code≠0，蜂巢常判为失败): tag=%s err=%s query_param_keys=%s",
+            log_tag,
+            err,
+            list(dict.fromkeys(request.query_params.keys())),
+        )
         return _sf_json_err(err or "reject", 500)
     return _sf_json_ok()
 

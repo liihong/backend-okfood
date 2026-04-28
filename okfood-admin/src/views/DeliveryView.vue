@@ -280,6 +280,22 @@ async function printLabels() {
   window.print()
 }
 
+/** 与后端配送大表一致：address_line 为「片区 + 空格 + 详细」；导出 Excel 时配送地址列仅保留详细段（片区另列「地址片区」）。自提整行保留原样。 */
+function addressLineForExcelExport(st) {
+  if (st.groupArea === '门店自提') {
+    return st.address_line != null ? String(st.address_line) : ''
+  }
+  const line = String(st.address_line ?? '').trim()
+  const ar = String(st.area ?? '').trim()
+  if (ar && line.startsWith(`${ar} `)) {
+    return line.slice(ar.length + 1).trim()
+  }
+  if (ar && line.startsWith(ar)) {
+    return line.slice(ar.length).trim()
+  }
+  return line
+}
+
 /**
  * 将当前大表导出为 xlsx：一行对应一名会员，地址为停靠点级别（同址多会员时地址重复）。
  * 数据与页面列表一致（同一配送日 + 当前片区/手机号筛选）；清空筛选即为当日全量。
@@ -301,7 +317,7 @@ function exportSheetToExcel() {
         配送业务日: d,
         线路分组: st.groupArea ?? '',
         地址片区: st.area ?? '',
-        配送地址: st.address_line ?? '',
+        配送地址: addressLineForExcelExport(st),
         会员ID: m.member_id,
         姓名: m.name != null ? String(m.name) : '',
         手机: m.phone != null ? String(m.phone) : '',
