@@ -83,6 +83,12 @@ const leaveSyncing = ref(true)
 /** 与后台 app_settings.leave_deadline_time 一致，默认 21:00:00 */
 const leaveDeadlineTime = ref('21:00:00')
 
+/**
+ * 请假页专用：拉取 /api/user/me。
+ * 部分机型/弱网下 uni.request 可能长时间不回调；单独缩短 timeout 并配合 race 硬截止，避免「一直正在同步」。
+ */
+const LEAVE_ME_SYNC_MS = 20000
+
 function shanghaiTodayYmd() {
   try {
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -194,11 +200,11 @@ const leaveLineEnd = computed(() => {
 })
 
 const activeLeaveHint = computed(() => {
-  if (isRangeOnlyLeave.value) return '（按上海日期；与配送请假状态一致）'
+  if (isRangeOnlyLeave.value) return '（与配送请假状态一致）'
   if (isTomorrowLeave.value) {
-    return '（自提交当日起至目标日 24:00 止，上海时区；不配送日见右端；与「我的」状态一致）'
+    return '（自提交当日起至目标日 24:00 止）'
   }
-  return '（按上海日期；与配送请假状态一致）'
+  return '（按以上日期；与配送请假状态一致）'
 })
 
 function ymdFromApi(d) {
@@ -210,7 +216,14 @@ function ymdFromApi(d) {
 async function syncLeaveFromServer() {
   leaveSyncing.value = true
   try {
-    const me = await request('/api/user/me', { method: 'GET' })
+    const me = await Promise.race([
+      request('/api/user/me', { method: 'GET', timeout: LEAVE_ME_SYNC_MS }),
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('网络异常，同步超时，请稍后重试'))
+        }, LEAVE_ME_SYNC_MS + 2000)
+      }),
+    ])
     if (me?.leave_deadline_time) {
       leaveDeadlineTime.value = String(me.leave_deadline_time).trim()
     }
@@ -235,8 +248,13 @@ async function syncLeaveFromServer() {
       clearMemberSession()
       uni.showToast({ title: '登录已失效，请重新登录', icon: 'none' })
       setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+    } else {
+      const msg = e instanceof Error ? e.message : ''
+      if (msg.includes('同步超时') || msg.includes('请求超时')) {
+        uni.showToast({ title: msg, icon: 'none' })
+      }
     }
-    /* 其它：未登录或网络失败时保持本地展示 */
+    /* 其它错误：保持本地展示，避免普通失败也弹窗 */
   } finally {
     leaveSyncing.value = false
   }

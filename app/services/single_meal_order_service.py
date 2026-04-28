@@ -30,7 +30,11 @@ from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.schemas.courier import CourierTaskMemberOut
 from app.schemas.single_meal_order import SingleMealOrderCreateIn, SingleMealOrderOut
-from app.services.courier_task_sorting import distance_from_anchor_m, task_sort_key
+from app.services.courier_task_sorting import (
+    centroid_from_task_rows,
+    distance_from_anchor_m,
+    order_task_rows_by_nearest_neighbor,
+)
 from app.services.member_address_service import delivery_region_name_map, routing_area_label
 from app.services.store_config_service import load_store_coordinates_for_sorting
 
@@ -372,7 +376,12 @@ def list_courier_single_order_tasks(
                 dish_title=(dsh.name or "").strip() or None,
             )
         )
-    out.sort(key=lambda x: task_sort_key(x.sort_distance_m))
+    depot_lng, depot_lat = (
+        (float(store_lng), float(store_lat))
+        if store_lng is not None and store_lat is not None
+        else centroid_from_task_rows(out)
+    )
+    order_task_rows_by_nearest_neighbor(out, depot_lng, depot_lat)
     return out
 
 

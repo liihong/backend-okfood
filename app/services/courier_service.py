@@ -21,9 +21,10 @@ from app.models.member_address import MemberAddress
 from app.schemas.courier import CourierTaskMemberOut
 from app.services.courier_admin_service import regions_for_courier
 from app.services.courier_task_sorting import (
+    centroid_from_task_rows,
     distance_from_anchor_m,
+    order_task_rows_by_nearest_neighbor,
     reference_lng_lat_for_task_sorting,
-    task_sort_key,
 )
 from app.services.store_config_service import load_store_coordinates_for_sorting
 from app.services.leave import is_absent_on_delivery_date
@@ -263,7 +264,7 @@ def list_today_tasks(
     - 配送日不在请假区间，且「明天请假」不影响「今日」配送；
     - 周日与法定节假日不生成订阅清单；
     - 按 delivery_region_id 过滤默认地址；
-    - 组内按与坐标均值的直线距离排序。
+    - 组内从门店（或质心）出发按最近邻贪心排序停留点，减少折返。
     - 当日已送达后余额不足、不再入选应送名单的会员，仍从 delivery_logs 补入本清单（与配送大表一致），便于对账。
     """
     d = delivery_date or today_shanghai()
@@ -323,7 +324,7 @@ def list_today_tasks(
                 is_delivered=m.id in delivered_ids,
             )
         )
-    rows.sort(key=lambda x: task_sort_key(x.sort_distance_m))
+    order_task_rows_by_nearest_neighbor(rows, ref_lng, ref_lat)
     return rows
 
 
@@ -338,7 +339,6 @@ def list_tasks_for_courier(
     regions = regions_for_courier(db, courier_id)
     if not regions:
         singles = list_courier_single_order_tasks(db, courier_id, d)
-        singles.sort(key=lambda x: task_sort_key(x.sort_distance_m))
         return singles, d
     by_member: dict[int, CourierTaskMemberOut] = {}
     for reg in regions:
@@ -353,7 +353,13 @@ def list_tasks_for_courier(
     out = list(by_member.values())
     singles = list_courier_single_order_tasks(db, courier_id, d)
     out.extend(singles)
-    out.sort(key=lambda x: task_sort_key(x.sort_distance_m))
+    store_lng, store_lat = load_store_coordinates_for_sorting(db)
+    depot_lng, depot_lat = (
+        (float(store_lng), float(store_lat))
+        if store_lng is not None and store_lat is not None
+        else centroid_from_task_rows(out)
+    )
+    order_task_rows_by_nearest_neighbor(out, depot_lng, depot_lat)
     return out, d
 
 
