@@ -303,7 +303,7 @@ async function submitEditMember() {
       phone: editForm.value.phone,
       name: editForm.value.name.trim(),
       remarks: editForm.value.remarks.trim() || null,
-      address: editForm.value.address.trim(),
+      address: editForm.value.address.trim() || null,
       daily_meal_units: Math.max(1, Math.min(50, Number(editForm.value.daily_meal_units) || 1)),
       balance: Math.max(0, Math.min(999999, Math.floor(Number(editForm.value.balance) || 0))),
       delivery_start_date: editForm.value.delivery_start_date?.trim()
