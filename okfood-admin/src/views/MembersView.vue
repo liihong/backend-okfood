@@ -186,19 +186,82 @@ const showLeaveModal = ref(false)
 const leaveSaving = ref(false)
 const leaveTarget = ref(null)
 const leaveMode = ref('tomorrow')
+/** 多天请假（区间）：YYYY-MM-DD，与小程序「多天请假」同一接口口径 */
+const leaveRangeStart = ref('')
+const leaveRangeEnd = ref('')
+
+function shanghaiTodayYmd() {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date())
+    const y = parts.find((p) => p.type === 'year')?.value
+    const m = parts.find((p) => p.type === 'month')?.value
+    const d = parts.find((p) => p.type === 'day')?.value
+    if (y && m && d) return `${y}-${m}-${d}`
+  } catch {
+    /* ignore */
+  }
+  const n = new Date()
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
+}
+
+function addDaysYmdShanghai(ymd, deltaDays) {
+  if (!ymd) return ''
+  const t = new Date(`${ymd}T12:00:00+08:00`)
+  const t2 = new Date(t.getTime() + deltaDays * 24 * 60 * 60 * 1000)
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(t2)
+  const y = parts.find((p) => p.type === 'year')?.value
+  const m = parts.find((p) => p.type === 'month')?.value
+  const d = parts.find((p) => p.type === 'day')?.value
+  return y && m && d ? `${y}-${m}-${d}` : ''
+}
+
+function defaultAdminLeaveRange() {
+  const t = shanghaiTodayYmd()
+  const start = addDaysYmdShanghai(t, 1)
+  return { start, end: start }
+}
 
 function openLeaveMember(u) {
   leaveTarget.value = u
   leaveMode.value = 'tomorrow'
+  const r = defaultAdminLeaveRange()
+  leaveRangeStart.value = r.start
+  leaveRangeEnd.value = r.end
   showLeaveModal.value = true
 }
 
 async function submitLeaveMember() {
   const u = leaveTarget.value
   if (!u || !u.phone) return
+  if (leaveMode.value === 'range') {
+    const s = (leaveRangeStart.value || '').trim()
+    const e = (leaveRangeEnd.value || '').trim()
+    if (!s || !e) {
+      showToast('请填写开始日期与结束日期', 'error')
+      return
+    }
+    if (e < s) {
+      showToast('结束日期不能早于开始日期', 'error')
+      return
+    }
+  }
   leaveSaving.value = true
   try {
     const payload = { phone: u.phone, type: leaveMode.value }
+    if (leaveMode.value === 'range') {
+      payload.start = leaveRangeStart.value.trim()
+      payload.end = leaveRangeEnd.value.trim()
+    }
     await apiJson(
       '/api/admin/member/leave',
       { method: 'POST', body: JSON.stringify(payload) },
@@ -578,9 +641,32 @@ onMounted(async () => {
             <label>操作类型</label>
             <select v-model="leaveMode" class="input-delivery-area">
               <option value="tomorrow">明日配送请假（与小程序「明天有事」一致）</option>
+              <option value="range">多天配送请假（与小程序「多天请假」一致，需选起止日期）</option>
               <option value="clear_tomorrow">仅取消「明日请假」</option>
               <option value="cancel">清空全部请假</option>
             </select>
+            <template v-if="leaveMode === 'range'">
+              <div class="form-group form-group--leave-range">
+                <label>开始日期</label>
+                <input
+                  v-model="leaveRangeStart"
+                  type="date"
+                  class="input-delivery-area"
+                  :min="shanghaiTodayYmd()"
+                  required
+                />
+              </div>
+              <div class="form-group form-group--leave-range">
+                <label>结束日期</label>
+                <input
+                  v-model="leaveRangeEnd"
+                  type="date"
+                  class="input-delivery-area"
+                  :min="leaveRangeStart || shanghaiTodayYmd()"
+                  required
+                />
+              </div>
+            </template>
             <p class="modal-hint">后台代操作不校验当日请假截止时间；日期均为上海业务日。</p>
           </div>
           <button type="submit" class="btn-submit-order" :disabled="leaveSaving">
