@@ -124,7 +124,8 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
         address_summary = f"{area} {detail_line}".strip()
         addr_id = int(addr.id)
 
-    if not db.get(Member, member_id):
+    mem = db.get(Member, member_id)
+    if not mem or mem.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
 
     from app.services.menu_day_stock_service import assert_single_order_stock_available
@@ -252,7 +253,7 @@ def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, c
         raise HTTPException(status_code=400, detail="订单已支付")
 
     member = db.get(Member, member_id)
-    if not member:
+    if not member or member.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
     openid = (member.wx_mini_openid or "").strip()
     if not openid:

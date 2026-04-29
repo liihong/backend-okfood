@@ -550,7 +550,7 @@ class SfSameCityRowBase(BaseModel):
     is_direct: bool = Field(
         False, description="专人直送，映射 is_person_direct"
     )
-    vehicle_type: str = Field("小轿车", max_length=50, description="车型，目前写入备注补充")
+    vehicle_type: str = Field("电动车", max_length=50, description="车型，目前写入备注补充")
     is_insured: bool = Field(False, description="是否保价")
     goods_value_yuan: Decimal | None = Field(
         default=None, ge=0, max_digits=12, decimal_places=2, description="保价时货值(元)"

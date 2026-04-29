@@ -26,6 +26,7 @@ def job_reset_leave_flags() -> None:
         db.execute(
             update(Member)
             .where(
+                Member.deleted_at.is_(None),
                 Member.tomorrow_leave_target_date.isnot(None),
                 Member.tomorrow_leave_target_date < today,
             )
@@ -34,6 +35,7 @@ def job_reset_leave_flags() -> None:
         db.execute(
             update(Member)
             .where(
+                Member.deleted_at.is_(None),
                 Member.tomorrow_leave_target_date.is_(None),
                 Member.is_leaved_tomorrow.is_(True),
             )
@@ -43,12 +45,15 @@ def job_reset_leave_flags() -> None:
         db.execute(
             update(Member)
             .where(
+                Member.deleted_at.is_(None),
                 Member.is_leaved_tomorrow.is_(False),
                 Member.tomorrow_leave_target_date.isnot(None),
             )
             .values(tomorrow_leave_target_date=None)
         )
-        rows = db.scalars(select(Member).where(Member.leave_range_end.isnot(None))).all()
+        rows = db.scalars(
+            select(Member).where(Member.deleted_at.is_(None), Member.leave_range_end.isnot(None))
+        ).all()
         for m in rows:
             if m.leave_range_end is not None and m.leave_range_end < today:
                 m.leave_range_start = None
@@ -70,7 +75,11 @@ def job_low_balance_notify() -> None:
     try:
         today = today_shanghai()
         threshold = settings.LOW_BALANCE_THRESHOLD
-        stmt = select(Member).where(Member.is_active.is_(True), Member.balance <= threshold)
+        stmt = select(Member).where(
+            Member.deleted_at.is_(None),
+            Member.is_active.is_(True),
+            Member.balance <= threshold,
+        )
         rows = db.scalars(stmt).all()
         for m in rows:
             if m.last_low_balance_notify_date == today:

@@ -76,7 +76,7 @@ def sql_effective_daily_meal_units_column():
 
 def _member_by_phone(db: Session, phone: str) -> Member | None:
 
-    return db.scalar(select(Member).where(Member.phone == phone))
+    return db.scalar(select(Member).where(Member.phone == phone, Member.deleted_at.is_(None)))
 
 
 
@@ -110,7 +110,7 @@ def ensure_member_stub(
     微信登录可对已存在会员更新 wx_mini_openid；新号则创建占位档案并写入 openid。
     """
 
-    row_id = db.scalar(select(Member.id).where(Member.phone == phone))
+    row_id = db.scalar(select(Member.id).where(Member.phone == phone, Member.deleted_at.is_(None)))
 
     if row_id is not None:
 
@@ -280,7 +280,7 @@ def get_member(db: Session, member_id: int) -> MemberOut:
 
     m = db.get(Member, member_id)
 
-    if not m:
+    if not m or m.deleted_at is not None:
 
         raise HTTPException(status_code=404, detail="用户不存在")
 
@@ -460,7 +460,7 @@ def patch_member_profile(
 
     m = db.get(Member, member_id)
 
-    if not m:
+    if not m or m.deleted_at is not None:
 
         raise HTTPException(status_code=404, detail="用户不存在")
 
@@ -611,7 +611,7 @@ def activate_member(db: Session, member_id: int) -> MemberOut:
 
     m = db.get(Member, member_id)
 
-    if not m:
+    if not m or m.deleted_at is not None:
 
         raise HTTPException(status_code=404, detail="用户不存在")
 
@@ -641,7 +641,7 @@ def leave_request(
 
     m = db.get(Member, member_id)
 
-    if not m:
+    if not m or m.deleted_at is not None:
 
         raise HTTPException(status_code=404, detail="用户不存在")
 

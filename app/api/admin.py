@@ -28,6 +28,7 @@ from app.schemas.admin import (
 )
 from app.schemas.common import TokenResponse
 from app.services.admin_service import (
+    admin_delete_member,
     admin_login_user,
     admin_weekly_menu_preview,
     assign_menu_schedule,
@@ -193,6 +194,10 @@ def users(
         bool,
         Query(description="true=仅片区未分配（无默认地址或 delivery_region_id 为空）"),
     ] = False,
+    on_leave_only: Annotated[
+        bool,
+        Query(description="true=仅当前请假中（与列表「请假中」状态一致：区间含今日或明日请假未过期）"),
+    ] = False,
 ):
     response.headers["Cache-Control"] = "no-store"
     _ = admin_username
@@ -216,9 +221,22 @@ def users(
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=pt or None,
+        on_leave_only=on_leave_only,
     )
     serialized = [dump_model(i) for i in items]
     return page_response(items=serialized, total=total, page=page, page_size=page_size, msg="获取成功")
+
+
+@router.delete("/users/{member_id}")
+def admin_delete_member_route(
+    member_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """删除会员：无业务流水时物理删除；否则逻辑删除并保留追溯数据。"""
+    _ = admin_username
+    out = admin_delete_member(db, member_id)
+    return success(data=out, msg=out.get("msg") or "已删除")
 
 
 @router.post("/recharge")
@@ -241,6 +259,10 @@ def card_orders(
     admin_username: str = Depends(admin_subject),
     q: str | None = None,
     pay_status: Annotated[str | None, Query(description="未缴 | 已缴")] = None,
+    include_history: Annotated[
+        bool,
+        Query(description="true=含已缴且已入账等全部历史；默认 false 仅待处理工单"),
+    ] = False,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -249,7 +271,12 @@ def card_orders(
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     items, total = list_card_orders_paged(
-        db, q=q, pay_status=pay_status, page=page, page_size=page_size
+        db,
+        q=q,
+        pay_status=pay_status,
+        page=page,
+        page_size=page_size,
+        include_history=include_history,
     )
     serialized = [dump_model(i) for i in items]
     return page_response(

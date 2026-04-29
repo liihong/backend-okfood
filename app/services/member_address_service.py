@@ -302,7 +302,8 @@ def _to_out(row: MemberAddress, id_to_name: dict[int, str]) -> MemberAddressOut:
 
 
 def _ensure_member_exists(db: Session, member_id: int) -> None:
-    if not db.get(Member, member_id):
+    m = db.get(Member, member_id)
+    if not m or m.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
 
 

@@ -49,12 +49,14 @@ CREATE TABLE IF NOT EXISTS `members` (
   `delivery_deferred` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '暂不配送：无起送日意向且保持未开卡',
   `store_pickup` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '门店自提：不参与按地址配送与骑手任务，单独归组备餐',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `deleted_at` DATETIME NULL DEFAULT NULL COMMENT '逻辑删除时间；空表示正常',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_members_phone` (`phone`),
   UNIQUE KEY `uk_members_wx_mini_openid` (`wx_mini_openid`),
   KEY `idx_members_active_balance` (`is_active`, `balance`),
   KEY `idx_members_balance_created` (`balance`, `created_at`),
   KEY `idx_members_leave_range` (`leave_range_start`, `leave_range_end`),
+  KEY `idx_members_deleted_at` (`deleted_at`),
   CONSTRAINT `chk_members_balance_nonneg` CHECK (`balance` >= 0),
   CONSTRAINT `chk_members_daily_meal_units` CHECK (`daily_meal_units` >= 1 AND `daily_meal_units` <= 50)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员';

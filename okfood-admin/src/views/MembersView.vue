@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, computed, onMounted, nextTick } from 'vue'
-import { Search, Phone, X } from 'lucide-vue-next'
+import { Search, Phone, X, Trash2 } from 'lucide-vue-next'
 import {
   apiJson,
   adminAccessToken,
@@ -26,6 +26,8 @@ const membersPlanFilter = ref('')
 const membersRegionFilter = ref('')
 /** 仅未开卡 is_active=false */
 const membersInactiveOnly = ref(false)
+/** 仅当前请假中（与列表「请假中」及后端 on_leave_only 一致） */
+const membersOnLeaveOnly = ref(false)
 const regionFilterOptions = ref([])
 
 /** 顶栏全库统计（不受当前搜索/筛选影响） */
@@ -66,6 +68,12 @@ function toggleInactiveOnly() {
   void fetchMembers()
 }
 
+function toggleOnLeaveOnly() {
+  membersOnLeaveOnly.value = !membersOnLeaveOnly.value
+  membersPage.value = 1
+  void fetchMembers()
+}
+
 function onRegionFilterChange() {
   membersPage.value = 1
   void fetchMembers()
@@ -98,6 +106,38 @@ async function fetchMemberStats() {
   }
 }
 
+const memberDeletingId = ref(null)
+
+async function deleteMemberRow(u) {
+  if (!u?.id) return
+  const label = `${u.name || '—'} · ${u.phone || ''}`
+  const ok = window.confirm(
+    `确定删除该会员？\n${label}\n\n若有余额流水、配送记录、单次点餐或开卡工单，将仅做逻辑删除并保留数据；若四项均无记录则物理删除档案与地址。`,
+  )
+  if (!ok) return
+  memberDeletingId.value = u.id
+  try {
+    const data = await apiJson(`/api/admin/users/${Number(u.id)}`, { method: 'DELETE' }, { auth: true })
+    const detail =
+      data && typeof data === 'object' && typeof data.msg === 'string'
+        ? data.msg
+        : '已删除'
+    showToast(detail, 'success')
+    await fetchMemberStats()
+    await fetchMembers()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '删除失败', 'error')
+  } finally {
+    memberDeletingId.value = null
+  }
+}
+
 async function fetchMembers() {
   if (!adminAccessToken.value) return
   membersLoading.value = true
@@ -113,6 +153,7 @@ async function fetchMembers() {
     const q = searchQuery.value.trim()
     if (q) params.set('q', q)
     if (membersInactiveOnly.value) params.set('inactive_only', '1')
+    if (membersOnLeaveOnly.value) params.set('on_leave_only', '1')
     if (membersRegionFilter.value === 'unassigned') params.set('unassigned_region', '1')
     else if (membersRegionFilter.value) {
       const rid = String(membersRegionFilter.value).trim()
@@ -471,7 +512,7 @@ onMounted(async () => {
                 已过期
               </button>
             </div>
-            <div class="members-extra-filters" aria-label="片区与开卡筛选">
+            <div class="members-extra-filters" aria-label="套餐、片区与状态筛选">
               <label class="members-filter-label" for="members-plan-filter">套餐</label>
               <select
                 id="members-plan-filter"
@@ -506,18 +547,29 @@ onMounted(async () => {
               >
                 未开卡
               </button>
+              <button
+                type="button"
+                role="tab"
+                class="members-validity-tab"
+                :class="{ 'members-validity-tab--active': membersOnLeaveOnly }"
+                :aria-selected="membersOnLeaveOnly"
+                @click="toggleOnLeaveOnly"
+              >
+                请假中
+              </button>
             </div>
           </div>
         </div>
       </div>
       <AdminTable
         variant="members"
+        size="small"
         :data="membersRows"
         :loading="membersLoading"
         :row-key="memberRowKey"
         empty-text="暂无会员数据"
       >
-        <el-table-column label="会员信息" min-width="160">
+        <el-table-column label="会员信息" min-width="148">
           <template #default="{ row: u }">
             <div class="t-name">
               {{ u.name }}
@@ -534,7 +586,7 @@ onMounted(async () => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="配送片区" min-width="100">
+        <el-table-column label="配送片区" min-width="88" show-overflow-tooltip>
           <template #default="{ row: u }">
             <span class="area-tag">{{ u.area }}</span>
           </template>
@@ -551,16 +603,16 @@ onMounted(async () => {
             }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="请假时间" min-width="156" class-name="td-col-leave">
+        <el-table-column label="请假时间" min-width="92" width="102" class-name="td-col-leave">
           <template #default="{ row: u }">
             <div v-if="!u.leave_kind" class="leave-cell leave-cell--empty">—</div>
-            <div v-else class="leave-cell">
+            <div v-else class="leave-cell" :title="u.leave_detail || ''">
               <span class="leave-badge" :class="'leave-badge--' + u.leave_kind">{{ u.leave_badge }}</span>
               <div class="leave-detail">{{ u.leave_detail }}</div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="剩余 / 总次数" align="center" min-width="120">
+        <el-table-column label="剩余 / 总次数" align="center" min-width="108">
           <template #default="{ row: u }">
             <div class="balance-cell">
               <span class="balance-text" :class="{ warning: u.balance <= 2 && u.is_active }">{{
@@ -586,14 +638,29 @@ onMounted(async () => {
             {{ u.remarks || '—' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" align="right" min-width="200" fixed="right">
+        <el-table-column label="操作" align="right" min-width="198" width="208" fixed="right">
           <template #default="{ row: u }">
             <div class="members-row-actions">
-              <button type="button" class="btn-sm secondary" @click="openLeaveMember(u)">
+              <button type="button" class="btn-sm secondary btn-members-op" title="手工请假" @click="openLeaveMember(u)">
                 请假
               </button>
-              <button type="button" class="btn-sm secondary" @click="openEditMember(u)">
-                修改会员信息
+              <button
+                type="button"
+                class="btn-sm secondary btn-members-op"
+                title="修改会员信息"
+                @click="openEditMember(u)"
+              >
+                修改
+              </button>
+              <button
+                type="button"
+                class="btn-sm danger btn-members-op"
+                :disabled="memberDeletingId === u.id"
+                title="删除会员"
+                @click="deleteMemberRow(u)"
+              >
+                <Trash2 :size="12" aria-hidden="true" />
+                删除
               </button>
             </div>
           </template>

@@ -41,7 +41,7 @@ def delivery_region_map_overview(db: Session) -> DeliveryRegionMapOverviewOut:
         .select_from(Member)
         .join(default_addr_pick, default_addr_pick.c.mid == Member.id)
         .join(MemberAddress, MemberAddress.id == default_addr_pick.c.addr_id)
-        .where(Member.balance > 0)
+        .where(Member.balance > 0, Member.deleted_at.is_(None))
         .order_by(Member.id.asc())
     )
     rows = db.execute(stmt).all()

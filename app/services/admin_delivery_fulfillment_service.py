@@ -54,7 +54,7 @@ def admin_mark_subscription_fulfilled(
         )
 
     member = db.execute(select(Member).where(Member.id == member_id).with_for_update()).scalar_one_or_none()
-    if not member:
+    if not member or member.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
     if bool(member.store_pickup) != (kind == "pickup"):
         raise HTTPException(

@@ -131,7 +131,7 @@ class Settings(BaseSettings):
     """预估每份餐品重量(kg)，用于 default 重量与 weight_gram。"""
     SF_DEFAULT_PRODUCT_TYPE: int = 1
     """order_detail.product_type，1=快餐 等，见 openic 文档。"""
-    SF_PRODUCT_CATEGORY_LABEL: str = "外韵落地配"
+    SF_PRODUCT_CATEGORY_LABEL: str = "外部落地配"
     """与 Excel 模板「商品类别」列对应，写入备注/货品描述。"""
     SF_DEFAULT_VEHICLE_TYPE: str = "小轿车"
     """与模板「车型」列默认，可写进订单备注。"""

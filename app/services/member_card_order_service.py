@@ -62,7 +62,7 @@ def ensure_miniprogram_offline_claim_order(
             detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早今天，10:00 及之后最早明天）",
         )
     m = db.get(Member, member_id)
-    if not m:
+    if not m or m.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
     if int(m.balance) > 0:
         raise HTTPException(status_code=400, detail="仅剩余次数为 0 时可登记线下开卡")
@@ -200,9 +200,18 @@ def list_card_orders_paged(
     pay_status: str | None,
     page: int,
     page_size: int,
+    include_history: bool = False,
 ) -> tuple[list[CardOrderOut], int]:
     join_on = Member.id == MemberCardOrder.member_id
     filters = []
+    if not include_history:
+        # 默认工作台：隐藏「已缴且已同步入账」的完结单；其余（未缴、已缴待入账等）仍显示
+        filters.append(
+            or_(
+                MemberCardOrder.pay_status != CardOrderPayStatus.PAID.value,
+                MemberCardOrder.applied_to_member.is_(False),
+            )
+        )
     if q and q.strip():
         esc = _escape_like_fragment(q.strip())
         filters.append(
@@ -236,7 +245,7 @@ def list_card_orders_paged(
 
 def create_card_order(db: Session, body: CardOrderCreateIn, *, operator: str) -> CardOrderOut:
     phone = body.phone.strip()
-    m = db.execute(select(Member).where(Member.phone == phone)).scalar_one_or_none()
+    m = db.execute(select(Member).where(Member.phone == phone, Member.deleted_at.is_(None))).scalar_one_or_none()
     if not m:
         if body.open_mode == CardOpenMode.RENEW:
             raise HTTPException(status_code=404, detail="会员不存在")
