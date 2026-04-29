@@ -537,7 +537,7 @@ class SfSameCityRowBase(BaseModel):
         description="收货纬度 GCJ-02；写入顺丰 receive.user_lat，缺省则回退示例坐标",
     )
     product_category: str = Field(
-        default="外韵落地配",
+        default="外部落地配",
         max_length=200,
         description="商品/品类显示名，写入 product_detail 与备注",
     )
