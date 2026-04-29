@@ -202,6 +202,39 @@ function adminUserYmd(v) {
   return s.length >= 10 ? s.slice(0, 10) : s
 }
 
+function ymdParts(ymd) {
+  const s = adminUserYmd(ymd)
+  if (s.length < 10) return null
+  const y = Number(s.slice(0, 4))
+  const m = Number(s.slice(5, 7))
+  const d = Number(s.slice(8, 10))
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null
+  return { y, m, d }
+}
+
+/** 单日请假文案：「M月d号」 */
+function formatLeaveDaySingleLabel(ymd) {
+  const p = ymdParts(ymd)
+  return p ? `${p.m}月${p.d}号` : String(adminUserYmd(ymd) || '').trim()
+}
+
+/**
+ * 跨日请假：同月年为「d号~d号」，否则补足月或年以防歧义
+ */
+function formatLeaveDayRangeLabel(rs, re) {
+  const a = ymdParts(rs)
+  const b = ymdParts(re)
+  if (!a || !b) return `${adminUserYmd(rs)}~${adminUserYmd(re)}`
+
+  if (a.y === b.y && a.m === b.m) {
+    return `${a.d}号~${b.d}号`
+  }
+  if (a.y === b.y) {
+    return `${a.m}月${a.d}号~${b.m}月${b.d}号`
+  }
+  return `${a.y}年${a.m}月${a.d}号~${b.y}年${b.m}月${b.d}号`
+}
+
 /** 列表「请假时间」：区间优先于「仅明日」 */
 function buildLeaveListFields(raw) {
   const rs = adminUserYmd(raw.leave_range_start)
@@ -210,22 +243,23 @@ function buildLeaveListFields(raw) {
     if (rs === re) {
       return {
         leave_kind: 'range_single',
-        leave_badge: '单日请假',
-        leave_detail: rs,
+        leave_badge: '',
+        leave_detail: formatLeaveDaySingleLabel(rs),
       }
     }
     return {
       leave_kind: 'range_multi',
-      leave_badge: '多天请假',
-      leave_detail: `${rs} ～ ${re}`,
+      leave_badge: '',
+      leave_detail: formatLeaveDayRangeLabel(rs, re),
     }
   }
   if (raw.is_leaved_tomorrow === true) {
     const td = adminUserYmd(raw.tomorrow_leave_target_date)
+    const label = td ? formatLeaveDaySingleLabel(td) : ''
     return {
       leave_kind: 'tomorrow',
-      leave_badge: '明日请假',
-      leave_detail: td ? `配送日 ${td}` : '目标日未绑定',
+      leave_badge: '',
+      leave_detail: label || '目标日未绑定',
     }
   }
   return {

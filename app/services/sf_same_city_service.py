@@ -12,7 +12,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -127,6 +127,12 @@ def _to_unix(dtx: datetime | None) -> int:
     return int(dtx.timestamp())
 
 
+def _second_day_noon_unix_shanghai(base_day: date) -> int:
+    """业务日「次日」中午 12:00（上海）；用于顺丰 ``expect_pickup_time`` / ``shop_expect_time`` 等秒级时间戳。"""
+    nd = base_day + timedelta(days=1)
+    return int(datetime(nd.year, nd.month, nd.day, 12, 0, 0, tzinfo=_SH).timestamp())
+
+
 def _load_default_address(
     db: Session, member_id: int, default_by_id: dict[int, MemberAddress]
 ) -> MemberAddress | None:
@@ -225,6 +231,8 @@ def _build_aggs(
             db, {int(aaddr.delivery_region_id)} if aaddr.delivery_region_id else set()
         )
         ra = (o.routing_area or "").strip() or routing_area_label(aaddr, nm)
+        if area_key and (ra or "").strip() != area_key.strip():
+            continue
         rline = _resolve_delivery_line(aaddr, nm)
         line_full = (rline.address_line or "").strip()
         if not line_full:
@@ -348,7 +356,7 @@ def _agg_to_row(
         recv_phone=(rphone or "—")[:20],
         product_category=(s.SF_PRODUCT_CATEGORY_LABEL or "餐品").strip(),
         weight_kg=round(wkg, 2),
-        push_immediately=True,
+        push_immediately=False,
         expect_delivery_at=expect_at_default,
         remark=rmk_s,
         is_direct=False,
@@ -437,6 +445,7 @@ def _create_order_payload(
     gset: Any,
     store: Any,
     now_ts: int,
+    delivery_date: date,
 ) -> dict[str, Any]:
     n_meals = max(1, int(row.subscription_pending_units) + int(row.single_meal_count))
     w_gram = int(float(row.weight_kg) * 1000)
@@ -499,6 +508,9 @@ def _create_order_payload(
     if is_appoint and expect_ts:
         body["appoint_type"] = 1
         body["expect_time"] = int(expect_ts)
+        # 用户期望上门时间 / 商家期望送达（骑士端展示、非考核字段）：业务日次日 12:00，秒级时间戳
+        second_noon = _second_day_noon_unix_shanghai(delivery_date)
+        body["shop_expect_time"] = str(int(second_noon))
     if decl is not None:
         body["declared_value"] = int(decl)
     body["is_person_direct"] = 1 if row.is_direct else 0
@@ -609,7 +621,7 @@ def push_sf_same_city(db: Session, body: SfSameCityPushIn) -> SfSameCityPushOut:
         snap_db: dict[str, Any] = snap_preview
         try:
             pld = _create_order_payload(
-                item, shop_order_id=soid, gset=gset, store=store, now_ts=now_ts
+                item, shop_order_id=soid, gset=gset, store=store, now_ts=now_ts, delivery_date=d
             )
             snap_db = _sf_push_request_snapshot(snap_preview, pld, gset=gset)
             res = httpc.create_order(

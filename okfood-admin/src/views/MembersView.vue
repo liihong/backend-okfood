@@ -610,7 +610,6 @@ onMounted(async () => {
           <template #default="{ row: u }">
             <div v-if="!u.leave_kind" class="leave-cell leave-cell--empty">—</div>
             <div v-else class="leave-cell" :title="u.leave_detail || ''">
-              <span class="leave-badge" :class="'leave-badge--' + u.leave_kind">{{ u.leave_badge }}</span>
               <div class="leave-detail">{{ u.leave_detail }}</div>
             </div>
           </template>
@@ -621,9 +620,8 @@ onMounted(async () => {
               <span class="balance-text" :class="{ warning: u.balance <= 2 && u.is_active }">{{
                 u.balanceLabel
               }}</span>
-              <p v-if="u.is_on_leave_today" class="balance-leave-hint">今日配送请假</p>
               <p
-                v-else-if="u.tomorrow_leave"
+                v-if="u.tomorrow_leave && !u.is_on_leave_today"
                 class="balance-leave-hint balance-leave-hint--tomorrow"
               >
                 明日配送请假

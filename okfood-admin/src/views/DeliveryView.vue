@@ -141,6 +141,8 @@ const sfBizDayPast = computed(() => {
   return Boolean(d && d < todayShanghaiStr())
 })
 const sfSelectAll = ref(true)
+/** 勾选后预览不按片区过滤（当日全部到家停靠点）；不勾选时优先顶部片区下拉，否则用当前 Tab，默认减少一次推单量 */
+const sfPreviewAllRegions = ref(false)
 /** 顺丰弹窗内：按收货人手机（表格「手机」列）再筛选，支持后几位或完整号 */
 const sfModalPhoneFilter = ref('')
 
@@ -157,6 +159,22 @@ const sfModalFilteredRows = computed(() => {
 const sfModalFilterActive = computed(() =>
   Boolean((sfModalPhoneFilter.value || '').trim().replace(/\s/g, ''))
 )
+
+/** 顺丰预览请求：与顶部筛选同源；未勾选「全部片区」时优先下拉片区，否则用当前 Tab（自提 Tab 不传 area，与原先全量到家一致） */
+function sfPreviewQueryArea() {
+  if (sfPreviewAllRegions.value) return ''
+  const fromToolbar = (areaFilter.value || '').trim()
+  if (fromToolbar) return fromToolbar
+  const tab = (activeRegionTab.value || '').trim()
+  if (tab === '门店自提') return ''
+  return tab
+}
+
+const sfPreviewScopeHint = computed(() => {
+  if (sfPreviewAllRegions.value) return '全部片区'
+  const a = sfPreviewQueryArea()
+  return a ? `片区「${a}」` : '全部片区'
+})
 
 /** 当前选中的路由分组片区（与 group.area 一致） */
 const activeRegionTab = ref('')
@@ -470,15 +488,13 @@ function applySfSelectAll(val) {
   }
 }
 
-async function openSfDialog() {
+async function loadSfPreviewData() {
   if (!adminAccessToken.value) return
-  sfModalPhoneFilter.value = ''
-  sfDialogOpen.value = true
   sfLoading.value = true
   const d0 = (deliveryDateQuery.value || '').trim() || todayShanghaiStr()
   const base = new URLSearchParams()
   base.set('delivery_date', d0)
-  const a = (areaFilter.value || '').trim()
+  const a = sfPreviewQueryArea()
   if (a) base.set('area', a)
   const ph = (phoneQuery.value || '').trim()
   if (ph) base.set('phone', ph)
@@ -503,6 +519,14 @@ async function openSfDialog() {
   } finally {
     sfLoading.value = false
   }
+}
+
+async function openSfDialog() {
+  if (!adminAccessToken.value) return
+  sfModalPhoneFilter.value = ''
+  sfPreviewAllRegions.value = false
+  sfDialogOpen.value = true
+  await loadSfPreviewData()
 }
 
 async function submitSfPush() {
@@ -751,9 +775,14 @@ async function markDelivery(memberId, kind) {
               ><input v-model="sfSelectAll" type="checkbox" @change="applySfSelectAll(sfSelectAll)" />
               全选</label
             >
+            <label class="sf-check-all sf-check-all--muted"
+              ><input v-model="sfPreviewAllRegions" type="checkbox" @change="loadSfPreviewData" />
+              加载全部片区</label
+            >
             <span class="sf-hint"
-              >业务日 <strong>{{ sfPreview.delivery_date || deliveryDateQuery }}</strong> ·
-              共 {{ sfModalFilteredRows.length }} 个停靠点<span v-if="sfModalFilterActive"
+              >业务日 <strong>{{ sfPreview.delivery_date || deliveryDateQuery }}</strong> · 范围
+              <strong>{{ sfPreviewScopeHint }}</strong> · 共 {{ sfModalFilteredRows.length }} 个停靠点<span
+                v-if="sfModalFilterActive"
                 >（全量 {{ (sfPreview.rows || []).length }}）</span
               >；取消勾选则该行不推。</span
             >
@@ -1161,6 +1190,10 @@ async function markDelivery(memberId, kind) {
   gap: 0.35rem;
   cursor: pointer;
   user-select: none;
+}
+.sf-check-all--muted {
+  color: #64748b;
+  font-size: 0.82rem;
 }
 .sf-hint {
   color: #64748b;

@@ -542,7 +542,9 @@ class SfSameCityRowBase(BaseModel):
         description="商品/品类显示名，写入 product_detail 与备注",
     )
     weight_kg: float = Field(..., ge=0.01, le=200.0, description="重量(Kg)，将换算为 weight_gram")
-    push_immediately: bool = Field(True, description="是=立即推单；否=预约 expect_time(送达)")
+    push_immediately: bool = Field(
+        False, description="否=预约单（默认）；是=立即推单（非预约，不传 expect_time）"
+    )
     expect_delivery_at: datetime | None = Field(
         default=None, description="期望送达时间(上海)；非立即时必传"
     )
