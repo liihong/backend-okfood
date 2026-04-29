@@ -137,12 +137,9 @@ async function saveMemberAddress() {
       { method: 'PATCH', body: JSON.stringify(payload) },
       { auth: true },
     )
-    showToast('地址已保存', 'success')
-    const list = await apiJson(`/api/admin/users/${Number(m.id)}/addresses`, {}, { auth: true })
-    addrList.value = Array.isArray(list) ? list : []
-    const updated = addrList.value.find((x) => Number(x.id) === Number(ed.id))
-    if (updated) pickAddrEdit(updated)
+    showToast('保存成功', 'success')
     emit('saved')
+    open.value = false
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -250,14 +247,15 @@ async function saveMemberAddress() {
 
             <el-row :gutter="12">
               <el-col :xs="24" :sm="14">
-                <el-form-item label="地点信息（小区 / 道路 / POI）">
+                <el-form-item label="地点信息（省市区保存时自动拼接；取自地图）">
                   <el-input
                     v-model="addrEdit.map_location_text"
                     type="textarea"
+                    readonly
                     :autosize="{ minRows: 2, maxRows: 4 }"
                     maxlength="500"
                     show-word-limit
-                    placeholder="不含门牌；可与地图文案同步"
+                    placeholder="请在下方的地图中选点自动填入（小区/POI 名，服务端会合并省市区）"
                   />
                 </el-form-item>
               </el-col>

@@ -67,14 +67,38 @@ function formatCoord(n) {
   return String(Math.round(Number(n) * 1e6) / 1e6)
 }
 
-function poiToMapText(poi) {
+/** 只作为「地点信息」后缀提交：小区/POI 名称。省市区由服务端逆地理合并，勿含道路路口长描述。 */
+function poiToLocationSuffix(poi) {
   if (!poi) return ''
-  const name = String(poi.name || '').trim()
-  const addr = String(poi.address || '').trim()
-  const district = String(poi.district || '').trim()
-  if (name && addr) return `${name} ${addr}`.trim()
-  if (district && name) return `${district}${name}`.trim()
-  return name || addr || district || ''
+  return String(poi.name || '').trim().slice(0, 500)
+}
+
+function regeocodeToLocationSuffix(regeocode) {
+  if (!regeocode || typeof regeocode !== 'object') return ''
+  const ac = regeocode.addressComponent || {}
+  const pickNeighborhood = () => {
+    const n = ac.neighborhood
+    if (typeof n === 'string' && n.trim()) return n.trim()
+    if (n && typeof n === 'object' && n.name) return String(n.name).trim()
+    return ''
+  }
+  const pickBuilding = () => {
+    const b = ac.building
+    if (typeof b === 'string' && b.trim()) return b.trim()
+    if (b && typeof b === 'object' && b.name) return String(b.name).trim()
+    return ''
+  }
+  let place = pickNeighborhood() || pickBuilding()
+  if (!place && Array.isArray(regeocode.pois) && regeocode.pois.length) {
+    place = String(regeocode.pois[0].name || '').trim()
+  }
+  if (!place && Array.isArray(regeocode.aois) && regeocode.aois.length) {
+    place = String(regeocode.aois[0].name || '').trim()
+  }
+  if (!place && ac.township) {
+    place = String(ac.township).trim()
+  }
+  return place.slice(0, 500)
 }
 
 function applyPick(lng, lat, mapText) {
@@ -89,10 +113,9 @@ function applyPick(lng, lat, mapText) {
 function reverseGeocodeToText(lng, lat) {
   if (!geocoder || !Number.isFinite(lng) || !Number.isFinite(lat)) return
   geocoder.getAddress([lng, lat], (status, result) => {
-    if (status === 'complete' && result?.regeocode?.formattedAddress) {
-      const t = String(result.regeocode.formattedAddress).trim()
-      if (t) emit('update:mapLocationText', t.slice(0, 500))
-    }
+    if (status !== 'complete' || !result?.regeocode) return
+    const t = regeocodeToLocationSuffix(result.regeocode)
+    if (t) emit('update:mapLocationText', t)
   })
 }
 
@@ -143,7 +166,7 @@ async function initMap() {
     AMap.plugin(['AMap.PlaceSearch', 'AMap.AutoComplete', 'AMap.Geocoder'], () => resolve())
   })
 
-  geocoder = new AMap.Geocoder({ city: '全国' })
+  geocoder = new AMap.Geocoder({ city: '全国', radius: 300, extensions: 'all' })
 
   if (map) {
     try {
@@ -204,7 +227,13 @@ async function initMap() {
     autoComplete.on('select', (e) => {
       const poi = e?.poi
       if (!poi) return
-      const txt = poiToMapText(poi)
+      const txt = poiToLocationSuffix(poi)
+      const showInInput = String(poi.name || txt || '').trim()
+      if (showInInput) {
+        searchKeyword.value = showInInput
+        const el = document.getElementById(props.searchInputId)
+        if (el && 'value' in el) el.value = showInInput
+      }
       let plng
       let plat
       if (poi.location) {
@@ -226,7 +255,14 @@ async function initMap() {
             if (loc) {
               const x = typeof loc.getLng === 'function' ? loc.getLng() : loc.lng
               const y = typeof loc.getLat === 'function' ? loc.getLat() : loc.lat
-              finishSearchPick(x, y, poiToMapText(p1) || txt)
+              const label = poiToLocationSuffix(p1) || txt
+              const inputLabel = String(p1.name || label || '').trim()
+              if (inputLabel) {
+                searchKeyword.value = inputLabel
+                const el = document.getElementById(props.searchInputId)
+                if (el && 'value' in el) el.value = inputLabel
+              }
+              finishSearchPick(x, y, label)
               return
             }
           }
@@ -246,6 +282,12 @@ async function initMap() {
 
 function finishSearchPick(lng, lat, mapText) {
   if (!Number.isFinite(lng) || !Number.isFinite(lat) || !map) return
+  if (mapText != null && String(mapText).trim()) {
+    const disp = String(mapText).trim()
+    searchKeyword.value = disp
+    const el = document.getElementById(props.searchInputId)
+    if (el && 'value' in el) el.value = disp
+  }
   applyPick(lng, lat, mapText || null)
   const AMap = window.AMap
   if (!marker) {
@@ -260,7 +302,9 @@ function finishSearchPick(lng, lat, mapText) {
 }
 
 function runKeywordSearch() {
-  const kw = String(searchKeyword.value || '').trim()
+  const el = document.getElementById(props.searchInputId)
+  const fromDom = el && 'value' in el ? String(el.value || '').trim() : ''
+  const kw = fromDom || String(searchKeyword.value || '').trim()
   if (!kw || !placeSearch) {
     return
   }
@@ -277,8 +321,20 @@ function runKeywordSearch() {
     }
     const lng = typeof loc.getLng === 'function' ? loc.getLng() : loc.lng
     const lat = typeof loc.getLat === 'function' ? loc.getLat() : loc.lat
-    finishSearchPick(lng, lat, poiToMapText(p0))
+    const suffix = poiToLocationSuffix(p0)
+    const inputLabel = String(p0.name || suffix || '').trim()
+    if (inputLabel) {
+      searchKeyword.value = inputLabel
+      const el = document.getElementById(props.searchInputId)
+      if (el && 'value' in el) el.value = inputLabel
+    }
+    finishSearchPick(lng, lat, suffix)
   })
+}
+
+function onSearchInput(e) {
+  const v = e?.target?.value
+  searchKeyword.value = typeof v === 'string' ? v : ''
 }
 
 watch(
@@ -326,17 +382,17 @@ onUnmounted(() => {
       <div class="mdmp-search">
         <input
           :id="searchInputId"
-          v-model="searchKeyword"
           type="text"
           class="mdmp-search-input"
           placeholder="搜索地点（联想或输入后点搜索），如：宝龙城市广场 新乡"
           autocomplete="off"
+          @input="onSearchInput"
           @keydown.enter.prevent="runKeywordSearch"
         />
         <button type="button" class="mdmp-search-btn" @click="runKeywordSearch">搜索</button>
       </div>
       <p class="mdmp-hint">
-        选用联想结果或「搜索」第一条 POI；也可<strong>点击地图</strong>、<strong>拖动标记</strong>微调。坐标系为 GCJ-02（高德）。
+        选用联想或「搜索」后，搜索框会显示所选 POI 名称；仅供确认，最终以地点信息（小区名）与保存时省市区合并为准。也可<strong>点击地图</strong>、<strong>拖动标记</strong>微调。坐标系 GCJ-02（高德）。
       </p>
       <div ref="mapEl" class="mdmp-map" />
     </template>

@@ -407,8 +407,7 @@ onMounted(async () => {
           </div>
           <div class="members-filter-toolbar">
             <div class="members-validity-tabs" role="tablist" aria-label="会员有效期">
-              <button
-                type="button"
+              <el-button text
                 role="tab"
                 class="members-validity-tab"
                 :class="{ 'members-validity-tab--active': membersValidityTab === 'all' }"
@@ -416,9 +415,8 @@ onMounted(async () => {
                 @click="membersValidityTab = 'all'"
               >
                 全部
-              </button>
-              <button
-                type="button"
+              </el-button>
+              <el-button text
                 role="tab"
                 class="members-validity-tab"
                 :class="{ 'members-validity-tab--active': membersValidityTab === 'active' }"
@@ -426,9 +424,8 @@ onMounted(async () => {
                 @click="membersValidityTab = 'active'"
               >
                 生效中
-              </button>
-              <button
-                type="button"
+              </el-button>
+              <el-button text
                 role="tab"
                 class="members-validity-tab"
                 :class="{ 'members-validity-tab--active': membersValidityTab === 'expired' }"
@@ -436,7 +433,7 @@ onMounted(async () => {
                 @click="membersValidityTab = 'expired'"
               >
                 已过期
-              </button>
+              </el-button>
             </div>
             <div class="members-extra-filters" aria-label="套餐、片区与状态筛选">
               <label class="members-filter-label" for="members-plan-filter">套餐</label>
@@ -463,8 +460,7 @@ onMounted(async () => {
                   {{ r.name || '—' }}
                 </option>
               </select>
-              <button
-                type="button"
+              <el-button text
                 role="tab"
                 class="members-validity-tab"
                 :class="{ 'members-validity-tab--active': membersInactiveOnly }"
@@ -472,9 +468,8 @@ onMounted(async () => {
                 @click="toggleInactiveOnly"
               >
                 未开卡
-              </button>
-              <button
-                type="button"
+              </el-button>
+              <el-button text
                 role="tab"
                 class="members-validity-tab"
                 :class="{ 'members-validity-tab--active': membersOnLeaveOnly }"
@@ -482,7 +477,7 @@ onMounted(async () => {
                 @click="toggleOnLeaveOnly"
               >
                 请假中
-              </button>
+              </el-button>
             </div>
           </div>
         </div>
@@ -495,7 +490,7 @@ onMounted(async () => {
         :row-key="memberRowKey"
         empty-text="暂无会员数据"
       >
-        <el-table-column label="会员信息" min-width="128">
+        <el-table-column label="会员信息" min-width="100">
           <template #default="{ row: u }">
             <div class="t-name">
               {{ u.name }}
@@ -511,7 +506,7 @@ onMounted(async () => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="会员级别" align="center" min-width="88">
+        <el-table-column label="级别" align="center" min-width="75">
           <template #default="{ row: u }">
             <span class="t-plan" :class="planTagClass(u.plan)">{{ u.plan }}</span>
           </template>
@@ -521,7 +516,7 @@ onMounted(async () => {
             {{ memberAddressDetailWithoutArea(u) || '—' }}
           </template>
         </el-table-column>
-        <el-table-column label="请假时间" min-width="92" width="102" class-name="td-col-leave">
+        <el-table-column label="请假时间" min-width="150" width="120" class-name="td-col-leave">
           <template #default="{ row: u }">
             <div v-if="!u.leave_kind" class="leave-cell leave-cell--empty">—</div>
             <div v-else class="leave-cell" :title="u.leave_detail || ''">
@@ -530,7 +525,7 @@ onMounted(async () => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="剩余 / 总次数" align="center" min-width="108">
+        <el-table-column label="剩余 / 总次数" align="center" min-width="90">
           <template #default="{ row: u }">
             <div class="balance-cell">
               <span class="balance-text" :class="{ warning: u.balance <= 2 && u.is_active }">{{
@@ -546,7 +541,7 @@ onMounted(async () => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="状态" min-width="88">
+        <el-table-column label="状态" min-width="80">
           <template #default="{ row: u }">
             <span :class="memberStatusClass(u.status)">{{ u.status }}</span>
           </template>
@@ -556,54 +551,43 @@ onMounted(async () => {
             {{ u.remarks || '—' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" align="right" min-width="268" width="278" fixed="right">
+        <el-table-column label="操作" align="right" min-width="220" fixed="right">
           <template #default="{ row: u }">
             <div class="members-row-actions">
-              <button type="button" class="btn-sm secondary btn-members-op" title="地址管理：地图选点，地点与门牌分别保存"
+              <el-button size="small" class="btn-members-op" type="primary" title="地址管理：地图选点，地点与门牌分别保存"
                 @click="openMemberAddresses(u)">
                 <MapPin :size="12" aria-hidden="true" />
                 地址
-              </button>
-              <button type="button" class="btn-sm secondary btn-members-op" title="手工请假" @click="openLeaveMember(u)">
+              </el-button>
+              <el-button size="small" class="btn-members-op" type="warning" title="手工请假" @click="openLeaveMember(u)">
                 请假
-              </button>
-              <button
-                type="button"
-                class="btn-sm secondary btn-members-op"
-                title="修改会员信息"
-                @click="openEditMember(u)"
-              >
+              </el-button>
+              <el-button size="small" class="btn-members-op" type="primary" title="修改会员信息" @click="openEditMember(u)">
                 修改
-              </button>
-              <button
-                type="button"
-                class="btn-sm danger btn-members-op"
+              </el-button>
+              <el-button size="small" type="danger" class="btn-members-op"
                 :disabled="memberDeletingId === u.id"
                 title="删除会员"
                 @click="deleteMemberRow(u)"
               >
                 <Trash2 :size="12" aria-hidden="true" />
                 删除
-              </button>
+              </el-button>
             </div>
           </template>
         </el-table-column>
       </AdminTable>
       <div v-if="adminAccessToken" class="members-pagination">
-        <button type="button" class="btn-sm" :disabled="membersPage <= 1" @click="goMembersPrev">
-          上一页
-        </button>
+        <el-button plain size="small" :disabled="membersPage <= 1" @click="goMembersPrev">上一页</el-button>
         <span class="members-page-meta"
           >第 {{ membersPage }} / {{ membersTotalPages }} 页 · 共 {{ membersTotal }} 条</span
         >
-        <button
-          type="button"
-          class="btn-sm"
+        <el-button plain size="small"
           :disabled="membersPage >= membersTotalPages"
           @click="goMembersNext"
         >
           下一页
-        </button>
+        </el-button>
       </div>
     </div>
 
@@ -619,9 +603,9 @@ onMounted(async () => {
             <h3>手工请假</h3>
             <p>ADMIN LEAVE</p>
           </div>
-          <button type="button" class="close-btn" @click="showLeaveModal = false">
+          <el-button text circle class="close-btn" @click="showLeaveModal = false">
             <X :size="20" />
-          </button>
+          </el-button>
         </div>
         <form class="modal-form" @submit.prevent="submitLeaveMember">
           <p v-if="leaveTarget" class="modal-hint modal-hint--tight">
@@ -659,9 +643,10 @@ onMounted(async () => {
             </template>
             <p class="modal-hint">后台代操作不校验当日请假截止时间；日期均为上海业务日。</p>
           </div>
-          <button type="submit" class="btn-submit-order" :disabled="leaveSaving">
+          <el-button type="primary" class="btn-submit-order" native-type="submit" :loading="leaveSaving"
+            :disabled="leaveSaving">
             {{ leaveSaving ? '提交中…' : '确认' }}
-          </button>
+          </el-button>
         </form>
       </div>
     </div>

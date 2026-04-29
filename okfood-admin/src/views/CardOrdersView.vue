@@ -642,12 +642,13 @@ class="member-pill co-sync-pill"
               @warn="onDeliveryMapWarn"
             />
             <div class="form-group">
-              <label>地图详细地址</label>
+              <label>地图详细地址（只读）</label>
               <textarea
                 v-model="createForm.map_location_text"
                 rows="2"
                 maxlength="500"
-                placeholder="选点后自动填入，可直接修改"
+                readonly
+                placeholder="选点后自动填入（小区/POI 名；省市区由保存时合并）"
               />
             </div>
             <div class="form-group">
