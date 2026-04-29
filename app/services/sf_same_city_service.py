@@ -17,6 +17,7 @@ from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from fastapi import HTTPException
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
@@ -376,15 +377,19 @@ def _has_success(db: Session, d: date, stop_id: str) -> bool:
     return r is not None
 
 
+def aggs_for_delivery_date(db: Session, d: date) -> dict[str, _Agg]:
+    """当日全部停靠点聚合（与同业务日顺丰预览/履约同源）。"""
+    members, default_by_id = eligible_members_for_delivery(db, delivery_date=d, delivery_region_id=None)
+    mlist = list(members)
+    return _build_aggs(db, d, None, None, mlist, default_by_id)
+
+
 def load_agg_for_stop_id(db: Session, d: date, stop_id: str) -> _Agg | None:
     """
     按业务日与停靠点 id（与顺丰预览/推单同源）解析聚合行；不加片区/手机筛选，
     与「全量大表 + 单次点餐到家」口径一致。
     """
-    members, default_by_id = eligible_members_for_delivery(db, delivery_date=d, delivery_region_id=None)
-    mlist = list(members)
-    ags = _build_aggs(db, d, None, None, mlist, default_by_id)
-    return ags.get(stop_id)
+    return aggs_for_delivery_date(db, d).get(stop_id)
 
 
 def preview_sf_same_city(
@@ -680,3 +685,77 @@ def _persist_fail(
     )
     db.add(row)
     db.commit()
+
+
+def cancel_sf_same_city_push(
+    db: Session,
+    *,
+    push_id: int,
+    cancel_reason: str | None = None,
+) -> dict[str, Any]:
+    """
+    调用顺丰开放平台 ``POST …/cancelorder?sign=``，同步返回顺丰 JSON。
+
+    同城开放平台约定示例字段（与三方封装一致）：``order_id`` + ``order_type``
+    （``1``=顺丰订单号，``2``=商家订单号）、可选 ``cancel_code`` / ``cancel_reason``。
+    """
+    gset = get_settings()
+    if not gset.SF_OPEN_DEV_ID or not (gset.SF_OPEN_SHOP_ID or "").strip() or not (
+        gset.SF_OPEN_SECRET or ""
+    ).strip():
+        raise HTTPException(status_code=400, detail="请先在 .env 配置 SF_OPEN_DEV_ID、SF_OPEN_SHOP_ID、SF_OPEN_SECRET")
+    row = db.get(SfSameCityPush, push_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="推单记录不存在")
+    try:
+        ec_int = int(row.error_code) if row.error_code is not None else None
+    except (TypeError, ValueError):
+        ec_int = None
+    has_sf_id = bool((row.sf_order_id or "").strip())
+    create_ok = ec_int == 0
+    # 仅「明确创单成功」或「已有顺丰单号」才允许调顺丰 cancel（后者兼容异常/历史数据）
+    if not create_ok and not has_sf_id:
+        em = (row.error_msg or "").strip()
+        bits = [
+            "本条推单在系统中标记为「未成功创单」（error_code≠0），且未保存顺丰订单号，无法在顺丰侧取消。"
+            " 常见原因：请求顺丰 createorder 时被拒绝或超时落库失败。"
+        ]
+        if row.error_code is not None:
+            bits.append(f"落地 error_code={row.error_code}。")
+        if em:
+            bits.append(em[:300])
+        raise HTTPException(status_code=400, detail=" ".join(bits))
+    st = row.sf_callback_order_status
+    if st is not None and int(st) in (2, 17, 22, 31):
+        raise HTTPException(status_code=400, detail="当前顺丰回调状态已为取消、完结或取消中，如需核对请以顺丰控制台为准")
+    sfo = (row.sf_order_id or "").strip()
+    shop_oid = (row.shop_order_id or "").strip()
+    if not sfo and not shop_oid:
+        raise HTTPException(status_code=400, detail="缺少顺丰单号与商家订单号")
+    reason = (cancel_reason or "").strip() or "商家发起取消"
+    now_ts = int(time.time())
+    dev_id = int(gset.SF_OPEN_DEV_ID)
+    body: dict[str, Any] = {
+        "cancel_code": 313,
+        "cancel_reason": reason[:200],
+        "dev_id": dev_id,
+        "push_time": now_ts,
+    }
+    if sfo:
+        body["order_id"] = sfo
+        body["order_type"] = 1
+    else:
+        body["order_id"] = shop_oid[:64]
+        body["order_type"] = 2
+        body["shop_id"] = str(gset.SF_OPEN_SHOP_ID or "").strip()
+        body["shop_type"] = int(gset.SF_OPEN_SHOP_TYPE or 1)
+    httpc = SfOpenClient()
+    try:
+        res = httpc.cancel_order(
+            body, dev_id=dev_id, app_key=(gset.SF_OPEN_SECRET or "").strip()
+        )
+    except SfOpenApiError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if isinstance(res, dict):
+        return {"message": "顺丰已受理取消", "sf_response": res}
+    return {"message": "顺丰已受理取消", "sf_response": None}

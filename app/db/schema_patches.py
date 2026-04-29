@@ -119,6 +119,68 @@ def apply_member_addresses_map_door_columns() -> None:
         )
 
 
+def apply_member_addresses_pca_columns() -> None:
+    """为 member_addresses 增加 province / city / district；已存在则跳过。"""
+    try:
+        insp = inspect(engine)
+        if not insp.has_table("member_addresses"):
+            return
+        col_names = {c["name"].lower() for c in insp.get_columns("member_addresses")}
+    except Exception as e:
+        logger.warning("补库: 无法检查 member_addresses 表结构: %s", e)
+        return
+
+    if "province" in col_names and "city" in col_names and "district" in col_names:
+        return
+
+    dname = engine.dialect.name
+    try:
+        with engine.begin() as conn:
+            if dname in ("mysql", "mariadb"):
+                if "province" not in col_names:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE `member_addresses` ADD COLUMN `province` VARCHAR(64) NULL "
+                            "COMMENT '省' AFTER `lat`"
+                        )
+                    )
+                if "city" not in col_names:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE `member_addresses` ADD COLUMN `city` VARCHAR(64) NULL "
+                            "COMMENT '市' AFTER `province`"
+                        )
+                    )
+                if "district" not in col_names:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE `member_addresses` ADD COLUMN `district` VARCHAR(64) NULL "
+                            "COMMENT '区' AFTER `city`"
+                        )
+                    )
+            elif dname == "sqlite":
+                if "province" not in col_names:
+                    conn.execute(text("ALTER TABLE member_addresses ADD COLUMN province VARCHAR(64)"))
+                if "city" not in col_names:
+                    conn.execute(text("ALTER TABLE member_addresses ADD COLUMN city VARCHAR(64)"))
+                if "district" not in col_names:
+                    conn.execute(text("ALTER TABLE member_addresses ADD COLUMN district VARCHAR(64)"))
+            else:
+                logger.error(
+                    "补库: 当前库类型 %s 需手动执行 "
+                    "sql/migrations/20260429_member_addresses_pca.sql",
+                    dname,
+                )
+                return
+        logger.info("补库: 已添加 member_addresses.province / city / district")
+    except Exception as e:
+        logger.error(
+            "补库: 添加 province/city/district 失败，请手动执行 "
+            "sql/migrations/20260429_member_addresses_pca.sql: %s",
+            e,
+        )
+
+
 def apply_sf_same_city_callback_support() -> None:
     """顺丰回调表及对 sf_same_city_pushes 的增量列；未迁移时补齐。"""
     try:

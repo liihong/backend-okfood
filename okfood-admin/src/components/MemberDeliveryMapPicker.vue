@@ -38,6 +38,8 @@ const props = defineProps({
   lngStr: { type: String, default: '' },
   latStr: { type: String, default: '' },
   mapLocationText: { type: String, default: '' },
+  /** 页内多处地图时设为唯一 id，避免搜索框冲突 */
+  searchInputId: { type: String, default: 'card-order-delivery-amap-search' },
 })
 
 const emit = defineEmits(['update:lngStr', 'update:latStr', 'update:mapLocationText', 'warn'])
@@ -47,7 +49,6 @@ const amapSecurity = String(import.meta.env.VITE_AMAP_SECURITY_CODE || '').trim(
 
 const mapEl = ref(null)
 const searchKeyword = ref('')
-const searchInputId = 'card-order-delivery-amap-search'
 
 let map = null
 let marker = null
@@ -194,9 +195,9 @@ async function initMap() {
   })
 
   await nextTick()
-  if (document.getElementById(searchInputId)) {
+  if (document.getElementById(props.searchInputId)) {
     autoComplete = new AMap.AutoComplete({
-      input: searchInputId,
+      input: props.searchInputId,
       city: '新乡',
       citylimit: false,
     })

@@ -10,12 +10,86 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.models.single_meal_order import SingleMealOrder
 from app.models.sf_same_city_push import SfSameCityPush
 from app.services.admin_delivery_fulfillment_service import subscription_fulfilled_try_sf_home_no_commit
-from app.services.sf_same_city_service import load_agg_for_stop_id
+from app.services.sf_same_city_service import aggs_for_delivery_date, load_agg_for_stop_id
 from app.services.single_meal_order_service import mark_single_meal_delivered_sf_completion_no_commit
 
 logger = logging.getLogger(__name__)
+
+
+def _fallback_members_from_snapshot(snap: Any) -> list[dict[str, Any]]:
+    """创单快照中的收件人姓名/电话（停靠点无法再解析时的回退）。"""
+    if not isinstance(snap, dict):
+        return []
+    pr = snap.get("preview_row")
+    if not isinstance(pr, dict):
+        return []
+    rname = (pr.get("recv_name") or "").strip()
+    rphone = (pr.get("recv_phone") or "").strip()
+    if rphone in ("—",):
+        rphone = ""
+    if not rname and not rphone:
+        return []
+    return [
+        {
+            "member_id": None,
+            "name": rname or "—",
+            "phone": rphone or "—",
+            "kind": "snapshot",
+        }
+    ]
+
+
+def _member_rows_from_agg(db: Session, agg: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for x in getattr(agg, "sub_lines", None) or []:
+        mid = x.get("member_id")
+        if mid is None:
+            continue
+        try:
+            im = int(mid)
+        except (TypeError, ValueError):
+            continue
+        out.append(
+            {
+                "member_id": im,
+                "name": (x.get("name") or "").strip() or "—",
+                "phone": (x.get("phone") or "").strip() or "—",
+                "kind": "subscription",
+            }
+        )
+    singles = getattr(agg, "singles", None) or []
+    if singles:
+        ids = []
+        for sng in singles:
+            try:
+                ids.append(int(sng["id"]))
+            except (KeyError, TypeError, ValueError):
+                pass
+        oid_mid: dict[int, int] = {}
+        if ids:
+            rows = db.execute(
+                select(SingleMealOrder.id, SingleMealOrder.member_id).where(SingleMealOrder.id.in_(ids))
+            ).all()
+            for oid, mid in rows:
+                if mid is not None:
+                    oid_mid[int(oid)] = int(mid)
+        for sng in singles:
+            try:
+                oid = int(sng["id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            out.append(
+                {
+                    "member_id": oid_mid.get(oid),
+                    "name": (sng.get("member_name") or "").strip() or "—",
+                    "phone": (sng.get("member_phone") or "").strip() or "—",
+                    "kind": "single_meal",
+                }
+            )
+    return out
 
 
 def apply_sf_order_complete_fulfillment(db: Session, pus: SfSameCityPush) -> None:
@@ -73,15 +147,23 @@ def list_sf_same_city_pushes_for_monitor(
     off = max(0, (page - 1) * page_size)
     rows = list(db.scalars(q.offset(off).limit(page_size)).all())
 
+    def iso_dt(x: Any) -> str | None:
+        if x is None:
+            return None
+        if hasattr(x, "isoformat"):
+            return x.isoformat()
+        return str(x)
+
+    agg_by_date: dict[date, dict[str, Any]] = {}
+    for d0 in {r.delivery_date for r in rows if r.delivery_date is not None}:
+        agg_by_date[d0] = aggs_for_delivery_date(db, d0)
+
     out: list[dict[str, Any]] = []
     for r in rows:
-
-        def iso_dt(x: Any) -> str | None:
-            if x is None:
-                return None
-            if hasattr(x, "isoformat"):
-                return x.isoformat()
-            return str(x)
+        agg = agg_by_date.get(r.delivery_date, {}).get(str(r.stop_id)) if r.delivery_date else None
+        members = _member_rows_from_agg(db, agg) if agg is not None else []
+        if not members:
+            members = _fallback_members_from_snapshot(r.request_snapshot)
 
         out.append(
             {
@@ -99,6 +181,7 @@ def list_sf_same_city_pushes_for_monitor(
                 "sf_callback_order_status": int(r.sf_callback_order_status)
                 if r.sf_callback_order_status is not None
                 else None,
+                "members": members,
             }
         )
     return out, total

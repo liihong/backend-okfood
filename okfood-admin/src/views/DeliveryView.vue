@@ -178,18 +178,6 @@ const selectedGroup = computed(() => {
   return groups.find((g) => g.area === cur) || groups[0]
 })
 
-function countIssueStops(sheet) {
-  let n = 0
-  for (const g of sheet.groups || []) {
-    for (const st of g.stops || []) {
-      if (st.has_area_issue) n += 1
-    }
-  }
-  return n
-}
-
-const sheetIssueStopCount = computed(() => countIssueStops(sheetToday.value))
-
 function flatStopsForSheet(sheet) {
   const out = []
   for (const g of sheet.groups || []) {
@@ -922,11 +910,6 @@ async function markDelivery(memberId, kind) {
             配送列表
             <span class="delivery-day-date">{{ sheetToday.delivery_date }}</span>
           </h3>
-          <p v-if="sheetIssueStopCount > 0" class="delivery-area-alert delivery-area-alert--compact">
-            有
-            <strong>{{ sheetIssueStopCount }}</strong>
-            个配送点需维护片区，见下表标注。
-          </p>
           <p v-if="!sheetToday.groups?.length" class="members-loading">
             <template v-if="sheetToday.is_subscription_delivery_day === false">
               该日非订阅配送业务日：周日、国家法定节假日及国务院调休放假日不生成大表，份数不计入该日。请选择其它业务日，或在「营业概览」核对备餐人数是否为 0。
@@ -941,14 +924,6 @@ async function markDelivery(memberId, kind) {
           <div v-else class="delivery-region-tabs">
             <div v-if="selectedGroup" role="tabpanel" :aria-label="selectedGroup.area" class="delivery-tabpanel">
               <div class="group-card">
-                <div class="group-header" :class="{ 'group-header--area-warn': selectedGroup.has_area_issue }">
-                  <h4>
-                    <MapPin :size="18" class="inline-icon" />
-                    {{ selectedGroup.area }}
-                    <span v-if="selectedGroup.has_area_issue" class="group-area-badge">区域待维护</span>
-                  </h4>
-                  <span class="badge">{{ groupTabMetaLine(selectedGroup) }}</span>
-                </div>
                 <div class="delivery-batch-bar">
                   <span class="delivery-batch-bar__hint">
                     勾选左侧行可批量操作；已选 <strong>{{ selectedDeliveryStops.length }}</strong> 个配送点，待标记
@@ -1242,11 +1217,6 @@ async function markDelivery(memberId, kind) {
   font-weight: 700;
   color: #64748b;
 }
-.delivery-area-alert--compact {
-  margin: 0 0 0.75rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.75rem;
-}
 
 .delivery-region-tabs {
   display: flex;
@@ -1443,32 +1413,6 @@ async function markDelivery(memberId, kind) {
 .t-contact {
   font-size: 0.8rem;
   vertical-align: top;
-}
-
-.delivery-area-alert {
-  margin: 0.75rem 0 0;
-  padding: 0.75rem 1rem;
-  border-radius: 0.75rem;
-  background: #fff7ed;
-  border: 1px solid #fdba74;
-  color: #9a3412;
-  font-size: 0.8rem;
-  line-height: 1.45;
-}
-
-.group-header--area-warn {
-  background: linear-gradient(90deg, rgba(251, 146, 60, 0.2), transparent);
-}
-
-.group-area-badge {
-  margin-left: 0.5rem;
-  font-size: 12px;
-  font-weight: 900;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #fed7aa;
-  color: #9a3412;
-  vertical-align: middle;
 }
 
 .contact-line--area-warn .t-name {

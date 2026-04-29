@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from decimal import Decimal
 from decimal import Decimal
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
@@ -599,6 +599,18 @@ class SfSameCityPushOut(BaseModel):
     results: list[SfSameCityPushItemResult] = Field(default_factory=list)
 
 
+class SfSameCityPushMonitorMemberRow(BaseModel):
+    """监控页：停靠点对应的系统会员（订阅行 + 单点餐）；无匹配时可能来自快照收件人。"""
+
+    member_id: int | None = None
+    name: str = ""
+    phone: str = ""
+    kind: str = Field(
+        default="subscription",
+        description="subscription=订阅停靠点；single_meal=单点餐；snapshot=仅快照收件人（无法解析停靠点聚合时）",
+    )
+
+
 class SfSameCityPushMonitorRow(BaseModel):
     """顺丰推单列表：订单监控页，与同城创单落地库字段一致。"""
 
@@ -614,6 +626,25 @@ class SfSameCityPushMonitorRow(BaseModel):
     last_callback_at: str | None = None
     last_callback_kind: str | None = None
     sf_callback_order_status: int | None = None
+    members: list[SfSameCityPushMonitorMemberRow] = Field(
+        default_factory=list,
+        description="该顺丰单停靠点在当前系统聚合中的会员明细（可多人物流合并）",
+    )
+
+
+class SfSameCityCancelIn(BaseModel):
+    """调用顺丰 ``cancelorder`` 的可选参数。"""
+
+    cancel_reason: str | None = Field(
+        None,
+        max_length=200,
+        description="取消原因；不传则按顺丰侧默认「商家发起取消」语义发送",
+    )
+
+
+class SfSameCityCancelOut(BaseModel):
+    message: str = ""
+    sf_response: dict[str, Any] | None = Field(None, description="顺丰接口原始 JSON")
 
 
 class CardOrderOut(BaseModel):

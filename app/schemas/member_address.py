@@ -13,6 +13,9 @@ class MemberAddressOut(BaseModel):
     detail_address: str
     map_location_text: str | None = Field(None, description="地图选点/省市区道路小区等")
     door_detail: str | None = Field(None, description="楼栋、单元、门牌等")
+    province: str | None = Field(None, description="省（逆地理或与前端同步）")
+    city: str | None = Field(None, description="市")
+    district: str | None = Field(None, description="区")
     remarks: str | None
     location: Location | None
     is_default: bool

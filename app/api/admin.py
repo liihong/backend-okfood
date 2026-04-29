@@ -4,8 +4,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from app.core.deps import SessionDep, admin_subject, issue_admin_token
+from app.models.member import Member
 from app.models.enums import PlanType
 from app.core.limiter import limiter
+from app.schemas.member_address import MemberAddressUpdateIn
 from app.schemas.admin import (
     AdminAddressIn,
     AdminDeliveryMarkIn,
@@ -26,6 +28,8 @@ from app.schemas.admin import (
     SfSameCityPushIn,
     SfSameCityPushOut,
     SfSameCityPushMonitorRow,
+    SfSameCityCancelIn,
+    SfSameCityCancelOut,
 )
 from app.schemas.common import TokenResponse
 from app.services.admin_service import (
@@ -48,10 +52,11 @@ from app.services.admin_service import (
 from app.services.sf_order_fulfillment_service import (
     list_sf_same_city_pushes_for_monitor,
 )
-from app.services.sf_same_city_service import preview_sf_same_city, push_sf_same_city
+from app.services.sf_same_city_service import cancel_sf_same_city_push, preview_sf_same_city, push_sf_same_city
 from app.services.store_config_service import get_store_config, update_store_config
 from app.services.delivery_sheet_service import build_delivery_sheet
 from app.services.admin_delivery_fulfillment_service import admin_mark_subscription_fulfilled
+from app.services.member_address_service import list_addresses, update_address
 from app.services.member_service import (
     admin_member_leave,
     admin_patch_member_profile,
@@ -164,6 +169,20 @@ def delivery_sf_pushes(
         page_size=page_size,
         msg="获取成功",
     )
+
+
+@router.post("/delivery-sf/pushes/{push_id}/cancel", response_model=None)
+def delivery_sf_cancel_push(
+    push_id: int,
+    body: SfSameCityCancelIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """调用顺丰 ``cancelorder`` 取消配送（商家异常场景）；同步返回顺丰响应 JSON。"""
+    _ = admin_username
+    raw = cancel_sf_same_city_push(db, push_id=push_id, cancel_reason=body.cancel_reason)
+    out = SfSameCityCancelOut.model_validate(raw)
+    return success(data=dump_model(out), msg="取消请求已提交")
 
 
 @router.post("/delivery-mark")
@@ -372,6 +391,38 @@ def member_leave(body: AdminMemberLeaveIn, db: SessionDep, admin_username: str =
         end=body.end,
     )
     return success(data=dump_model(member), msg="请假状态已更新")
+
+
+@router.get("/users/{member_id}/addresses")
+def admin_member_addresses_list(
+    member_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """会员档案：列出该会员全部配送地址（含地图文案、门牌、经纬度与省市区）。"""
+    _ = admin_username
+    m = db.get(Member, member_id)
+    if not m or m.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="会员不存在")
+    items = list_addresses(db, member_id)
+    return success(data=[dump_model(i) for i in items], msg="获取成功")
+
+
+@router.patch("/users/{member_id}/addresses/{address_id}")
+def admin_member_address_patch(
+    member_id: int,
+    address_id: int,
+    body: MemberAddressUpdateIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """管理端保存会员地址：可与小程序拆分一致（地点文案 / 门牌），坐标变更时服务端逆地理写入省市区并重算片区。"""
+    _ = admin_username
+    m = db.get(Member, member_id)
+    if not m or m.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="会员不存在")
+    out = update_address(db, member_id, address_id, body)
+    return success(data=dump_model(out), msg="地址已保存")
 
 
 @router.get("/dishes")

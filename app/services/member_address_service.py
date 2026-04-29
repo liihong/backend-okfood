@@ -47,9 +47,15 @@ def _sync_detail_from_map_and_door(map_text: str | None, door: str | None) -> st
     return f"{m} {d}".strip()
 
 
-def _enrich_map_location_from_coords(lng: float, lat: float, map_text: str | None) -> str | None:
-    pca = amap.regeocode_pca(lng, lat)
-    return _merge_pca_into_map_location(pca, map_text)
+def _fill_regeo_fields_from_coords(row: MemberAddress, lng: float | None, lat: float | None) -> None:
+    if lng is None or lat is None:
+        return
+    snap = amap.fetch_regeo_snapshot(float(lng), float(lat))
+    if not snap:
+        return
+    row.province = snap.province
+    row.city = snap.city
+    row.district = snap.district
 
 
 def _row_coords(row: MemberAddress) -> tuple[float, float] | None:
@@ -138,8 +144,14 @@ def upsert_default_address_after_register(
         row.delivery_region_id = delivery_region_id
         row.lng = lng
         row.lat = lat
+        _fill_regeo_fields_from_coords(row, lng, lat)
         return
     _clear_defaults(db, member_id, except_id=None)
+    pv = cy = ds = None
+    if lng is not None and lat is not None:
+        snap_reg = amap.fetch_regeo_snapshot(float(lng), float(lat))
+        if snap_reg:
+            pv, cy, ds = snap_reg.province, snap_reg.city, snap_reg.district
     db.add(
         MemberAddress(
             member_id=member_id,
@@ -150,6 +162,9 @@ def upsert_default_address_after_register(
             remarks=remarks,
             lng=lng,
             lat=lat,
+            province=pv,
+            city=cy,
+            district=ds,
             is_default=True,
         )
     )
@@ -187,8 +202,13 @@ def upsert_default_address_from_admin_map_pick(
         row.lng = lng_f
         row.lat = lat_f
         row.delivery_region_id = rid
+        _fill_regeo_fields_from_coords(row, lng_f, lat_f)
         return
     _clear_defaults(db, member_id, except_id=None)
+    pv = cy = ds = None
+    snap_ins = amap.fetch_regeo_snapshot(lng_f, lat_f)
+    if snap_ins:
+        pv, cy, ds = snap_ins.province, snap_ins.city, snap_ins.district
     db.add(
         MemberAddress(
             member_id=member_id,
@@ -201,6 +221,9 @@ def upsert_default_address_from_admin_map_pick(
             remarks=None,
             lng=lng_f,
             lat=lat_f,
+            province=pv,
+            city=cy,
+            district=ds,
             is_default=True,
         )
     )
@@ -241,8 +264,14 @@ def admin_set_default_address_detail(
         row.detail_address = detail
         row.lng, row.lat = lng, lat
         row.delivery_region_id = rid
+        _fill_regeo_fields_from_coords(row, lng, lat)
         return
     _clear_defaults(db, member_id, except_id=None)
+    pv = cy = ds = None
+    if lng is not None and lat is not None:
+        snap_ad = amap.fetch_regeo_snapshot(float(lng), float(lat))
+        if snap_ad:
+            pv, cy, ds = snap_ad.province, snap_ad.city, snap_ad.district
     db.add(
         MemberAddress(
             member_id=member_id,
@@ -253,6 +282,9 @@ def admin_set_default_address_detail(
             remarks=None,
             lng=lng,
             lat=lat,
+            province=pv,
+            city=cy,
+            district=ds,
             is_default=True,
         )
     )
@@ -273,10 +305,12 @@ def apply_auto_area_from_coords_or_geocode(db: Session, row: MemberAddress) -> N
     if row.lng is not None and row.lat is not None:
         r = assign_region_for_coords(db, float(row.lng), float(row.lat))
         row.delivery_region_id = int(r.id) if r else None
+        _fill_regeo_fields_from_coords(row, float(row.lng), float(row.lat))
         return
     lng, lat, rid = _geocode_bundle(db, row.detail_address)
     row.lng, row.lat = lng, lat
     row.delivery_region_id = rid
+    _fill_regeo_fields_from_coords(row, lng, lat)
 
 
 def _to_out(row: MemberAddress, id_to_name: dict[int, str]) -> MemberAddressOut:
@@ -293,6 +327,9 @@ def _to_out(row: MemberAddress, id_to_name: dict[int, str]) -> MemberAddressOut:
         detail_address=row.detail_address,
         map_location_text=_opt_str(row.map_location_text),
         door_detail=_opt_str(row.door_detail),
+        province=_opt_str(row.province),
+        city=_opt_str(row.city),
+        district=_opt_str(row.district),
         remarks=row.remarks,
         location=loc,
         is_default=bool(row.is_default),
@@ -354,12 +391,16 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
         raise HTTPException(status_code=400, detail=f"每位会员最多保存 {_MAX_ADDRESSES_PER_MEMBER} 条地址")
 
     effective_default = True if count == 0 else body.is_default
+    pv = cy = ds = None
     if body.location is not None:
         lng_f, lat_f = float(body.location.lng), float(body.location.lat)
         lng, lat = lng_f, lat_f
         r = assign_region_for_coords(db, lng_f, lat_f)
         rid = int(r.id) if r else None
-        map_m = _enrich_map_location_from_coords(lng_f, lat_f, _opt_str(body.map_location_text))
+        snap = amap.fetch_regeo_snapshot(lng_f, lat_f)
+        if snap:
+            pv, cy, ds = snap.province, snap.city, snap.district
+        map_m = _merge_pca_into_map_location(snap.pca_prefix_line if snap else None, _opt_str(body.map_location_text))
         map_eff = map_m if map_m else _opt_str(body.map_location_text)
         door_eff = _opt_str(body.door_detail)
         detail_eff = _sync_detail_from_map_and_door(map_eff, door_eff)
@@ -367,6 +408,10 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
             detail_eff = body.detail_address.strip()
     else:
         lng, lat, rid = _geocode_bundle(db, body.detail_address)
+        if lng is not None and lat is not None:
+            snap_n = amap.fetch_regeo_snapshot(float(lng), float(lat))
+            if snap_n:
+                pv, cy, ds = snap_n.province, snap_n.city, snap_n.district
         map_eff = _opt_str(body.map_location_text)
         door_eff = _opt_str(body.door_detail)
         detail_eff = body.detail_address.strip()
@@ -385,6 +430,9 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
         remarks=body.remarks,
         lng=lng,
         lat=lat,
+        province=pv,
+        city=cy,
+        district=ds,
         is_default=effective_default,
     )
     db.add(row)
@@ -427,11 +475,17 @@ def update_address(db: Session, member_id: int, address_id: int, body: MemberAdd
         or "door_detail" in patch
         or "detail_address" in patch
     )
+    snap = amap.fetch_regeo_snapshot(lnglat[0], lnglat[1]) if lnglat else None
+    if snap:
+        row.province = snap.province
+        row.city = snap.city
+        row.district = snap.district
+
     if lnglat is not None and addr_touched:
-        lng_f, lat_f = lnglat
-        map_en = _enrich_map_location_from_coords(lng_f, lat_f, row.map_location_text)
-        if map_en:
-            row.map_location_text = map_en
+        if snap:
+            map_en = _merge_pca_into_map_location(snap.pca_prefix_line, row.map_location_text)
+            if map_en:
+                row.map_location_text = map_en
         row.detail_address = _sync_detail_from_map_and_door(row.map_location_text, row.door_detail)
 
     if is_default_new is True:
