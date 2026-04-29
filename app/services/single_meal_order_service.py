@@ -407,3 +407,20 @@ def confirm_single_order_delivery(db: Session, courier_id: str, order_id: int) -
     courier_row.fee_pending = prev + fee_yuan
     row.fulfillment_status = "delivered"
     db.commit()
+
+
+def mark_single_meal_delivered_sf_completion_no_commit(db: Session, order_id: int) -> None:
+    """
+    顺丰订单完成：单点餐标履约已送达；餐费已预付，不扣会员次数、不产生骑手待结算。
+    不符合条件时静默跳过（幂等）。
+    """
+    row = db.get(SingleMealOrder, order_id)
+    if not row:
+        return
+    if row.pay_status != "已支付":
+        return
+    if row.fulfillment_status == "delivered":
+        return
+    if bool(getattr(row, "store_pickup", False)):
+        return
+    row.fulfillment_status = "delivered"

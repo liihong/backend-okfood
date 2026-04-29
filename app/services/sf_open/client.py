@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 from urllib.parse import quote
 
@@ -10,6 +11,9 @@ import httpx
 
 from app.core.config import get_settings
 from app.services.sf_open.sign import generate_open_sign
+
+logger = logging.getLogger(__name__)
+
 
 class SfOpenApiError(Exception):
     """顺丰返回 `error_code != 0` 或 HTTP 非 2xx。"""
@@ -50,6 +54,12 @@ class SfOpenClient:
 
         json_str = sign_mod._canonical_json(post_body)
         sig = generate_open_sign(json_str, int(dev_id), app_key)
+        soid = post_body.get("shop_order_id")
+        logger.info(
+            "SF createorder POST body (canonical JSON, equals sign source): shop_order_id=%s %s",
+            soid,
+            json_str,
+        )
         url = f"{self._base}{self.CREATE_ORDER_PATH}?sign={quote(sig, safe='')}"
         headers = {"Content-Type": "application/json; charset=utf-8"}
         with httpx.Client(timeout=self._timeout) as client:

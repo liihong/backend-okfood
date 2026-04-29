@@ -550,7 +550,11 @@ class SfSameCityRowBase(BaseModel):
     is_direct: bool = Field(
         False, description="专人直送，映射 is_person_direct"
     )
-    vehicle_type: str = Field("电动车", max_length=50, description="车型，目前写入备注补充")
+    vehicle_type: str = Field(
+        "小轿车",
+        max_length=50,
+        description="车型展示名（备注文案）；顺丰接口根字段 vehicle_type 使用配置 SF_VEHICLE_TYPE_CODE（默认 1）",
+    )
     is_insured: bool = Field(False, description="是否保价")
     goods_value_yuan: Decimal | None = Field(
         default=None, ge=0, max_digits=12, decimal_places=2, description="保价时货值(元)"
@@ -593,6 +597,23 @@ class SfSameCityPushItemResult(BaseModel):
 
 class SfSameCityPushOut(BaseModel):
     results: list[SfSameCityPushItemResult] = Field(default_factory=list)
+
+
+class SfSameCityPushMonitorRow(BaseModel):
+    """顺丰推单列表：订单监控页，与同城创单落地库字段一致。"""
+
+    id: int
+    delivery_date: str
+    stop_id: str
+    shop_order_id: str
+    sf_order_id: str | None
+    sf_bill_id: str | None
+    error_code: int | None
+    error_msg: str | None = None
+    created_at: str | None = None
+    last_callback_at: str | None = None
+    last_callback_kind: str | None = None
+    sf_callback_order_status: int | None = None
 
 
 class CardOrderOut(BaseModel):

@@ -21,6 +21,12 @@ function todayShanghaiStr() {
   return ymdInTimeZone(new Date(), 'Asia/Shanghai')
 }
 
+/** 业务日已过时，期望送达默认用「今日」起算，避免仍落在历史日期 */
+function effectiveSfExpectDefaultYmd(deliveryYmd) {
+  const yRaw = (deliveryYmd || '').trim() || todayShanghaiStr()
+  return yRaw < todayShanghaiStr() ? todayShanghaiStr() : yRaw
+}
+
 /** 顺丰弹窗：期望送达 value-format 字符串，默认当日 12:00（与后端预览一致） */
 function defaultSfExpectAt(ymd) {
   const d = (ymd || '').trim() || todayShanghaiStr()
@@ -41,7 +47,9 @@ function expectAtToValueFormat(v, ymd) {
 
 /** 弹窗行：与会员地址 field 名对齐的 map/门牌 + 默认送达时间 */
 function normalizeSfPreviewRows(rows, deliveryYmd) {
-  const y = (deliveryYmd || '').trim() || todayShanghaiStr()
+  const yRaw = (deliveryYmd || '').trim() || todayShanghaiStr()
+  const y = effectiveSfExpectDefaultYmd(yRaw)
+  const today = todayShanghaiStr()
   return (Array.isArray(rows) ? rows : []).map((r) => {
     const map0 =
       r.map_location_text != null && String(r.map_location_text).length
@@ -51,13 +59,18 @@ function normalizeSfPreviewRows(rows, deliveryYmd) {
       r.door_detail != null && String(r.door_detail).length
         ? String(r.door_detail)
         : String(r.recv_building ?? '')
+    let exp = expectAtToValueFormat(r.expect_delivery_at, y)
+    if (yRaw < today) {
+      const expYmd = String(exp || '').split('T')[0]
+      if (!expYmd || expYmd < today) exp = defaultSfExpectAt(y)
+    }
     return {
       ...r,
       map_location_text: map0,
       door_detail: door0,
       recv_address: map0,
       recv_building: door0,
-      expect_delivery_at: expectAtToValueFormat(r.expect_delivery_at, y),
+      expect_delivery_at: exp,
     }
   })
 }
@@ -66,11 +79,26 @@ const sfExpectDefaultTime = new Date(2000, 0, 1, 12, 0, 0)
 
 function onSfPushImmediatelyChange(row) {
   if (row && !row.push_immediately) {
-    const ymd = (sfPreview.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
+    const ymd = effectiveSfExpectDefaultYmd(sfPreview.value.delivery_date || deliveryDateQuery.value)
     if (!row.expect_delivery_at) {
       row.expect_delivery_at = defaultSfExpectAt(ymd)
     }
   }
+}
+
+/** 解析顺丰弹窗 expect_delivery_at（上海墙钟 +08:00）与当前时刻比较 */
+function parseSfExpectAtShanghai(s) {
+  const m = String(s || '').match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})$/)
+  if (!m) return null
+  return new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}+08:00`)
+}
+
+/** 业务日早于今日时，禁止期望送达选上海日历今日之前的日期 */
+function sfExpectDeliveryDisabledDate(time) {
+  const d = String(sfPreview.value.delivery_date || '').trim()
+  if (!d || d >= todayShanghaiStr()) return false
+  const ymd = ymdInTimeZone(time, 'Asia/Shanghai')
+  return ymd < todayShanghaiStr()
 }
 
 /** 与 GET /api/admin/delivery-sheet 响应字段对齐（含到家送达汇总） */
@@ -107,6 +135,11 @@ const sfDialogOpen = ref(false)
 const sfLoading = ref(false)
 const sfPushSubmitting = ref(false)
 const sfPreview = ref({ delivery_date: '', rows: [], sf_configured: false })
+/** 顺丰弹窗当前业务日是否早于上海今日（历史日查询） */
+const sfBizDayPast = computed(() => {
+  const d = String(sfPreview.value.delivery_date || '').trim()
+  return Boolean(d && d < todayShanghaiStr())
+})
 const sfSelectAll = ref(true)
 /** 顺丰弹窗内：按收货人手机（表格「手机」列）再筛选，支持后几位或完整号 */
 const sfModalPhoneFilter = ref('')
@@ -492,6 +525,18 @@ async function submitSfPush() {
     showToast('没有可推单的停靠点', 'error')
     return
   }
+  for (const r of rows) {
+    if (!r.selected || r.already_pushed || r.push_immediately) continue
+    const expectAt = r.expect_delivery_at || defaultSfExpectAt(effectiveSfExpectDefaultYmd(d0))
+    const t = parseSfExpectAtShanghai(expectAt)
+    if (!t || t.getTime() < Date.now()) {
+      showToast(
+        '存在未选「立即推单」的停靠点：期望送达须晚于当前时间（上海）。历史业务日请选今日及之后的日期时段。',
+        'error'
+      )
+      return
+    }
+  }
   sfPushSubmitting.value = true
   try {
     const payload = {
@@ -706,6 +751,9 @@ async function markDelivery(memberId, kind) {
       </p>
       <p v-if="sfLoading" class="members-loading">加载推单清单…</p>
       <template v-else>
+        <p v-if="sfBizDayPast" class="sf-warn sf-warn--muted">
+          当前业务日早于今日（上海）：期望送达已按今日起算，日历不可选今日之前；预约时间须晚于当前时刻。
+        </p>
         <div class="sf-bar">
           <div class="sf-bar__left">
             <label class="sf-check-all"
@@ -801,6 +849,7 @@ async function markDelivery(memberId, kind) {
                   size="small"
                   class="sf-dt"
                   :disabled="row.push_immediately"
+                  :disabled-date="sfExpectDeliveryDisabledDate"
                 />
               </template>
             </el-table-column>
@@ -1088,6 +1137,11 @@ async function markDelivery(memberId, kind) {
   color: #b45309;
   background: #fffbeb;
   border-radius: 0.5rem;
+}
+.sf-warn--muted {
+  color: #92400e;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
 }
 .sf-warn code {
   font-size: 0.75rem;

@@ -17,6 +17,7 @@ const MenuView = () => import('../views/MenuView.vue')
 const WeeklyMenuView = () => import('../views/WeeklyMenuView.vue')
 const CardOrdersView = () => import('../views/CardOrdersView.vue')
 const StoreConfigView = () => import('../views/StoreConfigView.vue')
+const SfOrdersMonitorView = () => import('../views/SfOrdersMonitorView.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -49,6 +50,12 @@ const router = createRouter({
         { path: 'delivery', name: 'delivery', component: DeliveryView, meta: { title: '智能配送大表' } },
         { path: 'regions', name: 'regions', component: RegionsView, meta: { title: '配送区域管理' } },
         { path: 'couriers', name: 'couriers', component: CouriersView, meta: { title: '配送员管理' } },
+        {
+          path: 'delivery-sf-orders',
+          name: 'delivery-sf-orders',
+          component: SfOrdersMonitorView,
+          meta: { title: '顺丰订单监控' },
+        },
         { path: 'finance', name: 'finance', component: FinanceView, meta: { title: '财务中心' } },
         { path: 'menu', name: 'menu', component: MenuView, meta: { title: '菜品管理' } },
         {

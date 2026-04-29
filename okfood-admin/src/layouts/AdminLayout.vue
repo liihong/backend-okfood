@@ -140,6 +140,7 @@ watch(sidebarCollapsedPref, (v) => {
           </template>
           <el-menu-item index="/regions">配送区域管理</el-menu-item>
           <el-menu-item index="/couriers">配送员管理</el-menu-item>
+          <el-menu-item index="/delivery-sf-orders">顺丰订单监控</el-menu-item>
         </el-sub-menu>
 
         <el-menu-item index="/finance">

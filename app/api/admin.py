@@ -25,6 +25,7 @@ from app.schemas.admin import (
     SfSameCityPreviewOut,
     SfSameCityPushIn,
     SfSameCityPushOut,
+    SfSameCityPushMonitorRow,
 )
 from app.schemas.common import TokenResponse
 from app.services.admin_service import (
@@ -43,6 +44,9 @@ from app.services.admin_service import (
     member_list_overview_counts,
     update_settings,
     upsert_dish,
+)
+from app.services.sf_order_fulfillment_service import (
+    list_sf_same_city_pushes_for_monitor,
 )
 from app.services.sf_same_city_service import preview_sf_same_city, push_sf_same_city
 from app.services.store_config_service import get_store_config, update_store_config
@@ -137,6 +141,29 @@ def delivery_sf_push(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return success(data=dump_model(out), msg="处理完成")
+
+
+@router.get("/delivery-sf/pushes", response_model=None)
+def delivery_sf_pushes(
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+    delivery_date: Annotated[date | None, Query(description="业务日，不传则全部")] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    """顺丰同城创单落地记录列表（控制台回调状态），用于后台订单监控。"""
+    _ = admin_username
+    items_raw, total = list_sf_same_city_pushes_for_monitor(
+        db, delivery_date=delivery_date, page=page, page_size=page_size
+    )
+    items = [SfSameCityPushMonitorRow.model_validate(x) for x in items_raw]
+    return page_response(
+        items=[dump_model(x) for x in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        msg="获取成功",
+    )
 
 
 @router.post("/delivery-mark")

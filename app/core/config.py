@@ -24,6 +24,7 @@ class Settings(BaseSettings):
             "SF_OPEN_SHOP_TYPE",
             "SF_API_VERSION",
             "SF_DEFAULT_PRODUCT_TYPE",
+            "SF_VEHICLE_TYPE_CODE",
         ):
             if data.get(k) == "":
                 data.pop(k, None)
@@ -135,6 +136,8 @@ class Settings(BaseSettings):
     """与 Excel 模板「商品类别」列对应，写入备注/货品描述。"""
     SF_DEFAULT_VEHICLE_TYPE: str = "小轿车"
     """与模板「车型」列默认，可写进订单备注。"""
+    SF_VEHICLE_TYPE_CODE: int = 1
+    """顺丰 createorder 根字段 ``vehicle_type``（整数编码，以开放平台文档为准；默认 1）。"""
     SF_CALLBACK_SKIP_SIGN_VERIFY: bool = False
     """仅本地调试：跳过顺丰推送回调的 sign 校验（勿用于生产）。"""
 
