@@ -687,16 +687,19 @@ async function markDelivery(memberId, kind) {
             <Printer :size="18" />
             打印标签
           </button>
-          <button
-            type="button"
-            class="btn-ghost delivery-sf-btn"
+          <el-button
+            plain
+            round
+            class="delivery-sf-btn"
             :disabled="loading"
             :title="!sfPreview.sf_configured ? '请在后端 .env 配置顺丰开发者参数' : ''"
             @click="openSfDialog"
           >
-            <Truck :size="18" />
-            顺丰推单
-          </button>
+            <span class="delivery-sf-btn__inner">
+              <Truck :size="18" stroke-width="2" />
+              顺丰推单
+            </span>
+          </el-button>
         </div>
       </div>
       <!-- 片区统计与切换：单独一行，右对齐，不占表格区 -->
@@ -1100,7 +1103,7 @@ async function markDelivery(memberId, kind) {
   flex: 1 1 auto;
   min-width: 0;
 }
-.delivery-sf-btn {
+.delivery-sf-btn__inner {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
