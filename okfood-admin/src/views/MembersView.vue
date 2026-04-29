@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, computed, onMounted, nextTick } from 'vue'
-import { Search, Phone, X, Trash2, MapPin } from 'lucide-vue-next'
+import { Search, Phone, X, Trash2, MapPin, CalendarOff, Pencil } from 'lucide-vue-next'
 import {
   apiJson,
   adminAccessToken,
@@ -551,21 +551,23 @@ onMounted(async () => {
             {{ u.remarks || '—' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" align="right" min-width="220" fixed="right">
+        <el-table-column label="操作" align="right" min-width="240" fixed="right">
           <template #default="{ row: u }">
             <div class="members-row-actions">
-              <el-button size="small" class="btn-members-op" type="primary" title="地址管理：地图选点，地点与门牌分别保存"
+              <el-button class="btn-members-op" type="primary" title="地址管理：地图选点，地点与门牌分别保存"
                 @click="openMemberAddresses(u)">
-                <MapPin :size="12" aria-hidden="true" />
+                <MapPin :size="12" aria-hidden="true" style="margin-right: 5px;" />
                 地址
               </el-button>
-              <el-button size="small" class="btn-members-op" type="warning" title="手工请假" @click="openLeaveMember(u)">
+              <el-button class="btn-members-op" type="warning" title="手工请假" @click="openLeaveMember(u)">
+                <CalendarOff :size="12" aria-hidden="true" style="margin-right: 5px;" />
                 请假
               </el-button>
-              <el-button size="small" class="btn-members-op" type="primary" title="修改会员信息" @click="openEditMember(u)">
+              <el-button class="btn-members-op" type="primary" title="修改会员信息" @click="openEditMember(u)">
+                <Pencil :size="12" aria-hidden="true" style="margin-right: 5px;" />
                 修改
               </el-button>
-              <el-button size="small" type="danger" class="btn-members-op"
+              <el-button type="danger" class="btn-members-op"
                 :disabled="memberDeletingId === u.id"
                 title="删除会员"
                 @click="deleteMemberRow(u)"
