@@ -906,7 +906,7 @@
 }
 
 .table-header {
-  padding: 2rem;
+  padding: 1rem;
   border-bottom: 1px solid #f8fafc;
 }
 
@@ -953,6 +953,12 @@
   gap: 0.45rem 0.55rem;
 }
 
+.members-export-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  align-self: center;
+}
 .members-query-row .members-region-select {
   min-width: 5.75rem;
   max-width: 9.5rem;

@@ -75,6 +75,7 @@ def _apply_member_list_filters(
     q_phone: str | None,
     validity: str | None,
     inactive_only: bool = False,
+    delivery_deferred_only: bool = False,
     delivery_region_id: int | None = None,
     unassigned_region: bool = False,
     plan_type: str | None = None,
@@ -110,7 +111,14 @@ def _apply_member_list_filters(
     if plan_type:
         stmt = stmt.where(Member.plan_type == plan_type)
     if inactive_only:
-        stmt = stmt.where(Member.is_active.is_(False))
+        # 与前台「未开卡」一致：排除「暂停配送」(delivery_deferred)
+        stmt = stmt.where(
+            and_(Member.is_active.is_(False), Member.delivery_deferred.is_(False)),
+        )
+    if delivery_deferred_only:
+        stmt = stmt.where(
+            and_(Member.is_active.is_(False), Member.delivery_deferred.is_(True)),
+        )
     if unassigned_region:
         dap = default_address_pick_subquery()
         ma = aliased(MemberAddress)
@@ -186,6 +194,7 @@ def list_members_paged(
     page_size: int,
     validity: str | None = None,
     inactive_only: bool = False,
+    delivery_deferred_only: bool = False,
     delivery_region_id: int | None = None,
     unassigned_region: bool = False,
     plan_type: str | None = None,
@@ -200,6 +209,7 @@ def list_members_paged(
         q_phone=q_phone,
         validity=validity,
         inactive_only=inactive_only,
+        delivery_deferred_only=delivery_deferred_only,
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=plan_type,
@@ -210,6 +220,7 @@ def list_members_paged(
         q_phone=q_phone,
         validity=validity,
         inactive_only=inactive_only,
+        delivery_deferred_only=delivery_deferred_only,
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=plan_type,

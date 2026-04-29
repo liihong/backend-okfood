@@ -231,7 +231,14 @@ def users(
         str | None,
         Query(description="套餐筛选：周卡 | 月卡；不传或空=不限"),
     ] = None,
-    inactive_only: Annotated[bool, Query(description="true=仅未开卡 is_active=false")] = False,
+    inactive_only: Annotated[
+        bool,
+        Query(description="true=仅未开卡：is_active=false 且非暂停配送 delivery_deferred=false"),
+    ] = False,
+    delivery_deferred_only: Annotated[
+        bool,
+        Query(description="true=仅暂停配送：is_active=false 且 delivery_deferred=true"),
+    ] = False,
     delivery_region_id: Annotated[
         int | None,
         Query(ge=1, description="默认地址 delivery_region_id；与 unassigned_region 互斥"),
@@ -257,6 +264,8 @@ def users(
     page_size = min(max(1, page_size), 100)
     if delivery_region_id is not None and unassigned_region:
         raise HTTPException(status_code=400, detail="不能同时指定 delivery_region_id 与 unassigned_region")
+    if inactive_only and delivery_deferred_only:
+        raise HTTPException(status_code=400, detail="inactive_only 与 delivery_deferred_only 不能同时为 true")
     items, total = list_members_paged(
         db,
         q_phone=q,
@@ -264,6 +273,7 @@ def users(
         page_size=page_size,
         validity=v or None,
         inactive_only=inactive_only,
+        delivery_deferred_only=delivery_deferred_only,
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=pt or None,
