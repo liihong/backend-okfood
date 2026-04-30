@@ -1,4 +1,9 @@
-"""创建管理员账号：python scripts/create_admin.py admin your_password"""
+"""创建管理员账号。
+
+示例：
+  python scripts/create_admin.py admin your_password
+  python scripts/create_admin.py courier_user secret --role delivery
+"""
 
 import argparse
 import sys
@@ -18,6 +23,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="创建后台管理员")
     parser.add_argument("username")
     parser.add_argument("password")
+    parser.add_argument(
+        "--role",
+        choices=("full", "delivery"),
+        default="full",
+        help="full=完整后台；delivery=仅配送管理（大表、区域、骑手、顺丰监控等）",
+    )
     args = parser.parse_args()
 
     db = SessionLocal()
@@ -26,7 +37,13 @@ def main() -> None:
         if exists:
             print("用户名已存在")
             return
-        db.add(AdminUser(username=args.username, password_hash=hash_password(args.password)))
+        db.add(
+            AdminUser(
+                username=args.username,
+                password_hash=hash_password(args.password),
+                role=args.role,
+            )
+        )
         db.commit()
         print("创建成功")
     finally:

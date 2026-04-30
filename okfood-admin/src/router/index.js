@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import {
   hydrateTokenFromStorage,
   adminAccessToken,
+  adminKind,
   registerAdminRouter,
 } from '../admin/core.js'
 
@@ -33,21 +34,37 @@ const router = createRouter({
       component: AdminLayout,
       meta: { requiresAuth: true },
       children: [
-        { path: '', redirect: { name: 'dashboard' } },
+        {
+          path: '',
+          redirect: () => {
+            hydrateTokenFromStorage()
+            return { name: adminKind.value === 'delivery' ? 'regions' : 'dashboard' }
+          },
+        },
         {
           path: 'dashboard',
           name: 'dashboard',
           component: DashboardView,
-          meta: { title: '今日营业概览', hidePageTitle: true },
+          meta: { title: '今日营业概览', hidePageTitle: true, fullAdminOnly: true },
         },
-        { path: 'users', name: 'users', component: MembersView, meta: { title: '会员档案库' } },
+        {
+          path: 'users',
+          name: 'users',
+          component: MembersView,
+          meta: { title: '会员档案库', fullAdminOnly: true },
+        },
         {
           path: 'card-orders',
           name: 'card-orders',
           component: CardOrdersView,
-          meta: { title: '开卡工单' },
+          meta: { title: '开卡工单', fullAdminOnly: true },
         },
-        { path: 'delivery', name: 'delivery', component: DeliveryView, meta: { title: '智能配送大表' } },
+        {
+          path: 'delivery',
+          name: 'delivery',
+          component: DeliveryView,
+          meta: { title: '智能配送大表', fullAdminOnly: true },
+        },
         { path: 'regions', name: 'regions', component: RegionsView, meta: { title: '配送区域管理' } },
         { path: 'couriers', name: 'couriers', component: CouriersView, meta: { title: '配送员管理' } },
         {
@@ -56,19 +73,29 @@ const router = createRouter({
           component: SfOrdersMonitorView,
           meta: { title: '顺丰订单监控' },
         },
-        { path: 'finance', name: 'finance', component: FinanceView, meta: { title: '财务中心' } },
-        { path: 'menu', name: 'menu', component: MenuView, meta: { title: '菜品管理' } },
+        {
+          path: 'finance',
+          name: 'finance',
+          component: FinanceView,
+          meta: { title: '财务中心', fullAdminOnly: true },
+        },
+        {
+          path: 'menu',
+          name: 'menu',
+          component: MenuView,
+          meta: { title: '菜品管理', fullAdminOnly: true },
+        },
         {
           path: 'weekly-menu',
           name: 'weekly-menu',
           component: WeeklyMenuView,
-          meta: { title: '本周菜单' },
+          meta: { title: '本周菜单', fullAdminOnly: true },
         },
         {
           path: 'store-config',
           name: 'store-config',
           component: StoreConfigView,
-          meta: { title: '门店配置' },
+          meta: { title: '门店配置', fullAdminOnly: true },
         },
       ],
     },
@@ -84,7 +111,10 @@ router.beforeEach((to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (to.name === 'login' && hasToken) {
-    return { name: 'dashboard' }
+    return { name: adminKind.value === 'delivery' ? 'regions' : 'dashboard' }
+  }
+  if (hasToken && to.meta.fullAdminOnly && adminKind.value === 'delivery') {
+    return { name: 'regions', replace: true }
   }
   return true
 })

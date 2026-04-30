@@ -3,7 +3,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
-from app.core.deps import SessionDep, admin_subject, issue_admin_token
+from app.core.deps import (
+    ADMIN_ACCOUNT_DELIVERY,
+    ROLE_ADMIN,
+    ROLE_ADMIN_DELIVERY,
+    SessionDep,
+    admin_or_delivery_staff_subject,
+    admin_subject,
+    issue_admin_token,
+)
 from app.models.member import Member
 from app.models.enums import PlanType
 from app.core.limiter import limiter
@@ -31,7 +39,7 @@ from app.schemas.admin import (
     SfSameCityCancelIn,
     SfSameCityCancelOut,
 )
-from app.schemas.common import TokenResponse
+from app.schemas.common import AdminLoginTokenOut
 from app.services.admin_service import (
     admin_delete_member,
     admin_login_user,
@@ -75,8 +83,11 @@ router = APIRouter(prefix="/admin", tags=["管理端"])
 @router.post("/login")
 @limiter.limit("30/minute")
 def login(request: Request, body: AdminLoginIn, db: SessionDep):
-    admin_login_user(db, body.username, body.password)
-    token = TokenResponse(access_token=issue_admin_token(body.username))
+    u = admin_login_user(db, body.username, body.password)
+    role_raw = (getattr(u, "role", None) or "").strip().lower()
+    kind = "delivery" if role_raw == ADMIN_ACCOUNT_DELIVERY else "full"
+    jwt_role = ROLE_ADMIN_DELIVERY if kind == "delivery" else ROLE_ADMIN
+    token = AdminLoginTokenOut(access_token=issue_admin_token(body.username, jwt_role=jwt_role), admin_kind=kind)
     return success(data=dump_model(token), msg="登录成功")
 
 
@@ -151,7 +162,7 @@ def delivery_sf_push(
 @router.get("/delivery-sf/pushes", response_model=None)
 def delivery_sf_pushes(
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
     delivery_date: Annotated[date | None, Query(description="业务日，不传则全部")] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -176,7 +187,7 @@ def delivery_sf_cancel_push(
     push_id: int,
     body: SfSameCityCancelIn,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
 ):
     """调用顺丰 ``cancelorder`` 取消配送（商家异常场景）；同步返回顺丰响应 JSON。"""
     _ = admin_username

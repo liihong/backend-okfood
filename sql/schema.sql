@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS `admin_users` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `username` VARCHAR(64) NOT NULL,
   `password_hash` VARCHAR(255) NOT NULL,
+  `role` VARCHAR(16) NOT NULL DEFAULT 'full' COMMENT 'full | delivery',
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),

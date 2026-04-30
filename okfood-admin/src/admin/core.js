@@ -8,11 +8,14 @@ export const LOGIN_PRESET_PASSWORD = String(
   import.meta.env.VITE_ADMIN_LOGIN_PRESET_PASSWORD ?? '',
 ).trim()
 export const ADMIN_TOKEN_KEY = 'okfood_admin_access_token'
+export const ADMIN_KIND_KEY = 'okfood_admin_kind'
 const ENV_API_BASE = String(import.meta.env.VITE_API_BASE_URL || '').trim()
 export const API_BASE = ENV_API_BASE.replace(/\/$/, '')
 
 export const adminAccessToken = ref('')
 export const rememberLogin = ref(false)
+/** `full` | `delivery`，与登录 JWT / 接口 admin_kind 一致 */
+export const adminKind = ref('full')
 /** 会员列表：会员档案页写入，营业概览预览读取 */
 export const memberList = ref([])
 
@@ -26,37 +29,97 @@ export function registerAdminRouter(r) {
   adminRouter = r
 }
 
-export function hydrateTokenFromStorage() {
+function peekJwtRole(token) {
+  const t = String(token || '').trim()
+  if (!t) return null
   try {
-    const fromLocal = localStorage.getItem(ADMIN_TOKEN_KEY)
-    const fromSess = sessionStorage.getItem(ADMIN_TOKEN_KEY)
-    adminAccessToken.value = (fromLocal || fromSess || '').trim()
-    rememberLogin.value = Boolean(fromLocal)
+    const seg = t.split('.')[1]
+    if (!seg) return null
+    const b64 = seg.replace(/-/g, '+').replace(/_/g, '/')
+    const padLen = (4 - (b64.length % 4)) % 4
+    const padded = b64 + '='.repeat(padLen)
+    const json = JSON.parse(atob(padded))
+    return typeof json.role === 'string' ? json.role : null
   } catch {
-    /* ignore */
+    return null
   }
 }
 
-export function setAdminToken(token) {
-  adminAccessToken.value = token
+function persistAdminKind(kind) {
+  const k = kind === 'delivery' ? 'delivery' : 'full'
+  adminKind.value = k
   try {
     if (rememberLogin.value) {
-      localStorage.setItem(ADMIN_TOKEN_KEY, token)
-      sessionStorage.removeItem(ADMIN_TOKEN_KEY)
+      localStorage.setItem(ADMIN_KIND_KEY, k)
+      sessionStorage.removeItem(ADMIN_KIND_KEY)
     } else {
-      sessionStorage.setItem(ADMIN_TOKEN_KEY, token)
-      localStorage.removeItem(ADMIN_TOKEN_KEY)
+      sessionStorage.setItem(ADMIN_KIND_KEY, k)
+      localStorage.removeItem(ADMIN_KIND_KEY)
     }
   } catch {
     /* ignore */
   }
 }
 
+/** 根据当前 token（及可选的登录响应）刷新 adminKind：JWT role 优先，解析失败时用登录接口 admin_kind。 */
+function applyAdminKindFromCurrentToken(loginPayload = null) {
+  const t = String(adminAccessToken.value || '').trim()
+  if (!t) {
+    adminKind.value = 'full'
+    return
+  }
+  const role = peekJwtRole(t)
+  let kind = 'full'
+  if (role === 'admin_delivery') kind = 'delivery'
+  else if (role === 'admin') kind = 'full'
+  else {
+    const raw = loginPayload && loginPayload.admin_kind
+    if (raw === 'delivery' || raw === 'full') kind = raw === 'delivery' ? 'delivery' : 'full'
+  }
+  persistAdminKind(kind)
+}
+
+/** 登录成功后须先 setAdminToken，再调用本函数传入登录返回的 data。 */
+export function syncAdminKindFromLoginPayload(data) {
+  applyAdminKindFromCurrentToken(data && typeof data === 'object' ? data : null)
+}
+
+export function hydrateTokenFromStorage() {
+  try {
+    const fromLocal = localStorage.getItem(ADMIN_TOKEN_KEY)
+    const fromSess = sessionStorage.getItem(ADMIN_TOKEN_KEY)
+    adminAccessToken.value = (fromLocal || fromSess || '').trim()
+    rememberLogin.value = Boolean(fromLocal)
+    applyAdminKindFromCurrentToken()
+  } catch {
+    /* ignore */
+  }
+}
+
+export function setAdminToken(token) {
+  adminAccessToken.value = String(token || '').trim()
+  try {
+    if (rememberLogin.value) {
+      localStorage.setItem(ADMIN_TOKEN_KEY, adminAccessToken.value)
+      sessionStorage.removeItem(ADMIN_TOKEN_KEY)
+    } else {
+      sessionStorage.setItem(ADMIN_TOKEN_KEY, adminAccessToken.value)
+      localStorage.removeItem(ADMIN_TOKEN_KEY)
+    }
+  } catch {
+    /* ignore */
+  }
+  applyAdminKindFromCurrentToken()
+}
+
 export function clearAdminToken() {
   adminAccessToken.value = ''
+  adminKind.value = 'full'
   try {
     sessionStorage.removeItem(ADMIN_TOKEN_KEY)
     localStorage.removeItem(ADMIN_TOKEN_KEY)
+    sessionStorage.removeItem(ADMIN_KIND_KEY)
+    localStorage.removeItem(ADMIN_KIND_KEY)
   } catch {
     /* ignore */
   }

@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -8,6 +10,12 @@ class Message(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class AdminLoginTokenOut(TokenResponse):
+    """登录响应：`admin_kind` 与 JWT `role`（admin / admin_delivery）一致。"""
+
+    admin_kind: Literal["full", "delivery"] = "full"
 
 
 class Pagination(BaseModel):

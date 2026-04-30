@@ -4,9 +4,11 @@ import { useRouter } from 'vue-router'
 import {
   apiJson,
   setAdminToken,
+  syncAdminKindFromLoginPayload,
   rememberLogin,
   LOGIN_PRESET_USER,
   LOGIN_PRESET_PASSWORD,
+  adminKind,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
@@ -34,8 +36,11 @@ const handleAdminLogin = async () => {
     const token = data && data.access_token
     if (!token) throw new Error('登录响应缺少 access_token')
     setAdminToken(token)
+    syncAdminKindFromLoginPayload(data)
     showToast('登录成功')
-    await router.replace({ name: 'dashboard' })
+    await router.replace({
+      name: adminKind.value === 'delivery' ? 'regions' : 'dashboard',
+    })
   } catch (e) {
     loginError.value = true
     window.setTimeout(() => {
