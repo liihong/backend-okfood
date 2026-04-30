@@ -177,7 +177,10 @@ const isRangeOnlyLeave = computed(
 
 const activeLeaveTitle = computed(() => {
   if (isRangeOnlyLeave.value) return '当前区间请假'
-  if (isTomorrowLeave.value) return '明日配送请假'
+  if (isTomorrowLeave.value) {
+    const md = ymdToDotMd(tomorrowTargetYmd.value)
+    return md ? `${md} 请假` : '请假中'
+  }
   return '当前请假'
 })
 
@@ -211,6 +214,18 @@ function ymdFromApi(d) {
   if (d == null || d === '') return ''
   const s = String(d)
   return s.length >= 10 ? s.slice(0, 10) : s
+}
+
+/** 展示用：月.日，与「我的」页一致 */
+function ymdToDotMd(ymd) {
+  const raw = ymdFromApi(ymd)
+  if (!raw) return ''
+  const parts = raw.split('-')
+  if (parts.length < 3) return ''
+  const m = Number(parts[1])
+  const d = Number(parts[2])
+  if (!m || !d) return ''
+  return `${m}.${d}`
 }
 
 async function syncLeaveFromServer() {

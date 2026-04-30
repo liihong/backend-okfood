@@ -21,20 +21,29 @@ def _opt_str(v: str | None) -> str | None:
     return t if t else None
 
 
-def _merge_pca_into_map_location(pca: str | None, client_map: str | None) -> str | None:
-    """将逆地理得到的省市区前缀与小程序上传的地图文案合并，避免重复拼接。"""
-    pca_s = (pca or "").strip()
-    client_s = (client_map or "").strip()
-    if not pca_s:
-        return _opt_str(client_s)
-    if not client_s:
-        return _opt_str(pca_s)
-    pn = pca_s.replace(" ", "")
-    cn = client_s.replace(" ", "")
-    if pn and pn in cn:
-        return _opt_str(client_s)
-    merged = f"{pca_s} {client_s}".strip()
-    return _opt_str(merged)
+def _format_pca_compact(province: str | None, city: str | None, district: str | None) -> str:
+    """与高德 addressComponent 相同的紧凑拼接：省市区连写，供展示行前缀。"""
+    parts: list[str] = []
+    p = (province or "").strip()
+    c = (city or "").strip()
+    d = (district or "").strip()
+    if p:
+        parts.append(p)
+    if c and c not in p and all(c not in x for x in parts):
+        parts.append(c)
+    if d and all(d not in x for x in parts):
+        parts.append(d)
+    return "".join(parts).strip()
+
+
+def _sync_detail_from_pca_community_door(
+    pca_line: str | None, community: str | None, door: str | None
+) -> str:
+    """完整配送地址行：省市区 + 小区/POI 名 + 门牌；不含道路细目。"""
+    p = (pca_line or "").strip()
+    m = (community or "").strip()
+    d = (door or "").strip()
+    return " ".join([x for x in (p, m, d) if x]).strip()
 
 
 def _sync_detail_from_map_and_door(map_text: str | None, door: str | None) -> str:
@@ -400,10 +409,12 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
         snap = amap.fetch_regeo_snapshot(lng_f, lat_f)
         if snap:
             pv, cy, ds = snap.province, snap.city, snap.district
-        map_m = _merge_pca_into_map_location(snap.pca_prefix_line if snap else None, _opt_str(body.map_location_text))
-        map_eff = map_m if map_m else _opt_str(body.map_location_text)
+        map_eff = _opt_str(body.map_location_text)
         door_eff = _opt_str(body.door_detail)
-        detail_eff = _sync_detail_from_map_and_door(map_eff, door_eff)
+        pca_ln = snap.pca_prefix_line if snap else None
+        if not pca_ln and (pv or cy or ds):
+            pca_ln = _format_pca_compact(pv, cy, ds) or None
+        detail_eff = _sync_detail_from_pca_community_door(pca_ln, map_eff, door_eff)
         if not detail_eff.strip():
             detail_eff = body.detail_address.strip()
     else:
@@ -482,11 +493,10 @@ def update_address(db: Session, member_id: int, address_id: int, body: MemberAdd
         row.district = snap.district
 
     if lnglat is not None and addr_touched:
-        if snap:
-            map_en = _merge_pca_into_map_location(snap.pca_prefix_line, row.map_location_text)
-            if map_en:
-                row.map_location_text = map_en
-        row.detail_address = _sync_detail_from_map_and_door(row.map_location_text, row.door_detail)
+        pca_ln = snap.pca_prefix_line if snap else _format_pca_compact(row.province, row.city, row.district)
+        row.detail_address = _sync_detail_from_pca_community_door(
+            pca_ln or None, row.map_location_text, row.door_detail
+        )
 
     if is_default_new is True:
         _clear_defaults(db, member_id, except_id=row.id)

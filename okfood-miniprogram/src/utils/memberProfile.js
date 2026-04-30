@@ -17,7 +17,7 @@ function hasNonEmptyField(v) {
 }
 
 /**
- * 是否需要引导「完善资料」：占位姓名、缺展示用昵称、或既未选起送日又未选「暂不配送」
+ * 是否需要引导「完善资料」：占位姓名、缺展示用昵称、或既未选起送日又未选「暂停配送」
  * 与「开卡/支付」解耦，不因剩余次数为 0 而强制进资料页（购卡在独立模块中完成）。
  * @param {object | null | undefined} profile GET /api/user/me 的 data
  */
@@ -43,4 +43,14 @@ export function shouldPromptMemberCardPay(profile) {
   if (!profile || typeof profile !== 'object') return false
   const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
   return balance <= 0
+}
+
+/**
+ * 会员卡暂停配送且仍有剩余次数（与后台 delivery_deferred + balance 一致）
+ * @param {object | null | undefined} profile GET /api/user/me 的 data
+ */
+export function isDeliveryPausedWithBalance(profile) {
+  if (!profile || typeof profile !== 'object') return false
+  const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
+  return profile.delivery_deferred === true && balance > 0
 }

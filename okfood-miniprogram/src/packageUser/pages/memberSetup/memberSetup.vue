@@ -1,10 +1,48 @@
 <template>
   <view class="page">
-   <OkNavbar show-back title="会员资料与开卡" />
+   <OkNavbar show-back :title="resumeOnlyMode ? '恢复配送' : '会员资料与开卡'" />
     <scroll-view scroll-y class="scroll" :show-scrollbar="false">
      <view class="wrap">
 
-      <view class="setup-module">
+      <!-- 从「我的」恢复配送：仅配送方式 + 起送日 -->
+      <view v-if="resumeOnlyMode" class="setup-module">
+        <view class="section section--resume-only">
+           <text class="sec-title">配送或门店自提</text>
+           <radio-group class="pay-radio-group pay-radio-group--delivery" @change="onDeliveryModeChange">
+              <label class="pay-radio-row">
+               <radio value="delivery" :checked="deliveryMode === 'delivery'" :color="payRadioColor" />
+                <text class="pay-radio-label">配送到家</text>
+              </label>
+              <label class="pay-radio-row">
+                <radio value="pickup" :checked="deliveryMode === 'pickup'" :color="payRadioColor" />
+                <text class="pay-radio-label">门店自提</text>
+              </label>
+            </radio-group>
+           <template v-if="deliveryMode === 'delivery' || deliveryMode === 'pickup'">
+              <text class="sec-sub">
+               <template v-if="deliveryMode === 'delivery'">
+                 顺丰小哥全程保驾护航。
+               </template>
+                <template v-else>
+                 OK饭健康餐门店位置：天安名邸小区门面房
+                </template>
+              </text>
+              <picker mode="date" :value="pickerDeliveryYmd" :start="minDeliveryYmd" @change="onDeliveryPick">
+                <view class="date-picker-row">
+                  <text :class="['date-picker-text', deliveryYmd ? '' : 'date-picker-text--ph']">
+                   {{ deliveryYmd || '请选择开始的业务日期' }}
+                  </text>
+                  <text class="date-picker-arrow">›</text>
+                </view>
+              </picker>
+            </template>
+            <text v-else class="sec-sub">
+             请在上方选择「配送到家」或「门店自提」，并选择开始的业务日期。
+            </text>
+          </view>
+      </view>
+
+      <view v-else class="setup-module">
          <text class="module-title">一、个人资料</text>
           <view v-if="!skipProfileIdentityEdit" class="section">
             <text class="sec-title">头像（可选）</text>
@@ -36,9 +74,9 @@
                 <radio value="pickup" :checked="deliveryMode === 'pickup'" :color="payRadioColor" />
                 <text class="pay-radio-label">门店自提</text>
               </label>
-              <label class="pay-radio-row">
+              <label v-if="!resumeOnlyMode" class="pay-radio-row">
                 <radio value="defer" :checked="deliveryMode === 'defer'" :color="payRadioColor" />
-                <text class="pay-radio-label">暂不配送</text>
+                <text class="pay-radio-label">暂停配送</text>
               </label>
             </radio-group>
            <template v-if="deliveryMode === 'delivery' || deliveryMode === 'pickup'">
@@ -60,7 +98,7 @@
               </picker>
             </template>
             <text v-else class="sec-sub">
-             暂不配送，后期联系客服开通配送日期。
+             暂停配送后剩余次数保留；恢复时在「我的」点「恢复配送」或在此改选配送方式与日期。
             </text>
           </view>
 
@@ -89,7 +127,7 @@
         </view>
        </view>
 
-        <view v-if="needsCardPayment" class="setup-module setup-module--card">
+        <view v-if="!resumeOnlyMode && needsCardPayment" class="setup-module setup-module--card">
          <text class="module-title">二、开卡</text>
           <view class="section">
            <text class="sec-title">开卡卡种</text>
@@ -159,7 +197,7 @@
           </view>
         </view>
 
-        <view v-else-if="!needsCardPayment" class="section">
+        <view v-else-if="!resumeOnlyMode && !needsCardPayment" class="section">
           <text class="sec-title">会员状态</text>
           <text class="sec-sub">
             您当前仍有剩余订餐次数（{{ serverBalance }} 次），无需再次购买会员卡，完善资料即可。
@@ -208,7 +246,7 @@ const avatarUrl = ref('')
 const remoteAvatarUrl = ref('')
 const selectedPlan = ref('周卡')
 /** 需购卡时：固定为线下已缴，仅保存资料并提交卡种（不拉起微信支付） */
-/** delivery=配送到家；pickup=门店自提；defer=暂不配送（服务端 is_active=0） */
+/** delivery=配送到家；pickup=门店自提；defer=暂停配送（服务端 delivery_deferred） */
 const deliveryMode = ref('delivery')
 const deliveryYmd = ref('')
 const minDeliveryYmd = ref(minMemberDeliveryStartYmd())
@@ -246,6 +284,7 @@ const saveAmountMonth = computed(() => {
 const needsCardPayment = computed(() => serverBalance.value <= 0)
 
 const submitButtonText = computed(() => {
+  if (resumeOnlyMode.value) return '确认恢复配送'
   if (!needsCardPayment.value) return '保存并返回「我的」'
   return '保存资料'
 })
@@ -273,12 +312,19 @@ function onDeliveryModeChange(e) {
   }
 }
 
+/** 从「我的」恢复配送进入：仅展示配送方式与起送日 */
+const resumeOnlyMode = ref(false)
+const resumeHintShown = ref(false)
+
 onLoad((options) => {
   const raw = options?.preCard != null ? String(options.preCard) : ''
   const k = decodeURIComponent(raw).trim()
   if (k === '周卡' || k === '月卡') {
     selectedPlan.value = k
   }
+  const fr = options?.from != null ? String(options.from).trim() : ''
+  resumeOnlyMode.value = fr === 'resume'
+  resumeHintShown.value = false
 })
 
 onShow(() => {
@@ -322,7 +368,10 @@ async function loadProfile() {
     serverBalance.value = Math.max(0, Math.floor(Number(data.balance) || 0))
     skipProfileIdentityEdit.value =
       shouldPromptMemberCardPay(data) && !shouldOpenMemberSetup(data)
-    if (!shouldOpenMemberSetup(data) && !shouldPromptMemberCardPay(data)) {
+    /** 有余额且暂停配送时仍须停留本页以便改为「恢复配送」并重选起送日 */
+    const pausedWithBalance =
+      data.delivery_deferred === true && serverBalance.value > 0
+    if (!shouldOpenMemberSetup(data) && !shouldPromptMemberCardPay(data) && !pausedWithBalance) {
       uni.showToast({ title: '资料与餐次已就绪', icon: 'success' })
       setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 600)
       return
@@ -348,6 +397,20 @@ async function loadProfile() {
     if (data.delivery_deferred === true) {
       deliveryMode.value = 'defer'
       deliveryYmd.value = ''
+      if (
+        resumeOnlyMode.value &&
+        serverBalance.value > 0 &&
+        !resumeHintShown.value
+      ) {
+        resumeHintShown.value = true
+        setTimeout(() => {
+          uni.showToast({
+            title: '请选择配送方式与开始日期',
+            icon: 'none',
+            duration: 2400,
+          })
+        }, 400)
+      }
     } else if (data.store_pickup === true) {
       deliveryMode.value = 'pickup'
       const ds = data.delivery_start_date != null ? String(data.delivery_start_date).trim() : ''
@@ -422,6 +485,49 @@ function onNickInput(e) {
 async function onSubmit() {
   const phone = memberPhone.value || uni.getStorageSync('memberPhone') || ''
   const nick = String(nickDraft.value || '').trim()
+
+  if (resumeOnlyMode.value) {
+    if (!getMemberToken() || !phone) {
+      uni.showToast({ title: '登录已失效', icon: 'none' })
+      return
+    }
+    if (deliveryMode.value === 'defer') {
+      uni.showToast({ title: '请选择配送到家或门店自提', icon: 'none' })
+      return
+    }
+    const d0 = deliveryYmd.value?.trim()
+    if (!d0) {
+      uni.showToast({ title: '请选择开始的业务日期', icon: 'none' })
+      return
+    }
+    if (d0 < minDeliveryYmd.value) {
+      uni.showToast({
+        title: '起送日须不早于当前允许的最小业务日（上海；10:00 前可今日起，10:00 后仅次日起）',
+        icon: 'none',
+      })
+      return
+    }
+    submitting.value = true
+    try {
+      await request('/api/user/profile', {
+        method: 'PATCH',
+        data: {
+          delivery_deferred: false,
+          delivery_start_date: d0,
+          store_pickup: deliveryMode.value === 'pickup',
+        },
+      })
+      uni.showToast({ title: '已恢复配送', icon: 'success', duration: 2000 })
+      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+    } catch (err) {
+      uni.hideLoading()
+      uni.showToast({ title: err?.message || '保存失败', icon: 'none', duration: 2800 })
+    } finally {
+      submitting.value = false
+    }
+    return
+  }
+
   if (
     !skipProfileIdentityEdit.value &&
     (!nick || nick === WX_DEFAULT_NICK)

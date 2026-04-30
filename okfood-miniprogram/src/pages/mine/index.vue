@@ -70,10 +70,21 @@
           <view class="balance-line">
             <text class="num">{{ displayBalance }}</text>
             <text class="unit">剩余餐次</text>
-            <view v-if="showVipRenewEntry" class="type-label-slot" @tap.stop="goMemberSetup">
+            <view
+              v-if="showResumeDeliveryEntry"
+              class="type-label-slot"
+              @tap.stop="goResumeDelivery"
+            >
+              <text class="vip-renew-btn">恢复配送</text>
+            </view>
+            <view
+              v-else-if="showVipRenewEntry"
+              class="type-label-slot"
+              @tap.stop="goMemberSetup"
+            >
               <text class="vip-renew-btn">开卡续费</text>
             </view>
-           <text v-else :class="['type-label', { 'type-label--leave-detail': isLeaveCardDetailStatus }]">{{
+            <text v-else :class="['type-label', { 'type-label--leave-detail': isLeaveCardDetailStatus }]">{{
               memberDeliveryStatus }}</text>
           </view>
           <text v-if="isLoggedIn" class="today-delivery-addr">{{ todayDeliveryAddressLine }}</text>
@@ -95,6 +106,14 @@
           </view>
           <view class="menu-row" @click="goLeave">
             <text class="menu-label">😴 请假管理</text>
+            <text class="arrow">›</text>
+          </view>
+          <view
+            v-if="showPauseDeliveryMenuRow"
+            class="menu-row"
+            @click="onPauseDeliveryTap"
+          >
+            <text class="menu-label">⏸️ 暂停配送</text>
             <text class="arrow">›</text>
           </view>
           <view class="menu-row" @click="goAddress">
@@ -129,6 +148,7 @@ import { wxMiniMemberLoginAndStore, hasWxPhoneAuthDetail } from '@/utils/wxMembe
 import {
   shouldOpenMemberSetup,
   shouldPromptMemberCardPay,
+  isDeliveryPausedWithBalance,
   isPlaceholderWxProfile,
   MEMBER_STUB_NAME,
   WX_DEFAULT_NICK,
@@ -165,7 +185,7 @@ const planType = ref('')
 const leaveRange = ref(null)
 /** 与后端 is_leaved_tomorrow 同步：仅明日请假（自提交当日至目标日 24:00 前展示「请假中」） */
 const isLeavedTomorrow = ref(false)
-/** 与 backend tomorrow_leave_target_date 一致，用于「明日请假」侧展示目标业务日 */
+/** 与 backend tomorrow_leave_target_date 一致，用于单日快速请假侧展示目标业务日 */
 const tomorrowLeaveTargetYmd = ref('')
 const isActive = ref(false)
 const createdAt = ref('')
@@ -276,10 +296,25 @@ const showMemberCardModule = computed(() => {
   return serverBalance.value <= 0
 })
 
-/** 绿区右侧：开卡/续费按钮，跳转「会员资料与开卡」合页 */
-const showVipRenewEntry = computed(() => {
+/** 有余额且暂停配送：会员卡右侧展示「恢复配送」（与「开卡续费」互斥；资料待完善也可点此进入资料页恢复） */
+const showResumeDeliveryEntry = computed(() => {
   if (!isLoggedIn.value) return false
+  return isDeliveryPausedWithBalance(memberProfileRaw.value)
+})
+
+/** 绿区右侧：剩余次数为 0 或资料待完善时展示「开卡续费」；暂停且有次数时不展示 */
+const showVipRenewEntry = computed(() => {
+  if (!isLoggedIn.value || showResumeDeliveryEntry.value) return false
   return needsMemberSetupPage.value || showMemberCardModule.value
+})
+
+/** 仍有餐次且当前未暂停：菜单中提供一键暂停（等同资料页「暂停配送」选项） */
+const showPauseDeliveryMenuRow = computed(() => {
+  if (!isLoggedIn.value || needsMemberSetupPage.value) return false
+  const p = memberProfileRaw.value
+  if (!p || typeof p !== 'object') return false
+  if (p.delivery_deferred === true) return false
+  return Math.max(0, Math.floor(Number(p.balance) || 0)) > 0
 })
 
 function isHttpAvatarUrl(u) {
@@ -570,11 +605,12 @@ const memberDeliveryStatus = computed(() => {
     if (isLeavedTomorrow.value) {
       const t = tomorrowLeaveTargetYmd.value
       const md = t ? ymdToDotMd(t) : ''
-      if (md) return `明日 ${md} 请假`
-      return '明日请假'
+      if (md) return `${md} 请假`
+      return '请假中'
     }
     return '请假中'
   }
+  if (isDeliveryPausedWithBalance(memberProfileRaw.value)) return '暂停配送'
   if (showMemberCardModule.value) return '待开卡/续费'
   return '生效中'
 })
@@ -858,6 +894,50 @@ function goDailyMealUnits() {
 
 function goMemberSetup() {
   uni.navigateTo({ url: '/packageUser/pages/memberSetup/memberSetup' })
+}
+
+function goResumeDelivery() {
+  uni.navigateTo({
+    url: '/packageUser/pages/memberSetup/memberSetup?from=resume',
+    fail: (e) => {
+      console.error('navigateTo memberSetup resume', e)
+      uni.showToast({ title: '无法打开资料页，请重试', icon: 'none' })
+    },
+  })
+}
+
+function onPauseDeliveryTap() {
+  if (!getMemberToken()) {
+    uni.showToast({ title: '请先登录', icon: 'none' })
+    return
+  }
+  uni.showModal({
+    title: '暂停配送',
+    content:
+      '确认后暂停会员卡配送（剩余餐次保留）。恢复时需重新选择开始的业务日期。是否暂停？',
+    confirmText: '暂停配送',
+    cancelText: '取消',
+    success: async (res) => {
+      if (!res.confirm) return
+      uni.showLoading({ title: '提交中', mask: true })
+      try {
+        await request('/api/user/profile', {
+          method: 'PATCH',
+          data: { delivery_deferred: true },
+        })
+        await refreshMember()
+        uni.showToast({ title: '已暂停配送', icon: 'success' })
+      } catch (err) {
+        uni.showToast({
+          title: err?.message || '操作失败',
+          icon: 'none',
+          duration: 2800,
+        })
+      } finally {
+        uni.hideLoading()
+      }
+    },
+  })
 }
 </script>
 
