@@ -106,6 +106,7 @@
             <text class="arrow">›</text>
           </view>
         </view>
+        <text class="page-version">版本 1.1.5</text>
       </view>
     </scroll-view>
   </view>
@@ -255,8 +256,8 @@ function syncDisplayNoAnim() {
 
 const profileName = computed(() => {
   if (userName.value?.trim()) return userName.value.trim()
-  const p = memberPhone.value
-  if (p && p.length === 11) return `${p.slice(0, 3)}****${p.slice(-4)}`
+  const p = String(memberPhone.value || '').trim()
+  if (p) return p
   return '会员'
 })
 
@@ -303,15 +304,14 @@ const setupRowTitle = computed(() => {
   if (w && w !== WX_DEFAULT_NICK) return w
   const un = userName.value?.trim()
   if (un && un !== MEMBER_STUB_NAME) return un
-  const p = memberPhone.value
-  if (p && p.length === 11) return `${p.slice(0, 3)}****${p.slice(-4)}`
+  const p = String(memberPhone.value || '').trim()
+  if (p) return p
   return '点我：完善个人资料'
 })
 
 const setupRowPhoneLine = computed(() => {
   if (!needsMemberSetupPage.value) return ''
   const p = memberPhone.value?.trim() || ''
-  if (p.length === 11) return `${p.slice(0, 3)}****${p.slice(-4)}`
   return p || '请绑定手机号'
 })
 
@@ -472,9 +472,7 @@ function onNicknameBlurConfirm() {
 
 const profileSub = computed(() => {
   if (!isLoggedIn.value || needsMemberSetupPage.value) return ''
-  const p = memberPhone.value
-  if (p && p.length === 11) return `${p.slice(0, 3)}****${p.slice(-4)}`
-  return ''
+  return String(memberPhone.value || '').trim()
 })
 
 
@@ -1347,5 +1345,16 @@ function goMemberSetup() {
 .arrow {
   color: #ccc;
   font-size: 40rpx;
+}
+
+/* 页面底部版本号（低调展示） */
+.page-version {
+  display: block;
+  margin-top: 40rpx;
+  text-align: center;
+  font-size: 18rpx;
+  font-weight: 500;
+  color: #c8c8c8;
+  letter-spacing: 0.5rpx;
 }
 </style>

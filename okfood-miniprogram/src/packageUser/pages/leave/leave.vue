@@ -1,11 +1,18 @@
 <template>
   <view class="page">
     <OkNavbar show-back title="请假管理 👌" />
-    <scroll-view scroll-y class="scroll" :style="scrollStyle">
-      <view v-if="leaveSyncing" class="page-leave page-leave--sync">
-        <text class="leave-loading-text">正在同步请假状态…</text>
-      </view>
-      <view v-else class="page-leave">
+    <scroll-view
+      scroll-y
+      class="scroll"
+      :style="scrollStyle"
+      refresher-enabled
+      :refresher-triggered="refresherTriggered"
+      @refresherrefresh="onLeaveRefresherRefresh"
+    >
+      <view class="page-leave">
+        <view v-if="leaveRefreshing" class="leave-sync-hint">
+          <text class="leave-sync-hint__text">正在同步最新状态…</text>
+        </view>
         <view v-if="isOnLeaveNow" class="leave-block leave-block--active">
           <text class="leave-status-tag">请假中</text>
           <text class="leave-h3 leave-h3--compact">{{ activeLeaveTitle }}</text>
@@ -79,7 +86,14 @@ const serverLeaveEnd = ref('')
 /** 仅明日请假：不配送目标业务日（上海），与后端 tomorrow_leave_target_date 一致 */
 const tomorrowTargetYmd = ref('')
 const scrollStyle = ref({})
-const leaveSyncing = ref(true)
+/** 后台拉取 /me 时顶部轻提示，不遮挡操作 */
+const leaveRefreshing = ref(false)
+/** 并发 sync 序号，只应用最后一次结果，避免乱序覆盖 */
+let leaveSyncGeneration = 0
+/** 防重复提交（快速请假 / 区间 / 取消） */
+const leaveActionBusy = ref(false)
+/** scroll-view 下拉刷新动画状态 */
+const refresherTriggered = ref(false)
 /** 与后台 app_settings.leave_deadline_time 一致，默认 21:00:00 */
 const leaveDeadlineTime = ref('21:00:00')
 
@@ -213,8 +227,13 @@ function ymdFromApi(d) {
   return s.length >= 10 ? s.slice(0, 10) : s
 }
 
-async function syncLeaveFromServer() {
-  leaveSyncing.value = true
+/**
+ * @param {{ noBanner?: boolean }} [opts] noBanner：下拉刷新时不再显示顶部黄条，避免与 refresher 重复
+ */
+async function syncLeaveFromServer(opts = {}) {
+  const noBanner = Boolean(opts.noBanner)
+  const gen = ++leaveSyncGeneration
+  if (!noBanner) leaveRefreshing.value = true
   try {
     const me = await Promise.race([
       request('/api/user/me', { method: 'GET', timeout: LEAVE_ME_SYNC_MS }),
@@ -224,6 +243,7 @@ async function syncLeaveFromServer() {
         }, LEAVE_ME_SYNC_MS + 2000)
       }),
     ])
+    if (gen !== leaveSyncGeneration) return
     if (me?.leave_deadline_time) {
       leaveDeadlineTime.value = String(me.leave_deadline_time).trim()
     }
@@ -244,6 +264,7 @@ async function syncLeaveFromServer() {
       rangeEnd.value = ''
     }
   } catch (e) {
+    if (gen !== leaveSyncGeneration) return
     if (isUserMeNotFoundError(e)) {
       clearMemberSession()
       uni.showToast({ title: '登录已失效，请重新登录', icon: 'none' })
@@ -254,9 +275,20 @@ async function syncLeaveFromServer() {
         uni.showToast({ title: msg, icon: 'none' })
       }
     }
-    /* 其它错误：保持本地展示，避免普通失败也弹窗 */
   } finally {
-    leaveSyncing.value = false
+    if (gen === leaveSyncGeneration && !noBanner) {
+      leaveRefreshing.value = false
+    }
+  }
+}
+
+/** 列表区域下拉刷新：与 onShow 同源拉取 /me */
+async function onLeaveRefresherRefresh() {
+  refresherTriggered.value = true
+  try {
+    await syncLeaveFromServer({ noBanner: true })
+  } finally {
+    refresherTriggered.value = false
   }
 }
 
@@ -266,6 +298,8 @@ function confirmCancelAllLeave() {
     content: '将清除当前区间请假及「明天请假」标记，确定取消？',
     success: async (res) => {
       if (!res.confirm) return
+      if (leaveActionBusy.value) return
+      leaveActionBusy.value = true
       try {
         await request('/api/user/leave', {
           method: 'POST',
@@ -278,6 +312,8 @@ function confirmCancelAllLeave() {
           title: e instanceof Error ? e.message : '取消失败',
           icon: 'none',
         })
+      } finally {
+        leaveActionBusy.value = false
       }
     },
   })
@@ -290,36 +326,32 @@ onShow(() => {
 })
 
 async function toggleTomorrow() {
-  if (isTomorrowLeave.value) {
-    try {
+  if (leaveActionBusy.value) return
+  const wasTomorrow = isTomorrowLeave.value
+  leaveActionBusy.value = true
+  try {
+    if (wasTomorrow) {
       await request('/api/user/leave', {
         method: 'POST',
         data: { type: 'clear_tomorrow' },
       })
       await syncLeaveFromServer()
       uni.showToast({ title: '已取消明天请假', icon: 'success' })
-    } catch (e) {
-      uni.showToast({
-        title: e instanceof Error ? e.message : '取消失败',
-        icon: 'none',
+    } else {
+      await request('/api/user/leave', {
+        method: 'POST',
+        data: { type: 'tomorrow' },
       })
+      await syncLeaveFromServer()
+      uni.showToast({ title: '已提交明天请假', icon: 'success' })
     }
-    return
-  }
-  try {
-    await request('/api/user/leave', {
-      method: 'POST',
-      data: {
-        type: 'tomorrow',
-      },
-    })
-    await syncLeaveFromServer()
-    uni.showToast({ title: '已提交明天请假', icon: 'success' })
   } catch (e) {
     uni.showToast({
-      title: e instanceof Error ? e.message : '提交失败',
+      title: e instanceof Error ? e.message : wasTomorrow ? '取消失败' : '提交失败',
       icon: 'none',
     })
+  } finally {
+    leaveActionBusy.value = false
   }
 }
 
@@ -331,6 +363,7 @@ function onEnd(e) {
 }
 
 async function submitRange() {
+  if (leaveActionBusy.value) return
   if (!rangeStart.value || !rangeEnd.value) {
     uni.showToast({ title: '请选择起止日期', icon: 'none' })
     return
@@ -339,6 +372,7 @@ async function submitRange() {
     uni.showToast({ title: '开始日期不能晚于结束日期', icon: 'none' })
     return
   }
+  leaveActionBusy.value = true
   try {
     await request('/api/user/leave', {
       method: 'POST',
@@ -358,6 +392,8 @@ async function submitRange() {
       title: e instanceof Error ? e.message : '提交失败',
       icon: 'none',
     })
+  } finally {
+    leaveActionBusy.value = false
   }
 }
 </script>
@@ -373,16 +409,17 @@ async function submitRange() {
   padding-bottom: 80rpx;
 }
 
-.page-leave--sync {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 40vh;
+.leave-sync-hint {
+  padding: 20rpx 28rpx;
+  margin-bottom: 24rpx;
+  background: rgba(250, 204, 21, 0.2);
+  border-radius: 24rpx;
+  border: 1px solid rgba(250, 204, 21, 0.45);
 }
 
-.leave-loading-text {
-  font-size: 28rpx;
-  color: $ok-slate-400;
+.leave-sync-hint__text {
+  font-size: 24rpx;
+  color: $ok-slate-600;
   font-weight: 800;
 }
 
