@@ -124,7 +124,8 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
         address_summary = f"{area} {detail_line}".strip()
         addr_id = int(addr.id)
 
-    if not db.get(Member, member_id):
+    mem = db.get(Member, member_id)
+    if not mem or mem.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
 
     from app.services.menu_day_stock_service import assert_single_order_stock_available
@@ -252,7 +253,7 @@ def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, c
         raise HTTPException(status_code=400, detail="订单已支付")
 
     member = db.get(Member, member_id)
-    if not member:
+    if not member or member.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
     openid = (member.wx_mini_openid or "").strip()
     if not openid:
@@ -406,3 +407,20 @@ def confirm_single_order_delivery(db: Session, courier_id: str, order_id: int) -
     courier_row.fee_pending = prev + fee_yuan
     row.fulfillment_status = "delivered"
     db.commit()
+
+
+def mark_single_meal_delivered_sf_completion_no_commit(db: Session, order_id: int) -> None:
+    """
+    顺丰订单完成：单点餐标履约已送达；餐费已预付，不扣会员次数、不产生骑手待结算。
+    不符合条件时静默跳过（幂等）。
+    """
+    row = db.get(SingleMealOrder, order_id)
+    if not row:
+        return
+    if row.pay_status != "已支付":
+        return
+    if row.fulfillment_status == "delivered":
+        return
+    if bool(getattr(row, "store_pickup", False)):
+        return
+    row.fulfillment_status = "delivered"

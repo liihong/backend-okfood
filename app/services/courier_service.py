@@ -120,6 +120,7 @@ def eligible_members_for_delivery(
         .outerjoin(daf, daf.c.mid == Member.id)
         .outerjoin(MemberAddress, MemberAddress.id == daf.c.addr_id)
         .where(
+            Member.deleted_at.is_(None),
             Member.is_active.is_(True),
             Member.balance >= units_sql,
             Member.store_pickup.is_(False),
@@ -178,6 +179,7 @@ def eligible_members_for_store_pickup(
         .outerjoin(daf, daf.c.mid == Member.id)
         .outerjoin(MemberAddress, MemberAddress.id == daf.c.addr_id)
         .where(
+            Member.deleted_at.is_(None),
             Member.is_active.is_(True),
             Member.balance >= units_sql,
             Member.store_pickup.is_(True),
@@ -378,7 +380,7 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
     today = today_shanghai()
 
     member = db.execute(select(Member).where(Member.id == member_id).with_for_update()).scalar_one_or_none()
-    if not member:
+    if not member or member.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
 
     allowed_region_ids = {int(r.region_id) for r in regions_for_courier(db, courier_id)}

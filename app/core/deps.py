@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 ROLE_MEMBER = "member"
 ROLE_COURIER = "courier"
 ROLE_ADMIN = "admin"
+ROLE_ADMIN_DELIVERY = "admin_delivery"
+
+ADMIN_ACCOUNT_FULL = "full"
+ADMIN_ACCOUNT_DELIVERY = "delivery"
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -71,6 +75,16 @@ def admin_subject(creds: HTTPAuthorizationCredentials | None = Depends(bearer_sc
     return sub
 
 
+def admin_or_delivery_staff_subject(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> str:
+    """完整管理员 JWT 或「仅配送管理」后台账号 JWT。"""
+    sub, role = _subject_from_bearer(creds)
+    if role not in (ROLE_ADMIN, ROLE_ADMIN_DELIVERY):
+        raise HTTPException(status_code=403, detail="需要管理员或配送管理账号令牌")
+    return sub
+
+
 def issue_member_token(member_id: int) -> str:
     """会员 JWT（当前仅微信小程序登录签发）；`sub` 为 members.id。"""
     return create_access_token(
@@ -88,10 +102,11 @@ def issue_courier_token(courier_id: str) -> str:
     )
 
 
-def issue_admin_token(username: str) -> str:
+def issue_admin_token(username: str, *, jwt_role: str | None = None) -> str:
+    role = jwt_role if jwt_role is not None else ROLE_ADMIN
     return create_access_token(
         subject=username,
-        role=ROLE_ADMIN,
+        role=role,
         expires_delta=timedelta(minutes=settings.JWT_EXPIRE_MINUTES_ADMIN),
     )
 

@@ -1,5 +1,6 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import and_, case, exists, func, literal, not_, or_, select, true
@@ -11,13 +12,16 @@ from app.core.security import verify_password
 from app.core.timeutil import today_shanghai, tomorrow_shanghai
 from app.models.admin_user import AdminUser
 from app.models.balance_log import BalanceLog
+from app.models.delivery_log import DeliveryLog
 from app.models.enums import BalanceReason, PlanType
 from app.constants import UNASSIGNED_DELIVERY_AREA
 from app.models.member import Member
 from app.models.member_address import MemberAddress
+from app.models.member_card_order import MemberCardOrder
 from app.models.menu_dish import MenuDish
 from app.models.menu_schedule import MenuSchedule
 from app.models.product_category import ProductCategory
+from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.schemas.admin import (
     CategoryAdminOut,
@@ -71,10 +75,13 @@ def _apply_member_list_filters(
     q_phone: str | None,
     validity: str | None,
     inactive_only: bool = False,
+    delivery_deferred_only: bool = False,
     delivery_region_id: int | None = None,
     unassigned_region: bool = False,
     plan_type: str | None = None,
+    on_leave_only: bool = False,
 ):
+    stmt = stmt.where(Member.deleted_at.is_(None))
     if q_phone:
         q = q_phone.strip()
         if q:
@@ -104,7 +111,14 @@ def _apply_member_list_filters(
     if plan_type:
         stmt = stmt.where(Member.plan_type == plan_type)
     if inactive_only:
-        stmt = stmt.where(Member.is_active.is_(False))
+        # 与前台「未开卡」一致：排除「暂停配送」(delivery_deferred)
+        stmt = stmt.where(
+            and_(Member.is_active.is_(False), Member.delivery_deferred.is_(False)),
+        )
+    if delivery_deferred_only:
+        stmt = stmt.where(
+            and_(Member.is_active.is_(False), Member.delivery_deferred.is_(True)),
+        )
     if unassigned_region:
         dap = default_address_pick_subquery()
         ma = aliased(MemberAddress)
@@ -129,6 +143,21 @@ def _apply_member_list_filters(
                 .where(ma.delivery_region_id == delivery_region_id)
             )
         )
+    if on_leave_only:
+        # 与 `_member_on_leave_today` / 列表「请假中」状态一致（上海当前业务日）
+        biz_today = today_shanghai()
+        in_leave_range = and_(
+            Member.leave_range_start.isnot(None),
+            Member.leave_range_end.isnot(None),
+            Member.leave_range_start <= biz_today,
+            Member.leave_range_end >= biz_today,
+        )
+        tomorrow_leave_active = and_(
+            Member.is_leaved_tomorrow.is_(True),
+            Member.tomorrow_leave_target_date.isnot(None),
+            biz_today <= Member.tomorrow_leave_target_date,
+        )
+        stmt = stmt.where(or_(in_leave_range, tomorrow_leave_active))
     return stmt
 
 
@@ -148,7 +177,7 @@ def member_list_overview_counts(db: Session) -> MemberListStatsOut:
             func.count().label("total"),
             func.coalesce(func.sum(case((Member.balance > 0, 1), else_=0)), 0).label("active"),
             func.coalesce(func.sum(case((Member.balance == 0, 1), else_=0)), 0).label("expired"),
-        ).select_from(Member)
+        ).select_from(Member).where(Member.deleted_at.is_(None))
     ).one()
     return MemberListStatsOut(
         total=int(row.total or 0),
@@ -165,9 +194,11 @@ def list_members_paged(
     page_size: int,
     validity: str | None = None,
     inactive_only: bool = False,
+    delivery_deferred_only: bool = False,
     delivery_region_id: int | None = None,
     unassigned_region: bool = False,
     plan_type: str | None = None,
+    on_leave_only: bool = False,
 ) -> tuple[list[MemberAdminOut], int]:
     # 每人至多一条「默认地址」：避免多条 is_default=1 时 JOIN 放大行数、拖慢 ORDER BY + LIMIT
     default_addr_pick = default_address_pick_subquery()
@@ -178,18 +209,22 @@ def list_members_paged(
         q_phone=q_phone,
         validity=validity,
         inactive_only=inactive_only,
+        delivery_deferred_only=delivery_deferred_only,
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=plan_type,
+        on_leave_only=on_leave_only,
     ).subquery("cnt")
     page_sq = _apply_member_list_filters(
         select(Member.id.label("pid")).select_from(Member),
         q_phone=q_phone,
         validity=validity,
         inactive_only=inactive_only,
+        delivery_deferred_only=delivery_deferred_only,
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=plan_type,
+        on_leave_only=on_leave_only,
     )
     page_sq = (
         page_sq.order_by(Member.created_at.desc())
@@ -271,7 +306,7 @@ def apply_member_recharge_delta(
     """调整会员剩余次数并写入 balance_logs；由调用方 commit。"""
     if body.amount == 0:
         raise HTTPException(status_code=400, detail="调整幅度不能为 0")
-    m = db.execute(select(Member).where(Member.phone == body.phone)).scalar_one_or_none()
+    m = db.execute(select(Member).where(Member.phone == body.phone, Member.deleted_at.is_(None))).scalar_one_or_none()
     if not m:
         raise HTTPException(status_code=404, detail="用户不存在")
     m.balance += body.amount
@@ -299,6 +334,37 @@ def apply_member_recharge_delta(
         )
     )
     return m
+
+
+def admin_delete_member(db: Session, member_id: int) -> dict[str, str]:
+    """无关联业务流水时可物理删除；否则逻辑删除并释放手机号。"""
+    m = db.get(Member, member_id)
+    if not m:
+        raise HTTPException(status_code=404, detail="会员不存在")
+    if m.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="该会员已删除")
+    mid = int(member_id)
+    n_bal = int(db.scalar(select(func.count()).select_from(BalanceLog).where(BalanceLog.member_id == mid)) or 0)
+    n_del = int(db.scalar(select(func.count()).select_from(DeliveryLog).where(DeliveryLog.member_id == mid)) or 0)
+    n_smo = int(
+        db.scalar(select(func.count()).select_from(SingleMealOrder).where(SingleMealOrder.member_id == mid)) or 0
+    )
+    n_card = int(
+        db.scalar(select(func.count()).select_from(MemberCardOrder).where(MemberCardOrder.member_id == mid)) or 0
+    )
+    can_hard = n_bal == 0 and n_del == 0 and n_smo == 0 and n_card == 0
+    if can_hard:
+        db.delete(m)
+        db.commit()
+        return {"mode": "hard", "msg": "已物理删除（无余额流水、配送记录、单次点餐与开卡工单）"}
+    m.deleted_at = datetime.utcnow()
+    m.wx_mini_openid = None
+    m.phone = ("z" + uuid.uuid4().hex[:18])[:20]
+    db.commit()
+    return {
+        "mode": "soft",
+        "msg": "已逻辑删除：余额/配送等业务记录仍关联保留以便追溯；手机号已释放，用户可重新注册",
+    }
 
 
 def upsert_dish(db: Session, body: DishUpsertIn) -> DishAdminOut:
@@ -557,10 +623,11 @@ def dashboard_meal_summary(db: Session) -> DashboardMealSummaryOut:
             Member.delivery_start_date <= d,
         )
         base = and_(Member.is_active.is_(True), Member.balance >= units_sql, started)
-        leave_n = int(db.scalar(select(func.count()).select_from(Member).where(base, absent)) or 0)
+        active_only = Member.deleted_at.is_(None)
+        leave_n = int(db.scalar(select(func.count()).select_from(Member).where(active_only, base, absent)) or 0)
         prep_n = int(
             db.scalar(
-                select(func.coalesce(func.sum(units_sql), 0)).select_from(Member).where(base, not_(absent))
+                select(func.coalesce(func.sum(units_sql), 0)).select_from(Member).where(active_only, base, not_(absent))
             )
             or 0
         )

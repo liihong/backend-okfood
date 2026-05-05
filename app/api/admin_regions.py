@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from app.core.deps import SessionDep, admin_subject
+from app.core.deps import SessionDep, admin_or_delivery_staff_subject, admin_subject
 from app.schemas.delivery_region import DeliveryRegionCreateIn, DeliveryRegionUpdateIn
 from app.services.delivery_region_map_overview_service import delivery_region_map_overview
 from app.services.delivery_region_service import (
@@ -26,7 +26,7 @@ def delivery_region_map_overview_route(db: SessionDep, _admin: str = Depends(adm
 def delivery_regions_list(
     db: SessionDep,
     include_polygon: bool = False,
-    _admin: str = Depends(admin_subject),
+    _admin: str = Depends(admin_or_delivery_staff_subject),
 ):
     """默认不返回 polygon_json（显著减小负载）；需要全量多边形时传 `?include_polygon=true`。"""
     items = list_delivery_regions(db, include_polygon=include_polygon)
@@ -34,24 +34,24 @@ def delivery_regions_list(
 
 
 @router.get("/delivery-regions/{region_id}")
-def delivery_regions_get(region_id: int, db: SessionDep, _admin: str = Depends(admin_subject)):
+def delivery_regions_get(region_id: int, db: SessionDep, _admin: str = Depends(admin_or_delivery_staff_subject)):
     item = get_delivery_region(db, region_id)
     return success(data=dump_model(item), msg="获取成功")
 
 
 @router.post("/delivery-regions")
-def delivery_regions_create(body: DeliveryRegionCreateIn, db: SessionDep, _admin: str = Depends(admin_subject)):
+def delivery_regions_create(body: DeliveryRegionCreateIn, db: SessionDep, _admin: str = Depends(admin_or_delivery_staff_subject)):
     item = create_delivery_region(db, body)
     return success(data=dump_model(item), msg="创建成功")
 
 
 @router.patch("/delivery-regions/{region_id}")
-def delivery_regions_patch(region_id: int, body: DeliveryRegionUpdateIn, db: SessionDep, _admin: str = Depends(admin_subject)):
+def delivery_regions_patch(region_id: int, body: DeliveryRegionUpdateIn, db: SessionDep, _admin: str = Depends(admin_or_delivery_staff_subject)):
     item = update_delivery_region(db, region_id, body)
     return success(data=dump_model(item), msg="更新成功")
 
 
 @router.delete("/delivery-regions/{region_id}")
-def delivery_regions_delete(region_id: int, db: SessionDep, _admin: str = Depends(admin_subject)):
+def delivery_regions_delete(region_id: int, db: SessionDep, _admin: str = Depends(admin_or_delivery_staff_subject)):
     delete_delivery_region(db, region_id)
     return success(msg="已删除")

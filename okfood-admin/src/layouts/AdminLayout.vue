@@ -14,11 +14,18 @@ import {
   ChevronsRight,
   Settings,
 } from 'lucide-vue-next'
-import { handleAdminLogout } from '../admin/core.js'
+import { handleAdminLogout, adminKind, hydrateTokenFromStorage } from '../admin/core.js'
 
 const SIDEBAR_COLLAPSED_KEY = 'okfood-admin-sidebar-collapsed'
 
 const route = useRoute()
+
+const isDeliveryOnly = computed(() => adminKind.value === 'delivery')
+
+/** 与模板绑定：明确布尔，避免 Element Plus 菜单缓存旧结构 */
+const showFullAdminMenus = computed(() => !isDeliveryOnly.value)
+
+const portalSubtitle = computed(() => (isDeliveryOnly.value ? '配送管理' : 'SUPER ADMIN'))
 
 const pageTitle = computed(() => route.meta.title || 'OK Fine Admin')
 
@@ -49,6 +56,7 @@ function toggleSidebar() {
 }
 
 onMounted(() => {
+  hydrateTokenFromStorage()
   sidebarMediaQuery = window.matchMedia('(max-width: 900px)')
   syncNarrowScreen()
   sidebarMediaQuery.addEventListener('change', syncNarrowScreen)
@@ -81,7 +89,7 @@ watch(sidebarCollapsedPref, (v) => {
         <div class="logo-box">&#128076;</div>
         <div v-show="!sidebarCollapsed" class="logo-text">
           <h1>OK Fine</h1>
-          <span>SUPER ADMIN</span>
+          <span>{{ portalSubtitle }}</span>
         </div>
         <button
           type="button"
@@ -96,6 +104,7 @@ watch(sidebarCollapsedPref, (v) => {
       </div>
 
       <el-menu
+        :key="adminKind"
         class="sidebar-menu"
         :default-active="activeMenuPath"
         :collapse="sidebarCollapsed"
@@ -105,26 +114,26 @@ watch(sidebarCollapsedPref, (v) => {
         text-color="rgba(255, 255, 255, 0.72)"
         active-text-color="#facc15"
       >
-        <el-menu-item index="/dashboard">
+        <el-menu-item v-if="showFullAdminMenus" index="/dashboard">
           <!-- 外层必须用 div：el-menu--collapse 会把 >span 设为 width:0 隐藏，连图标一起没了 -->
           <div class="menu-item-inner">
             <BarChart3 :size="18" stroke-width="2" />
             <span class="menu-item-label">营业概览</span>
           </div>
         </el-menu-item>
-        <el-menu-item index="/users">
+        <el-menu-item v-if="showFullAdminMenus" index="/users">
           <div class="menu-item-inner">
             <Users :size="18" stroke-width="2" />
             <span class="menu-item-label">会员档案</span>
           </div>
         </el-menu-item>
-        <el-menu-item index="/card-orders">
+        <el-menu-item v-if="showFullAdminMenus" index="/card-orders">
           <div class="menu-item-inner">
             <ClipboardList :size="18" stroke-width="2" />
             <span class="menu-item-label">开卡工单</span>
           </div>
         </el-menu-item>
-        <el-menu-item index="/delivery">
+        <el-menu-item v-if="showFullAdminMenus" index="/delivery">
           <div class="menu-item-inner">
             <Truck :size="18" stroke-width="2" />
             <span class="menu-item-label">配送大表</span>
@@ -140,16 +149,17 @@ watch(sidebarCollapsedPref, (v) => {
           </template>
           <el-menu-item index="/regions">配送区域管理</el-menu-item>
           <el-menu-item index="/couriers">配送员管理</el-menu-item>
+          <el-menu-item index="/delivery-sf-orders">顺丰订单监控</el-menu-item>
         </el-sub-menu>
 
-        <el-menu-item index="/finance">
+        <el-menu-item v-if="showFullAdminMenus" index="/finance">
           <div class="menu-item-inner">
             <DollarSign :size="18" stroke-width="2" />
             <span class="menu-item-label">财务中心</span>
           </div>
         </el-menu-item>
 
-        <el-sub-menu index="sub-menu-mgmt">
+        <el-sub-menu v-if="showFullAdminMenus" index="sub-menu-mgmt">
           <template #title>
             <div class="menu-item-inner">
               <Utensils :size="18" stroke-width="2" />
@@ -160,7 +170,7 @@ watch(sidebarCollapsedPref, (v) => {
           <el-menu-item index="/weekly-menu">本周菜单</el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu index="sub-system">
+        <el-sub-menu v-if="showFullAdminMenus" index="sub-system">
           <template #title>
             <div class="menu-item-inner">
               <Settings :size="18" stroke-width="2" />
@@ -178,7 +188,7 @@ watch(sidebarCollapsedPref, (v) => {
         @click="handleAdminLogout"
       >
         <div v-show="!sidebarCollapsed" class="admin-info">
-          <div class="avatar">Admin</div>
+          <div class="avatar">{{ isDeliveryOnly ? '配送' : 'Admin' }}</div>
           <span>安全退出</span>
         </div>
         <LogOut :size="16" />

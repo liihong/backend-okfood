@@ -47,7 +47,7 @@
                 <text class="map-pick-line">{{ recvLocTitle }}</text>
                 <text v-if="recvLocSub" class="map-pick-sub">{{ recvLocSub }}</text>
               </view>
-              <text v-else class="map-pick-placeholder">请在地图上选择小区/道路等收货位置</text>
+              <text v-else class="map-pick-placeholder">请在地图上选择小区/收货点位置</text>
               <view class="map-pick-actions">
                 <button class="btn-map-pick" hover-class="none" @tap="chooseMapLocation">地图选点</button>
               </view>
@@ -115,45 +115,34 @@ const form = reactive({
 
 /** 坐标仅提交接口；界面只展示地名（uni.chooseLocation 地图选点） */
 const coords = ref(null)
-/** 选点返回的结构化字段，用于拼接 detail_address；省市区由服务端按经纬度高德逆地理编码与小程序文案合并写入 map_location_text */
+/** 选点返回的结构化字段；map_location_text 仅提交小区/POI 名，省市区由服务端逆地理写入库 */
 const poiMeta = ref(null)
-/** 主标题：多为小区或 POI 名称 */
+/** 主标题：小区或 POI 名称（微信地图 name） */
 const recvLocTitle = ref('')
-/** 副标题：城市、道路等补充（不展示经纬度） */
+/** 副标题：已保存地址时展示省市区（逆地理compact） */
 const recvLocSub = ref('')
 
 const useMapAddress = computed(() => coords.value != null)
 
-function buildPoiBaseAddress(p) {
+/** 写入 map_location_text：仅小区/POI 名，不包含微信 address 里的道路信息 */
+function buildMapCommunityText(p) {
   if (!p || typeof p !== 'object') return ''
-  const city = String(p.city ?? '').trim()
-  const name = String(p.name ?? '').trim()
-  let address = String(p.address ?? '').trim()
-  if (city && address.startsWith(city)) {
-    address = address.slice(city.length).trim()
-  }
-  // 与后台/列表展示一致：先省市区与道路，再小区/POI 名（微信常把 name 作小区、address 作行政区+路）
-  const region = [city, address].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
-  const parts = []
-  if (region) parts.push(region)
-  if (name && (!region || !region.includes(name))) parts.push(name)
-  return parts.join(' ').replace(/\s+/g, ' ').trim()
+  return String(p.name ?? '').trim()
 }
 
-function setPoiDisplayLines(city, name, address) {
-  const c = String(city || '').trim()
+function formatRegionCompact(item) {
+  if (!item || typeof item !== 'object') return ''
+  const a = [
+    item.province != null ? String(item.province).trim() : '',
+    item.city != null ? String(item.city).trim() : '',
+    item.district != null ? String(item.district).trim() : '',
+  ].filter(Boolean)
+  return a.join('')
+}
+
+function setPoiDisplayLinesFromPick(name) {
   const n = String(name || '').trim()
-  let a = String(address || '').trim()
-  if (c && a.startsWith(c)) {
-    a = a.slice(c.length).trim()
-  }
-  const region = [c, a].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
-  if (region) {
-    recvLocTitle.value = region
-    recvLocSub.value = n && !region.includes(n) ? n : ''
-    return
-  }
-  recvLocTitle.value = n || c || '已选地点'
+  recvLocTitle.value = n || '已选地点'
   recvLocSub.value = ''
 }
 
@@ -237,7 +226,7 @@ function applyAddressItem(item) {
         : ''
     if (mapSaved || doorSaved) {
       recvLocTitle.value = mapSaved || (item.detail_address != null ? String(item.detail_address) : '')
-      recvLocSub.value = ''
+      recvLocSub.value = formatRegionCompact(item)
       form.houseNumber = doorSaved
       form.legacyDetail = ''
     } else {
@@ -287,10 +276,8 @@ function applyCoordsAndPoiMeta(la, lo, meta) {
   }
   coords.value = { lat: la, lng: lo }
   poiMeta.value = meta
-  const city = String(meta.city ?? '').trim()
   const name = String(meta.name ?? '').trim()
-  const address = String(meta.address ?? '').trim()
-  setPoiDisplayLines(city, name, address)
+  setPoiDisplayLinesFromPick(name)
   form.legacyDetail = ''
   return true
 }
@@ -397,16 +384,16 @@ function buildAddressBody() {
   const hasCoords = coords.value != null
   let detail_address = ''
   if (hasCoords) {
-    const base = poiMeta.value
-      ? buildPoiBaseAddress(poiMeta.value)
+    const community = poiMeta.value
+      ? buildMapCommunityText(poiMeta.value)
       : (recvLocTitle.value || '').trim()
     const house = (form.houseNumber || '').trim()
-    detail_address = house ? `${base} ${house}`.trim() : base
+    detail_address = [community, house].filter(Boolean).join(' ').trim()
     return {
       contact_name: form.name.trim(),
       contact_phone: String(form.phone).replace(/\D/g, ''),
       detail_address,
-      map_location_text: base || null,
+      map_location_text: community || null,
       door_detail: house || null,
       remarks: (form.remarks || '').trim(),
       location: { lng: coords.value.lng, lat: coords.value.lat },
@@ -452,7 +439,7 @@ async function save() {
   const hasCoords = coords.value != null
   if (hasCoords) {
     const baseOk = poiMeta.value
-      ? buildPoiBaseAddress(poiMeta.value)
+      ? buildMapCommunityText(poiMeta.value)
       : (recvLocTitle.value || '').trim()
     if (!baseOk) {
       uni.showToast({ title: '请选择收货地点', icon: 'none' })

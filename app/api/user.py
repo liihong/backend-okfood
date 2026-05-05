@@ -147,14 +147,14 @@ def sync_wx_mini_openid(
     openid = str(sess.get("openid") or "").strip()
     if not openid:
         raise HTTPException(status_code=400, detail="微信未返回用户标识，请稍后重试")
-    bound_id = db.scalar(select(Member.id).where(Member.wx_mini_openid == openid))
+    bound_id = db.scalar(select(Member.id).where(Member.wx_mini_openid == openid, Member.deleted_at.is_(None)))
     if bound_id is not None and int(bound_id) != int(member_id):
         raise HTTPException(
             status_code=400,
             detail="当前微信已绑定其他会员账号，请使用对应账号登录或联系客服",
         )
     member = db.get(Member, member_id)
-    if not member:
+    if not member or member.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
     member.wx_mini_openid = openid
     db.commit()

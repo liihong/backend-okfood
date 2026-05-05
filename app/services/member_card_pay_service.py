@@ -76,7 +76,7 @@ def create_miniprogram_member_card_order(
         )
 
     m = db.get(Member, member_id)
-    if not m:
+    if not m or m.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
 
     amt = card_order_amount_yuan_for_kind(db, k)
@@ -115,7 +115,7 @@ def prepare_wechat_jsapi_for_member_card_order(
         raise HTTPException(status_code=400, detail="订单已支付")
 
     member = db.get(Member, member_id)
-    if not member:
+    if not member or member.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
     openid = (member.wx_mini_openid or "").strip()
     if not openid:

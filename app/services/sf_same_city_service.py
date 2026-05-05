@@ -12,11 +12,12 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from fastapi import HTTPException
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
@@ -37,6 +38,7 @@ from app.services.delivery_sheet_service import (
 )
 from app.services.member_address_service import delivery_region_name_map, routing_area_label
 from app.services.member_service import effective_daily_meal_units
+from app.services.sf_open import sign as sf_sign_mod
 from app.services.sf_open.client import SfOpenApiError, SfOpenClient
 from app.services.store_config_service import get_store_config
 from app.schemas.admin import (
@@ -49,6 +51,25 @@ from app.schemas.admin import (
 )
 
 _SH = ZoneInfo("Asia/Shanghai")
+
+
+def _sf_push_request_snapshot(
+    preview_row: dict[str, Any],
+    pld: dict[str, Any],
+    *,
+    gset: Any,
+) -> dict[str, Any]:
+    """落库：预览行 + 实际发往顺丰的报文（与签名同源 canonical JSON）。"""
+    canon = sf_sign_mod._canonical_json(pld)
+    return {
+        "preview_row": preview_row,
+        "shop_id": str(gset.SF_OPEN_SHOP_ID or "").strip(),
+        "dev_id": int(gset.SF_OPEN_DEV_ID),
+        "product_type": int(gset.SF_DEFAULT_PRODUCT_TYPE or 1),
+        "vehicle_type_code": int(gset.SF_VEHICLE_TYPE_CODE or 1),
+        "sf_create_order": pld,
+        "sf_canonical_json": canon,
+    }
 
 
 def _sf_receive_city_name(row: SfSameCityRowBase, env_city: str) -> str:
@@ -104,6 +125,12 @@ def _to_unix(dtx: datetime | None) -> int:
     if dtx.tzinfo is None:
         dtx = dtx.replace(tzinfo=_SH)
     return int(dtx.timestamp())
+
+
+def _second_day_noon_unix_shanghai(base_day: date) -> int:
+    """业务日「次日」中午 12:00（上海）；用于顺丰 ``expect_pickup_time`` / ``shop_expect_time`` 等秒级时间戳。"""
+    nd = base_day + timedelta(days=1)
+    return int(datetime(nd.year, nd.month, nd.day, 12, 0, 0, tzinfo=_SH).timestamp())
 
 
 def _load_default_address(
@@ -204,6 +231,8 @@ def _build_aggs(
             db, {int(aaddr.delivery_region_id)} if aaddr.delivery_region_id else set()
         )
         ra = (o.routing_area or "").strip() or routing_area_label(aaddr, nm)
+        if area_key and (ra or "").strip() != area_key.strip():
+            continue
         rline = _resolve_delivery_line(aaddr, nm)
         line_full = (rline.address_line or "").strip()
         if not line_full:
@@ -327,7 +356,7 @@ def _agg_to_row(
         recv_phone=(rphone or "—")[:20],
         product_category=(s.SF_PRODUCT_CATEGORY_LABEL or "餐品").strip(),
         weight_kg=round(wkg, 2),
-        push_immediately=True,
+        push_immediately=False,
         expect_delivery_at=expect_at_default,
         remark=rmk_s,
         is_direct=False,
@@ -354,6 +383,21 @@ def _has_success(db: Session, d: date, stop_id: str) -> bool:
         .limit(1)
     )
     return r is not None
+
+
+def aggs_for_delivery_date(db: Session, d: date) -> dict[str, _Agg]:
+    """当日全部停靠点聚合（与同业务日顺丰预览/履约同源）。"""
+    members, default_by_id = eligible_members_for_delivery(db, delivery_date=d, delivery_region_id=None)
+    mlist = list(members)
+    return _build_aggs(db, d, None, None, mlist, default_by_id)
+
+
+def load_agg_for_stop_id(db: Session, d: date, stop_id: str) -> _Agg | None:
+    """
+    按业务日与停靠点 id（与顺丰预览/推单同源）解析聚合行；不加片区/手机筛选，
+    与「全量大表 + 单次点餐到家」口径一致。
+    """
+    return aggs_for_delivery_date(db, d).get(stop_id)
 
 
 def preview_sf_same_city(
@@ -401,6 +445,7 @@ def _create_order_payload(
     gset: Any,
     store: Any,
     now_ts: int,
+    delivery_date: date,
 ) -> dict[str, Any]:
     n_meals = max(1, int(row.subscription_pending_units) + int(row.single_meal_count))
     w_gram = int(float(row.weight_kg) * 1000)
@@ -413,8 +458,10 @@ def _create_order_payload(
     decl = None
     if is_insu and row.goods_value_yuan is not None:
         decl = int(Decimal(str(row.goods_value_yuan)) * 100)
+    # 备注：仅体现当次停靠点份数（如「2份餐」）；可选拼接管理端备注，不传车型/类别文案
+    meal_note = f"{int(n_meals)}份餐"
     rmk0 = (row.remark or "").strip()
-    rmk2 = f"{rmk0} 车型:{row.vehicle_type} 类别:{row.product_category}" if rmk0 else f"车型:{row.vehicle_type} 类别:{row.product_category}"
+    rmk_final = f"{meal_note} {rmk0}".strip() if rmk0 else meal_note
 
     # 无会员坐标时的回退中心点（河南省新乡市，GCJ-02 约值，与默认 SF_CITY_NAME 一致）
     recv_lng, recv_lat = 113.883991, 35.303257
@@ -454,12 +501,16 @@ def _create_order_payload(
         "pay_type": 1,
         "push_time": int(now_ts),
         "version": int(gset.SF_API_VERSION or 17),
+        "vehicle_type": int(gset.SF_VEHICLE_TYPE_CODE or 1),
         "order_sequence": str(shop_order_id)[-6:],
-        "remark": rmk2[:500],
+        "remark": rmk_final[:500],
     }
     if is_appoint and expect_ts:
         body["appoint_type"] = 1
         body["expect_time"] = int(expect_ts)
+        # 用户期望上门时间 / 商家期望送达（骑士端展示、非考核字段）：业务日次日 12:00，秒级时间戳
+        second_noon = _second_day_noon_unix_shanghai(delivery_date)
+        body["shop_expect_time"] = str(int(second_noon))
     if decl is not None:
         body["declared_value"] = int(decl)
     body["is_person_direct"] = 1 if row.is_direct else 0
@@ -536,14 +587,43 @@ def push_sf_same_city(db: Session, body: SfSameCityPushIn) -> SfSameCityPushOut:
                 )
             )
             continue
+        if not item.push_immediately and item.expect_delivery_at is not None:
+            edt = item.expect_delivery_at
+            if edt.tzinfo is None:
+                edt = edt.replace(tzinfo=_SH)
+            else:
+                edt = edt.astimezone(_SH)
+            t_today = today_shanghai()
+            if d < t_today and edt.date() < t_today:
+                out.append(
+                    SfSameCityPushItemResult(
+                        stop_id=item.stop_id,
+                        ok=False,
+                        message="所选业务日已早于今日（上海），期望送达日期须为今日或之后。",
+                        sf_order_id=None,
+                    )
+                )
+                continue
+            if edt.timestamp() < time.time():
+                out.append(
+                    SfSameCityPushItemResult(
+                        stop_id=item.stop_id,
+                        ok=False,
+                        message="期望送达须晚于当前时间（上海）；请调整预约时间或使用立即推单。",
+                        sf_order_id=None,
+                    )
+                )
+                continue
         soid = f"OKF{d:%Y%m%d}{item.stop_id[:12]}{uuid.uuid4().hex[:8]}"
         if len(soid) > 64:
             soid = soid[:64]
-        snap: dict = item.model_dump(mode="json")
+        snap_preview: dict[str, Any] = item.model_dump(mode="json")
+        snap_db: dict[str, Any] = snap_preview
         try:
             pld = _create_order_payload(
-                item, shop_order_id=soid, gset=gset, store=store, now_ts=now_ts
+                item, shop_order_id=soid, gset=gset, store=store, now_ts=now_ts, delivery_date=d
             )
+            snap_db = _sf_push_request_snapshot(snap_preview, pld, gset=gset)
             res = httpc.create_order(
                 pld, dev_id=int(gset.SF_OPEN_DEV_ID), app_key=(gset.SF_OPEN_SECRET or "").strip()
             )
@@ -559,7 +639,7 @@ def push_sf_same_city(db: Session, body: SfSameCityPushIn) -> SfSameCityPushOut:
                 sf_bill_id=str(sfb) if sfb is not None else None,
                 error_code=0,
                 error_msg="",
-                request_snapshot=snap,
+                request_snapshot=snap_db,
                 response_json=res if isinstance(res, dict) else None,
             )
             db.add(row)
@@ -575,14 +655,20 @@ def push_sf_same_city(db: Session, body: SfSameCityPushIn) -> SfSameCityPushOut:
         except SfOpenApiError as e:
             db.rollback()
             _persist_fail(
-                db, d, item.stop_id, soid, snap, int(e.error_code) if e.error_code is not None else -1, str(e)[:1000]
+                db,
+                d,
+                item.stop_id,
+                soid,
+                snap_db,
+                int(e.error_code) if e.error_code is not None else -1,
+                str(e)[:1000],
             )
             out.append(
                 SfSameCityPushItemResult(stop_id=item.stop_id, ok=False, message=str(e), sf_order_id=None)
             )
         except Exception as e:
             db.rollback()
-            _persist_fail(db, d, item.stop_id, soid, snap, -2, str(e)[:1000])
+            _persist_fail(db, d, item.stop_id, soid, snap_db, -2, str(e)[:1000])
             out.append(
                 SfSameCityPushItemResult(
                     stop_id=item.stop_id, ok=False, message=f"推单异常: {e!s}", sf_order_id=None
@@ -611,3 +697,77 @@ def _persist_fail(
     )
     db.add(row)
     db.commit()
+
+
+def cancel_sf_same_city_push(
+    db: Session,
+    *,
+    push_id: int,
+    cancel_reason: str | None = None,
+) -> dict[str, Any]:
+    """
+    调用顺丰开放平台 ``POST …/cancelorder?sign=``，同步返回顺丰 JSON。
+
+    同城开放平台约定示例字段（与三方封装一致）：``order_id`` + ``order_type``
+    （``1``=顺丰订单号，``2``=商家订单号）、可选 ``cancel_code`` / ``cancel_reason``。
+    """
+    gset = get_settings()
+    if not gset.SF_OPEN_DEV_ID or not (gset.SF_OPEN_SHOP_ID or "").strip() or not (
+        gset.SF_OPEN_SECRET or ""
+    ).strip():
+        raise HTTPException(status_code=400, detail="请先在 .env 配置 SF_OPEN_DEV_ID、SF_OPEN_SHOP_ID、SF_OPEN_SECRET")
+    row = db.get(SfSameCityPush, push_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="推单记录不存在")
+    try:
+        ec_int = int(row.error_code) if row.error_code is not None else None
+    except (TypeError, ValueError):
+        ec_int = None
+    has_sf_id = bool((row.sf_order_id or "").strip())
+    create_ok = ec_int == 0
+    # 仅「明确创单成功」或「已有顺丰单号」才允许调顺丰 cancel（后者兼容异常/历史数据）
+    if not create_ok and not has_sf_id:
+        em = (row.error_msg or "").strip()
+        bits = [
+            "本条推单在系统中标记为「未成功创单」（error_code≠0），且未保存顺丰订单号，无法在顺丰侧取消。"
+            " 常见原因：请求顺丰 createorder 时被拒绝或超时落库失败。"
+        ]
+        if row.error_code is not None:
+            bits.append(f"落地 error_code={row.error_code}。")
+        if em:
+            bits.append(em[:300])
+        raise HTTPException(status_code=400, detail=" ".join(bits))
+    st = row.sf_callback_order_status
+    if st is not None and int(st) in (2, 17, 22, 31):
+        raise HTTPException(status_code=400, detail="当前顺丰回调状态已为取消、完结或取消中，如需核对请以顺丰控制台为准")
+    sfo = (row.sf_order_id or "").strip()
+    shop_oid = (row.shop_order_id or "").strip()
+    if not sfo and not shop_oid:
+        raise HTTPException(status_code=400, detail="缺少顺丰单号与商家订单号")
+    reason = (cancel_reason or "").strip() or "商家发起取消"
+    now_ts = int(time.time())
+    dev_id = int(gset.SF_OPEN_DEV_ID)
+    body: dict[str, Any] = {
+        "cancel_code": 313,
+        "cancel_reason": reason[:200],
+        "dev_id": dev_id,
+        "push_time": now_ts,
+    }
+    if sfo:
+        body["order_id"] = sfo
+        body["order_type"] = 1
+    else:
+        body["order_id"] = shop_oid[:64]
+        body["order_type"] = 2
+        body["shop_id"] = str(gset.SF_OPEN_SHOP_ID or "").strip()
+        body["shop_type"] = int(gset.SF_OPEN_SHOP_TYPE or 1)
+    httpc = SfOpenClient()
+    try:
+        res = httpc.cancel_order(
+            body, dev_id=dev_id, app_key=(gset.SF_OPEN_SECRET or "").strip()
+        )
+    except SfOpenApiError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if isinstance(res, dict):
+        return {"message": "顺丰已受理取消", "sf_response": res}
+    return {"message": "顺丰已受理取消", "sf_response": None}

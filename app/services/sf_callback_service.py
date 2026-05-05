@@ -323,6 +323,7 @@ def persist_sf_callback_and_sync_push(
     )
     db.add(row)
 
+    matched_push: SfSameCityPush | None = None
     if sign_ok and payload:
         pus = None
         if shop_order_id:
@@ -330,6 +331,7 @@ def persist_sf_callback_and_sync_push(
         if pus is None and sf_order_id:
             pus = db.scalar(select(SfSameCityPush).where(SfSameCityPush.sf_order_id == sf_order_id))
         if pus is not None:
+            matched_push = pus
             pus.last_callback_at = datetime.utcnow()
             pus.last_callback_kind = route_kind[:64]
             ost = payload.get("order_status")
@@ -338,6 +340,18 @@ def persist_sf_callback_and_sync_push(
                     pus.sf_callback_order_status = int(ost)
                 except (TypeError, ValueError):
                     pass
+
+    if sign_ok and route_kind == "order_complete" and matched_push is not None:
+        try:
+            from app.services.sf_order_fulfillment_service import apply_sf_order_complete_fulfillment
+
+            apply_sf_order_complete_fulfillment(db, matched_push)
+        except Exception:
+            logger.exception(
+                "顺丰订单完成自动履约失败 shop_order_id=%s stop_id=%s",
+                getattr(matched_push, "shop_order_id", None),
+                getattr(matched_push, "stop_id", None),
+            )
 
     db.commit()
     db.refresh(row)

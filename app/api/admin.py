@@ -3,9 +3,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
-from app.core.deps import SessionDep, admin_subject, issue_admin_token
+from app.core.deps import (
+    ADMIN_ACCOUNT_DELIVERY,
+    ROLE_ADMIN,
+    ROLE_ADMIN_DELIVERY,
+    SessionDep,
+    admin_or_delivery_staff_subject,
+    admin_subject,
+    issue_admin_token,
+)
+from app.models.member import Member
 from app.models.enums import PlanType
 from app.core.limiter import limiter
+from app.schemas.member_address import MemberAddressUpdateIn
 from app.schemas.admin import (
     AdminAddressIn,
     AdminDeliveryMarkIn,
@@ -25,9 +35,13 @@ from app.schemas.admin import (
     SfSameCityPreviewOut,
     SfSameCityPushIn,
     SfSameCityPushOut,
+    SfSameCityPushMonitorRow,
+    SfSameCityCancelIn,
+    SfSameCityCancelOut,
 )
-from app.schemas.common import TokenResponse
+from app.schemas.common import AdminLoginTokenOut
 from app.services.admin_service import (
+    admin_delete_member,
     admin_login_user,
     admin_weekly_menu_preview,
     assign_menu_schedule,
@@ -43,10 +57,14 @@ from app.services.admin_service import (
     update_settings,
     upsert_dish,
 )
-from app.services.sf_same_city_service import preview_sf_same_city, push_sf_same_city
+from app.services.sf_order_fulfillment_service import (
+    list_sf_same_city_pushes_for_monitor,
+)
+from app.services.sf_same_city_service import cancel_sf_same_city_push, preview_sf_same_city, push_sf_same_city
 from app.services.store_config_service import get_store_config, update_store_config
 from app.services.delivery_sheet_service import build_delivery_sheet
 from app.services.admin_delivery_fulfillment_service import admin_mark_subscription_fulfilled
+from app.services.member_address_service import list_addresses, update_address
 from app.services.member_service import (
     admin_member_leave,
     admin_patch_member_profile,
@@ -65,8 +83,11 @@ router = APIRouter(prefix="/admin", tags=["管理端"])
 @router.post("/login")
 @limiter.limit("30/minute")
 def login(request: Request, body: AdminLoginIn, db: SessionDep):
-    admin_login_user(db, body.username, body.password)
-    token = TokenResponse(access_token=issue_admin_token(body.username))
+    u = admin_login_user(db, body.username, body.password)
+    role_raw = (getattr(u, "role", None) or "").strip().lower()
+    kind = "delivery" if role_raw == ADMIN_ACCOUNT_DELIVERY else "full"
+    jwt_role = ROLE_ADMIN_DELIVERY if kind == "delivery" else ROLE_ADMIN
+    token = AdminLoginTokenOut(access_token=issue_admin_token(body.username, jwt_role=jwt_role), admin_kind=kind)
     return success(data=dump_model(token), msg="登录成功")
 
 
@@ -138,6 +159,43 @@ def delivery_sf_push(
     return success(data=dump_model(out), msg="处理完成")
 
 
+@router.get("/delivery-sf/pushes", response_model=None)
+def delivery_sf_pushes(
+    db: SessionDep,
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
+    delivery_date: Annotated[date | None, Query(description="业务日，不传则全部")] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    """顺丰同城创单落地记录列表（控制台回调状态），用于后台订单监控。"""
+    _ = admin_username
+    items_raw, total = list_sf_same_city_pushes_for_monitor(
+        db, delivery_date=delivery_date, page=page, page_size=page_size
+    )
+    items = [SfSameCityPushMonitorRow.model_validate(x) for x in items_raw]
+    return page_response(
+        items=[dump_model(x) for x in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        msg="获取成功",
+    )
+
+
+@router.post("/delivery-sf/pushes/{push_id}/cancel", response_model=None)
+def delivery_sf_cancel_push(
+    push_id: int,
+    body: SfSameCityCancelIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
+):
+    """调用顺丰 ``cancelorder`` 取消配送（商家异常场景）；同步返回顺丰响应 JSON。"""
+    _ = admin_username
+    raw = cancel_sf_same_city_push(db, push_id=push_id, cancel_reason=body.cancel_reason)
+    out = SfSameCityCancelOut.model_validate(raw)
+    return success(data=dump_model(out), msg="取消请求已提交")
+
+
 @router.post("/delivery-mark")
 def delivery_mark(
     body: AdminDeliveryMarkIn,
@@ -184,7 +242,14 @@ def users(
         str | None,
         Query(description="套餐筛选：周卡 | 月卡；不传或空=不限"),
     ] = None,
-    inactive_only: Annotated[bool, Query(description="true=仅未开卡 is_active=false")] = False,
+    inactive_only: Annotated[
+        bool,
+        Query(description="true=仅未开卡：is_active=false 且非暂停配送 delivery_deferred=false"),
+    ] = False,
+    delivery_deferred_only: Annotated[
+        bool,
+        Query(description="true=仅暂停配送：is_active=false 且 delivery_deferred=true"),
+    ] = False,
     delivery_region_id: Annotated[
         int | None,
         Query(ge=1, description="默认地址 delivery_region_id；与 unassigned_region 互斥"),
@@ -192,6 +257,10 @@ def users(
     unassigned_region: Annotated[
         bool,
         Query(description="true=仅片区未分配（无默认地址或 delivery_region_id 为空）"),
+    ] = False,
+    on_leave_only: Annotated[
+        bool,
+        Query(description="true=仅当前请假中（与列表「请假中」状态一致：区间含今日或明日请假未过期）"),
     ] = False,
 ):
     response.headers["Cache-Control"] = "no-store"
@@ -206,6 +275,8 @@ def users(
     page_size = min(max(1, page_size), 100)
     if delivery_region_id is not None and unassigned_region:
         raise HTTPException(status_code=400, detail="不能同时指定 delivery_region_id 与 unassigned_region")
+    if inactive_only and delivery_deferred_only:
+        raise HTTPException(status_code=400, detail="inactive_only 与 delivery_deferred_only 不能同时为 true")
     items, total = list_members_paged(
         db,
         q_phone=q,
@@ -213,12 +284,26 @@ def users(
         page_size=page_size,
         validity=v or None,
         inactive_only=inactive_only,
+        delivery_deferred_only=delivery_deferred_only,
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=pt or None,
+        on_leave_only=on_leave_only,
     )
     serialized = [dump_model(i) for i in items]
     return page_response(items=serialized, total=total, page=page, page_size=page_size, msg="获取成功")
+
+
+@router.delete("/users/{member_id}")
+def admin_delete_member_route(
+    member_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """删除会员：无业务流水时物理删除；否则逻辑删除并保留追溯数据。"""
+    _ = admin_username
+    out = admin_delete_member(db, member_id)
+    return success(data=out, msg=out.get("msg") or "已删除")
 
 
 @router.post("/recharge")
@@ -241,6 +326,10 @@ def card_orders(
     admin_username: str = Depends(admin_subject),
     q: str | None = None,
     pay_status: Annotated[str | None, Query(description="未缴 | 已缴")] = None,
+    include_history: Annotated[
+        bool,
+        Query(description="true=含已缴且已入账等全部历史；默认 false 仅待处理工单"),
+    ] = False,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -249,7 +338,12 @@ def card_orders(
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     items, total = list_card_orders_paged(
-        db, q=q, pay_status=pay_status, page=page, page_size=page_size
+        db,
+        q=q,
+        pay_status=pay_status,
+        page=page,
+        page_size=page_size,
+        include_history=include_history,
     )
     serialized = [dump_model(i) for i in items]
     return page_response(
@@ -318,6 +412,38 @@ def member_leave(body: AdminMemberLeaveIn, db: SessionDep, admin_username: str =
         end=body.end,
     )
     return success(data=dump_model(member), msg="请假状态已更新")
+
+
+@router.get("/users/{member_id}/addresses")
+def admin_member_addresses_list(
+    member_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """会员档案：列出该会员全部配送地址（含地图文案、门牌、经纬度与省市区）。"""
+    _ = admin_username
+    m = db.get(Member, member_id)
+    if not m or m.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="会员不存在")
+    items = list_addresses(db, member_id)
+    return success(data=[dump_model(i) for i in items], msg="获取成功")
+
+
+@router.patch("/users/{member_id}/addresses/{address_id}")
+def admin_member_address_patch(
+    member_id: int,
+    address_id: int,
+    body: MemberAddressUpdateIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """管理端保存会员地址：可与小程序拆分一致（地点文案 / 门牌），坐标变更时服务端逆地理写入省市区并重算片区。"""
+    _ = admin_username
+    m = db.get(Member, member_id)
+    if not m or m.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="会员不存在")
+    out = update_address(db, member_id, address_id, body)
+    return success(data=dump_model(out), msg="地址已保存")
 
 
 @router.get("/dishes")

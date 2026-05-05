@@ -21,6 +21,12 @@ function todayShanghaiStr() {
   return ymdInTimeZone(new Date(), 'Asia/Shanghai')
 }
 
+/** 业务日已过时，期望送达默认用「今日」起算，避免仍落在历史日期 */
+function effectiveSfExpectDefaultYmd(deliveryYmd) {
+  const yRaw = (deliveryYmd || '').trim() || todayShanghaiStr()
+  return yRaw < todayShanghaiStr() ? todayShanghaiStr() : yRaw
+}
+
 /** 顺丰弹窗：期望送达 value-format 字符串，默认当日 12:00（与后端预览一致） */
 function defaultSfExpectAt(ymd) {
   const d = (ymd || '').trim() || todayShanghaiStr()
@@ -41,7 +47,9 @@ function expectAtToValueFormat(v, ymd) {
 
 /** 弹窗行：与会员地址 field 名对齐的 map/门牌 + 默认送达时间 */
 function normalizeSfPreviewRows(rows, deliveryYmd) {
-  const y = (deliveryYmd || '').trim() || todayShanghaiStr()
+  const yRaw = (deliveryYmd || '').trim() || todayShanghaiStr()
+  const y = effectiveSfExpectDefaultYmd(yRaw)
+  const today = todayShanghaiStr()
   return (Array.isArray(rows) ? rows : []).map((r) => {
     const map0 =
       r.map_location_text != null && String(r.map_location_text).length
@@ -51,13 +59,18 @@ function normalizeSfPreviewRows(rows, deliveryYmd) {
       r.door_detail != null && String(r.door_detail).length
         ? String(r.door_detail)
         : String(r.recv_building ?? '')
+    let exp = expectAtToValueFormat(r.expect_delivery_at, y)
+    if (yRaw < today) {
+      const expYmd = String(exp || '').split('T')[0]
+      if (!expYmd || expYmd < today) exp = defaultSfExpectAt(y)
+    }
     return {
       ...r,
       map_location_text: map0,
       door_detail: door0,
       recv_address: map0,
       recv_building: door0,
-      expect_delivery_at: expectAtToValueFormat(r.expect_delivery_at, y),
+      expect_delivery_at: exp,
     }
   })
 }
@@ -66,11 +79,26 @@ const sfExpectDefaultTime = new Date(2000, 0, 1, 12, 0, 0)
 
 function onSfPushImmediatelyChange(row) {
   if (row && !row.push_immediately) {
-    const ymd = (sfPreview.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
+    const ymd = effectiveSfExpectDefaultYmd(sfPreview.value.delivery_date || deliveryDateQuery.value)
     if (!row.expect_delivery_at) {
       row.expect_delivery_at = defaultSfExpectAt(ymd)
     }
   }
+}
+
+/** 解析顺丰弹窗 expect_delivery_at（上海墙钟 +08:00）与当前时刻比较 */
+function parseSfExpectAtShanghai(s) {
+  const m = String(s || '').match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})$/)
+  if (!m) return null
+  return new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}+08:00`)
+}
+
+/** 业务日早于今日时，禁止期望送达选上海日历今日之前的日期 */
+function sfExpectDeliveryDisabledDate(time) {
+  const d = String(sfPreview.value.delivery_date || '').trim()
+  if (!d || d >= todayShanghaiStr()) return false
+  const ymd = ymdInTimeZone(time, 'Asia/Shanghai')
+  return ymd < todayShanghaiStr()
 }
 
 /** 与 GET /api/admin/delivery-sheet 响应字段对齐（含到家送达汇总） */
@@ -107,7 +135,14 @@ const sfDialogOpen = ref(false)
 const sfLoading = ref(false)
 const sfPushSubmitting = ref(false)
 const sfPreview = ref({ delivery_date: '', rows: [], sf_configured: false })
+/** 顺丰弹窗当前业务日是否早于上海今日（历史日查询） */
+const sfBizDayPast = computed(() => {
+  const d = String(sfPreview.value.delivery_date || '').trim()
+  return Boolean(d && d < todayShanghaiStr())
+})
 const sfSelectAll = ref(true)
+/** 勾选后预览不按片区过滤（当日全部到家停靠点）；不勾选时优先顶部片区下拉，否则用当前 Tab，默认减少一次推单量 */
+const sfPreviewAllRegions = ref(false)
 /** 顺丰弹窗内：按收货人手机（表格「手机」列）再筛选，支持后几位或完整号 */
 const sfModalPhoneFilter = ref('')
 
@@ -124,6 +159,22 @@ const sfModalFilteredRows = computed(() => {
 const sfModalFilterActive = computed(() =>
   Boolean((sfModalPhoneFilter.value || '').trim().replace(/\s/g, ''))
 )
+
+/** 顺丰预览请求：与顶部筛选同源；未勾选「全部片区」时优先下拉片区，否则用当前 Tab（自提 Tab 不传 area，与原先全量到家一致） */
+function sfPreviewQueryArea() {
+  if (sfPreviewAllRegions.value) return ''
+  const fromToolbar = (areaFilter.value || '').trim()
+  if (fromToolbar) return fromToolbar
+  const tab = (activeRegionTab.value || '').trim()
+  if (tab === '门店自提') return ''
+  return tab
+}
+
+const sfPreviewScopeHint = computed(() => {
+  if (sfPreviewAllRegions.value) return '全部片区'
+  const a = sfPreviewQueryArea()
+  return a ? `片区「${a}」` : '全部片区'
+})
 
 /** 当前选中的路由分组片区（与 group.area 一致） */
 const activeRegionTab = ref('')
@@ -144,18 +195,6 @@ const selectedGroup = computed(() => {
   const cur = activeRegionTab.value
   return groups.find((g) => g.area === cur) || groups[0]
 })
-
-function countIssueStops(sheet) {
-  let n = 0
-  for (const g of sheet.groups || []) {
-    for (const st of g.stops || []) {
-      if (st.has_area_issue) n += 1
-    }
-  }
-  return n
-}
-
-const sheetIssueStopCount = computed(() => countIssueStops(sheetToday.value))
 
 function flatStopsForSheet(sheet) {
   const out = []
@@ -449,15 +488,13 @@ function applySfSelectAll(val) {
   }
 }
 
-async function openSfDialog() {
+async function loadSfPreviewData() {
   if (!adminAccessToken.value) return
-  sfModalPhoneFilter.value = ''
-  sfDialogOpen.value = true
   sfLoading.value = true
   const d0 = (deliveryDateQuery.value || '').trim() || todayShanghaiStr()
   const base = new URLSearchParams()
   base.set('delivery_date', d0)
-  const a = (areaFilter.value || '').trim()
+  const a = sfPreviewQueryArea()
   if (a) base.set('area', a)
   const ph = (phoneQuery.value || '').trim()
   if (ph) base.set('phone', ph)
@@ -484,6 +521,14 @@ async function openSfDialog() {
   }
 }
 
+async function openSfDialog() {
+  if (!adminAccessToken.value) return
+  sfModalPhoneFilter.value = ''
+  sfPreviewAllRegions.value = false
+  sfDialogOpen.value = true
+  await loadSfPreviewData()
+}
+
 async function submitSfPush() {
   if (sfPushSubmitting.value) return
   const d0 = (sfPreview.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
@@ -491,6 +536,18 @@ async function submitSfPush() {
   if (!rows.length) {
     showToast('没有可推单的停靠点', 'error')
     return
+  }
+  for (const r of rows) {
+    if (!r.selected || r.already_pushed || r.push_immediately) continue
+    const expectAt = r.expect_delivery_at || defaultSfExpectAt(effectiveSfExpectDefaultYmd(d0))
+    const t = parseSfExpectAtShanghai(expectAt)
+    if (!t || t.getTime() < Date.now()) {
+      showToast(
+        '存在未选「立即推单」的停靠点：期望送达须晚于当前时间（上海）。历史业务日请选今日及之后的日期时段。',
+        'error'
+      )
+      return
+    }
   }
   sfPushSubmitting.value = true
   try {
@@ -654,16 +711,19 @@ async function markDelivery(memberId, kind) {
             <Printer :size="18" />
             打印标签
           </button>
-          <button
-            type="button"
-            class="btn-ghost delivery-sf-btn"
+          <el-button
+            plain
+            round
+            class="delivery-sf-btn"
             :disabled="loading"
             :title="!sfPreview.sf_configured ? '请在后端 .env 配置顺丰开发者参数' : ''"
             @click="openSfDialog"
           >
-            <Truck :size="18" />
-            顺丰推单
-          </button>
+            <span class="delivery-sf-btn__inner">
+              <Truck :size="18" stroke-width="2" />
+              顺丰推单
+            </span>
+          </el-button>
         </div>
       </div>
       <!-- 片区统计与切换：单独一行，右对齐，不占表格区 -->
@@ -706,15 +766,23 @@ async function markDelivery(memberId, kind) {
       </p>
       <p v-if="sfLoading" class="members-loading">加载推单清单…</p>
       <template v-else>
+        <p v-if="sfBizDayPast" class="sf-warn sf-warn--muted">
+          当前业务日早于今日（上海）：期望送达已按今日起算，日历不可选今日之前；预约时间须晚于当前时刻。
+        </p>
         <div class="sf-bar">
           <div class="sf-bar__left">
             <label class="sf-check-all"
               ><input v-model="sfSelectAll" type="checkbox" @change="applySfSelectAll(sfSelectAll)" />
               全选</label
             >
+            <label class="sf-check-all sf-check-all--muted"
+              ><input v-model="sfPreviewAllRegions" type="checkbox" @change="loadSfPreviewData" />
+              加载全部片区</label
+            >
             <span class="sf-hint"
-              >业务日 <strong>{{ sfPreview.delivery_date || deliveryDateQuery }}</strong> ·
-              共 {{ sfModalFilteredRows.length }} 个停靠点<span v-if="sfModalFilterActive"
+              >业务日 <strong>{{ sfPreview.delivery_date || deliveryDateQuery }}</strong> · 范围
+              <strong>{{ sfPreviewScopeHint }}</strong> · 共 {{ sfModalFilteredRows.length }} 个停靠点<span
+                v-if="sfModalFilterActive"
                 >（全量 {{ (sfPreview.rows || []).length }}）</span
               >；取消勾选则该行不推。</span
             >
@@ -801,6 +869,7 @@ async function markDelivery(memberId, kind) {
                   size="small"
                   class="sf-dt"
                   :disabled="row.push_immediately"
+                  :disabled-date="sfExpectDeliveryDisabledDate"
                 />
               </template>
             </el-table-column>
@@ -873,11 +942,6 @@ async function markDelivery(memberId, kind) {
             配送列表
             <span class="delivery-day-date">{{ sheetToday.delivery_date }}</span>
           </h3>
-          <p v-if="sheetIssueStopCount > 0" class="delivery-area-alert delivery-area-alert--compact">
-            有
-            <strong>{{ sheetIssueStopCount }}</strong>
-            个配送点需维护片区，见下表标注。
-          </p>
           <p v-if="!sheetToday.groups?.length" class="members-loading">
             <template v-if="sheetToday.is_subscription_delivery_day === false">
               该日非订阅配送业务日：周日、国家法定节假日及国务院调休放假日不生成大表，份数不计入该日。请选择其它业务日，或在「营业概览」核对备餐人数是否为 0。
@@ -892,14 +956,6 @@ async function markDelivery(memberId, kind) {
           <div v-else class="delivery-region-tabs">
             <div v-if="selectedGroup" role="tabpanel" :aria-label="selectedGroup.area" class="delivery-tabpanel">
               <div class="group-card">
-                <div class="group-header" :class="{ 'group-header--area-warn': selectedGroup.has_area_issue }">
-                  <h4>
-                    <MapPin :size="18" class="inline-icon" />
-                    {{ selectedGroup.area }}
-                    <span v-if="selectedGroup.has_area_issue" class="group-area-badge">区域待维护</span>
-                  </h4>
-                  <span class="badge">{{ groupTabMetaLine(selectedGroup) }}</span>
-                </div>
                 <div class="delivery-batch-bar">
                   <span class="delivery-batch-bar__hint">
                     勾选左侧行可批量操作；已选 <strong>{{ selectedDeliveryStops.length }}</strong> 个配送点，待标记
@@ -1076,7 +1132,7 @@ async function markDelivery(memberId, kind) {
   flex: 1 1 auto;
   min-width: 0;
 }
-.delivery-sf-btn {
+.delivery-sf-btn__inner {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -1088,6 +1144,11 @@ async function markDelivery(memberId, kind) {
   color: #b45309;
   background: #fffbeb;
   border-radius: 0.5rem;
+}
+.sf-warn--muted {
+  color: #92400e;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
 }
 .sf-warn code {
   font-size: 0.75rem;
@@ -1129,6 +1190,10 @@ async function markDelivery(memberId, kind) {
   gap: 0.35rem;
   cursor: pointer;
   user-select: none;
+}
+.sf-check-all--muted {
+  color: #64748b;
+  font-size: 0.82rem;
 }
 .sf-hint {
   color: #64748b;
@@ -1187,11 +1252,6 @@ async function markDelivery(memberId, kind) {
   font-size: 0.85rem;
   font-weight: 700;
   color: #64748b;
-}
-.delivery-area-alert--compact {
-  margin: 0 0 0.75rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.75rem;
 }
 
 .delivery-region-tabs {
@@ -1389,32 +1449,6 @@ async function markDelivery(memberId, kind) {
 .t-contact {
   font-size: 0.8rem;
   vertical-align: top;
-}
-
-.delivery-area-alert {
-  margin: 0.75rem 0 0;
-  padding: 0.75rem 1rem;
-  border-radius: 0.75rem;
-  background: #fff7ed;
-  border: 1px solid #fdba74;
-  color: #9a3412;
-  font-size: 0.8rem;
-  line-height: 1.45;
-}
-
-.group-header--area-warn {
-  background: linear-gradient(90deg, rgba(251, 146, 60, 0.2), transparent);
-}
-
-.group-area-badge {
-  margin-left: 0.5rem;
-  font-size: 12px;
-  font-weight: 900;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #fed7aa;
-  color: #9a3412;
-  vertical-align: middle;
 }
 
 .contact-line--area-warn .t-name {

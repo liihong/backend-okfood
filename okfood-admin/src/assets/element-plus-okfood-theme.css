@@ -63,6 +63,12 @@
   --el-text-color-regular: #475569;
   --el-text-color-secondary: #64748b;
   --el-text-color-placeholder: #94a3b8;
+
+  /* el-table 表头：与后台墨绿侧栏同源 */
+  --okfood-el-table-header-bg: #0e5a44;
+  --okfood-el-table-header-bg-hover: #0a4937;
+  --okfood-el-table-header-text: rgba(255, 255, 255, 0.95);
+  --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
 }
 
 /* --- 侧栏 el-menu：与 admin-ui 深绿侧栏、强调色 #facc15 一致 --- */
@@ -190,4 +196,71 @@
     flex: 1 1 140px;
     padding-left: 1rem !important;
   }
+}
+
+/* --- el-table 表头：墨绿背景（与侧栏 / 主色 #0e5a44 一致）--- */
+.el-table thead th.el-table__cell {
+  background-color: var(--okfood-el-table-header-bg) !important;
+  color: var(--okfood-el-table-header-text);
+}
+
+.el-table .el-table__fixed-header-wrapper th.el-table__cell {
+  background-color: var(--okfood-el-table-header-bg) !important;
+  color: var(--okfood-el-table-header-text);
+}
+
+.el-table .el-table__header-wrapper th.el-table__cell:hover,
+.el-table .el-table__fixed-header-wrapper th.el-table__cell:hover {
+  background-color: var(--okfood-el-table-header-bg-hover) !important;
+}
+
+.el-table thead th.el-table__cell.is-leaf,
+.el-table .el-table__fixed-header-wrapper th.el-table__cell.is-leaf {
+  border-bottom-color: var(--okfood-el-table-header-divider);
+}
+
+.el-table.el-table--border .el-table__header-wrapper th.el-table__cell,
+.el-table.el-table--border .el-table__fixed-header-wrapper th.el-table__cell {
+  border-right-color: var(--okfood-el-table-header-divider);
+}
+
+.el-table th.el-table__cell .cell {
+  color: inherit;
+}
+
+/* 表头排序：弱态白 + 选中态琥珀黄（与导航强调色呼应）*/
+.el-table th.el-table__cell .sort-caret.ascending {
+  border-bottom-color: rgba(255, 255, 255, 0.35);
+}
+.el-table th.el-table__cell .sort-caret.descending {
+  border-top-color: rgba(255, 255, 255, 0.35);
+}
+.el-table th.ascending .sort-caret.ascending {
+  border-bottom-color: #facc15;
+}
+.el-table th.descending .sort-caret.descending {
+  border-top-color: #facc15;
+}
+
+.el-table th.el-table__cell .caret-wrapper:hover .sort-caret.ascending {
+  border-bottom-color: rgba(250, 204, 21, 0.55);
+}
+
+.el-table th.el-table__cell .caret-wrapper:hover .sort-caret.descending {
+  border-top-color: rgba(250, 204, 21, 0.55);
+}
+
+/* 表头筛选触发器图标 */
+.el-table th.el-table__cell .el-table__column-filter-trigger {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.el-table th.el-table__cell .el-table__column-filter-trigger:hover {
+  color: rgba(255, 255, 255, 1);
+}
+
+/* --- el-button 默认（无 type / 默认 type）：边框与标签使用墨绿主色，与 sidebar / primary 一致 --- */
+.el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--info):not(.is-text):not(.is-link) {
+  --el-button-text-color: var(--el-color-primary);
+  --el-button-border-color: var(--el-color-primary);
 }

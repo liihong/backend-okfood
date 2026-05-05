@@ -17,6 +17,8 @@ const pageSize = ref(20)
 const total = ref(0)
 const searchQuery = ref('')
 const payFilter = ref('')
+/** 默认 false：仅待处理（未缴或已缴未入账）；勾选后查全部历史 */
+const includeHistory = ref(false)
 
 function todayInputDate() {
   const d = new Date()
@@ -39,6 +41,43 @@ function planTagClass(kind) {
   return 't-plan--count'
 }
 
+function truncateText(s, max) {
+  const t = (s == null ? '' : String(s)).trim()
+  if (!t) return ''
+  if (t.length <= max) return t
+  return `${t.slice(0, Math.max(0, max - 1))}…`
+}
+
+/** 列表格内备注缩略（完整内容用单元格 title 展示） */
+function remarkPreview(text) {
+  const t = (text == null ? '' : String(text)).trim()
+  if (!t) return '—'
+  return truncateText(t, 22)
+}
+
+/** 创建人 + 时间单行：MM-DD HH:mm */
+function cardOrderCreatedLine(row) {
+  const who = truncateText(row.created_by, 10)
+  const iso = row.created_at
+  let when = ''
+  if (iso) {
+    const x = String(iso).replace('T', ' ').trim()
+    const m = x.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
+    when = m ? `${m[2]}-${m[3]} ${m[4]}:${m[5]}` : x.slice(0, 16)
+  }
+  if (who && when) return `${who} · ${when}`
+  if (who) return who
+  if (when) return when
+  return '—'
+}
+
+function memberLine2Title(row) {
+  const p = (row.member_phone || '').trim()
+  const w = (row.member_wechat_name || '').trim()
+  if (w) return `${p} · 微信 ${w}`
+  return p || ''
+}
+
 async function fetchList() {
   if (!adminAccessToken.value) return
   loading.value = true
@@ -51,6 +90,7 @@ async function fetchList() {
     if (q) params.set('q', q)
     const pf = payFilter.value.trim()
     if (pf === '未缴' || pf === '已缴') params.set('pay_status', pf)
+    if (includeHistory.value) params.set('include_history', 'true')
     const data = await apiJson(`/api/admin/card-orders?${params.toString()}`, {}, { auth: true })
     list.value = Array.isArray(data.items) ? data.items : []
     total.value = Number(data.total) || 0
@@ -78,6 +118,11 @@ watch(searchQuery, () => {
 })
 
 watch(payFilter, () => {
+  page.value = 1
+  void fetchList()
+})
+
+watch(includeHistory, () => {
   page.value = 1
   void fetchList()
 })
@@ -394,7 +439,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="tab-content animate-up">
+ <section class="tab-content animate-up card-orders-page">
     <div class="table-container">
       <div class="table-header table-header--members table-header--couriers-row">
         <div class="search-box search-box--flex">
@@ -402,6 +447,10 @@ onMounted(() => {
           <input v-model="searchQuery" placeholder="搜索手机、姓名或微信昵称…" />
         </div>
         <div class="card-orders-filters">
+         <label class="card-orders-filter-label card-orders-filter-label--check">
+            <input v-model="includeHistory" type="checkbox" class="card-orders-history-check" />
+            查看历史开卡记录
+          </label>
           <label class="card-orders-filter-label">
             缴费
             <select v-model="payFilter" class="card-orders-select">
@@ -415,74 +464,82 @@ onMounted(() => {
           </button>
         </div>
       </div>
-      <p class="card-orders-intro">
-        <ClipboardList :size="16" class="card-orders-intro-icon" />
-        新建工单时先选「新会员开卡」或「老会员续卡」。新会员须填写姓名与微信昵称写入档案；续卡仅凭手机号匹配。
-        可同时录入配送位置（地图选点、收货手机、门牌等），保存为会员默认地址并自动划区。
-        开始配送日可选具体业务日或「暂不开卡」。缴费状态为「已缴」时自动按卡类型入账次数与套餐；仅在选择起送日时同时写入会员起送日并激活配送。选「未缴」则仅建单。
-      </p>
+
       <AdminTable
+class="card-orders-table"
         variant="members"
+size="small"
         :data="list"
         :loading="loading"
         row-key="id"
         empty-text="暂无工单"
       >
-        <el-table-column label="单号" width="90" class-name="td-mono">
+       <el-table-column label="单号" width="72" class-name="td-mono td-co-id">
           <template #default="{ row }">#{{ row.id }}</template>
         </el-table-column>
-        <el-table-column label="会员" min-width="220">
+       <el-table-column label="会员" class-name="td-co-member">
           <template #default="{ row }">
-            <div class="t-name">
-              {{ row.member_name || '—' }}
-              <span class="t-plan" :class="planTagClass(row.card_kind)">{{ row.card_kind }}</span>
-            </div>
-            <div class="member-phone-cell t-sub">
-              <Phone :size="12" class="member-phone-icon" />
-              <span class="member-phone-num">{{ row.member_phone }}</span>
-            </div>
-            <div v-if="row.member_wechat_name" class="t-sub t-wechat">微信 {{ row.member_wechat_name }}</div>
+           <div class="co-member-compact">
+              <div class="co-member-line1">
+                <span class="co-member-name" :title="row.member_name || ''">{{
+                  row.member_name || '—'
+                }}</span>
+                <span class="t-plan co-plan-tag" :class="planTagClass(row.card_kind)">{{
+                  row.card_kind
+                }}</span>
+              </div>
+             <div class="co-member-line2" :title="memberLine2Title(row)">
+                <Phone :size="11" class="member-phone-icon co-phone-icon" />
+                <span class="co-phone-num">{{ row.member_phone }}</span>
+                <template v-if="row.member_wechat_name">
+                  <span class="co-sep">·</span>
+                  <span class="co-wx">{{ truncateText(row.member_wechat_name, 6) }}</span>
+                </template>
+              </div>
+           </div>
           </template>
         </el-table-column>
-        <el-table-column prop="card_kind" label="卡类型" min-width="88" />
-        <el-table-column label="起送日" width="108" class-name="td-mono">
+       <el-table-column label="起送日" width="112" class-name="td-mono co-nowrap">
           <template #default="{ row }">{{ row.delivery_start_date || '—' }}</template>
         </el-table-column>
-        <el-table-column prop="pay_channel" label="缴费渠道" min-width="88" />
-        <el-table-column label="缴费状态" min-width="88">
+       <el-table-column prop="pay_channel" label="渠道" min-width="24" class-name="co-nowrap" />
+        <el-table-column label="状态" min-width="34" class-name="co-nowrap">
           <template #default="{ row }">
             <span :class="payStatusClass(row.pay_status)">{{ row.pay_status }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="实收(元)" align="right" min-width="88">
+       <el-table-column label="实收" align="right" width="72" min-width="64" class-name="co-amt">
           <template #default="{ row }">
-            <span class="font-black">
+           <span class="font-black co-amt-num">
               {{ row.amount_yuan != null && row.amount_yuan !== '' ? row.amount_yuan : '—' }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="入账" min-width="88">
+       <el-table-column label="入账" width="82" min-width="74" align="center" class-name="co-nowrap">
           <template #default="{ row }">
             <span
-              class="member-pill"
+class="member-pill co-sync-pill"
               :class="row.applied_to_member ? 'member-pill--emerald' : 'member-pill--slate'"
             >
               {{ row.applied_to_member ? '已同步' : '未同步' }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="备注" min-width="100" class-name="td-remarks">
-          <template #default="{ row }">{{ row.remark || '—' }}</template>
-        </el-table-column>
-        <el-table-column label="创建人 / 时间" min-width="140">
+       <el-table-column label="备注" min-width="200" width="152" class-name="td-co-remark">
           <template #default="{ row }">
-            <div class="t-sub t-sub--stacked">
-              <span>{{ row.created_by }}</span>
-              <span>{{ row.created_at }}</span>
-            </div>
+            <span class="co-remark-text" :title="(row.remark || '').trim() || undefined">{{
+              remarkPreview(row.remark)
+            }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" align="right" width="88" fixed="right">
+       <el-table-column label="创建" min-width="150" width="132" class-name="td-co-created">
+          <template #default="{ row }">
+           <span class="co-created-line" :title="`${row.created_by || ''} ${row.created_at || ''}`">{{
+              cardOrderCreatedLine(row)
+            }}</span>
+          </template>
+        </el-table-column>
+       <el-table-column label="操作" align="right" width="76" fixed="right" class-name="td-co-actions">
           <template #default="{ row }">
             <button type="button" class="btn-sm" @click="openEditModal(row)">更新</button>
           </template>
@@ -585,12 +642,13 @@ onMounted(() => {
               @warn="onDeliveryMapWarn"
             />
             <div class="form-group">
-              <label>地图详细地址</label>
+              <label>地图详细地址（只读）</label>
               <textarea
                 v-model="createForm.map_location_text"
                 rows="2"
                 maxlength="500"
-                placeholder="选点后自动填入，可直接修改"
+                readonly
+                placeholder="选点后自动填入（小区/POI 名；省市区由保存时合并）"
               />
             </div>
             <div class="form-group">
@@ -811,6 +869,18 @@ onMounted(() => {
   font-size: 13px;
   color: var(--text-muted, #64748b);
 }
+.card-orders-filter-label--check {
+  user-select: none;
+  cursor: pointer;
+}
+
+.card-orders-history-check {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--primary, #3b82f6);
+  cursor: pointer;
+}
 .card-orders-select {
   padding: 8px 10px;
   border-radius: 8px;
@@ -833,10 +903,6 @@ onMounted(() => {
 .card-orders-intro-icon {
   flex-shrink: 0;
   margin-top: 2px;
-}
-.t-wechat {
-  margin-top: 2px;
-  font-size: 12px;
 }
 .modal-form--card-order {
   padding-bottom: 2.85rem;
@@ -959,5 +1025,123 @@ onMounted(() => {
 .form-group :deep(.card-order-date-picker .el-input__wrapper.is-focus) {
   border-color: #0e5a44;
   background: #fff;
+}
+/* 开卡工单列表：更小行高、备注/创建信息缩略 */
+.card-orders-page :deep(.card-orders-table.admin-table--members.el-table--small .el-table__header th.el-table__cell) {
+  padding: 0.32rem 0.45rem;
+  font-size: 11px;
+}
+
+.card-orders-page :deep(.card-orders-table.admin-table--members.el-table--small .el-table__body td.el-table__cell) {
+  padding: 0.22rem 0.45rem;
+}
+
+.card-orders-page :deep(.card-orders-table .cell) {
+  line-height: 1.22;
+  font-size: 12px;
+}
+
+.co-member-compact {
+  min-width: 0;
+  line-height: 1.18;
+}
+
+.co-member-line1 {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.co-member-name {
+  font-weight: 800;
+  font-size: 12px;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.co-plan-tag {
+  flex-shrink: 0;
+  margin-left: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.co-member-line2 {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 1px;
+  min-width: 0;
+  font-size: 11px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.co-phone-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.co-phone-num {
+  flex-shrink: 0;
+}
+
+.co-sep {
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+
+.co-wx {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.card-orders-page :deep(.co-nowrap .cell) {
+  white-space: nowrap;
+}
+
+.co-amt-num {
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.co-sync-pill {
+  font-size: 10px;
+  padding: 1px 6px;
+  font-weight: 800;
+}
+
+.co-remark-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #475569;
+  max-width: 100%;
+}
+
+.co-created-line {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #64748b;
+  max-width: 100%;
+}
+
+.card-orders-page :deep(.td-co-actions .btn-sm) {
+  padding: 0.22rem 0.42rem;
+  font-size: 11px;
 }
 </style>

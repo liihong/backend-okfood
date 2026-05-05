@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch, computed, onMounted, nextTick } from 'vue'
-import { Search, Phone, X } from 'lucide-vue-next'
+import { Search, Phone, X, Trash2, MapPin, CalendarOff, Pencil, Download } from 'lucide-vue-next'
+import * as XLSX from 'xlsx'
 import {
   apiJson,
   adminAccessToken,
@@ -9,6 +10,8 @@ import {
   handleAdminLogout,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import MemberEditModal from './components/MemberEditModal.vue'
+import MemberAddressesModal from './components/MemberAddressesModal.vue'
 
 /** 本页表格数据（本地 ref；同步写入 memberList 供登出清空等兼容） */
 const membersRows = ref([])
@@ -24,8 +27,8 @@ const membersValidityTab = ref('all')
 const membersPlanFilter = ref('')
 /** 片区：'' | 'unassigned' | 区域 id 字符串 */
 const membersRegionFilter = ref('')
-/** 仅未开卡 is_active=false */
-const membersInactiveOnly = ref(false)
+/** 会员状态筛选：'' | inactive 未开卡（不含暂停配送） | paused 暂停配送 | leave 请假中；三者互斥 */
+const membersStatusSegment = ref('')
 const regionFilterOptions = ref([])
 
 /** 顶栏全库统计（不受当前搜索/筛选影响） */
@@ -60,8 +63,10 @@ async function loadRegionFilterOptions() {
   }
 }
 
-function toggleInactiveOnly() {
-  membersInactiveOnly.value = !membersInactiveOnly.value
+/** 再次点击同一项则清除状态筛选 */
+function selectMembersStatusSegment(seg) {
+  const next = membersStatusSegment.value === seg ? '' : seg
+  membersStatusSegment.value = next
   membersPage.value = 1
   void fetchMembers()
 }
@@ -98,26 +103,71 @@ async function fetchMemberStats() {
   }
 }
 
+const memberDeletingId = ref(null)
+const membersExporting = ref(false)
+
+async function deleteMemberRow(u) {
+  if (!u?.id) return
+  const label = `${u.name || '—'} · ${u.phone || ''}`
+  const ok = window.confirm(
+    `确定删除该会员？\n${label}\n\n若有余额流水、配送记录、单次点餐或开卡工单，将仅做逻辑删除并保留数据；若四项均无记录则物理删除档案与地址。`,
+  )
+  if (!ok) return
+  memberDeletingId.value = u.id
+  try {
+    const data = await apiJson(`/api/admin/users/${Number(u.id)}`, { method: 'DELETE' }, { auth: true })
+    const detail =
+      data && typeof data === 'object' && typeof data.msg === 'string'
+        ? data.msg
+        : '已删除'
+    showToast(detail, 'success')
+    await fetchMemberStats()
+    await fetchMembers()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '删除失败', 'error')
+  } finally {
+    memberDeletingId.value = null
+  }
+}
+
+/** 与列表请求一致；exportMode 为 true 时固定仅「剩余次数>0」（不导出 balance=0） */
+function buildMembersListParams(page, pageSize, { exportMode = false } = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  })
+  if (exportMode) {
+    params.set('validity', 'active')
+  } else {
+    const vq = validityQuery()
+    if (vq) params.set('validity', vq)
+  }
+  const pq = membersPlanFilter.value.trim()
+  if (pq) params.set('plan_type', pq)
+  const q = searchQuery.value.trim()
+  if (q) params.set('q', q)
+  if (membersStatusSegment.value === 'inactive') params.set('inactive_only', '1')
+  else if (membersStatusSegment.value === 'paused') params.set('delivery_deferred_only', '1')
+  else if (membersStatusSegment.value === 'leave') params.set('on_leave_only', '1')
+  if (membersRegionFilter.value === 'unassigned') params.set('unassigned_region', '1')
+  else if (membersRegionFilter.value) {
+    const rid = String(membersRegionFilter.value).trim()
+    if (rid && rid !== 'unassigned') params.set('delivery_region_id', rid)
+  }
+  return params
+}
+
 async function fetchMembers() {
   if (!adminAccessToken.value) return
   membersLoading.value = true
   try {
-    const params = new URLSearchParams({
-      page: String(membersPage.value),
-      page_size: String(membersPageSize.value),
-    })
-    const vq = validityQuery()
-    if (vq) params.set('validity', vq)
-    const pq = membersPlanFilter.value.trim()
-    if (pq) params.set('plan_type', pq)
-    const q = searchQuery.value.trim()
-    if (q) params.set('q', q)
-    if (membersInactiveOnly.value) params.set('inactive_only', '1')
-    if (membersRegionFilter.value === 'unassigned') params.set('unassigned_region', '1')
-    else if (membersRegionFilter.value) {
-      const rid = String(membersRegionFilter.value).trim()
-      if (rid && rid !== 'unassigned') params.set('delivery_region_id', rid)
-    }
+    const params = buildMembersListParams(membersPage.value, membersPageSize.value)
     const qs = params.toString()
     const data = await apiJson(`/api/admin/users?${qs}`, {}, { auth: true })
     const rawItems = Array.isArray(data?.items) ? data.items : []
@@ -136,6 +186,83 @@ async function fetchMembers() {
     showToast(e instanceof Error ? e.message : '加载会员列表失败', 'error')
   } finally {
     membersLoading.value = false
+  }
+}
+
+async function exportMembersExcel() {
+  if (!adminAccessToken.value || membersExporting.value) return
+  membersExporting.value = true
+  const pageSize = 100
+  const collected = []
+  try {
+    let page = 1
+    let total = 0
+    for (; ;) {
+      const params = buildMembersListParams(page, pageSize, { exportMode: true })
+      const data = await apiJson(`/api/admin/users?${params.toString()}`, {}, { auth: true })
+      const rawItems = Array.isArray(data?.items) ? data.items : []
+      total = Number(data?.total) || 0
+      let idx = collected.length
+      for (const raw of rawItems) {
+        const u = mapAdminUserToRow(raw, idx)
+        idx += 1
+        if ((Number(u.balance) || 0) > 0) collected.push(u)
+      }
+      if (page * pageSize >= total || rawItems.length < pageSize) break
+      page += 1
+    }
+    if (!collected.length) {
+      showToast('没有可导出数据（不含剩余次数为 0 的会员），或当前筛选下无符合条件记录', 'error')
+      return
+    }
+    const out = collected.map((u) => ({
+      会员ID: u.id ?? '',
+      姓名: u.name || '',
+      微信昵称: u.wechat_name ? String(u.wechat_name) : '',
+      手机: u.phone || '',
+      套餐类型: u.plan || '',
+      配送片区: u.area && u.area !== '—' ? String(u.area) : '',
+      配送地址详情: memberAddressDetailWithoutArea(u) || '',
+      '剩余／总次数': u.balanceLabel || String(u.balance),
+      每日份数: u.daily_meal_units ?? '',
+      请假信息: u.leave_kind
+        ? [u.leave_badge, u.leave_detail].filter(Boolean).join(' ').trim()
+        : '',
+      状态: u.status || '',
+      起送业务日: u.delivery_start_date || '',
+      备注: u.remarks != null && String(u.remarks).length ? String(u.remarks) : '',
+    }))
+    const ws = XLSX.utils.json_to_sheet(out)
+    ws['!cols'] = [
+      { wch: 10 },
+      { wch: 12 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 8 },
+      { wch: 14 },
+      { wch: 36 },
+      { wch: 14 },
+      { wch: 8 },
+      { wch: 22 },
+      { wch: 10 },
+      { wch: 12 },
+      { wch: 28 },
+    ]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, '会员档案')
+    const stamp = shanghaiTodayYmd()
+    XLSX.writeFile(wb, `会员档案_剩余次数大于0_${stamp}.xlsx`)
+    showToast(`已导出 ${out.length} 条（已排除剩余次数为 0）`, 'success')
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '导出失败', 'error')
+  } finally {
+    membersExporting.value = false
   }
 }
 
@@ -284,43 +411,22 @@ async function submitLeaveMember() {
   }
 }
 
-/** --- 修改会员 --- */
+/** --- 修改会员（弹窗子组件 MemberEditModal） --- */
 const showEditModal = ref(false)
-const editSaving = ref(false)
-/** 打开编辑弹窗时的套餐类型，用于判断是否与档案一致、是否提交 plan_type */
-const editInitialPlanType = ref('次卡')
-const editForm = ref({
-  phone: '',
-  name: '',
-  address: '',
-  remarks: '',
-  /** 每配送日份数（多张周卡等） */
-  daily_meal_units: 1,
-  /** 档案套餐标签：与列表「周卡/月卡」角标一致；仅改展示与统计口径，不自动改余额 */
-  plan_type: '次卡',
-  use_auto_area: false,
-  /** 会员剩余订餐次数（管理端直接改数，差值记入 balance_logs） */
-  balance: 0,
-  /** 起送业务日 YYYY-MM-DD，空表示未设置 */
-  delivery_start_date: '',
-  /** 门店自提 */
-  store_pickup: false,
-  /** 会员卡停用(暂停配送/先不开卡)，同 members.delivery_deferred；勾选后不参与排期与分拣 */
-  delivery_deferred: false,
-  /** 配送片区：'' 表示未分配，否则为区域 id 字符串（与下拉 value 一致） */
-  delivery_region_id: '',
+const editTargetMember = ref(null)
+
+watch(showEditModal, (v) => {
+  if (!v) editTargetMember.value = null
 })
 
-watch(
-  () => editForm.value.delivery_deferred,
-  (v) => {
-    if (v) editForm.value.store_pickup = false
-  },
-)
+async function onMemberEditSaved() {
+  await fetchMembers()
+  await fetchMemberStats()
+}
 
-/** 编辑框仅填详细地址：优先 API 的 detail_address，否则从旧版「片区 + 详细」展示串回推 */
-function defaultAddressDetailForEdit(u) {
-  let detail = typeof u.detail_address === 'string' ? u.detail_address.trim() : ''
+/** 不含所属片区：优先 detail_address，否则从旧版「片区 + 详细」串去掉 u.area 前缀 */
+function memberAddressDetailWithoutArea(u) {
+  const detail = typeof u.detail_address === 'string' ? u.detail_address.trim() : ''
   if (detail) return detail
   const rawAddr = String(u.address || '').trim()
   if (!rawAddr || rawAddr.startsWith('（未设置')) return ''
@@ -331,82 +437,27 @@ function defaultAddressDetailForEdit(u) {
   return rawAddr
 }
 
-async function openEditMember(u) {
-  const p0 = u.plan && u.plan !== '—' ? u.plan : '次卡'
-  editInitialPlanType.value = p0
-  const dr =
-    u.delivery_region_id != null && u.delivery_region_id !== ''
-      ? String(u.delivery_region_id)
-      : ''
-  editForm.value = {
-    phone: u.phone,
-    name: u.name || '',
-    address: defaultAddressDetailForEdit(u),
-    remarks: u.remarks || '',
-    daily_meal_units: Math.max(1, Math.min(50, Number(u.daily_meal_units) || 1)),
-    plan_type: p0,
-    use_auto_area: false,
-    balance: Math.max(0, Math.min(999999, Math.floor(Number(u.balance) || 0))),
-    delivery_start_date:
-      typeof u.delivery_start_date === 'string' && u.delivery_start_date.trim()
-        ? u.delivery_start_date.trim().slice(0, 10)
-        : '',
-    store_pickup: u.store_pickup === true,
-    delivery_deferred: u.delivery_deferred === true,
-    delivery_region_id: dr,
-  }
+function openEditMember(u) {
+  editTargetMember.value = u
   showEditModal.value = true
 }
 
-async function submitEditMember() {
-  if (!editForm.value.phone) return
-  editSaving.value = true
-  try {
-    const payload = {
-      phone: editForm.value.phone,
-      name: editForm.value.name.trim(),
-      remarks: editForm.value.remarks.trim() || null,
-      address: editForm.value.address.trim() || null,
-      daily_meal_units: Math.max(1, Math.min(50, Number(editForm.value.daily_meal_units) || 1)),
-      balance: Math.max(0, Math.min(999999, Math.floor(Number(editForm.value.balance) || 0))),
-      delivery_start_date: editForm.value.delivery_start_date?.trim()
-        ? editForm.value.delivery_start_date.trim().slice(0, 10)
-        : null,
-      store_pickup: editForm.value.store_pickup === true,
-      delivery_deferred: editForm.value.delivery_deferred === true,
-    }
-    if (editForm.value.use_auto_area) {
-      payload.use_auto_area = true
-    } else {
-      const dr = editForm.value.delivery_region_id
-      payload.delivery_region_id = dr === '' || dr == null ? null : Number(dr)
-    }
-    const pt = String(editForm.value.plan_type || '次卡').trim() || '次卡'
-    if (pt !== editInitialPlanType.value) {
-      payload.plan_type = pt
-    }
-    await apiJson(
-      '/api/admin/member/profile',
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      },
-      { auth: true },
-    )
-    showEditModal.value = false
-    await fetchMembers()
-    await fetchMemberStats()
-  } catch (e) {
-    const status = e && typeof e.status === 'number' ? e.status : 0
-    if (status === 401) {
-      alert('登录已过期，请重新登录')
-      handleAdminLogout()
-      return
-    }
-    showToast(e instanceof Error ? e.message : '保存失败', 'error')
-  } finally {
-    editSaving.value = false
-  }
+/** --- 会员地址管理（地图选点子组件 MemberAddressesModal） --- */
+const showAddrModal = ref(false)
+const addrTargetMember = ref(null)
+
+watch(showAddrModal, (v) => {
+  if (!v) addrTargetMember.value = null
+})
+
+function openMemberAddresses(u) {
+  if (!u?.id) return
+  addrTargetMember.value = u
+  showAddrModal.value = true
+}
+
+async function onMemberAddressesSaved() {
+  await fetchMembers()
 }
 
 onMounted(async () => {
@@ -420,28 +471,22 @@ onMounted(async () => {
   <section class="tab-content animate-up">
     <div class="table-container">
       <div class="table-header table-header--members">
-        <div
-          v-if="adminAccessToken"
-          class="members-header-stats members-header-stats--inline"
-          aria-live="polite"
-        >
-          <template v-if="membersStats.total !== null">
-            当前总会员：<strong>{{ membersStats.total }}</strong> 个，生效中
-            <strong>{{ membersStats.active }}</strong> 个，已过期
-            <strong>{{ membersStats.expired }}</strong> 个
-          </template>
-          <span v-else-if="membersStatsLoading" class="members-header-stats--muted">统计加载中…</span>
-          <span v-else class="members-header-stats--muted">统计暂不可用</span>
-        </div>
+
         <div class="members-query-row">
           <div class="search-box search-box--members-inline">
             <Search :size="18" />
             <input v-model="searchQuery" placeholder="搜索姓名、电话或片区地址..." />
           </div>
+          <div v-if="adminAccessToken" class="members-export-actions">
+            <el-button type="primary" plain size="small" class="members-export-btn" :loading="membersExporting"
+              :disabled="membersLoading" title="按当前搜索与筛选拉取全部分页；自动排除剩余次数为 0 的会员" @click="exportMembersExcel">
+              <Download :size="14" aria-hidden="true" style="margin-right: 4px; vertical-align: -2px" />
+              导出 Excel
+            </el-button>
+          </div>
           <div class="members-filter-toolbar">
             <div class="members-validity-tabs" role="tablist" aria-label="会员有效期">
-              <button
-                type="button"
+              <el-button
                 role="tab"
                 class="members-validity-tab"
                 :class="{ 'members-validity-tab--active': membersValidityTab === 'all' }"
@@ -449,9 +494,8 @@ onMounted(async () => {
                 @click="membersValidityTab = 'all'"
               >
                 全部
-              </button>
-              <button
-                type="button"
+              </el-button>
+              <el-button
                 role="tab"
                 class="members-validity-tab"
                 :class="{ 'members-validity-tab--active': membersValidityTab === 'active' }"
@@ -459,9 +503,8 @@ onMounted(async () => {
                 @click="membersValidityTab = 'active'"
               >
                 生效中
-              </button>
-              <button
-                type="button"
+              </el-button>
+              <el-button
                 role="tab"
                 class="members-validity-tab"
                 :class="{ 'members-validity-tab--active': membersValidityTab === 'expired' }"
@@ -469,9 +512,9 @@ onMounted(async () => {
                 @click="membersValidityTab = 'expired'"
               >
                 已过期
-              </button>
+              </el-button>
             </div>
-            <div class="members-extra-filters" aria-label="片区与开卡筛选">
+            <div class="members-extra-filters" aria-label="套餐、片区与状态筛选">
               <label class="members-filter-label" for="members-plan-filter">套餐</label>
               <select
                 id="members-plan-filter"
@@ -496,32 +539,51 @@ onMounted(async () => {
                   {{ r.name || '—' }}
                 </option>
               </select>
-              <button
-                type="button"
+              <el-button
                 role="tab"
                 class="members-validity-tab"
-                :class="{ 'members-validity-tab--active': membersInactiveOnly }"
-                :aria-selected="membersInactiveOnly"
-                @click="toggleInactiveOnly"
+                :class="{ 'members-validity-tab--active': membersStatusSegment === 'inactive' }"
+                :aria-selected="membersStatusSegment === 'inactive'"
+                title="未激活会员卡且非暂停配送"
+                @click="selectMembersStatusSegment('inactive')"
               >
                 未开卡
-              </button>
+              </el-button>
+              <el-button
+                role="tab"
+                class="members-validity-tab"
+                :class="{ 'members-validity-tab--active': membersStatusSegment === 'paused' }"
+                :aria-selected="membersStatusSegment === 'paused'"
+                title="会员卡停用（暂停配送）"
+                @click="selectMembersStatusSegment('paused')"
+              >
+                暂停配送
+              </el-button>
+              <el-button
+                role="tab"
+                class="members-validity-tab"
+                :class="{ 'members-validity-tab--active': membersStatusSegment === 'leave' }"
+                :aria-selected="membersStatusSegment === 'leave'"
+                @click="selectMembersStatusSegment('leave')"
+              >
+                请假中
+              </el-button>
             </div>
           </div>
         </div>
       </div>
       <AdminTable
         variant="members"
+        size="small"
         :data="membersRows"
         :loading="membersLoading"
         :row-key="memberRowKey"
         empty-text="暂无会员数据"
       >
-        <el-table-column label="会员信息" min-width="160">
+        <el-table-column label="会员信息" min-width="100">
           <template #default="{ row: u }">
             <div class="t-name">
               {{ u.name }}
-              <span class="t-plan" :class="planTagClass(u.plan)">{{ u.plan }}</span>
             </div>
             <div v-if="u.wechat_name" class="t-sub t-wechat">微信 {{ u.wechat_name }}</div>
           </template>
@@ -534,41 +596,32 @@ onMounted(async () => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="配送片区" min-width="100">
+        <el-table-column label="级别" align="center" min-width="75">
           <template #default="{ row: u }">
-            <span class="area-tag">{{ u.area }}</span>
+            <span class="t-plan" :class="planTagClass(u.plan)">{{ u.plan }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="开始配送时间" min-width="120" align="center" class-name="td-delivery-start">
+        <el-table-column label="配送地址" min-width="300" show-overflow-tooltip>
           <template #default="{ row: u }">
-            {{ u.delivery_start_date || '—' }}
+            {{ memberAddressDetailWithoutArea(u) || '—' }}
           </template>
         </el-table-column>
-        <el-table-column label="自提" align="center" min-width="72">
-          <template #default="{ row: u }">
-            <span :class="u.store_pickup ? 'pickup-tag pickup-tag--on' : 'pickup-tag'">{{
-              u.store_pickup ? '是' : '否'
-            }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="请假时间" min-width="156" class-name="td-col-leave">
+        <el-table-column label="请假时间" min-width="150" width="120" class-name="td-col-leave">
           <template #default="{ row: u }">
             <div v-if="!u.leave_kind" class="leave-cell leave-cell--empty">—</div>
-            <div v-else class="leave-cell">
-              <span class="leave-badge" :class="'leave-badge--' + u.leave_kind">{{ u.leave_badge }}</span>
+            <div v-else class="leave-cell" :title="u.leave_detail || ''">
               <div class="leave-detail">{{ u.leave_detail }}</div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="剩余 / 总次数" align="center" min-width="120">
+        <el-table-column label="剩余 / 总次数" align="center" min-width="90">
           <template #default="{ row: u }">
             <div class="balance-cell">
               <span class="balance-text" :class="{ warning: u.balance <= 2 && u.is_active }">{{
                 u.balanceLabel
               }}</span>
-              <p v-if="u.is_on_leave_today" class="balance-leave-hint">今日配送请假</p>
               <p
-                v-else-if="u.tomorrow_leave"
+                v-if="u.tomorrow_leave && !u.is_on_leave_today"
                 class="balance-leave-hint balance-leave-hint--tomorrow"
               >
                 明日配送请假
@@ -576,7 +629,7 @@ onMounted(async () => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="状态" min-width="88">
+        <el-table-column label="状态" min-width="80">
           <template #default="{ row: u }">
             <span :class="memberStatusClass(u.status)">{{ u.status }}</span>
           </template>
@@ -586,34 +639,45 @@ onMounted(async () => {
             {{ u.remarks || '—' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" align="right" min-width="200" fixed="right">
+        <el-table-column label="操作" align="right" min-width="240" fixed="right">
           <template #default="{ row: u }">
             <div class="members-row-actions">
-              <button type="button" class="btn-sm secondary" @click="openLeaveMember(u)">
+              <el-button class="btn-members-op" type="primary" title="地址管理：地图选点，地点与门牌分别保存"
+                @click="openMemberAddresses(u)">
+                <MapPin :size="12" aria-hidden="true" style="margin-right: 5px;" />
+                地址
+              </el-button>
+              <el-button class="btn-members-op" type="warning" title="手工请假" @click="openLeaveMember(u)">
+                <CalendarOff :size="12" aria-hidden="true" style="margin-right: 5px;" />
                 请假
-              </button>
-              <button type="button" class="btn-sm secondary" @click="openEditMember(u)">
-                修改会员信息
-              </button>
+              </el-button>
+              <el-button class="btn-members-op" type="primary" title="修改会员信息" @click="openEditMember(u)">
+                <Pencil :size="12" aria-hidden="true" style="margin-right: 5px;" />
+                修改
+              </el-button>
+              <el-button type="danger" class="btn-members-op"
+                :disabled="memberDeletingId === u.id"
+                title="删除会员"
+                @click="deleteMemberRow(u)"
+              >
+                <Trash2 :size="12" aria-hidden="true" />
+                删除
+              </el-button>
             </div>
           </template>
         </el-table-column>
       </AdminTable>
       <div v-if="adminAccessToken" class="members-pagination">
-        <button type="button" class="btn-sm" :disabled="membersPage <= 1" @click="goMembersPrev">
-          上一页
-        </button>
+        <el-button plain size="small" :disabled="membersPage <= 1" @click="goMembersPrev">上一页</el-button>
         <span class="members-page-meta"
           >第 {{ membersPage }} / {{ membersTotalPages }} 页 · 共 {{ membersTotal }} 条</span
         >
-        <button
-          type="button"
-          class="btn-sm"
+        <el-button plain size="small"
           :disabled="membersPage >= membersTotalPages"
           @click="goMembersNext"
         >
           下一页
-        </button>
+        </el-button>
       </div>
     </div>
 
@@ -629,9 +693,9 @@ onMounted(async () => {
             <h3>手工请假</h3>
             <p>ADMIN LEAVE</p>
           </div>
-          <button type="button" class="close-btn" @click="showLeaveModal = false">
+          <el-button text circle class="close-btn" @click="showLeaveModal = false">
             <X :size="20" />
-          </button>
+          </el-button>
         </div>
         <form class="modal-form" @submit.prevent="submitLeaveMember">
           <p v-if="leaveTarget" class="modal-hint modal-hint--tight">
@@ -669,135 +733,22 @@ onMounted(async () => {
             </template>
             <p class="modal-hint">后台代操作不校验当日请假截止时间；日期均为上海业务日。</p>
           </div>
-          <button type="submit" class="btn-submit-order" :disabled="leaveSaving">
+          <el-button type="primary" class="btn-submit-order" native-type="submit" :loading="leaveSaving"
+            :disabled="leaveSaving">
             {{ leaveSaving ? '提交中…' : '确认' }}
-          </button>
+          </el-button>
         </form>
       </div>
     </div>
 
-    <div
-      v-if="showEditModal"
-      class="modal-overlay"
-      v-esc-close="() => (showEditModal = false)"
-      @click.self="showEditModal = false"
-    >
-      <div class="modal-card modal-card--member-edit">
-        <div class="modal-header">
-          <div class="header-info">
-            <h3>修改会员信息</h3>
-            <p>EDIT MEMBER PROFILE</p>
-          </div>
-          <button type="button" class="close-btn" @click="showEditModal = false">
-            <X :size="20" />
-          </button>
-        </div>
-        <form class="modal-form modal-form--member-two-col" @submit.prevent="submitEditMember">
-          <div class="form-group">
-            <label>手机号</label>
-            <input :value="editForm.phone" type="text" disabled class="input-disabled" />
-          </div>
-          <div class="form-group">
-            <label>姓名</label>
-            <input v-model="editForm.name" required maxlength="100" />
-          </div>
-          <div class="form-group form-group--span-full">
-            <label>默认配送地址</label>
-            <textarea v-model="editForm.address" required rows="3" maxlength="500"></textarea>
-          </div>
-          <div class="form-group form-group--span-full">
-            <label>配送片区</label>
-            <select
-              v-model="editForm.delivery_region_id"
-              class="input-delivery-area"
-              :disabled="editForm.use_auto_area"
-            >
-              <option value="">未分配</option>
-              <option v-for="r in regionFilterOptions" :key="r.id" :value="String(r.id)">
-                {{ r.name || '—' }}
-              </option>
-            </select>
-            <label class="checkbox-row">
-              <input v-model="editForm.use_auto_area" type="checkbox" />
-              <span>保存时按地址/坐标重新自动划区（勾选后忽略下方手动片区）</span>
-            </label>
-            <p class="modal-hint">
-              下拉列表与列表筛选一致（仅启用中的配送区域）。未勾选自动划区时，保存会先按地址地理编码划区，再以您选择的片区覆盖。
-            </p>
-          </div>
-          <div class="form-group form-group--span-full member-delivery-block">
-            <label>开始配送日期（起送业务日）</label>
-            <div class="member-delivery-controls-row">
-              <div class="member-delivery-date-wrap">
-                <input v-model="editForm.delivery_start_date" type="date" />
-              </div>
-              <label class="checkbox-row member-delivery-check">
-                <input v-model="editForm.delivery_deferred" type="checkbox" />
-                <span>暂停配送（会员卡停用）</span>
-              </label>
-              <label class="checkbox-row member-delivery-check">
-                <input
-                  v-model="editForm.store_pickup"
-                  type="checkbox"
-                  :disabled="editForm.delivery_deferred"
-                />
-                <span>门店自提（不到家配送，仍计入备餐大表「门店自提」分组）</span>
-              </label>
-            </div>
-            <p class="modal-hint">
-              上海业务日：该日及之后才进入配送排期；留空表示未设置起送日。保存时会与「未开卡 / 余额」等规则一并生效；勾选「暂停配送」时保存会清空起送日。
-            </p>
-            <p class="modal-hint">
-              与小程序「暂不配送 / 先不开卡」为同一数据字段。勾选后不参与配送大表/分拣、不计入开卡分货，并会清空起送日、关闭门店自提。取消勾选且有余额时恢复为在册活跃（是否排期仍取决于起送日等条件）。
-            </p>
-          </div>
-          <div class="form-group">
-            <label>会员剩余次数</label>
-            <input
-              v-model.number="editForm.balance"
-              type="number"
-              min="0"
-              max="999999"
-              step="1"
-              required
-            />
-            <p class="modal-hint">
-              直接修改当前剩余订餐次数；与旧值的差额会写入余额流水（原因：管理端调整）。常规续卡仍建议走「开卡工单」入账。
-            </p>
-          </div>
-          <div class="form-group">
-            <label>每配送日份数</label>
-            <input
-              v-model.number="editForm.daily_meal_units"
-              type="number"
-              min="1"
-              max="50"
-              step="1"
-              required
-            />
-            <p class="modal-hint">例如购 2 张周卡、同日需送 2 份时填 2；确认送达将按该倍数扣减剩余次数。</p>
-          </div>
-          <div class="form-group">
-            <label>套餐类型（档案标签）</label>
-            <select v-model="editForm.plan_type" class="input-delivery-area">
-              <option value="周卡">周卡</option>
-              <option value="月卡">月卡</option>
-              <option value="次卡">次卡</option>
-            </select>
-            <p class="modal-hint">
-              仅同步列表与小程序展示的套餐角标，不会增减剩余次数；次数增减须通过「开卡工单」同步入账。若续月卡后角标仍为周卡，可在此改为月卡。
-            </p>
-          </div>
-          <div class="form-group">
-            <label>备注（忌口等）</label>
-            <textarea v-model="editForm.remarks" rows="4" maxlength="500" placeholder="可留空"></textarea>
-          </div>
-          <button type="submit" class="btn-submit-order" :disabled="editSaving">
-            {{ editSaving ? '保存中…' : '保存' }}
-          </button>
-        </form>
-      </div>
-    </div>
+    <MemberEditModal v-model:open="showEditModal" :member="editTargetMember" :region-options="regionFilterOptions"
+      @saved="onMemberEditSaved" />
+
+    <MemberAddressesModal
+      v-model:open="showAddrModal"
+      :member="addrTargetMember"
+      @saved="onMemberAddressesSaved"
+    />
 
   </section>
 </template>

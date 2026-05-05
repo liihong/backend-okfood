@@ -38,3 +38,4 @@ class Member(Base):
     delivery_deferred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     store_pickup: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)

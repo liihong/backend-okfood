@@ -27,26 +27,20 @@ def _eligible_ids_pickup(db: Session, d: date) -> set[int]:
     return {int(m.id) for m in members}
 
 
-def admin_mark_subscription_fulfilled(
+def _subscription_fulfilled_apply(
     db: Session,
     *,
     member_id: int,
     delivery_date: date,
-    admin_username: str,
+    operator_tag: str,
     kind: str,
+    ok_ids: set[int],
 ) -> None:
-    """
-    kind: ``"home"`` 配送到家 / ``"pickup"`` 门店自提。
-    与骑手端确认一致的业务校验（除片区外）；已送达则幂等；不增加 courier.fee_pending。
-    """
+    """与 ``admin_mark_subscription_fulfilled`` 相同业务规则；不落库事务（由调用方 commit）。"""
     if kind not in ("home", "pickup"):
         raise HTTPException(status_code=400, detail="类型无效")
     d = delivery_date
     today = today_shanghai()
-    if kind == "home":
-        ok_ids = _eligible_ids_home(db, d)
-    else:
-        ok_ids = _eligible_ids_pickup(db, d)
     if int(member_id) not in ok_ids:
         raise HTTPException(
             status_code=400,
@@ -54,7 +48,7 @@ def admin_mark_subscription_fulfilled(
         )
 
     member = db.execute(select(Member).where(Member.id == member_id).with_for_update()).scalar_one_or_none()
-    if not member:
+    if not member or member.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
     if bool(member.store_pickup) != (kind == "pickup"):
         raise HTTPException(
@@ -83,8 +77,7 @@ def admin_mark_subscription_fulfilled(
     if log and log.status == DeliveryStatus.LEAVE.value:
         raise HTTPException(status_code=400, detail="该日记录为请假状态")
 
-    op = (admin_username or "admin").strip()[:44]
-    op_tag = f"admin:{op}"[:50]
+    op_tag = (operator_tag or "admin:unknown").strip()[:50]
 
     if not log:
         log = DeliveryLog(
@@ -105,4 +98,55 @@ def admin_mark_subscription_fulfilled(
             detail=None,
         )
     )
+
+
+def admin_mark_subscription_fulfilled(
+    db: Session,
+    *,
+    member_id: int,
+    delivery_date: date,
+    admin_username: str,
+    kind: str,
+) -> None:
+    """
+    kind: ``"home"`` 配送到家 / ``"pickup"`` 门店自提。
+    与骑手端确认一致的业务校验（除片区外）；已送达则幂等；不增加 courier.fee_pending。
+    """
+    d = delivery_date
+    if kind == "home":
+        ok_ids = _eligible_ids_home(db, d)
+    else:
+        ok_ids = _eligible_ids_pickup(db, d)
+    op = (admin_username or "admin").strip()[:44]
+    op_tag = f"admin:{op}"[:50]
+    _subscription_fulfilled_apply(
+        db,
+        member_id=member_id,
+        delivery_date=d,
+        operator_tag=op_tag,
+        kind=kind,
+        ok_ids=ok_ids,
+    )
     db.commit()
+
+
+def subscription_fulfilled_try_sf_home_no_commit(
+    db: Session,
+    *,
+    member_id: int,
+    delivery_date: date,
+) -> None:
+    """
+    顺丰「订单完成」自动履约（到家）：与智能配送大表标记送达口径一致；
+    operator 记为 ``sf:order_complete``；不产生独立 commit。
+    """
+    d = delivery_date
+    ok_ids = _eligible_ids_home(db, d)
+    _subscription_fulfilled_apply(
+        db,
+        member_id=member_id,
+        delivery_date=d,
+        operator_tag="sf:order_complete",
+        kind="home",
+        ok_ids=ok_ids,
+    )

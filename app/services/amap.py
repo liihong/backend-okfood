@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -6,6 +7,16 @@ import httpx
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RegeoSnapshot:
+    """单次逆地理结果：合并前缀文案 + 省市区拆分字段。"""
+
+    pca_prefix_line: str | None
+    province: str | None
+    city: str | None
+    district: str | None
 
 # https://lbs.amap.com/api/webservice/guide/tools/info
 _GEO_FAIL_HINTS: dict[str, str] = {
@@ -69,9 +80,24 @@ def geocode_address(address: str) -> tuple[float, float] | None:
         return None
 
 
-def regeocode_pca(lng: float, lat: float) -> str | None:
+def _province_city_district_from_ac(ac: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    prov = str(ac.get("province") or "").strip()
+    city_raw = ac.get("city")
+    if isinstance(city_raw, list):
+        city = str(city_raw[0]).strip() if city_raw else ""
+    else:
+        city = str(city_raw or "").strip()
+    district = str(ac.get("district") or "").strip()
+    return (
+        prov if prov else None,
+        city if city else None,
+        district if district else None,
+    )
+
+
+def fetch_regeo_snapshot(lng: float, lat: float) -> RegeoSnapshot | None:
     """
-    高德逆地理编码：根据 GCJ-02 经纬度解析省/市/区，拼成一条「收货大地址」前缀（不含门牌）。
+    高德逆地理编码（单次请求）：返回合并前缀与省 / 市 / 区拆分字段。
     失败或未配置 Key 时返回 None。
     """
     key = settings.AMAP_KEY.strip()
@@ -103,7 +129,18 @@ def regeocode_pca(lng: float, lat: float) -> str | None:
     if not isinstance(ac, dict):
         return None
     pca = _format_pca_from_amap_component(ac)
-    return pca if pca else None
+    pline = pca if pca else None
+    pv, cy, ds = _province_city_district_from_ac(ac)
+    return RegeoSnapshot(pca_prefix_line=pline, province=pv, city=cy, district=ds)
+
+
+def regeocode_pca(lng: float, lat: float) -> str | None:
+    """
+    高德逆地理编码：根据 GCJ-02 经纬度解析省/市/区，拼成一条「收货大地址」前缀（不含门牌）。
+    失败或未配置 Key 时返回 None。
+    """
+    snap = fetch_regeo_snapshot(lng, lat)
+    return snap.pca_prefix_line if snap else None
 
 
 def _format_pca_from_amap_component(ac: dict[str, Any]) -> str:
