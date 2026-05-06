@@ -39,42 +39,35 @@
           </view>
           <view class="form-field">
             <view class="field-label-row">
-              <text class="field-title">收货位置</text>
-              <text class="field-optional-hint">（地图选点）</text>
-            </view>
-            <view class="form-input-p map-pick-slot">
-              <view v-if="recvLocTitle" class="map-pick-summary">
-                <text class="map-pick-line">{{ recvLocTitle }}</text>
-                <text v-if="recvLocSub" class="map-pick-sub">{{ recvLocSub }}</text>
-              </view>
-              <text v-else class="map-pick-placeholder">请在地图上选择小区/收货点位置</text>
-              <view class="map-pick-actions">
-                <button class="btn-map-pick" hover-class="none" @tap="chooseMapLocation">地图选点</button>
-              </view>
-            </view>
-          </view>
-          <view v-if="useMapAddress" class="form-field">
-            <view class="field-label-row">
-              <text class="field-title">门牌号/单元楼层</text>
-              <text class="field-required">*</text>
-            </view>
-            <input
-              v-model="form.houseNumber"
-              class="form-input-p"
-              placeholder="例：3栋 2 单元 501"
-            />
-          </view>
-          <view v-else class="form-field">
-            <view class="field-label-row">
-              <text class="field-title">详细地址</text>
+              <text class="field-title">收货位置主文案</text>
               <text class="field-required">*</text>
             </view>
             <textarea
-              v-model="form.legacyDetail"
+              v-model="form.mapLocationText"
+              maxlength="500"
               class="form-input-p form-textarea"
-              placeholder="请输入小区、楼栋与门牌等完整地址"
+              placeholder="请先「地图选点」或手填小区、道路、建筑物等（map_location_text）"
             />
-            <text class="field-hint">未使用地图选点时，将仅按文字地址自动定位（精度可能较低）</text>
+            <view class="map-pick-slot">
+              <view class="map-pick-actions">
+                <button class="btn-map-pick" hover-class="none" @tap="chooseMapLocation">地图选点</button>
+                <text v-if="coords" class="coords-bound-hint">已绑定地图坐标</text>
+              </view>
+            </view>
+            <text class="field-hint">未选点时，服务端将按主文案与门牌尝试地理编码（精度可能较低）</text>
+          </view>
+          <view class="form-field">
+            <view class="field-label-row">
+              <text class="field-title">门牌号/单元楼层</text>
+              <text v-if="coords" class="field-required">*</text>
+              <text v-else class="field-optional-hint">（选填）</text>
+            </view>
+            <input
+              v-model="form.doorDetail"
+              maxlength="500"
+              class="form-input-p"
+              placeholder="例：C座 2707（door_detail）"
+            />
           </view>
           <view class="form-field">
             <view class="field-label-row">
@@ -102,39 +95,19 @@ import { computed, reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { request, getMemberToken } from '@/utils/api.js'
-import { normalizeAddressList, getAddressRecordId } from '@/utils/addressApi.js'
+import { normalizeAddressList, addressLineFromStructured } from '@/utils/addressApi.js'
 import { hasWxPhoneAuthDetail, wxMiniMemberLoginAndStore } from '@/utils/wxMemberLogin.js'
 
 const form = reactive({
   name: '',
   phone: '',
-  houseNumber: '',
-  legacyDetail: '',
+  mapLocationText: '',
+  doorDetail: '',
   remarks: '',
 })
 
-/** 坐标仅提交接口；界面只展示地名（uni.chooseLocation 地图选点） */
+/** 坐标仅提交接口；与 map_location_text / door_detail 一并保存 */
 const coords = ref(null)
-/** 选点返回的结构化字段；提交 POI 名即可，服务端逆地理后可规范 map_location_text */
-const poiMeta = ref(null)
-/** 主标题：地图选点/收货主文案（与接口 map_location_text 对齐） */
-const recvLocTitle = ref('')
-/** 副标题：门牌/单元楼层（与 door_detail 对齐） */
-const recvLocSub = ref('')
-
-const useMapAddress = computed(() => coords.value != null)
-
-/** 写入 map_location_text：仅小区/POI 名，不包含微信 address 里的道路信息 */
-function buildMapCommunityText(p) {
-  if (!p || typeof p !== 'object') return ''
-  return String(p.name ?? '').trim()
-}
-
-function setPoiDisplayLinesFromPick(name) {
-  const n = String(name || '').trim()
-  recvLocTitle.value = n || '已选地点'
-  recvLocSub.value = ''
-}
 
 /** 当前编辑的地址 id；无则 POST 新增，有则 PATCH */
 const addressId = ref('')
@@ -187,79 +160,42 @@ function memberPhonePath() {
   return p ? String(p).replace(/\D/g, '') : ''
 }
 
-/** 接口返回的地址项 → 表单（map_location_text + door_detail；无坐标时整段写入 legacyDetail） */
+function strAddrPart(v) {
+  if (v == null) return ''
+  if (typeof v === 'string') return v.trim()
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+  return String(v).trim()
+}
+
+/** 接口条目 → 表单：仅存 map_location_text、door_detail 与联系人 */
 function applyAddressItem(item) {
   if (!item || typeof item !== 'object') return
-  const id = item.id ?? item.address_id ?? item.addressId
-  addressId.value = id != null ? String(id) : ''
+  addressId.value = item.id != null ? String(item.id) : ''
   if (item.contact_name != null) form.name = String(item.contact_name)
-  else if (item.name != null) form.name = String(item.name)
-  else if (item.recipient_name != null) form.name = String(item.recipient_name)
-  if (item.contact_phone != null) form.phone = String(item.contact_phone)
-  else if (item.phone != null) form.phone = String(item.phone)
+  else if (item.contactName != null) form.name = String(item.contactName)
+  if (item.contact_phone != null) form.phone = String(item.contact_phone).replace(/\D/g, '')
+  else if (item.contactPhone != null) form.phone = String(item.contactPhone).replace(/\D/g, '')
   if (item.remarks != null) form.remarks = String(item.remarks)
+
+  form.mapLocationText = strAddrPart(
+    item.map_location_text ?? item.mapLocationText,
+  )
+  form.doorDetail = strAddrPart(item.door_detail ?? item.doorDetail)
 
   const loc = item.location
   const latRaw = loc && typeof loc === 'object' && loc.lat != null ? Number(loc.lat) : NaN
   const lngRaw = loc && typeof loc === 'object' && loc.lng != null ? Number(loc.lng) : NaN
   const hasLoc = Number.isFinite(latRaw) && Number.isFinite(lngRaw)
-  if (hasLoc) {
-    coords.value = { lat: latRaw, lng: lngRaw }
-    poiMeta.value = null
-    const mapSaved =
-      item.map_location_text != null && String(item.map_location_text).trim()
-        ? String(item.map_location_text).trim()
-        : ''
-    const doorSaved =
-      item.door_detail != null && String(item.door_detail).trim()
-        ? String(item.door_detail).trim()
-        : ''
-    if (mapSaved || doorSaved) {
-      recvLocTitle.value = mapSaved
-      recvLocSub.value = doorSaved
-      form.houseNumber = doorSaved
-      form.legacyDetail = ''
-    } else {
-      const fa =
-        item.full_address != null && String(item.full_address).trim()
-          ? String(item.full_address).trim()
-          : ''
-      recvLocTitle.value = fa
-      recvLocSub.value = ''
-      form.houseNumber = ''
-      form.legacyDetail = ''
-    }
-  } else {
-    coords.value = null
-    poiMeta.value = null
-    recvLocTitle.value = ''
-    recvLocSub.value = ''
-    form.houseNumber = ''
-    const fa =
-      item.full_address != null && String(item.full_address).trim()
-        ? String(item.full_address).trim()
-        : ''
-    if (fa) form.legacyDetail = fa
-    else if (item.map_location_text != null || item.door_detail != null) {
-      form.legacyDetail = [item.map_location_text, item.door_detail]
-        .map((x) => (x != null ? String(x).trim() : ''))
-        .filter(Boolean)
-        .join(' ')
-    } else if (item.address != null) form.legacyDetail = String(item.address)
-    else form.legacyDetail = ''
-  }
+  coords.value = hasLoc ? { lat: latRaw, lng: lngRaw } : null
 }
 
 function clearForm() {
   form.name = ''
   form.phone = ''
-  form.houseNumber = ''
-  form.legacyDetail = ''
+  form.mapLocationText = ''
+  form.doorDetail = ''
   form.remarks = ''
   coords.value = null
-  poiMeta.value = null
-  recvLocTitle.value = ''
-  recvLocSub.value = ''
   addressId.value = ''
 }
 
@@ -272,10 +208,8 @@ function applyCoordsAndPoiMeta(la, lo, meta) {
     return false
   }
   coords.value = { lat: la, lng: lo }
-  poiMeta.value = meta
-  const name = String(meta.name ?? '').trim()
-  setPoiDisplayLinesFromPick(name)
-  form.legacyDetail = ''
+  const name = String(meta?.name ?? '').trim()
+  form.mapLocationText = name || form.mapLocationText
   return true
 }
 
@@ -289,15 +223,9 @@ function openChooseLocationCentered(lat, lng) {
     ...opts,
     success(res) {
       const name = String(res.name ?? '').trim()
-      const address = String(res.address ?? '').trim()
       const la = res.latitude != null ? Number(res.latitude) : NaN
       const lo = res.longitude != null ? Number(res.longitude) : NaN
-      applyCoordsAndPoiMeta(la, lo, {
-        type: 2,
-        city: '',
-        name,
-        address,
-      })
+      applyCoordsAndPoiMeta(la, lo, { name })
     },
     fail(err) {
       const msg = err?.errMsg != null ? String(err.errMsg) : ''
@@ -363,7 +291,7 @@ async function loadAddressById(id) {
       method: 'GET',
     })
     const list = normalizeAddressList(data)
-    const item = list.find((row) => getAddressRecordId(row) === id)
+    const item = list.find((row) => row && String(row.id) === id)
     if (item) {
       applyAddressItem(item)
       return
@@ -378,28 +306,25 @@ async function loadAddressById(id) {
 
 /** POST/PATCH 与后台约定字段（仅 map_location_text + door_detail；完整展示由二者拼接） */
 function buildAddressBody() {
-  const hasCoords = coords.value != null
-  if (hasCoords) {
-    const community = poiMeta.value
-      ? buildMapCommunityText(poiMeta.value)
-      : (recvLocTitle.value || '').trim()
-    const house = (form.houseNumber || '').trim()
+  const mapT = form.mapLocationText.trim()
+  const doorT = form.doorDetail.trim()
+  const base = {
+    contact_name: form.name.trim(),
+    contact_phone: String(form.phone).replace(/\D/g, ''),
+    remarks: (form.remarks || '').trim(),
+  }
+  if (coords.value != null) {
     return {
-      contact_name: form.name.trim(),
-      contact_phone: String(form.phone).replace(/\D/g, ''),
-      map_location_text: community || null,
-      door_detail: house || null,
-      remarks: (form.remarks || '').trim(),
+      ...base,
+      map_location_text: mapT || null,
+      door_detail: doorT || null,
       location: { lng: coords.value.lng, lat: coords.value.lat },
     }
   }
-  const line = (form.legacyDetail || '').trim()
   return {
-    contact_name: form.name.trim(),
-    contact_phone: String(form.phone).replace(/\D/g, ''),
-    map_location_text: line,
-    door_detail: null,
-    remarks: (form.remarks || '').trim(),
+    ...base,
+    map_location_text: mapT,
+    door_detail: doorT || null,
   }
 }
 
@@ -428,22 +353,16 @@ async function save() {
     uni.showToast({ title: '请填写 11 位手机号', icon: 'none' })
     return
   }
+  if (!form.mapLocationText.trim()) {
+    uni.showToast({
+      title: '请填写收货位置主文案，或使用地图选点',
+      icon: 'none',
+    })
+    return
+  }
   const hasCoords = coords.value != null
-  if (hasCoords) {
-    const baseOk = poiMeta.value
-      ? buildMapCommunityText(poiMeta.value)
-      : (recvLocTitle.value || '').trim()
-    if (!baseOk) {
-      uni.showToast({ title: '请选择收货地点', icon: 'none' })
-      return
-    }
-    const isNew = !addressId.value
-    if (isNew && !(form.houseNumber || '').trim()) {
-      uni.showToast({ title: '请填写门牌号/单元楼层', icon: 'none' })
-      return
-    }
-  } else if (!(form.legacyDetail || '').trim()) {
-    uni.showToast({ title: '请填写详细地址', icon: 'none' })
+  if (hasCoords && !addressId.value && !form.doorDetail.trim()) {
+    uni.showToast({ title: '请填写门牌号/单元楼层', icon: 'none' })
     return
   }
   const token = getMemberToken()
@@ -466,17 +385,15 @@ async function save() {
         method: 'POST',
         data: body,
       })
-      if (saveResult && typeof saveResult === 'object') {
-        const nid = saveResult.id ?? saveResult.address_id ?? saveResult.addressId
-        if (nid != null) addressId.value = String(nid)
+      if (saveResult && typeof saveResult === 'object' && saveResult.id != null) {
+        addressId.value = String(saveResult.id)
       }
     }
     const bodySaved = buildAddressBody()
-    const addrLine = [bodySaved.map_location_text, bodySaved.door_detail]
-      .map((x) => (typeof x === 'string' ? x.trim() : ''))
-      .filter(Boolean)
-      .join(' ')
-      .trim()
+    const addrLine = addressLineFromStructured({
+      map_location_text: bodySaved.map_location_text ?? '',
+      door_detail: bodySaved.door_detail ?? '',
+    })
     uni.setStorageSync('deliveryAddress', {
       name: form.name,
       phone: form.phone,
@@ -606,31 +523,11 @@ async function save() {
   align-items: center;
 }
 
-.map-pick-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-}
-
-.map-pick-line {
-  font-weight: 800;
-  font-size: 30rpx;
-  color: $ok-slate-800;
-  line-height: 1.45;
-}
-
-.map-pick-sub {
-  font-size: 26rpx;
+.coords-bound-hint {
+  font-size: 24rpx;
   font-weight: 700;
-  color: #64748b;
-  line-height: 1.45;
-}
-
-.map-pick-placeholder {
-  font-weight: 700;
-  font-size: 28rpx;
-  color: #94a3b8;
-  line-height: 1.45;
+  color: $ok-forest-green;
+  line-height: 1.35;
 }
 
 .btn-map-pick {

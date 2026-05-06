@@ -37,6 +37,13 @@ from app.services.member_service import effective_daily_meal_units, sql_effectiv
 from app.services.single_meal_order_service import list_courier_single_order_tasks
 
 
+def _member_not_skip_subscription_saturday(delivery_date: date):
+    """普通周六剔除「固定周六不履约」会员；非周六不加条件。"""
+    if delivery_date.weekday() == 5:
+        return Member.skip_subscription_saturday.is_(False)
+    return literal(True)
+
+
 def normalize_cn_mobile(raw: str) -> str:
     s = (raw or "").strip()
     digits = re.sub(r"\D", "", s)
@@ -88,7 +95,7 @@ def eligible_members_for_delivery(
     「仅明天请假」相对业务 today（上海），与 delivery_date 比较。
     若会员设置了 delivery_start_date，仅当 delivery_date 不早于该日才入选。
     周日与法定节假日不配送，直接返回空列表（与配送大表、备餐口径一致）。
-
+    普通周六且会员开启「固定周六不履约」时，该会员不进入名单（到家）；与 `store_pickup`/自提同类规则见本模块自提函数。
     单次查询 OUTER JOIN 默认地址；按片区筛选时在 SQL 中过滤，避免「全员查完再内存过滤」的二次往返。
     """
     if not is_subscription_delivery_day(delivery_date):
@@ -130,6 +137,7 @@ def eligible_members_for_delivery(
             Member.store_pickup.is_(False),
             not_(absent),
             started,
+            _member_not_skip_subscription_saturday(delivery_date),
         )
     )
     if delivery_region_id is not None:
@@ -150,6 +158,7 @@ def eligible_members_for_store_pickup(
     """
     当日应备餐的门店自提会员（与 `eligible_members_for_delivery` 相同的请假、起送日、余额规则；
     不按片区过滤；不参与骑手线路。
+    普通周六且会员开启「固定周六不履约」时亦不进入本名单。
     """
     if not is_subscription_delivery_day(delivery_date):
         return [], {}
@@ -189,6 +198,7 @@ def eligible_members_for_store_pickup(
             Member.store_pickup.is_(True),
             not_(absent),
             started,
+            _member_not_skip_subscription_saturday(delivery_date),
         )
     )
     members: list[Member] = []
@@ -406,6 +416,8 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
         raise HTTPException(status_code=400, detail="未到约定的开始配送日，无法确认送达")
     if not is_subscription_delivery_day(d):
         raise HTTPException(status_code=400, detail="该日为周日或法定节假日，订阅配送不履约")
+    if d.weekday() == 5 and bool(member.skip_subscription_saturday):
+        raise HTTPException(status_code=400, detail="该会员固定周六不参与订阅履约，无法确认送达")
 
     log = db.execute(
         select(DeliveryLog).where(DeliveryLog.member_id == member_id, DeliveryLog.delivery_date == d).with_for_update()

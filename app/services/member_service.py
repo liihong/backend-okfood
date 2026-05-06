@@ -1050,6 +1050,10 @@ def admin_patch_member_profile(
 
     store_pickup: bool | None = None,
 
+    set_skip_subscription_saturday: bool = False,
+
+    skip_subscription_saturday: bool | None = None,
+
     set_delivery_region_id: bool = False,
 
     delivery_region_id: int | None = None,
@@ -1083,6 +1087,8 @@ def admin_patch_member_profile(
         and not set_delivery_start_date
 
         and not set_store_pickup
+
+        and not set_skip_subscription_saturday
 
         and not set_delivery_region_id
 
@@ -1239,6 +1245,14 @@ def admin_patch_member_profile(
             raise HTTPException(status_code=400, detail="门店自提标记不能为空")
 
         m.store_pickup = bool(store_pickup)
+
+    if set_skip_subscription_saturday:
+
+        if skip_subscription_saturday is None:
+
+            raise HTTPException(status_code=400, detail="固定周六不履约标记不能为空")
+
+        m.skip_subscription_saturday = bool(skip_subscription_saturday)
 
     if set_delivery_deferred:
 

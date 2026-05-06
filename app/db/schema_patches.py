@@ -11,6 +11,52 @@ from app.db.session import engine
 logger = logging.getLogger(__name__)
 
 
+def apply_members_skip_subscription_saturday_column() -> None:
+    """为 members 增加 skip_subscription_saturday；已存在则跳过。"""
+    try:
+        insp = inspect(engine)
+        if not insp.has_table("members"):
+            return
+        col_names = {c["name"].lower() for c in insp.get_columns("members")}
+    except Exception as e:
+        logger.warning("补库: 无法检查 members 表结构: %s", e)
+        return
+
+    if "skip_subscription_saturday" in col_names:
+        return
+
+    dname = engine.dialect.name
+    try:
+        with engine.begin() as conn:
+            if dname in ("mysql", "mariadb"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE `members` ADD COLUMN `skip_subscription_saturday` TINYINT(1) NOT NULL DEFAULT 0 "
+                        "COMMENT '固定周六不参与订阅履约（全局日历仍为履约日时生效）' AFTER `store_pickup`"
+                    )
+                )
+            elif dname == "sqlite":
+                conn.execute(
+                    text(
+                        "ALTER TABLE members ADD COLUMN skip_subscription_saturday INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+            else:
+                logger.error(
+                    "补库: 当前库类型 %s 需手动执行 "
+                    "sql/migrations/20260506_members_skip_subscription_saturday.sql",
+                    dname,
+                )
+                return
+        logger.info("补库: 已添加 members.skip_subscription_saturday")
+    except Exception as e:
+        logger.error(
+            "补库: 添加 skip_subscription_saturday 失败，请手动执行 "
+            "sql/migrations/20260506_members_skip_subscription_saturday.sql: %s",
+            e,
+        )
+
+
 def apply_members_tomorrow_leave_target_column() -> None:
     """为 members 增加 tomorrow_leave_target_date；已存在则跳过。"""
     try:

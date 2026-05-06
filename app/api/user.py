@@ -42,6 +42,7 @@ from app.schemas.user import (
     WxMiniLoginIn,
 )
 
+from app.services.member_delivery_deduction_service import list_member_delivery_deductions
 from app.services.oss_upload_service import upload_member_avatar_bytes
 
 from app.services.member_address_service import create_address, delete_address, list_addresses, update_address
@@ -288,6 +289,26 @@ def remove_address_me(address_id: int, db: SessionDep, member_id: int = Depends(
     delete_address(db, member_id, address_id)
 
     return success(msg="已删除")
+
+
+
+
+@router.get("/me/delivery-deductions")
+def list_delivery_deductions_me(
+    db: SessionDep,
+    member_id: int = Depends(member_subject),
+    page: int = 1,
+    page_size: int = 20,
+):
+    """套餐配送：已确认送达并扣减剩余餐次的业务日列表（按配送日倒序）。"""
+    items, total = list_member_delivery_deductions(db, member_id, page=page, page_size=page_size)
+    return page_response(
+        items=[dump_model(x) for x in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        msg="获取成功",
+    )
 
 
 

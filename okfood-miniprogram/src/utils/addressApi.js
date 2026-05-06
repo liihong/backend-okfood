@@ -1,5 +1,5 @@
 /**
- * 统一解析地址列表（兼容：纯数组、{ data:[] } 整包、items/list/addresses 等）
+ * 统一解析地址列表（兼容：纯数组、{ data:[] } 整包）
  * @param {unknown} input
  */
 export function normalizeAddressList(input) {
@@ -16,10 +16,6 @@ export function normalizeAddressList(input) {
   if (typeof data !== 'object') return []
   if (Array.isArray(data.data)) return data.data
   if (Array.isArray(data.items)) return data.items
-  if (Array.isArray(data.list)) return data.list
-  if (Array.isArray(data.addresses)) return data.addresses
-  if (Array.isArray(data.records)) return data.records
-  if (Array.isArray(data.result)) return data.result
   if (data.data != null && typeof data.data === 'object' && !Array.isArray(data.data)) {
     const nested = normalizeAddressList(data.data)
     if (nested.length) return nested
@@ -30,19 +26,41 @@ export function normalizeAddressList(input) {
 /** @param {Record<string, unknown>} item */
 export function getAddressRecordId(item) {
   if (!item || typeof item !== 'object') return ''
-  const id = item.id ?? item.address_id ?? item.addressId
+  const id = item.id
   return id != null ? String(id) : ''
 }
 
-/** 是否默认地址（仅看接口字段，不用列表序号猜测） */
+/** @param {unknown} v */
+function addressTextPart(v) {
+  if (v == null) return ''
+  if (typeof v === 'string') return v.trim()
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+  return String(v).trim()
+}
+
+/**
+ * 列表/缓存：优先 map_location_text + door_detail（与后端 full_address 同语义），与接口常见的 camelCase 别名一致；缺省时用 full_address。
+ * @param {Record<string, unknown>} item
+ */
+export function addressLineFromStructured(item) {
+  if (!item || typeof item !== 'object') return ''
+  const map = addressTextPart(
+    item.map_location_text ?? item.mapLocationText,
+  )
+  const door = addressTextPart(item.door_detail ?? item.doorDetail)
+  const joined = [map, door].filter(Boolean).join(' ').trim()
+  if (joined) return joined
+  return addressTextPart(item.full_address ?? item.fullAddress)
+}
+
+/** 是否默认地址（仅看接口字段） */
 export function isAddressItemDefault(item) {
   if (!item || typeof item !== 'object') return false
   return (
     item.is_default === true ||
     item.is_default === 1 ||
-    item.default === true ||
-    item.default === 1 ||
-    (typeof item.isDefault === 'boolean' && item.isDefault)
+    item.isDefault === true ||
+    item.isDefault === 1
   )
 }
 
@@ -63,25 +81,9 @@ export function sortAddressesDefaultFirst(items) {
  */
 export function addressListRow(item, index) {
   const id = getAddressRecordId(item)
-  const name =
-    (typeof item.contact_name === 'string' && item.contact_name) ||
-    (typeof item.name === 'string' && item.name) ||
-    (typeof item.recipient_name === 'string' && item.recipient_name) ||
-    ''
-  const phone =
-    (typeof item.contact_phone === 'string' && item.contact_phone) ||
-    (typeof item.phone === 'string' && item.phone) ||
-    ''
-  const addr =
-    (typeof item.full_address === 'string' && item.full_address.trim()) ||
-    [item.map_location_text, item.door_detail]
-      .map((x) => (typeof x === 'string' ? x.trim() : ''))
-      .filter(Boolean)
-      .join(' ') ||
-    (typeof item.address === 'string' && item.address) ||
-    ''
-  // 用户端不展示所属片区，仅展示详细地址；片区仍由接口返回供后台/路由使用
-  const line = addr.trim()
+  const name = addressTextPart(item.contact_name ?? item.contactName)
+  const phone = addressTextPart(item.contact_phone ?? item.contactPhone)
+  const line = addressLineFromStructured(item)
   const isDefault = isAddressItemDefault(item)
   return { id, name, phone, line, isDefault }
 }

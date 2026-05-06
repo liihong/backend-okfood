@@ -2,6 +2,7 @@ from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import Response as PlainResponse
 
 from app.core.deps import (
     ADMIN_ACCOUNT_DELIVERY,
@@ -59,7 +60,9 @@ from app.services.admin_service import (
 )
 from app.services.sf_order_fulfillment_service import (
     list_sf_same_city_pushes_for_monitor,
+    list_sf_same_city_pushes_for_monitor_export,
 )
+from app.services.sf_same_city_monitor_xlsx import build_sf_push_monitor_xlsx
 from app.services.sf_same_city_service import cancel_sf_same_city_push, preview_sf_same_city, push_sf_same_city
 from app.services.store_config_service import get_store_config, update_store_config
 from app.services.delivery_sheet_service import build_delivery_sheet
@@ -195,6 +198,40 @@ def delivery_sf_pushes(
         page=page,
         page_size=page_size,
         msg="获取成功",
+    )
+
+
+@router.get("/delivery-sf/pushes/export.xlsx", response_model=None)
+def delivery_sf_pushes_export_xlsx(
+    db: SessionDep,
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
+    delivery_date: Annotated[date, Query(description="业务日，必填；导出该日全部匹配筛选条件的创单记录")],
+    sf_callback_order_status: Annotated[
+        int | None,
+        Query(description="顺丰配送状态推送中的 order_status；与 callback_order_status_unknown 互斥"),
+    ] = None,
+    callback_order_status_unknown: Annotated[
+        bool,
+        Query(description="为真时仅导出尚未收到配送状态回调的记录"),
+    ] = False,
+):
+    """导出顺丰订单监控列表同源数据（不分页），用于按业务日与控制台核对。"""
+    _ = admin_username
+    try:
+        rows = list_sf_same_city_pushes_for_monitor_export(
+            db,
+            delivery_date=delivery_date,
+            sf_callback_order_status=sf_callback_order_status,
+            callback_order_status_unknown=callback_order_status_unknown,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    body = build_sf_push_monitor_xlsx(rows)
+    fn = f"sf_orders_monitor_{delivery_date.isoformat()}.xlsx"
+    return PlainResponse(
+        content=body,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'},
     )
 
 
@@ -407,6 +444,8 @@ def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_usernam
         delivery_start_date=body.delivery_start_date,
         set_store_pickup="store_pickup" in fs,
         store_pickup=body.store_pickup,
+        set_skip_subscription_saturday="skip_subscription_saturday" in fs,
+        skip_subscription_saturday=body.skip_subscription_saturday,
         set_delivery_region_id="delivery_region_id" in fs,
         delivery_region_id=body.delivery_region_id,
         set_delivery_deferred="delivery_deferred" in fs,

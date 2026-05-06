@@ -193,6 +193,10 @@ class MemberAdminOut(BaseModel):
         description="起送业务日（上海）：非空则仅当配送日>=该日才进入配送大表；开卡工单同步时写入",
     )
     store_pickup: bool = Field(False, description="门店自提，不参与骑手任务与按地址配送分组")
+    skip_subscription_saturday: bool = Field(
+        False,
+        description="固定周六不参与订阅履约（全局日历仍为履约日时，到家与自提名单均排除）",
+    )
     address: str
     map_location_text: str = Field(
         "",
@@ -296,6 +300,10 @@ class AdminMemberPatchIn(BaseModel):
     store_pickup: bool | None = Field(
         None,
         description="门店自提；提交则更新；与配送到家互斥",
+    )
+    skip_subscription_saturday: bool | None = Field(
+        None,
+        description="固定周六不参与订阅履约；提交则更新",
     )
     delivery_deferred: bool | None = Field(
         None,

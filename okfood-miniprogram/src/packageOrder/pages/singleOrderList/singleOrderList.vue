@@ -1,6 +1,6 @@
 <template>
   <view class="page">
-    <OkNavbar show-back title="我的单次订单" />
+   <OkNavbar show-back title="消费记录" />
     <scroll-view
       scroll-y
       class="scroll"
@@ -11,34 +11,21 @@
       <view class="list-inner">
         <view v-if="loading && !items.length" class="state-text">加载中…</view>
         <view v-else-if="!items.length" class="state-text state-text--muted">
-          暂无单次点餐订单，可在「菜单」中选购
+         暂无扣次记录。套餐配送在确认送达、扣减「剩余餐次」后，会按配送业务日显示在此。
         </view>
         <template v-else>
-          <view
-            v-for="row in items"
-            :key="row.id"
-            class="order-card"
-            @click="goDetail(row.id)"
-          >
-            <view class="card-top">
-              <text class="order-no">单号 {{ row.out_trade_no || row.id }}</text>
-              <text :class="['status-pill', `status-pill--${statusTone(row)}`]">
-                {{ statusLine(row) }}
-              </text>
-            </view>
-            <text class="dish-title">{{ row.dish_title || '餐品' }}</text>
-            <view class="card-meta">
-              <text class="meta">供餐日 {{ row.delivery_date || '—' }}</text>
-              <text class="meta">×{{ row.quantity ?? 1 }}</text>
-            </view>
-            <view class="card-foot">
-              <text class="amt">¥ {{ row.amount_yuan || '0.00' }}</text>
-              <text class="chevron">详情 ›</text>
-            </view>
+         <view v-if="total > 0" class="summary-card">
+            <text class="summary-title">累计扣次</text>
+            <text class="summary-num">{{ total }} 个配送日</text>
+            <text class="summary-hint">下列为每次扣次对应的配送日期</text>
+          </view>
+         <view v-for="(row, idx) in items" :key="row.delivery_date + '-' + idx" class="record-row">
+            <text class="record-label">配送日</text>
+            <text class="record-date">{{ row.delivery_date || '—' }}</text>
           </view>
         </template>
         <view v-if="loadingMore" class="state-text state-text--small">加载更多…</view>
-        <view v-else-if="items.length && !hasMore" class="state-text state-text--small state-text--muted">
+       <view v-else-if="items.length && !hasMore" class="state-text state-text--small state-text--muted">
           已加载全部
         </view>
         <view class="scroll-tail" />
@@ -52,7 +39,7 @@ import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { getMemberToken } from '@/utils/api.js'
-import { listSingleMealOrders, singleOrderStatusMeta } from '@/utils/singleOrderApi.js'
+import { listDeliveryDeductions } from '@/utils/deliveryDeductionApi.js'
 
 const items = ref([])
 const total = ref(0)
@@ -64,14 +51,6 @@ let fetchSeq = 0
 
 const hasMore = computed(() => items.value.length < total.value)
 
-function statusLine(row) {
-  return singleOrderStatusMeta(row).line1
-}
-
-function statusTone(row) {
-  return singleOrderStatusMeta(row).tone
-}
-
 async function fetchPage(reset) {
   const token = getMemberToken()
   const seq = ++fetchSeq
@@ -82,7 +61,7 @@ async function fetchPage(reset) {
     loadingMore.value = false
     uni.showModal({
       title: '需要登录',
-      content: '请先完成手机号登录后再查看订单。',
+      content: '请先完成手机号登录后再查看消费记录。',
       confirmText: '去登录',
       success: (r) => {
         if (r.confirm) uni.switchTab({ url: '/pages/mine/index' })
@@ -99,7 +78,7 @@ async function fetchPage(reset) {
   }
   try {
     const p = reset ? 1 : page.value
-    const data = await listSingleMealOrders({ page: p, page_size: pageSize })
+    const data = await listDeliveryDeductions({ page: p, page_size: pageSize })
     if (seq !== fetchSeq) return
     const list = Array.isArray(data?.items) ? data.items : []
     const t = typeof data?.total === 'number' ? data.total : list.length
@@ -138,13 +117,6 @@ function loadMore() {
 onShow(() => {
   void fetchPage(true)
 })
-
-function goDetail(id) {
-  if (id == null) return
-  uni.navigateTo({
-    url: `/packageOrder/pages/singleOrderDetail/singleOrderDetail?id=${encodeURIComponent(String(id))}`,
-  })
-}
 </script>
 
 <style lang="scss" scoped>
@@ -167,6 +139,65 @@ function goDetail(id) {
   padding: 24rpx 40rpx 0;
 }
 
+.summary-card {
+  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
+  border-radius: 36rpx;
+  padding: 32rpx 36rpx;
+  margin-bottom: 24rpx;
+  border: 1px solid rgba(14, 90, 68, 0.12);
+}
+
+.summary-title {
+  display: block;
+  font-size: 26rpx;
+  font-weight: 800;
+  color: $ok-slate-500;
+  margin-bottom: 8rpx;
+}
+
+.summary-num {
+  display: block;
+  font-size: 44rpx;
+  font-weight: 950;
+  color: $ok-forest-green;
+  line-height: 1.2;
+  margin-bottom: 12rpx;
+}
+
+.summary-hint {
+  display: block;
+  font-size: 22rpx;
+  color: $ok-slate-400;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.record-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+    background: #fff;
+    border-radius: 36rpx;
+    padding: 32rpx 40rpx;
+  margin-bottom: 16rpx;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+    box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.04);
+}
+
+.record-label {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: $ok-slate-500;
+}
+
+.record-date {
+  font-size: 30rpx;
+  font-weight: 900;
+  color: #333;
+  font-variant-numeric: tabular-nums;
+}
+
 .state-text {
   padding: 80rpx 20rpx;
   text-align: center;
@@ -183,96 +214,6 @@ function goDetail(id) {
   padding: 32rpx 20rpx;
   font-size: 24rpx;
   font-weight: 600;
-}
-
-.order-card {
-  background: #fff;
-  border-radius: 48rpx;
-  padding: 36rpx 40rpx;
-  margin-bottom: 24rpx;
-  border: 1px solid rgba(0, 0, 0, 0.04);
-  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.04);
-}
-
-.card-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
-  margin-bottom: 16rpx;
-}
-
-.order-no {
-  font-size: 24rpx;
-  color: $ok-slate-400;
-  font-weight: 700;
-  flex: 1;
-  min-width: 0;
-}
-
-.status-pill {
-  font-size: 22rpx;
-  font-weight: 900;
-  padding: 6rpx 18rpx;
-  border-radius: 999rpx;
-  flex-shrink: 0;
-}
-
-.status-pill--warn {
-  background: #fff7ed;
-  color: #c2410c;
-}
-
-.status-pill--ok {
-  background: #ecfdf5;
-  color: #047857;
-}
-
-.status-pill--info {
-  background: #eff6ff;
-  color: #1d4ed8;
-}
-
-.dish-title {
-  display: block;
-  font-size: 32rpx;
-  font-weight: 950;
-  color: #333;
-  line-height: 1.35;
-}
-
-.card-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16rpx;
-  margin-top: 12rpx;
-}
-
-.meta {
-  font-size: 24rpx;
-  color: $ok-slate-500;
-  font-weight: 700;
-}
-
-.card-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 20rpx;
-  padding-top: 20rpx;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.amt {
-  font-size: 34rpx;
-  font-weight: 950;
-  color: $ok-forest-green;
-}
-
-.chevron {
-  font-size: 26rpx;
-  color: $ok-slate-400;
-  font-weight: 800;
 }
 
 .scroll-tail {

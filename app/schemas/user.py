@@ -47,6 +47,12 @@ class MemberOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DeliveryDeductionOut(BaseModel):
+    """套餐订阅：某日确认送达后按该业务日扣减剩余餐次。"""
+
+    delivery_date: date = Field(..., description="配送业务日（上海）")
+
+
 class RegisterIn(BaseModel):
     phone: str = Field(..., min_length=5, max_length=20)
     name: str = Field(..., min_length=1, max_length=100)

@@ -120,10 +120,10 @@
             <text class="menu-label">🏠 地址管理</text>
             <text class="arrow">›</text>
           </view>
-         <!-- <view class="menu-row" @click="goSingleOrders">
-            <text class="menu-label">🧾 我的单次订单</text>
+         <view class="menu-row" @click="goSingleOrders">
+            <text class="menu-label">🍽️ 消费记录</text>
             <text class="arrow">›</text>
-         </view> -->
+         </view>
         </view>
         <text class="page-version">版本 1.1.5</text>
       </view>

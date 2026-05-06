@@ -29,6 +29,7 @@ const editForm = ref({
   balance: 0,
   delivery_start_date: '',
   store_pickup: false,
+  skip_subscription_saturday: false,
   delivery_deferred: false,
   delivery_region_id: '',
 })
@@ -74,6 +75,7 @@ function fillFormFromMember(u) {
         ? u.delivery_start_date.trim().slice(0, 10)
         : '',
     store_pickup: u.store_pickup === true,
+    skip_subscription_saturday: u.skip_subscription_saturday === true,
     delivery_deferred: u.delivery_deferred === true,
     delivery_region_id: dr,
   }
@@ -106,6 +108,7 @@ async function submitEditMember() {
         ? editForm.value.delivery_start_date.trim().slice(0, 10)
         : null,
       store_pickup: editForm.value.store_pickup === true,
+      skip_subscription_saturday: editForm.value.skip_subscription_saturday === true,
       delivery_deferred: editForm.value.delivery_deferred === true,
     }
     if (editForm.value.use_auto_area) {
@@ -209,6 +212,10 @@ async function submitEditMember() {
                 :disabled="editForm.delivery_deferred"
               />
               <span>门店自提（不到家配送，仍计入备餐大表「门店自提」分组）</span>
+            </label>
+            <label class="checkbox-row member-delivery-check">
+              <input v-model="editForm.skip_subscription_saturday" type="checkbox" />
+              <span>固定周六不参与订阅（周一～周五履约；与普通周六仍可配送的其他会员区分开）</span>
             </label>
           </div>
           <p class="modal-hint">

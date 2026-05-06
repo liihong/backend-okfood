@@ -19,6 +19,14 @@ from app.services.single_meal_order_service import mark_single_meal_delivered_sf
 logger = logging.getLogger(__name__)
 
 
+def _iso_dt(x: Any) -> str | None:
+    if x is None:
+        return None
+    if hasattr(x, "isoformat"):
+        return x.isoformat()
+    return str(x)
+
+
 def _fallback_members_from_snapshot(snap: Any) -> list[dict[str, Any]]:
     """创单快照中的收件人姓名/电话（停靠点无法再解析时的回退）。"""
     if not isinstance(snap, dict):
@@ -92,6 +100,35 @@ def _member_rows_from_agg(db: Session, agg: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _sf_push_monitor_row_dict(
+    db: Session,
+    r: SfSameCityPush,
+    agg_by_date: dict[date, dict[str, Any]],
+) -> dict[str, Any]:
+    agg = agg_by_date.get(r.delivery_date, {}).get(str(r.stop_id)) if r.delivery_date else None
+    members = _member_rows_from_agg(db, agg) if agg is not None else []
+    if not members:
+        members = _fallback_members_from_snapshot(r.request_snapshot)
+
+    return {
+        "id": int(r.id),
+        "delivery_date": r.delivery_date.isoformat() if r.delivery_date else "",
+        "stop_id": str(r.stop_id),
+        "shop_order_id": str(r.shop_order_id),
+        "sf_order_id": str(r.sf_order_id) if r.sf_order_id else None,
+        "sf_bill_id": str(r.sf_bill_id) if r.sf_bill_id else None,
+        "error_code": int(r.error_code) if r.error_code is not None else None,
+        "error_msg": (r.error_msg or "")[:500] if r.error_msg else None,
+        "created_at": _iso_dt(r.created_at),
+        "last_callback_at": _iso_dt(r.last_callback_at),
+        "last_callback_kind": r.last_callback_kind,
+        "sf_callback_order_status": int(r.sf_callback_order_status)
+        if r.sf_callback_order_status is not None
+        else None,
+        "members": members,
+    }
+
+
 def apply_sf_order_complete_fulfillment(db: Session, pus: SfSameCityPush) -> None:
     """
     ``route_kind=order_complete`` 且验签通过、已匹配推单记录时调用（由回调落库前写入，同一事务 commit）。
@@ -160,42 +197,39 @@ def list_sf_same_city_pushes_for_monitor(
     off = max(0, (page - 1) * page_size)
     rows = list(db.scalars(q.offset(off).limit(page_size)).all())
 
-    def iso_dt(x: Any) -> str | None:
-        if x is None:
-            return None
-        if hasattr(x, "isoformat"):
-            return x.isoformat()
-        return str(x)
-
     agg_by_date: dict[date, dict[str, Any]] = {}
     for d0 in {r.delivery_date for r in rows if r.delivery_date is not None}:
         agg_by_date[d0] = aggs_for_delivery_date(db, d0)
 
-    out: list[dict[str, Any]] = []
-    for r in rows:
-        agg = agg_by_date.get(r.delivery_date, {}).get(str(r.stop_id)) if r.delivery_date else None
-        members = _member_rows_from_agg(db, agg) if agg is not None else []
-        if not members:
-            members = _fallback_members_from_snapshot(r.request_snapshot)
-
-        out.append(
-            {
-                "id": int(r.id),
-                "delivery_date": r.delivery_date.isoformat() if r.delivery_date else "",
-                "stop_id": str(r.stop_id),
-                "shop_order_id": str(r.shop_order_id),
-                "sf_order_id": str(r.sf_order_id) if r.sf_order_id else None,
-                "sf_bill_id": str(r.sf_bill_id) if r.sf_bill_id else None,
-                "error_code": int(r.error_code) if r.error_code is not None else None,
-                "error_msg": (r.error_msg or "")[:500] if r.error_msg else None,
-                "created_at": iso_dt(r.created_at),
-                "last_callback_at": iso_dt(r.last_callback_at),
-                "last_callback_kind": r.last_callback_kind,
-                "sf_callback_order_status": int(r.sf_callback_order_status)
-                if r.sf_callback_order_status is not None
-                else None,
-                "members": members,
-            }
-        )
+    out = [_sf_push_monitor_row_dict(db, r, agg_by_date) for r in rows]
     return out, total
+
+
+def list_sf_same_city_pushes_for_monitor_export(
+    db: Session,
+    *,
+    delivery_date: date | None,
+    sf_callback_order_status: int | None = None,
+    callback_order_status_unknown: bool = False,
+) -> list[dict[str, Any]]:
+    """与监控列表同源筛选，不分页；用于 Excel 导出。"""
+    if delivery_date is None:
+        raise ValueError("导出须指定业务日 delivery_date")
+
+    if callback_order_status_unknown and sf_callback_order_status is not None:
+        raise ValueError("不可同时指定具体回调状态与「暂无回调状态」筛选")
+
+    q = select(SfSameCityPush).where(SfSameCityPush.delivery_date == delivery_date)
+    if callback_order_status_unknown:
+        q = q.where(SfSameCityPush.sf_callback_order_status.is_(None))
+    elif sf_callback_order_status is not None:
+        q = q.where(SfSameCityPush.sf_callback_order_status == int(sf_callback_order_status))
+    q = q.order_by(SfSameCityPush.id.desc())
+    rows = list(db.scalars(q).all())
+
+    agg_by_date: dict[date, dict[str, Any]] = {}
+    if rows:
+        agg_by_date[delivery_date] = aggs_for_delivery_date(db, delivery_date)
+
+    return [_sf_push_monitor_row_dict(db, r, agg_by_date) for r in rows]
 

@@ -226,19 +226,41 @@ def upsert_default_address_from_admin_map_pick(
 ) -> None:
     """
     管理端地图选点写入或更新默认配送地址（含 map_location_text / door_detail），按坐标自动划区；不 commit。
+    map_location_text 与小程序建档一致：按坐标逆地理拼接省市区前缀后再入库。
     """
-    base = (map_location_text or "").strip()[:500]
+    map_raw = _opt_str(map_location_text)
     door_raw = (door_detail or "").strip()[:500]
     lng_f, lat_f = float(lng), float(lat)
     r = assign_region_for_coords(db, lng_f, lat_f)
     rid = int(r.id) if r else None
     row = get_default_address(db, member_id)
+    old_pca_compact: str | None = None
+    if row and row.lng is not None and row.lat is not None:
+        try:
+            prev_lng, prev_lat = float(row.lng), float(row.lat)
+        except (TypeError, ValueError):
+            prev_lng, prev_lat = None, None
+        if prev_lng is not None and prev_lat is not None:
+            osnap = amap.fetch_regeo_snapshot(prev_lng, prev_lat)
+            if osnap:
+                old_pca_compact = (
+                    osnap.pca_prefix_line or _format_pca_compact(osnap.province, osnap.city, osnap.district) or None
+                )
+    snap = amap.fetch_regeo_snapshot(lng_f, lat_f)
+    pca_ln = snap.pca_prefix_line if snap else None
+    if not pca_ln and snap:
+        pca_ln = _format_pca_compact(snap.province, snap.city, snap.district) or None
+    map_eff = _normalize_map_location_text_with_regeo_hints(
+        map_text=map_raw,
+        new_pca_ln=pca_ln,
+        previous_pca_compact=old_pca_compact,
+    )
     cn = (contact_name or "").strip()[:100]
     cp = (contact_phone or "").strip()[:20]
     if row:
         row.contact_name = cn
         row.contact_phone = cp
-        row.map_location_text = base if base else None
+        row.map_location_text = map_eff
         row.door_detail = door_raw if door_raw else None
         row.lng = lng_f
         row.lat = lat_f
@@ -251,7 +273,7 @@ def upsert_default_address_from_admin_map_pick(
             contact_name=cn,
             contact_phone=cp,
             delivery_region_id=rid,
-            map_location_text=base if base else None,
+            map_location_text=map_eff,
             door_detail=door_raw if door_raw else None,
             remarks=None,
             lng=lng_f,

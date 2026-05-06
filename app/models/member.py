@@ -37,5 +37,7 @@ class Member(Base):
     delivery_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     delivery_deferred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     store_pickup: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # 固定周六不参与订阅履约（当周六十 global 仍为履约日时）；默认关闭
+    skip_subscription_saturday: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)

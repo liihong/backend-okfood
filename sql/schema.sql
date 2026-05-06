@@ -25,6 +25,7 @@
 --  21) members.delivery_deferred 暂不配送标记（见 migrations/20260422_members_delivery_deferred.sql）
 --  22) weekly_menu_slot.total_stock 日总份与单次可售（见 migrations/20260425_weekly_menu_slot_total_stock.sql）
 --  23) members.store_pickup 门店自提（见 migrations/20260424_members_store_pickup.sql）
+--  24) members.skip_subscription_saturday 固定周六不履约（见 migrations/20260506_members_skip_subscription_saturday.sql）
 
 SET NAMES utf8mb4;
 
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS `members` (
   `delivery_start_date` DATE NULL COMMENT '起送业务日(上海)：非空则仅当配送日>=该日才参与配送',
   `delivery_deferred` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '暂不配送：无起送日意向且保持未开卡',
   `store_pickup` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '门店自提：不参与按地址配送与骑手任务，单独归组备餐',
+  `skip_subscription_saturday` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '固定周六不参与订阅履约（全局日历仍为履约日时生效）',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `deleted_at` DATETIME NULL DEFAULT NULL COMMENT '逻辑删除时间；空表示正常',
   PRIMARY KEY (`id`),

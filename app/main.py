@@ -15,6 +15,7 @@ from app.core.limiter import limiter
 from app.db.schema_patches import (
     apply_member_addresses_drop_legacy_columns,
     apply_member_addresses_map_door_columns,
+    apply_members_skip_subscription_saturday_column,
     apply_members_tomorrow_leave_target_column,
     apply_sf_same_city_callback_support,
 )
@@ -48,6 +49,7 @@ async def lifespan(app: FastAPI):
     _ = app
     ensure_upload_root()
     apply_members_tomorrow_leave_target_column()
+    apply_members_skip_subscription_saturday_column()
     apply_member_addresses_map_door_columns()
     apply_member_addresses_drop_legacy_columns()
     apply_sf_same_city_callback_support()

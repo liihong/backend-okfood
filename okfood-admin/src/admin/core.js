@@ -204,6 +204,47 @@ export async function apiJson(path, init = {}, { auth = false } = {}) {
   return data
 }
 
+/**
+ * 二进制响应（如 xlsx）：成功返回 Blob。失败时抛出带 status 的 Error（与 apiJson 一致；401 由调用方 handleAdminLogout）。
+ * @returns {Promise<{ blob: Blob, status: number }>}
+ */
+export async function apiBlob(path, init = {}, { auth = false } = {}) {
+  const url = `${API_BASE}${path}`
+  const headers = {
+    ...(init.headers || {}),
+  }
+  if (auth && adminAccessToken.value) {
+    headers.Authorization = `Bearer ${adminAccessToken.value}`
+  }
+  const method = String(init.method || 'GET').toUpperCase()
+  const res = await fetch(url, {
+    cache: method === 'GET' ? 'no-store' : 'default',
+    ...init,
+    headers,
+  })
+  const blob = await res.blob()
+  if (!res.ok) {
+    const status = res.status
+    let text = ''
+    try {
+      text = await blob.text()
+    } catch {
+      text = ''
+    }
+    let data = null
+    try {
+      data = text ? JSON.parse(text) : null
+    } catch {
+      /* ignore */
+    }
+    const msg = errorMessageFromBody(data, `请求失败 (${status})`)
+    const err = new Error(msg)
+    err.status = status
+    throw err
+  }
+  return { blob, status: res.status }
+}
+
 /** multipart 上传（不要设置 Content-Type，由浏览器带 boundary） */
 export async function apiForm(path, formData, { auth = false } = {}) {
   const url = `${API_BASE}${path}`
@@ -362,6 +403,7 @@ export function mapAdminUserToRow(raw, idx) {
       leave_detail: '',
       status: '未开卡',
       store_pickup: false,
+      skip_subscription_saturday: false,
     }
   }
   const balance = Number(raw.balance) || 0
@@ -428,5 +470,6 @@ export function mapAdminUserToRow(raw, idx) {
     leave_detail: leaveList.leave_detail,
     status,
     store_pickup: raw.store_pickup === true,
+    skip_subscription_saturday: raw.skip_subscription_saturday === true,
   }
 }

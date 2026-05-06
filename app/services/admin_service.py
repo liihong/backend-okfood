@@ -279,6 +279,7 @@ def list_members_paged(
                 wechat_name=m.wechat_name,
                 delivery_start_date=m.delivery_start_date,
                 store_pickup=bool(m.store_pickup),
+                skip_subscription_saturday=bool(m.skip_subscription_saturday),
                 address=ad_line,
                 map_location_text=(addr.map_location_text or "").strip() if addr else "",
                 door_detail=(addr.door_detail or "").strip() if addr else "",
@@ -630,6 +631,8 @@ def dashboard_meal_summary(db: Session) -> DashboardMealSummaryOut:
             Member.delivery_start_date <= d,
         )
         base = and_(Member.is_active.is_(True), Member.balance >= units_sql, started)
+        if d.weekday() == 5:
+            base = and_(base, Member.skip_subscription_saturday.is_(False))
         active_only = Member.deleted_at.is_(None)
         leave_n = int(db.scalar(select(func.count()).select_from(Member).where(active_only, base, absent)) or 0)
         prep_n = int(

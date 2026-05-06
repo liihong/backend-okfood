@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { RefreshCw } from 'lucide-vue-next'
-import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
+import { apiBlob, apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
 function todayShanghaiStr() {
@@ -19,6 +19,7 @@ function todayShanghaiStr() {
 }
 
 const loading = ref(false)
+const exporting = ref(false)
 const cancelBusyId = ref(null)
 const items = ref([])
 const total = ref(0)
@@ -67,6 +68,46 @@ function onDateChange() {
 function onOrderStatusChange() {
   page.value = 1
   void fetchList()
+}
+
+async function exportExcel() {
+  if (!adminAccessToken.value) return
+  const d = (deliveryDate.value || '').trim()
+  if (!d) {
+    showToast('请先选择业务日', 'error')
+    return
+  }
+  exporting.value = true
+  try {
+    const q = new URLSearchParams()
+    q.set('delivery_date', d)
+    const os = (orderStatusFilter.value ?? '').trim()
+    if (os === 'unknown') q.set('callback_order_status_unknown', 'true')
+    else if (os !== '') q.set('sf_callback_order_status', os)
+    const { blob } = await apiBlob(`/api/admin/delivery-sf/pushes/export.xlsx?${q.toString()}`, {}, { auth: true })
+    const href = URL.createObjectURL(blob)
+    try {
+      const a = document.createElement('a')
+      a.href = href
+      a.download = `顺丰订单监控_${d}.xlsx`
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    } finally {
+      URL.revokeObjectURL(href)
+    }
+    showToast('已开始下载', 'success')
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '导出失败', 'error')
+  } finally {
+    exporting.value = false
+  }
 }
 
 function goPrev() {
@@ -262,6 +303,15 @@ onMounted(() => {
               <RefreshCw v-if="!loading" :size="16" stroke-width="2" />
               刷新
             </span>
+          </el-button>
+          <el-button
+            type="primary"
+            plain
+            :loading="exporting"
+            :disabled="loading || !(deliveryDate || '').trim()"
+            @click="exportExcel"
+          >
+            导出 Excel
           </el-button>
         </div>
       </div>

@@ -225,6 +225,14 @@ function parseResponsePayload(raw) {
   return raw
 }
 
+/** HTTP 层 4xx/5xx：将 Starlette/FastAPI 等泛化文案换成可理解的提示 */
+function humanizeHttpStatusMessage(statusCode, msg) {
+  if (statusCode === 404 && msg === 'Not Found') {
+    return '接口不存在(404)：线上请部署最新后端；本地请配置 VITE_API_BASE 指向本机 API（如 http://局域网IP:8001）。'
+  }
+  return msg
+}
+
 /**
  * @param {string} path 如 /api/menu/tomorrow
  * @param {UniNamespace.RequestOptions & { retry?: number }} options
@@ -273,6 +281,7 @@ export function request(path, options = {}) {
               else if (typeof data.message === 'string' && data.message) msg = data.message
               else if (typeof data.detail === 'string') msg = data.detail
             }
+            msg = humanizeHttpStatusMessage(statusCode, msg)
             const err = new Error(msg)
             err.status = statusCode
             reject(err)
@@ -359,7 +368,7 @@ export function uploadMemberAvatarFile(filePath, options = {}) {
             else if (typeof data.message === 'string' && data.message) msg = data.message
             else if (typeof data.detail === 'string') msg = data.detail
           }
-          reject(new Error(msg))
+          reject(new Error(humanizeHttpStatusMessage(statusCode, msg)))
           return
         }
         if (data && typeof data === 'object' && !Array.isArray(data) && 'code' in data) {
@@ -433,6 +442,7 @@ export function courierRequest(path, options = {}) {
               else if (typeof data.message === 'string' && data.message) msg = data.message
               else if (typeof data.detail === 'string') msg = data.detail
             }
+            msg = humanizeHttpStatusMessage(statusCode, msg)
             const err = new Error(msg)
             err.status = statusCode
             reject(err)
