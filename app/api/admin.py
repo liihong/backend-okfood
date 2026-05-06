@@ -62,7 +62,6 @@ from app.services.sf_order_fulfillment_service import (
     list_sf_same_city_pushes_for_monitor,
     list_sf_same_city_pushes_for_monitor_export,
 )
-from app.services.sf_same_city_monitor_xlsx import build_sf_push_monitor_xlsx
 from app.services.sf_same_city_service import cancel_sf_same_city_push, preview_sf_same_city, push_sf_same_city
 from app.services.store_config_service import get_store_config, update_store_config
 from app.services.delivery_sheet_service import build_delivery_sheet
@@ -226,6 +225,13 @@ def delivery_sf_pushes_export_xlsx(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    try:
+        from app.services.sf_same_city_monitor_xlsx import build_sf_push_monitor_xlsx
+    except ImportError as e:
+        raise HTTPException(
+            status_code=503,
+            detail="导出 Excel 需要 openpyxl，请在服务器虚拟环境中执行：pip install -r requirements.txt",
+        ) from e
     body = build_sf_push_monitor_xlsx(rows)
     fn = f"sf_orders_monitor_{delivery_date.isoformat()}.xlsx"
     return PlainResponse(
