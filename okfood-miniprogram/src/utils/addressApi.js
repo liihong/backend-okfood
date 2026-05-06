@@ -73,7 +73,11 @@ export function addressListRow(item, index) {
     (typeof item.phone === 'string' && item.phone) ||
     ''
   const addr =
-    (typeof item.detail_address === 'string' && item.detail_address) ||
+    (typeof item.full_address === 'string' && item.full_address.trim()) ||
+    [item.map_location_text, item.door_detail]
+      .map((x) => (typeof x === 'string' ? x.trim() : ''))
+      .filter(Boolean)
+      .join(' ') ||
     (typeof item.address === 'string' && item.address) ||
     ''
   // 用户端不展示所属片区，仅展示详细地址；片区仍由接口返回供后台/路由使用

@@ -13,8 +13,8 @@ from app.api import admin, admin_couriers, admin_regions, admin_uploads, courier
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.db.schema_patches import (
+    apply_member_addresses_drop_legacy_columns,
     apply_member_addresses_map_door_columns,
-    apply_member_addresses_pca_columns,
     apply_members_tomorrow_leave_target_column,
     apply_sf_same_city_callback_support,
 )
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     ensure_upload_root()
     apply_members_tomorrow_leave_target_column()
     apply_member_addresses_map_door_columns()
-    apply_member_addresses_pca_columns()
+    apply_member_addresses_drop_legacy_columns()
     apply_sf_same_city_callback_support()
     setup_scheduler()
     yield

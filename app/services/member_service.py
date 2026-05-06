@@ -41,9 +41,10 @@ from app.services.leave import is_leave_deadline_passed
 
 from app.services.member_address_service import (
     admin_apply_manual_delivery_region,
-    admin_set_default_address_detail,
+    admin_set_default_address_plain_line,
     apply_auto_area_from_coords_or_geocode,
     delivery_region_name_map,
+    full_address_line,
     get_default_address,
     upsert_default_address_after_register,
 )
@@ -188,7 +189,7 @@ def _to_member_out(
 
     if default_addr is not None:
 
-        address_line = (default_addr.detail_address or "").strip()
+        address_line = full_address_line(default_addr.map_location_text, default_addr.door_detail)
 
         if default_addr.delivery_region_id is not None:
 
@@ -332,7 +333,7 @@ def register_member(db: Session, body: RegisterIn) -> MemberOut:
 
             contact_phone=body.phone,
 
-            detail_address=body.address,
+            address_line=body.address,
 
             remarks=body.remarks,
 
@@ -392,7 +393,7 @@ def register_member(db: Session, body: RegisterIn) -> MemberOut:
 
         contact_phone=body.phone,
 
-        detail_address=body.address,
+        address_line=body.address,
 
         remarks=body.remarks,
 
@@ -991,7 +992,7 @@ def admin_update_member_address(db: Session, phone: str, address: str, *, operat
 
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    admin_set_default_address_detail(
+    admin_set_default_address_plain_line(
 
         db,
 
@@ -1121,7 +1122,7 @@ def admin_patch_member_profile(
 
             raise HTTPException(status_code=400, detail="地址不能为空")
 
-        admin_set_default_address_detail(
+        admin_set_default_address_plain_line(
 
             db,
 

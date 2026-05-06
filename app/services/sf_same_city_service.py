@@ -36,7 +36,7 @@ from app.services.delivery_sheet_service import (
     _resolve_delivery_line,
     build_delivery_sheet,
 )
-from app.services.member_address_service import delivery_region_name_map, routing_area_label
+from app.services.member_address_service import delivery_region_name_map, full_address_line, routing_area_label
 from app.services.member_service import effective_daily_meal_units
 from app.services.sf_open import sign as sf_sign_mod
 from app.services.sf_open.client import SfOpenApiError, SfOpenClient
@@ -288,12 +288,13 @@ def _agg_to_row(
         if o and o.member_address_id:
             maddr = db.get(MemberAddress, o.member_address_id)
 
-    # 与会员地址表一致：收货大地址=地图选点文案；门牌=楼栋/门牌（无则回退整段详细地址）
+    # 与会员地址表一致：收货大地址=地图选点文案；门牌=楼栋/门牌；仅一段时并入 recv_address
     if maddr:
         recv_addr = (maddr.map_location_text or "").strip()
         recv_build = (maddr.door_detail or "").strip()
-        if not recv_build:
-            recv_build = (maddr.detail_address or "").strip()
+        if not recv_addr:
+            recv_addr = full_address_line(maddr.map_location_text, maddr.door_detail)
+            recv_build = ""
     else:
         recv_addr = ""
         recv_build = ""

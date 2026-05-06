@@ -40,9 +40,11 @@ watch(
   },
 )
 
-/** 不含所属片区：优先 detail_address，否则从旧版「片区 + 详细」串去掉 u.area 前缀 */
+/** 不含所属片区：map_location_text + door_detail；否则从列表 address 去掉片区前缀 */
 function memberAddressDetailWithoutArea(u) {
-  const detail = typeof u.detail_address === 'string' ? u.detail_address.trim() : ''
+  const mapT = typeof u.map_location_text === 'string' ? u.map_location_text.trim() : ''
+  const door = typeof u.door_detail === 'string' ? u.door_detail.trim() : ''
+  const detail = [mapT, door].filter(Boolean).join(' ').trim()
   if (detail) return detail
   const rawAddr = String(u.address || '').trim()
   if (!rawAddr || rawAddr.startsWith('（未设置')) return ''

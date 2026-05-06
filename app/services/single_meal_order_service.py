@@ -35,7 +35,7 @@ from app.services.courier_task_sorting import (
     distance_from_anchor_m,
     order_task_rows_by_nearest_neighbor,
 )
-from app.services.member_address_service import delivery_region_name_map, routing_area_label
+from app.services.member_address_service import delivery_region_name_map, full_address_line, routing_area_label
 from app.services.store_config_service import load_store_coordinates_for_sorting
 
 logger = logging.getLogger(__name__)
@@ -120,7 +120,7 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
             raise HTTPException(status_code=404, detail="配送地址不存在")
         nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
         area = routing_area_label(addr, nm)
-        detail_line = (addr.detail_address or "").strip()
+        detail_line = full_address_line(addr.map_location_text, addr.door_detail)
         address_summary = f"{area} {detail_line}".strip()
         addr_id = int(addr.id)
 
@@ -188,7 +188,7 @@ def _single_meal_order_row_to_out(
                     db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set()
                 )
                 ar = routing_area_label(addr, nm)
-                detail_line = (addr.detail_address or "").strip()
+                detail_line = full_address_line(addr.map_location_text, addr.door_detail)
                 address_summary = f"{ar} {detail_line}".strip()
             else:
                 address_summary = (row.routing_area or "").strip() or "—"
@@ -351,7 +351,7 @@ def list_courier_single_order_tasks(
     for order, member, a, dsh in db.execute(stmt).all():
         nm = delivery_region_name_map(db, {int(a.delivery_region_id)} if a.delivery_region_id else set())
         ar = (order.routing_area or "").strip() or routing_area_label(a, nm)
-        detail = (a.detail_address or "").strip()
+        detail = full_address_line(a.map_location_text, a.door_detail)
         display_addr = f"{ar} {detail}".strip()
         sort_m = distance_from_anchor_m(
             store_lng,

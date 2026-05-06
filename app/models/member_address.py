@@ -25,15 +25,11 @@ class MemberAddress(Base):
         nullable=True,
         index=True,
     )
-    detail_address: Mapped[str] = mapped_column(String(500))
     map_location_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
     door_detail: Mapped[str | None] = mapped_column(String(500), nullable=True)
     remarks: Mapped[str | None] = mapped_column(String(500), nullable=True)
     lng: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
     lat: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
-    province: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    city: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    district: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

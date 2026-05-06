@@ -28,7 +28,11 @@ from app.services.courier_task_sorting import (
 )
 from app.services.store_config_service import load_store_coordinates_for_sorting
 from app.services.leave import is_absent_on_delivery_date
-from app.services.member_address_service import default_address_pick_subquery, load_default_address_map
+from app.services.member_address_service import (
+    default_address_pick_subquery,
+    full_address_line,
+    load_default_address_map,
+)
 from app.services.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
 from app.services.single_meal_order_service import list_courier_single_order_tasks
 
@@ -308,7 +312,7 @@ def list_today_tasks(
             float(addr.lng) if addr is not None and addr.lng is not None else None,
             float(addr.lat) if addr is not None and addr.lat is not None else None,
         )
-        detail = (addr.detail_address if addr else "") or ""
+        detail = full_address_line(addr.map_location_text, addr.door_detail) if addr else ""
         display_addr = f"{ar} {detail}".strip() or "（未设置默认配送地址）"
         units = effective_daily_meal_units(m)
         rows.append(

@@ -29,7 +29,7 @@ from app.services.courier_service import (
     eligible_members_for_store_pickup,
     extra_delivered_ineligible_subscribers,
 )
-from app.services.member_address_service import delivery_region_name_map, routing_area_label
+from app.services.member_address_service import delivery_region_name_map, full_address_line, routing_area_label
 from app.services.member_service import effective_daily_meal_units
 
 
@@ -48,7 +48,7 @@ def _resolve_delivery_line(addr: MemberAddress | None, id_to_name: dict[int, str
     """仅使用默认配送地址；members 表地址字段已废弃。"""
     if addr:
         area = routing_area_label(addr, id_to_name)
-        detail = (addr.detail_address or "").strip()
+        detail = full_address_line(addr.map_location_text, addr.door_detail)
         line = f"{area} {detail}".strip()
         return _ResolvedStopLine(area=area, detail=detail, address_line=line or detail or "（无详细地址）")
     return _ResolvedStopLine(

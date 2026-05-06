@@ -22,12 +22,6 @@ const addrEdit = ref(null)
 /** 多条地址时下拉切换 */
 const addrSelectedId = ref(null)
 
-function formatAddrPca(a) {
-  if (!a || typeof a !== 'object') return '—'
-  const parts = [a.province, a.city, a.district].filter((x) => x && String(x).trim())
-  return parts.length ? parts.join(' ') : '—'
-}
-
 function pickAddrEdit(a) {
   const lng = a.location?.lng
   const lat = a.location?.lat
@@ -61,12 +55,6 @@ const addrHeadCoordDisplay = computed(() => {
   const b = String(addrEdit.value.latStr ?? '').trim()
   if (a && b) return `${a}, ${b}`
   return '未选点'
-})
-
-const addrHeadPcaDisplay = computed(() => {
-  if (!addrEdit.value) return '—'
-  const row = addrList.value.find((x) => Number(x.id) === Number(addrEdit.value.id))
-  return formatAddrPca(row)
 })
 
 async function loadAddressesForMember() {
@@ -206,9 +194,6 @@ async function saveMemberAddress() {
               <el-tag size="small" type="info" effect="plain" class="members-addr-coord-tag">{{
                 addrHeadCoordDisplay
               }}</el-tag>
-              <el-divider direction="vertical" class="members-addr-divider" />
-              <span class="members-addr-k">省市区</span>
-              <el-text size="small" class="members-addr-pca-line" truncated>{{ addrHeadPcaDisplay }}</el-text>
             </el-space>
           </div>
 
@@ -247,7 +232,7 @@ async function saveMemberAddress() {
 
             <el-row :gutter="12">
               <el-col :xs="24" :sm="14">
-                <el-form-item label="地点信息（省市区保存时自动拼接；取自地图）">
+                <el-form-item label="收货位置主文案（map_location_text）">
                   <el-input
                     v-model="addrEdit.map_location_text"
                     type="textarea"
@@ -255,7 +240,7 @@ async function saveMemberAddress() {
                     :autosize="{ minRows: 2, maxRows: 4 }"
                     maxlength="500"
                     show-word-limit
-                    placeholder="请在下方的地图中选点自动填入（小区/POI 名，服务端会合并省市区）"
+                    placeholder="地图选点自动填入；可与门牌拼接为完整收货地址"
                   />
                 </el-form-item>
               </el-col>

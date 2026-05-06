@@ -73,6 +73,7 @@ def apply_member_addresses_map_door_columns() -> None:
         return
 
     dname = engine.dialect.name
+    after_first = "detail_address" if "detail_address" in col_names else "delivery_region_id"
     try:
         with engine.begin() as conn:
             if dname in ("mysql", "mariadb"):
@@ -81,8 +82,8 @@ def apply_member_addresses_map_door_columns() -> None:
                         text(
                             "ALTER TABLE `member_addresses` "
                             "ADD COLUMN `map_location_text` VARCHAR(500) NULL "
-                            "COMMENT '地图选点/省市区道路小区等收货位置文字' "
-                            "AFTER `detail_address`"
+                            "COMMENT '地图选点/收货位置主文案' "
+                            f"AFTER `{after_first}`"
                         )
                     )
                 if "door_detail" not in col_names:
@@ -119,8 +120,11 @@ def apply_member_addresses_map_door_columns() -> None:
         )
 
 
-def apply_member_addresses_pca_columns() -> None:
-    """为 member_addresses 增加 province / city / district；已存在则跳过。"""
+def apply_member_addresses_drop_legacy_columns() -> None:
+    """
+    移除 member_addresses 的 detail_address 与省市区独立列；数据并入 map_location_text / door_detail。
+    须在 map_location_text、door_detail 列已存在后执行（见 apply_member_addresses_map_door_columns）。
+    """
     try:
         insp = inspect(engine)
         if not insp.has_table("member_addresses"):
@@ -130,53 +134,54 @@ def apply_member_addresses_pca_columns() -> None:
         logger.warning("补库: 无法检查 member_addresses 表结构: %s", e)
         return
 
-    if "province" in col_names and "city" in col_names and "district" in col_names:
+    legacy = [c for c in ("province", "city", "district", "detail_address") if c in col_names]
+    if not legacy:
+        return
+    if "map_location_text" not in col_names:
+        logger.warning("补库: member_addresses 尚无 map_location_text，跳过删省市区/detail_address（请先补 map/door 列）")
         return
 
     dname = engine.dialect.name
+    if dname not in ("mysql", "mariadb", "sqlite"):
+        logger.warning(
+            "补库: member_addresses 删列需手动执行 sql/migrations/20260506_member_addresses_drop_detail_pca.sql，"
+            "当前 dialect=%s",
+            dname,
+        )
+        return
+
     try:
         with engine.begin() as conn:
-            if dname in ("mysql", "mariadb"):
-                if "province" not in col_names:
+            if "detail_address" in col_names:
+                if dname in ("mysql", "mariadb"):
                     conn.execute(
                         text(
-                            "ALTER TABLE `member_addresses` ADD COLUMN `province` VARCHAR(64) NULL "
-                            "COMMENT '省' AFTER `lat`"
+                            "UPDATE `member_addresses` SET `map_location_text` = TRIM(`detail_address`) "
+                            "WHERE (`map_location_text` IS NULL OR TRIM(`map_location_text`) = '') "
+                            "AND `detail_address` IS NOT NULL AND TRIM(`detail_address`) <> ''"
                         )
                     )
-                if "city" not in col_names:
+                elif dname == "sqlite":
                     conn.execute(
                         text(
-                            "ALTER TABLE `member_addresses` ADD COLUMN `city` VARCHAR(64) NULL "
-                            "COMMENT '市' AFTER `province`"
+                            "UPDATE member_addresses SET map_location_text = TRIM(detail_address) "
+                            "WHERE (map_location_text IS NULL OR TRIM(map_location_text) = '') "
+                            "AND detail_address IS NOT NULL AND TRIM(detail_address) <> ''"
                         )
                     )
-                if "district" not in col_names:
-                    conn.execute(
-                        text(
-                            "ALTER TABLE `member_addresses` ADD COLUMN `district` VARCHAR(64) NULL "
-                            "COMMENT '区' AFTER `city`"
-                        )
-                    )
-            elif dname == "sqlite":
-                if "province" not in col_names:
-                    conn.execute(text("ALTER TABLE member_addresses ADD COLUMN province VARCHAR(64)"))
-                if "city" not in col_names:
-                    conn.execute(text("ALTER TABLE member_addresses ADD COLUMN city VARCHAR(64)"))
-                if "district" not in col_names:
-                    conn.execute(text("ALTER TABLE member_addresses ADD COLUMN district VARCHAR(64)"))
-            else:
-                logger.error(
-                    "补库: 当前库类型 %s 需手动执行 "
-                    "sql/migrations/20260429_member_addresses_pca.sql",
-                    dname,
-                )
-                return
-        logger.info("补库: 已添加 member_addresses.province / city / district")
+
+            drops = [c for c in ("province", "city", "district", "detail_address") if c in col_names]
+            for col in drops:
+                if dname in ("mysql", "mariadb"):
+                    conn.execute(text(f"ALTER TABLE `member_addresses` DROP COLUMN `{col}`"))
+                elif dname == "sqlite":
+                    conn.execute(text(f"ALTER TABLE member_addresses DROP COLUMN {col}"))
+
+        logger.info("补库: 已移除 member_addresses 的 detail_address / province / city / district（如曾存在）")
     except Exception as e:
         logger.error(
-            "补库: 添加 province/city/district 失败，请手动执行 "
-            "sql/migrations/20260429_member_addresses_pca.sql: %s",
+            "补库: 移除 member_addresses 旧列失败，请手动执行 "
+            "sql/migrations/20260506_member_addresses_drop_detail_pca.sql: %s",
             e,
         )
 

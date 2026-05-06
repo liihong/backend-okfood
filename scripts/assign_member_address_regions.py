@@ -30,7 +30,11 @@ from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models.member_address import MemberAddress
-from app.services.member_address_service import apply_auto_area_from_coords_or_geocode, delivery_region_name_map
+from app.services.member_address_service import (
+    apply_auto_area_from_coords_or_geocode,
+    delivery_region_name_map,
+    full_address_line,
+)
 from app.services.region_assignment import assign_region_for_coords
 
 
@@ -200,7 +204,7 @@ def main() -> None:
         print(f"仍为 NULL（未落入任一启用区域多边形或地理编码失败）: {len(null_ids)} 条")
         if null_ids and len(null_ids) <= 30:
             for r in null_ids:
-                detail = (r.detail_address or "")[:60]
+                detail = full_address_line(r.map_location_text, r.door_detail)[:60]
                 print(f"  id={r.id} member_id={r.member_id} detail={detail!r} lng={r.lng} lat={r.lat}")
     finally:
         db.close()

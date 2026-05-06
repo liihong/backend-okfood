@@ -40,6 +40,7 @@ from app.schemas.admin import (
 from app.services.member_address_service import (
     default_address_pick_subquery,
     delivery_region_name_map,
+    full_address_line,
     routing_area_label,
 )
 from app.services.member_service import (
@@ -94,7 +95,12 @@ def _apply_member_list_filters(
                 .select_from(dap)
                 .join(ma, ma.id == dap.c.addr_id)
                 .where(dap.c.mid == Member.id)
-                .where(ma.detail_address.like(f"%{esc}%", escape="\\"))
+                .where(
+                    or_(
+                        ma.map_location_text.like(f"%{esc}%", escape="\\"),
+                        ma.door_detail.like(f"%{esc}%", escape="\\"),
+                    )
+                )
             )
             stmt = stmt.where(
                 or_(
@@ -257,7 +263,7 @@ def list_members_paged(
         if m is None:
             continue
         if addr:
-            detail = (addr.detail_address or "").strip()
+            detail = full_address_line(addr.map_location_text, addr.door_detail)
             ar = routing_area_label(addr, id_to_name)
             ad_line = f"{ar} {detail}".strip() if detail else ar
         else:
@@ -274,7 +280,8 @@ def list_members_paged(
                 delivery_start_date=m.delivery_start_date,
                 store_pickup=bool(m.store_pickup),
                 address=ad_line,
-                detail_address=detail,
+                map_location_text=(addr.map_location_text or "").strip() if addr else "",
+                door_detail=(addr.door_detail or "").strip() if addr else "",
                 avatar_url=m.avatar_url,
                 area=ar,
                 delivery_region_id=dr_id,

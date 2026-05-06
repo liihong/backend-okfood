@@ -194,9 +194,13 @@ class MemberAdminOut(BaseModel):
     )
     store_pickup: bool = Field(False, description="门店自提，不参与骑手任务与按地址配送分组")
     address: str
-    detail_address: str = Field(
+    map_location_text: str = Field(
         "",
-        description="默认配送地址详细行（不含片区前缀）；编辑表单应使用本字段，勿用 address 展示列",
+        description="默认地址：地图定位/收货主文案 segment；与小程序 member_addresses.map_location_text 一致",
+    )
+    door_detail: str = Field(
+        "",
+        description="默认地址：门牌 segment；与 member_addresses.door_detail 一致；完整地址请拼接二者",
     )
     avatar_url: str | None
     area: str = Field(..., description="默认地址配送片区展示名")

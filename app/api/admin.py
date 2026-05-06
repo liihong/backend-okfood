@@ -164,14 +164,30 @@ def delivery_sf_pushes(
     db: SessionDep,
     admin_username: str = Depends(admin_or_delivery_staff_subject),
     delivery_date: Annotated[date | None, Query(description="业务日，不传则全部")] = None,
+    sf_callback_order_status: Annotated[
+        int | None,
+        Query(description="顺丰配送状态推送中的 order_status；与 callback_order_status_unknown 互斥"),
+    ] = None,
+    callback_order_status_unknown: Annotated[
+        bool,
+        Query(description="为真时仅返回尚未收到配送状态回调（sf_callback_order_status 为空）的记录"),
+    ] = False,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ):
     """顺丰同城创单落地记录列表（控制台回调状态），用于后台订单监控。"""
     _ = admin_username
-    items_raw, total = list_sf_same_city_pushes_for_monitor(
-        db, delivery_date=delivery_date, page=page, page_size=page_size
-    )
+    try:
+        items_raw, total = list_sf_same_city_pushes_for_monitor(
+            db,
+            delivery_date=delivery_date,
+            page=page,
+            page_size=page_size,
+            sf_callback_order_status=sf_callback_order_status,
+            callback_order_status_unknown=callback_order_status_unknown,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     items = [SfSameCityPushMonitorRow.model_validate(x) for x in items_raw]
     return page_response(
         items=[dump_model(x) for x in items],

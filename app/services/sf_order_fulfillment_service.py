@@ -133,16 +133,29 @@ def list_sf_same_city_pushes_for_monitor(
     delivery_date: date | None,
     page: int,
     page_size: int,
+    sf_callback_order_status: int | None = None,
+    callback_order_status_unknown: bool = False,
 ) -> tuple[list[dict[str, Any]], int]:
-    """按业务日可选筛选，创建时间倒序分页。"""
+    """按业务日、顺丰回调配送状态可选筛选，创建时间倒序分页。"""
+    if callback_order_status_unknown and sf_callback_order_status is not None:
+        raise ValueError("不可同时指定具体回调状态与「暂无回调状态」筛选")
+
     fq = select(func.count()).select_from(SfSameCityPush)
     if delivery_date is not None:
         fq = fq.where(SfSameCityPush.delivery_date == delivery_date)
+    if callback_order_status_unknown:
+        fq = fq.where(SfSameCityPush.sf_callback_order_status.is_(None))
+    elif sf_callback_order_status is not None:
+        fq = fq.where(SfSameCityPush.sf_callback_order_status == int(sf_callback_order_status))
     total = int(db.scalar(fq) or 0)
 
     q = select(SfSameCityPush)
     if delivery_date is not None:
         q = q.where(SfSameCityPush.delivery_date == delivery_date)
+    if callback_order_status_unknown:
+        q = q.where(SfSameCityPush.sf_callback_order_status.is_(None))
+    elif sf_callback_order_status is not None:
+        q = q.where(SfSameCityPush.sf_callback_order_status == int(sf_callback_order_status))
     q = q.order_by(SfSameCityPush.id.desc())
     off = max(0, (page - 1) * page_size)
     rows = list(db.scalars(q.offset(off).limit(page_size)).all())

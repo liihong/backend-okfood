@@ -115,11 +115,11 @@ const form = reactive({
 
 /** 坐标仅提交接口；界面只展示地名（uni.chooseLocation 地图选点） */
 const coords = ref(null)
-/** 选点返回的结构化字段；map_location_text 仅提交小区/POI 名，省市区由服务端逆地理写入库 */
+/** 选点返回的结构化字段；提交 POI 名即可，服务端逆地理后可规范 map_location_text */
 const poiMeta = ref(null)
-/** 主标题：小区或 POI 名称（微信地图 name） */
+/** 主标题：地图选点/收货主文案（与接口 map_location_text 对齐） */
 const recvLocTitle = ref('')
-/** 副标题：已保存地址时展示省市区（逆地理compact） */
+/** 副标题：门牌/单元楼层（与 door_detail 对齐） */
 const recvLocSub = ref('')
 
 const useMapAddress = computed(() => coords.value != null)
@@ -128,16 +128,6 @@ const useMapAddress = computed(() => coords.value != null)
 function buildMapCommunityText(p) {
   if (!p || typeof p !== 'object') return ''
   return String(p.name ?? '').trim()
-}
-
-function formatRegionCompact(item) {
-  if (!item || typeof item !== 'object') return ''
-  const a = [
-    item.province != null ? String(item.province).trim() : '',
-    item.city != null ? String(item.city).trim() : '',
-    item.district != null ? String(item.district).trim() : '',
-  ].filter(Boolean)
-  return a.join('')
 }
 
 function setPoiDisplayLinesFromPick(name) {
@@ -197,7 +187,7 @@ function memberPhonePath() {
   return p ? String(p).replace(/\D/g, '') : ''
 }
 
-/** 接口返回的地址项 → 表单（优先 contact_name / contact_phone / detail_address） */
+/** 接口返回的地址项 → 表单（map_location_text + door_detail；无坐标时整段写入 legacyDetail） */
 function applyAddressItem(item) {
   if (!item || typeof item !== 'object') return
   const id = item.id ?? item.address_id ?? item.addressId
@@ -225,18 +215,16 @@ function applyAddressItem(item) {
         ? String(item.door_detail).trim()
         : ''
     if (mapSaved || doorSaved) {
-      recvLocTitle.value = mapSaved || (item.detail_address != null ? String(item.detail_address) : '')
-      recvLocSub.value = formatRegionCompact(item)
+      recvLocTitle.value = mapSaved
+      recvLocSub.value = doorSaved
       form.houseNumber = doorSaved
       form.legacyDetail = ''
     } else {
-      const line =
-        item.detail_address != null
-          ? String(item.detail_address)
-          : item.address != null
-            ? String(item.address)
-            : ''
-      recvLocTitle.value = line
+      const fa =
+        item.full_address != null && String(item.full_address).trim()
+          ? String(item.full_address).trim()
+          : ''
+      recvLocTitle.value = fa
       recvLocSub.value = ''
       form.houseNumber = ''
       form.legacyDetail = ''
@@ -247,8 +235,17 @@ function applyAddressItem(item) {
     recvLocTitle.value = ''
     recvLocSub.value = ''
     form.houseNumber = ''
-    if (item.detail_address != null) form.legacyDetail = String(item.detail_address)
-    else if (item.address != null) form.legacyDetail = String(item.address)
+    const fa =
+      item.full_address != null && String(item.full_address).trim()
+        ? String(item.full_address).trim()
+        : ''
+    if (fa) form.legacyDetail = fa
+    else if (item.map_location_text != null || item.door_detail != null) {
+      form.legacyDetail = [item.map_location_text, item.door_detail]
+        .map((x) => (x != null ? String(x).trim() : ''))
+        .filter(Boolean)
+        .join(' ')
+    } else if (item.address != null) form.legacyDetail = String(item.address)
     else form.legacyDetail = ''
   }
 }
@@ -379,36 +376,31 @@ async function loadAddressById(id) {
   }, 100)
 }
 
-/** POST/PATCH 与后台约定字段 */
+/** POST/PATCH 与后台约定字段（仅 map_location_text + door_detail；完整展示由二者拼接） */
 function buildAddressBody() {
   const hasCoords = coords.value != null
-  let detail_address = ''
   if (hasCoords) {
     const community = poiMeta.value
       ? buildMapCommunityText(poiMeta.value)
       : (recvLocTitle.value || '').trim()
     const house = (form.houseNumber || '').trim()
-    detail_address = [community, house].filter(Boolean).join(' ').trim()
     return {
       contact_name: form.name.trim(),
       contact_phone: String(form.phone).replace(/\D/g, ''),
-      detail_address,
       map_location_text: community || null,
       door_detail: house || null,
       remarks: (form.remarks || '').trim(),
       location: { lng: coords.value.lng, lat: coords.value.lat },
     }
   }
-  detail_address = (form.legacyDetail || '').trim()
-  const body = {
+  const line = (form.legacyDetail || '').trim()
+  return {
     contact_name: form.name.trim(),
     contact_phone: String(form.phone).replace(/\D/g, ''),
-    detail_address,
-    map_location_text: null,
+    map_location_text: line,
     door_detail: null,
     remarks: (form.remarks || '').trim(),
   }
-  return body
 }
 
 onLoad((options) => {
@@ -480,10 +472,15 @@ async function save() {
       }
     }
     const bodySaved = buildAddressBody()
+    const addrLine = [bodySaved.map_location_text, bodySaved.door_detail]
+      .map((x) => (typeof x === 'string' ? x.trim() : ''))
+      .filter(Boolean)
+      .join(' ')
+      .trim()
     uni.setStorageSync('deliveryAddress', {
       name: form.name,
       phone: form.phone,
-      address: bodySaved.detail_address,
+      address: addrLine,
       remarks: form.remarks,
       location: hasCoords ? { lat: coords.value.lat, lng: coords.value.lng } : null,
     })

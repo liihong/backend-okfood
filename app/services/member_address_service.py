@@ -14,6 +14,17 @@ from app.services.region_assignment import assign_region_for_coords
 _MAX_ADDRESSES_PER_MEMBER = 20
 
 
+def full_address_line(map_location_text: str | None, door_detail: str | None) -> str:
+    """完整收货展示/地理编码用地址：两段非空时用空格拼接。"""
+    m = (map_location_text or "").strip()
+    d = (door_detail or "").strip()
+    if not m:
+        return d
+    if not d:
+        return m
+    return f"{m} {d}".strip()
+
+
 def _opt_str(v: str | None) -> str | None:
     if v is None:
         return None
@@ -22,7 +33,7 @@ def _opt_str(v: str | None) -> str | None:
 
 
 def _format_pca_compact(province: str | None, city: str | None, district: str | None) -> str:
-    """与高德 addressComponent 相同的紧凑拼接：省市区连写，供展示行前缀。"""
+    """与高德 addressComponent 相同的紧凑拼接：省市区连写，供逆地理前缀。"""
     parts: list[str] = []
     p = (province or "").strip()
     c = (city or "").strip()
@@ -36,35 +47,65 @@ def _format_pca_compact(province: str | None, city: str | None, district: str | 
     return "".join(parts).strip()
 
 
-def _sync_detail_from_pca_community_door(
-    pca_line: str | None, community: str | None, door: str | None
-) -> str:
-    """完整配送地址行：省市区 + 小区/POI 名 + 门牌；不含道路细目。"""
-    p = (pca_line or "").strip()
-    m = (community or "").strip()
-    d = (door or "").strip()
-    return " ".join([x for x in (p, m, d) if x]).strip()
+def _strip_if_prefix_matches(text: str, prefix: str) -> str:
+    """若 text 以 prefix（忽略空白差异的紧凑前缀）开头，去掉该前缀剩余部分。"""
+    t = text.strip()
+    p = (prefix or "").strip()
+    if not t or not p:
+        return t
+    if t.startswith(p):
+        r = t[len(p) :].strip()
+        return r if r else t
+    pc = "".join(p.split())
+    if not pc:
+        return t
+    built = ""
+    i = 0
+    while i < len(t) and len(built) < len(pc):
+        ch = t[i]
+        i += 1
+        if not ch.isspace():
+            built += ch
+        if built == pc:
+            break
+    if built != pc:
+        return t
+    return t[i:].strip()
 
 
-def _sync_detail_from_map_and_door(map_text: str | None, door: str | None) -> str:
-    m = (map_text or "").strip()
-    d = (door or "").strip()
-    if not m:
-        return d
-    if not d:
-        return m
-    return f"{m} {d}".strip()
-
-
-def _fill_regeo_fields_from_coords(row: MemberAddress, lng: float | None, lat: float | None) -> None:
-    if lng is None or lat is None:
-        return
-    snap = amap.fetch_regeo_snapshot(float(lng), float(lat))
-    if not snap:
-        return
-    row.province = snap.province
-    row.city = snap.city
-    row.district = snap.district
+def _normalize_map_location_text_with_regeo_hints(
+    *,
+    map_text: str | None,
+    new_pca_ln: str | None,
+    previous_pca_compact: str | None,
+) -> str | None:
+    """
+    map_location_text 存库可并入省市区前缀：优先用高德逆地理的 pca_prefix_line。
+    previous_pca_compact 用于 PATCH 挪动选点前，按旧坐标逆地理前缀剥掉冗余省市区。
+    """
+    p_new = (new_pca_ln or "").strip()
+    s_prev = (previous_pca_compact or "").strip()
+    raw = (map_text or "").strip()
+    if not raw:
+        return _opt_str(p_new[:500] if p_new else None)
+    core = raw
+    for pref in (p_new, s_prev):
+        pref = (pref or "").strip()
+        if not pref:
+            continue
+        stripped = _strip_if_prefix_matches(core, pref)
+        if stripped != core:
+            core = stripped.strip()
+            break
+    if not core:
+        return _opt_str(p_new[:500] if p_new else None)
+    if not p_new:
+        return _opt_str(core[:500])
+    pc_core, pc_new = "".join(core.split()), "".join(p_new.split())
+    if core.startswith(p_new) or (pc_new and pc_core.startswith(pc_new)):
+        return _opt_str(core[:500])
+    combined = f"{p_new} {core}".strip()
+    return _opt_str(combined[:500])
 
 
 def _row_coords(row: MemberAddress) -> tuple[float, float] | None:
@@ -136,44 +177,37 @@ def upsert_default_address_after_register(
     member_id: int,
     contact_name: str,
     contact_phone: str,
-    detail_address: str,
+    address_line: str,
     remarks: str | None,
     delivery_region_id: int | None,
     lng: float | None,
     lat: float | None,
 ) -> None:
-    """登记/更新会员资料时写入或更新默认配送地址（不 commit）。"""
+    """登记/更新会员资料时写入或更新默认配送地址（整段写入 map_location_text；不 commit）。"""
     row = get_default_address(db, member_id)
-    detail = (detail_address or "").strip()
+    base = (address_line or "").strip()[:500]
     if row:
         row.contact_name = contact_name
         row.contact_phone = contact_phone
-        row.detail_address = detail
+        row.map_location_text = base if base else None
+        row.door_detail = None
         row.remarks = remarks
         row.delivery_region_id = delivery_region_id
         row.lng = lng
         row.lat = lat
-        _fill_regeo_fields_from_coords(row, lng, lat)
         return
     _clear_defaults(db, member_id, except_id=None)
-    pv = cy = ds = None
-    if lng is not None and lat is not None:
-        snap_reg = amap.fetch_regeo_snapshot(float(lng), float(lat))
-        if snap_reg:
-            pv, cy, ds = snap_reg.province, snap_reg.city, snap_reg.district
     db.add(
         MemberAddress(
             member_id=member_id,
             contact_name=contact_name,
             contact_phone=contact_phone,
             delivery_region_id=delivery_region_id,
-            detail_address=detail,
+            map_location_text=base if base else None,
+            door_detail=None,
             remarks=remarks,
             lng=lng,
             lat=lat,
-            province=pv,
-            city=cy,
-            district=ds,
             is_default=True,
         )
     )
@@ -195,7 +229,6 @@ def upsert_default_address_from_admin_map_pick(
     """
     base = (map_location_text or "").strip()[:500]
     door_raw = (door_detail or "").strip()[:500]
-    detail = f"{base} {door_raw}".strip() if door_raw else base
     lng_f, lat_f = float(lng), float(lat)
     r = assign_region_for_coords(db, lng_f, lat_f)
     rid = int(r.id) if r else None
@@ -205,34 +238,24 @@ def upsert_default_address_from_admin_map_pick(
     if row:
         row.contact_name = cn
         row.contact_phone = cp
-        row.detail_address = detail[:500]
         row.map_location_text = base if base else None
         row.door_detail = door_raw if door_raw else None
         row.lng = lng_f
         row.lat = lat_f
         row.delivery_region_id = rid
-        _fill_regeo_fields_from_coords(row, lng_f, lat_f)
         return
     _clear_defaults(db, member_id, except_id=None)
-    pv = cy = ds = None
-    snap_ins = amap.fetch_regeo_snapshot(lng_f, lat_f)
-    if snap_ins:
-        pv, cy, ds = snap_ins.province, snap_ins.city, snap_ins.district
     db.add(
         MemberAddress(
             member_id=member_id,
             contact_name=cn,
             contact_phone=cp,
             delivery_region_id=rid,
-            detail_address=detail[:500],
             map_location_text=base if base else None,
             door_detail=door_raw if door_raw else None,
             remarks=None,
             lng=lng_f,
             lat=lat_f,
-            province=pv,
-            city=cy,
-            district=ds,
             is_default=True,
         )
     )
@@ -255,7 +278,7 @@ def admin_apply_manual_delivery_region(
     addr.delivery_region_id = delivery_region_id
 
 
-def admin_set_default_address_detail(
+def admin_set_default_address_plain_line(
     db: Session,
     *,
     member_id: int,
@@ -263,37 +286,31 @@ def admin_set_default_address_detail(
     contact_name: str,
     contact_phone: str,
 ) -> None:
-    """管理端修改配送地址：写默认地址行并地理编码+自动划区（不 commit）。"""
+    """管理端单一文本地址：整段写入 map_location_text，清 door_detail；地理编码+自动划区（不 commit）。"""
     detail = (detail_line or "").strip()
     lng, lat, rid = _geocode_bundle(db, detail)
     row = get_default_address(db, member_id)
+    map_text = detail[:500]
     if row:
         row.contact_name = contact_name
         row.contact_phone = contact_phone
-        row.detail_address = detail
+        row.map_location_text = map_text
+        row.door_detail = None
         row.lng, row.lat = lng, lat
         row.delivery_region_id = rid
-        _fill_regeo_fields_from_coords(row, lng, lat)
         return
     _clear_defaults(db, member_id, except_id=None)
-    pv = cy = ds = None
-    if lng is not None and lat is not None:
-        snap_ad = amap.fetch_regeo_snapshot(float(lng), float(lat))
-        if snap_ad:
-            pv, cy, ds = snap_ad.province, snap_ad.city, snap_ad.district
     db.add(
         MemberAddress(
             member_id=member_id,
             contact_name=contact_name,
             contact_phone=contact_phone,
             delivery_region_id=rid,
-            detail_address=detail,
+            map_location_text=map_text,
+            door_detail=None,
             remarks=None,
             lng=lng,
             lat=lat,
-            province=pv,
-            city=cy,
-            district=ds,
             is_default=True,
         )
     )
@@ -310,22 +327,22 @@ def _geocode_bundle(db: Session, detail: str) -> tuple[float | None, float | Non
 
 
 def apply_auto_area_from_coords_or_geocode(db: Session, row: MemberAddress) -> None:
-    """管理端「恢复自动划区」：已有坐标则按多边形划区；无坐标则按详细地址尝试高德地理编码后再划区。"""
+    """管理端「恢复自动划区」：已有坐标则按多边形划区；无坐标则按拼接地址尝试高德地理编码后再划区。"""
     if row.lng is not None and row.lat is not None:
         r = assign_region_for_coords(db, float(row.lng), float(row.lat))
         row.delivery_region_id = int(r.id) if r else None
-        _fill_regeo_fields_from_coords(row, float(row.lng), float(row.lat))
         return
-    lng, lat, rid = _geocode_bundle(db, row.detail_address)
+    line = full_address_line(row.map_location_text, row.door_detail)
+    lng, lat, rid = _geocode_bundle(db, line)
     row.lng, row.lat = lng, lat
     row.delivery_region_id = rid
-    _fill_regeo_fields_from_coords(row, lng, lat)
 
 
 def _to_out(row: MemberAddress, id_to_name: dict[int, str]) -> MemberAddressOut:
     loc = None
     if row.lng is not None and row.lat is not None:
         loc = Location(lng=float(row.lng), lat=float(row.lat))
+    fa = full_address_line(row.map_location_text, row.door_detail)
     return MemberAddressOut(
         id=int(row.id),
         member_id=int(row.member_id),
@@ -333,12 +350,9 @@ def _to_out(row: MemberAddress, id_to_name: dict[int, str]) -> MemberAddressOut:
         contact_phone=row.contact_phone,
         delivery_region_id=int(row.delivery_region_id) if row.delivery_region_id is not None else None,
         area=routing_area_label(row, id_to_name),
-        detail_address=row.detail_address,
         map_location_text=_opt_str(row.map_location_text),
         door_detail=_opt_str(row.door_detail),
-        province=_opt_str(row.province),
-        city=_opt_str(row.city),
-        district=_opt_str(row.district),
+        full_address=fa,
         remarks=row.remarks,
         location=loc,
         is_default=bool(row.is_default),
@@ -400,32 +414,28 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
         raise HTTPException(status_code=400, detail=f"每位会员最多保存 {_MAX_ADDRESSES_PER_MEMBER} 条地址")
 
     effective_default = True if count == 0 else body.is_default
-    pv = cy = ds = None
+
+    map_raw = _opt_str(body.map_location_text)
+    door_eff = _opt_str(body.door_detail)
+
     if body.location is not None:
         lng_f, lat_f = float(body.location.lng), float(body.location.lat)
         lng, lat = lng_f, lat_f
         r = assign_region_for_coords(db, lng_f, lat_f)
         rid = int(r.id) if r else None
         snap = amap.fetch_regeo_snapshot(lng_f, lat_f)
-        if snap:
-            pv, cy, ds = snap.province, snap.city, snap.district
-        map_eff = _opt_str(body.map_location_text)
-        door_eff = _opt_str(body.door_detail)
         pca_ln = snap.pca_prefix_line if snap else None
-        if not pca_ln and (pv or cy or ds):
-            pca_ln = _format_pca_compact(pv, cy, ds) or None
-        detail_eff = _sync_detail_from_pca_community_door(pca_ln, map_eff, door_eff)
-        if not detail_eff.strip():
-            detail_eff = body.detail_address.strip()
+        if not pca_ln and snap:
+            pca_ln = _format_pca_compact(snap.province, snap.city, snap.district) or None
+        map_eff = _normalize_map_location_text_with_regeo_hints(
+            map_text=map_raw,
+            new_pca_ln=pca_ln,
+            previous_pca_compact=None,
+        )
     else:
-        lng, lat, rid = _geocode_bundle(db, body.detail_address)
-        if lng is not None and lat is not None:
-            snap_n = amap.fetch_regeo_snapshot(float(lng), float(lat))
-            if snap_n:
-                pv, cy, ds = snap_n.province, snap_n.city, snap_n.district
-        map_eff = _opt_str(body.map_location_text)
-        door_eff = _opt_str(body.door_detail)
-        detail_eff = body.detail_address.strip()
+        line = full_address_line(map_raw, door_eff)
+        lng, lat, rid = _geocode_bundle(db, line)
+        map_eff = map_raw
 
     if effective_default:
         _clear_defaults(db, member_id, except_id=None)
@@ -435,15 +445,11 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
         contact_name=body.contact_name,
         contact_phone=body.contact_phone,
         delivery_region_id=rid,
-        detail_address=detail_eff,
         map_location_text=map_eff,
         door_detail=door_eff,
         remarks=body.remarks,
         lng=lng,
         lat=lat,
-        province=pv,
-        city=cy,
-        district=ds,
         is_default=effective_default,
     )
     db.add(row)
@@ -457,6 +463,16 @@ def update_address(db: Session, member_id: int, address_id: int, body: MemberAdd
     row = db.get(MemberAddress, address_id)
     if not row or row.member_id != member_id:
         raise HTTPException(status_code=404, detail="地址不存在")
+
+    coords_prev = _row_coords(row)
+    prev_lng, prev_lat = (coords_prev[0], coords_prev[1]) if coords_prev else (None, None)
+    old_pca_compact: str | None = None
+    if prev_lng is not None and prev_lat is not None:
+        osnap = amap.fetch_regeo_snapshot(prev_lng, prev_lat)
+        if osnap:
+            old_pca_compact = (
+                osnap.pca_prefix_line or _format_pca_compact(osnap.province, osnap.city, osnap.district) or None
+            )
 
     patch = body.model_dump(exclude_unset=True)
     is_default_new = patch.pop("is_default", None)
@@ -475,27 +491,26 @@ def update_address(db: Session, member_id: int, address_id: int, body: MemberAdd
         row.lng, row.lat = lng_f, lat_f
         r = assign_region_for_coords(db, lng_f, lat_f)
         row.delivery_region_id = int(r.id) if r else None
-    elif "detail_address" in patch or "map_location_text" in patch or "door_detail" in patch:
-        lng, lat, rid = _geocode_bundle(db, row.detail_address)
+    elif "map_location_text" in patch or "door_detail" in patch:
+        line = full_address_line(row.map_location_text, row.door_detail)
+        lng, lat, rid = _geocode_bundle(db, line)
         row.lng, row.lat, row.delivery_region_id = lng, lat, rid
 
     lnglat = _row_coords(row)
     addr_touched = (
-        location_patch is not None
-        or "map_location_text" in patch
-        or "door_detail" in patch
-        or "detail_address" in patch
+        location_patch is not None or "map_location_text" in patch or "door_detail" in patch
     )
+
     snap = amap.fetch_regeo_snapshot(lnglat[0], lnglat[1]) if lnglat else None
-    if snap:
-        row.province = snap.province
-        row.city = snap.city
-        row.district = snap.district
 
     if lnglat is not None and addr_touched:
-        pca_ln = snap.pca_prefix_line if snap else _format_pca_compact(row.province, row.city, row.district)
-        row.detail_address = _sync_detail_from_pca_community_door(
-            pca_ln or None, row.map_location_text, row.door_detail
+        pca_ln = snap.pca_prefix_line if snap else None
+        if not pca_ln and snap:
+            pca_ln = _format_pca_compact(snap.province, snap.city, snap.district) or None
+        row.map_location_text = _normalize_map_location_text_with_regeo_hints(
+            map_text=row.map_location_text,
+            new_pca_ln=pca_ln,
+            previous_pca_compact=old_pca_compact,
         )
 
     if is_default_new is True:

@@ -25,6 +25,8 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const deliveryDate = ref(todayShanghaiStr())
+/** 回调订单状态筛：空=全部；unknown=尚无回调状态；其余为顺丰 order_status 数值字符串 */
+const orderStatusFilter = ref('')
 
 const totalPages = computed(() => Math.max(1, Math.ceil((total.value || 0) / pageSize.value)))
 
@@ -37,6 +39,9 @@ async function fetchList() {
     q.set('page_size', String(pageSize.value))
     const d = (deliveryDate.value || '').trim()
     if (d) q.set('delivery_date', d)
+    const os = (orderStatusFilter.value ?? '').trim()
+    if (os === 'unknown') q.set('callback_order_status_unknown', 'true')
+    else if (os !== '') q.set('sf_callback_order_status', os)
     const data = await apiJson(`/api/admin/delivery-sf/pushes?${q.toString()}`, {}, { auth: true })
     items.value = Array.isArray(data?.items) ? data.items : []
     total.value = Number(data?.total) || 0
@@ -55,6 +60,11 @@ async function fetchList() {
 }
 
 function onDateChange() {
+  page.value = 1
+  void fetchList()
+}
+
+function onOrderStatusChange() {
   page.value = 1
   void fetchList()
 }
@@ -90,6 +100,22 @@ const SF_ORDER_STATUS_ZH = {
   31: '取消中',
   91: '骑士上报异常',
 }
+
+const orderStatusOptions = computed(() => {
+  const opts = [
+    { value: '', label: '全部回调状态' },
+    { value: 'unknown', label: '暂无回调状态' },
+  ]
+  const nums = Object.keys(SF_ORDER_STATUS_ZH)
+    .map((k) => Number(k))
+    .filter((n) => !Number.isNaN(n))
+    .sort((a, b) => a - b)
+  for (const n of nums) {
+    const zh = SF_ORDER_STATUS_ZH[n]
+    opts.push({ value: String(n), label: `${zh}（${n}）` })
+  }
+  return opts
+})
 
 /** 回调路由 kind（落库 last_callback_kind） */
 const SF_CALLBACK_KIND_ZH = {
@@ -212,6 +238,25 @@ onMounted(() => {
               @change="onDateChange"
             />
           </label>
+          <label class="sf-monitor-field">
+            <span>回调订单状态</span>
+            <el-select
+              v-model="orderStatusFilter"
+              placeholder="全部"
+              :disabled="loading"
+              clearable
+              filterable
+              class="sf-monitor-status"
+              @change="onOrderStatusChange"
+            >
+              <el-option
+                v-for="opt in orderStatusOptions"
+                :key="opt.value === '' ? '_all' : opt.value"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </el-select>
+          </label>
           <el-button plain class="sf-monitor-refresh" :loading="loading" @click="fetchList">
             <span class="sf-monitor-refresh-inner">
               <RefreshCw v-if="!loading" :size="16" stroke-width="2" />
@@ -308,6 +353,9 @@ onMounted(() => {
 }
 .sf-monitor-date {
   width: 160px;
+}
+.sf-monitor-status {
+  width: 240px;
 }
 .sf-monitor-refresh-inner {
   display: inline-flex;

@@ -204,7 +204,7 @@ def _geocode(amap_key: str, address: str) -> tuple[float, float] | None:
 class MemberRow:
     name: str
     phone_raw: str
-    detail_address: str
+    map_location_text: str
     plan_type: str
     balance: int
     meal_quota_total: int
@@ -328,7 +328,7 @@ def collect_member_rows(path: Path) -> list[MemberRow]:
             MemberRow(
                 name=name,
                 phone_raw=phone_raw,
-                detail_address=addr,
+                map_location_text=addr,
                 plan_type=pt,
                 balance=balance,
                 meal_quota_total=total,
@@ -414,10 +414,10 @@ def aggregate_members(raw_rows: list[MemberRow]) -> list[AggregatedMember]:
         # 按规范化地址合并
         addr_map: dict[str, MergedAddress] = {}
         for r in rows:
-            an = _normalize_detail_address(r.detail_address)
+            an = _normalize_detail_address(r.map_location_text)
             if not an:
                 continue
-            disp = r.detail_address.strip().replace("\r\n", "\n").replace("\r", "\n")
+            disp = r.map_location_text.strip().replace("\r\n", "\n").replace("\r", "\n")
             disp_one = re.sub(r"\s+", " ", disp.replace("\n", " ")).strip()
             cn = _normalize_name(r.name)
             if an not in addr_map:
@@ -524,9 +524,9 @@ SET @__member_id = LAST_INSERT_ID();
 
             fh.write(
                 f"""INSERT INTO `member_addresses` (
-  `member_id`, `contact_name`, `contact_phone`, `delivery_region_id`, `detail_address`, `remarks`, `lng`, `lat`, `is_default`, `created_at`, `updated_at`
+  `member_id`, `contact_name`, `contact_phone`, `delivery_region_id`, `map_location_text`, `door_detail`, `remarks`, `lng`, `lat`, `is_default`, `created_at`, `updated_at`
 ) VALUES (
-  @__member_id, {_sql_str(cname)}, {_sql_str(m.phone)}, NULL, {det}, {rem_a}, {lng_sql}, {lat_sql}, {is_def}, {created_sql}, {created_sql}
+  @__member_id, {_sql_str(cname)}, {_sql_str(m.phone)}, NULL, {det}, NULL, {rem_a}, {lng_sql}, {lat_sql}, {is_def}, {created_sql}, {created_sql}
 );
 
 """

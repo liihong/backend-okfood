@@ -96,10 +96,10 @@
         </view>
 
         <view class="action-list">
-          <view v-if="!isLoggedIn" class="menu-row" @click="goCourier">
+         <!-- <view v-if="!isLoggedIn" class="menu-row" @click="goCourier">
             <text class="menu-label">配送员工作台</text>
             <text class="arrow">›</text>
-          </view>
+        </view> -->
           <view class="menu-row" @click="goDailyMealUnits">
             <text class="menu-label">📦 修改每日送达份数</text>
             <text class="arrow">›</text>
@@ -120,10 +120,10 @@
             <text class="menu-label">🏠 地址管理</text>
             <text class="arrow">›</text>
           </view>
-          <view class="menu-row" @click="goSingleOrders">
+         <!-- <view class="menu-row" @click="goSingleOrders">
             <text class="menu-label">🧾 我的单次订单</text>
             <text class="arrow">›</text>
-          </view>
+         </view> -->
         </view>
         <text class="page-version">版本 1.1.5</text>
       </view>
