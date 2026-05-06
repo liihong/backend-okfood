@@ -204,7 +204,6 @@ def delivery_sf_pushes(
 @router.get("/delivery-sf/pushes/export.xlsx", response_model=None)
 def delivery_sf_pushes_export_xlsx(
     db: SessionDep,
-    admin_username: str = Depends(admin_or_delivery_staff_subject),
     delivery_date: Annotated[date, Query(description="业务日，必填；导出该日全部匹配筛选条件的创单记录")],
     sf_callback_order_status: Annotated[
         int | None,
@@ -214,6 +213,7 @@ def delivery_sf_pushes_export_xlsx(
         bool,
         Query(description="为真时仅导出尚未收到配送状态回调的记录"),
     ] = False,
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
 ):
     """导出顺丰订单监控列表同源数据（不分页），用于按业务日与控制台核对。"""
     _ = admin_username
