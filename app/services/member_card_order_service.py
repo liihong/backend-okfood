@@ -319,6 +319,22 @@ def create_card_order(db: Session, body: CardOrderCreateIn, *, operator: str) ->
     return _order_to_out(db, order)
 
 
+def delete_card_order(db: Session, order_id: int) -> None:
+    """删除无效/重复工单：仅未缴且未同步入账可删。"""
+    order = db.get(MemberCardOrder, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    if order.applied_to_member:
+        raise HTTPException(status_code=400, detail="已同步入账的工单不可删除")
+    if order.pay_status == CardOrderPayStatus.PAID.value:
+        raise HTTPException(
+            status_code=400,
+            detail="已缴工单不可删除；若实为误标请先在「更新」中改回未缴后再删",
+        )
+    db.delete(order)
+    db.commit()
+
+
 def update_card_order(
     db: Session, order_id: int, body: CardOrderPatchIn, *, operator: str
 ) -> CardOrderOut:

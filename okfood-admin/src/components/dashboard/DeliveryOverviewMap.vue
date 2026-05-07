@@ -13,6 +13,11 @@ const XINXIANG_CITY_NE = [114.52, 35.56]
 /** 在包络外再扩一点留白（度） */
 const XINXIANG_BOUNDS_MARGIN_DEG = 0.03
 const BOUNDS_PADDING_PX = [48, 56, 72, 56]
+/** 营业概览地图在默认基础上的额外拉近级数（高德 zoom 越大越近） */
+const MAP_ZOOM_LEVEL_UP = 4
+const ZOOM_CITY_FALLBACK = 10.5 + MAP_ZOOM_LEVEL_UP
+const ZOOM_STORE = 12 + MAP_ZOOM_LEVEL_UP
+const ZOOM_MAX = 19
 
 /** @type {any} */
 let memberInfoWindow = null
@@ -133,9 +138,13 @@ function fitMapToXinxiangCity() {
   try {
     const bounds = new AMap.Bounds(sw, ne)
     map.setBounds(bounds, false, BOUNDS_PADDING_PX)
+    const z = map.getZoom()
+    if (typeof z === 'number' && Number.isFinite(z)) {
+      map.setZoom(Math.min(z + MAP_ZOOM_LEVEL_UP, ZOOM_MAX))
+    }
   } catch {
     map.setCenter([...XINXIANG_CENTER])
-    map.setZoom(10.5)
+    map.setZoom(ZOOM_CITY_FALLBACK)
   }
 }
 
@@ -147,7 +156,7 @@ function fitMapViewToStoreOrCity() {
   const lat = sa?.store_lat != null ? Number(sa.store_lat) : NaN
   if (Number.isFinite(lng) && Number.isFinite(lat)) {
     map.setCenter([lng, lat])
-    map.setZoom(12)
+    map.setZoom(ZOOM_STORE)
     return
   }
   fitMapToXinxiangCity()
@@ -265,7 +274,7 @@ async function initMap() {
     const cLat = sa0?.store_lat != null ? Number(sa0.store_lat) : NaN
     const hasStore = Number.isFinite(cLng) && Number.isFinite(cLat)
     map = new AMap.Map(mapEl.value, {
-      zoom: hasStore ? 12 : 10.5,
+      zoom: hasStore ? ZOOM_STORE : ZOOM_CITY_FALLBACK,
       center: hasStore ? [cLng, cLat] : [...XINXIANG_CENTER],
       viewMode: '2D',
       mapStyle: 'amap://styles/normal',

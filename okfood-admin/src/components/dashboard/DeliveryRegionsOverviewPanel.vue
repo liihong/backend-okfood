@@ -12,12 +12,28 @@ const router = useRouter()
 
 const dashboardStats = ref([])
 const dashboardStatsLoading = ref(false)
+/** @type {import('vue').Ref<string>} YYYY-MM-DD，与营业概览四张卡片锚定业务日一致 */
+const summaryAnchorDate = ref('')
+/** @type {import('vue').Ref<Record<string, unknown> | null>} */
+const summaryMeta = ref(null)
+
+const summaryIsLiveToday = computed(() => {
+  const m = summaryMeta.value
+  if (!m) return true
+  return String(m.business_anchor_date || '') === String(m.shanghai_today || '')
+})
 
 async function fetchDashboardSummary() {
   if (!adminAccessToken.value) return
   dashboardStatsLoading.value = true
   try {
-    const d = await apiJson('/api/admin/dashboard-summary', {}, { auth: true })
+    const q = summaryAnchorDate.value.trim()
+    const qs = q ? `?business_date=${encodeURIComponent(q)}` : ''
+    const d = await apiJson(`/api/admin/dashboard-summary${qs}`, {}, { auth: true })
+    summaryMeta.value = d
+    if (d && typeof d.business_anchor_date === 'string') {
+      summaryAnchorDate.value = d.business_anchor_date
+    }
     const tl = Number(d?.today_leave_members) || 0
     const tp = Number(d?.today_meals_to_prepare) || 0
     const nl = Number(d?.tomorrow_leave_members) || 0
@@ -26,7 +42,7 @@ async function fetchDashboardSummary() {
       {
         label: '今日请假会员',
         value: tl,
-        unit: '个',
+        unit: '人',
         icon: UserMinus,
         bg: '#ffe4e6',
         color: '#e11d48',
@@ -35,7 +51,7 @@ async function fetchDashboardSummary() {
       {
         label: '今日需准备餐品',
         value: tp,
-        unit: '个',
+        unit: '份',
         icon: Utensils,
         bg: '#d1fae5',
         color: '#059669',
@@ -44,7 +60,7 @@ async function fetchDashboardSummary() {
       {
         label: '明日请假会员',
         value: nl,
-        unit: '个',
+        unit: '人',
         icon: UserMinus,
         bg: '#ffedd5',
         color: '#ea580c',
@@ -53,7 +69,7 @@ async function fetchDashboardSummary() {
       {
         label: '明日需准备餐品',
         value: np,
-        unit: '个',
+        unit: '份',
         icon: Utensils,
         bg: '#e0f2fe',
         color: '#0284c7',
@@ -68,6 +84,7 @@ async function fetchDashboardSummary() {
       return
     }
     dashboardStats.value = []
+    summaryMeta.value = null
     showToast(e instanceof Error ? e.message : '加载营业概览失败', 'error')
   } finally {
     dashboardStatsLoading.value = false
@@ -93,14 +110,20 @@ const {
 } = useDeliveryRegionMapOverview()
 
 function onBizStatClick(mapFilter) {
+  if (!summaryIsLiveToday.value) return
   if (!mapFilter) return
   toggleMapFilter(mapFilter)
 }
 
 function onBizStatKeydown(e, mapFilter) {
+  if (!summaryIsLiveToday.value) return
   if (e.key !== 'Enter' && e.key !== ' ') return
   e.preventDefault()
   onBizStatClick(mapFilter)
+}
+
+function onSummaryDateChange() {
+  void fetchDashboardSummary()
 }
 
 const showDeliveryMetrics = computed(() => {
@@ -119,6 +142,11 @@ const regionRows = computed(() =>
 
 const unassignedMemberCount = computed(() => membersCountByArea.value[UNASSIGNED_AREA_LABEL] || 0)
 
+function refreshPanel() {
+  void load()
+  void fetchDashboardSummary()
+}
+
 onMounted(() => {
   void load()
   void fetchDashboardSummary()
@@ -133,15 +161,28 @@ onMounted(() => {
         <div>
           <h3 class="dro-h">配送区域总览</h3>
           <p class="dro-sub">
-            下方四张卡片可点击筛选地图标点（再点一次取消）；默认不显示「暂停配送」会员坐标；玫红点为今日请假、橙点为仅明日请假，绿/黄仍为今日是否已送达
+            下方四张卡片可点击筛选地图标点（再点一次取消）；默认不显示「暂停配送」会员坐标；玫红点为今日请假、橙点为仅明日请假，绿/黄仍为今日是否已送达。
+            <template v-if="!summaryIsLiveToday">
+              当前为历史锚定时，卡片不与地图联动；地图送达状态仍为服务器「今日」。
+            </template>
           </p>
         </div>
       </div>
       <div class="dro-actions">
-        <button type="button" class="dro-btn-ghost" :disabled="loading" @click="load()">
+        <button type="button" class="dro-btn-ghost" :disabled="loading" @click="refreshPanel">
           <RefreshCw :size="16" :class="{ 'dro-spin': loading }" />
           刷新
         </button>
+        <label class="dro-date-wrap">
+          <span class="dro-date-lbl">营业概览锚定日</span>
+          <input
+            v-model="summaryAnchorDate"
+            type="date"
+            class="dro-date-input"
+            :disabled="dashboardStatsLoading"
+            @change="onSummaryDateChange"
+          />
+        </label>
         <button type="button" class="dro-btn-link" @click="router.push({ name: 'store-config' })">
           门店配置 <ChevronRight :size="14" />
         </button>
@@ -150,6 +191,14 @@ onMounted(() => {
         </button>
       </div>
     </header>
+
+    <p v-if="summaryMeta?.from_snapshot" class="dro-snapshot-hint">
+      已显示归档数据（与智能配送大表口径对齐的首读留存）。
+      <template v-if="summaryMeta.snapshot_recorded_at">
+        归档时间 {{ summaryMeta.snapshot_recorded_at }}。
+      </template>
+      管理员可通过 API 参数 force_recompute 按当前库重算并覆盖。
+    </p>
 
     <p v-if="dashboardStatsLoading" class="dro-loading">正在加载营业概览…</p>
     <p v-else-if="!dashboardStats.length" class="dro-loading">暂无营业概览数据，配送地图仍可查看。</p>
@@ -164,12 +213,18 @@ onMounted(() => {
         <div
           v-for="(s, i) in dashboardStats"
           :key="'biz-' + i"
-          class="dro-stat dro-stat--biz dro-stat--clickable"
-          :class="{ 'dro-stat--filter-on': mapFilterKey === s.mapFilter }"
-          role="button"
-          tabindex="0"
-          :aria-pressed="mapFilterKey === s.mapFilter ? 'true' : 'false'"
-          :aria-label="(s.label || '') + '，点击筛选地图'"
+          class="dro-stat dro-stat--biz"
+          :class="{
+            'dro-stat--clickable': summaryIsLiveToday,
+            'dro-stat--filter-on': summaryIsLiveToday && mapFilterKey === s.mapFilter,
+            'dro-stat--muted': !summaryIsLiveToday,
+          }"
+          :role="summaryIsLiveToday ? 'button' : undefined"
+          :tabindex="summaryIsLiveToday ? 0 : -1"
+          :aria-pressed="
+            summaryIsLiveToday && mapFilterKey === s.mapFilter ? 'true' : 'false'
+          "
+          :aria-label="(s.label || '') + (summaryIsLiveToday ? '，点击筛选地图' : '')"
           @click="onBizStatClick(s.mapFilter)"
           @keydown="onBizStatKeydown($event, s.mapFilter)"
         >
@@ -331,6 +386,34 @@ onMounted(() => {
 .dro-btn-link:hover {
   background: #ecfdf5;
 }
+.dro-date-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}
+.dro-date-lbl {
+  white-space: nowrap;
+  font-weight: 600;
+}
+.dro-date-input {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  font-size: 13px;
+  font-family: inherit;
+}
+.dro-snapshot-hint {
+  font-size: 13px;
+  color: #0369a1;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0 0 1rem;
+  line-height: 1.45;
+}
 .dro-spin {
   animation: dro-spin 0.85s linear infinite;
 }
@@ -416,6 +499,10 @@ onMounted(() => {
   border-color: #0e5a44;
   box-shadow: 0 0 0 1px #0e5a44;
   background: #f0fdf4;
+}
+.dro-stat--biz.dro-stat--muted {
+  cursor: default;
+  opacity: 0.94;
 }
 .dro-stat-val {
   display: block;

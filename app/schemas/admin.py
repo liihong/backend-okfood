@@ -334,12 +334,18 @@ class AdminMemberPatchIn(BaseModel):
 
 
 class DashboardMealSummaryOut(BaseModel):
-    """营业概览：与配送清单同一规则（激活且有余额；请假含区间与「仅明天请假」）。"""
+    """营业概览：备餐份数与智能配送大表一致；过去业务日可读快照（首读落库后不变）。"""
 
+    shanghai_today: date = Field(..., description="服务端当前上海日历日（区分历史锚日）")
+    business_anchor_date: date = Field(..., description="本响应中「今日/明日」所锚定的业务日(上海)，「明日」为其日历次日")
     today_leave_members: int = Field(..., description="今日请假会员数")
-    today_meals_to_prepare: int = Field(..., description="今日需准备餐品份数")
+    today_meals_to_prepare: int = Field(..., description="今日需准备餐品份数（与大表分组合计一致）")
     tomorrow_leave_members: int = Field(..., description="明日请假会员数")
     tomorrow_meals_to_prepare: int = Field(..., description="明日需准备餐品份数")
+    from_snapshot: bool = Field(False, description="过去日：是否直接读取 admin_dashboard_biz_day_snapshots")
+    snapshot_recorded_at: datetime | None = Field(
+        None, description="归档写入时间；当日实时计算时通常为空（过去日首算写入后同次响应亦可为空）"
+    )
 
 
 class FinanceReceivedBucketOut(BaseModel):

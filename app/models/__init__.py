@@ -1,3 +1,4 @@
+from app.models.admin_dashboard_biz_day_snapshot import AdminDashboardBizDaySnapshot
 from app.models.admin_user import AdminUser
 from app.models.app_settings import AppSettings
 from app.models.balance_log import BalanceLog
@@ -16,6 +17,7 @@ from app.models.sf_same_city_callback import SfSameCityCallback
 from app.models.sf_same_city_push import SfSameCityPush
 
 __all__ = [
+    "AdminDashboardBizDaySnapshot",
     "AdminUser",
     "AppSettings",
     "BalanceLog",

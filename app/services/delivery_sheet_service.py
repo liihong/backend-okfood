@@ -131,6 +131,14 @@ def _member_ids_delivered_on_date(db: Session, delivery_date: date, member_ids: 
     return {int(x) for x in rows}
 
 
+def total_meal_units_for_delivery_sheet(db: Session, *, delivery_date: date) -> int:
+    """与 ``build_delivery_sheet`` 各分组 ``meal_total`` 之和一致（到家+自提，含已送后不再应送仍并入大表者）。"""
+    if not is_subscription_delivery_day(delivery_date):
+        return 0
+    sheet = build_delivery_sheet(db, delivery_date=delivery_date)
+    return int(sum(g.meal_total for g in sheet.groups))
+
+
 def build_delivery_sheet(
     db: Session,
     *,

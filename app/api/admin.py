@@ -75,6 +75,7 @@ from app.services.member_service import (
 )
 from app.services.member_card_order_service import (
     create_card_order,
+    delete_card_order,
     list_card_orders_paged,
     update_card_order,
 )
@@ -96,10 +97,25 @@ def login(request: Request, body: AdminLoginIn, db: SessionDep):
 
 
 @router.get("/dashboard-summary")
-def dashboard_summary(db: SessionDep, admin_username: str = Depends(admin_subject)):
-    """今日/明日请假会员数与需准备餐品数（与配送任务同一口径；周日与法定节假日为 0）。"""
+def dashboard_summary(
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+    business_date: Annotated[
+        date | None,
+        Query(description="业务锚日(上海)，默认当日；早于今日时优先读归档快照"),
+    ] = None,
+    force_recompute: Annotated[
+        bool,
+        Query(description="仅过去锚日：忽略快照按当前库重算并覆盖归档"),
+    ] = False,
+):
+    """今日/明日请假与备餐：备餐份数与智能配送大表一致；过去日可读不可变归档。"""
     _ = admin_username
-    summary = dashboard_meal_summary(db)
+    summary = dashboard_meal_summary(
+        db,
+        business_anchor_date=business_date,
+        force_recompute=force_recompute,
+    )
     return success(data=dump_model(summary), msg="获取成功")
 
 
@@ -439,6 +455,17 @@ def card_orders_patch(
 ):
     out = update_card_order(db, order_id, body, operator=admin_username)
     return success(data=dump_model(out), msg="工单已更新")
+
+
+@router.delete("/card-orders/{order_id}")
+def card_orders_delete(
+    order_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    _ = admin_username
+    delete_card_order(db, order_id)
+    return success(data=None, msg="工单已删除")
 
 
 @router.post("/member/profile")

@@ -384,6 +384,41 @@ function openEditModal(row) {
   showEditModal.value = true
 }
 
+function canDeleteCardOrder(row) {
+  return row && !row.applied_to_member && row.pay_status !== '已缴'
+}
+
+const deletingId = ref(0)
+
+async function deleteCardOrder(row) {
+  if (!canDeleteCardOrder(row)) return
+  const phone = (row.member_phone || '').trim()
+  const label = `#${row.id} ${phone ? phone : '会员'}`
+  if (
+    !confirm(
+      `确定删除该开卡工单？\n${label}\n\n仅可删除未缴且未入账同步的工单，删除后不可恢复。`,
+    )
+  ) {
+    return
+  }
+  deletingId.value = row.id
+  try {
+    await apiJson(`/api/admin/card-orders/${row.id}`, { method: 'DELETE' }, { auth: true })
+    showToast('工单已删除')
+    await fetchList()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '删除失败', 'error')
+  } finally {
+    deletingId.value = 0
+  }
+}
+
 async function submitEdit() {
   if (!editForm.value.id) return
   const deferEdit = editForm.value.delivery_start_mode === 'defer'
@@ -539,9 +574,20 @@ class="member-pill co-sync-pill"
             }}</span>
           </template>
         </el-table-column>
-       <el-table-column label="操作" align="right" width="76" fixed="right" class-name="td-co-actions">
+       <el-table-column label="操作" align="right" width="128" fixed="right" class-name="td-co-actions">
           <template #default="{ row }">
-            <button type="button" class="btn-sm" @click="openEditModal(row)">更新</button>
+            <span class="co-row-actions">
+              <button type="button" class="btn-sm" @click="openEditModal(row)">更新</button>
+              <button
+                v-if="canDeleteCardOrder(row)"
+                type="button"
+                class="btn-sm danger"
+                :disabled="deletingId === row.id"
+                @click="deleteCardOrder(row)"
+              >
+                {{ deletingId === row.id ? '…' : '删除' }}
+              </button>
+            </span>
           </template>
         </el-table-column>
       </AdminTable>
@@ -1033,6 +1079,13 @@ class="member-pill co-sync-pill"
 }
 .modal-hint--warn {
   color: #b45309;
+}
+.card-orders-page .co-row-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
 }
 /* Element Plus 日期选择：与弹窗内原生输入框的圆角、背景一致 */
 .form-group :deep(.card-order-date-picker) {

@@ -320,3 +320,13 @@ CREATE TABLE IF NOT EXISTS `single_meal_orders` (
     ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员单次点餐订单';
 
+CREATE TABLE IF NOT EXISTS `admin_dashboard_biz_day_snapshots` (
+  `business_anchor_date` DATE NOT NULL COMMENT '统计锚定业务日(上海)：「今日」指该日；「明日」指日历次日',
+  `today_leave_members` INT NOT NULL,
+  `today_meals_to_prepare` INT NOT NULL COMMENT '与当日配送大表分组 meal_total 合计一致',
+  `tomorrow_leave_members` INT NOT NULL,
+  `tomorrow_meals_to_prepare` INT NOT NULL,
+  `recorded_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '首次落库或管理员强制重算覆盖时间',
+  PRIMARY KEY (`business_anchor_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='营业概览与配送大表对齐的按日归档（过去日首读落库后默认不变）';
+

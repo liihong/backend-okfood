@@ -3,13 +3,14 @@ from decimal import Decimal
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import and_, case, exists, func, literal, not_, or_, select, true
+from sqlalchemy import and_, case, exists, func, literal, or_, select, true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from app.core.delivery_calendar import is_subscription_delivery_day
 from app.core.security import verify_password
 from app.core.timeutil import today_shanghai, tomorrow_shanghai
+from app.models.admin_dashboard_biz_day_snapshot import AdminDashboardBizDaySnapshot
 from app.models.admin_user import AdminUser
 from app.models.balance_log import BalanceLog
 from app.models.delivery_log import DeliveryLog
@@ -37,6 +38,7 @@ from app.schemas.admin import (
     WeeklySlotAssignIn,
     MenuDayTotalStockIn,
 )
+from app.services.delivery_sheet_service import total_meal_units_for_delivery_sheet
 from app.services.member_address_service import (
     default_address_pick_subquery,
     delivery_region_name_map,
@@ -596,58 +598,116 @@ def update_settings(db: Session, body: SettingsIn) -> None:
     db.commit()
 
 
-def dashboard_meal_summary(db: Session) -> DashboardMealSummaryOut:
-    """
-    今日/明日请假人数与备餐份数。
-    口径与 `list_today_tasks` 一致：is_active 且 balance>=当日应付份数 且已达起送日；缺席含区间请假与「仅明天请假」（仅对配送日为明天生效）。
-    周日与法定节假日无订阅备餐，对应日期的请假人数与份数均记 0。
-    """
-    anchor_today = today_shanghai()
+def count_leave_members_for_delivery_day(db: Session, d: date) -> int:
+    if not is_subscription_delivery_day(d):
+        return 0
     tomorrow_as_date = tomorrow_shanghai()
     units_sql = sql_effective_daily_meal_units_column()
+    in_leave_range = and_(
+        Member.leave_range_start.is_not(None),
+        Member.leave_range_end.is_not(None),
+        Member.leave_range_start <= d,
+        Member.leave_range_end >= d,
+    )
+    target_hit = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date == d,
+    )
+    legacy_tomorrow = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date.is_(None),
+        literal(d) == literal(tomorrow_as_date),
+    )
+    tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
+    absent = or_(in_leave_range, tomorrow_leave_hit)
+    started = or_(
+        Member.delivery_start_date.is_(None),
+        Member.delivery_start_date <= d,
+    )
+    base = and_(Member.is_active.is_(True), Member.balance >= units_sql, started)
+    if d.weekday() == 5:
+        base = and_(base, Member.skip_subscription_saturday.is_(False))
+    active_only = Member.deleted_at.is_(None)
+    return int(
+        db.scalar(select(func.count()).select_from(Member).where(active_only, base, absent)) or 0
+    )
 
-    def counts_for_delivery_day(d: date) -> tuple[int, int]:
-        if not is_subscription_delivery_day(d):
-            return 0, 0
-        in_leave_range = and_(
-            Member.leave_range_start.is_not(None),
-            Member.leave_range_end.is_not(None),
-            Member.leave_range_start <= d,
-            Member.leave_range_end >= d,
-        )
-        target_hit = and_(
-            Member.is_leaved_tomorrow.is_(True),
-            Member.tomorrow_leave_target_date == d,
-        )
-        legacy_tomorrow = and_(
-            Member.is_leaved_tomorrow.is_(True),
-            Member.tomorrow_leave_target_date.is_(None),
-            literal(d) == literal(tomorrow_as_date),
-        )
-        tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
-        absent = or_(in_leave_range, tomorrow_leave_hit)
-        started = or_(
-            Member.delivery_start_date.is_(None),
-            Member.delivery_start_date <= d,
-        )
-        base = and_(Member.is_active.is_(True), Member.balance >= units_sql, started)
-        if d.weekday() == 5:
-            base = and_(base, Member.skip_subscription_saturday.is_(False))
-        active_only = Member.deleted_at.is_(None)
-        leave_n = int(db.scalar(select(func.count()).select_from(Member).where(active_only, base, absent)) or 0)
-        prep_n = int(
-            db.scalar(
-                select(func.coalesce(func.sum(units_sql), 0)).select_from(Member).where(active_only, base, not_(absent))
+
+def dashboard_meal_summary(
+    db: Session,
+    *,
+    business_anchor_date: date | None = None,
+    force_recompute: bool = False,
+) -> DashboardMealSummaryOut:
+    """
+    今日/明日请假人数与备餐份数。
+    备餐份数与 ``build_delivery_sheet``（智能配送大表）各分组合计一致；周日与法定节假日为 0。
+    锚定日早于当前上海日时：优先读 ``admin_dashboard_biz_day_snapshots``，无则按当前库计算并落库（之后不变），
+    ``force_recompute=true`` 时管理员可强制按当前库重算并覆盖归档。
+    """
+    anchor = business_anchor_date or today_shanghai()
+    day_after = date.fromordinal(anchor.toordinal() + 1)
+    cal_today = today_shanghai()
+
+    if anchor < cal_today and not force_recompute:
+        row = db.get(AdminDashboardBizDaySnapshot, anchor)
+        if row is not None:
+            return DashboardMealSummaryOut(
+                shanghai_today=cal_today,
+                business_anchor_date=anchor,
+                today_leave_members=int(row.today_leave_members),
+                today_meals_to_prepare=int(row.today_meals_to_prepare),
+                tomorrow_leave_members=int(row.tomorrow_leave_members),
+                tomorrow_meals_to_prepare=int(row.tomorrow_meals_to_prepare),
+                from_snapshot=True,
+                snapshot_recorded_at=row.recorded_at,
             )
-            or 0
-        )
-        return leave_n, prep_n
 
-    tl, tp = counts_for_delivery_day(anchor_today)
-    nl, np = counts_for_delivery_day(tomorrow_as_date)
-    return DashboardMealSummaryOut(
+    tl = count_leave_members_for_delivery_day(db, anchor)
+    tp = total_meal_units_for_delivery_sheet(db, delivery_date=anchor)
+    nl = count_leave_members_for_delivery_day(db, day_after)
+    np = total_meal_units_for_delivery_sheet(db, delivery_date=day_after)
+
+    out = DashboardMealSummaryOut(
+        shanghai_today=cal_today,
+        business_anchor_date=anchor,
         today_leave_members=tl,
         today_meals_to_prepare=tp,
         tomorrow_leave_members=nl,
         tomorrow_meals_to_prepare=np,
+        from_snapshot=False,
+        snapshot_recorded_at=None,
     )
+
+    if anchor < cal_today:
+        now = datetime.utcnow()
+        row = db.get(AdminDashboardBizDaySnapshot, anchor)
+        if row is None:
+            row = AdminDashboardBizDaySnapshot(
+                business_anchor_date=anchor,
+                today_leave_members=tl,
+                today_meals_to_prepare=tp,
+                tomorrow_leave_members=nl,
+                tomorrow_meals_to_prepare=np,
+                recorded_at=now,
+            )
+            db.add(row)
+        else:
+            row.today_leave_members = tl
+            row.today_meals_to_prepare = tp
+            row.tomorrow_leave_members = nl
+            row.tomorrow_meals_to_prepare = np
+            row.recorded_at = now
+        db.commit()
+        out = DashboardMealSummaryOut(
+            shanghai_today=out.shanghai_today,
+            business_anchor_date=out.business_anchor_date,
+            today_leave_members=out.today_leave_members,
+            today_meals_to_prepare=out.today_meals_to_prepare,
+            tomorrow_leave_members=out.tomorrow_leave_members,
+            tomorrow_meals_to_prepare=out.tomorrow_meals_to_prepare,
+            from_snapshot=False,
+            snapshot_recorded_at=row.recorded_at,
+        )
+
+    return out
