@@ -39,14 +39,14 @@
           </view>
           <view class="form-field">
             <view class="field-label-row">
-              <text class="field-title">收货位置主文案</text>
+              <text class="field-title">收餐地址</text>
               <text class="field-required">*</text>
             </view>
             <textarea
               v-model="form.mapLocationText"
               maxlength="500"
               class="form-input-p form-textarea"
-              placeholder="请先「地图选点」或手填小区、道路、建筑物等（map_location_text）"
+              placeholder="请先在「地图选点」"
             />
             <view class="map-pick-slot">
               <view class="map-pick-actions">
@@ -54,19 +54,17 @@
                 <text v-if="coords" class="coords-bound-hint">已绑定地图坐标</text>
               </view>
             </view>
-            <text class="field-hint">未选点时，服务端将按主文案与门牌尝试地理编码（精度可能较低）</text>
           </view>
           <view class="form-field">
             <view class="field-label-row">
               <text class="field-title">门牌号/单元楼层</text>
-              <text v-if="coords" class="field-required">*</text>
-              <text v-else class="field-optional-hint">（选填）</text>
+              <text class="field-required">*</text>
             </view>
             <input
               v-model="form.doorDetail"
               maxlength="500"
               class="form-input-p"
-              placeholder="例：C座 2707（door_detail）"
+placeholder="例：C座 2707"
             />
           </view>
           <view class="form-field">
@@ -76,7 +74,7 @@
             <input
               v-model="form.remarks"
               class="form-input-p form-remarks"
-              placeholder="如果您有忌口：请输入/不吃葱/不吃香菜"
+placeholder="备注"
             />
           </view>
         </view>

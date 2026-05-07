@@ -308,8 +308,15 @@ def persist_sf_callback_and_sync_push(
     """写入回调日志；验签通过且命中推单记录时刷新最近顺丰字段。"""
     shop_order_id = None
     sf_order_id = None
+    parsed_callback_order_status: int | None = None
     if payload:
         shop_order_id, sf_order_id = _extract_ids(payload)
+        ost_raw = payload.get("order_status")
+        if ost_raw is not None:
+            try:
+                parsed_callback_order_status = int(ost_raw)
+            except (TypeError, ValueError):
+                parsed_callback_order_status = None
 
     truncated = raw_body[:65000] if len(raw_body) > 65000 else raw_body
     row = SfSameCityCallback(
@@ -334,12 +341,8 @@ def persist_sf_callback_and_sync_push(
             matched_push = pus
             pus.last_callback_at = datetime.utcnow()
             pus.last_callback_kind = route_kind[:64]
-            ost = payload.get("order_status")
-            if ost is not None:
-                try:
-                    pus.sf_callback_order_status = int(ost)
-                except (TypeError, ValueError):
-                    pass
+            if parsed_callback_order_status is not None:
+                pus.sf_callback_order_status = parsed_callback_order_status
 
     if sign_ok and route_kind == "order_complete" and matched_push is not None:
         try:
@@ -349,6 +352,23 @@ def persist_sf_callback_and_sync_push(
         except Exception:
             logger.exception(
                 "顺丰订单完成自动履约失败 shop_order_id=%s stop_id=%s",
+                getattr(matched_push, "shop_order_id", None),
+                getattr(matched_push, "stop_id", None),
+            )
+
+    if (
+        sign_ok
+        and route_kind == "delivery_status"
+        and matched_push is not None
+        and parsed_callback_order_status == 17
+    ):
+        try:
+            from app.services.sf_order_fulfillment_service import apply_sf_delivery_status_tuotou_if_today
+
+            apply_sf_delivery_status_tuotou_if_today(db, matched_push)
+        except Exception:
+            logger.exception(
+                "顺丰配送状态(妥投)自动履约失败 shop_order_id=%s stop_id=%s",
                 getattr(matched_push, "shop_order_id", None),
                 getattr(matched_push, "stop_id", None),
             )

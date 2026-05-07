@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.timeutil import today_shanghai
 from app.models.single_meal_order import SingleMealOrder
 from app.models.sf_same_city_push import SfSameCityPush
 from app.services.admin_delivery_fulfillment_service import subscription_fulfilled_try_sf_home_no_commit
@@ -17,6 +18,9 @@ from app.services.sf_same_city_service import aggs_for_delivery_date, load_agg_f
 from app.services.single_meal_order_service import mark_single_meal_delivered_sf_completion_no_commit
 
 logger = logging.getLogger(__name__)
+
+# 顺丰开放平台配送推送 order_status：17=配送员妥投完单（与后台监控文案一致）
+SF_ORDER_STATUS_DELIVERED_TUOTOU = 17
 
 
 def _iso_dt(x: Any) -> str | None:
@@ -129,13 +133,9 @@ def _sf_push_monitor_row_dict(
     }
 
 
-def apply_sf_order_complete_fulfillment(db: Session, pus: SfSameCityPush) -> None:
+def _apply_sf_same_city_stop_fulfillment(db: Session, pus: SfSameCityPush, *, operator_tag: str) -> None:
     """
-    ``route_kind=order_complete`` 且验签通过、已匹配推单记录时调用（由回调落库前写入，同一事务 commit）。
-
-    - 仅处理 ``error_code == 0`` 的成功创单记录。
-    - 订阅：按停靠点聚合内待送达会员逐条执行与 admin 大表「标记送达（到家）」相同扣次。
-    - 单次点餐：标 ``fulfillment_status=delivered``（已付餐费，不扣次数）。
+    同一停靠点的订阅扣次 + 单点餐履约标记；已由各类顺丰回调按需调用。
     """
     if int(pus.error_code or -1) != 0:
         return
@@ -151,7 +151,9 @@ def apply_sf_order_complete_fulfillment(db: Session, pus: SfSameCityPush) -> Non
             continue
         mid = int(sl["member_id"])
         try:
-            subscription_fulfilled_try_sf_home_no_commit(db, member_id=mid, delivery_date=pus.delivery_date)
+            subscription_fulfilled_try_sf_home_no_commit(
+                db, member_id=mid, delivery_date=pus.delivery_date, operator_tag=operator_tag
+            )
         except HTTPException as e:
             logger.info(
                 "顺丰自动履约跳过订阅 member_id=%s date=%s detail=%s",
@@ -162,6 +164,29 @@ def apply_sf_order_complete_fulfillment(db: Session, pus: SfSameCityPush) -> Non
     for sng in agg.singles:
         oid = int(sng["id"])
         mark_single_meal_delivered_sf_completion_no_commit(db, oid)
+
+
+def apply_sf_order_complete_fulfillment(db: Session, pus: SfSameCityPush) -> None:
+    """
+    ``route_kind=order_complete`` 且验签通过、已匹配推单记录时调用（由回调落库前写入，同一事务 commit）。
+
+    - 仅处理 ``error_code == 0`` 的成功创单记录。
+    - 订阅：按停靠点聚合内待送达会员逐条执行与 admin 大表「标记送达（到家）」相同扣次。
+    - 单次点餐：标 ``fulfillment_status=delivered``（已付餐费，不扣次数）。
+    """
+    _apply_sf_same_city_stop_fulfillment(db, pus, operator_tag="sf:order_complete")
+
+
+def apply_sf_delivery_status_tuotou_if_today(db: Session, pus: SfSameCityPush) -> None:
+    """
+    「配送状态变更」回调中单次报文 ``order_status=17``（妥投完单）时调用。
+
+    仅当该推单行上的业务配送日等于上海「今天」时对停靠点执行扣次 / 单次标履约，
+    避免历史日运单或非当日监控回调误扣次。
+    """
+    if pus.delivery_date is None or pus.delivery_date != today_shanghai():
+        return
+    _apply_sf_same_city_stop_fulfillment(db, pus, operator_tag="sf:delivery_status")
 
 
 def list_sf_same_city_pushes_for_monitor(

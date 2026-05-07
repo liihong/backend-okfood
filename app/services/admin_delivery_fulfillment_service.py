@@ -135,18 +135,20 @@ def subscription_fulfilled_try_sf_home_no_commit(
     *,
     member_id: int,
     delivery_date: date,
+    operator_tag: str = "sf:order_complete",
 ) -> None:
     """
-    顺丰「订单完成」自动履约（到家）：与智能配送大表标记送达口径一致；
-    operator 记为 ``sf:order_complete``；不产生独立 commit。
+    顺丰自动履约（到家）：与智能配送大表标记送达口径一致；
+    operator 默认为 ``sf:order_complete``（订单完成）；配送状态推送妥投为 ``sf:delivery_status``；不产生独立 commit。
     """
     d = delivery_date
     ok_ids = _eligible_ids_home(db, d)
+    tag = (operator_tag or "sf:order_complete").strip()[:50] or "sf:order_complete"
     _subscription_fulfilled_apply(
         db,
         member_id=member_id,
         delivery_date=d,
-        operator_tag="sf:order_complete",
+        operator_tag=tag,
         kind="home",
         ok_ids=ok_ids,
     )
