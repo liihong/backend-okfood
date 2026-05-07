@@ -7,6 +7,8 @@ from app.models.delivery_log import DeliveryLog
 from app.models.enums import DeliveryStatus
 from app.schemas.user import DeliveryDeductionOut
 
+_ADMIN_MEMBER_DELIVERED_DATES_LIMIT = 2000
+
 
 def list_member_delivery_deductions(
     db: Session,
@@ -24,3 +26,20 @@ def list_member_delivery_deductions(
     offset = (page - 1) * page_size
     rows = db.scalars(base.offset(offset).limit(page_size)).all()
     return [DeliveryDeductionOut(delivery_date=r.delivery_date) for r in rows], total
+
+
+def list_member_delivered_dates_admin(
+    db: Session,
+    member_id: int,
+) -> tuple[list[DeliveryDeductionOut], int, bool]:
+    """管理端：某会员已确认送达的去重配送业务日（新在前）。`truncated` 表示超过单次返回上限。"""
+    cap = _ADMIN_MEMBER_DELIVERED_DATES_LIMIT
+    mid = int(member_id)
+    filt = (DeliveryLog.member_id == mid) & (DeliveryLog.status == DeliveryStatus.DELIVERED.value)
+    subq = select(DeliveryLog.delivery_date).where(filt).distinct().subquery()
+    total = int(db.scalar(select(func.count()).select_from(subq)) or 0)
+    dates = db.scalars(
+        select(DeliveryLog.delivery_date).where(filt).distinct().order_by(DeliveryLog.delivery_date.desc()).limit(cap)
+    ).all()
+    truncated = total > len(dates)
+    return [DeliveryDeductionOut(delivery_date=d) for d in dates], total, truncated

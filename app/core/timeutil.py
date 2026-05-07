@@ -1,8 +1,9 @@
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 # 业务日与时区：与定时任务、请假截止、菜单「明天」保持一致
 TZ_SHANGHAI = ZoneInfo("Asia/Shanghai")
+TZ_UTC = ZoneInfo("UTC")
 
 
 def now_shanghai() -> datetime:
@@ -26,3 +27,27 @@ def min_member_delivery_start_shanghai(now: datetime | None = None) -> date:
     if n.time() >= time(10, 0, 0):
         return t.fromordinal(t.toordinal() + 1)
     return t
+
+
+def utc_naive_range_for_shanghai_calendar_day(d: date) -> tuple[datetime, datetime]:
+    """上海自然日 [d 00:00, 次日 00:00) 对应库内 naive UTC 时间戳区间（左闭右开）。
+
+    与模型中 DateTime 默认 utcnow 写入一致，便于按「上海当天」筛选。
+    """
+    start_local = datetime.combine(d, time.min, tzinfo=TZ_SHANGHAI)
+    end_local = start_local + timedelta(days=1)
+    start_utc = start_local.astimezone(TZ_UTC).replace(tzinfo=None)
+    end_utc = end_local.astimezone(TZ_UTC).replace(tzinfo=None)
+    return start_utc, end_utc
+
+
+def utc_naive_range_for_shanghai_calendar_month(year: int, month: int) -> tuple[datetime, datetime]:
+    """上海自然月 [当月1日 00:00, 次月1日 00:00) 的 naive UTC 区间（左闭右开）。"""
+    first = date(year, month, 1)
+    if month == 12:
+        next_first = date(year + 1, 1, 1)
+    else:
+        next_first = date(year, month + 1, 1)
+    start_utc, _ = utc_naive_range_for_shanghai_calendar_day(first)
+    _, end_utc = utc_naive_range_for_shanghai_calendar_day(next_first)
+    return start_utc, end_utc

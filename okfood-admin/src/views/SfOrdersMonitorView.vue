@@ -153,7 +153,7 @@ const orderStatusOptions = computed(() => {
     .sort((a, b) => a - b)
   for (const n of nums) {
     const zh = SF_ORDER_STATUS_ZH[n]
-    opts.push({ value: String(n), label: `${zh}（${n}）` })
+    opts.push({ value: String(n), label: zh })
   }
   return opts
 })
@@ -173,10 +173,10 @@ const SF_CALLBACK_KIND_ZH = {
 function sfOrderStatusLabel(code) {
   if (code === undefined || code === null || code === '') return '—'
   const n = Number(code)
-  if (Number.isNaN(n)) return String(code)
+  if (Number.isNaN(n)) return '未识别'
   const zh = SF_ORDER_STATUS_ZH[n]
-  if (zh) return `${zh}（${n}）`
-  return `未识别（${n}）`
+  if (zh) return zh
+  return '未识别'
 }
 
 function sfCallbackKindLabel(kind) {

@@ -66,6 +66,7 @@ from app.services.sf_same_city_service import cancel_sf_same_city_push, preview_
 from app.services.store_config_service import get_store_config, update_store_config
 from app.services.delivery_sheet_service import build_delivery_sheet
 from app.services.admin_delivery_fulfillment_service import admin_mark_subscription_fulfilled
+from app.services.member_delivery_deduction_service import list_member_delivered_dates_admin
 from app.services.member_address_service import list_addresses, update_address
 from app.services.member_service import (
     admin_member_leave,
@@ -77,6 +78,7 @@ from app.services.member_card_order_service import (
     list_card_orders_paged,
     update_card_order,
 )
+from app.services.finance_received_service import finance_received_summary
 from app.utils.response import dump_model, page_response, success
 
 router = APIRouter(prefix="/admin", tags=["管理端"])
@@ -98,6 +100,14 @@ def dashboard_summary(db: SessionDep, admin_username: str = Depends(admin_subjec
     """今日/明日请假会员数与需准备餐品数（与配送任务同一口径；周日与法定节假日为 0）。"""
     _ = admin_username
     summary = dashboard_meal_summary(db)
+    return success(data=dump_model(summary), msg="获取成功")
+
+
+@router.get("/finance/received-summary")
+def finance_received_summary_route(db: SessionDep, admin_username: str = Depends(admin_subject)):
+    """已收账款：累计 / 本月（上海自然月）/ 今日（上海自然日），按 updated_at 落入对应日界。"""
+    _ = admin_username
+    summary = finance_received_summary(db)
     return success(data=dump_model(summary), msg="获取成功")
 
 
@@ -488,6 +498,28 @@ def admin_member_addresses_list(
         raise HTTPException(status_code=404, detail="会员不存在")
     items = list_addresses(db, member_id)
     return success(data=[dump_model(i) for i in items], msg="获取成功")
+
+
+@router.get("/users/{member_id}/delivered-dates")
+def admin_member_delivered_dates(
+    member_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+):
+    """会员档案：该会员订阅套餐已确认送达的配送业务日（去重），用于核对消费 / 履约记录。"""
+    _ = admin_username
+    m = db.get(Member, member_id)
+    if not m or m.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="会员不存在")
+    items, total, truncated = list_member_delivered_dates_admin(db, member_id)
+    return success(
+        data={
+            "items": [dump_model(x) for x in items],
+            "total": total,
+            "truncated": truncated,
+        },
+        msg="获取成功",
+    )
 
 
 @router.patch("/users/{member_id}/addresses/{address_id}")

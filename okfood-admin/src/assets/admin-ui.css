@@ -1211,7 +1211,7 @@
   overflow: hidden;
 }
 .admin-table--members.el-table .members-row-actions {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.25rem;
 }
@@ -1708,6 +1708,27 @@
   grid-template-columns: 1fr 1fr;
   gap: 2rem;
 }
+
+.finance-grid.finance-grid--triple {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.finance-card--note {
+  grid-column: 1 / -1;
+  padding: 1.5rem 2rem;
+  margin-top: 0;
+}
+
+.f-val--panel {
+  font-size: 2rem;
+  font-weight: 900;
+  font-style: italic;
+  color: #0e5a44;
+}
+
+.finance-card.primary .f-val--panel {
+  color: #fff;
+}
 .finance-card {
   padding: 2.5rem;
   border-radius: 3rem;
@@ -1726,6 +1747,10 @@
   right: 1rem;
   opacity: 0.1;
 }
+.finance-card.white .bg-icon--muted {
+  opacity: 0.06;
+  color: #0e5a44;
+}
 .f-label {
   font-size: 12px;
   font-weight: 900;
@@ -1743,6 +1768,23 @@
   font-size: 3rem;
   font-weight: 900;
   font-style: italic;
+}
+.f-sub {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.88;
+  margin: 1rem 0 0;
+  line-height: 1.5;
+}
+.finance-remark {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.55;
+  margin: 0.75rem 0 0;
+}
+.finance-remark .em {
+  color: #0e5a44;
+  font-weight: 800;
 }
 .f-trend {
   font-size: 12px;
@@ -2211,6 +2253,69 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1.5rem;
+}
+
+/* 会员档案 — 消费记录（已送达配送日） */
+.modal-card--delivery-records .modal-body--delivery-records {
+  padding: 1.75rem 2.5rem 2.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.delivery-records-caption {
+  font-size: 12px;
+  opacity: 0.78;
+  margin: 0;
+  line-height: 1.45;
+}
+.delivery-records-summary {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+.delivery-records-truncated {
+  font-weight: 600;
+  color: #b45309;
+  font-size: 12px;
+}
+.delivery-records-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(420px, 50vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: rgba(248, 250, 247, 0.95);
+}
+.delivery-records-list li {
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 14px;
+  font-weight: 600;
+}
+.delivery-records-list li:last-child {
+  border-bottom: none;
+}
+.delivery-records-ymd-muted {
+  font-weight: 500;
+  font-size: 12px;
+  opacity: 0.45;
+  margin-left: 4px;
+}
+.delivery-records-empty {
+  margin: 0;
+  padding: 1rem 0.25rem;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.delivery-records-loading {
+  padding: 1.5rem;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
 }
 
 /* 会员管理 — 修改会员信息弹窗：两列 + 跨列表单项 */

@@ -342,6 +342,39 @@ class DashboardMealSummaryOut(BaseModel):
     tomorrow_meals_to_prepare: int = Field(..., description="明日需准备餐品份数")
 
 
+class FinanceReceivedBucketOut(BaseModel):
+    """已收账款：单业务来源的笔数与金额。"""
+
+    count: int = Field(..., ge=0, description="笔数")
+    amount_yuan: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=14,
+        decimal_places=2,
+        description="实收金额合计（元）；未填金额的工单在笔数中计入，金额按 0",
+    )
+
+
+class FinanceReceivedWindowOut(BaseModel):
+    """某一统计窗口内：开卡工单已缴 + 单次点餐已支付。"""
+
+    total_amount_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2)
+    total_count: int = Field(..., ge=0, description="已收笔数合计")
+    card_orders: FinanceReceivedBucketOut = Field(..., description="开卡工单 pay_status=已缴")
+    single_meal_orders: FinanceReceivedBucketOut = Field(..., description="单次点餐 pay_status=已支付")
+
+
+class FinanceReceivedSummaryOut(BaseModel):
+    """财务中心：累计 / 本月（上海自然月）/ 今日（上海自然日）已收汇总。"""
+
+    timezone_label: str = Field(default="Asia/Shanghai", description="日历与日界口径")
+    shanghai_today: date = Field(..., description="请求时的上海日历日")
+    shanghai_calendar_month: str = Field(..., description="当前上海自然月，YYYY-MM")
+    cumulative: FinanceReceivedWindowOut = Field(..., description="历史全部已标记已收")
+    this_month: FinanceReceivedWindowOut = Field(..., description="本月内（按 updated_at 落入上海月界）")
+    today: FinanceReceivedWindowOut = Field(..., description="今日内（按 updated_at 落入上海日界）")
+
+
 class DeliverySheetMemberOut(BaseModel):
     member_id: int = Field(..., ge=1, description="会员主键，供大表人工标记")
     phone: str

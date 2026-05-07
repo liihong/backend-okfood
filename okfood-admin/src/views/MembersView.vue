@@ -1,6 +1,16 @@
 <script setup>
 import { ref, watch, computed, onMounted, nextTick } from 'vue'
-import { Search, Phone, X, Trash2, MapPin, CalendarOff, Pencil, Download } from 'lucide-vue-next'
+import {
+  Search,
+  Phone,
+  X,
+  Trash2,
+  MapPin,
+  CalendarOff,
+  Pencil,
+  Download,
+  Receipt,
+} from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import {
   apiJson,
@@ -458,6 +468,71 @@ function openMemberAddresses(u) {
   showAddrModal.value = true
 }
 
+/** --- 消费记录：已确认送达的配送业务日 --- */
+const showDeliveryRecordModal = ref(false)
+const deliveryRecordTarget = ref(null)
+const deliveryRecordLoading = ref(false)
+const deliveryRecordDates = ref([])
+const deliveryRecordTotal = ref(0)
+const deliveryRecordTruncated = ref(false)
+
+function formatDeliveryBizYmdLabel(ymd) {
+  const s = typeof ymd === 'string' ? ymd.trim().slice(0, 10) : ''
+  if (s.length !== 10) return ymd != null ? String(ymd) : '—'
+  try {
+    const d = new Date(`${s}T12:00:00+08:00`)
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      weekday: 'short',
+    }).format(d)
+  } catch {
+    return s
+  }
+}
+
+async function openMemberDeliveryRecords(u) {
+  if (!u?.id) return
+  deliveryRecordTarget.value = u
+  deliveryRecordDates.value = []
+  deliveryRecordTotal.value = 0
+  deliveryRecordTruncated.value = false
+  showDeliveryRecordModal.value = true
+  deliveryRecordLoading.value = true
+  try {
+    const data = await apiJson(`/api/admin/users/${Number(u.id)}/delivered-dates`, {}, { auth: true })
+    const items = Array.isArray(data?.items) ? data.items : []
+    deliveryRecordDates.value = items
+      .map((row) => (row && row.delivery_date != null ? String(row.delivery_date).slice(0, 10) : ''))
+      .filter(Boolean)
+    deliveryRecordTotal.value = Number(data?.total) || deliveryRecordDates.value.length
+    deliveryRecordTruncated.value = Boolean(data?.truncated)
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '加载失败', 'error')
+    showDeliveryRecordModal.value = false
+    deliveryRecordTarget.value = null
+  } finally {
+    deliveryRecordLoading.value = false
+  }
+}
+
+watch(showDeliveryRecordModal, (v) => {
+  if (!v) {
+    deliveryRecordTarget.value = null
+    deliveryRecordDates.value = []
+    deliveryRecordTotal.value = 0
+    deliveryRecordTruncated.value = false
+  }
+})
+
 async function onMemberAddressesSaved() {
   await fetchMembers()
 }
@@ -641,9 +716,14 @@ onMounted(async () => {
             {{ u.remarks || '—' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" align="right" min-width="240" fixed="right">
+        <el-table-column label="操作" align="right" min-width="300" fixed="right">
           <template #default="{ row: u }">
             <div class="members-row-actions">
+              <el-button class="btn-members-op" type="success" plain title="套餐已确认送达的业务日（扣次记录）"
+                @click="openMemberDeliveryRecords(u)">
+                <Receipt :size="12" aria-hidden="true" style="margin-right: 5px;" />
+                消费记录
+              </el-button>
               <el-button class="btn-members-op" type="primary" title="地址管理：地图选点，地点与门牌分别保存"
                 @click="openMemberAddresses(u)">
                 <MapPin :size="12" aria-hidden="true" style="margin-right: 5px;" />
@@ -751,6 +831,47 @@ onMounted(async () => {
       :member="addrTargetMember"
       @saved="onMemberAddressesSaved"
     />
+
+    <div
+      v-if="showDeliveryRecordModal"
+      class="modal-overlay"
+      v-esc-close="() => (showDeliveryRecordModal = false)"
+      @click.self="showDeliveryRecordModal = false"
+    >
+      <div class="modal-card modal-card--delivery-records">
+        <div class="modal-header">
+          <div class="header-info">
+            <h3>消费记录</h3>
+            <p>已送达配送日</p>
+          </div>
+          <el-button text circle class="close-btn" @click="showDeliveryRecordModal = false">
+            <X :size="20" />
+          </el-button>
+        </div>
+        <div class="modal-body modal-body--delivery-records">
+          <p v-if="deliveryRecordTarget" class="modal-hint modal-hint--tight">
+            {{ deliveryRecordTarget.name || '—' }} · {{ deliveryRecordTarget.phone || '' }}
+          </p>
+          <p class="modal-hint delivery-records-caption">
+            下列为订阅套餐在骑手确认送达后扣次的业务日（上海），按新到旧排列。
+          </p>
+          <div v-if="deliveryRecordLoading" class="delivery-records-loading">加载中…</div>
+          <template v-else>
+            <p class="delivery-records-summary">
+              共 <strong>{{ deliveryRecordTotal }}</strong> 个配送日
+              <span v-if="deliveryRecordTruncated" class="delivery-records-truncated">（仅显示最近部分，可联系技术导出全量）</span>
+            </p>
+            <ul v-if="deliveryRecordDates.length" class="delivery-records-list">
+              <li v-for="(ymd, idx) in deliveryRecordDates" :key="`${ymd}-${idx}`">
+                {{ formatDeliveryBizYmdLabel(ymd) }}
+                <span class="delivery-records-ymd-muted">（{{ ymd }}）</span>
+              </li>
+            </ul>
+            <p v-else class="delivery-records-empty">暂无记录。未产生「确认送达」或无套餐扣次时为空。</p>
+          </template>
+        </div>
+      </div>
+    </div>
 
   </section>
 </template>

@@ -561,7 +561,7 @@ class="member-pill co-sync-pill"
         v-esc-close="() => (showCreateModal = false)"
         @click.self="showCreateModal = false"
       >
-        <div class="modal-card">
+        <div class="modal-card modal-card--card-order-create">
         <div class="modal-header">
           <div class="header-info">
             <h3>新建开卡工单</h3>
@@ -571,8 +571,11 @@ class="member-pill co-sync-pill"
             <X :size="20" />
           </button>
         </div>
-        <form class="modal-form modal-form--card-order" @submit.prevent="submitCreate">
-          <div class="form-group open-mode-group">
+        <form
+          class="modal-form modal-form--card-order modal-form--co-create-3col"
+          @submit.prevent="submitCreate"
+        >
+          <div class="form-group open-mode-group co-create-span-full">
             <label>办理类型</label>
             <div class="open-mode-options">
               <label class="radio-tile">
@@ -601,7 +604,7 @@ class="member-pill co-sync-pill"
               @input="onCreatePhoneInput"
             />
           </div>
-          <div v-if="createForm.open_mode === 'renew'" class="renew-preview-box">
+          <div v-if="createForm.open_mode === 'renew'" class="renew-preview-box co-create-span-full">
             <p v-if="renewPreviewLoading" class="modal-hint">正在查询该手机号会员…</p>
             <template v-else-if="renewPreview">
               <p class="modal-hint">
@@ -620,7 +623,7 @@ class="member-pill co-sync-pill"
               未找到该手机号会员，请确认已注册或改用「新会员开卡」。
             </p>
           </div>
-          <div v-if="createForm.open_mode === 'new_member'" class="form-row">
+          <div v-if="createForm.open_mode === 'new_member'" class="form-row form-row--co-create-3col">
             <div class="form-group">
               <label>会员姓名</label>
               <input v-model="createForm.name" required maxlength="100" placeholder="写入档案 name" />
@@ -630,7 +633,7 @@ class="member-pill co-sync-pill"
               <input v-model="createForm.wechat_name" required maxlength="100" placeholder="写入档案 wechat_name" />
             </div>
           </div>
-          <div class="form-group card-order-delivery-address-block">
+          <div class="form-group card-order-delivery-address-block co-create-span-full">
             <label>配送位置（可选）</label>
             <p class="modal-hint card-order-map-hint">
               与小程序一致：地图搜索或点选后自动填入详细地址（坐标仅后台保存，用于划区）；收货手机号与上方会员手机号相同。门牌号可补充。
@@ -656,7 +659,7 @@ class="member-pill co-sync-pill"
               <input v-model="createForm.door_detail" maxlength="500" placeholder="如：3 号楼 1202" />
             </div>
           </div>
-          <div class="form-group open-mode-group">
+          <div class="form-group open-mode-group co-create-span-full">
             <label>开始配送日（业务日）</label>
             <div class="open-mode-options">
               <label class="radio-tile">
@@ -692,7 +695,7 @@ class="member-pill co-sync-pill"
               </p>
             </div>
           </div>
-          <div class="form-row">
+          <div class="form-row form-row--co-create-3col">
             <div class="form-group">
               <label>卡类型</label>
               <select v-model="createForm.card_kind">
@@ -710,7 +713,7 @@ class="member-pill co-sync-pill"
               </select>
             </div>
           </div>
-          <div class="form-row">
+          <div class="form-row form-row--co-create-3col">
             <div class="form-group">
               <label>缴费状态</label>
               <select v-model="createForm.pay_status">
@@ -723,15 +726,15 @@ class="member-pill co-sync-pill"
               <input v-model="createForm.amount_yuan" type="number" min="0" step="0.01" placeholder="留空表示未填" />
             </div>
           </div>
-          <div class="form-group">
+          <div class="form-group co-create-span-full">
             <label>备注</label>
             <textarea v-model="createForm.remark" rows="2" maxlength="500" placeholder="可选"></textarea>
           </div>
-          <p class="modal-hint">
+          <p class="modal-hint co-create-span-full">
             缴费状态为「已缴」时，创建后将自动同步剩余次数（周卡 +{{ planDefaultTotal('周卡') }} / 月卡
             +{{ planDefaultTotal('月卡') }} / 次卡 +{{ planDefaultTotal('次卡') }}）与套餐；仅在选择「指定起送日」时同时写入起送日并激活。选「未缴」则不入账。
           </p>
-          <button type="submit" class="btn-submit-order" :disabled="createSubmitting">
+          <button type="submit" class="btn-submit-order co-create-span-full" :disabled="createSubmitting">
             {{ createSubmitting ? '提交中…' : '创建工单' }}
           </button>
         </form>
@@ -908,6 +911,35 @@ class="member-pill co-sync-pill"
   padding-bottom: 2.85rem;
   scroll-padding-bottom: 1.5rem;
 }
+
+.modal-card.modal-card--card-order-create {
+  max-width: min(1080px, 100%);
+}
+
+.modal-form.modal-form--co-create-3col {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 1.25rem;
+  row-gap: 1.25rem;
+}
+
+.modal-form.modal-form--co-create-3col > .co-create-span-full {
+  grid-column: 1 / -1;
+}
+
+.modal-form.modal-form--co-create-3col .form-row--co-create-3col {
+  display: contents;
+}
+
+@media (max-width: 900px) {
+  .modal-form.modal-form--co-create-3col {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .modal-form.modal-form--co-create-3col > .co-create-span-full {
+    grid-column: auto;
+  }
+}
+
 .open-mode-group .open-mode-options {
   display: grid;
   grid-template-columns: 1fr 1fr;
