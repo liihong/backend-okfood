@@ -724,8 +724,12 @@ onMounted(async () => {
                 <Receipt :size="12" aria-hidden="true" style="margin-right: 5px;" />
                 消费记录
               </el-button>
-              <el-button class="btn-members-op" type="primary" title="地址管理：地图选点，地点与门牌分别保存"
-                @click="openMemberAddresses(u)">
+              <el-button
+                class="btn-members-op"
+                type="primary"
+                title="地址管理：查看全部配送地址，编辑、地图选点，并可代为切换默认地址"
+                @click="openMemberAddresses(u)"
+              >
                 <MapPin :size="12" aria-hidden="true" style="margin-right: 5px;" />
                 地址
               </el-button>

@@ -17,10 +17,15 @@ const emit = defineEmits(['saved'])
 const addrList = ref([])
 const addrLoading = ref(false)
 const addrSaving = ref(false)
+const addrDefaultSaving = ref(false)
 /** 当前编辑行：含地图用字符串经纬度 */
 const addrEdit = ref(null)
-/** 多条地址时下拉切换 */
+/** 当前选中的地址 id（列表高亮与表单联动） */
 const addrSelectedId = ref(null)
+
+const currentAddrRow = computed(() =>
+  addrList.value.find((x) => Number(x.id) === Number(addrSelectedId.value)),
+)
 
 function pickAddrEdit(a) {
   const lng = a.location?.lng
@@ -38,17 +43,6 @@ function pickAddrEdit(a) {
   }
 }
 
-function addrOptionLabel(a) {
-  const tag = a.is_default ? '默认 · ' : ''
-  return `${tag}${a.contact_name || '—'} ${a.contact_phone || ''}`.trim()
-}
-
-function onAddrSelectChange(id) {
-  if (id == null || id === '') return
-  const row = addrList.value.find((x) => Number(x.id) === Number(id))
-  if (row) pickAddrEdit(row)
-}
-
 const addrHeadCoordDisplay = computed(() => {
   if (!addrEdit.value) return '—'
   const a = String(addrEdit.value.lngStr ?? '').trim()
@@ -57,7 +51,10 @@ const addrHeadCoordDisplay = computed(() => {
   return '未选点'
 })
 
-async function loadAddressesForMember() {
+/**
+ * @param {number | null} [preferId] 刷新后优先选中该地址（保存/设默认后保持编辑对象）
+ */
+async function loadAddressesForMember(preferId = null) {
   const m = props.member
   if (!open.value || !m?.id) return
   addrList.value = []
@@ -67,7 +64,9 @@ async function loadAddressesForMember() {
   try {
     const list = await apiJson(`/api/admin/users/${Number(m.id)}/addresses`, {}, { auth: true })
     addrList.value = Array.isArray(list) ? list : []
-    const def = addrList.value.find((x) => x.is_default) || addrList.value[0]
+    const pref =
+      preferId != null ? addrList.value.find((x) => Number(x.id) === Number(preferId)) : null
+    const def = pref || addrList.value.find((x) => x.is_default) || addrList.value[0]
     if (def) pickAddrEdit(def)
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
@@ -90,7 +89,7 @@ watch([open, () => props.member?.id], ([isOpen, mid]) => {
     addrSelectedId.value = null
     return
   }
-  if (mid != null) void loadAddressesForMember()
+  if (mid != null) void loadAddressesForMember(null)
 })
 
 function close() {
@@ -106,6 +105,7 @@ async function saveMemberAddress() {
   const m = props.member
   const ed = addrEdit.value
   if (!m?.id || !ed?.id) return
+  const savedId = Number(ed.id)
   addrSaving.value = true
   try {
     const payload = {
@@ -121,13 +121,13 @@ async function saveMemberAddress() {
       payload.location = { lng, lat }
     }
     await apiJson(
-      `/api/admin/users/${Number(m.id)}/addresses/${Number(ed.id)}`,
+      `/api/admin/users/${Number(m.id)}/addresses/${savedId}`,
       { method: 'PATCH', body: JSON.stringify(payload) },
       { auth: true },
     )
     showToast('保存成功', 'success')
     emit('saved')
-    open.value = false
+    await loadAddressesForMember(savedId)
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -138,6 +138,35 @@ async function saveMemberAddress() {
     showToast(e instanceof Error ? e.message : '保存失败', 'error')
   } finally {
     addrSaving.value = false
+  }
+}
+
+async function makeCurrentAddressDefault() {
+  const m = props.member
+  const ed = addrEdit.value
+  if (!m?.id || !ed?.id) return
+  if (currentAddrRow.value?.is_default) return
+  const aid = Number(ed.id)
+  addrDefaultSaving.value = true
+  try {
+    await apiJson(
+      `/api/admin/users/${Number(m.id)}/addresses/${aid}`,
+      { method: 'PATCH', body: JSON.stringify({ is_default: true }) },
+      { auth: true },
+    )
+    showToast('已设为默认配送地址', 'success')
+    emit('saved')
+    await loadAddressesForMember(aid)
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '设置默认失败', 'error')
+  } finally {
+    addrDefaultSaving.value = false
   }
 }
 </script>
@@ -167,110 +196,149 @@ async function saveMemberAddress() {
           <el-empty description="该会员暂无配送地址记录。" :image-size="80" />
         </template>
         <template v-else>
-          <el-select
-            v-if="addrList.length > 1"
-            v-model="addrSelectedId"
-            class="members-addr-switch"
-            placeholder="切换配送地址"
-            filterable
-            size="small"
-            @change="onAddrSelectChange"
-          >
-            <el-option
-              v-for="a in addrList"
-              :key="a.id"
-              :label="addrOptionLabel(a)"
-              :value="Number(a.id)"
-            />
-          </el-select>
-
-          <div v-if="member && addrEdit" class="members-addr-first-row">
-            <el-space wrap :size="8" alignment="center">
-              <span class="members-addr-k">会员</span>
-              <el-text truncated class="members-addr-name">{{ member.name || '—' }}</el-text>
-              <el-text type="info" truncated>{{ member.phone || '' }}</el-text>
-              <el-divider direction="vertical" class="members-addr-divider" />
-              <span class="members-addr-k">经纬度</span>
-              <el-tag size="small" type="info" effect="plain" class="members-addr-coord-tag">{{
-                addrHeadCoordDisplay
-              }}</el-tag>
-            </el-space>
-          </div>
-
-          <el-form
-            v-if="addrEdit"
-            label-position="top"
-            size="small"
-            class="members-addr-el-form"
-            @submit.prevent="saveMemberAddress"
-          >
-            <el-row :gutter="12">
-              <el-col :xs="24" :sm="12">
-                <el-form-item label="收件人">
-                  <el-input v-model="addrEdit.contact_name" maxlength="100" clearable placeholder="收件人姓名" />
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :sm="12">
-                <el-form-item label="联系电话">
-                  <el-input v-model="addrEdit.contact_phone" maxlength="20" clearable placeholder="手机号" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-
-            <el-form-item label="地图选点（GCJ-02）" class="members-addr-map-form-item">
-              <div class="members-addr-map-wrap">
-                <MemberDeliveryMapPicker
-                  :key="'ma-' + addrEdit.id"
-                  v-model:lng-str="addrEdit.lngStr"
-                  v-model:lat-str="addrEdit.latStr"
-                  v-model:map-location-text="addrEdit.map_location_text"
-                  :search-input-id="'members-addr-amap-' + addrEdit.id"
-                  @warn="onAddrMapWarn"
-                />
+          <div class="members-addr-layout">
+            <aside class="members-addr-list-pane" aria-label="会员全部地址">
+              <p class="members-addr-list-hint">共 {{ addrList.length }} 条 · 点击条目在右侧编辑</p>
+              <div class="members-addr-list-scroll">
+                <div
+                  v-for="a in addrList"
+                  :key="a.id"
+                  role="button"
+                  tabindex="0"
+                  class="members-addr-list-item"
+                  :class="{
+                    'members-addr-list-item--active': addrSelectedId === Number(a.id),
+                  }"
+                  @click="pickAddrEdit(a)"
+                  @keydown.enter.prevent="pickAddrEdit(a)"
+                >
+                  <div class="members-addr-list-item-top">
+                    <el-tag v-if="a.is_default" size="small" type="success" effect="plain">默认</el-tag>
+                    <span class="members-addr-list-item-name">{{ a.contact_name || '—' }}</span>
+                  </div>
+                  <div class="members-addr-list-item-phone">{{ a.contact_phone || '—' }}</div>
+                  <div class="members-addr-list-item-addr" :title="a.full_address || ''">
+                    {{ a.full_address || '—' }}
+                  </div>
+                  <div class="members-addr-list-item-area">{{ a.area || '—' }}</div>
+                </div>
               </div>
-            </el-form-item>
+            </aside>
 
-            <el-row :gutter="12">
-              <el-col :xs="24" :sm="14">
-                <el-form-item label="收货位置主文案（map_location_text）">
+            <div class="members-addr-edit-pane">
+              <div v-if="member && addrEdit" class="members-addr-first-row">
+                <el-space wrap :size="8" alignment="center">
+                  <span class="members-addr-k">会员</span>
+                  <el-text truncated class="members-addr-name">{{ member.name || '—' }}</el-text>
+                  <el-text type="info" truncated>{{ member.phone || '' }}</el-text>
+                  <el-divider direction="vertical" class="members-addr-divider" />
+                  <span class="members-addr-k">经纬度</span>
+                  <el-tag size="small" type="info" effect="plain" class="members-addr-coord-tag">{{
+                    addrHeadCoordDisplay
+                  }}</el-tag>
+                </el-space>
+              </div>
+
+              <el-form
+                v-if="addrEdit"
+                label-position="top"
+                size="small"
+                class="members-addr-el-form"
+                @submit.prevent="saveMemberAddress"
+              >
+                <el-row :gutter="12">
+                  <el-col :xs="24" :sm="12">
+                    <el-form-item label="收件人">
+                      <el-input v-model="addrEdit.contact_name" maxlength="100" clearable placeholder="收件人姓名" />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :xs="24" :sm="12">
+                    <el-form-item label="联系电话">
+                      <el-input v-model="addrEdit.contact_phone" maxlength="20" clearable placeholder="手机号" />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+
+                <el-form-item label="地图选点（GCJ-02）" class="members-addr-map-form-item">
+                  <div class="members-addr-map-wrap">
+                    <MemberDeliveryMapPicker
+                      :key="'ma-' + addrEdit.id"
+                      v-model:lng-str="addrEdit.lngStr"
+                      v-model:lat-str="addrEdit.latStr"
+                      v-model:map-location-text="addrEdit.map_location_text"
+                      :search-input-id="'members-addr-amap-' + addrEdit.id"
+                      @warn="onAddrMapWarn"
+                    />
+                  </div>
+                </el-form-item>
+
+                <el-row :gutter="12">
+                  <el-col :xs="24" :sm="14">
+                    <el-form-item label="收货位置主文案（map_location_text）">
+                      <el-input
+                        v-model="addrEdit.map_location_text"
+                        type="textarea"
+                        readonly
+                        :autosize="{ minRows: 2, maxRows: 4 }"
+                        maxlength="500"
+                        show-word-limit
+                        placeholder="地图选点自动填入；可与门牌拼接为完整收货地址"
+                      />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :xs="24" :sm="10">
+                    <el-form-item label="门牌（楼栋 / 单元 / 室号）">
+                      <el-input
+                        v-model="addrEdit.door_detail"
+                        type="textarea"
+                        :autosize="{ minRows: 2, maxRows: 3 }"
+                        maxlength="500"
+                        placeholder="例如：3 号楼 1202"
+                      />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+
+                <el-form-item label="地址备注">
                   <el-input
-                    v-model="addrEdit.map_location_text"
+                    v-model="addrEdit.remarks"
                     type="textarea"
-                    readonly
-                    :autosize="{ minRows: 2, maxRows: 4 }"
+                    :autosize="{ minRows: 1, maxRows: 3 }"
                     maxlength="500"
-                    show-word-limit
-                    placeholder="地图选点自动填入；可与门牌拼接为完整收货地址"
+                    placeholder="忌口等，可留空"
                   />
                 </el-form-item>
-              </el-col>
-              <el-col :xs="24" :sm="10">
-                <el-form-item label="门牌（楼栋 / 单元 / 室号）">
-                  <el-input
-                    v-model="addrEdit.door_detail"
-                    type="textarea"
-                    :autosize="{ minRows: 2, maxRows: 3 }"
-                    maxlength="500"
-                    placeholder="例如：3 号楼 1202"
-                  />
+
+                <el-form-item class="members-addr-actions">
+                  <div class="members-addr-actions-inner">
+                    <div class="members-addr-actions-left">
+                      <el-button
+                        v-if="currentAddrRow && !currentAddrRow.is_default"
+                        type="warning"
+                        plain
+                        :loading="addrDefaultSaving"
+                        :disabled="addrSaving"
+                        @click.prevent="makeCurrentAddressDefault"
+                      >
+                        设为默认配送地址
+                      </el-button>
+                      <el-tag
+                        v-else-if="currentAddrRow && currentAddrRow.is_default"
+                        size="small"
+                        type="success"
+                        effect="plain"
+                      >
+                        当前为默认地址
+                      </el-tag>
+                    </div>
+                    <el-button type="primary" :loading="addrSaving" :disabled="addrDefaultSaving" native-type="submit"
+                      >保存地址</el-button
+                    >
+                  </div>
                 </el-form-item>
-              </el-col>
-            </el-row>
-
-            <el-form-item label="地址备注">
-              <el-input
-                v-model="addrEdit.remarks"
-                type="textarea"
-                :autosize="{ minRows: 1, maxRows: 3 }"
-                maxlength="500"
-                placeholder="忌口等，可留空"
-              />
-            </el-form-item>
-
-            <el-form-item class="members-addr-actions">
-              <el-button type="primary" :loading="addrSaving" native-type="submit">保存地址</el-button>
-            </el-form-item>
-          </el-form>
+              </el-form>
+            </div>
+          </div>
         </template>
       </div>
     </div>
@@ -279,18 +347,107 @@ async function saveMemberAddress() {
 
 <style scoped>
 .members-addr-modal-card {
-  max-width: min(620px, 96vw);
+  max-width: min(920px, 98vw);
 }
 
 .members-addr-modal-body {
   padding: 1rem 1.25rem 1.35rem;
-  max-height: min(82vh, 680px);
+  max-height: min(82vh, 720px);
   overflow: auto;
 }
 
-.members-addr-switch {
-  width: 100%;
-  margin-bottom: 10px;
+.members-addr-layout {
+  display: grid;
+  grid-template-columns: minmax(200px, 268px) 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .members-addr-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.members-addr-list-pane {
+  position: sticky;
+  top: 0;
+}
+
+.members-addr-list-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.4;
+}
+
+.members-addr-list-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(56vh, 520px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.members-addr-list-item {
+  text-align: left;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 10px 10px 8px;
+  cursor: pointer;
+  background: var(--el-fill-color-blank);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.members-addr-list-item:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+
+.members-addr-list-item--active {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.members-addr-list-item-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.members-addr-list-item-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.members-addr-list-item-phone {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 4px;
+}
+
+.members-addr-list-item-addr {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--el-text-color-regular);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.members-addr-list-item-area {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  margin-top: 6px;
+}
+
+.members-addr-edit-pane {
+  min-width: 0;
 }
 
 .members-addr-first-row {
@@ -365,7 +522,24 @@ async function saveMemberAddress() {
   margin-bottom: 0 !important;
 }
 
+.members-addr-actions-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
+.members-addr-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 32px;
+}
+
 .members-addr-actions :deep(.el-form-item__content) {
-  justify-content: flex-end;
+  display: block;
 }
 </style>

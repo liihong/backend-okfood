@@ -216,6 +216,8 @@ CREATE TABLE IF NOT EXISTS `menu_dish` (
   `is_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
   `category_id` BIGINT UNSIGNED NULL COMMENT '所属分类（商品库）',
   `single_order_price_yuan` DECIMAL(12, 2) NULL COMMENT '单点售价(元)',
+  `spice_level` VARCHAR(16) NULL DEFAULT NULL COMMENT '辣度代码：none/mild/medium/hot',
+  `internal_view_sop` TEXT NULL COMMENT '内部查看操作说明，不对会员展示',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -232,12 +234,11 @@ CREATE TABLE IF NOT EXISTS `weekly_menu_slot` (
   `dish_id` BIGINT UNSIGNED NOT NULL,
   `total_stock` INT UNSIGNED NULL DEFAULT NULL COMMENT '日总份(含订阅与单次)；NULL=不限制单次卡',
   `service_date` DATE AS (DATE_ADD(`week_start`, INTERVAL (`slot` - 1) DAY)) STORED,
-  `service_ym` CHAR(7) AS (DATE_FORMAT(`service_date`, '%Y-%m')) STORED,
+  `service_ym` CHAR(7) AS (DATE_FORMAT(`service_date`, '%Y-%m')) STORED COMMENT '自然月（派生列，便于按年月查询/统计）',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_weekly_slot_week_day` (`week_start`, `slot`),
-  UNIQUE KEY `uk_weekly_dish_month` (`dish_id`, `service_ym`),
   KEY `idx_weekly_menu_week` (`week_start`),
   KEY `idx_weekly_menu_dish` (`dish_id`),
   CONSTRAINT `fk_weekly_menu_dish` FOREIGN KEY (`dish_id`) REFERENCES `menu_dish` (`id`)
@@ -249,12 +250,11 @@ CREATE TABLE IF NOT EXISTS `menu_schedule` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `menu_date` DATE NOT NULL COMMENT '配送/供餐业务日',
   `dish_id` BIGINT UNSIGNED NOT NULL,
-  `schedule_ym` CHAR(7) AS (DATE_FORMAT(`menu_date`, '%Y-%m')) STORED COMMENT '自然月，用于同月菜品去重',
+  `schedule_ym` CHAR(7) AS (DATE_FORMAT(`menu_date`, '%Y-%m')) STORED COMMENT '自然月（派生列，便于按年月查询/统计）',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_menu_schedule_date` (`menu_date`),
-  UNIQUE KEY `uk_schedule_dish_month` (`dish_id`, `schedule_ym`),
   KEY `idx_menu_schedule_dish` (`dish_id`),
   CONSTRAINT `fk_menu_schedule_dish` FOREIGN KEY (`dish_id`) REFERENCES `menu_dish` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE
@@ -326,6 +326,7 @@ CREATE TABLE IF NOT EXISTS `admin_dashboard_biz_day_snapshots` (
   `today_meals_to_prepare` INT NOT NULL COMMENT '与当日配送大表分组 meal_total 合计一致',
   `tomorrow_leave_members` INT NOT NULL,
   `tomorrow_meals_to_prepare` INT NOT NULL,
+  `today_expire_one_unit_members` INT NOT NULL DEFAULT 0 COMMENT '锚定日应履约且 balance 恰等于每配送日份数（仅剩 1 次）的会员数',
   `recorded_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '首次落库或管理员强制重算覆盖时间',
   PRIMARY KEY (`business_anchor_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='营业概览与配送大表对齐的按日归档（过去日首读落库后默认不变）';

@@ -47,7 +47,23 @@ const dishForm = reactive({
   image_url: '',
   is_enabled: true,
   category_id: '',
+  spice_level: '',
+  internal_view_sop: '',
 })
+
+const SPICE_ADMIN_LABELS = {
+  '': '未标注',
+  none: '不辣',
+  mild: '微微辣',
+  medium: '微辣',
+  hot: '较辣',
+}
+
+function dishSpiceBadge(row) {
+  const k = row && row.spice_level != null ? String(row.spice_level).trim().toLowerCase() : ''
+  if (!k) return '未标注'
+  return SPICE_ADMIN_LABELS[k] || '未标注'
+}
 const dishFileInput = ref(null)
 const dishPhotoUploading = ref(false)
 
@@ -95,6 +111,8 @@ function resetDishForm() {
   dishForm.image_url = ''
   dishForm.is_enabled = true
   dishForm.category_id = ''
+  dishForm.spice_level = ''
+  dishForm.internal_view_sop = ''
 }
 
 const openDishEditorAdd = () => {
@@ -115,6 +133,8 @@ const openDishEditorEdit = (row) => {
   dishForm.image_url = row.image_url || ''
   dishForm.is_enabled = row.is_enabled !== false
   dishForm.category_id = row.category_id != null ? String(row.category_id) : ''
+  dishForm.spice_level = row.spice_level != null ? String(row.spice_level).trim().toLowerCase() : ''
+  dishForm.internal_view_sop = row.internal_view_sop != null ? String(row.internal_view_sop) : ''
   showDishModal.value = true
 }
 
@@ -183,6 +203,7 @@ async function saveDish() {
     }
     single_order_price_yuan = n
   }
+  const spiceRaw = String(dishForm.spice_level ?? '').trim().toLowerCase()
   const body = {
     name: dishForm.name.trim(),
     description: (dishForm.description || '').trim() || null,
@@ -190,6 +211,8 @@ async function saveDish() {
     is_enabled: Boolean(dishForm.is_enabled),
     category_id: Number.isFinite(categoryId) ? categoryId : null,
     single_order_price_yuan,
+    spice_level: spiceRaw === '' ? null : spiceRaw,
+    internal_view_sop: (dishForm.internal_view_sop || '').trim() || null,
   }
   if (isEditingDish.value && dishForm.id != null) {
     body.id = dishForm.id
@@ -237,6 +260,21 @@ onMounted(() => {
 
 <template>
   <section class="tab-content animate-up menu-section">
+    <details class="dish-internal-sop-banner">
+      <summary class="dish-internal-sop-summary">菜品库 · 内部查看 SOP（点击展开）</summary>
+      <div class="dish-internal-sop-content">
+        <ol class="dish-internal-sop-list">
+          <li>新建或编辑菜品时，核对名称与「配料 / 描述」与实际出餐一致。</li>
+          <li>
+            凡含辣椒、辣酱、泡椒等刺激性辣味，须在「辣度」中标注；仅有轻微辣感（如少量黑胡椒、豆瓣）请选择「微微辣」，便于会员预判。
+          </li>
+          <li>展示图与单点价格变更后，在周菜单与详情页抽查会员端展示。</li>
+          <li>
+            「内部操作说明」仅后台可见，可记录备餐衔接、话术或备注；请勿将会员需要知道的过敏原等信息只写在此处。
+          </li>
+        </ol>
+      </div>
+    </details>
     <div class="dish-toolbar">
       <div class="dish-toolbar-search">
         <Search :size="18" />
@@ -259,7 +297,7 @@ onMounted(() => {
             {{ d.is_enabled !== false ? '上架' : '停用' }}
           </div>
         </div>
-        <p class="menu-card-meta">{{ categoryLabel(d.category_id) }}</p>
+        <p class="menu-card-meta">{{ categoryLabel(d.category_id) }} · 辣度 {{ dishSpiceBadge(d) }}</p>
         <div class="menu-card-body">
           <h4 class="menu-dish-title">【 {{ d.name }} 】</h4>
           <p class="menu-dish-desc">{{ d.description || '—' }}</p>
@@ -374,6 +412,24 @@ onMounted(() => {
             class="menu-editor-textarea"
             rows="3"
             placeholder="原切鸡腿肉、秘制盐葱酱、杂粮基底、时令蔬果。"
+          ></textarea>
+
+          <label class="menu-editor-label" for="dish-spice">辣度（会员端可见）</label>
+          <select id="dish-spice" v-model="dishForm.spice_level" class="menu-editor-input">
+            <option value="">未标注</option>
+            <option value="none">不辣</option>
+            <option value="mild">微微辣</option>
+            <option value="medium">微辣</option>
+            <option value="hot">较辣</option>
+          </select>
+
+          <label class="menu-editor-label" for="dish-internal-sop">内部操作说明（仅后台，不对会员展示）</label>
+          <textarea
+            id="dish-internal-sop"
+            v-model="dishForm.internal_view_sop"
+            class="menu-editor-textarea"
+            rows="3"
+            placeholder="备餐衔接、内部话术等；会员可见信息请写在配料/描述中。"
           ></textarea>
 
           <label class="menu-editor-label" for="dish-single-price">单点价格（元，可选）</label>

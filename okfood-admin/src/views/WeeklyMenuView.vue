@@ -196,7 +196,7 @@ onMounted(() => {
 <template>
   <section class="tab-content animate-up weekly-menu-page">
     <p class="weekly-intro">
-      维护每周一至周日的固定槽位菜品；与按日排期共用「同一自然月内同一道菜仅出现一次」规则。日总份数：留空为不限制；设置后，单次可售=总份数−当日会员应配送份数−已付单次。同一自然日、同一道菜的日总份数在槽位上维护。
+      维护每周一至周日的固定槽位菜品（可与按日排期重复安排同一道菜）。日总份数：留空为不限制；设置后，单次可售=总份数−当日会员应配送份数−已付单次。同一自然日、同一道菜的日总份数在槽位上维护。
     </p>
 
     <div v-loading="loading" class="weekly-cards">

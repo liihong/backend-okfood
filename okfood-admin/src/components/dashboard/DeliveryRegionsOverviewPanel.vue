@@ -1,7 +1,14 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { RefreshCw, ChevronRight, MapPin, UserMinus, Utensils } from 'lucide-vue-next'
+import {
+  RefreshCw,
+  ChevronRight,
+  MapPin,
+  UserMinus,
+  Utensils,
+  CalendarClock,
+} from 'lucide-vue-next'
 import { useDeliveryRegionMapOverview } from '../../composables/useDeliveryRegionMapOverview.js'
 import DeliveryOverviewMap from './DeliveryOverviewMap.vue'
 import { UNASSIGNED_AREA_LABEL } from '../../utils/regionAssignment.js'
@@ -38,6 +45,7 @@ async function fetchDashboardSummary() {
     const tp = Number(d?.today_meals_to_prepare) || 0
     const nl = Number(d?.tomorrow_leave_members) || 0
     const np = Number(d?.tomorrow_meals_to_prepare) || 0
+    const te = Number(d?.today_expire_one_unit_members) || 0
     dashboardStats.value = [
       {
         label: '今日请假会员',
@@ -74,6 +82,15 @@ async function fetchDashboardSummary() {
         bg: '#e0f2fe',
         color: '#0284c7',
         mapFilter: 'tomorrow_prep',
+      },
+      {
+        label: '今日到期剩1次会员',
+        value: te,
+        unit: '人',
+        icon: CalendarClock,
+        bg: '#f3e8ff',
+        color: '#7c3aed',
+        mapFilter: null,
       },
     ]
   } catch (e) {
@@ -161,7 +178,7 @@ onMounted(() => {
         <div>
           <h3 class="dro-h">配送区域总览</h3>
           <p class="dro-sub">
-            下方四张卡片可点击筛选地图标点（再点一次取消）；默认不显示「暂停配送」会员坐标；玫红点为今日请假、橙点为仅明日请假，绿/黄仍为今日是否已送达。
+            下方前四张卡片可点击筛选地图标点（再点一次取消）；默认不显示「暂停配送」会员坐标；玫红点为今日请假、橙点为仅明日请假，绿/黄仍为今日是否已送达。
             <template v-if="!summaryIsLiveToday">
               当前为历史锚定时，卡片不与地图联动；地图送达状态仍为服务器「今日」。
             </template>
@@ -215,16 +232,19 @@ onMounted(() => {
           :key="'biz-' + i"
           class="dro-stat dro-stat--biz"
           :class="{
-            'dro-stat--clickable': summaryIsLiveToday,
-            'dro-stat--filter-on': summaryIsLiveToday && mapFilterKey === s.mapFilter,
+            'dro-stat--clickable': summaryIsLiveToday && s.mapFilter,
+            'dro-stat--filter-on':
+              summaryIsLiveToday && s.mapFilter && mapFilterKey === s.mapFilter,
             'dro-stat--muted': !summaryIsLiveToday,
           }"
-          :role="summaryIsLiveToday ? 'button' : undefined"
-          :tabindex="summaryIsLiveToday ? 0 : -1"
+          :role="summaryIsLiveToday && s.mapFilter ? 'button' : undefined"
+          :tabindex="summaryIsLiveToday && s.mapFilter ? 0 : -1"
           :aria-pressed="
-            summaryIsLiveToday && mapFilterKey === s.mapFilter ? 'true' : 'false'
+            summaryIsLiveToday && s.mapFilter && mapFilterKey === s.mapFilter ? 'true' : 'false'
           "
-          :aria-label="(s.label || '') + (summaryIsLiveToday ? '，点击筛选地图' : '')"
+          :aria-label="
+            (s.label || '') + (summaryIsLiveToday && s.mapFilter ? '，点击筛选地图' : '')
+          "
           @click="onBizStatClick(s.mapFilter)"
           @keydown="onBizStatKeydown($event, s.mapFilter)"
         >

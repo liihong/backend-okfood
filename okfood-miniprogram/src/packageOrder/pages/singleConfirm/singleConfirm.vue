@@ -17,6 +17,9 @@
           <view class="dish-meta">
             <text class="meta-tag">{{ dish.day }} · {{ serviceDateYmd }}</text>
           </view>
+          <view v-if="dish.spiceLabel" class="dish-spice-line">
+            <text class="dish-spice-line-txt">辣度 {{ dish.spiceLabel }}</text>
+          </view>
           <view v-if="dish && dish.singleStockLimited" class="stock-row">
             <text>剩余可单点</text>
             <text class="stock-row-num">{{ dish.singleStockRemaining ?? 0 }}</text>
@@ -492,6 +495,16 @@ async function handlePay() {
   background: rgba(14, 90, 68, 0.12);
   padding: 8rpx 20rpx;
   border-radius: 16rpx;
+}
+
+.dish-spice-line {
+  margin-top: 12rpx;
+}
+
+.dish-spice-line-txt {
+  font-size: 24rpx;
+  font-weight: 850;
+  color: #9a3412;
 }
 
 .dish-price {

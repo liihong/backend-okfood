@@ -17,7 +17,7 @@ from app.core.timeutil import (
     tomorrow_shanghai,
 )
 
-from app.models.menu_dish import MenuDish
+from app.models.menu_dish import MenuDish, SPICE_LEVEL_MEMBER_LABELS
 
 from app.models.menu_schedule import MenuSchedule
 
@@ -784,7 +784,7 @@ def get_tomorrow_menu(db: Session) -> dict:
 
         _, dish = row
 
-        return {
+        out = {
 
             "date": d.isoformat(),
 
@@ -799,6 +799,10 @@ def get_tomorrow_menu(db: Session) -> dict:
             "price": _member_menu_price(dish),
 
         }
+
+        out.update(_member_spice_public_fields(dish))
+
+        return out
 
     row2 = db.execute(
 
@@ -830,7 +834,7 @@ def get_tomorrow_menu(db: Session) -> dict:
 
     _, dish = row2
 
-    return {
+    out = {
 
         "date": d.isoformat(),
 
@@ -845,6 +849,10 @@ def get_tomorrow_menu(db: Session) -> dict:
         "price": _member_menu_price(dish),
 
     }
+
+    out.update(_member_spice_public_fields(dish))
+
+    return out
 
 
 
@@ -865,6 +873,19 @@ def _member_menu_price(dish: MenuDish | None) -> float | None:
         return None
 
     return float(dish.single_order_price_yuan)
+
+
+def _member_spice_public_fields(dish: MenuDish | None) -> dict[str, str]:
+    """会员端辣度：未在后台标注则不返回；含 none(不辣)/mild/medium/hot。"""
+    if dish is None:
+        return {}
+    raw = (getattr(dish, "spice_level", None) or "").strip().lower()
+    if not raw:
+        return {}
+    label = SPICE_LEVEL_MEMBER_LABELS.get(raw)
+    if not label:
+        return {}
+    return {"spice_level": raw, "spice_label": label}
 
 
 
@@ -891,6 +912,10 @@ def _dish_to_member_card(*, menu_date: date, dish: MenuDish | None, slot: int | 
     if slot is not None:
 
         o["slot"] = slot
+
+    if dish is not None:
+
+        o.update(_member_spice_public_fields(dish))
 
     return o
 
@@ -971,6 +996,9 @@ def get_menu_detail_by_dish_id(db: Session, dish_id: int, *, service_date: date 
         "price": _member_menu_price(dish),
 
     }
+
+    out.update(_member_spice_public_fields(dish))
+
     if service_date is not None:
         from app.services.menu_day_stock_service import single_order_stock_for_dish_date
 

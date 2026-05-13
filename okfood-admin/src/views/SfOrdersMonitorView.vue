@@ -263,7 +263,7 @@ onMounted(() => {
     <div class="table-container">
       <div class="sf-monitor-toolbar">
         <p class="sf-monitor-hint">
-          顺丰侧「订单完成」回调通过后，系统将按停靠点对订阅会员<strong>标记送达并扣次数</strong>（与配送大表「标记送达」一致）；单点餐仅更新履约状态。
+          顺丰侧「订单完成」回调或配送状态中<strong>妥投完单 (17)</strong>通过后，系统将按停靠点对订阅会员<strong>标记送达并扣次数</strong>（与配送大表「标记送达」一致）；单点餐仅更新履约状态。
         </p>
         <div class="sf-monitor-filters">
           <label class="sf-monitor-field">

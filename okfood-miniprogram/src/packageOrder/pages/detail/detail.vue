@@ -20,6 +20,9 @@
             <text class="detail-title">{{ dish.name }}</text>
             <text class="limit-tag">{{ dish.day }}限定</text>
           </view>
+          <view v-if="dish.spiceLabel" class="detail-spice-strip">
+            <text class="detail-spice-txt">辣度：{{ dish.spiceLabel }}</text>
+          </view>
           <view class="detail-price-card">
             <view class="price-card-left">
               <text class="p-sub">自律首选价 / Single Order</text>
@@ -261,6 +264,20 @@ function handleBuy() {
   border-radius: 16rpx;
   font-weight: 900;
   flex-shrink: 0;
+}
+
+.detail-spice-strip {
+  margin-bottom: 24rpx;
+  padding: 16rpx 24rpx;
+  background: #fff7ed;
+  border-radius: 20rpx;
+  border: 1rpx solid #fed7aa;
+}
+
+.detail-spice-txt {
+  font-size: 26rpx;
+  font-weight: 850;
+  color: #9a3412;
 }
 
 .detail-price-card {

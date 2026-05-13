@@ -10,7 +10,6 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.timeutil import today_shanghai
 from app.models.single_meal_order import SingleMealOrder
 from app.models.sf_same_city_push import SfSameCityPush
 from app.services.admin_delivery_fulfillment_service import subscription_fulfilled_try_sf_home_no_commit
@@ -177,14 +176,15 @@ def apply_sf_order_complete_fulfillment(db: Session, pus: SfSameCityPush) -> Non
     _apply_sf_same_city_stop_fulfillment(db, pus, operator_tag="sf:order_complete")
 
 
-def apply_sf_delivery_status_tuotou_if_today(db: Session, pus: SfSameCityPush) -> None:
+def apply_sf_delivery_status_tuotou(db: Session, pus: SfSameCityPush) -> None:
     """
-    「配送状态变更」回调中单次报文 ``order_status=17``（妥投完单）时调用。
+    「配送状态变更」回调中 ``order_status=17``（妥投完单）时调用。
 
-    仅当该推单行上的业务配送日等于上海「今天」时对停靠点执行扣次 / 单次标履约，
-    避免历史日运单或非当日监控回调误扣次。
+    按推单行上的业务配送日执行扣次 / 单次标履约（与 ``order_complete`` 路径一致）。
+    妥投常在深夜回调，不再限制「须等于上海当日日期」，避免静默跳过；
+    重复回调由送达流水幂等处理。
     """
-    if pus.delivery_date is None or pus.delivery_date != today_shanghai():
+    if pus.delivery_date is None:
         return
     _apply_sf_same_city_stop_fulfillment(db, pus, operator_tag="sf:delivery_status")
 

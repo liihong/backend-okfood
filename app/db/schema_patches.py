@@ -324,3 +324,143 @@ ALTER TABLE `sf_same_city_pushes`
         logger.info("补库: 已检查顺丰推送回调表 / sf_same_city_pushes 顺丰状态列")
     except Exception as e:
         logger.warning("补库: 顺丰回调表补齐失败（可手动执行 sql/migrations/20260428）：%s", e)
+
+
+def apply_admin_dashboard_biz_day_snapshot_expire_one_unit_column() -> None:
+    """为 admin_dashboard_biz_day_snapshots 增加 today_expire_one_unit_members；已存在则跳过。"""
+    try:
+        insp = inspect(engine)
+        if not insp.has_table("admin_dashboard_biz_day_snapshots"):
+            return
+        col_names = {c["name"].lower() for c in insp.get_columns("admin_dashboard_biz_day_snapshots")}
+    except Exception as e:
+        logger.warning("补库: 无法检查 admin_dashboard_biz_day_snapshots 表结构: %s", e)
+        return
+
+    if "today_expire_one_unit_members" in col_names:
+        return
+
+    dname = engine.dialect.name
+    try:
+        with engine.begin() as conn:
+            if dname in ("mysql", "mariadb"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE `admin_dashboard_biz_day_snapshots` "
+                        "ADD COLUMN `today_expire_one_unit_members` INT NOT NULL DEFAULT 0 "
+                        "COMMENT '锚定日应履约且 balance 恰等于每配送日份数（仅剩 1 次）的会员数' "
+                        "AFTER `tomorrow_meals_to_prepare`"
+                    )
+                )
+            elif dname == "sqlite":
+                conn.execute(
+                    text(
+                        "ALTER TABLE admin_dashboard_biz_day_snapshots "
+                        "ADD COLUMN today_expire_one_unit_members INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+            else:
+                logger.error(
+                    "补库: 当前库类型 %s 需手动执行 sql/migrations/20260508_admin_dashboard_expire_one_unit.sql",
+                    dname,
+                )
+                return
+        logger.info("补库: 已添加 admin_dashboard_biz_day_snapshots.today_expire_one_unit_members")
+    except Exception as e:
+        logger.error(
+            "补库: 添加 today_expire_one_unit_members 失败，请手动执行 "
+            "sql/migrations/20260508_admin_dashboard_expire_one_unit.sql: %s",
+            e,
+        )
+
+
+def apply_drop_menu_dish_month_unique_constraints() -> None:
+    """移除菜单「同月同一道菜仅出现一次」唯一索引；已不存在则跳过。"""
+    try:
+        insp = inspect(engine)
+        if not insp.has_table("weekly_menu_slot") or not insp.has_table("menu_schedule"):
+            return
+    except Exception as e:
+        logger.warning("补库: 无法检查菜单表: %s", e)
+        return
+
+    dname = engine.dialect.name
+    if dname not in ("mysql", "mariadb"):
+        return
+
+    def index_exists(conn, table: str, name: str) -> bool:
+        r = conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.statistics "
+                "WHERE table_schema = DATABASE() AND table_name = :t AND index_name = :n LIMIT 1"
+            ),
+            {"t": table, "n": name},
+        )
+        return r.scalar() is not None
+
+    try:
+        with engine.begin() as conn:
+            if index_exists(conn, "weekly_menu_slot", "uk_weekly_dish_month"):
+                conn.execute(text("ALTER TABLE `weekly_menu_slot` DROP INDEX `uk_weekly_dish_month`"))
+                logger.info("补库: 已移除 weekly_menu_slot.uk_weekly_dish_month")
+            if index_exists(conn, "menu_schedule", "uk_schedule_dish_month"):
+                conn.execute(text("ALTER TABLE `menu_schedule` DROP INDEX `uk_schedule_dish_month`"))
+                logger.info("补库: 已移除 menu_schedule.uk_schedule_dish_month")
+    except Exception as e:
+        logger.error(
+            "补库: 移除菜单月去重索引失败，请手动执行 "
+            "sql/migrations/20260511_drop_menu_dish_month_unique.sql: %s",
+            e,
+        )
+
+
+def apply_menu_dish_spice_internal_sop_columns() -> None:
+    """menu_dish：辣度与内部 SOP 文本；未迁移时补齐。"""
+    try:
+        insp = inspect(engine)
+        if not insp.has_table("menu_dish"):
+            return
+        col_names = {c["name"].lower() for c in insp.get_columns("menu_dish")}
+    except Exception as e:
+        logger.warning("补库: 无法检查 menu_dish 表结构: %s", e)
+        return
+
+    if "spice_level" in col_names and "internal_view_sop" in col_names:
+        return
+
+    dname = engine.dialect.name
+    try:
+        with engine.begin() as conn:
+            if dname in ("mysql", "mariadb"):
+                if "spice_level" not in col_names:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE `menu_dish` ADD COLUMN `spice_level` VARCHAR(16) NULL DEFAULT NULL "
+                            "COMMENT '辣度代码：none/mild/medium/hot' AFTER `single_order_price_yuan`"
+                        )
+                    )
+                if "internal_view_sop" not in col_names:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE `menu_dish` ADD COLUMN `internal_view_sop` TEXT NULL "
+                            "COMMENT '内部查看操作说明，不对会员展示' AFTER `spice_level`"
+                        )
+                    )
+            elif dname == "sqlite":
+                if "spice_level" not in col_names:
+                    conn.execute(text("ALTER TABLE menu_dish ADD COLUMN spice_level VARCHAR(16)"))
+                if "internal_view_sop" not in col_names:
+                    conn.execute(text("ALTER TABLE menu_dish ADD COLUMN internal_view_sop TEXT"))
+            else:
+                logger.error(
+                    "补库: 当前库类型 %s 需手动执行 sql/migrations/20260511_menu_dish_spice_internal_sop.sql",
+                    dname,
+                )
+                return
+        logger.info("补库: 已添加 menu_dish.spice_level / internal_view_sop")
+    except Exception as e:
+        logger.error(
+            "补库: 添加 menu_dish 辣度/SOP 列失败，请手动执行 "
+            "sql/migrations/20260511_menu_dish_spice_internal_sop.sql: %s",
+            e,
+        )

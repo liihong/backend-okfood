@@ -275,25 +275,82 @@ def _hint_verify_grid(raw_body: str, _payload: dict[str, Any] | None) -> str:
     return f"candidates_wire={nw} form_aliases={nf} json_repr_aliases={nj}"
 
 
+_NEST_PAYLOAD_KEYS = ("data", "result", "body", "content")
+
+
+def _payload_dict_layers(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """顺丰部分推送把业务字段放在 data/result 等嵌套对象内；浅层合并查找。"""
+    layers: list[dict[str, Any]] = [payload]
+    for k in _NEST_PAYLOAD_KEYS:
+        inner = payload.get(k)
+        if isinstance(inner, dict) and inner not in layers:
+            layers.append(inner)
+    return layers
+
+
+def _first_str_from_layers(layers: list[dict[str, Any]], keys: tuple[str, ...]) -> Any:
+    for layer in layers:
+        for key in keys:
+            if key not in layer:
+                continue
+            v = layer[key]
+            if v is None:
+                continue
+            if isinstance(v, str) and not v.strip():
+                continue
+            return v
+    return None
+
+
 def _extract_ids(payload: dict[str, Any]) -> tuple[str | None, str | None]:
-    shop_order_id = (
-        payload.get("shop_order_id")
-        or payload.get("shopOrderId")
-        or payload.get("merchant_order_id")
+    layers = _payload_dict_layers(payload)
+    shop_order_id = _first_str_from_layers(
+        layers,
+        (
+            "shop_order_id",
+            "shopOrderId",
+            "merchant_order_id",
+            "merchantOrderId",
+            "shop_order_no",
+            "shopOrderNo",
+        ),
     )
     shop_s = None
     if shop_order_id is not None:
         shop_s = str(shop_order_id)[:128]
-    sf_order_id = (
-        payload.get("sf_order_id")
-        or payload.get("sfOrderId")
-        or payload.get("order_id")
-        or payload.get("sfBillId")
+    sf_order_id = _first_str_from_layers(
+        layers,
+        (
+            "sf_order_id",
+            "sfOrderId",
+            "order_id",
+            "orderId",
+            "sf_bill_id",
+            "sfBillId",
+            "bill_id",
+            "billId",
+            "waybill_id",
+            "waybillId",
+        ),
     )
     sf_s = None
     if sf_order_id is not None:
         sf_s = str(sf_order_id)[:64]
     return shop_s, sf_s
+
+
+def _extract_order_status(payload: dict[str, Any]) -> int | None:
+    layers = _payload_dict_layers(payload)
+    ost_raw = _first_str_from_layers(
+        layers,
+        ("order_status", "orderStatus", "delivery_status", "deliveryStatus"),
+    )
+    if ost_raw is None:
+        return None
+    try:
+        return int(ost_raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def persist_sf_callback_and_sync_push(
@@ -311,12 +368,7 @@ def persist_sf_callback_and_sync_push(
     parsed_callback_order_status: int | None = None
     if payload:
         shop_order_id, sf_order_id = _extract_ids(payload)
-        ost_raw = payload.get("order_status")
-        if ost_raw is not None:
-            try:
-                parsed_callback_order_status = int(ost_raw)
-            except (TypeError, ValueError):
-                parsed_callback_order_status = None
+        parsed_callback_order_status = _extract_order_status(payload)
 
     truncated = raw_body[:65000] if len(raw_body) > 65000 else raw_body
     row = SfSameCityCallback(
@@ -337,6 +389,8 @@ def persist_sf_callback_and_sync_push(
             pus = db.scalar(select(SfSameCityPush).where(SfSameCityPush.shop_order_id == shop_order_id))
         if pus is None and sf_order_id:
             pus = db.scalar(select(SfSameCityPush).where(SfSameCityPush.sf_order_id == sf_order_id))
+        if pus is None and sf_order_id:
+            pus = db.scalar(select(SfSameCityPush).where(SfSameCityPush.sf_bill_id == sf_order_id))
         if pus is not None:
             matched_push = pus
             pus.last_callback_at = datetime.utcnow()
@@ -363,9 +417,9 @@ def persist_sf_callback_and_sync_push(
         and parsed_callback_order_status == 17
     ):
         try:
-            from app.services.sf_order_fulfillment_service import apply_sf_delivery_status_tuotou_if_today
+            from app.services.sf_order_fulfillment_service import apply_sf_delivery_status_tuotou
 
-            apply_sf_delivery_status_tuotou_if_today(db, matched_push)
+            apply_sf_delivery_status_tuotou(db, matched_push)
         except Exception:
             logger.exception(
                 "顺丰配送状态(妥投)自动履约失败 shop_order_id=%s stop_id=%s",

@@ -125,7 +125,7 @@
             <text class="arrow">›</text>
          </view>
         </view>
-        <text class="page-version">版本 1.1.5</text>
+       <text class="page-version">版本 1.1.8</text>
       </view>
     </scroll-view>
   </view>

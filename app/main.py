@@ -13,10 +13,13 @@ from app.api import admin, admin_couriers, admin_regions, admin_uploads, courier
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.db.schema_patches import (
+    apply_admin_dashboard_biz_day_snapshot_expire_one_unit_column,
+    apply_drop_menu_dish_month_unique_constraints,
     apply_member_addresses_drop_legacy_columns,
     apply_member_addresses_map_door_columns,
     apply_members_skip_subscription_saturday_column,
     apply_members_tomorrow_leave_target_column,
+    apply_menu_dish_spice_internal_sop_columns,
     apply_sf_same_city_callback_support,
 )
 from app.jobs.scheduler import setup_scheduler, shutdown_scheduler
@@ -48,6 +51,9 @@ def _http_detail_to_msg(detail: str | list | dict) -> str:
 async def lifespan(app: FastAPI):
     _ = app
     ensure_upload_root()
+    apply_drop_menu_dish_month_unique_constraints()
+    apply_menu_dish_spice_internal_sop_columns()
+    apply_admin_dashboard_biz_day_snapshot_expire_one_unit_column()
     apply_members_tomorrow_leave_target_column()
     apply_members_skip_subscription_saturday_column()
     apply_member_addresses_map_door_columns()

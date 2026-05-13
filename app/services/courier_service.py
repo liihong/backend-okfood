@@ -4,7 +4,7 @@ from decimal import Decimal
 import re
 
 from fastapi import HTTPException
-from sqlalchemy import and_, literal, not_, or_, select
+from sqlalchemy import and_, func, literal, not_, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import verify_password
@@ -207,6 +207,64 @@ def eligible_members_for_store_pickup(
         members.append(m)
         defaults[m.id] = addr
     return members, defaults
+
+
+def count_expire_one_unit_members_for_business_day(db: Session, *, delivery_date: date) -> int:
+    """当日应履约（到家或自提）且 ``balance`` 恰等于每配送日份数的会员数（本日履约后将无余量）。
+
+    规则与 :func:`eligible_members_for_delivery` / :func:`eligible_members_for_store_pickup` 一致；
+    ``balance == daily_meal_units（封顶后）`` 表示仅剩 1 次配送。
+    """
+    if not is_subscription_delivery_day(delivery_date):
+        return 0
+    today = today_shanghai()
+    tomorrow = date.fromordinal(today.toordinal() + 1)
+    in_leave_range = and_(
+        Member.leave_range_start.is_not(None),
+        Member.leave_range_end.is_not(None),
+        Member.leave_range_start <= delivery_date,
+        Member.leave_range_end >= delivery_date,
+    )
+    target_hit = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date == delivery_date,
+    )
+    legacy_tomorrow = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date.is_(None),
+        literal(delivery_date) == literal(tomorrow),
+    )
+    tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
+    absent = or_(in_leave_range, tomorrow_leave_hit)
+    started = or_(
+        Member.delivery_start_date.is_(None),
+        Member.delivery_start_date <= delivery_date,
+    )
+    units_sql = sql_effective_daily_meal_units_column()
+    daf = default_address_pick_subquery()
+    common = [
+        Member.deleted_at.is_(None),
+        Member.is_active.is_(True),
+        Member.balance == units_sql,
+        not_(absent),
+        started,
+        _member_not_skip_subscription_saturday(delivery_date),
+    ]
+
+    def _one_count(*, store_pickup: bool) -> int:
+        q = (
+            select(func.count())
+            .select_from(Member)
+            .outerjoin(daf, daf.c.mid == Member.id)
+            .outerjoin(MemberAddress, MemberAddress.id == daf.c.addr_id)
+            .where(
+                *common,
+                Member.store_pickup.is_(store_pickup),
+            )
+        )
+        return int(db.scalar(q) or 0)
+
+    return _one_count(store_pickup=False) + _one_count(store_pickup=True)
 
 
 def extra_delivered_ineligible_subscribers(

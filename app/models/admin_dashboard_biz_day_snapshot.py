@@ -26,6 +26,12 @@ class AdminDashboardBizDaySnapshot(Base):
     )
     tomorrow_leave_members: Mapped[int] = mapped_column(Integer, nullable=False)
     tomorrow_meals_to_prepare: Mapped[int] = mapped_column(Integer, nullable=False)
+    today_expire_one_unit_members: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="锚定日应履约且 balance 恰等于每配送日份数（仅剩 1 次）的会员数",
+    )
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,

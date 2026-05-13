@@ -38,6 +38,7 @@ from app.schemas.admin import (
     WeeklySlotAssignIn,
     MenuDayTotalStockIn,
 )
+from app.services.courier_service import count_expire_one_unit_members_for_business_day
 from app.services.delivery_sheet_service import total_meal_units_for_delivery_sheet
 from app.services.member_address_service import (
     default_address_pick_subquery,
@@ -56,6 +57,15 @@ def _dish_price_yuan_str(v: Decimal | None) -> str | None:
     if v is None:
         return None
     return format(v, "f")
+
+
+def _dish_spice_level_out(raw: str | None) -> str | None:
+    if raw is None or not str(raw).strip():
+        return None
+    s = str(raw).strip().lower()
+    if s in ("none", "mild", "medium", "hot"):
+        return s
+    return None
 
 
 def _member_on_leave_today(m: Member, today: date) -> bool:
@@ -390,6 +400,8 @@ def upsert_dish(db: Session, body: DishUpsertIn) -> DishAdminOut:
         row.is_enabled = body.is_enabled
         row.category_id = body.category_id
         row.single_order_price_yuan = body.single_order_price_yuan
+        row.spice_level = body.spice_level
+        row.internal_view_sop = body.internal_view_sop
     else:
         row = MenuDish(
             name=body.name,
@@ -398,6 +410,8 @@ def upsert_dish(db: Session, body: DishUpsertIn) -> DishAdminOut:
             is_enabled=body.is_enabled,
             category_id=body.category_id,
             single_order_price_yuan=body.single_order_price_yuan,
+            spice_level=body.spice_level,
+            internal_view_sop=body.internal_view_sop,
         )
         db.add(row)
     db.commit()
@@ -410,6 +424,8 @@ def upsert_dish(db: Session, body: DishUpsertIn) -> DishAdminOut:
         is_enabled=row.is_enabled,
         category_id=row.category_id,
         single_order_price_yuan=_dish_price_yuan_str(row.single_order_price_yuan),
+        spice_level=_dish_spice_level_out(row.spice_level),
+        internal_view_sop=row.internal_view_sop,
         created_at=row.created_at.isoformat() if row.created_at else "",
     )
 
@@ -430,6 +446,8 @@ def list_dishes_admin(db: Session, *, enabled_only: bool, q: str | None = None) 
             is_enabled=r.is_enabled,
             category_id=r.category_id,
             single_order_price_yuan=_dish_price_yuan_str(r.single_order_price_yuan),
+            spice_level=_dish_spice_level_out(r.spice_level),
+            internal_view_sop=r.internal_view_sop,
             created_at=r.created_at.isoformat() if r.created_at else "",
         )
         for r in rows
@@ -466,7 +484,7 @@ def assign_menu_schedule(db: Session, body: MenuScheduleAssignIn) -> None:
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail="该菜品在本自然月已排在其他日期（一个月不重样），请换菜或调整日期",
+            detail="保存排期失败：数据冲突（例如该日期已有其他记录）",
         )
 
 
@@ -578,7 +596,7 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn) -> None:
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail="该菜品在本自然月已排在其他日期（周槽位与按日排期共用「一月不重样」规则），请换菜或调整槽位",
+            detail="保存周菜单槽位失败：数据冲突（例如槽位或关联约束）",
         )
 
 
@@ -659,6 +677,7 @@ def dashboard_meal_summary(
                 today_meals_to_prepare=int(row.today_meals_to_prepare),
                 tomorrow_leave_members=int(row.tomorrow_leave_members),
                 tomorrow_meals_to_prepare=int(row.tomorrow_meals_to_prepare),
+                today_expire_one_unit_members=int(row.today_expire_one_unit_members),
                 from_snapshot=True,
                 snapshot_recorded_at=row.recorded_at,
             )
@@ -667,6 +686,7 @@ def dashboard_meal_summary(
     tp = total_meal_units_for_delivery_sheet(db, delivery_date=anchor)
     nl = count_leave_members_for_delivery_day(db, day_after)
     np = total_meal_units_for_delivery_sheet(db, delivery_date=day_after)
+    te = count_expire_one_unit_members_for_business_day(db, delivery_date=anchor)
 
     out = DashboardMealSummaryOut(
         shanghai_today=cal_today,
@@ -675,6 +695,7 @@ def dashboard_meal_summary(
         today_meals_to_prepare=tp,
         tomorrow_leave_members=nl,
         tomorrow_meals_to_prepare=np,
+        today_expire_one_unit_members=te,
         from_snapshot=False,
         snapshot_recorded_at=None,
     )
@@ -689,6 +710,7 @@ def dashboard_meal_summary(
                 today_meals_to_prepare=tp,
                 tomorrow_leave_members=nl,
                 tomorrow_meals_to_prepare=np,
+                today_expire_one_unit_members=te,
                 recorded_at=now,
             )
             db.add(row)
@@ -697,6 +719,7 @@ def dashboard_meal_summary(
             row.today_meals_to_prepare = tp
             row.tomorrow_leave_members = nl
             row.tomorrow_meals_to_prepare = np
+            row.today_expire_one_unit_members = te
             row.recorded_at = now
         db.commit()
         out = DashboardMealSummaryOut(
@@ -706,6 +729,7 @@ def dashboard_meal_summary(
             today_meals_to_prepare=out.today_meals_to_prepare,
             tomorrow_leave_members=out.tomorrow_leave_members,
             tomorrow_meals_to_prepare=out.tomorrow_meals_to_prepare,
+            today_expire_one_unit_members=out.today_expire_one_unit_members,
             from_snapshot=False,
             snapshot_recorded_at=row.recorded_at,
         )

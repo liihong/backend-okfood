@@ -1905,6 +1905,45 @@
   width: 100%;
 }
 
+.dish-internal-sop-banner {
+  margin-bottom: 1.25rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  background: #f8fafc;
+  padding: 0.75rem 1rem;
+}
+
+.dish-internal-sop-summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  color: #475569;
+  list-style: none;
+}
+
+.dish-internal-sop-summary::-webkit-details-marker {
+  display: none;
+}
+
+.dish-internal-sop-content {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.dish-internal-sop-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.dish-internal-sop-list li {
+  margin-bottom: 0.35rem;
+}
+
 .dish-toolbar {
   display: flex;
   align-items: center;

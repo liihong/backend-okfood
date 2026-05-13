@@ -87,6 +87,10 @@ function mapWeeklyListItem(item, index) {
   const pic = item.pic ?? item.image_url ?? item.img
   const rowKey =
     dishId || (date ? `${date}-${slot != null ? slot : index}` : `week-${index}`)
+  const spiceLabel =
+    typeof item.spice_label === 'string' && item.spice_label.trim()
+      ? item.spice_label.trim()
+      : ''
   return {
     dishId,
     serviceDate: date,
@@ -110,6 +114,7 @@ function mapWeeklyListItem(item, index) {
       item.singleOrderPriceYuan,
     img:
       (typeof pic === 'string' && pic) || (dishId ? PLACEHOLDER_IMG : ''),
+    spiceLabel,
   }
 }
 
@@ -276,6 +281,10 @@ export function mapMenuDetail(raw) {
       raw.single_stock_remaining != null && raw.single_stock_remaining !== ''
         ? Math.max(0, Math.floor(Number(raw.single_stock_remaining)))
         : null,
+    spiceLabel:
+      typeof raw.spice_label === 'string' && raw.spice_label.trim()
+        ? raw.spice_label.trim()
+        : '',
   }
 }
 

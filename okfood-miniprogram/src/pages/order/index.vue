@@ -42,7 +42,10 @@
               />
             </view>
             <view class="dish-body">
-              <text class="dish-name">{{ m.name }}</text>
+              <view class="dish-title-row">
+                <text class="dish-name">{{ m.name }}</text>
+                <text v-if="m.spiceLabel" class="dish-spice-pill">{{ m.spiceLabel }}</text>
+              </view>
               <view class="price-row">
                 <text class="price-label">自律体验价</text>
                 <text
@@ -345,11 +348,32 @@ function onImgErr(item) {
   flex-direction: column;
 }
 
+.dish-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12rpx;
+  margin-bottom: 4rpx;
+}
+
 .dish-name {
+  flex: 1;
+  min-width: 0;
   font-size: 26rpx;
   font-weight: 950;
   color: #333;
-  margin-bottom: 4rpx;
+}
+
+.dish-spice-pill {
+  flex-shrink: 0;
+  font-size: 18rpx;
+  font-weight: 900;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1rpx solid #fed7aa;
+  padding: 4rpx 12rpx;
+  border-radius: 12rpx;
+  line-height: 1.3;
 }
 
 .price-row {

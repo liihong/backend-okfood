@@ -28,6 +28,9 @@ class RechargeIn(BaseModel):
     plan_type: PlanType | None = None
 
 
+DishSpiceLevelCode = Literal["none", "mild", "medium", "hot"]
+
+
 class DishUpsertIn(BaseModel):
     """新建时省略 id；更新时带 id。"""
 
@@ -44,6 +47,12 @@ class DishUpsertIn(BaseModel):
         decimal_places=2,
         description="单点售价(元)，可空表示未定价",
     )
+    spice_level: DishSpiceLevelCode | None = Field(None, description="辣度：none 不辣 / mild 微微辣 / medium 微辣 / hot 较辣")
+    internal_view_sop: str | None = Field(
+        None,
+        max_length=16000,
+        description="内部查看操作说明，不对会员端返回",
+    )
 
 
 class DishAdminOut(BaseModel):
@@ -54,6 +63,8 @@ class DishAdminOut(BaseModel):
     is_enabled: bool
     category_id: int | None
     single_order_price_yuan: str | None = Field(None, description="单点售价(元)，字符串保留两位小数")
+    spice_level: DishSpiceLevelCode | None = None
+    internal_view_sop: str | None = None
     created_at: str
 
 
@@ -342,6 +353,11 @@ class DashboardMealSummaryOut(BaseModel):
     today_meals_to_prepare: int = Field(..., description="今日需准备餐品份数（与大表分组合计一致）")
     tomorrow_leave_members: int = Field(..., description="明日请假会员数")
     tomorrow_meals_to_prepare: int = Field(..., description="明日需准备餐品份数")
+    today_expire_one_unit_members: int = Field(
+        ...,
+        ge=0,
+        description="锚定日应履约（到家+自提口径）且剩余次数恰为 1 次（balance 等于每配送日份数）的会员数",
+    )
     from_snapshot: bool = Field(False, description="过去日：是否直接读取 admin_dashboard_biz_day_snapshots")
     snapshot_recorded_at: datetime | None = Field(
         None, description="归档写入时间；当日实时计算时通常为空（过去日首算写入后同次响应亦可为空）"
