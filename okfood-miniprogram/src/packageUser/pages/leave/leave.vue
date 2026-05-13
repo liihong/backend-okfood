@@ -41,18 +41,14 @@
           <text class="leave-h3">多天请假 (出差/旅游等)</text>
           <text class="leave-tip leave-tip--range">* 须在每日 {{ formatDeadlineHint(leaveDeadlineTime) }} 前提交，与上方快速请假相同 👌</text>
           <view class="date-group">
-            <picker mode="date" :value="rangeStart" @change="onStart">
-              <view class="date-item">
-                <text class="date-label">开始日期</text>
-                <text class="date-val">{{ rangeStart || '年 / 月 / 日' }}</text>
-              </view>
-            </picker>
-            <picker mode="date" :value="rangeEnd" @change="onEnd">
-              <view class="date-item">
-                <text class="date-label">结束日期</text>
-                <text class="date-val">{{ rangeEnd || '年 / 月 / 日' }}</text>
-              </view>
-            </picker>
+            <view class="date-item" @click="openRangeDatePick('start')">
+              <text class="date-label">开始日期</text>
+              <text class="date-val">{{ rangeStart || '年 / 月 / 日' }}</text>
+            </view>
+            <view class="date-item" @click="openRangeDatePick('end')">
+              <text class="date-label">结束日期</text>
+              <text class="date-val">{{ rangeEnd || '年 / 月 / 日' }}</text>
+            </view>
             <button class="btn-submit-range" @click="submitRange">提交多天计划</button>
           </view>
         </view>
@@ -67,6 +63,33 @@
         </view>
       </view>
     </scroll-view>
+
+    <!-- 原生 picker 在最小日期前仍会露出相邻行；用 picker-view 只渲染合法日期 -->
+    <view v-if="rangePickKind" class="range-pick-mask" @click.self="closeRangeDatePick">
+      <view class="range-pick-sheet" @click.stop>
+        <view class="range-pick-bar">
+          <text class="range-pick-bar__btn range-pick-bar__btn--cancel" @click="closeRangeDatePick">取消</text>
+          <text class="range-pick-bar__title">{{ rangePickKind === 'start' ? '开始日期' : '结束日期' }}</text>
+          <text class="range-pick-bar__btn range-pick-bar__btn--ok" @click="confirmRangeDatePick">确定</text>
+        </view>
+        <picker-view
+          class="range-pick-view"
+          :value="pvValue"
+          indicator-style="height: 72rpx"
+          @change="onRangePickerViewChange"
+        >
+          <picker-view-column>
+            <view v-for="y in yearOpts" :key="'y' + y" class="range-pick-cell">{{ y }}年</view>
+          </picker-view-column>
+          <picker-view-column>
+            <view v-for="m in monthOpts" :key="'m' + m" class="range-pick-cell">{{ m }}月</view>
+          </picker-view-column>
+          <picker-view-column>
+            <view v-for="d in dayOpts" :key="'d' + d" class="range-pick-cell">{{ d }}日</view>
+          </picker-view-column>
+        </picker-view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -102,6 +125,17 @@ const leaveDeadlineTime = ref('21:00:00')
  * 部分机型/弱网下 uni.request 可能长时间不回调；单独缩短 timeout 并配合 race 硬截止，避免「一直正在同步」。
  */
 const LEAVE_ME_SYNC_MS = 20000
+/** 多天请假可选的最远日期（相对「明天」） */
+const RANGE_PICK_DAYS_MAX = 730
+
+/** 自定义日期弹层：picker-view 列中不含最小日之前的项 */
+const rangePickKind = ref(null)
+const rangePickLo = ref('')
+const rangePickHi = ref('')
+const yearOpts = ref([])
+const monthOpts = ref([])
+const dayOpts = ref([])
+const pvValue = ref([0, 0, 0])
 
 function shanghaiTodayYmd() {
   try {
@@ -142,6 +176,132 @@ function addDaysYmdShanghai(ymd, deltaDays) {
   const d = parts.find((p) => p.type === 'day')?.value
   if (y && m && d) return `${y}-${m}-${d}`
   return ymd
+}
+
+function ymdParts(ymd) {
+  const raw = String(ymd || '').slice(0, 10)
+  const [ys, ms, ds] = raw.split('-')
+  const y = Number(ys)
+  const m = Number(ms)
+  const d = Number(ds)
+  return { y, m, d }
+}
+
+function ymdStr(y, m, d) {
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+}
+
+function daysInMonth(y, m) {
+  return new Date(y, m, 0).getDate()
+}
+
+function clampYmdToRange(ymd, lo, hi) {
+  if (!ymd || ymd < lo) return lo
+  if (ymd > hi) return hi
+  return ymd
+}
+
+function applyPickerState(lo, hi, ymdIn) {
+  let ymd = clampYmdToRange(ymdIn, lo, hi)
+  let { y, m, d } = ymdParts(ymd)
+  const dim = daysInMonth(y, m)
+  if (d > dim) d = dim
+  ymd = clampYmdToRange(ymdStr(y, m, d), lo, hi)
+  ;({ y, m, d } = ymdParts(ymd))
+
+  const loP = ymdParts(lo)
+  const hiP = ymdParts(hi)
+  const years = []
+  for (let yy = loP.y; yy <= hiP.y; yy++) years.push(yy)
+  yearOpts.value = years
+
+  let mLow = 1
+  let mHigh = 12
+  if (y === loP.y) mLow = loP.m
+  if (y === hiP.y) mHigh = hiP.m
+  const months = []
+  for (let mm = mLow; mm <= mHigh; mm++) months.push(mm)
+  monthOpts.value = months
+  if (m < mLow) m = mLow
+  if (m > mHigh) m = mHigh
+
+  let dLow = 1
+  let dHigh = daysInMonth(y, m)
+  if (y === loP.y && m === loP.m) dLow = loP.d
+  if (y === hiP.y && m === hiP.m) dHigh = Math.min(dHigh, hiP.d)
+  const days = []
+  for (let dd = dLow; dd <= dHigh; dd++) days.push(dd)
+  dayOpts.value = days
+  if (d < dLow) d = dLow
+  if (d > dHigh) d = dHigh
+
+  const iy = years.indexOf(y)
+  const im = months.indexOf(m)
+  const id = days.indexOf(d)
+  pvValue.value = [Math.max(0, iy), Math.max(0, im), Math.max(0, id)]
+}
+
+function openRangeDatePick(kind) {
+  const loGlobal = rangePickerMinYmd.value
+  const hiGlobal = addDaysYmdShanghai(loGlobal, RANGE_PICK_DAYS_MAX)
+  const lo = kind === 'end' ? rangeEndPickerMinYmd.value : loGlobal
+  const hi = hiGlobal
+  rangePickLo.value = lo
+  rangePickHi.value = hi
+  rangePickKind.value = kind
+  const raw = kind === 'start' ? rangeStart.value : rangeEnd.value
+  const cur = raw && raw >= lo && raw <= hi ? raw : lo
+  applyPickerState(lo, hi, cur)
+  rangePickKind.value = kind
+}
+
+function closeRangeDatePick() {
+  rangePickKind.value = null
+}
+
+function onRangePickerViewChange(e) {
+  const lo = rangePickLo.value
+  const hi = rangePickHi.value
+  const [iyRaw, imRaw, idRaw] = (e.detail.value || [0, 0, 0]).map(Number)
+  const years = yearOpts.value
+  const y = years[Math.min(Math.max(0, iyRaw), years.length - 1)]
+  const loP = ymdParts(lo)
+  const hiP = ymdParts(hi)
+  let mLow = 1
+  let mHigh = 12
+  if (y === loP.y) mLow = loP.m
+  if (y === hiP.y) mHigh = hiP.m
+  const tempMonths = []
+  for (let mm = mLow; mm <= mHigh; mm++) tempMonths.push(mm)
+  const m = tempMonths[Math.min(Math.max(0, imRaw), tempMonths.length - 1)]
+  let dLow = 1
+  let dHigh = daysInMonth(y, m)
+  if (y === loP.y && m === loP.m) dLow = loP.d
+  if (y === hiP.y && m === hiP.m) dHigh = Math.min(dHigh, hiP.d)
+  const span = Math.max(0, dHigh - dLow)
+  const d = dLow + Math.min(Math.max(0, idRaw), span)
+  applyPickerState(lo, hi, ymdStr(y, m, d))
+}
+
+function confirmRangeDatePick() {
+  const y = yearOpts.value[pvValue.value[0]]
+  const m = monthOpts.value[pvValue.value[1]]
+  const d = dayOpts.value[pvValue.value[2]]
+  if (y == null || m == null || d == null) {
+    closeRangeDatePick()
+    return
+  }
+  const ymd = ymdStr(y, m, d)
+  const lo = rangePickLo.value
+  const hi = rangePickHi.value
+  const v = clampYmdToRange(ymd, lo, hi)
+  if (rangePickKind.value === 'start') {
+    rangeStart.value = v
+    if (rangeEnd.value && rangeEnd.value < v) rangeEnd.value = v
+  } else {
+    rangeEnd.value = v
+  }
+  closeRangeDatePick()
 }
 
 /** 已有「明天请假」或已设置区间（含尚未开始的未来区间）：只展示状态与取消，不展示新提交入口 */
@@ -188,6 +348,16 @@ function formatDeadlineHint(t) {
 const isRangeOnlyLeave = computed(
   () => Boolean(serverLeaveStart.value && serverLeaveEnd.value),
 )
+
+/** 多天请假：可选日期从上海「明天」起，当日及更早不在选择器中展示 */
+const rangePickerMinYmd = computed(() => shanghaiTomorrowYmd())
+
+/** 结束日不得早于开始日，且不得早于「明天」 */
+const rangeEndPickerMinYmd = computed(() => {
+  const min = rangePickerMinYmd.value
+  const rs = rangeStart.value
+  return rs && rs >= min ? rs : min
+})
 
 const activeLeaveTitle = computed(() => {
   if (isRangeOnlyLeave.value) return '当前区间请假'
@@ -370,13 +540,6 @@ async function toggleTomorrow() {
   }
 }
 
-function onStart(e) {
-  rangeStart.value = e.detail.value
-}
-function onEnd(e) {
-  rangeEnd.value = e.detail.value
-}
-
 async function submitRange() {
   if (leaveActionBusy.value) return
   if (!rangeStart.value || !rangeEnd.value) {
@@ -385,6 +548,11 @@ async function submitRange() {
   }
   if (rangeStart.value > rangeEnd.value) {
     uni.showToast({ title: '开始日期不能晚于结束日期', icon: 'none' })
+    return
+  }
+  const minDay = shanghaiTomorrowYmd()
+  if (rangeStart.value < minDay || rangeEnd.value < minDay) {
+    uni.showToast({ title: '多天请假须从明天起选日期', icon: 'none' })
     return
   }
   leaveActionBusy.value = true
@@ -585,5 +753,65 @@ async function submitRange() {
   margin-top: 20rpx;
   border: none;
   box-shadow: 0 20rpx 40rpx rgba(250, 204, 21, 0.2);
+}
+
+.range-pick-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.range-pick-sheet {
+  background: #fff;
+  border-radius: 32rpx 32rpx 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.range-pick-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 32rpx;
+  border-bottom: 1px solid $ok-slate-100;
+}
+
+.range-pick-bar__title {
+  font-size: 30rpx;
+  font-weight: 950;
+  color: $ok-slate-600;
+}
+
+.range-pick-bar__btn {
+  font-size: 30rpx;
+  font-weight: 800;
+  padding: 12rpx 20rpx;
+}
+
+.range-pick-bar__btn--cancel {
+  color: $ok-slate-400;
+}
+
+.range-pick-bar__btn--ok {
+  color: $ok-forest-green;
+}
+
+.range-pick-view {
+  width: 100%;
+  height: 440rpx;
+}
+
+.range-pick-cell {
+  line-height: 72rpx;
+  text-align: center;
+  font-size: 32rpx;
+  font-weight: 800;
+  color: $ok-slate-800;
 }
 </style>

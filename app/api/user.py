@@ -22,7 +22,12 @@ from app.integrations.wechat_mini import (
 
 from app.schemas.common import TokenResponse
 
-from app.schemas.member_address import MemberAddressCreateIn, MemberAddressUpdateIn
+from app.schemas.member_address import (
+    DeliveryRegionCheckIn,
+    DeliveryRegionCheckOut,
+    MemberAddressCreateIn,
+    MemberAddressUpdateIn,
+)
 
 from app.schemas.admin import FileUploadOut
 
@@ -45,7 +50,13 @@ from app.schemas.user import (
 from app.services.member_delivery_deduction_service import list_member_delivery_deductions
 from app.services.oss_upload_service import upload_member_avatar_bytes
 
-from app.services.member_address_service import create_address, delete_address, list_addresses, update_address
+from app.services.member_address_service import (
+    check_coords_in_delivery_region,
+    create_address,
+    delete_address,
+    list_addresses,
+    update_address,
+)
 
 from app.services.member_service import (
 
@@ -194,11 +205,15 @@ def activate(body: ActivateIn, db: SessionDep, member_id: int = Depends(member_s
 
 @router.post("/leave")
 
-def leave(body: LeaveIn, db: SessionDep, member_id: int = Depends(member_subject)):
+def leave(request: Request, body: LeaveIn, db: SessionDep, member_id: int = Depends(member_subject)):
 
     """请假 / 取消：`clear_tomorrow` 仅取消「明天请假」；`cancel` 清空明天与区间。"""
 
-    member = leave_request(db, member_id, body.type, body.start, body.end)
+    ip = resolve_request_client_ip(
+        request.headers.get("x-forwarded-for"),
+        request.client.host if request.client else None,
+    )
+    member = leave_request(db, member_id, body.type, body.start, body.end, ip_address=ip)
 
     return success(data=dump_model(member), msg="请假状态已更新")
 
@@ -243,6 +258,25 @@ def read_addresses_me(db: SessionDep, member_id: int = Depends(member_subject)):
 
 
 
+@router.post("/me/delivery-region/check")
+@limiter.limit("60/minute")
+def check_delivery_region_me(
+    request: Request,
+    body: DeliveryRegionCheckIn,
+    db: SessionDep,
+    _member_id: int = Depends(member_subject),
+):
+    """地图选点是否落在启用配送片区内：命中返回片区 id/名称；未命中 in_region=false。"""
+    _ = request
+    in_region, rid, name = check_coords_in_delivery_region(
+        db, float(body.location.lng), float(body.location.lat)
+    )
+    payload = DeliveryRegionCheckOut(in_region=in_region, delivery_region_id=rid, region_name=name)
+    return success(data=dump_model(payload), msg="校验完成")
+
+
+
+
 
 @router.post("/me/addresses")
 
@@ -252,7 +286,11 @@ def add_address_me(request: Request, body: MemberAddressCreateIn, db: SessionDep
 
     """新增配送地址：高德地理编码（失败则坐标为空，区域保留客户端或「未分配」）；首条地址自动设为默认。"""
 
-    out = create_address(db, member_id, body)
+    ip = resolve_request_client_ip(
+        request.headers.get("x-forwarded-for"),
+        request.client.host if request.client else None,
+    )
+    out = create_address(db, member_id, body, ip_address=ip)
 
     return success(data=dump_model(out), msg="保存成功")
 
@@ -264,6 +302,8 @@ def add_address_me(request: Request, body: MemberAddressCreateIn, db: SessionDep
 
 def patch_address_me(
 
+    request: Request,
+
     address_id: int,
 
     body: MemberAddressUpdateIn,
@@ -274,7 +314,11 @@ def patch_address_me(
 
 ):
 
-    out = update_address(db, member_id, address_id, body)
+    ip = resolve_request_client_ip(
+        request.headers.get("x-forwarded-for"),
+        request.client.host if request.client else None,
+    )
+    out = update_address(db, member_id, address_id, body, ip_address=ip)
 
     return success(data=dump_model(out), msg="已更新")
 
@@ -284,9 +328,13 @@ def patch_address_me(
 
 @router.delete("/me/addresses/{address_id}")
 
-def remove_address_me(address_id: int, db: SessionDep, member_id: int = Depends(member_subject)):
+def remove_address_me(request: Request, address_id: int, db: SessionDep, member_id: int = Depends(member_subject)):
 
-    delete_address(db, member_id, address_id)
+    ip = resolve_request_client_ip(
+        request.headers.get("x-forwarded-for"),
+        request.client.host if request.client else None,
+    )
+    delete_address(db, member_id, address_id, ip_address=ip)
 
     return success(msg="已删除")
 
@@ -451,7 +499,7 @@ def sync_member_card_order_after_pay(
 
 @router.patch("/profile")
 
-def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends(member_subject)):
+def patch_profile(request: Request, body: ProfilePatchIn, db: SessionDep, member_id: int = Depends(member_subject)):
 
     updates = body.model_dump(exclude_unset=True)
 
@@ -460,6 +508,11 @@ def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends
         member = get_member(db, member_id)
 
         return success(data=dump_model(member), msg="获取成功")
+
+    ip = resolve_request_client_ip(
+        request.headers.get("x-forwarded-for"),
+        request.client.host if request.client else None,
+    )
 
     set_avatar = "avatar_url" in updates
 
@@ -546,6 +599,8 @@ def patch_profile(body: ProfilePatchIn, db: SessionDep, member_id: int = Depends
         set_daily_meal_units=set_units,
 
         daily_meal_units=body.daily_meal_units if set_units else None,
+
+        ip_address=ip,
 
     )
 

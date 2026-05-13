@@ -49,6 +49,18 @@ from app.services.member_address_service import (
     upsert_default_address_after_register,
 )
 
+from app.services.member_operation_log_service import (
+    OP_LEAVE_CANCEL,
+    OP_LEAVE_CLEAR_TOMORROW,
+    OP_LEAVE_RANGE,
+    OP_LEAVE_TOMORROW,
+    OP_PAUSE_DELIVERY,
+    OP_RESUME_DELIVERY,
+    OP_UPDATE_DAILY_UNITS,
+    OP_UPDATE_DELIVERY_START,
+    OP_UPDATE_STORE_PICKUP,
+    record_member_operation,
+)
 from app.services.region_assignment import assign_region_for_coords
 from app.services.store_config_service import ensure_app_settings_row
 
@@ -457,6 +469,8 @@ def patch_member_profile(
 
     daily_meal_units: int | None = None,
 
+    ip_address: str | None = None,
+
 ) -> MemberOut:
 
     m = db.get(Member, member_id)
@@ -464,6 +478,15 @@ def patch_member_profile(
     if not m or m.deleted_at is not None:
 
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    # 采集变更前关键字段，供操作日志 before/after 对比
+    prev_snapshot = {
+        "daily_meal_units": int(m.daily_meal_units or 1),
+        "delivery_deferred": bool(m.delivery_deferred),
+        "store_pickup": bool(m.store_pickup),
+        "delivery_start_date": m.delivery_start_date.isoformat() if m.delivery_start_date else None,
+        "is_active": bool(m.is_active),
+    }
 
     if set_daily_meal_units and daily_meal_units is not None:
 
@@ -598,6 +621,75 @@ def patch_member_profile(
 
         )
 
+    # 操作日志：仅记录「争议易扯皮」的字段变化（份数/暂停/自提/起送日）
+    new_snapshot = {
+        "daily_meal_units": int(m.daily_meal_units or 1),
+        "delivery_deferred": bool(m.delivery_deferred),
+        "store_pickup": bool(m.store_pickup),
+        "delivery_start_date": m.delivery_start_date.isoformat() if m.delivery_start_date else None,
+        "is_active": bool(m.is_active),
+    }
+    if set_daily_meal_units and prev_snapshot["daily_meal_units"] != new_snapshot["daily_meal_units"]:
+        record_member_operation(
+            db,
+            member_id=member_id,
+            operation_type=OP_UPDATE_DAILY_UNITS,
+            summary=(
+                f"修改每日送达份数 {prev_snapshot['daily_meal_units']}→{new_snapshot['daily_meal_units']}"
+            ),
+            before={"daily_meal_units": prev_snapshot["daily_meal_units"]},
+            after={"daily_meal_units": new_snapshot["daily_meal_units"]},
+            ip_address=ip_address,
+        )
+    if set_delivery_deferred and prev_snapshot["delivery_deferred"] != new_snapshot["delivery_deferred"]:
+        record_member_operation(
+            db,
+            member_id=member_id,
+            operation_type=(
+                OP_PAUSE_DELIVERY if new_snapshot["delivery_deferred"] else OP_RESUME_DELIVERY
+            ),
+            summary="暂停配送" if new_snapshot["delivery_deferred"] else "取消暂停配送",
+            before={"delivery_deferred": prev_snapshot["delivery_deferred"]},
+            after={
+                "delivery_deferred": new_snapshot["delivery_deferred"],
+                "delivery_start_date": new_snapshot["delivery_start_date"],
+                "store_pickup": new_snapshot["store_pickup"],
+            },
+            ip_address=ip_address,
+        )
+    if set_store_pickup and prev_snapshot["store_pickup"] != new_snapshot["store_pickup"]:
+        record_member_operation(
+            db,
+            member_id=member_id,
+            operation_type=OP_UPDATE_STORE_PICKUP,
+            summary=("改为门店自提" if new_snapshot["store_pickup"] else "改为配送到家"),
+            before={"store_pickup": prev_snapshot["store_pickup"]},
+            after={"store_pickup": new_snapshot["store_pickup"]},
+            ip_address=ip_address,
+        )
+    if (
+        set_delivery_start
+        and not (set_delivery_deferred and prev_snapshot["delivery_deferred"] != new_snapshot["delivery_deferred"])
+        and prev_snapshot["delivery_start_date"] != new_snapshot["delivery_start_date"]
+    ):
+        prev_ds = prev_snapshot["delivery_start_date"] or "-"
+        new_ds = new_snapshot["delivery_start_date"] or "-"
+        # 从暂停态切到配送/自提+选起送日，视作恢复配送
+        op_type = (
+            OP_RESUME_DELIVERY
+            if prev_snapshot["delivery_deferred"] and not new_snapshot["delivery_deferred"]
+            else OP_UPDATE_DELIVERY_START
+        )
+        record_member_operation(
+            db,
+            member_id=member_id,
+            operation_type=op_type,
+            summary=f"修改起送日 {prev_ds}→{new_ds}",
+            before={"delivery_start_date": prev_snapshot["delivery_start_date"]},
+            after={"delivery_start_date": new_snapshot["delivery_start_date"]},
+            ip_address=ip_address,
+        )
+
     db.commit()
 
     db.refresh(m)
@@ -638,6 +730,9 @@ def leave_request(
     end: date | None,
     *,
     skip_leave_deadline: bool = False,
+    ip_address: str | None = None,
+    source: str = "miniprogram",
+    operator: str | None = None,
 ) -> MemberOut:
 
     m = db.get(Member, member_id)
@@ -654,7 +749,15 @@ def leave_request(
 
     now = now_shanghai()
 
-
+    # 操作日志：采集变更前的请假状态，便于争议时还原
+    prev = {
+        "is_leaved_tomorrow": bool(m.is_leaved_tomorrow),
+        "tomorrow_leave_target_date": (
+            m.tomorrow_leave_target_date.isoformat() if m.tomorrow_leave_target_date else None
+        ),
+        "leave_range_start": m.leave_range_start.isoformat() if m.leave_range_start else None,
+        "leave_range_end": m.leave_range_end.isoformat() if m.leave_range_end else None,
+    }
 
     if typ == LeaveType.CANCEL:
 
@@ -714,7 +817,39 @@ def leave_request(
 
         raise HTTPException(status_code=400, detail="不支持的请假类型")
 
-
+    after = {
+        "is_leaved_tomorrow": bool(m.is_leaved_tomorrow),
+        "tomorrow_leave_target_date": (
+            m.tomorrow_leave_target_date.isoformat() if m.tomorrow_leave_target_date else None
+        ),
+        "leave_range_start": m.leave_range_start.isoformat() if m.leave_range_start else None,
+        "leave_range_end": m.leave_range_end.isoformat() if m.leave_range_end else None,
+    }
+    if typ == LeaveType.TOMORROW:
+        op_type = OP_LEAVE_TOMORROW
+        summary = f"明天请假：{after['tomorrow_leave_target_date'] or '-'}"
+    elif typ == LeaveType.RANGE:
+        op_type = OP_LEAVE_RANGE
+        s = after["leave_range_start"] or "-"
+        e = after["leave_range_end"] or "-"
+        summary = f"区间请假：{s} ~ {e}"
+    elif typ == LeaveType.CLEAR_TOMORROW:
+        op_type = OP_LEAVE_CLEAR_TOMORROW
+        summary = "取消明天请假"
+    else:
+        op_type = OP_LEAVE_CANCEL
+        summary = "取消所有请假"
+    record_member_operation(
+        db,
+        member_id=member_id,
+        operation_type=op_type,
+        summary=summary,
+        before=prev,
+        after=after,
+        ip_address=ip_address,
+        source=source,
+        operator=operator,
+    )
 
     db.commit()
 
@@ -730,6 +865,8 @@ def admin_member_leave(
     typ: LeaveType,
     start: date | None,
     end: date | None,
+    operator: str | None = None,
+    ip_address: str | None = None,
 ) -> MemberOut:
     """管理端代会员设置请假：不校验当日 `leave_deadline_time`（小程序端提交「明天/区间」仍受截止限制）。"""
 
@@ -737,7 +874,17 @@ def admin_member_leave(
     m = _member_by_phone(db, p)
     if not m:
         raise HTTPException(status_code=404, detail="用户不存在")
-    return leave_request(db, m.id, typ, start, end, skip_leave_deadline=True)
+    return leave_request(
+        db,
+        m.id,
+        typ,
+        start,
+        end,
+        skip_leave_deadline=True,
+        ip_address=ip_address,
+        source="admin",
+        operator=(f"admin:{operator}" if operator else None),
+    )
 
 
 def _week_start_and_slot(d: date) -> tuple[date, int]:

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(python -c \"from app.main import app; print\\('routes=', len\\(app.routes\\)\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/schemas/member_address.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('app/services/member_address_service.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('app/api/user.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"from app.api import user; from app.services import member_address_service; from app.schemas import member_address; print\\('imports OK'\\); print\\('check fn:', hasattr\\(member_address_service, 'check_coords_in_delivery_region'\\)\\); print\\('schema:', hasattr\\(member_address, 'DeliveryRegionCheckIn'\\), hasattr\\(member_address, 'DeliveryRegionCheckOut'\\)\\)\")"
+    ]
+  }
+}

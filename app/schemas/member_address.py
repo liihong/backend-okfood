@@ -43,6 +43,16 @@ class MemberAddressCreateIn(BaseModel):
     )
 
 
+class DeliveryRegionCheckIn(BaseModel):
+    location: Location = Field(..., description="地图选点坐标（gcj02）")
+
+
+class DeliveryRegionCheckOut(BaseModel):
+    in_region: bool = Field(..., description="坐标是否落在启用的配送片区内")
+    delivery_region_id: int | None = Field(None, description="命中片区 id；未命中为 null")
+    region_name: str | None = Field(None, description="命中片区名称；未命中为 null")
+
+
 class MemberAddressUpdateIn(BaseModel):
     contact_name: str | None = Field(None, min_length=1, max_length=100)
     contact_phone: str | None = Field(None, min_length=5, max_length=20)

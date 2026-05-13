@@ -9,6 +9,13 @@ from app.models.member_address import MemberAddress
 from app.schemas.member_address import MemberAddressCreateIn, MemberAddressOut, MemberAddressUpdateIn
 from app.schemas.user import Location
 from app.services import amap
+from app.services.member_operation_log_service import (
+    OP_ADDRESS_CREATE,
+    OP_ADDRESS_DELETE,
+    OP_ADDRESS_SET_DEFAULT,
+    OP_ADDRESS_UPDATE,
+    record_member_operation,
+)
 from app.services.region_assignment import assign_region_for_coords
 
 _MAX_ADDRESSES_PER_MEMBER = 20
@@ -415,6 +422,17 @@ def _assign_default_if_none(db: Session, member_id: int) -> None:
         last.is_default = True
 
 
+def check_coords_in_delivery_region(
+    db: Session, lng: float, lat: float
+) -> tuple[bool, int | None, str | None]:
+    """判断坐标是否落在启用的配送片区内；命中时返回片区 id 与名称。"""
+    r = assign_region_for_coords(db, float(lng), float(lat))
+    if r is None:
+        return False, None, None
+    name = (r.name or "").strip() or UNASSIGNED_DELIVERY_AREA
+    return True, int(r.id), name
+
+
 def list_addresses(db: Session, member_id: int) -> list[MemberAddressOut]:
     _ensure_member_exists(db, member_id)
     rows = db.scalars(
@@ -427,7 +445,7 @@ def list_addresses(db: Session, member_id: int) -> list[MemberAddressOut]:
     return [_to_out(r, nm) for r in rows]
 
 
-def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> MemberAddressOut:
+def create_address(db: Session, member_id: int, body: MemberAddressCreateIn, *, ip_address: str | None = None) -> MemberAddressOut:
     _ensure_member_exists(db, member_id)
     count = (
         db.scalar(select(func.count()).select_from(MemberAddress).where(MemberAddress.member_id == member_id)) or 0
@@ -475,16 +493,54 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn) -> 
         is_default=effective_default,
     )
     db.add(row)
+    db.flush()
+    record_member_operation(
+        db,
+        member_id=member_id,
+        operation_type=OP_ADDRESS_CREATE,
+        summary=f"新增配送地址：{full_address_line(map_eff, door_eff) or '(空)'}"
+        + ("（默认）" if effective_default else ""),
+        before=None,
+        after={
+            "address_id": int(row.id),
+            "contact_name": row.contact_name,
+            "contact_phone": row.contact_phone,
+            "map_location_text": map_eff,
+            "door_detail": door_eff,
+            "is_default": bool(effective_default),
+        },
+        ip_address=ip_address,
+    )
     db.commit()
     db.refresh(row)
     nm = delivery_region_name_map(db, {int(row.delivery_region_id)} if row.delivery_region_id else set())
     return _to_out(row, nm)
 
 
-def update_address(db: Session, member_id: int, address_id: int, body: MemberAddressUpdateIn) -> MemberAddressOut:
+def update_address(
+    db: Session,
+    member_id: int,
+    address_id: int,
+    body: MemberAddressUpdateIn,
+    *,
+    ip_address: str | None = None,
+    source: str = "miniprogram",
+    operator: str | None = None,
+) -> MemberAddressOut:
     row = db.get(MemberAddress, address_id)
     if not row or row.member_id != member_id:
         raise HTTPException(status_code=404, detail="地址不存在")
+
+    # 采集变更前快照，供操作日志 before/after 对比
+    prev = {
+        "contact_name": row.contact_name,
+        "contact_phone": row.contact_phone,
+        "map_location_text": row.map_location_text,
+        "door_detail": row.door_detail,
+        "remarks": row.remarks,
+        "is_default": bool(row.is_default),
+        "full_address": full_address_line(row.map_location_text, row.door_detail),
+    }
 
     coords_prev = _row_coords(row)
     prev_lng, prev_lat = (coords_prev[0], coords_prev[1]) if coords_prev else (None, None)
@@ -542,19 +598,71 @@ def update_address(db: Session, member_id: int, address_id: int, body: MemberAdd
         row.is_default = False
         _assign_default_if_none(db, member_id)
 
+    db.flush()
+    after = {
+        "address_id": int(row.id),
+        "contact_name": row.contact_name,
+        "contact_phone": row.contact_phone,
+        "map_location_text": row.map_location_text,
+        "door_detail": row.door_detail,
+        "remarks": row.remarks,
+        "is_default": bool(row.is_default),
+        "full_address": full_address_line(row.map_location_text, row.door_detail),
+    }
+    # 仅在 before/after 真正发生差异时记一次日志，避免无意义空操作
+    changed_keys = [k for k in after if prev.get(k) != after.get(k) and k != "address_id"]
+    if changed_keys:
+        only_set_default = changed_keys == ["is_default"] and after["is_default"] is True and not prev["is_default"]
+        op_type = OP_ADDRESS_SET_DEFAULT if only_set_default else OP_ADDRESS_UPDATE
+        if only_set_default:
+            summary = f"设为默认配送地址：{after['full_address'] or '(空)'}"
+        elif prev["full_address"] != after["full_address"]:
+            summary = f"修改配送地址：{prev['full_address'] or '(空)'} → {after['full_address'] or '(空)'}"
+        else:
+            summary = f"修改配送地址信息：{after['full_address'] or '(空)'}"
+        record_member_operation(
+            db,
+            member_id=member_id,
+            operation_type=op_type,
+            summary=summary,
+            before={"address_id": int(row.id), **{k: prev[k] for k in changed_keys if k in prev}},
+            after={k: after[k] for k in ["address_id", *changed_keys]},
+            ip_address=ip_address,
+            operator=operator,
+            source=source,
+        )
+
     db.commit()
     db.refresh(row)
     nm = delivery_region_name_map(db, {int(row.delivery_region_id)} if row.delivery_region_id else set())
     return _to_out(row, nm)
 
 
-def delete_address(db: Session, member_id: int, address_id: int) -> None:
+def delete_address(db: Session, member_id: int, address_id: int, *, ip_address: str | None = None) -> None:
     row = db.get(MemberAddress, address_id)
     if not row or row.member_id != member_id:
         raise HTTPException(status_code=404, detail="地址不存在")
     was_default = bool(row.is_default)
+    before = {
+        "address_id": int(row.id),
+        "contact_name": row.contact_name,
+        "contact_phone": row.contact_phone,
+        "map_location_text": row.map_location_text,
+        "door_detail": row.door_detail,
+        "is_default": was_default,
+        "full_address": full_address_line(row.map_location_text, row.door_detail),
+    }
     db.delete(row)
     db.flush()
     if was_default:
         _assign_default_if_none(db, member_id)
+    record_member_operation(
+        db,
+        member_id=member_id,
+        operation_type=OP_ADDRESS_DELETE,
+        summary=f"删除配送地址：{before['full_address'] or '(空)'}" + ("（原默认）" if was_default else ""),
+        before=before,
+        after=None,
+        ip_address=ip_address,
+    )
     db.commit()

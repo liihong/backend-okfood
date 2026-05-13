@@ -211,6 +211,29 @@ function applyCoordsAndPoiMeta(la, lo, meta) {
   return true
 }
 
+/**
+ * 选点后立即校验是否落在启用配送片区内。
+ * @returns {Promise<boolean>} 在范围内返回 true；否则弹窗提示并返回 false（不回填）
+ */
+async function ensureCoordsInDeliveryRegion(la, lo) {
+  try {
+    const resp = await request('/api/user/me/delivery-region/check', {
+      method: 'POST',
+      data: { location: { lng: lo, lat: la } },
+    })
+    const inRegion =
+      resp && typeof resp === 'object' ? resp.in_region === true : false
+    return inRegion
+  } catch (err) {
+    uni.showToast({
+      title: err instanceof Error ? err.message : '配送范围校验失败，请重试',
+      icon: 'none',
+      duration: 2800,
+    })
+    return false
+  }
+}
+
 function openChooseLocationCentered(lat, lng) {
   const opts = {}
   if (Number.isFinite(lat) && Number.isFinite(lng)) {
@@ -219,10 +242,26 @@ function openChooseLocationCentered(lat, lng) {
   }
   uni.chooseLocation({
     ...opts,
-    success(res) {
+    async success(res) {
       const name = String(res.name ?? '').trim()
       const la = res.latitude != null ? Number(res.latitude) : NaN
       const lo = res.longitude != null ? Number(res.longitude) : NaN
+      if (!Number.isFinite(la) || !Number.isFinite(lo)) {
+        uni.showToast({ title: '未获取到位置坐标，请重选', icon: 'none' })
+        return
+      }
+      uni.showLoading({ title: '校验配送范围…', mask: true })
+      const ok = await ensureCoordsInDeliveryRegion(la, lo)
+      uni.hideLoading()
+      if (!ok) {
+        uni.showModal({
+          title: '超出配送范围',
+          content: '当前位置不在配送范围内，请重新选择位置。',
+          showCancel: false,
+          confirmText: '我知道了',
+        })
+        return
+      }
       applyCoordsAndPoiMeta(la, lo, { name })
     },
     fail(err) {

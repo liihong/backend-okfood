@@ -12,6 +12,7 @@ from app.models.delivery_region import DeliveryRegion, DeliveryRegionCourier
 from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.models.member_card_order import MemberCardOrder
+from app.models.member_operation_log import MemberOperationLog
 from app.models.single_meal_order import SingleMealOrder
 from app.models.sf_same_city_callback import SfSameCityCallback
 from app.models.sf_same_city_push import SfSameCityPush
@@ -32,6 +33,7 @@ __all__ = [
     "Member",
     "MemberAddress",
     "MemberCardOrder",
+    "MemberOperationLog",
     "SingleMealOrder",
     "SfSameCityCallback",
     "SfSameCityPush",

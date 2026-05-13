@@ -68,6 +68,10 @@ from app.services.delivery_sheet_service import build_delivery_sheet
 from app.services.admin_delivery_fulfillment_service import admin_mark_subscription_fulfilled
 from app.services.member_delivery_deduction_service import list_member_delivered_dates_admin
 from app.services.member_address_service import list_addresses, update_address
+from app.services.member_operation_log_service import (
+    list_member_operations,
+    operation_log_to_dict,
+)
 from app.services.member_service import (
     admin_member_leave,
     admin_patch_member_profile,
@@ -80,6 +84,7 @@ from app.services.member_card_order_service import (
     update_card_order,
 )
 from app.services.finance_received_service import finance_received_summary
+from app.integrations.wechat_pay_v2 import resolve_request_client_ip
 from app.utils.response import dump_model, page_response, success
 
 router = APIRouter(prefix="/admin", tags=["管理端"])
@@ -499,15 +504,18 @@ def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_usernam
 
 
 @router.post("/member/leave")
-def member_leave(body: AdminMemberLeaveIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+def member_leave(request: Request, body: AdminMemberLeaveIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
     """代会员设置请假（明日 / 区间 / 取消），不受小程序当日请假截止时间限制。"""
-    _ = admin_username
+    xf = request.headers.get("x-forwarded-for")
+    ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
     member = admin_member_leave(
         db,
         phone=body.phone,
         typ=body.type,
         start=body.start,
         end=body.end,
+        operator=admin_username,
+        ip_address=ip,
     )
     return success(data=dump_model(member), msg="请假状态已更新")
 
@@ -551,6 +559,7 @@ def admin_member_delivered_dates(
 
 @router.patch("/users/{member_id}/addresses/{address_id}")
 def admin_member_address_patch(
+    request: Request,
     member_id: int,
     address_id: int,
     body: MemberAddressUpdateIn,
@@ -558,12 +567,51 @@ def admin_member_address_patch(
     admin_username: str = Depends(admin_subject),
 ):
     """管理端保存会员地址：可与小程序拆分一致（地点文案 / 门牌），坐标变更时服务端逆地理写入省市区并重算片区。"""
+    m = db.get(Member, member_id)
+    if not m or m.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="会员不存在")
+    xf = request.headers.get("x-forwarded-for")
+    ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
+    out = update_address(
+        db,
+        member_id,
+        address_id,
+        body,
+        ip_address=ip,
+        source="admin",
+        operator=f"admin:{admin_username}"[:100],
+    )
+    return success(data=dump_model(out), msg="地址已保存")
+
+
+@router.get("/users/{member_id}/operation-logs")
+def admin_member_operation_logs(
+    member_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_subject),
+    page: int = 1,
+    page_size: int = 20,
+    operation_type: str | None = None,
+):
+    """会员档案：查看该会员自助操作日志（暂停/恢复配送、修改份数、地址增删改等）。"""
     _ = admin_username
     m = db.get(Member, member_id)
     if not m or m.deleted_at is not None:
         raise HTTPException(status_code=404, detail="会员不存在")
-    out = update_address(db, member_id, address_id, body)
-    return success(data=dump_model(out), msg="地址已保存")
+    items, total = list_member_operations(
+        db,
+        member_id=member_id,
+        page=page,
+        page_size=page_size,
+        operation_type=operation_type,
+    )
+    return page_response(
+        items=[operation_log_to_dict(x) for x in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        msg="获取成功",
+    )
 
 
 @router.get("/dishes")
