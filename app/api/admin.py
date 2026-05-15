@@ -6,11 +6,14 @@ from fastapi.responses import Response as PlainResponse
 
 from app.core.deps import (
     ADMIN_ACCOUNT_DELIVERY,
+    ADMIN_ACCOUNT_SUPPORT,
     ROLE_ADMIN,
     ROLE_ADMIN_DELIVERY,
+    ROLE_ADMIN_SUPPORT,
     SessionDep,
+    admin_full_subject,
     admin_or_delivery_staff_subject,
-    admin_subject,
+    admin_staff_subject,
     issue_admin_token,
 )
 from app.models.member import Member
@@ -95,8 +98,15 @@ router = APIRouter(prefix="/admin", tags=["管理端"])
 def login(request: Request, body: AdminLoginIn, db: SessionDep):
     u = admin_login_user(db, body.username, body.password)
     role_raw = (getattr(u, "role", None) or "").strip().lower()
-    kind = "delivery" if role_raw == ADMIN_ACCOUNT_DELIVERY else "full"
-    jwt_role = ROLE_ADMIN_DELIVERY if kind == "delivery" else ROLE_ADMIN
+    if role_raw == ADMIN_ACCOUNT_DELIVERY:
+        kind = "delivery"
+        jwt_role = ROLE_ADMIN_DELIVERY
+    elif role_raw == ADMIN_ACCOUNT_SUPPORT:
+        kind = "support"
+        jwt_role = ROLE_ADMIN_SUPPORT
+    else:
+        kind = "full"
+        jwt_role = ROLE_ADMIN
     token = AdminLoginTokenOut(access_token=issue_admin_token(body.username, jwt_role=jwt_role), admin_kind=kind)
     return success(data=dump_model(token), msg="登录成功")
 
@@ -104,7 +114,7 @@ def login(request: Request, body: AdminLoginIn, db: SessionDep):
 @router.get("/dashboard-summary")
 def dashboard_summary(
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
     business_date: Annotated[
         date | None,
         Query(description="业务锚日(上海)，默认当日；早于今日时优先读归档快照"),
@@ -125,7 +135,7 @@ def dashboard_summary(
 
 
 @router.get("/finance/received-summary")
-def finance_received_summary_route(db: SessionDep, admin_username: str = Depends(admin_subject)):
+def finance_received_summary_route(db: SessionDep, admin_username: str = Depends(admin_full_subject)):
     """已收账款：累计 / 本月（上海自然月）/ 今日（上海自然日），按 updated_at 落入对应日界。"""
     _ = admin_username
     summary = finance_received_summary(db)
@@ -135,7 +145,7 @@ def finance_received_summary_route(db: SessionDep, admin_username: str = Depends
 @router.get("/delivery-sheet")
 def delivery_sheet(
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
     delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
     area: Annotated[str | None, Query(description="按默认配送地址所属片区筛选，可选")] = None,
     phone: Annotated[
@@ -157,7 +167,7 @@ def delivery_sheet(
 @router.get("/delivery-sf/preview", response_model=None)
 def delivery_sf_preview(
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
     delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
     area: Annotated[str | None, Query(description="同 delivery-sheet 片区筛选")] = None,
     phone: Annotated[str | None, Query(description="同 delivery-sheet 手机筛选")] = None,
@@ -177,7 +187,7 @@ def delivery_sf_preview(
 def delivery_sf_push(
     body: SfSameCityPushIn,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     """
     提交勾选的行到顺丰 ``createorder``；未勾选行忽略；同停靠点同业务日已成功的行会拒绝防重复。
@@ -290,7 +300,7 @@ def delivery_sf_cancel_push(
 def delivery_mark(
     body: AdminDeliveryMarkIn,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     """大表人工标记：配送到家 / 门店自提完成（扣次、写 delivery_logs；不增加骑手待结算）。"""
     admin_mark_subscription_fulfilled(
@@ -307,7 +317,7 @@ def delivery_mark(
 def users_stats(
     response: Response,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     """会员档案库顶栏：总会员数、生效中、已过期（与列表 validity 口径一致）。"""
     response.headers["Cache-Control"] = "no-store"
@@ -320,7 +330,7 @@ def users_stats(
 def users(
     response: Response,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
     q: str | None = None,
     page: int = 1,
     page_size: int = 20,
@@ -388,7 +398,7 @@ def users(
 def admin_delete_member_route(
     member_id: int,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     """删除会员：无业务流水时物理删除；否则逻辑删除并保留追溯数据。"""
     _ = admin_username
@@ -400,7 +410,7 @@ def admin_delete_member_route(
 def recharge(
     body: RechargeIn,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     """已废弃：次数入账须走开卡工单并同步，以便留存工单与 balance_logs.detail。"""
     _ = body, db, admin_username
@@ -413,7 +423,7 @@ def recharge(
 @router.get("/card-orders")
 def card_orders(
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
     q: str | None = None,
     pay_status: Annotated[str | None, Query(description="未缴 | 已缴")] = None,
     include_history: Annotated[
@@ -445,7 +455,7 @@ def card_orders(
 def card_orders_create(
     body: CardOrderCreateIn,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     out = create_card_order(db, body, operator=admin_username)
     return success(data=dump_model(out), msg="工单已创建")
@@ -456,7 +466,7 @@ def card_orders_patch(
     order_id: int,
     body: CardOrderPatchIn,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     out = update_card_order(db, order_id, body, operator=admin_username)
     return success(data=dump_model(out), msg="工单已更新")
@@ -466,7 +476,7 @@ def card_orders_patch(
 def card_orders_delete(
     order_id: int,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     _ = admin_username
     delete_card_order(db, order_id)
@@ -474,7 +484,7 @@ def card_orders_delete(
 
 
 @router.post("/member/profile")
-def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
     fs = body.model_fields_set
     member = admin_patch_member_profile(
         db,
@@ -504,7 +514,7 @@ def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_usernam
 
 
 @router.post("/member/leave")
-def member_leave(request: Request, body: AdminMemberLeaveIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+def member_leave(request: Request, body: AdminMemberLeaveIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
     """代会员设置请假（明日 / 区间 / 取消），不受小程序当日请假截止时间限制。"""
     xf = request.headers.get("x-forwarded-for")
     ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
@@ -524,7 +534,7 @@ def member_leave(request: Request, body: AdminMemberLeaveIn, db: SessionDep, adm
 def admin_member_addresses_list(
     member_id: int,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     """会员档案：列出该会员全部配送地址（含地图文案、门牌、经纬度与省市区）。"""
     _ = admin_username
@@ -539,7 +549,7 @@ def admin_member_addresses_list(
 def admin_member_delivered_dates(
     member_id: int,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     """会员档案：该会员订阅套餐已确认送达的配送业务日（去重），用于核对消费 / 履约记录。"""
     _ = admin_username
@@ -564,7 +574,7 @@ def admin_member_address_patch(
     address_id: int,
     body: MemberAddressUpdateIn,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     """管理端保存会员地址：可与小程序拆分一致（地点文案 / 门牌），坐标变更时服务端逆地理写入省市区并重算片区。"""
     m = db.get(Member, member_id)
@@ -588,7 +598,7 @@ def admin_member_address_patch(
 def admin_member_operation_logs(
     member_id: int,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
     page: int = 1,
     page_size: int = 20,
     operation_type: str | None = None,
@@ -617,7 +627,7 @@ def admin_member_operation_logs(
 @router.get("/dishes")
 def dishes(
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
     enabled_only: bool = False,
     q: Annotated[str | None, Query(description="按名称模糊筛选")] = None,
 ):
@@ -628,7 +638,7 @@ def dishes(
 
 
 @router.post("/dish")
-def dish_upsert(body: DishUpsertIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+def dish_upsert(body: DishUpsertIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
     _ = admin_username
     out = upsert_dish(db, body)
     return success(data=dump_model(out), msg="菜品已保存")
@@ -638,7 +648,7 @@ def dish_upsert(body: DishUpsertIn, db: SessionDep, admin_username: str = Depend
 def dish_delete(
     dish_id: int,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     _ = admin_username
     delete_dish(db, dish_id)
@@ -646,7 +656,7 @@ def dish_delete(
 
 
 @router.post("/menu/schedule")
-def menu_schedule(body: MenuScheduleAssignIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+def menu_schedule(body: MenuScheduleAssignIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
     """将某日排期绑定到菜品库中的 `dish_id`（同月同一菜仅能排一天）。"""
     _ = admin_username
     assign_menu_schedule(db, body)
@@ -654,7 +664,7 @@ def menu_schedule(body: MenuScheduleAssignIn, db: SessionDep, admin_username: st
 
 
 @router.get("/categories")
-def categories(db: SessionDep, admin_username: str = Depends(admin_subject)):
+def categories(db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
     """商品分类列表（含 code=weekly 的「每周餐品」）。"""
     _ = admin_username
     items = list_categories_admin(db)
@@ -662,7 +672,7 @@ def categories(db: SessionDep, admin_username: str = Depends(admin_subject)):
 
 
 @router.post("/category")
-def category_create(body: CategoryCreateIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+def category_create(body: CategoryCreateIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
     _ = admin_username
     out = create_category_admin(db, body)
     return success(data=dump_model(out), msg="分类已创建")
@@ -671,7 +681,7 @@ def category_create(body: CategoryCreateIn, db: SessionDep, admin_username: str 
 @router.get("/menu/weekly-slots")
 def menu_weekly_slots(
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
     week_start: Annotated[date | None, Query(description="指定周任意一天则只返回该周槽位；不传则返回本周+下周")] = None,
 ):
     """每周餐品槽位：不传参数时同时返回本周与下周，便于预告维护（无需翻周拷贝数据）。"""
@@ -680,7 +690,7 @@ def menu_weekly_slots(
 
 
 @router.post("/menu/weekly-slot")
-def menu_weekly_slot(body: WeeklySlotAssignIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+def menu_weekly_slot(body: WeeklySlotAssignIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
     """设置某周 slot（1–7）对应的菜品；`dish_id` 为空则清空该槽。"""
     _ = admin_username
     assign_weekly_menu_slot(db, body)
@@ -688,7 +698,7 @@ def menu_weekly_slot(body: WeeklySlotAssignIn, db: SessionDep, admin_username: s
 
 
 @router.post("/menu/day-total-stock")
-def menu_day_total_stock(body: MenuDayTotalStockIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+def menu_day_total_stock(body: MenuDayTotalStockIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
     """设置该周某一天对应菜品的日总份数；用于单次卡可售=总份数−当日应配送−已付单次。"""
     _ = admin_username
     set_weekly_slot_menu_total_stock(db, body)
@@ -696,14 +706,14 @@ def menu_day_total_stock(body: MenuDayTotalStockIn, db: SessionDep, admin_userna
 
 
 @router.post("/settings")
-def update_app_settings(body: SettingsIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+def update_app_settings(body: SettingsIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
     _ = admin_username
     update_settings(db, body)
     return success(msg="设置已更新")
 
 
 @router.get("/store-config")
-def admin_store_config_get(db: SessionDep, admin_username: str = Depends(admin_subject)):
+def admin_store_config_get(db: SessionDep, admin_username: str = Depends(admin_full_subject)):
     """门店基础信息：名称、Logo、地图锚点坐标（GCJ-02）。"""
     _ = admin_username
     cfg = get_store_config(db)
@@ -714,7 +724,7 @@ def admin_store_config_get(db: SessionDep, admin_username: str = Depends(admin_s
 def admin_store_config_put(
     body: StoreConfigUpdateIn,
     db: SessionDep,
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_full_subject),
 ):
     """更新门店配置；未传的字段保持不变（PATCH 语义）。"""
     _ = admin_username
@@ -723,7 +733,7 @@ def admin_store_config_put(
 
 
 @router.post("/member/address")
-def member_address(body: AdminAddressIn, db: SessionDep, admin_username: str = Depends(admin_subject)):
+def member_address(body: AdminAddressIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
     """修改会员地址并触发高德地理编码（失败则清空坐标）。"""
     member = admin_update_member_address(db, body.phone, body.address, operator=admin_username)
     return success(data=dump_model(member), msg="地址已更新")

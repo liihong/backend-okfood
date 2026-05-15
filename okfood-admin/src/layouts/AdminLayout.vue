@@ -21,11 +21,18 @@ const SIDEBAR_COLLAPSED_KEY = 'okfood-admin-sidebar-collapsed'
 const route = useRoute()
 
 const isDeliveryOnly = computed(() => adminKind.value === 'delivery')
+const isSupportOnly = computed(() => adminKind.value === 'support')
 
 /** 与模板绑定：明确布尔，避免 Element Plus 菜单缓存旧结构 */
 const showFullAdminMenus = computed(() => !isDeliveryOnly.value)
+/** 仅店主完整账号：财务中心、门店配置 */
+const showOwnerAdminMenus = computed(() => !isDeliveryOnly.value && !isSupportOnly.value)
 
-const portalSubtitle = computed(() => (isDeliveryOnly.value ? '配送管理' : 'SUPER ADMIN'))
+const portalSubtitle = computed(() => {
+  if (isDeliveryOnly.value) return '配送管理'
+  if (isSupportOnly.value) return '客服工作台'
+  return 'SUPER ADMIN'
+})
 
 const pageTitle = computed(() => route.meta.title || 'OK Fine Admin')
 
@@ -152,7 +159,7 @@ watch(sidebarCollapsedPref, (v) => {
           <el-menu-item index="/delivery-sf-orders">顺丰订单监控</el-menu-item>
         </el-sub-menu>
 
-        <el-menu-item v-if="showFullAdminMenus" index="/finance">
+        <el-menu-item v-if="showOwnerAdminMenus" index="/finance">
           <div class="menu-item-inner">
             <DollarSign :size="18" stroke-width="2" />
             <span class="menu-item-label">财务中心</span>
@@ -170,7 +177,7 @@ watch(sidebarCollapsedPref, (v) => {
           <el-menu-item index="/weekly-menu">本周菜单</el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="showFullAdminMenus" index="sub-system">
+        <el-sub-menu v-if="showOwnerAdminMenus" index="sub-system">
           <template #title>
             <div class="menu-item-inner">
               <Settings :size="18" stroke-width="2" />
@@ -188,7 +195,7 @@ watch(sidebarCollapsedPref, (v) => {
         @click="handleAdminLogout"
       >
         <div v-show="!sidebarCollapsed" class="admin-info">
-          <div class="avatar">{{ isDeliveryOnly ? '配送' : 'Admin' }}</div>
+          <div class="avatar">{{ isDeliveryOnly ? '配送' : isSupportOnly ? '客服' : 'Admin' }}</div>
           <span>安全退出</span>
         </div>
         <LogOut :size="16" />

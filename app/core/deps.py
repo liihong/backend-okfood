@@ -17,9 +17,11 @@ ROLE_MEMBER = "member"
 ROLE_COURIER = "courier"
 ROLE_ADMIN = "admin"
 ROLE_ADMIN_DELIVERY = "admin_delivery"
+ROLE_ADMIN_SUPPORT = "admin_support"
 
 ADMIN_ACCOUNT_FULL = "full"
 ADMIN_ACCOUNT_DELIVERY = "delivery"
+ADMIN_ACCOUNT_SUPPORT = "support"
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -75,12 +77,25 @@ def admin_subject(creds: HTTPAuthorizationCredentials | None = Depends(bearer_sc
     return sub
 
 
+def admin_staff_subject(creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> str:
+    """完整管理员或客服账号（不含财务中心、门店配置等「店主」专属接口）。"""
+    sub, role = _subject_from_bearer(creds)
+    if role not in (ROLE_ADMIN, ROLE_ADMIN_SUPPORT):
+        raise HTTPException(status_code=403, detail="需要管理端令牌")
+    return sub
+
+
+def admin_full_subject(creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> str:
+    """仅完整管理员（店主）：财务汇总、门店配置等。"""
+    return admin_subject(creds)
+
+
 def admin_or_delivery_staff_subject(
     creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> str:
-    """完整管理员 JWT 或「仅配送管理」后台账号 JWT。"""
+    """完整管理员、客服或「仅配送管理」后台账号 JWT。"""
     sub, role = _subject_from_bearer(creds)
-    if role not in (ROLE_ADMIN, ROLE_ADMIN_DELIVERY):
+    if role not in (ROLE_ADMIN, ROLE_ADMIN_DELIVERY, ROLE_ADMIN_SUPPORT):
         raise HTTPException(status_code=403, detail="需要管理员或配送管理账号令牌")
     return sub
 

@@ -12,10 +12,12 @@ import {
 import { useDeliveryRegionMapOverview } from '../../composables/useDeliveryRegionMapOverview.js'
 import DeliveryOverviewMap from './DeliveryOverviewMap.vue'
 import { UNASSIGNED_AREA_LABEL } from '../../utils/regionAssignment.js'
-import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
+import { apiJson, adminAccessToken, adminKind, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 
 const router = useRouter()
+
+const showStoreConfigShortcut = computed(() => adminKind.value === 'full')
 
 const dashboardStats = ref([])
 const dashboardStatsLoading = ref(false)
@@ -200,7 +202,12 @@ onMounted(() => {
             @change="onSummaryDateChange"
           />
         </label>
-        <button type="button" class="dro-btn-link" @click="router.push({ name: 'store-config' })">
+        <button
+          v-if="showStoreConfigShortcut"
+          type="button"
+          class="dro-btn-link"
+          @click="router.push({ name: 'store-config' })"
+        >
           门店配置 <ChevronRight :size="14" />
         </button>
         <button type="button" class="dro-btn-link" @click="router.push({ name: 'regions' })">

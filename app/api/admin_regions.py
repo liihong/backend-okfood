@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from app.core.deps import SessionDep, admin_or_delivery_staff_subject, admin_subject
+from app.core.deps import SessionDep, admin_or_delivery_staff_subject, admin_staff_subject
 from app.schemas.delivery_region import DeliveryRegionCreateIn, DeliveryRegionUpdateIn
 from app.services.delivery_region_map_overview_service import delivery_region_map_overview
 from app.services.delivery_region_service import (
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/admin", tags=["管理端-配送区域"])
 
 
 @router.get("/delivery-region-map-overview")
-def delivery_region_map_overview_route(db: SessionDep, _admin: str = Depends(admin_subject)):
+def delivery_region_map_overview_route(db: SessionDep, _admin: str = Depends(admin_staff_subject)):
     """配送区域 + 有余额会员坐标聚合，供营业概览地图一次性加载。"""
     payload = delivery_region_map_overview(db)
     return success(data=dump_model(payload), msg="获取成功")

@@ -13,9 +13,9 @@ class TokenResponse(BaseModel):
 
 
 class AdminLoginTokenOut(TokenResponse):
-    """登录响应：`admin_kind` 与 JWT `role`（admin / admin_delivery）一致。"""
+    """登录响应：`admin_kind` 与 JWT `role`（admin / admin_delivery / admin_support）一致。"""
 
-    admin_kind: Literal["full", "delivery"] = "full"
+    admin_kind: Literal["full", "delivery", "support"] = "full"
 
 
 class Pagination(BaseModel):

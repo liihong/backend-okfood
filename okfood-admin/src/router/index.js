@@ -77,7 +77,7 @@ const router = createRouter({
           path: 'finance',
           name: 'finance',
           component: FinanceView,
-          meta: { title: '财务中心', fullAdminOnly: true },
+          meta: { title: '财务中心', ownerAdminOnly: true },
         },
         {
           path: 'menu',
@@ -95,7 +95,7 @@ const router = createRouter({
           path: 'store-config',
           name: 'store-config',
           component: StoreConfigView,
-          meta: { title: '门店配置', fullAdminOnly: true },
+          meta: { title: '门店配置', ownerAdminOnly: true },
         },
       ],
     },
@@ -112,6 +112,14 @@ router.beforeEach((to) => {
   }
   if (to.name === 'login' && hasToken) {
     return { name: adminKind.value === 'delivery' ? 'regions' : 'dashboard' }
+  }
+  if (hasToken && to.meta.ownerAdminOnly) {
+    if (adminKind.value === 'delivery') {
+      return { name: 'regions', replace: true }
+    }
+    if (adminKind.value === 'support') {
+      return { name: 'dashboard', replace: true }
+    }
   }
   if (hasToken && to.meta.fullAdminOnly && adminKind.value === 'delivery') {
     return { name: 'regions', replace: true }

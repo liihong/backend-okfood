@@ -3,6 +3,7 @@
 示例：
   python scripts/create_admin.py admin your_password
   python scripts/create_admin.py courier_user secret --role delivery
+  python scripts/create_admin.py cs_user secret --role support
 """
 
 import argparse
@@ -25,9 +26,9 @@ def main() -> None:
     parser.add_argument("password")
     parser.add_argument(
         "--role",
-        choices=("full", "delivery"),
+        choices=("full", "delivery", "support"),
         default="full",
-        help="full=完整后台；delivery=仅配送管理（大表、区域、骑手、顺丰监控等）",
+        help="full=完整后台；delivery=仅配送管理相关菜单；support=客服（无财务中心/门店配置）",
     )
     args = parser.parse_args()
 

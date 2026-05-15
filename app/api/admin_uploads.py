@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 
-from app.core.deps import admin_subject
+from app.core.deps import admin_staff_subject
 from app.core.limiter import limiter
 from app.schemas.admin import FileUploadOut
 from app.services.upload_service import save_image_bytes
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/admin", tags=["管理端"])
 async def admin_upload_image(
     request: Request,
     file: UploadFile = File(..., description="图片文件"),
-    admin_username: str = Depends(admin_subject),
+    admin_username: str = Depends(admin_staff_subject),
 ):
     _ = request
     _ = admin_username
