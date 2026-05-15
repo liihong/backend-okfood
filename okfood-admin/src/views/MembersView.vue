@@ -817,7 +817,7 @@ onMounted(async () => {
                 />
               </div>
             </template>
-            <p class="modal-hint">后台代操作不校验当日请假截止时间；日期均为上海业务日。</p>
+            <p class="modal-hint">后台代操作不校验当日请假截止时间；日期均为业务日。</p>
           </div>
           <el-button type="primary" class="btn-submit-order" native-type="submit" :loading="leaveSaving"
             :disabled="leaveSaving">
@@ -857,7 +857,7 @@ onMounted(async () => {
             {{ deliveryRecordTarget.name || '—' }} · {{ deliveryRecordTarget.phone || '' }}
           </p>
           <p class="modal-hint delivery-records-caption">
-            下列为订阅套餐在骑手确认送达后扣次的业务日（上海），按新到旧排列。
+            下列为订阅套餐在骑手确认送达后扣次的业务日，按新到旧排列。
           </p>
           <div v-if="deliveryRecordLoading" class="delivery-records-loading">加载中…</div>
           <template v-else>
@@ -867,8 +867,11 @@ onMounted(async () => {
             </p>
             <ul v-if="deliveryRecordDates.length" class="delivery-records-list">
               <li v-for="(ymd, idx) in deliveryRecordDates" :key="`${ymd}-${idx}`">
-                {{ formatDeliveryBizYmdLabel(ymd) }}
-                <span class="delivery-records-ymd-muted">（{{ ymd }}）</span>
+                <span class="delivery-records-idx">{{ idx + 1 }}</span>
+                <span class="delivery-records-line">
+                  {{ formatDeliveryBizYmdLabel(ymd) }}
+                  <span class="delivery-records-ymd-muted">（{{ ymd }}）</span>
+                </span>
               </li>
             </ul>
             <p v-else class="delivery-records-empty">暂无记录。未产生「确认送达」或无套餐扣次时为空。</p>

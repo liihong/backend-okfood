@@ -384,16 +384,18 @@ onUnmounted(() => {
           :id="searchInputId"
           type="text"
           class="mdmp-search-input"
-          placeholder="搜索地点（联想或输入后点搜索），如：宝龙城市广场 新乡"
+          placeholder="搜索配送地点"
           autocomplete="off"
           @input="onSearchInput"
           @keydown.enter.prevent="runKeywordSearch"
         />
         <button type="button" class="mdmp-search-btn" @click="runKeywordSearch">搜索</button>
-      </div>
+      </div> 
+      <!-- 
       <p class="mdmp-hint">
-        选用联想或「搜索」后，搜索框会显示所选 POI 名称；仅供确认，最终以地点信息（小区名）与保存时省市区合并为准。也可<strong>点击地图</strong>、<strong>拖动标记</strong>微调。坐标系 GCJ-02（高德）。
+        选用联想或「搜索」后，搜索框会显示所选 POI 名称；仅供确认，最终以地点信息（小区名）与保存时省市区合并为准。也可<strong>点击地图</strong>、<strong>拖动标记</strong>微调。坐标系 GCJ-02（高德）。 
       </p>
+      -->
       <div ref="mapEl" class="mdmp-map" />
     </template>
   </div>

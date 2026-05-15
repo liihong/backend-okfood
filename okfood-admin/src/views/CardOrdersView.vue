@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { ClipboardList, Phone, Plus, Search, X } from 'lucide-vue-next'
+import { CreditCard, MapPin, Phone, Plus, Search, UserRound, X, Zap } from 'lucide-vue-next'
 import {
   apiJson,
   adminAccessToken,
@@ -151,7 +151,7 @@ const createForm = ref({
   delivery_start_date: todayInputDate(),
   card_kind: '周卡',
   pay_channel: '微信',
-  pay_status: '未缴',
+  pay_status: '已缴',
   amount_yuan: '',
   remark: '',
   delivery_lng: '',
@@ -244,7 +244,7 @@ function openCreateModal() {
     delivery_start_date: todayInputDate(),
     card_kind: '周卡',
     pay_channel: '微信',
-    pay_status: '未缴',
+    pay_status: '已缴',
     amount_yuan: '',
     remark: '',
     delivery_lng: '',
@@ -618,171 +618,241 @@ class="member-pill co-sync-pill"
           </button>
         </div>
         <form
-          class="modal-form modal-form--card-order modal-form--co-create-3col"
+          class="modal-form modal-form--card-order modal-form--co-create-split"
           @submit.prevent="submitCreate"
         >
-          <div class="form-group open-mode-group co-create-span-full">
-            <label>办理类型</label>
-            <div class="open-mode-options">
-              <label class="radio-tile">
-                <span class="radio-tile-head">
-                  <input v-model="createForm.open_mode" type="radio" value="new_member" />
-                  <span class="radio-tile-title">新会员开卡</span>
-                </span>
-                <span class="radio-tile-sub">填写姓名、微信昵称并写入档案</span>
-              </label>
-              <label class="radio-tile">
-                <span class="radio-tile-head">
-                  <input v-model="createForm.open_mode" type="radio" value="renew" />
-                  <span class="radio-tile-title">老会员续卡</span>
-                </span>
-                <span class="radio-tile-sub">仅核对手机号；入账叠加剩余与总次数</span>
-              </label>
+          <!-- 左侧：会员资料 + 卡项费用 + 激活 -->
+          <div class="co-create-split-main">
+            <div class="co-create-panel">
+              <div class="co-create-panel-title co-create-panel-title--with-icon">
+                <UserRound class="co-create-panel-title-icon" :size="18" :stroke-width="2.25" aria-hidden="true" />
+                会员基本资料
+              </div>
+              <div class="form-group open-mode-group">
+                <label>办理类型</label>
+                <div class="open-mode-options">
+                  <label class="radio-tile">
+                    <span class="radio-tile-head">
+                      <input v-model="createForm.open_mode" type="radio" value="new_member" />
+                      <span class="radio-tile-title">新会员开卡</span>
+                    </span>
+                    <span class="radio-tile-sub">填写姓名、微信昵称并写入档案</span>
+                  </label>
+                  <label class="radio-tile">
+                    <span class="radio-tile-head">
+                      <input v-model="createForm.open_mode" type="radio" value="renew" />
+                      <span class="radio-tile-title">老会员续卡</span>
+                    </span>
+                    <span class="radio-tile-sub">仅核对手机号；入账叠加剩余与总次数</span>
+                  </label>
+                </div>
+              </div>
+              <div
+                class="co-create-member-fields"
+                :class="
+                  createForm.open_mode === 'renew'
+                    ? 'co-create-renew-phone-row'
+                    : 'co-create-member-grid'
+                "
+              >
+                <div class="form-group">
+                  <label>会员手机号</label>
+                  <input
+                    v-model="createForm.phone"
+                    required
+                    maxlength="20"
+                    :placeholder="
+                      createForm.open_mode === 'new_member' ? '请输入11位手机号' : '已注册会员的手机号'
+                    "
+                    @input="onCreatePhoneInput"
+                  />
+                </div>
+                <template v-if="createForm.open_mode === 'new_member'">
+                  <div class="form-group">
+                    <label>会员姓名</label>
+                    <input v-model="createForm.name" required maxlength="100" placeholder="写入档案 name" />
+                  </div>
+                  <div class="form-group">
+                    <label>微信昵称</label>
+                    <input
+                      v-model="createForm.wechat_name"
+                      required
+                      maxlength="100"
+                      placeholder="写入档案 wechat_name"
+                    />
+                  </div>
+                </template>
+                <div v-else class="form-group co-create-renew-match-col">
+                  <label class="co-create-renew-match-label">档案匹配</label>
+                  <div class="renew-preview-box renew-preview-box--aside">
+                    <p v-if="renewPreviewLoading" class="modal-hint">正在查询该手机号会员…</p>
+                    <template v-else-if="renewPreview">
+                      <p class="modal-hint">
+                        已匹配：<strong>{{ renewPreview.name || '—' }}</strong>
+                        · 套餐 {{ renewPreview.plan_type || '—' }}
+                        · 当前剩余 <strong>{{ Number(renewPreview.balance) || 0 }}</strong>
+                        次
+                      </p>
+                      <p v-if="renewSyncPreview" class="modal-hint modal-hint--accent">
+                        同步入账后约：<strong>剩余 {{ renewSyncPreview.nextBal }}</strong> /
+                        <strong>总 {{ renewSyncPreview.nextTotal }}</strong>
+                        （本次 +{{ renewSyncPreview.add }}）
+                      </p>
+                    </template>
+                    <p
+                      v-else-if="(createForm.phone || '').trim().length >= 5"
+                      class="modal-hint modal-hint--warn"
+                    >
+                      未找到该手机号会员，请确认已注册或改用「新会员开卡」。
+                    </p>
+                    <p v-else class="modal-hint co-create-renew-match-placeholder">
+                      请在左侧输入手机号后将自动检索档案。
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="co-create-panel">
+              <div class="co-create-panel-title co-create-panel-title--with-icon">
+                <CreditCard class="co-create-panel-title-icon" :size="18" :stroke-width="2.25" aria-hidden="true" />
+                卡项与费用配置
+              </div>
+              <div class="co-create-fees-row3">
+                <div class="form-group">
+                  <label>卡类型</label>
+                  <select v-model="createForm.card_kind">
+                    <option value="周卡">周卡（默认 +{{ planDefaultTotal('周卡') }} 次）</option>
+                    <option value="月卡">月卡（默认 +{{ planDefaultTotal('月卡') }} 次）</option>
+                    <option value="次卡">次卡（默认 +{{ planDefaultTotal('次卡') }} 次）</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>缴费渠道</label>
+                  <select v-model="createForm.pay_channel">
+                    <option value="微信">微信</option>
+                    <option value="支付宝">支付宝</option>
+                    <option value="线下">线下</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>缴费状态</label>
+                  <select
+                    v-model="createForm.pay_status"
+                    class="co-create-pay-status-select"
+                    :class="{ 'co-create-pay-status-select--paid': createForm.pay_status === '已缴' }"
+                  >
+                    <option value="未缴">未缴</option>
+                    <option value="已缴">已缴</option>
+                  </select>
+                </div>
+              </div>
+              <div class="co-create-fees-row2">
+                <div class="form-group">
+                  <label>实收金额</label>
+                  <input
+                    v-model="createForm.amount_yuan"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="留空表示未填"
+                  />
+                </div>
+                <div class="form-group co-create-remark-field">
+                  <label>备注</label>
+                  <textarea v-model="createForm.remark" rows="1" maxlength="500" placeholder="可选"></textarea>
+                </div>
+              </div>
+            </div>
+
+            <div class="co-create-panel co-create-panel--activation">
+              <div class="co-create-panel-title co-create-panel-title--with-icon">
+                <Zap class="co-create-panel-title-icon" :size="18" :stroke-width="2.25" aria-hidden="true" />
+                激活设置
+              </div>
+              <div class="co-create-activation-row">
+                <div class="open-mode-options open-mode-options--activation">
+                  <label class="radio-tile radio-tile--compact">
+                    <span class="radio-tile-head">
+                      <input v-model="createForm.delivery_start_mode" type="radio" value="date" />
+                      <span class="radio-tile-title">指定起送日</span>
+                    </span>
+                    <span class="radio-tile-sub">选择具体业务日起参与配送大表</span>
+                  </label>
+                  <label class="radio-tile radio-tile--compact">
+                    <span class="radio-tile-head">
+                      <input v-model="createForm.delivery_start_mode" type="radio" value="defer" />
+                      <span class="radio-tile-title">暂不开卡</span>
+                    </span>
+                    <span class="radio-tile-sub">已缴仍入次数与套餐；暂不写入起送日，可日后在「更新」中补日期</span>
+                  </label>
+                </div>
+                <div
+                  v-if="createForm.delivery_start_mode === 'date'"
+                  class="card-order-delivery-block co-create-activation-date"
+                >
+                  <el-date-picker
+                    v-model="createForm.delivery_start_date"
+                    type="date"
+                    value-format="YYYY-MM-DD"
+                    format="YYYY-MM-DD"
+                    placeholder="选择开始配送日"
+                    class="card-order-date-picker"
+                    :clearable="false"
+                  />
+                  <!-- <p class="modal-hint card-order-delivery-hint">
+                    须不早于系统允许的最早业务日；该日起可查见、可派单。
+                  </p> -->
+                </div>
+              </div>
             </div>
           </div>
-          <div class="form-group">
-            <label>会员手机号</label>
-            <input
-              v-model="createForm.phone"
-              required
-              maxlength="20"
-              placeholder="已注册会员的手机号"
-              @input="onCreatePhoneInput"
-            />
-          </div>
-          <div v-if="createForm.open_mode === 'renew'" class="renew-preview-box co-create-span-full">
-            <p v-if="renewPreviewLoading" class="modal-hint">正在查询该手机号会员…</p>
-            <template v-else-if="renewPreview">
-              <p class="modal-hint">
-已匹配：<strong>{{ renewPreview.name || '—' }}</strong>
-                · 套餐 {{ renewPreview.plan_type || '—' }}
-                · 当前剩余 <strong>{{ Number(renewPreview.balance) || 0 }}</strong>
-                次
-              </p>
-              <p v-if="renewSyncPreview" class="modal-hint modal-hint--accent">
-                同步入账后约：<strong>剩余 {{ renewSyncPreview.nextBal }}</strong> /
-                <strong>总 {{ renewSyncPreview.nextTotal }}</strong>
-                （本次 +{{ renewSyncPreview.add }}）
-              </p>
-            </template>
-            <p v-else-if="(createForm.phone || '').trim().length >= 5" class="modal-hint modal-hint--warn">
-              未找到该手机号会员，请确认已注册或改用「新会员开卡」。
-            </p>
-          </div>
-          <div v-if="createForm.open_mode === 'new_member'" class="form-row form-row--co-create-3col">
-            <div class="form-group">
-              <label>会员姓名</label>
-              <input v-model="createForm.name" required maxlength="100" placeholder="写入档案 name" />
-            </div>
-            <div class="form-group">
-              <label>微信昵称</label>
-              <input v-model="createForm.wechat_name" required maxlength="100" placeholder="写入档案 wechat_name" />
-            </div>
-          </div>
-          <div class="form-group card-order-delivery-address-block co-create-span-full">
-            <label>配送位置（可选）</label>
-            <p class="modal-hint card-order-map-hint">
-              与小程序一致：地图搜索或点选后自动填入详细地址（坐标仅后台保存，用于划区）；收货手机号与上方会员手机号相同。门牌号可补充。
-            </p>
-            <MemberDeliveryMapPicker
-              v-model:lng-str="createForm.delivery_lng"
-              v-model:lat-str="createForm.delivery_lat"
-              v-model:map-location-text="createForm.map_location_text"
-              @warn="onDeliveryMapWarn"
-            />
-            <div class="form-group">
-              <label>地图详细地址（只读）</label>
-              <textarea
-                v-model="createForm.map_location_text"
-                rows="2"
-                maxlength="500"
-                readonly
-                placeholder="选点后自动填入（小区/POI 名；省市区由保存时合并）"
+
+          <!-- 右侧：配送位置 + 提交 -->
+          <div class="co-create-split-side">
+            <div class="co-create-panel co-create-panel--side">
+              <div class="co-create-panel-head-row">
+                <div class="co-create-panel-title co-create-panel-title--plain co-create-panel-title--with-icon">
+                  <MapPin class="co-create-panel-title-icon" :size="18" :stroke-width="2.25" aria-hidden="true" />
+                  配送位置
+                </div>
+                <!-- <span class="co-create-optional-pill">OPTIONAL</span> -->
+              </div>
+              <!-- <p class="modal-hint card-order-map-hint">
+                与小程序一致：地图搜索或点选后填入详细地址（坐标后台保存）。
+              </p> -->
+              <MemberDeliveryMapPicker
+                class="co-create-map-picker-root"
+                v-model:lng-str="createForm.delivery_lng"
+                v-model:lat-str="createForm.delivery_lat"
+                v-model:map-location-text="createForm.map_location_text"
+                @warn="onDeliveryMapWarn"
               />
+              <div class="form-group">
+                <label>地图详细地址（只读）</label>
+                <textarea
+                  v-model="createForm.map_location_text"
+                  rows="2"
+                  maxlength="500"
+                  readonly
+                  placeholder="选取地图坐标后自动填充"
+                />
+              </div>
+              <div class="form-group">
+                <label>门牌号 / 单元楼层</label>
+                <input v-model="createForm.door_detail" maxlength="500" placeholder="如：3 号楼 1202" />
+              </div>
             </div>
-            <div class="form-group">
-              <label>门牌号 / 单元楼层</label>
-              <input v-model="createForm.door_detail" maxlength="500" placeholder="如：3 号楼 1202" />
-            </div>
-          </div>
-          <div class="form-group open-mode-group co-create-span-full">
-            <label>开始配送日（业务日）</label>
-            <div class="open-mode-options">
-              <label class="radio-tile">
-                <span class="radio-tile-head">
-                  <input v-model="createForm.delivery_start_mode" type="radio" value="date" />
-                  <span class="radio-tile-title">指定起送日</span>
-                </span>
-                <span class="radio-tile-sub">选择具体业务日起参与配送大表</span>
-              </label>
-              <label class="radio-tile">
-                <span class="radio-tile-head">
-                  <input v-model="createForm.delivery_start_mode" type="radio" value="defer" />
-                  <span class="radio-tile-title">暂不开卡</span>
-                </span>
-                <span class="radio-tile-sub">已缴仍入次数与套餐；暂不写入起送日、不激活配送，可日后在「更新」中补日期</span>
-              </label>
-            </div>
-            <div
-              v-if="createForm.delivery_start_mode === 'date'"
-              class="card-order-delivery-block"
-            >
-              <el-date-picker
-                v-model="createForm.delivery_start_date"
-                type="date"
-                value-format="YYYY-MM-DD"
-                format="YYYY-MM-DD"
-                placeholder="选择开始配送日"
-                class="card-order-date-picker"
-                :clearable="false"
-              />
-              <p class="modal-hint card-order-delivery-hint">
-                须不早于系统允许的最早业务日（上海）；该日起可查见、可派单。
-              </p>
+            <div class="co-create-side-footer">
+              <!-- <p class="modal-hint co-create-submit-hint">
+                缴费状态为「已缴」时，创建后将自动同步剩余次数（周卡 +{{ planDefaultTotal('周卡') }} / 月卡
+                +{{ planDefaultTotal('月卡') }} / 次卡 +{{ planDefaultTotal('次卡') }}）与套餐；仅在选择「指定起送日」时同时写入起送日并激活。选「未缴」则不入账。
+              </p> -->
+              <button type="submit" class="btn-submit-order co-create-submit-wide" :disabled="createSubmitting">
+                {{ createSubmitting ? '提交中…' : '创建开卡工单' }}
+              </button>
             </div>
           </div>
-          <div class="form-row form-row--co-create-3col">
-            <div class="form-group">
-              <label>卡类型</label>
-              <select v-model="createForm.card_kind">
-                <option value="周卡">周卡（默认 +{{ planDefaultTotal('周卡') }} 次）</option>
-                <option value="月卡">月卡（默认 +{{ planDefaultTotal('月卡') }} 次）</option>
-                <option value="次卡">次卡（默认 +{{ planDefaultTotal('次卡') }} 次）</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>缴费渠道</label>
-              <select v-model="createForm.pay_channel">
-                <option value="微信">微信</option>
-                <option value="支付宝">支付宝</option>
-                <option value="线下">线下</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row form-row--co-create-3col">
-            <div class="form-group">
-              <label>缴费状态</label>
-              <select v-model="createForm.pay_status">
-                <option value="未缴">未缴</option>
-                <option value="已缴">已缴</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>实收金额(元，可选)</label>
-              <input v-model="createForm.amount_yuan" type="number" min="0" step="0.01" placeholder="留空表示未填" />
-            </div>
-          </div>
-          <div class="form-group co-create-span-full">
-            <label>备注</label>
-            <textarea v-model="createForm.remark" rows="2" maxlength="500" placeholder="可选"></textarea>
-          </div>
-          <p class="modal-hint co-create-span-full">
-            缴费状态为「已缴」时，创建后将自动同步剩余次数（周卡 +{{ planDefaultTotal('周卡') }} / 月卡
-            +{{ planDefaultTotal('月卡') }} / 次卡 +{{ planDefaultTotal('次卡') }}）与套餐；仅在选择「指定起送日」时同时写入起送日并激活。选「未缴」则不入账。
-          </p>
-          <button type="submit" class="btn-submit-order co-create-span-full" :disabled="createSubmitting">
-            {{ createSubmitting ? '提交中…' : '创建工单' }}
-          </button>
         </form>
         </div>
       </div>
@@ -879,7 +949,7 @@ class="member-pill co-sync-pill"
           </div>
           <p v-if="editForm.applied_to_member" class="modal-hint">已入账的工单不可改回「未缴」。</p>
           <div class="form-group">
-            <label>实收金额(元，可选)</label>
+            <label>实收金额</label>
             <input v-model="editForm.amount_yuan" type="number" min="0" step="0.01" placeholder="留空可清空金额" />
           </div>
           <div class="form-group">
@@ -958,31 +1028,267 @@ class="member-pill co-sync-pill"
   scroll-padding-bottom: 1.5rem;
 }
 
-.modal-card.modal-card--card-order-create {
-  max-width: min(1080px, 100%);
+/* 隐藏金额等 number 控件自带的上下箭头（Chrome / Safari / Firefox） */
+.modal-form input[type='number']::-webkit-outer-spin-button,
+.modal-form input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
-.modal-form.modal-form--co-create-3col {
+.modal-form input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.modal-card.modal-card--card-order-create {
+  width: 100%;
+  max-width: min(1200px, calc(100vw - 2rem));
+}
+
+/** 新建工单：左主表单（约 2/3）+ 右配送与提交（约 1/3） */
+.modal-form.modal-form--co-create-split {
+  padding: 1.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 400px);
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+/* 新建工单：输入框 / 下拉 / 文本区内边距（控制纵向高度观感） */
+.modal-form.modal-form--co-create-split .form-group input:not([type='radio']),
+.modal-form.modal-form--co-create-split .form-group select,
+.modal-form.modal-form--co-create-split .form-group textarea {
+  padding: 0.8rem;
+}
+
+.co-create-split-main,
+.co-create-split-side {
+  min-width: 0;
+}
+
+.co-create-split-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.co-create-split-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.co-create-panel {
+  background: var(--surface, #fff);
+  border-radius: 14px;
+  border: 1px solid var(--border, #e8eef3);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  padding: 1.15rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.co-create-panel--side {
+  flex: 1 1 auto;
+}
+
+/* 「激活设置」底部含日期控件，加长底部留白，避免贴底与焦点边框观感溢出 */
+.co-create-panel--activation {
+  padding-bottom: 1.85rem;
+}
+
+.co-create-panel-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.co-create-panel-title--plain {
+  margin: 0;
+}
+
+/* 分组标题前缀图标：与顶部品牌色呼应，避免与右侧 OPTIONAL 挤叠 */
+.co-create-panel-title--with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.co-create-panel-head-row .co-create-panel-title--with-icon {
+  flex: 1;
+  min-width: 0;
+}
+
+.co-create-panel-title-icon {
+  flex-shrink: 0;
+  color: #0e5a44;
+}
+
+.co-create-panel-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.co-create-optional-pill {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.co-create-member-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  column-gap: 1.25rem;
-  row-gap: 1.25rem;
+  gap: 1rem;
 }
 
-.modal-form.modal-form--co-create-3col > .co-create-span-full {
-  grid-column: 1 / -1;
+.co-create-renew-phone-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(240px, 1.55fr);
+  gap: 1rem;
+  align-items: start;
 }
 
-.modal-form.modal-form--co-create-3col .form-row--co-create-3col {
-  display: contents;
+.co-create-renew-match-col {
+  min-width: 0;
 }
 
-@media (max-width: 900px) {
-  .modal-form.modal-form--co-create-3col {
+.co-create-renew-match-label {
+  font-size: 12px;
+  font-weight: 900;
+  color: #94a3b8;
+  text-transform: uppercase;
+  padding-left: 0.5rem;
+}
+
+.co-create-renew-match-placeholder {
+  opacity: 0.85;
+}
+
+.renew-preview-box--aside {
+  margin-bottom: 0;
+  min-height: 3.25rem;
+}
+
+.co-create-fees-row3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.co-create-fees-row2 {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+/* 备注默认一行高度与左侧实收金额输入框一致（同 padding + 单行字高），仍可通过右下角纵向拉伸 */
+.co-create-fees-row2 .form-group input[type='number'],
+.co-create-fees-row2 .co-create-remark-field textarea {
+  min-height: calc(1.35em + 1.6rem);
+  box-sizing: border-box;
+}
+
+.co-create-activation-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.open-mode-options--activation {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+  align-items: stretch;
+}
+
+.co-create-activation-date {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  /* Element Plus：date-editor 默认用 --el-date-editor-width 固定像素，改为拉满整行 */
+  --el-date-editor-width: 100%;
+}
+
+.co-create-activation-date :deep(.el-date-editor.el-input__wrapper) {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.co-create-pay-status-select--paid {
+  background: rgba(16, 185, 129, 0.14) !important;
+  color: #047857 !important;
+  font-weight: 800;
+}
+
+.co-create-side-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: auto;
+}
+
+.co-create-submit-hint {
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.co-create-submit-wide {
+  width: 100%;
+  margin-top: 0 !important;
+}
+
+.radio-tile--compact {
+  padding: 10px 12px;
+  gap: 4px;
+}
+
+.radio-tile--compact .radio-tile-sub {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.co-create-map-picker-root :deep(.mdmp-map) {
+  min-height: 220px;
+  height: min(260px, 38vh);
+}
+
+@media (max-width: 960px) {
+  .modal-form.modal-form--co-create-split {
     grid-template-columns: minmax(0, 1fr);
   }
-  .modal-form.modal-form--co-create-3col > .co-create-span-full {
-    grid-column: auto;
+}
+
+@media (max-width: 820px) {
+  .co-create-member-grid,
+  .co-create-renew-phone-row,
+  .co-create-fees-row3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .co-create-fees-row2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .open-mode-options--activation {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1068,7 +1374,7 @@ class="member-pill co-sync-pill"
   line-height: 1.6;
 }
 .renew-preview-box {
-  margin-bottom: 4px;
+  /* margin-bottom: 4px; */
   padding: 10px 12px;
   border-radius: 8px;
   background: var(--surface-2, #f8fafc);
@@ -1088,18 +1394,22 @@ class="member-pill co-sync-pill"
   gap: 0.35rem;
 }
 /* Element Plus 日期选择：与弹窗内原生输入框的圆角、背景一致 */
-.form-group :deep(.card-order-date-picker) {
+.form-group :deep(.card-order-date-picker),
+.co-create-activation-date :deep(.card-order-date-picker) {
   display: block;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
 }
-.form-group :deep(.card-order-delivery-block .el-date-editor) {
+.form-group :deep(.card-order-delivery-block .el-date-editor),
+.co-create-activation-date :deep(.card-order-delivery-block .el-date-editor),
+.co-create-activation-date :deep(.el-date-editor) {
   width: 100% !important;
   max-width: 100%;
   box-sizing: border-box;
 }
-.form-group :deep(.card-order-date-picker .el-input__wrapper) {
+.form-group :deep(.card-order-date-picker .el-input__wrapper),
+.co-create-activation-date :deep(.card-order-date-picker .el-input__wrapper) {
   width: 100%;
   min-height: 3.1rem;
   background: #f8fafc;
@@ -1107,9 +1417,16 @@ class="member-pill co-sync-pill"
   border-radius: 1.25rem;
   box-shadow: none;
 }
-.form-group :deep(.card-order-date-picker .el-input__wrapper.is-focus) {
+.form-group :deep(.card-order-date-picker .el-input__wrapper.is-focus),
+.co-create-activation-date :deep(.card-order-date-picker .el-input__wrapper.is-focus) {
   border-color: #0e5a44;
   background: #fff;
+}
+
+/* 新建工单：起送日期选择与上方控件统一为 0.8rem 内边距 */
+.modal-form.modal-form--co-create-split :deep(.card-order-date-picker .el-input__wrapper) {
+  min-height: auto;
+  padding: 0.8rem;
 }
 /* 开卡工单列表：更小行高、备注/创建信息缩略 */
 .card-orders-page :deep(.card-orders-table.admin-table--members.el-table--small .el-table__header th.el-table__cell) {

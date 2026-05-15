@@ -43,8 +43,8 @@ const periodRows = computed(() => {
     smAmt: w?.single_meal_orders?.amount_yuan,
   })
   return [
-    mk('today', `今日（上海 ${todayLabel.value || '—'}）`, s.today),
-    mk('month', `本月（上海 ${monthLabel.value || s.shanghai_calendar_month || '—'}）`, s.this_month),
+    mk('today', `今日（ ${todayLabel.value || '—'}）`, s.today),
+    mk('month', `本月（ ${monthLabel.value || s.shanghai_calendar_month || '—'}）`, s.this_month),
     mk('cumulative', '累计（全部已标记已收）', s.cumulative),
   ]
 })
@@ -102,7 +102,7 @@ onMounted(loadSummary)
       <div class="finance-card white finance-card--note">
         <p class="f-label-dark">口径说明</p>
         <p class="finance-remark">
-          统计<span class="em">上海日历</span>下的「今日 / 本月」：以订单
+          统计<span class="em">日历</span>下的「今日 / 本月」：以订单
           <span class="em">updated_at</span>（库内 UTC 时间）换算后是否落入对应日界为准。支付成功或后台改为已缴时会更新该时间。
         </p>
         <p class="finance-remark">

@@ -86,14 +86,14 @@ function onSfPushImmediatelyChange(row) {
   }
 }
 
-/** 解析顺丰弹窗 expect_delivery_at（上海墙钟 +08:00）与当前时刻比较 */
+/** 解析顺丰弹窗 expect_delivery_at（墙钟 +08:00）与当前时刻比较 */
 function parseSfExpectAtShanghai(s) {
   const m = String(s || '').match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})$/)
   if (!m) return null
   return new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}+08:00`)
 }
 
-/** 业务日早于今日时，禁止期望送达选上海日历今日之前的日期 */
+/** 业务日早于今日时，禁止期望送达选上日历今日之前的日期 */
 function sfExpectDeliveryDisabledDate(time) {
   const d = String(sfPreview.value.delivery_date || '').trim()
   if (!d || d >= todayShanghaiStr()) return false
@@ -116,7 +116,7 @@ const emptySheet = () => ({
 const areaFilter = ref('')
 /** 按手机号筛选大表（与 GET delivery-sheet ?phone= 一致；可后几位或完整号码） */
 const phoneQuery = ref('')
-/** 查询用的配送业务日（上海日历日 YYYY-MM-DD），可与「今天」不同 */
+/** 查询用的配送业务日（日历日 YYYY-MM-DD），可与「今天」不同 */
 const deliveryDateQuery = ref(todayShanghaiStr())
 /** 与后端 delivery_regions 启用列表同源（来自 delivery-sheet 响应） */
 const activeRegions = ref([])
@@ -135,7 +135,7 @@ const sfDialogOpen = ref(false)
 const sfLoading = ref(false)
 const sfPushSubmitting = ref(false)
 const sfPreview = ref({ delivery_date: '', rows: [], sf_configured: false })
-/** 顺丰弹窗当前业务日是否早于上海今日（历史日查询） */
+/** 顺丰弹窗当前业务日是否早于今日（历史日查询） */
 const sfBizDayPast = computed(() => {
   const d = String(sfPreview.value.delivery_date || '').trim()
   return Boolean(d && d < todayShanghaiStr())
@@ -543,7 +543,7 @@ async function submitSfPush() {
     const t = parseSfExpectAtShanghai(expectAt)
     if (!t || t.getTime() < Date.now()) {
       showToast(
-        '存在未选「立即推单」的停靠点：期望送达须晚于当前时间（上海）。历史业务日请选今日及之后的日期时段。',
+        '存在未选「立即推单」的停靠点：期望送达须晚于当前时间。历史业务日请选今日及之后的日期时段。',
         'error'
       )
       return
@@ -627,7 +627,7 @@ async function markDelivery(memberId, kind) {
       <div class="delivery-toolbar__row delivery-toolbar__row--primary">
         <div class="delivery-toolbar__filters">
           <label class="delivery-field">
-            <span>配送业务日（上海）</span>
+            <span>配送业务日</span>
             <el-date-picker
               v-model="deliveryDateQuery"
               type="date"
@@ -767,7 +767,7 @@ async function markDelivery(memberId, kind) {
       <p v-if="sfLoading" class="members-loading">加载推单清单…</p>
       <template v-else>
         <p v-if="sfBizDayPast" class="sf-warn sf-warn--muted">
-          当前业务日早于今日（上海）：期望送达已按今日起算，日历不可选今日之前；预约时间须晚于当前时刻。
+          当前业务日早于今日：期望送达已按今日起算，日历不可选今日之前；预约时间须晚于当前时刻。
         </p>
         <div class="sf-bar">
           <div class="sf-bar__left">
