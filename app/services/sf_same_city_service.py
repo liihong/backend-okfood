@@ -29,6 +29,7 @@ from app.models.member_address import MemberAddress
 from app.models.menu_dish import MenuDish
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.single_meal_order import SingleMealOrder
+from app.models.store import Store
 from app.services.courier_service import eligible_members_for_delivery
 from app.services.delivery_sheet_service import (
     _filter_members_by_phone_hint,
@@ -40,7 +41,7 @@ from app.services.member_address_service import delivery_region_name_map, full_a
 from app.services.member_service import effective_daily_meal_units
 from app.services.sf_open import sign as sf_sign_mod
 from app.services.sf_open.client import SfOpenApiError, SfOpenClient
-from app.services.store_config_service import get_store_config
+from app.services.tenant_integration_service import merged_sf_integration_namespace
 from app.schemas.admin import (
     SfSameCityPreviewOut,
     SfSameCityPreviewRow,
@@ -193,9 +194,13 @@ def _build_aggs(
     phone_key: str | None,
     members: list[Member],
     default_by_id: dict[int, MemberAddress],
+    *,
+    store_id: int,
 ) -> dict[str, _Agg]:
     """大表所有到家停靠点 + 单次餐合并。"""
-    sheet = build_delivery_sheet(db, delivery_date=d, area=area_key, phone=phone_key)
+    sheet = build_delivery_sheet(
+        db, delivery_date=d, area=area_key, phone=phone_key, store_id=int(store_id)
+    )
     aggs: dict[str, _Agg] = {}
     m_by_id = {int(m.id): m for m in members}
 
@@ -265,16 +270,20 @@ def _build_aggs(
 
 
 def _agg_to_row(
-    db: Session, a: _Agg, d: date, default_by_id: dict[int, MemberAddress], m_by_id: dict[int, Member]
+    db: Session,
+    a: _Agg,
+    d: date,
+    default_by_id: dict[int, MemberAddress],
+    m_by_id: dict[int, Member],
+    gset: Any,
 ) -> SfSameCityPreviewRow:
-    s = get_settings()
-    p_phone = (s.SF_PICKUP_PHONE or "").strip()
+    p_phone = (gset.SF_PICKUP_PHONE or "").strip()
     sub = sum(
         int(x.get("units") or 0) for x in a.sub_lines if not x.get("is_delivered")
     )
     sq = sum(int(x.get("qty") or 0) for x in a.singles)
     total = max(1, sub + sq)
-    wkg = max(0.1, float(s.SF_KG_PER_MEAL_UNIT) * float(total))
+    wkg = max(0.1, float(gset.SF_KG_PER_MEAL_UNIT) * float(total))
 
     maddr: MemberAddress | None = None
     for x in a.sub_lines:
@@ -355,13 +364,13 @@ def _agg_to_row(
         recv_lat=recv_lat_f,
         recv_name=rname[:100],
         recv_phone=(rphone or "—")[:20],
-        product_category=(s.SF_PRODUCT_CATEGORY_LABEL or "餐品").strip(),
+        product_category=(gset.SF_PRODUCT_CATEGORY_LABEL or "餐品").strip(),
         weight_kg=round(wkg, 2),
         push_immediately=False,
         expect_delivery_at=expect_at_default,
         remark=rmk_s,
         is_direct=False,
-        vehicle_type=(s.SF_DEFAULT_VEHICLE_TYPE or "小轿车").strip(),
+        vehicle_type=(gset.SF_DEFAULT_VEHICLE_TYPE or "小轿车").strip(),
         is_insured=False,
         goods_value_yuan=None,
         subscription_pending_units=int(sub),
@@ -386,19 +395,24 @@ def _has_success(db: Session, d: date, stop_id: str) -> bool:
     return r is not None
 
 
-def aggs_for_delivery_date(db: Session, d: date) -> dict[str, _Agg]:
+def aggs_for_delivery_date(db: Session, d: date, *, store_id: int | None = None) -> dict[str, _Agg]:
     """当日全部停靠点聚合（与同业务日顺丰预览/履约同源）。"""
-    members, default_by_id = eligible_members_for_delivery(db, delivery_date=d, delivery_region_id=None)
+    sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
+    members, default_by_id = eligible_members_for_delivery(
+        db, delivery_date=d, delivery_region_id=None, store_id=sid
+    )
     mlist = list(members)
-    return _build_aggs(db, d, None, None, mlist, default_by_id)
+    return _build_aggs(db, d, None, None, mlist, default_by_id, store_id=sid)
 
 
-def load_agg_for_stop_id(db: Session, d: date, stop_id: str) -> _Agg | None:
+def load_agg_for_stop_id(
+    db: Session, d: date, stop_id: str, *, store_id: int | None = None
+) -> _Agg | None:
     """
     按业务日与停靠点 id（与顺丰预览/推单同源）解析聚合行；不加片区/手机筛选，
     与「全量大表 + 单次点餐到家」口径一致。
     """
-    return aggs_for_delivery_date(db, d).get(stop_id)
+    return aggs_for_delivery_date(db, d, store_id=store_id).get(stop_id)
 
 
 def preview_sf_same_city(
@@ -407,27 +421,38 @@ def preview_sf_same_city(
     delivery_date: date | None = None,
     area: str | None = None,
     phone: str | None = None,
+    store_id: int | None = None,
 ) -> SfSameCityPreviewOut:
+    sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
+    st = db.get(Store, sid)
+    if not st or not st.is_active:
+        raise HTTPException(status_code=404, detail="门店不存在或已停用")
+    tid = int(st.tenant_id)
     d = delivery_date or today_shanghai()
     akey = (area or "").strip() or None
     pkey = (phone or "").strip() or None
     reg_id = None
     if akey:
-        rid = db.scalar(select(DeliveryRegion.id).where(DeliveryRegion.name == akey))
+        rid = db.scalar(
+            select(DeliveryRegion.id).where(
+                DeliveryRegion.name == akey,
+                DeliveryRegion.tenant_id == tid,
+            )
+        )
         if rid is not None:
             reg_id = int(rid)
     members, default_by_id = eligible_members_for_delivery(
-        db, delivery_date=d, delivery_region_id=reg_id
+        db, delivery_date=d, delivery_region_id=reg_id, store_id=sid
     )
     mlist = list(members)
     if pkey:
         mlist = _filter_members_by_phone_hint(mlist, pkey)
     m_by_id = {int(m.id): m for m in mlist}
 
-    ags = _build_aggs(db, d, akey, pkey, mlist, default_by_id)
-    gset = get_settings()
+    ags = _build_aggs(db, d, akey, pkey, mlist, default_by_id, store_id=sid)
+    gset = merged_sf_integration_namespace(db, tid)
     rows: list[SfSameCityPreviewRow] = [
-        _agg_to_row(db, ag, d, default_by_id, m_by_id)
+        _agg_to_row(db, ag, d, default_by_id, m_by_id, gset)
         for ag in sorted(ags.values(), key=lambda x: (x.group_area, x.address_line))
     ]
     return SfSameCityPreviewOut(
@@ -548,14 +573,20 @@ def _create_order_payload(
     return body
 
 
-def push_sf_same_city(db: Session, body: SfSameCityPushIn) -> SfSameCityPushOut:
-    gset = get_settings()
-    if not gset.SF_OPEN_DEV_ID or not (gset.SF_OPEN_SHOP_ID or "").strip() or not (gset.SF_OPEN_SECRET or "").strip():
-        raise ValueError("请先在 .env 配置 SF_OPEN_DEV_ID、SF_OPEN_SHOP_ID、SF_OPEN_SECRET")
-    if not (gset.SF_PICKUP_PHONE or "").strip() or not (gset.SF_PICKUP_ADDRESS or "").strip():
-        raise ValueError("请配置 .env 中 SF_PICKUP_PHONE 与 SF_PICKUP_ADDRESS。")
+def push_sf_same_city(db: Session, body: SfSameCityPushIn, *, store_id: int | None = None) -> SfSameCityPushOut:
+    base = get_settings()
     d = body.delivery_date
-    store = get_store_config(db)
+    sid = int(store_id) if store_id is not None else int(base.DEFAULT_STORE_ID)
+    st_row = db.get(Store, sid)
+    if not st_row:
+        raise ValueError("门店不存在")
+    tid = int(st_row.tenant_id)
+    gset = merged_sf_integration_namespace(db, tid)
+    if not gset.SF_OPEN_DEV_ID or not (gset.SF_OPEN_SHOP_ID or "").strip() or not (gset.SF_OPEN_SECRET or "").strip():
+        raise ValueError("请先在租户对接配置或 .env 配置 SF_OPEN_DEV_ID、SF_OPEN_SHOP_ID、SF_OPEN_SECRET")
+    if not (gset.SF_PICKUP_PHONE or "").strip() or not (gset.SF_PICKUP_ADDRESS or "").strip():
+        raise ValueError("请配置租户对接或 .env 中的顺丰取件电话与取件地址。")
+    store = get_store_config(db, store_id=sid)
     out: list[SfSameCityPushItemResult] = []
     now_ts = int(time.time())
     httpc = SfOpenClient()
@@ -633,6 +664,7 @@ def push_sf_same_city(db: Session, body: SfSameCityPushIn) -> SfSameCityPushOut:
             if isinstance(r, dict):
                 sfo, sfb = r.get("sf_order_id"), r.get("sf_bill_id")
             row = SfSameCityPush(
+                store_id=sid,
                 delivery_date=d,
                 stop_id=item.stop_id,
                 shop_order_id=soid,
@@ -663,13 +695,14 @@ def push_sf_same_city(db: Session, body: SfSameCityPushIn) -> SfSameCityPushOut:
                 snap_db,
                 int(e.error_code) if e.error_code is not None else -1,
                 str(e)[:1000],
+                store_id=sid,
             )
             out.append(
                 SfSameCityPushItemResult(stop_id=item.stop_id, ok=False, message=str(e), sf_order_id=None)
             )
         except Exception as e:
             db.rollback()
-            _persist_fail(db, d, item.stop_id, soid, snap_db, -2, str(e)[:1000])
+            _persist_fail(db, d, item.stop_id, soid, snap_db, -2, str(e)[:1000], store_id=sid)
             out.append(
                 SfSameCityPushItemResult(
                     stop_id=item.stop_id, ok=False, message=f"推单异常: {e!s}", sf_order_id=None
@@ -686,8 +719,11 @@ def _persist_fail(
     snap: dict,
     err_code: int,
     err_msg: str,
+    *,
+    store_id: int,
 ) -> None:
     row = SfSameCityPush(
+        store_id=int(store_id),
         delivery_date=d,
         stop_id=stop_id,
         shop_order_id=shop_order_id,
@@ -712,14 +748,16 @@ def cancel_sf_same_city_push(
     同城开放平台约定示例字段（与三方封装一致）：``order_id`` + ``order_type``
     （``1``=顺丰订单号，``2``=商家订单号）、可选 ``cancel_code`` / ``cancel_reason``。
     """
-    gset = get_settings()
-    if not gset.SF_OPEN_DEV_ID or not (gset.SF_OPEN_SHOP_ID or "").strip() or not (
-        gset.SF_OPEN_SECRET or ""
-    ).strip():
-        raise HTTPException(status_code=400, detail="请先在 .env 配置 SF_OPEN_DEV_ID、SF_OPEN_SHOP_ID、SF_OPEN_SECRET")
     row = db.get(SfSameCityPush, push_id)
     if row is None:
         raise HTTPException(status_code=404, detail="推单记录不存在")
+    st_row = db.get(Store, int(row.store_id)) if row.store_id else None
+    tid = int(st_row.tenant_id) if st_row else int(get_settings().DEFAULT_TENANT_ID)
+    gset = merged_sf_integration_namespace(db, tid)
+    if not gset.SF_OPEN_DEV_ID or not (gset.SF_OPEN_SHOP_ID or "").strip() or not (
+        gset.SF_OPEN_SECRET or ""
+    ).strip():
+        raise HTTPException(status_code=400, detail="请先在租户对接或 .env 配置 SF_OPEN_DEV_ID、SF_OPEN_SHOP_ID、SF_OPEN_SECRET")
     try:
         ec_int = int(row.error_code) if row.error_code is not None else None
     except (TypeError, ValueError):

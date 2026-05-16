@@ -7,14 +7,17 @@ from fastapi.responses import Response as PlainResponse
 from app.core.deps import (
     ADMIN_ACCOUNT_DELIVERY,
     ADMIN_ACCOUNT_SUPPORT,
+    ADMIN_ACCOUNT_SYSTEM,
     ROLE_ADMIN,
     ROLE_ADMIN_DELIVERY,
     ROLE_ADMIN_SUPPORT,
+    ROLE_ADMIN_SYSTEM,
     SessionDep,
     admin_full_subject,
     admin_or_delivery_staff_subject,
     admin_staff_subject,
     issue_admin_token,
+    require_admin_tenant_store,
 )
 from app.models.member import Member
 from app.models.enums import PlanType
@@ -86,7 +89,7 @@ from app.services.member_card_order_service import (
     list_card_orders_paged,
     update_card_order,
 )
-from app.services.finance_received_service import finance_received_summary
+from app.services.finance_received_service import finance_received_summary, finance_today_paid_card_orders
 from app.integrations.wechat_pay_v2 import resolve_request_client_ip
 from app.utils.response import dump_model, page_response, success
 
@@ -104,6 +107,9 @@ def login(request: Request, body: AdminLoginIn, db: SessionDep):
     elif role_raw == ADMIN_ACCOUNT_SUPPORT:
         kind = "support"
         jwt_role = ROLE_ADMIN_SUPPORT
+    elif role_raw == ADMIN_ACCOUNT_SYSTEM:
+        kind = "system"
+        jwt_role = ROLE_ADMIN_SYSTEM
     else:
         kind = "full"
         jwt_role = ROLE_ADMIN
@@ -115,6 +121,7 @@ def login(request: Request, body: AdminLoginIn, db: SessionDep):
 def dashboard_summary(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     business_date: Annotated[
         date | None,
         Query(description="业务锚日(上海)，默认当日；早于今日时优先读归档快照"),
@@ -125,27 +132,45 @@ def dashboard_summary(
     ] = False,
 ):
     """今日/明日请假与备餐：备餐份数与智能配送大表一致；过去日可读不可变归档。"""
-    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     summary = dashboard_meal_summary(
         db,
         business_anchor_date=business_date,
         force_recompute=force_recompute,
+        store_id=store_id,
     )
     return success(data=dump_model(summary), msg="获取成功")
 
 
 @router.get("/finance/received-summary")
-def finance_received_summary_route(db: SessionDep, admin_username: str = Depends(admin_full_subject)):
+def finance_received_summary_route(
+    db: SessionDep,
+    admin_username: str = Depends(admin_full_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
     """已收账款：累计 / 本月（上海自然月）/ 今日（上海自然日），按 updated_at 落入对应日界。"""
-    _ = admin_username
-    summary = finance_received_summary(db)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    summary = finance_received_summary(db, store_id=store_id)
     return success(data=dump_model(summary), msg="获取成功")
+
+
+@router.get("/finance/today-paid-card-orders")
+def finance_today_paid_card_orders_route(
+    db: SessionDep,
+    admin_username: str = Depends(admin_full_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """今日（上海日界）已缴开卡工单明细：时刻（HH:MM）、卡型、实收；归属日与 `received-summary` 开卡笔数口径一致（updated_at）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    payload = finance_today_paid_card_orders(db, store_id=store_id)
+    return success(data=dump_model(payload), msg="获取成功")
 
 
 @router.get("/delivery-sheet")
 def delivery_sheet(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
     area: Annotated[str | None, Query(description="按默认配送地址所属片区筛选，可选")] = None,
     phone: Annotated[
@@ -155,11 +180,11 @@ def delivery_sheet(
 ):
     """配送大表：激活且有余额、已达起送日、排除请假；周日与法定节假日不生成订阅派单；收件信息仅默认 member_addresses；同址聚合餐数。
     配送到家会员带 is_delivered（与 delivery_logs / 骑手确认送达同源）；门店自提不参与到家送达统计。"""
-    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     area_key = (area or "").strip() or None
     phone_key = (phone or "").strip() or None
     payload = build_delivery_sheet(
-        db, delivery_date=delivery_date, area=area_key, phone=phone_key
+        db, delivery_date=delivery_date, area=area_key, phone=phone_key, store_id=store_id
     )
     return success(data=dump_model(payload), msg="获取成功")
 
@@ -168,6 +193,7 @@ def delivery_sheet(
 def delivery_sf_preview(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
     area: Annotated[str | None, Query(description="同 delivery-sheet 片区筛选")] = None,
     phone: Annotated[str | None, Query(description="同 delivery-sheet 手机筛选")] = None,
@@ -176,9 +202,9 @@ def delivery_sf_preview(
     顺丰同城创单前预览：按停靠点合并大表+单点餐，返回 Excel 同结构字段的默认值。
     需配置：``SF_OPEN_*``、``SF_PICKUP_PHONE``、``SF_PICKUP_ADDRESS``。
     """
-    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     out: SfSameCityPreviewOut = preview_sf_same_city(
-        db, delivery_date=delivery_date, area=area, phone=phone
+        db, delivery_date=delivery_date, area=area, phone=phone, store_id=store_id
     )
     return success(data=dump_model(out), msg="获取成功")
 
@@ -188,15 +214,16 @@ def delivery_sf_push(
     body: SfSameCityPushIn,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """
     提交勾选的行到顺丰 ``createorder``；未勾选行忽略；同停靠点同业务日已成功的行会拒绝防重复。
 
     开发环境若无顺丰账号会失败并写入 ``sf_same_city_pushes`` 的 error_ 字段便于排查。
     """
-    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
-        out: SfSameCityPushOut = push_sf_same_city(db, body)
+        out: SfSameCityPushOut = push_sf_same_city(db, body, store_id=store_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return success(data=dump_model(out), msg="处理完成")
@@ -206,6 +233,7 @@ def delivery_sf_push(
 def delivery_sf_pushes(
     db: SessionDep,
     admin_username: str = Depends(admin_or_delivery_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     delivery_date: Annotated[date | None, Query(description="业务日，不传则全部")] = None,
     sf_callback_order_status: Annotated[
         int | None,
@@ -219,7 +247,7 @@ def delivery_sf_pushes(
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ):
     """顺丰同城创单落地记录列表（控制台回调状态），用于后台订单监控。"""
-    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
         items_raw, total = list_sf_same_city_pushes_for_monitor(
             db,
@@ -228,6 +256,7 @@ def delivery_sf_pushes(
             page_size=page_size,
             sf_callback_order_status=sf_callback_order_status,
             callback_order_status_unknown=callback_order_status_unknown,
+            store_id=store_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -254,15 +283,17 @@ def delivery_sf_pushes_export_xlsx(
         Query(description="为真时仅导出尚未收到配送状态回调的记录"),
     ] = False,
     admin_username: str = Depends(admin_or_delivery_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """导出顺丰订单监控列表同源数据（不分页），用于按业务日与控制台核对。"""
-    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
         rows = list_sf_same_city_pushes_for_monitor_export(
             db,
             delivery_date=delivery_date,
             sf_callback_order_status=sf_callback_order_status,
             callback_order_status_unknown=callback_order_status_unknown,
+            store_id=store_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -301,14 +332,17 @@ def delivery_mark(
     body: AdminDeliveryMarkIn,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """大表人工标记：配送到家 / 门店自提完成（扣次、写 delivery_logs；不增加骑手待结算）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     admin_mark_subscription_fulfilled(
         db,
         member_id=body.member_id,
         delivery_date=body.delivery_date,
         admin_username=admin_username,
         kind=body.kind,
+        store_id=store_id,
     )
     return success(msg="已标记")
 
@@ -318,11 +352,12 @@ def users_stats(
     response: Response,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """会员档案库顶栏：总会员数、生效中、已过期（与列表 validity 口径一致）。"""
     response.headers["Cache-Control"] = "no-store"
-    _ = admin_username
-    out = member_list_overview_counts(db)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = member_list_overview_counts(db, store_id=store_id)
     return success(data=dump_model(out), msg="获取成功")
 
 
@@ -362,9 +397,10 @@ def users(
         bool,
         Query(description="true=仅当前请假中（与列表「请假中」状态一致：区间含今日或明日请假未过期）"),
     ] = False,
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     response.headers["Cache-Control"] = "no-store"
-    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     v = (validity or "").strip().lower()
     if v not in ("", "active", "expired"):
         v = ""
@@ -389,6 +425,7 @@ def users(
         unassigned_region=unassigned_region,
         plan_type=pt or None,
         on_leave_only=on_leave_only,
+        store_id=store_id,
     )
     serialized = [dump_model(i) for i in items]
     return page_response(items=serialized, total=total, page=page, page_size=page_size, msg="获取成功")
@@ -424,6 +461,7 @@ def recharge(
 def card_orders(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     q: str | None = None,
     pay_status: Annotated[str | None, Query(description="未缴 | 已缴")] = None,
     include_history: Annotated[
@@ -434,7 +472,7 @@ def card_orders(
     page_size: int = 20,
 ):
     """会员开卡工单列表（分页）。"""
-    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     items, total = list_card_orders_paged(
@@ -444,6 +482,7 @@ def card_orders(
         page=page,
         page_size=page_size,
         include_history=include_history,
+        store_id=store_id,
     )
     serialized = [dump_model(i) for i in items]
     return page_response(
@@ -456,8 +495,10 @@ def card_orders_create(
     body: CardOrderCreateIn,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    out = create_card_order(db, body, operator=admin_username)
+    tid, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = create_card_order(db, body, operator=admin_username, tenant_id=tid, store_id=sid)
     return success(data=dump_model(out), msg="工单已创建")
 
 
@@ -467,8 +508,10 @@ def card_orders_patch(
     body: CardOrderPatchIn,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    out = update_card_order(db, order_id, body, operator=admin_username)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = update_card_order(db, order_id, body, operator=admin_username, store_id=store_id)
     return success(data=dump_model(out), msg="工单已更新")
 
 
@@ -477,9 +520,10 @@ def card_orders_delete(
     order_id: int,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    _ = admin_username
-    delete_card_order(db, order_id)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    delete_card_order(db, order_id, store_id=store_id)
     return success(data=None, msg="工单已删除")
 
 
@@ -628,19 +672,25 @@ def admin_member_operation_logs(
 def dishes(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     enabled_only: bool = False,
     q: Annotated[str | None, Query(description="按名称模糊筛选")] = None,
 ):
     """菜品库列表，排期时可从中选 `dish_id`。"""
-    _ = admin_username
-    items = list_dishes_admin(db, enabled_only=enabled_only, q=q)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    items = list_dishes_admin(db, enabled_only=enabled_only, q=q, store_id=store_id)
     return success(data=[dump_model(i) for i in items], msg="获取成功")
 
 
 @router.post("/dish")
-def dish_upsert(body: DishUpsertIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
-    _ = admin_username
-    out = upsert_dish(db, body)
+def dish_upsert(
+    body: DishUpsertIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = upsert_dish(db, body, store_id=store_id)
     return success(data=dump_model(out), msg="菜品已保存")
 
 
@@ -649,32 +699,47 @@ def dish_delete(
     dish_id: int,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    _ = admin_username
-    delete_dish(db, dish_id)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    delete_dish(db, dish_id, store_id=store_id)
     return success(msg="菜品已删除")
 
 
 @router.post("/menu/schedule")
-def menu_schedule(body: MenuScheduleAssignIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
+def menu_schedule(
+    body: MenuScheduleAssignIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
     """将某日排期绑定到菜品库中的 `dish_id`（同月同一菜仅能排一天）。"""
-    _ = admin_username
-    assign_menu_schedule(db, body)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    assign_menu_schedule(db, body, store_id=store_id)
     return success(msg="排期已保存")
 
 
 @router.get("/categories")
-def categories(db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
+def categories(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
     """商品分类列表（含 code=weekly 的「每周餐品」）。"""
-    _ = admin_username
-    items = list_categories_admin(db)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    items = list_categories_admin(db, store_id=store_id)
     return success(data=[dump_model(i) for i in items], msg="获取成功")
 
 
 @router.post("/category")
-def category_create(body: CategoryCreateIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
-    _ = admin_username
-    out = create_category_admin(db, body)
+def category_create(
+    body: CategoryCreateIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = create_category_admin(db, body, store_id=store_id)
     return success(data=dump_model(out), msg="分类已创建")
 
 
@@ -682,41 +747,61 @@ def category_create(body: CategoryCreateIn, db: SessionDep, admin_username: str 
 def menu_weekly_slots(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     week_start: Annotated[date | None, Query(description="指定周任意一天则只返回该周槽位；不传则返回本周+下周")] = None,
 ):
     """每周餐品槽位：不传参数时同时返回本周与下周，便于预告维护（无需翻周拷贝数据）。"""
-    _ = admin_username
-    return success(data=admin_weekly_menu_preview(db, week_start), msg="获取成功")
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    return success(data=admin_weekly_menu_preview(db, week_start, store_id=store_id), msg="获取成功")
 
 
 @router.post("/menu/weekly-slot")
-def menu_weekly_slot(body: WeeklySlotAssignIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
+def menu_weekly_slot(
+    body: WeeklySlotAssignIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
     """设置某周 slot（1–7）对应的菜品；`dish_id` 为空则清空该槽。"""
-    _ = admin_username
-    assign_weekly_menu_slot(db, body)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    assign_weekly_menu_slot(db, body, store_id=store_id)
     return success(msg="周槽位已保存")
 
 
 @router.post("/menu/day-total-stock")
-def menu_day_total_stock(body: MenuDayTotalStockIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
+def menu_day_total_stock(
+    body: MenuDayTotalStockIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
     """设置该周某一天对应菜品的日总份数；用于单次卡可售=总份数−当日应配送−已付单次。"""
-    _ = admin_username
-    set_weekly_slot_menu_total_stock(db, body)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    set_weekly_slot_menu_total_stock(db, body, store_id=store_id)
     return success(msg="日总库存已保存")
 
 
 @router.post("/settings")
-def update_app_settings(body: SettingsIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
-    _ = admin_username
-    update_settings(db, body)
+def update_app_settings(
+    body: SettingsIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    update_settings(db, body, store_id=store_id)
     return success(msg="设置已更新")
 
 
 @router.get("/store-config")
-def admin_store_config_get(db: SessionDep, admin_username: str = Depends(admin_full_subject)):
+def admin_store_config_get(
+    db: SessionDep,
+    admin_username: str = Depends(admin_full_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
     """门店基础信息：名称、Logo、地图锚点坐标（GCJ-02）。"""
-    _ = admin_username
-    cfg = get_store_config(db)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    cfg = get_store_config(db, store_id=store_id)
     return success(data=dump_model(cfg), msg="获取成功")
 
 
@@ -725,10 +810,11 @@ def admin_store_config_put(
     body: StoreConfigUpdateIn,
     db: SessionDep,
     admin_username: str = Depends(admin_full_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """更新门店配置；未传的字段保持不变（PATCH 语义）。"""
-    _ = admin_username
-    cfg = update_store_config(db, body)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    cfg = update_store_config(db, store_id=store_id, body=body)
     return success(data=dump_model(cfg), msg="已保存")
 
 

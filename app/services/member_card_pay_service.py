@@ -19,8 +19,11 @@ from app.integrations.wechat_pay_v2 import (
     build_miniprogram_pay_params,
     query_order_by_out_trade_no,
     unified_order_jsapi,
-    wechat_pay_misconfiguration_detail,
     yuan_decimal_to_fen,
+)
+from app.services.tenant_integration_service import (
+    get_merged_pay_config,
+    wechat_pay_misconfiguration_detail_merged,
 )
 from app.models.enums import CardOrderKind, CardOrderPayStatus, CardPayChannel
 from app.models.member import Member
@@ -46,13 +49,13 @@ def _format_amount_yuan(v: Decimal) -> str:
     return f"{v.quantize(Decimal('0.01')):.2f}"
 
 
-def card_order_amount_yuan_for_kind(db: Session, card_kind: str) -> Decimal:
+def card_order_amount_yuan_for_kind(db: Session, card_kind: str, *, store_id: int | None = None) -> Decimal:
     k = (card_kind or "").strip()
     if k == CardOrderKind.WEEK.value:
-        week_p, _ = get_member_card_prices_yuan(db)
+        week_p, _ = get_member_card_prices_yuan(db, store_id=store_id)
         return week_p
     if k == CardOrderKind.MONTH.value:
-        _, month_p = get_member_card_prices_yuan(db)
+        _, month_p = get_member_card_prices_yuan(db, store_id=store_id)
         return month_p
     if k == CardOrderKind.TIMES.value:
         return get_settings().MEMBER_CARD_TIMES_PRICE_YUAN
@@ -79,9 +82,11 @@ def create_miniprogram_member_card_order(
     if not m or m.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    amt = card_order_amount_yuan_for_kind(db, k)
+    amt = card_order_amount_yuan_for_kind(db, k, store_id=int(m.store_id))
     row = MemberCardOrder(
         member_id=member_id,
+        tenant_id=int(m.tenant_id),
+        store_id=int(m.store_id),
         card_kind=k,
         pay_channel=CardPayChannel.WECHAT.value,
         pay_status=CardOrderPayStatus.UNPAID.value,
@@ -104,15 +109,16 @@ def create_miniprogram_member_card_order(
 def prepare_wechat_jsapi_for_member_card_order(
     db: Session, member_id: int, order_id: int, client_ip: str
 ) -> dict[str, str]:
-    pay_cfg = wechat_pay_misconfiguration_detail()
-    if pay_cfg:
-        raise HTTPException(status_code=503, detail=pay_cfg)
-
     order = db.get(MemberCardOrder, order_id)
     if not order or int(order.member_id) != int(member_id):
         raise HTTPException(status_code=404, detail="开卡订单不存在")
     if order.pay_status == CardOrderPayStatus.PAID.value:
         raise HTTPException(status_code=400, detail="订单已支付")
+
+    pay_cfg = get_merged_pay_config(db, int(order.tenant_id))
+    perr = wechat_pay_misconfiguration_detail_merged(pay_cfg)
+    if perr:
+        raise HTTPException(status_code=503, detail=perr)
 
     member = db.get(Member, member_id)
     if not member or member.deleted_at is not None:
@@ -137,11 +143,14 @@ def prepare_wechat_jsapi_for_member_card_order(
             total_fee_fen=yuan_decimal_to_fen(order.amount_yuan),
             openid=openid,
             spbill_create_ip=client_ip,
+            pay=pay_cfg,
         )
     except WeChatPayV2Error as e:
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
 
-    return build_miniprogram_pay_params(prepay_id)
+    return build_miniprogram_pay_params(
+        prepay_id, appid=pay_cfg.wx_mini_appid, api_key=pay_cfg.wechat_pay_api_key
+    )
 
 
 def sync_member_card_order_from_wechat_query(
@@ -170,7 +179,8 @@ def sync_member_card_order_from_wechat_query(
         return True, "already_synced"
 
     try:
-        data = query_order_by_out_trade_no(out_no)
+        pay_cfg = get_merged_pay_config(db, int(order.tenant_id))
+        data = query_order_by_out_trade_no(out_no, pay=pay_cfg)
     except WeChatPayV2Error as e:
         return False, f"wechat_query:{str(e)}"[:220]
 

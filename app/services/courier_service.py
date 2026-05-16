@@ -37,6 +37,21 @@ from app.services.member_service import effective_daily_meal_units, sql_effectiv
 from app.services.single_meal_order_service import list_courier_single_order_tasks
 
 
+def _member_scope_clause(*, tenant_id: int | None, store_id: int | None):
+    """会员名单范围：优先按门店；否则按租户；均未指定时回落默认租户+门店（兼容单店）。"""
+    from app.core.config import get_settings
+
+    s = get_settings()
+    if store_id is not None:
+        return Member.store_id == int(store_id)
+    if tenant_id is not None:
+        return Member.tenant_id == int(tenant_id)
+    return and_(
+        Member.tenant_id == int(s.DEFAULT_TENANT_ID),
+        Member.store_id == int(s.DEFAULT_STORE_ID),
+    )
+
+
 def _member_not_skip_subscription_saturday(delivery_date: date):
     """普通周六剔除「固定周六不履约」会员；非周六不加条件。"""
     if delivery_date.weekday() == 5:
@@ -89,6 +104,8 @@ def eligible_members_for_delivery(
     *,
     delivery_date: date,
     delivery_region_id: int | None = None,
+    tenant_id: int | None = None,
+    store_id: int | None = None,
 ) -> tuple[list[Member], dict[int, MemberAddress | None]]:
     """
     应配送会员（Member 行）及每人默认地址（与 is_absent_on_delivery_date / 配送清单同一规则）。
@@ -138,6 +155,7 @@ def eligible_members_for_delivery(
             not_(absent),
             started,
             _member_not_skip_subscription_saturday(delivery_date),
+            _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
         )
     )
     if delivery_region_id is not None:
@@ -154,6 +172,8 @@ def eligible_members_for_store_pickup(
     db: Session,
     *,
     delivery_date: date,
+    tenant_id: int | None = None,
+    store_id: int | None = None,
 ) -> tuple[list[Member], dict[int, MemberAddress | None]]:
     """
     当日应备餐的门店自提会员（与 `eligible_members_for_delivery` 相同的请假、起送日、余额规则；
@@ -199,6 +219,7 @@ def eligible_members_for_store_pickup(
             not_(absent),
             started,
             _member_not_skip_subscription_saturday(delivery_date),
+            _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
         )
     )
     members: list[Member] = []
@@ -209,7 +230,13 @@ def eligible_members_for_store_pickup(
     return members, defaults
 
 
-def count_expire_one_unit_members_for_business_day(db: Session, *, delivery_date: date) -> int:
+def count_expire_one_unit_members_for_business_day(
+    db: Session,
+    *,
+    delivery_date: date,
+    tenant_id: int | None = None,
+    store_id: int | None = None,
+) -> int:
     """当日应履约（到家或自提）且 ``balance`` 恰等于每配送日份数的会员数（本日履约后将无余量）。
 
     规则与 :func:`eligible_members_for_delivery` / :func:`eligible_members_for_store_pickup` 一致；
@@ -249,6 +276,7 @@ def count_expire_one_unit_members_for_business_day(db: Session, *, delivery_date
         not_(absent),
         started,
         _member_not_skip_subscription_saturday(delivery_date),
+        _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
     ]
 
     def _one_count(*, store_pickup: bool) -> int:
@@ -274,6 +302,8 @@ def extra_delivered_ineligible_subscribers(
     already_home: set[int],
     already_pickup: set[int],
     delivery_region_id: int | None,
+    tenant_id: int | None = None,
+    store_id: int | None = None,
 ) -> tuple[list[Member], dict[int, MemberAddress | None], list[Member], dict[int, MemberAddress | None]]:
     """
     当日 delivery_logs 已为 DELIVERED，但会员不再满足「应配送/应自提」SQL（常见：扣次后 balance
@@ -296,7 +326,14 @@ def extra_delivered_ineligible_subscribers(
     if not need:
         return [], {}, [], {}
 
-    rows = list(db.scalars(select(Member).where(Member.id.in_(need))).all())
+    rows = list(
+        db.scalars(
+            select(Member).where(
+                Member.id.in_(need),
+                _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
+            )
+        ).all()
+    )
     if not rows:
         return [], {}, [], {}
 
@@ -330,6 +367,8 @@ def list_today_tasks(
     delivery_region_id: int,
     delivery_region_display: str,
     delivery_date: date | None = None,
+    tenant_id: int | None = None,
+    store_id: int | None = None,
 ) -> list[CourierTaskMemberOut]:
     """
     当日配送清单：
@@ -342,14 +381,24 @@ def list_today_tasks(
     - 当日已送达后余额不足、不再入选应送名单的会员，仍从 delivery_logs 补入本清单（与配送大表一致），便于对账。
     """
     d = delivery_date or today_shanghai()
-    eligible, defaults = eligible_members_for_delivery(db, delivery_date=d, delivery_region_id=delivery_region_id)
-    pu_list, _pu_def = eligible_members_for_store_pickup(db, delivery_date=d)
+    eligible, defaults = eligible_members_for_delivery(
+        db,
+        delivery_date=d,
+        delivery_region_id=delivery_region_id,
+        tenant_id=tenant_id,
+        store_id=store_id,
+    )
+    pu_list, _pu_def = eligible_members_for_store_pickup(
+        db, delivery_date=d, tenant_id=tenant_id, store_id=store_id
+    )
     ex_h, ex_d, _ex_pu, _ex_pud = extra_delivered_ineligible_subscribers(
         db,
         delivery_date=d,
         already_home={int(m.id) for m in eligible},
         already_pickup={int(m.id) for m in pu_list},
         delivery_region_id=delivery_region_id,
+        tenant_id=tenant_id,
+        store_id=store_id,
     )
     for m in ex_h:
         eligible.append(m)
@@ -368,7 +417,12 @@ def list_today_tasks(
             ).all()
         )
 
-    store_lng, store_lat = load_store_coordinates_for_sorting(db)
+    if store_id is not None:
+        store_lng, store_lat = load_store_coordinates_for_sorting(db, store_id=int(store_id))
+    elif tenant_id is not None:
+        store_lng, store_lat = load_store_coordinates_for_sorting(db, tenant_id=int(tenant_id))
+    else:
+        store_lng, store_lat = load_store_coordinates_for_sorting(db)
     ref_lng, ref_lat = reference_lng_lat_for_task_sorting(store_lng, store_lat, eligible, defaults)
     rows: list[CourierTaskMemberOut] = []
     ar = delivery_region_display
@@ -410,6 +464,8 @@ def list_tasks_for_courier(
 ) -> tuple[list[CourierTaskMemberOut], date]:
     """当日任务：仅包含该配送员在 delivery_region_couriers 中绑定的片区。"""
     d = delivery_date or today_shanghai()
+    c_row = db.get(Courier, courier_id)
+    tid = int(c_row.tenant_id) if c_row is not None else None
     regions = regions_for_courier(db, courier_id)
     if not regions:
         singles = list_courier_single_order_tasks(db, courier_id, d)
@@ -422,12 +478,17 @@ def list_tasks_for_courier(
             delivery_region_id=int(reg.region_id),
             delivery_region_display=rname,
             delivery_date=d,
+            tenant_id=tid,
         ):
             by_member[row.member_id] = row
     out = list(by_member.values())
     singles = list_courier_single_order_tasks(db, courier_id, d)
     out.extend(singles)
-    store_lng, store_lat = load_store_coordinates_for_sorting(db)
+    store_lng, store_lat = (
+        load_store_coordinates_for_sorting(db, tenant_id=tid)
+        if tid is not None
+        else load_store_coordinates_for_sorting(db)
+    )
     depot_lng, depot_lat = (
         (float(store_lng), float(store_lat))
         if store_lng is not None and store_lat is not None
@@ -454,6 +515,12 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
     member = db.execute(select(Member).where(Member.id == member_id).with_for_update()).scalar_one_or_none()
     if not member or member.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    courier_row = db.get(Courier, courier_id)
+    if not courier_row:
+        raise HTTPException(status_code=500, detail="配送员账户异常")
+    if int(member.tenant_id) != int(courier_row.tenant_id):
+        raise HTTPException(status_code=403, detail="无权操作该会员")
 
     allowed_region_ids = {int(r.region_id) for r in regions_for_courier(db, courier_id)}
     if not allowed_region_ids:
@@ -504,7 +571,7 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
             detail=None,
         )
     )
-    fee_yuan = courier_delivery_fee_yuan_for_meal_units(db, deduct)
+    fee_yuan = courier_delivery_fee_yuan_for_meal_units(db, deduct, store_id=int(member.store_id))
     courier_row = db.execute(select(Courier).where(Courier.courier_id == courier_id).with_for_update()).scalar_one_or_none()
     if not courier_row:
         raise HTTPException(status_code=500, detail="配送员账户异常")

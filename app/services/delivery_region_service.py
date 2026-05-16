@@ -15,7 +15,7 @@ from app.schemas.delivery_region import (
 )
 
 
-def _validate_courier_list(db: Session, couriers: list) -> None:
+def _validate_courier_list(db: Session, couriers: list, *, tenant_id: int | None = None) -> None:
     primary_count = sum(1 for c in couriers if c.is_primary)
     if primary_count > 1:
         raise HTTPException(status_code=400, detail="每个配送区域至多指定一名主责配送员")
@@ -27,6 +27,8 @@ def _validate_courier_list(db: Session, couriers: list) -> None:
         row = db.get(Courier, c.courier_id)
         if not row:
             raise HTTPException(status_code=400, detail=f"配送员不存在: {c.courier_id}")
+        if tenant_id is not None and int(row.tenant_id) != int(tenant_id):
+            raise HTTPException(status_code=400, detail=f"配送员不属于本租户: {c.courier_id}")
 
 
 def _couriers_from_region(r: DeliveryRegion) -> list[RegionCourierOut]:
@@ -59,7 +61,12 @@ def _to_region_out(r: DeliveryRegion) -> DeliveryRegionOut:
     return DeliveryRegionOut(**_to_region_summary(r).model_dump(), polygon_json=r.polygon_json)
 
 
-def list_delivery_regions(db: Session, *, include_polygon: bool = False) -> list[DeliveryRegionSummaryOut] | list[DeliveryRegionOut]:
+def list_delivery_regions(
+    db: Session,
+    *,
+    include_polygon: bool = False,
+    tenant_id: int | None = None,
+) -> list[DeliveryRegionSummaryOut] | list[DeliveryRegionOut]:
     load_opts: list = [
         selectinload(DeliveryRegion.courier_links).selectinload(DeliveryRegionCourier.courier),
     ]
@@ -70,27 +77,32 @@ def list_delivery_regions(db: Session, *, include_polygon: bool = False) -> list
         .options(*load_opts)
         .order_by(DeliveryRegion.priority.asc(), DeliveryRegion.id.asc())
     )
+    if tenant_id is not None:
+        stmt = stmt.where(DeliveryRegion.tenant_id == int(tenant_id))
     rows = db.scalars(stmt).all()
     if include_polygon:
         return [_to_region_out(r) for r in rows]
     return [_to_region_summary(r) for r in rows]
 
 
-def get_delivery_region(db: Session, region_id: int) -> DeliveryRegionOut:
+def get_delivery_region(db: Session, region_id: int, *, tenant_id: int | None = None) -> DeliveryRegionOut:
     stmt = (
         select(DeliveryRegion)
         .options(selectinload(DeliveryRegion.courier_links).selectinload(DeliveryRegionCourier.courier))
         .where(DeliveryRegion.id == region_id)
     )
+    if tenant_id is not None:
+        stmt = stmt.where(DeliveryRegion.tenant_id == int(tenant_id))
     r = db.scalars(stmt).first()
     if not r:
         raise HTTPException(status_code=404, detail="配送区域不存在")
     return _to_region_out(r)
 
 
-def create_delivery_region(db: Session, body: DeliveryRegionCreateIn) -> DeliveryRegionOut:
-    _validate_courier_list(db, body.couriers)
+def create_delivery_region(db: Session, body: DeliveryRegionCreateIn, *, tenant_id: int) -> DeliveryRegionOut:
+    _validate_courier_list(db, body.couriers, tenant_id=int(tenant_id))
     r = DeliveryRegion(
+        tenant_id=int(tenant_id),
         name=body.name.strip(),
         code=body.code.strip() if body.code else None,
         polygon_json=body.polygon_json,
@@ -110,15 +122,19 @@ def create_delivery_region(db: Session, body: DeliveryRegionCreateIn) -> Deliver
         )
     db.commit()
     db.refresh(r)
-    return get_delivery_region(db, int(r.id))
+    return get_delivery_region(db, int(r.id), tenant_id=int(tenant_id))
 
 
-def update_delivery_region(db: Session, region_id: int, body: DeliveryRegionUpdateIn) -> DeliveryRegionOut:
+def update_delivery_region(
+    db: Session, region_id: int, body: DeliveryRegionUpdateIn, *, tenant_id: int | None = None
+) -> DeliveryRegionOut:
     r = db.get(DeliveryRegion, region_id)
     if not r:
         raise HTTPException(status_code=404, detail="配送区域不存在")
+    if tenant_id is not None and int(r.tenant_id) != int(tenant_id):
+        raise HTTPException(status_code=404, detail="配送区域不存在")
     if body.couriers is not None:
-        _validate_courier_list(db, body.couriers)
+        _validate_courier_list(db, body.couriers, tenant_id=tenant_id)
     if body.name is not None:
         r.name = body.name.strip()
     if body.code is not None:
@@ -143,12 +159,14 @@ def update_delivery_region(db: Session, region_id: int, body: DeliveryRegionUpda
                 )
             )
     db.commit()
-    return get_delivery_region(db, region_id)
+    return get_delivery_region(db, region_id, tenant_id=tenant_id)
 
 
-def delete_delivery_region(db: Session, region_id: int) -> None:
+def delete_delivery_region(db: Session, region_id: int, *, tenant_id: int | None = None) -> None:
     r = db.get(DeliveryRegion, region_id)
     if not r:
+        raise HTTPException(status_code=404, detail="配送区域不存在")
+    if tenant_id is not None and int(r.tenant_id) != int(tenant_id):
         raise HTTPException(status_code=404, detail="配送区域不存在")
     db.delete(r)
     db.commit()

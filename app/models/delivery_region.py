@@ -12,6 +12,9 @@ class DeliveryRegion(Base):
     __tablename__ = "delivery_regions"
 
     id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", onupdate="CASCADE"), nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(64))
     code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     polygon_json: Mapped[dict | list] = mapped_column(JSON)

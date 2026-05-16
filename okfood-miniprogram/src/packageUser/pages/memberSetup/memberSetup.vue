@@ -128,21 +128,22 @@
        </view>
 
         <view v-if="!resumeOnlyMode && needsCardPayment" class="setup-module setup-module--card">
-         <text class="module-title">二、开卡</text>
+         <text class="module-title">二、开通会员卡</text>
           <view class="section">
-           <text class="sec-title">开卡卡种</text>
+           <text class="sec-title">选择卡种</text>
             <text class="sec-sub">
-             请选择您已经付费的卡种
+             支付成功后自动增加对应餐次（周卡 +6 / 月卡 +24）。
             </text>
-            <view class="plan-premium-wrap">
+           <!-- 活动价：绿底双白卡 -->
+            <view v-if="!useDeluxePlanUi" class="plan-premium-wrap">
               <view class="plan-grid plan-grid--premium">
-                <view :class="['plan-card', 'plan-card--premium', selectedPlan === '周卡' ? 'plan-card--on' : '']"
+               <view :class="['plan-card', 'plan-card--premium', selectedPlan === '周卡' ? 'plan-card--on' : '']"
                   @click="pickPlan('周卡')">
                   <view v-if="selectedPlan === '周卡'" class="plan-picked-pill">
                     <text class="plan-picked-pill-txt">已选</text>
                   </view>
                   <text class="plan-headline">自律周卡 / 6天</text>
-                  <text class="plan-origin">原价 ¥{{ cardOrigWeek }}</text>
+                 <text v-if="weekShowStrike" class="plan-origin">原价 ¥{{ weekListStr }}</text>
                   <view class="plan-activity">
                     <view class="plan-activity-tag">
                       <text class="plan-activity-tag-line">活</text>
@@ -164,13 +165,13 @@
                   'plan-card--premium',
                   'plan-card--rec',
                   selectedPlan === '月卡' ? 'plan-card--on' : '',
-                ]" @click="pickPlan('月卡')">
+]" @click="pickPlan('月卡')">
                   <view v-if="selectedPlan === '月卡'" class="plan-picked-pill">
                     <text class="plan-picked-pill-txt">已选</text>
                   </view>
                   <text class="plan-rec-pill">推荐</text>
                   <text class="plan-headline">全能月卡 / 24天</text>
-                  <text class="plan-origin">原价 ¥{{ cardOrigMonth }}</text>
+                 <text v-if="monthShowStrike" class="plan-origin">原价 ¥{{ monthListStr }}</text>
                   <view class="plan-activity">
                     <view class="plan-activity-tag">
                       <text class="plan-activity-tag-line">活</text>
@@ -188,12 +189,60 @@
                 </view>
               </view>
             </view>
-         </view>
-          <view class="section">
-            <text class="sec-title">线下已缴说明</text>
-            <text class="sec-sub">
-             信息提交后，由客服审核确认，并开始安排配送。
-            </text>
+           <!-- 标准价：尊享月卡深卡 + 轻食周卡浅卡 -->
+            <view v-else class="plan-deluxe-wrap">
+              <view class="plan-deluxe-grid">
+                <view :class="[
+                  'plan-deluxe',
+                  'plan-deluxe--month',
+                  selectedPlan === '月卡' ? 'plan-deluxe--on' : '',
+                ]" @click="pickPlan('月卡')">
+                  <text class="plan-deluxe-corner-tag plan-deluxe-corner-tag--vip">VIP MONTHLY</text>
+                  <view class="plan-deluxe-head-row">
+                    <view class="plan-deluxe-price-stack">
+                      <text class="plan-deluxe-kicker plan-deluxe-kicker--gold">省心推荐</text>
+                      <text class="plan-deluxe-big-price plan-deluxe-big-price--gold">¥{{ cardPriceMonth }}</text>
+                      <text class="plan-deluxe-sub plan-deluxe-sub--muted-gold">24天/全包</text>
+                    </view>
+                  </view>
+                  <text class="plan-deluxe-hero-title">全月尊享自律计划</text>
+                  <view class="plan-deluxe-benefits plan-deluxe-benefits--vip">
+                    <text class="plan-deluxe-benefit-line">★ 顺丰同城转送</text>
+                    <text class="plan-deluxe-benefit-line">★ 自由请假改地址</text>
+                    <text class="plan-deluxe-benefit-line">★ 菜品专享折上折</text>
+                    <text class="plan-deluxe-benefit-line">★ 生日尊享神秘厚礼</text>
+                  </view>
+                  <button class="plan-deluxe-btn plan-deluxe-btn--gold" hover-class="none"
+                    @click.stop="runPayFlow('月卡')">
+                    立即解锁尊贵月卡
+                  </button>
+                </view>
+
+                <view :class="[
+                  'plan-deluxe',
+                  'plan-deluxe--week',
+                  selectedPlan === '周卡' ? 'plan-deluxe--on' : '',
+                ]" @click="pickPlan('周卡')">
+                  <text class="plan-deluxe-corner-tag plan-deluxe-corner-tag--week">WEEKLY PASS</text>
+                  <view class="plan-deluxe-head-row plan-deluxe-head-row--week">
+                    <view class="plan-deluxe-price-stack">
+                      <text class="plan-deluxe-kicker plan-deluxe-kicker--muted">限时尝鲜</text>
+                      <text class="plan-deluxe-big-price plan-deluxe-big-price--teal">¥{{ cardPriceWeek }}</text>
+                      <text class="plan-deluxe-sub plan-deluxe-sub--muted">6天/周</text>
+                    </view>
+                  </view>
+                  <text class="plan-deluxe-hero-title plan-deluxe-hero-title--week">单周体验轻食计划</text>
+                  <view class="plan-deluxe-benefits plan-deluxe-benefits--week">
+                    <text class="plan-deluxe-benefit-line plan-deluxe-benefit-line--week">🌱 适合1周入门，轻松管理餐次</text>
+                    <text class="plan-deluxe-benefit-line plan-deluxe-benefit-line--week">🌱 同样尊享不重样和临时停改配权</text>
+                  </view>
+                  <button class="plan-deluxe-btn plan-deluxe-btn--dark" hover-class="none"
+                    @click.stop="runPayFlow('周卡')">
+                    周餐体验轻生活
+                  </button>
+               </view>
+             </view>
+            </view>
           </view>
         </view>
 
@@ -235,6 +284,7 @@ import {
   WX_DEFAULT_NICK,
 } from '@/utils/memberProfile.js'
 import { minMemberDeliveryStartYmd } from '@/utils/menuApi.js'
+import { runMemberCardWechatPay } from '@/utils/memberCardPay.js'
 
 /** 与 uni.scss $ok-forest-green 一致，供 radio 组件 color 使用 */
 const payRadioColor = '#0e5a44'
@@ -245,7 +295,6 @@ const avatarUrl = ref('')
 /** 服务端已保存的头像 URL，上传失败时用于恢复展示且不写入非法本地路径 */
 const remoteAvatarUrl = ref('')
 const selectedPlan = ref('周卡')
-/** 需购卡时：固定为线下已缴，仅保存资料并提交卡种（不拉起微信支付） */
 /** delivery=配送到家；pickup=门店自提；defer=暂停配送（服务端 delivery_deferred） */
 const deliveryMode = ref('delivery')
 const deliveryYmd = ref('')
@@ -259,9 +308,11 @@ const serverBalance = ref(0)
 /** 与后台 app_settings 同步，请求失败时用默认展示 */
 const cardPriceWeek = ref('168')
 const cardPriceMonth = ref('669')
-/** 展示用划线价；可与接口价同步，缺省为常见标价 */
-const cardOrigWeek = ref('188')
-const cardOrigMonth = ref('699')
+/** 后端：任一侧划线价高于实付价时为 true → 活动价整体样式 */
+const promoActive = ref(false)
+/** 来自接口的划线价（可空） */
+const weekListStr = ref('')
+const monthListStr = ref('')
 /** 资料已完备、仅开卡续费时隐藏头像与昵称编辑（与 shouldOpenMemberSetup 判定一致） */
 const skipProfileIdentityEdit = ref(false)
 
@@ -270,13 +321,29 @@ const showNickHint = computed(() => !String(nickDraft.value || '').trim())
 /** 未选日期时让滚轮落在合法最小日上，避免默认停在「今天」却仍受 start 限制 */
 const pickerDeliveryYmd = computed(() => deliveryYmd.value || minDeliveryYmd.value)
 
+const useDeluxePlanUi = computed(() => !promoActive.value)
+
+const weekShowStrike = computed(() => {
+  const o = Number(weekListStr.value)
+  const c = Number(cardPriceWeek.value)
+  return Number.isFinite(o) && Number.isFinite(c) && o > c
+})
+
+const monthShowStrike = computed(() => {
+  const o = Number(monthListStr.value)
+  const c = Number(cardPriceMonth.value)
+  return Number.isFinite(o) && Number.isFinite(c) && o > c
+})
+
 const saveAmountWeek = computed(() => {
-  const o = Math.floor(Number(cardOrigWeek.value) || 0)
+  if (!weekShowStrike.value) return 0
+  const o = Math.floor(Number(weekListStr.value) || 0)
   const c = Math.floor(Number(cardPriceWeek.value) || 0)
   return Math.max(0, o - c)
 })
 const saveAmountMonth = computed(() => {
-  const o = Math.floor(Number(cardOrigMonth.value) || 0)
+  if (!monthShowStrike.value) return 0
+  const o = Math.floor(Number(monthListStr.value) || 0)
   const c = Math.floor(Number(cardPriceMonth.value) || 0)
   return Math.max(0, o - c)
 })
@@ -286,7 +353,7 @@ const needsCardPayment = computed(() => serverBalance.value <= 0)
 const submitButtonText = computed(() => {
   if (resumeOnlyMode.value) return '确认恢复配送'
   if (!needsCardPayment.value) return '保存并返回「我的」'
-  return '保存资料'
+  return '微信支付并开通'
 })
 
 function pickPlan(p) {
@@ -348,10 +415,15 @@ async function loadCardPrices() {
   try {
     const d = await request('/api/user/member-card-prices', { method: 'GET' })
     if (d && typeof d === 'object') {
+      promoActive.value = !!d.promotion_active
       const w = d.week_price_yuan != null ? String(d.week_price_yuan).trim() : ''
       const m = d.month_price_yuan != null ? String(d.month_price_yuan).trim() : ''
       if (w) cardPriceWeek.value = w
       if (m) cardPriceMonth.value = m
+      weekListStr.value =
+        d.week_list_price_yuan != null ? String(d.week_list_price_yuan).trim() : ''
+      monthListStr.value =
+        d.month_list_price_yuan != null ? String(d.month_list_price_yuan).trim() : ''
     }
   } catch {
     /* 使用页面默认值 */
@@ -482,6 +554,13 @@ function onNickInput(e) {
   nickDraft.value = e.detail?.value ?? ''
 }
 
+async function runPayFlow(kind) {
+  if (kind === '周卡' || kind === '月卡') {
+    selectedPlan.value = kind
+  }
+  await onSubmit()
+}
+
 async function onSubmit() {
   const phone = memberPhone.value || uni.getStorageSync('memberPhone') || ''
   const nick = String(nickDraft.value || '').trim()
@@ -528,6 +607,8 @@ async function onSubmit() {
     return
   }
 
+  if (submitting.value) return
+
   if (
     !skipProfileIdentityEdit.value &&
     (!nick || nick === WX_DEFAULT_NICK)
@@ -537,6 +618,13 @@ async function onSubmit() {
   }
   if (needsCardPayment.value && !selectedPlan.value) {
     uni.showToast({ title: '请选择周卡或月卡', icon: 'none' })
+    return
+  }
+  if (needsCardPayment.value && deliveryMode.value === 'defer') {
+    uni.showToast({
+      title: '开通会员卡请先选择配送或门店自提，并选定开始日期',
+      icon: 'none',
+    })
     return
   }
   const d0 = deliveryYmd.value?.trim()
@@ -575,7 +663,6 @@ async function onSubmit() {
       patch.store_pickup = deliveryMode.value === 'pickup'
     }
     if (needsCardPayment.value) {
-      patch.card_pay_mode = 'offline_paid'
       patch.plan_type = selectedPlan.value === '月卡' ? '月卡' : '周卡'
     }
     const av = String(avatarUrl.value || '').trim()
@@ -601,19 +688,33 @@ async function onSubmit() {
       /*忽略 */
     }
 
-    const t =
-      needsCardPayment.value &&
-        (deliveryMode.value === 'delivery' || deliveryMode.value === 'pickup')
-        ? '已保存。后台开卡工单待核对'
-        : '已保存'
+    if (needsCardPayment.value) {
+      uni.showLoading({ title: '微信支付…', mask: true })
+      try {
+        await runMemberCardWechatPay({
+          cardKind: selectedPlan.value === '月卡' ? '月卡' : '周卡',
+          deliveryStartYmd: d0,
+          patchProfile: false,
+        })
+      } catch (payErr) {
+        const raw = `${payErr?.errMsg || payErr?.message || ''}`
+        if (/cancel|取消/i.test(raw)) {
+          uni.showToast({ title: '已取消支付', icon: 'none' })
+          return
+        }
+        throw payErr
+      } finally {
+        uni.hideLoading()
+      }
+      uni.showToast({ title: '支付成功，餐次已入账', icon: 'success', duration: 2000 })
+      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+      return
+    }
+
     uni.showToast({
-      title: t,
+      title: '已保存',
       icon: 'success',
-      duration:
-        needsCardPayment.value &&
-          (deliveryMode.value === 'delivery' || deliveryMode.value === 'pickup')
-          ? 2200
-          : 2000,
+      duration: 2000,
     })
     setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
   } catch (err) {
@@ -992,6 +1093,195 @@ async function onSubmit() {
     line-height: 1.4;
 }
 
+.plan-deluxe-wrap {
+  margin-top: 24rpx;
+}
+
+.plan-deluxe-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16rpx;
+}
+
+.plan-deluxe {
+  position: relative;
+  border-radius: 36rpx;
+  padding: 24rpx 16rpx 20rpx;
+  box-sizing: border-box;
+  min-height: 440rpx;
+  display: flex;
+  flex-direction: column;
+  border: 4rpx solid transparent;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.plan-deluxe--on {
+  transform: scale(1.02);
+  z-index: 1;
+}
+
+.plan-deluxe--month {
+  background: linear-gradient(165deg, #134e3a 0%, #052e21 52%, #020617 100%);
+  border-color: rgba(255, 216, 105, 0.45);
+  box-shadow: 0 12rpx 32rpx rgba(2, 6, 23, 0.45);
+}
+
+.plan-deluxe--month.plan-deluxe--on {
+  border-color: #ffd869;
+}
+
+.plan-deluxe--week {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 8rpx 24rpx rgba(15, 23, 42, 0.06);
+}
+
+.plan-deluxe--week.plan-deluxe--on {
+  border-color: rgba(14, 90, 68, 0.55);
+}
+
+.plan-deluxe-corner-tag {
+  align-self: flex-start;
+  font-size: 17rpx;
+  font-weight: 950;
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  margin-bottom: 12rpx;
+}
+
+.plan-deluxe-corner-tag--vip {
+  background: rgba(15, 23, 42, 0.45);
+  color: #ffd869;
+}
+
+.plan-deluxe-corner-tag--week {
+  background: #e6f4ef;
+  color: $ok-forest-green;
+}
+
+.plan-deluxe-head-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  margin-bottom: 8rpx;
+}
+
+.plan-deluxe-price-stack {
+  text-align: right;
+}
+
+.plan-deluxe-kicker {
+  display: block;
+  font-size: 20rpx;
+  font-weight: 800;
+}
+
+.plan-deluxe-kicker--gold {
+  color: #fbbf24;
+}
+
+.plan-deluxe-kicker--muted {
+  color: #94a3b8;
+}
+
+.plan-deluxe-big-price {
+  display: block;
+  font-size: 44rpx;
+  font-weight: 1000;
+  line-height: 1.1;
+}
+
+.plan-deluxe-big-price--gold {
+  color: #ffd869;
+}
+
+.plan-deluxe-big-price--teal {
+  color: #0f766e;
+}
+
+.plan-deluxe-sub {
+  display: block;
+  font-size: 20rpx;
+  font-weight: 700;
+}
+
+.plan-deluxe-sub--muted-gold {
+  color: rgba(254, 243, 199, 0.88);
+}
+
+.plan-deluxe-sub--muted {
+  color: #94a3b8;
+}
+
+.plan-deluxe-hero-title {
+  font-size: 30rpx;
+  font-weight: 950;
+  color: #ffffff;
+  line-height: 1.35;
+  margin-bottom: 16rpx;
+  text-align: left;
+}
+
+.plan-deluxe-hero-title--week {
+  color: #0f172a;
+}
+
+.plan-deluxe-benefits {
+  flex: 1;
+  border-radius: 20rpx;
+  padding: 16rpx 14rpx;
+  margin-bottom: 16rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.plan-deluxe-benefits--vip {
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.plan-deluxe-benefits--week {
+  background: #f1f5f9;
+}
+
+.plan-deluxe-benefit-line {
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #fef9c3;
+  line-height: 1.35;
+}
+
+.plan-deluxe-benefit-line--week {
+  color: #334155;
+}
+
+.plan-deluxe-btn {
+  margin-top: auto;
+  width: 100%;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  font-weight: 950;
+  padding: 20rpx 12rpx;
+  border: none;
+  line-height: 1.3;
+}
+
+.plan-deluxe-btn--gold {
+  background: linear-gradient(180deg, #fde68a 0%, #fbbf24 100%);
+  color: #0f172a;
+}
+
+.plan-deluxe-btn--dark {
+  background: #0f172a;
+  color: #ffffff;
+}
+
+.plan-deluxe-btn::after {
+  border: none;
+}
 .submit-btn {
   margin-top: 20rpx;
   width: 100%;

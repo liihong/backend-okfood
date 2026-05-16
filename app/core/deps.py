@@ -1,15 +1,26 @@
 import logging
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.security import create_access_token, decode_token
+from app.core.store_scope import (
+    PublicStoreContext,
+    assert_member_belongs_to_header_store,
+    parse_store_id_from_header_or_default,
+    resolve_public_store,
+)
 from app.db.session import get_db
+from app.models.admin_user import AdminUser
+from app.models.member import Member
+from app.models.store import Store
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +29,12 @@ ROLE_COURIER = "courier"
 ROLE_ADMIN = "admin"
 ROLE_ADMIN_DELIVERY = "admin_delivery"
 ROLE_ADMIN_SUPPORT = "admin_support"
+ROLE_ADMIN_SYSTEM = "admin_system"
 
 ADMIN_ACCOUNT_FULL = "full"
 ADMIN_ACCOUNT_DELIVERY = "delivery"
 ADMIN_ACCOUNT_SUPPORT = "support"
+ADMIN_ACCOUNT_SYSTEM = "system"
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -90,6 +103,14 @@ def admin_full_subject(creds: HTTPAuthorizationCredentials | None = Depends(bear
     return admin_subject(creds)
 
 
+def admin_system_subject(creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> str:
+    """平台管理员：租户与跨租户账号维护（JWT role=admin_system）。"""
+    sub, role = _subject_from_bearer(creds)
+    if role != ROLE_ADMIN_SYSTEM:
+        raise HTTPException(status_code=403, detail="需要平台管理员令牌")
+    return sub
+
+
 def admin_or_delivery_staff_subject(
     creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> str:
@@ -127,3 +148,76 @@ def issue_admin_token(username: str, *, jwt_role: str | None = None) -> str:
 
 
 SessionDep = Annotated[Session, Depends(get_db)]
+
+
+@dataclass(frozen=True)
+class MemberAuthScope:
+    """会员 JWT + 门店一致性（header 可选，不传则沿用档案门店）。"""
+
+    member_id: int
+    member: Member
+    store_id: int
+
+
+def member_auth_scope(
+    request: Request,
+    member_id: int = Depends(member_subject),
+    db: Session = Depends(get_db),
+) -> MemberAuthScope:
+    m = db.get(Member, member_id)
+    if not m or m.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    sid = assert_member_belongs_to_header_store(request, m)
+    return MemberAuthScope(member_id=int(member_id), member=m, store_id=sid)
+
+
+def member_id_scoped(auth: MemberAuthScope = Depends(member_auth_scope)) -> int:
+    """与 member_auth_scope 相同校验（含 X-Store-Id 与档案一致）；供仅需 member_id 的路由。"""
+
+    return auth.member_id
+
+
+MemberIdScoped = Annotated[int, Depends(member_id_scoped)]
+
+
+def public_store_dep(request: Request, db: Session = Depends(get_db)) -> PublicStoreContext:
+    sid = parse_store_id_from_header_or_default(request)
+    return resolve_public_store(db, sid)
+
+
+def require_admin_tenant_store(db: Session, *, admin_username: str, store_id: int) -> tuple[int, int]:
+    """返回 (tenant_id, store_id)；门店须属于该管理员租户。
+
+    兼容多租户管理端仍默认传 ``store_id=DEFAULT_STORE_ID``（多为 1）的情况：若该门店不属于本租户
+    或不可用，则回退为「本租户下 id 最小的启用门店」。
+    """
+    u = db.scalar(select(AdminUser).where(AdminUser.username == admin_username))
+    if not u:
+        raise HTTPException(status_code=401, detail="账号不存在")
+    tid = int(u.tenant_id)
+    sid_req = int(store_id)
+    st = db.get(Store, sid_req)
+    if st is not None and st.is_active and int(st.tenant_id) == tid:
+        return tid, int(st.id)
+
+    if sid_req == int(settings.DEFAULT_STORE_ID):
+        alt_id = db.scalar(
+            select(Store.id)
+            .where(Store.tenant_id == tid, Store.is_active.is_(True))
+            .order_by(Store.id.asc())
+            .limit(1)
+        )
+        if alt_id is not None:
+            return tid, int(alt_id)
+
+    if st is None or not st.is_active:
+        raise HTTPException(status_code=404, detail="门店不存在或已停用")
+    raise HTTPException(status_code=403, detail="无权操作该门店")
+
+
+def require_admin_tenant_id(db: Session, *, admin_username: str) -> int:
+    """当前登录管理员所属租户 id。"""
+    u = db.scalar(select(AdminUser).where(AdminUser.username == admin_username))
+    if not u:
+        raise HTTPException(status_code=401, detail="账号不存在")
+    return int(u.tenant_id)

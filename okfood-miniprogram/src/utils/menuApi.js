@@ -180,7 +180,10 @@ export function minMemberDeliveryStartYmd(now = new Date()) {
 }
 
 /**
- * 单点：仅「当日」「明日」供餐日可下单；全体会员在当日 10:00（上海）后不可再下「当日」单，仅可次日
+ * 单点供餐日是否允许发起下单（与后端 `single_meal_order_service.create_single_meal_order` 一致）：
+ * - 早于上海「今天」的供餐日：不可
+ * - 等于上海「今天」且已过 10:00：不可再下「当日」单
+ * - 明日、下周一等任意未来日期：允许进入下单流程（是否排餐、库存等由接口校验）
  * @param {string} [serviceDateYmd] YYYY-MM-DD
  * @param {{ now?: Date }} [opts] 可传 `now` 便于测试
  */
@@ -190,10 +193,9 @@ export function isSingleOrderServiceDate(serviceDateYmd, opts) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return false
   const now = opts && opts.now != null ? opts.now : new Date()
   const today = ymdTodayShanghai(now)
-  const tomorrow = addDaysIso(today, 1)
-  if (t !== today && t !== tomorrow) return false
-  if (!isShanghaiPastDailyCutoff(now)) return true
-  return t === tomorrow
+  if (t < today) return false
+  if (t === today && isShanghaiPastDailyCutoff(now)) return false
+  return true
 }
 
 /**
@@ -203,14 +205,15 @@ export function isSingleOrderServiceDate(serviceDateYmd, opts) {
  */
 export function singleOrderServiceDateError(serviceDateYmd, opts) {
   if (isSingleOrderServiceDate(serviceDateYmd, opts)) return ''
-  const now = opts && opts.now != null ? opts.now : new Date()
   const t = String(serviceDateYmd || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return '供餐日期无效'
+  const now = opts && opts.now != null ? opts.now : new Date()
   const today = ymdTodayShanghai(now)
-  const inWindow = t === today || t === addDaysIso(today, 1)
-  if (inWindow && isShanghaiPastDailyCutoff(now) && t === today) {
+  if (t < today) return '不可选择过去的供餐日'
+  if (t === today && isShanghaiPastDailyCutoff(now)) {
     return '每日 10:00 后仅可下次日及之后的单点单'
   }
-  return '仅当日与次日餐品可单点'
+  return '该供餐日不可单点'
 }
 
 /**

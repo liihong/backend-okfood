@@ -321,6 +321,22 @@ ALTER TABLE `sf_same_city_pushes`
                         )
                     )
 
+            if pushes_exists:
+                insp_fresh = inspect(engine)
+                cols_after = {c["name"].lower() for c in insp_fresh.get_columns("sf_same_city_pushes")}
+                if "store_id" not in cols_after:
+                    if dname in ("mysql", "mariadb"):
+                        conn.execute(
+                            text(
+                                "ALTER TABLE `sf_same_city_pushes` "
+                                "ADD COLUMN `store_id` BIGINT UNSIGNED NOT NULL DEFAULT 1 AFTER `id`"
+                            )
+                        )
+                    elif dname == "sqlite":
+                        conn.execute(
+                            text("ALTER TABLE sf_same_city_pushes ADD COLUMN store_id INTEGER NOT NULL DEFAULT 1")
+                        )
+
         logger.info("补库: 已检查顺丰推送回调表 / sf_same_city_pushes 顺丰状态列")
     except Exception as e:
         logger.warning("补库: 顺丰回调表补齐失败（可手动执行 sql/migrations/20260428）：%s", e)
@@ -464,3 +480,82 @@ def apply_menu_dish_spice_internal_sop_columns() -> None:
             "sql/migrations/20260511_menu_dish_spice_internal_sop.sql: %s",
             e,
         )
+
+
+def apply_tenant_integration_settings_table() -> None:
+    """租户对接配置表（小程序 / 微信商户 / 顺丰等）；未迁移时启动创建。"""
+    try:
+        insp = inspect(engine)
+        if not insp.has_table("tenants"):
+            return
+        if insp.has_table("tenant_integration_settings"):
+            return
+    except Exception as e:
+        logger.warning("补库: 无法检查 tenant_integration_settings: %s", e)
+        return
+
+    dname = engine.dialect.name
+    try:
+        with engine.begin() as conn:
+            if dname in ("mysql", "mariadb"):
+                conn.execute(
+                    text(
+                        """
+CREATE TABLE IF NOT EXISTS `tenant_integration_settings` (
+  `tenant_id` INT UNSIGNED NOT NULL,
+  `wx_mini_appid` VARCHAR(64) NULL,
+  `wx_mini_secret` VARCHAR(128) NULL,
+  `wechat_pay_mch_id` VARCHAR(32) NULL,
+  `wechat_pay_api_key` VARCHAR(128) NULL,
+  `wechat_pay_notify_url` VARCHAR(512) NULL,
+  `wx_subscribe_delivery_tmpl_id` VARCHAR(128) NULL,
+  `sf_open_dev_id` INT NULL,
+  `sf_open_secret` VARCHAR(255) NULL,
+  `sf_open_shop_id` VARCHAR(64) NULL,
+  `sf_open_shop_type` INT NULL,
+  `sf_pickup_phone` VARCHAR(32) NULL,
+  `sf_pickup_address` VARCHAR(512) NULL,
+  `sf_city_name` VARCHAR(64) NULL,
+  `extra_json` TEXT NULL,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`tenant_id`),
+  CONSTRAINT `fk_tis_tenant` FOREIGN KEY (`tenant_id`) REFERENCES `tenants` (`id`)
+    ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                        """
+                    )
+                )
+            elif dname == "sqlite":
+                conn.execute(
+                    text(
+                        """
+CREATE TABLE IF NOT EXISTS tenant_integration_settings (
+  tenant_id INTEGER NOT NULL PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+  wx_mini_appid VARCHAR(64),
+  wx_mini_secret VARCHAR(128),
+  wechat_pay_mch_id VARCHAR(32),
+  wechat_pay_api_key VARCHAR(128),
+  wechat_pay_notify_url VARCHAR(512),
+  wx_subscribe_delivery_tmpl_id VARCHAR(128),
+  sf_open_dev_id INTEGER,
+  sf_open_secret VARCHAR(255),
+  sf_open_shop_id VARCHAR(64),
+  sf_open_shop_type INTEGER,
+  sf_pickup_phone VARCHAR(32),
+  sf_pickup_address VARCHAR(512),
+  sf_city_name VARCHAR(64),
+  extra_json TEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+                        """
+                    )
+                )
+            else:
+                logger.error(
+                    "补库: 当前库类型 %s 无法自动创建 tenant_integration_settings，请手动执行迁移",
+                    dname,
+                )
+                return
+        logger.info("补库: 已创建 tenant_integration_settings")
+    except Exception as e:
+        logger.error("补库: tenant_integration_settings 创建失败: %s", e)

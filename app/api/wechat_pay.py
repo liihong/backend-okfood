@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, Depends, Request, Response
 
-from app.core.deps import SessionDep, member_subject
+from app.core.deps import SessionDep, MemberIdScoped
 from app.core.limiter import limiter
 from app.integrations.wechat_pay_v2 import (
     notify_client_ip_allowed,
@@ -71,7 +71,7 @@ def wechat_member_card_order_sync_after_pay(
     request: Request,
     order_id: int,
     db: SessionDep,
-    member_id: int = Depends(member_subject),
+    member_id: MemberIdScoped,
 ):
     """
     与 `POST /api/user/member-card-orders/{order_id}/sync-wechat-pay` 等价（需会员 JWT）。

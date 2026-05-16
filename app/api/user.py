@@ -4,20 +4,23 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 
 
-from app.core.deps import SessionDep, issue_member_token, member_subject
+from app.core.deps import (
+    SessionDep,
+    issue_member_token,
+    member_auth_scope,
+    MemberAuthScope,
+    MemberIdScoped,
+    public_store_dep,
+    PublicStoreContext,
+)
 
 from app.core.limiter import limiter
 
 from app.integrations.wechat_mini import (
-
     WeChatMiniError,
-
     get_phone_pure_number,
-
     jscode2session,
-
-    wx_mini_configured,
-
+    wx_mini_configured_for_tenant,
 )
 
 from app.schemas.common import TokenResponse
@@ -89,7 +92,7 @@ from app.services.single_meal_order_service import (
     prepare_wechat_jsapi_for_order,
 )
 
-from app.services.store_config_service import get_member_card_prices_yuan
+from app.services.store_config_service import get_member_card_prices_extended
 
 from app.integrations.wechat_pay_v2 import resolve_request_client_ip
 
@@ -107,7 +110,12 @@ router = APIRouter(prefix="/user", tags=["会员端"])
 
 @limiter.limit("30/minute")
 
-def login_wx_mini(request: Request, body: WxMiniLoginIn, db: SessionDep):
+def login_wx_mini(
+    request: Request,
+    body: WxMiniLoginIn,
+    db: SessionDep,
+    store_ctx: PublicStoreContext = Depends(public_store_dep),
+):
 
     """
 
@@ -115,17 +123,18 @@ def login_wx_mini(request: Request, body: WxMiniLoginIn, db: SessionDep):
 
     需在环境变量中配置 WX_MINI_APPID、WX_MINI_SECRET。
 
+    门店由请求头 ``X-Store-Id`` 解析（未传则默认门店）；档案按门店隔离。
+
     """
 
-    if not wx_mini_configured():
-
+    if not wx_mini_configured_for_tenant(db, int(store_ctx.tenant_id)):
         raise HTTPException(status_code=503, detail="微信小程序登录未配置或未开放")
 
     try:
 
-        sess = jscode2session(body.js_code)
+        sess = jscode2session(body.js_code, db=db, tenant_id=int(store_ctx.tenant_id))
 
-        phone = get_phone_pure_number(body.phone_code)
+        phone = get_phone_pure_number(body.phone_code, db=db, tenant_id=int(store_ctx.tenant_id))
 
     except WeChatMiniError as e:
 
@@ -133,7 +142,13 @@ def login_wx_mini(request: Request, body: WxMiniLoginIn, db: SessionDep):
 
     openid = str(sess.get("openid") or "").strip() or None
 
-    member_id = ensure_member_stub(db, phone, wx_mini_openid=openid)
+    member_id = ensure_member_stub(
+        db,
+        phone,
+        tenant_id=int(store_ctx.tenant_id),
+        store_id=int(store_ctx.store_id),
+        wx_mini_openid=openid,
+    )
 
     token = TokenResponse(access_token=issue_member_token(member_id))
 
@@ -146,28 +161,33 @@ def sync_wx_mini_openid(
     request: Request,
     body: WxMiniJsCodeIn,
     db: SessionDep,
-    member_id: int = Depends(member_subject),
+    auth: MemberAuthScope = Depends(member_auth_scope),
 ):
     """已持会员 JWT 时，用当前小程序会话的 `js_code` 写入 `members.wx_mini_openid`，便于 JSAPI 支付。"""
     _ = request
-    if not wx_mini_configured():
+    member_id = auth.member_id
+    member = auth.member
+    if not wx_mini_configured_for_tenant(db, int(member.tenant_id)):
         raise HTTPException(status_code=503, detail="微信小程序登录未配置或未开放")
     try:
-        sess = jscode2session(body.js_code)
+        sess = jscode2session(body.js_code, db=db, tenant_id=int(member.tenant_id))
     except WeChatMiniError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e))
     openid = str(sess.get("openid") or "").strip()
     if not openid:
         raise HTTPException(status_code=400, detail="微信未返回用户标识，请稍后重试")
-    bound_id = db.scalar(select(Member.id).where(Member.wx_mini_openid == openid, Member.deleted_at.is_(None)))
+    bound_id = db.scalar(
+        select(Member.id).where(
+            Member.wx_mini_openid == openid,
+            Member.deleted_at.is_(None),
+            Member.store_id == member.store_id,
+        )
+    )
     if bound_id is not None and int(bound_id) != int(member_id):
         raise HTTPException(
             status_code=400,
             detail="当前微信已绑定其他会员账号，请使用对应账号登录或联系客服",
         )
-    member = db.get(Member, member_id)
-    if not member or member.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="用户不存在")
     member.wx_mini_openid = openid
     db.commit()
     return success(msg="已同步微信标识")
@@ -177,11 +197,21 @@ def sync_wx_mini_openid(
 
 @limiter.limit("20/minute")
 
-def register(request: Request, body: RegisterIn, db: SessionDep):
+def register(
+    request: Request,
+    body: RegisterIn,
+    db: SessionDep,
+    store_ctx: PublicStoreContext = Depends(public_store_dep),
+):
 
     """新成员登记：写入前尝试高德地理编码（无 Key 或失败时坐标为空）。"""
 
-    member = register_member(db, body)
+    member = register_member(
+        db,
+        body,
+        tenant_id=int(store_ctx.tenant_id),
+        store_id=int(store_ctx.store_id),
+    )
 
     return success(data=dump_model(member), msg="注册成功")
 
@@ -191,7 +221,7 @@ def register(request: Request, body: RegisterIn, db: SessionDep):
 
 @router.post("/activate")
 
-def activate(body: ActivateIn, db: SessionDep, member_id: int = Depends(member_subject)):
+def activate(body: ActivateIn, db: SessionDep, member_id: MemberIdScoped):
 
     _ = body
 
@@ -205,7 +235,7 @@ def activate(body: ActivateIn, db: SessionDep, member_id: int = Depends(member_s
 
 @router.post("/leave")
 
-def leave(request: Request, body: LeaveIn, db: SessionDep, member_id: int = Depends(member_subject)):
+def leave(request: Request, body: LeaveIn, db: SessionDep, member_id: MemberIdScoped):
 
     """请假 / 取消：`clear_tomorrow` 仅取消「明天请假」；`cancel` 清空明天与区间。"""
 
@@ -223,7 +253,7 @@ def leave(request: Request, body: LeaveIn, db: SessionDep, member_id: int = Depe
 
 @router.get("/me")
 
-def read_member_me(db: SessionDep, member_id: int = Depends(member_subject)):
+def read_member_me(db: SessionDep, member_id: MemberIdScoped):
 
     """当前登录会员档案：JWT sub 为 members.id。"""
 
@@ -233,21 +263,31 @@ def read_member_me(db: SessionDep, member_id: int = Depends(member_subject)):
 
 
 @router.get("/member-card-prices")
-def read_member_card_prices(db: SessionDep, member_id: int = Depends(member_subject)):
+def read_member_card_prices(db: SessionDep, auth: MemberAuthScope = Depends(member_auth_scope)):
     """周卡/月卡当前标价（与自助开卡下单金额一致，数据来自后台门店配置）。"""
-    _ = member_id
-    wk, mo = get_member_card_prices_yuan(db)
+    ext = get_member_card_prices_extended(db, store_id=int(auth.store_id))
 
     def fmt(d: Decimal) -> str:
         return format(d.quantize(Decimal("0.01")), "f")
 
-    payload = MemberCardPricesOut(week_price_yuan=fmt(wk), month_price_yuan=fmt(mo))
+    def fmt_opt(d: Decimal | None) -> str | None:
+        if d is None:
+            return None
+        return fmt(d)
+
+    payload = MemberCardPricesOut(
+        week_price_yuan=fmt(ext.week_price_yuan),
+        month_price_yuan=fmt(ext.month_price_yuan),
+        week_list_price_yuan=fmt_opt(ext.week_list_price_yuan),
+        month_list_price_yuan=fmt_opt(ext.month_list_price_yuan),
+        promotion_active=ext.promotion_active,
+    )
     return success(data=dump_model(payload), msg="获取成功")
 
 
 @router.get("/me/addresses")
 
-def read_addresses_me(db: SessionDep, member_id: int = Depends(member_subject)):
+def read_addresses_me(db: SessionDep, member_id: MemberIdScoped):
 
     """会员配送地址列表（多地址）；默认地址优先。"""
 
@@ -264,12 +304,15 @@ def check_delivery_region_me(
     request: Request,
     body: DeliveryRegionCheckIn,
     db: SessionDep,
-    _member_id: int = Depends(member_subject),
+    auth: MemberAuthScope = Depends(member_auth_scope),
 ):
     """地图选点是否落在启用配送片区内：命中返回片区 id/名称；未命中 in_region=false。"""
     _ = request
     in_region, rid, name = check_coords_in_delivery_region(
-        db, float(body.location.lng), float(body.location.lat)
+        db,
+        float(body.location.lng),
+        float(body.location.lat),
+        tenant_id=int(auth.member.tenant_id),
     )
     payload = DeliveryRegionCheckOut(in_region=in_region, delivery_region_id=rid, region_name=name)
     return success(data=dump_model(payload), msg="校验完成")
@@ -282,7 +325,7 @@ def check_delivery_region_me(
 
 @limiter.limit("30/minute")
 
-def add_address_me(request: Request, body: MemberAddressCreateIn, db: SessionDep, member_id: int = Depends(member_subject)):
+def add_address_me(request: Request, body: MemberAddressCreateIn, db: SessionDep, member_id: MemberIdScoped):
 
     """新增配送地址：高德地理编码（失败则坐标为空，区域保留客户端或「未分配」）；首条地址自动设为默认。"""
 
@@ -310,7 +353,7 @@ def patch_address_me(
 
     db: SessionDep,
 
-    member_id: int = Depends(member_subject),
+    member_id: MemberIdScoped,
 
 ):
 
@@ -328,7 +371,7 @@ def patch_address_me(
 
 @router.delete("/me/addresses/{address_id}")
 
-def remove_address_me(request: Request, address_id: int, db: SessionDep, member_id: int = Depends(member_subject)):
+def remove_address_me(request: Request, address_id: int, db: SessionDep, member_id: MemberIdScoped):
 
     ip = resolve_request_client_ip(
         request.headers.get("x-forwarded-for"),
@@ -344,7 +387,7 @@ def remove_address_me(request: Request, address_id: int, db: SessionDep, member_
 @router.get("/me/delivery-deductions")
 def list_delivery_deductions_me(
     db: SessionDep,
-    member_id: int = Depends(member_subject),
+    member_id: MemberIdScoped,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -365,7 +408,7 @@ def list_delivery_deductions_me(
 @router.get("/single-orders")
 def list_single_orders_me(
     db: SessionDep,
-    member_id: int = Depends(member_subject),
+    member_id: MemberIdScoped,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -384,7 +427,7 @@ def list_single_orders_me(
 def read_single_order_me(
     order_id: int,
     db: SessionDep,
-    member_id: int = Depends(member_subject),
+    member_id: MemberIdScoped,
 ):
     """单次点餐订单详情（仅本人）。"""
     out = get_member_single_meal_order(db, member_id, order_id)
@@ -403,7 +446,7 @@ def create_single_order_me(
 
     db: SessionDep,
 
-    member_id: int = Depends(member_subject),
+    member_id: MemberIdScoped,
 
 ):
 
@@ -428,7 +471,7 @@ def prepay_single_order_wechat(
 
     db: SessionDep,
 
-    member_id: int = Depends(member_subject),
+    member_id: MemberIdScoped,
 
 ):
 
@@ -449,7 +492,7 @@ def create_member_card_order_me(
     request: Request,
     body: UserMemberCardOrderCreateIn,
     db: SessionDep,
-    member_id: int = Depends(member_subject),
+    member_id: MemberIdScoped,
 ):
     """自助开卡/续卡：创建未缴工单；支付成功后在微信回调中叠加剩余次数与总配额。"""
     _ = request
@@ -469,7 +512,7 @@ def prepay_member_card_order_wechat(
     request: Request,
     order_id: int,
     db: SessionDep,
-    member_id: int = Depends(member_subject),
+    member_id: MemberIdScoped,
 ):
     """开卡工单微信统一下单（JSAPI）。"""
     xf = request.headers.get("x-forwarded-for")
@@ -484,7 +527,7 @@ def sync_member_card_order_after_pay(
     request: Request,
     order_id: int,
     db: SessionDep,
-    member_id: int = Depends(member_subject),
+    member_id: MemberIdScoped,
 ):
     """
     小程序在 `requestPayment` 成功（`success`）后立即调用：向微信查询订单并执行与支付通知相同的入账逻辑。
@@ -499,7 +542,7 @@ def sync_member_card_order_after_pay(
 
 @router.patch("/profile")
 
-def patch_profile(request: Request, body: ProfilePatchIn, db: SessionDep, member_id: int = Depends(member_subject)):
+def patch_profile(request: Request, body: ProfilePatchIn, db: SessionDep, member_id: MemberIdScoped):
 
     updates = body.model_dump(exclude_unset=True)
 
@@ -618,9 +661,9 @@ async def upload_member_avatar_me(
 
     request: Request,
 
-    file: UploadFile = File(..., description="头像图片"),
+    member_id: MemberIdScoped,
 
-    member_id: int = Depends(member_subject),
+    file: UploadFile = File(..., description="头像图片"),
 
 ):
 

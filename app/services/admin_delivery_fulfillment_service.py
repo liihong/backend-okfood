@@ -17,13 +17,15 @@ from app.services.leave import is_absent_on_delivery_date
 from app.services.member_service import effective_daily_meal_units
 
 
-def _eligible_ids_home(db: Session, d: date) -> set[int]:
-    members, _ = eligible_members_for_delivery(db, delivery_date=d, delivery_region_id=None)
+def _eligible_ids_home(db: Session, d: date, *, store_id: int) -> set[int]:
+    members, _ = eligible_members_for_delivery(
+        db, delivery_date=d, delivery_region_id=None, store_id=int(store_id)
+    )
     return {int(m.id) for m in members}
 
 
-def _eligible_ids_pickup(db: Session, d: date) -> set[int]:
-    members, _ = eligible_members_for_store_pickup(db, delivery_date=d)
+def _eligible_ids_pickup(db: Session, d: date, *, store_id: int) -> set[int]:
+    members, _ = eligible_members_for_store_pickup(db, delivery_date=d, store_id=int(store_id))
     return {int(m.id) for m in members}
 
 
@@ -107,6 +109,7 @@ def admin_mark_subscription_fulfilled(
     delivery_date: date,
     admin_username: str,
     kind: str,
+    store_id: int,
 ) -> None:
     """
     kind: ``"home"`` 配送到家 / ``"pickup"`` 门店自提。
@@ -114,9 +117,9 @@ def admin_mark_subscription_fulfilled(
     """
     d = delivery_date
     if kind == "home":
-        ok_ids = _eligible_ids_home(db, d)
+        ok_ids = _eligible_ids_home(db, d, store_id=int(store_id))
     else:
-        ok_ids = _eligible_ids_pickup(db, d)
+        ok_ids = _eligible_ids_pickup(db, d, store_id=int(store_id))
     op = (admin_username or "admin").strip()[:44]
     op_tag = f"admin:{op}"[:50]
     _subscription_fulfilled_apply(
@@ -136,13 +139,17 @@ def subscription_fulfilled_try_sf_home_no_commit(
     member_id: int,
     delivery_date: date,
     operator_tag: str = "sf:order_complete",
+    store_id: int | None = None,
 ) -> None:
     """
     顺丰自动履约（到家）：与智能配送大表标记送达口径一致；
     operator 默认为 ``sf:order_complete``（订单完成）；配送状态推送妥投为 ``sf:delivery_status``；不产生独立 commit。
     """
     d = delivery_date
-    ok_ids = _eligible_ids_home(db, d)
+    from app.core.config import get_settings
+
+    sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
+    ok_ids = _eligible_ids_home(db, d, store_id=sid)
     tag = (operator_tag or "sf:order_complete").strip()[:50] or "sf:order_complete"
     _subscription_fulfilled_apply(
         db,

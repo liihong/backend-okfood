@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, time
 
 from app.models.member import Member
 
@@ -25,5 +25,6 @@ def is_absent_on_delivery_date(member: Member, delivery_date: date, *, today: da
 
 
 def is_leave_deadline_passed(now_time, deadline) -> bool:
-    """当前时间是否已超过「当日请假截止」时刻（仅比较 time）。"""
-    return now_time > deadline
+    """当前时间是否已超过「当日请假截止」时刻（仅比较 time，口径为北京时间）。"""
+    d = deadline if deadline is not None else time(21, 0, 0)
+    return now_time > d

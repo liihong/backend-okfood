@@ -10,9 +10,12 @@ class WeeklyMenuSlot(Base):
     """每周槽位：week_start（周一）+ slot（1–7）对应具体供餐日；本周/下周仅 week_start 不同。"""
 
     __tablename__ = "weekly_menu_slot"
-    __table_args__ = (UniqueConstraint("week_start", "slot", name="uk_weekly_slot_week_day"),)
+    __table_args__ = (UniqueConstraint("store_id", "week_start", "slot", name="uk_weekly_slot_store_week_slot"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("stores.id", onupdate="CASCADE"), nullable=False, index=True
+    )
     week_start: Mapped[date] = mapped_column(Date, nullable=False)
     slot: Mapped[int] = mapped_column(Integer, nullable=False)
     dish_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("menu_dish.id", onupdate="CASCADE"), nullable=False)

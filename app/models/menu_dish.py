@@ -13,6 +13,9 @@ class MenuDish(Base):
     __tablename__ = "menu_dish"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("stores.id", onupdate="CASCADE"), nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)

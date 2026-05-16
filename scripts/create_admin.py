@@ -26,9 +26,15 @@ def main() -> None:
     parser.add_argument("password")
     parser.add_argument(
         "--role",
-        choices=("full", "delivery", "support"),
+        choices=("full", "delivery", "support", "system"),
         default="full",
-        help="full=完整后台；delivery=仅配送管理相关菜单；support=客服（无财务中心/门店配置）",
+        help="full=完整后台；delivery=仅配送；support=客服；system=平台(租户管理)",
+    )
+    parser.add_argument(
+        "--tenant-id",
+        type=int,
+        default=1,
+        help="租户 id（默认 1）",
     )
     args = parser.parse_args()
 
@@ -41,6 +47,7 @@ def main() -> None:
         db.add(
             AdminUser(
                 username=args.username,
+                tenant_id=args.tenant_id,
                 password_hash=hash_password(args.password),
                 role=args.role,
             )

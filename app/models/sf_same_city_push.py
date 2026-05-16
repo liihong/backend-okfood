@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Date, DateTime, Integer, JSON, String
+from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -14,6 +14,9 @@ class SfSameCityPush(Base):
 
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=True
+    )
+    store_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("stores.id", onupdate="CASCADE"), nullable=False, index=True, default=1
     )
     delivery_date: Mapped[date] = mapped_column(Date, index=True)
     stop_id: Mapped[str] = mapped_column(String(64), index=True)

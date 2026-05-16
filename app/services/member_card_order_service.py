@@ -35,13 +35,13 @@ def _format_amount_yuan(v: Decimal | None) -> str | None:
     return format(v, "f")
 
 
-def _amount_yuan_for_card_kind_str(db: Session, card_kind: str) -> Decimal:
+def _amount_yuan_for_card_kind_str(db: Session, card_kind: str, *, store_id: int | None = None) -> Decimal:
     k = (card_kind or "").strip()
     if k == CardOrderKind.WEEK.value:
-        week_p, _ = get_member_card_prices_yuan(db)
+        week_p, _ = get_member_card_prices_yuan(db, store_id=store_id)
         return week_p
     if k == CardOrderKind.MONTH.value:
-        _, month_p = get_member_card_prices_yuan(db)
+        _, month_p = get_member_card_prices_yuan(db, store_id=store_id)
         return month_p
     if k == CardOrderKind.TIMES.value:
         return get_settings().MEMBER_CARD_TIMES_PRICE_YUAN
@@ -69,7 +69,7 @@ def ensure_miniprogram_offline_claim_order(
     k = (card_kind or "").strip()
     if k not in (CardOrderKind.WEEK.value, CardOrderKind.MONTH.value, CardOrderKind.TIMES.value):
         raise HTTPException(status_code=400, detail="开卡类型须为周卡、月卡或次卡")
-    amt = _amount_yuan_for_card_kind_str(db, k)
+    amt = _amount_yuan_for_card_kind_str(db, k, store_id=int(m.store_id))
     rmk = "小程序：用户自报已线下/其他方式缴费，待后台核对后标记已缴并同步入账"
     q = select(MemberCardOrder).where(
         MemberCardOrder.member_id == int(member_id),
@@ -90,6 +90,8 @@ def ensure_miniprogram_offline_claim_order(
         return order
     order = MemberCardOrder(
         member_id=int(member_id),
+        tenant_id=int(m.tenant_id),
+        store_id=int(m.store_id),
         card_kind=k,
         pay_channel=CardPayChannel.OFFLINE.value,
         pay_status=CardOrderPayStatus.UNPAID.value,
@@ -168,6 +170,7 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
         RechargeIn(phone=m.phone, amount=amt, plan_type=plan),
         operator=operator,
         log_detail=log_detail,
+        member_id=int(m.id),
     )
     if order.delivery_start_date is not None:
         m.is_active = True
@@ -201,9 +204,12 @@ def list_card_orders_paged(
     page: int,
     page_size: int,
     include_history: bool = False,
+    store_id: int | None = None,
 ) -> tuple[list[CardOrderOut], int]:
     join_on = Member.id == MemberCardOrder.member_id
     filters = []
+    if store_id is not None:
+        filters.append(MemberCardOrder.store_id == int(store_id))
     if not include_history:
         # 默认工作台：隐藏「已缴且已同步入账」的完结单；其余（未缴、已缴待入账等）仍显示
         filters.append(
@@ -243,9 +249,17 @@ def list_card_orders_paged(
     return [_order_to_out(db, r) for r in rows], total
 
 
-def create_card_order(db: Session, body: CardOrderCreateIn, *, operator: str) -> CardOrderOut:
+def create_card_order(
+    db: Session, body: CardOrderCreateIn, *, operator: str, tenant_id: int, store_id: int
+) -> CardOrderOut:
     phone = body.phone.strip()
-    m = db.execute(select(Member).where(Member.phone == phone, Member.deleted_at.is_(None))).scalar_one_or_none()
+    m = db.execute(
+        select(Member).where(
+            Member.phone == phone,
+            Member.store_id == int(store_id),
+            Member.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
     if not m:
         if body.open_mode == CardOpenMode.RENEW:
             raise HTTPException(status_code=404, detail="会员不存在")
@@ -256,6 +270,8 @@ def create_card_order(db: Session, body: CardOrderCreateIn, *, operator: str) ->
         m = Member(
             phone=phone[:20],
             name=nm[:100],
+            tenant_id=int(tenant_id),
+            store_id=int(store_id),
             wechat_name=wx_raw[:100] if wx_raw else None,
             remarks=None,
             avatar_url=None,
@@ -298,9 +314,12 @@ def create_card_order(db: Session, body: CardOrderCreateIn, *, operator: str) ->
             door_detail=da.door_detail,
             lng=float(da.lng),
             lat=float(da.lat),
+            tenant_id=int(tenant_id),
         )
     order = MemberCardOrder(
         member_id=m.id,
+        tenant_id=int(tenant_id),
+        store_id=int(store_id),
         card_kind=body.card_kind.value,
         pay_channel=body.pay_channel.value,
         pay_status=body.pay_status.value,
@@ -319,10 +338,12 @@ def create_card_order(db: Session, body: CardOrderCreateIn, *, operator: str) ->
     return _order_to_out(db, order)
 
 
-def delete_card_order(db: Session, order_id: int) -> None:
+def delete_card_order(db: Session, order_id: int, *, store_id: int | None = None) -> None:
     """删除无效/重复工单：仅未缴且未同步入账可删。"""
     order = db.get(MemberCardOrder, order_id)
     if not order:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    if store_id is not None and int(order.store_id) != int(store_id):
         raise HTTPException(status_code=404, detail="工单不存在")
     if order.applied_to_member:
         raise HTTPException(status_code=400, detail="已同步入账的工单不可删除")
@@ -336,10 +357,12 @@ def delete_card_order(db: Session, order_id: int) -> None:
 
 
 def update_card_order(
-    db: Session, order_id: int, body: CardOrderPatchIn, *, operator: str
+    db: Session, order_id: int, body: CardOrderPatchIn, *, operator: str, store_id: int | None = None
 ) -> CardOrderOut:
     order = db.get(MemberCardOrder, order_id)
     if not order:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    if store_id is not None and int(order.store_id) != int(store_id):
         raise HTTPException(status_code=404, detail="工单不存在")
 
     patch = body.model_dump(exclude_unset=True)

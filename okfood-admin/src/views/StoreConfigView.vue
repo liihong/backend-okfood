@@ -25,6 +25,8 @@ const form = ref({
   courier_delivery_extra_per_unit_yuan: '',
   member_card_week_price_yuan: '',
   member_card_month_price_yuan: '',
+  member_card_week_list_price_yuan: '',
+  member_card_month_list_price_yuan: '',
 })
 
 async function loadConfig() {
@@ -43,6 +45,8 @@ async function loadConfig() {
     form.value.courier_delivery_extra_per_unit_yuan = fmtMoney(d?.courier_delivery_extra_per_unit_yuan)
     form.value.member_card_week_price_yuan = fmtMoney(d?.member_card_week_price_yuan)
     form.value.member_card_month_price_yuan = fmtMoney(d?.member_card_month_price_yuan)
+    form.value.member_card_week_list_price_yuan = fmtMoney(d?.member_card_week_list_price_yuan)
+    form.value.member_card_month_list_price_yuan = fmtMoney(d?.member_card_month_list_price_yuan)
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -100,14 +104,30 @@ async function saveConfig() {
   if (base === null) return
   const extra = parseMoney(form.value.courier_delivery_extra_per_unit_yuan, '配送费每多一份加价')
   if (extra === null) return
+  const parseMoneyOptional = (raw, label) => {
+    const t = String(raw ?? '').trim()
+    if (t === '') return null
+    const n = Number(t)
+    if (!Number.isFinite(n) || n < 0) {
+      showToast(`${label}须为非负数字或留空`, 'error')
+      return undefined
+    }
+    return n
+  }
   const weekP = parseMoney(form.value.member_card_week_price_yuan, '周卡标价')
   if (weekP === null) return
   const monthP = parseMoney(form.value.member_card_month_price_yuan, '月卡标价')
   if (monthP === null) return
+  const weekList = parseMoneyOptional(form.value.member_card_week_list_price_yuan, '周卡划线价')
+  if (weekList === undefined) return
+  const monthList = parseMoneyOptional(form.value.member_card_month_list_price_yuan, '月卡划线价')
+  if (monthList === undefined) return
   payload.courier_delivery_base_yuan = base
   payload.courier_delivery_extra_per_unit_yuan = extra
   payload.member_card_week_price_yuan = weekP
   payload.member_card_month_price_yuan = monthP
+  payload.member_card_week_list_price_yuan = weekList
+  payload.member_card_month_list_price_yuan = monthList
 
   saving.value = true
   try {
@@ -268,7 +288,9 @@ onMounted(() => {
       </div>
 
       <h3 class="sc-subtitle">小程序会员卡标价（元）</h3>
-      <p class="sc-hint">会员自助开卡/续卡微信支付金额；与后台开卡工单标价独立，以此处为准。</p>
+      <p class="sc-hint">
+        会员自助开卡/续卡微信支付金额；与后台开卡工单标价独立，以此处为准。可选填写划线价（须高于对应标价）时小程序会员卡区域启用「活动价」样式。
+      </p>
       <div class="sc-coord-grid">
         <div class="sc-field">
           <label class="sc-label" for="sc-card-week">周卡</label>
@@ -290,6 +312,28 @@ onMounted(() => {
             class="sc-input sc-input--mono"
             inputmode="decimal"
             placeholder="例：669"
+          />
+        </div>
+        <div class="sc-field">
+          <label class="sc-label" for="sc-card-week-list">周卡划线价（可选）</label>
+          <input
+            id="sc-card-week-list"
+            v-model="form.member_card_week_list_price_yuan"
+            type="text"
+            class="sc-input sc-input--mono"
+            inputmode="decimal"
+            placeholder="高于标价时出现「活动价」样式；留空关闭"
+          />
+        </div>
+        <div class="sc-field">
+          <label class="sc-label" for="sc-card-month-list">月卡划线价（可选）</label>
+          <input
+            id="sc-card-month-list"
+            v-model="form.member_card_month_list_price_yuan"
+            type="text"
+            class="sc-input sc-input--mono"
+            inputmode="decimal"
+            placeholder="高于标价时出现「活动价」样式；留空关闭"
           />
         </div>
       </div>

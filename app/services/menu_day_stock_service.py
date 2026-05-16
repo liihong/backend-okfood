@@ -23,33 +23,41 @@ def _week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def resolve_dish_for_calendar_date(db: Session, menu_date: date) -> MenuDish | None:
+def resolve_dish_for_calendar_date(db: Session, menu_date: date, *, store_id: int) -> MenuDish | None:
     """某日周槽位或按日排期上的菜品；无排期则 None。"""
+    sid = int(store_id)
     anchor = _week_start(menu_date)
     slot = menu_date.weekday() + 1
     row = db.execute(
         select(WeeklyMenuSlot, MenuDish)
         .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
-        .where(WeeklyMenuSlot.week_start == anchor, WeeklyMenuSlot.slot == slot)
+        .where(
+            WeeklyMenuSlot.store_id == sid,
+            WeeklyMenuSlot.week_start == anchor,
+            WeeklyMenuSlot.slot == slot,
+        )
     ).first()
     if row:
         return row[1]
     row2 = db.execute(
         select(MenuSchedule, MenuDish)
         .join(MenuDish, MenuSchedule.dish_id == MenuDish.id)
-        .where(MenuSchedule.menu_date == menu_date)
+        .where(MenuSchedule.menu_date == menu_date, MenuSchedule.store_id == sid)
     ).first()
     if row2:
         return row2[1]
     return None
 
 
-def subscription_total_meals_on_date(db: Session, menu_date: date) -> int:
+def subscription_total_meals_on_date(db: Session, menu_date: date, *, store_id: int) -> int:
     """当日应配送的会员份数（到家+门店自提；与配送大表同一规则；非法定配送日则为 0）。"""
     if not is_subscription_delivery_day(menu_date):
         return 0
-    del_members, _ = eligible_members_for_delivery(db, delivery_date=menu_date, delivery_region_id=None)
-    pick_members, _ = eligible_members_for_store_pickup(db, delivery_date=menu_date)
+    sid = int(store_id)
+    del_members, _ = eligible_members_for_delivery(
+        db, delivery_date=menu_date, delivery_region_id=None, store_id=sid
+    )
+    pick_members, _ = eligible_members_for_store_pickup(db, delivery_date=menu_date, store_id=sid)
     total = 0
     for m in del_members:
         total += effective_daily_meal_units(m)
@@ -58,23 +66,29 @@ def subscription_total_meals_on_date(db: Session, menu_date: date) -> int:
     return total
 
 
-def paid_single_portions_sum(db: Session, dish_id: int, menu_date: date) -> int:
+def paid_single_portions_sum(db: Session, dish_id: int, menu_date: date, *, store_id: int) -> int:
+    sid = int(store_id)
     v = db.scalar(
         select(func.coalesce(func.sum(SingleMealOrder.quantity), 0)).where(
             SingleMealOrder.delivery_date == menu_date,
             SingleMealOrder.dish_id == dish_id,
             SingleMealOrder.pay_status == "已支付",
+            SingleMealOrder.store_id == sid,
         )
     )
     return int(v or 0)
 
 
-def weekly_slot_row_for_dish_date(db: Session, dish_id: int, menu_date: date) -> WeeklyMenuSlot | None:
+def weekly_slot_row_for_dish_date(
+    db: Session, dish_id: int, menu_date: date, *, store_id: int
+) -> WeeklyMenuSlot | None:
     """与单次点餐同周槽+同一道菜的行；仅周排期有库存字段。"""
+    sid = int(store_id)
     anchor = _week_start(menu_date)
     slot = menu_date.weekday() + 1
     return db.scalar(
         select(WeeklyMenuSlot).where(
+            WeeklyMenuSlot.store_id == sid,
             WeeklyMenuSlot.week_start == anchor,
             WeeklyMenuSlot.slot == slot,
             WeeklyMenuSlot.dish_id == dish_id,
@@ -102,11 +116,18 @@ class SingleOrderStockInfo:
         }
 
 
-def single_order_stock_for_dish_date(db: Session, dish_id: int, menu_date: date) -> SingleOrderStockInfo:
-    w = weekly_slot_row_for_dish_date(db, dish_id, menu_date)
-    scheduled = resolve_dish_for_calendar_date(db, menu_date)
-    sub = subscription_total_meals_on_date(db, menu_date) if scheduled and int(scheduled.id) == int(dish_id) else 0
-    paid = paid_single_portions_sum(db, dish_id, menu_date)
+def single_order_stock_for_dish_date(
+    db: Session, dish_id: int, menu_date: date, *, store_id: int
+) -> SingleOrderStockInfo:
+    sid = int(store_id)
+    w = weekly_slot_row_for_dish_date(db, dish_id, menu_date, store_id=sid)
+    scheduled = resolve_dish_for_calendar_date(db, menu_date, store_id=sid)
+    sub = (
+        subscription_total_meals_on_date(db, menu_date, store_id=sid)
+        if scheduled and int(scheduled.id) == int(dish_id)
+        else 0
+    )
+    paid = paid_single_portions_sum(db, dish_id, menu_date, store_id=sid)
     if w is None or w.total_stock is None:
         return SingleOrderStockInfo(
             limited=False, total_stock=None, subscription_meals=sub, paid_single_portions=paid, remaining=None
@@ -119,8 +140,10 @@ def single_order_stock_for_dish_date(db: Session, dish_id: int, menu_date: date)
     )
 
 
-def assert_single_order_stock_available(db: Session, dish_id: int, menu_date: date, quantity: int) -> None:
-    info = single_order_stock_for_dish_date(db, dish_id, menu_date)
+def assert_single_order_stock_available(
+    db: Session, dish_id: int, menu_date: date, quantity: int, *, store_id: int
+) -> None:
+    info = single_order_stock_for_dish_date(db, dish_id, menu_date, store_id=int(store_id))
     if not info.limited or info.remaining is None:
         return
     if quantity > int(info.remaining):
@@ -130,13 +153,20 @@ def assert_single_order_stock_available(db: Session, dish_id: int, menu_date: da
         )
 
 
-def set_weekly_slot_total_stock(db: Session, week_start: date, slot: int, total_stock: int | None) -> None:
+def set_weekly_slot_total_stock(
+    db: Session, week_start: date, slot: int, total_stock: int | None, *, store_id: int
+) -> None:
     """更新周槽日总份；NULL=不限制。槽位须已有菜品行。"""
     if slot < 1 or slot > 7:
         raise HTTPException(status_code=400, detail="slot 须在 1～7 之间")
+    sid = int(store_id)
     anchor = _week_start(week_start)
     w = db.scalar(
-        select(WeeklyMenuSlot).where(WeeklyMenuSlot.week_start == anchor, WeeklyMenuSlot.slot == slot)
+        select(WeeklyMenuSlot).where(
+            WeeklyMenuSlot.store_id == sid,
+            WeeklyMenuSlot.week_start == anchor,
+            WeeklyMenuSlot.slot == slot,
+        )
     )
     if total_stock is None:
         if w is not None:
@@ -152,16 +182,22 @@ def set_weekly_slot_total_stock(db: Session, week_start: date, slot: int, total_
 
 
 def _paid_sums_for_dates_dishes(
-    db: Session, dates: list[date], dish_ids: set[int]
+    db: Session, dates: list[date], dish_ids: set[int], *, store_id: int
 ) -> dict[tuple[date, int], int]:
     if not dates or not dish_ids:
         return {}
+    sid = int(store_id)
     rows = db.execute(
-        select(SingleMealOrder.delivery_date, SingleMealOrder.dish_id, func.coalesce(func.sum(SingleMealOrder.quantity), 0))
+        select(
+            SingleMealOrder.delivery_date,
+            SingleMealOrder.dish_id,
+            func.coalesce(func.sum(SingleMealOrder.quantity), 0),
+        )
         .where(
             SingleMealOrder.delivery_date.in_(dates),
             SingleMealOrder.dish_id.in_(dish_ids),
             SingleMealOrder.pay_status == "已支付",
+            SingleMealOrder.store_id == sid,
         )
         .group_by(SingleMealOrder.delivery_date, SingleMealOrder.dish_id)
     ).all()
@@ -169,18 +205,19 @@ def _paid_sums_for_dates_dishes(
 
 
 def weekly_slot_stock_extras(
-    db: Session, week_start_anchor: date, slot_payload: list[dict[str, Any]]
+    db: Session, week_start_anchor: date, slot_payload: list[dict[str, Any]], *, store_id: int
 ) -> list[dict[str, Any]]:
     """为每槽位附加 subscription_meals_for_day、single_stock_remaining；total_stock 由调用方自 payload 已带明。"""
     if not slot_payload:
         return []
+    sid = int(store_id)
     dates = [week_start_anchor + timedelta(days=i) for i in range(7)]
-    sub_by_date = {d: subscription_total_meals_on_date(db, d) for d in dates}
+    sub_by_date = {d: subscription_total_meals_on_date(db, d, store_id=sid) for d in dates}
     dish_ids: set[int] = set()
     for s in slot_payload:
         if s.get("dish_id") is not None:
             dish_ids.add(int(s["dish_id"]))
-    paid = _paid_sums_for_dates_dishes(db, dates, dish_ids)
+    paid = _paid_sums_for_dates_dishes(db, dates, dish_ids, store_id=sid)
     out: list[dict[str, Any]] = []
     for s in slot_payload:
         sl = int(s.get("slot", 0) or 0)
@@ -194,7 +231,7 @@ def weekly_slot_stock_extras(
             out.append(base)
             continue
         did_i = int(did)
-        scheduled = resolve_dish_for_calendar_date(db, menu_date)
+        scheduled = resolve_dish_for_calendar_date(db, menu_date, store_id=sid)
         sub = sub_by_date.get(menu_date, 0) if scheduled and int(scheduled.id) == did_i else 0
         paid_n = paid.get((menu_date, did_i), 0)
         base["subscription_meals_for_day"] = sub

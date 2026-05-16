@@ -53,13 +53,16 @@ def _to_out(c: Courier, regions: list[CourierRegionOut]) -> CourierAdminOut:
     )
 
 
-def list_couriers_admin(db: Session) -> list[CourierAdminOut]:
+def list_couriers_admin(db: Session, tenant_id: int) -> list[CourierAdminOut]:
     region_map = _regions_by_courier(db)
-    couriers = db.scalars(select(Courier).order_by(Courier.courier_id.asc())).all()
+    tid = int(tenant_id)
+    couriers = db.scalars(
+        select(Courier).where(Courier.tenant_id == tid).order_by(Courier.courier_id.asc())
+    ).all()
     return [_to_out(c, region_map.get(c.courier_id, [])) for c in couriers]
 
 
-def create_courier_admin(db: Session, body: CourierCreateIn) -> CourierAdminOut:
+def create_courier_admin(db: Session, body: CourierCreateIn, tenant_id: int) -> CourierAdminOut:
     cid = body.courier_id.strip()
     if not cid:
         raise HTTPException(status_code=400, detail="工号无效")
@@ -69,6 +72,7 @@ def create_courier_admin(db: Session, body: CourierCreateIn) -> CourierAdminOut:
     name = body.name.strip() if body.name and body.name.strip() else None
     c = Courier(
         courier_id=cid,
+        tenant_id=int(tenant_id),
         name=name,
         phone=phone,
         pin_hash=hash_password(body.pin),
@@ -80,9 +84,10 @@ def create_courier_admin(db: Session, body: CourierCreateIn) -> CourierAdminOut:
     return _to_out(c, [])
 
 
-def update_courier_admin(db: Session, courier_id: str, body: CourierUpdateIn) -> CourierAdminOut:
+def update_courier_admin(db: Session, courier_id: str, body: CourierUpdateIn, tenant_id: int) -> CourierAdminOut:
+    tid = int(tenant_id)
     c = db.get(Courier, courier_id)
-    if not c:
+    if not c or int(c.tenant_id) != tid:
         raise HTTPException(status_code=404, detail="配送员不存在")
     if body.name is not None:
         c.name = body.name.strip() if body.name.strip() else None
@@ -99,9 +104,10 @@ def update_courier_admin(db: Session, courier_id: str, body: CourierUpdateIn) ->
     return _to_out(c, regions_for_courier(db, courier_id))
 
 
-def reset_courier_pin(db: Session, courier_id: str, pin_plain: str) -> None:
+def reset_courier_pin(db: Session, courier_id: str, pin_plain: str, tenant_id: int) -> None:
+    tid = int(tenant_id)
     c = db.get(Courier, courier_id)
-    if not c:
+    if not c or int(c.tenant_id) != tid:
         raise HTTPException(status_code=404, detail="配送员不存在")
     c.pin_hash = hash_password(pin_plain)
     db.commit()

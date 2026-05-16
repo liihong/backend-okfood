@@ -1,12 +1,14 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { Calendar, CalendarDays, DollarSign, History } from 'lucide-vue-next'
+import { Calendar, CalendarDays, CreditCard, DollarSign, History } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
 const loading = ref(false)
 /** @type {import('vue').Ref<any>} */
 const summary = ref(null)
+/** @type {import('vue').Ref<Array<{ order_id: number; time_hm: string; card_kind: string; amount_yuan: string | number }>>} */
+const todayPaidCardItems = ref([])
 
 function fmtYuan(raw) {
   if (raw === null || raw === undefined) return '—'
@@ -56,11 +58,16 @@ async function loadSummary() {
   }
   loading.value = true
   try {
-    const data = await apiJson('/api/admin/finance/received-summary', {}, { auth: true })
-    summary.value = data || null
+    const [sum, cardPack] = await Promise.all([
+      apiJson('/api/admin/finance/received-summary', {}, { auth: true }),
+      apiJson('/api/admin/finance/today-paid-card-orders', {}, { auth: true }),
+    ])
+    summary.value = sum || null
+    todayPaidCardItems.value = Array.isArray(cardPack?.items) ? cardPack.items : []
   } catch (e) {
     showToast(e?.message || '加载失败', 'error')
     summary.value = null
+    todayPaidCardItems.value = []
   } finally {
     loading.value = false
   }
@@ -98,20 +105,30 @@ onMounted(loadSummary)
         </p>
         <p class="finance-remark" style="margin-top: 0.75rem">共 {{ summary ? summary.cumulative?.total_count ?? 0 : loading ? '…' : '—' }} 笔</p>
       </div>
-
-      <div class="finance-card white finance-card--note">
-        <p class="f-label-dark">口径说明</p>
-        <p class="finance-remark">
-          统计<span class="em">日历</span>下的「今日 / 本月」：以订单
-          <span class="em">updated_at</span>（库内 UTC 时间）换算后是否落入对应日界为准。支付成功或后台改为已缴时会更新该时间。
-        </p>
-        <p class="finance-remark">
-          开卡工单：<span class="em">已缴</span>且计入金额取工单实收；未填金额则笔数仍计、金额按 0。若已缴工单后续仅改备注等触发了更新时间，可能落入新的统计日（尚无独立「收款时间」字段）。
-        </p>
-        <p class="finance-remark">单次点餐：<span class="em">已支付</span>订单实付。</p>
-      </div>
     </div>
 
+  <div class="table-container table-container-finance finance-today-cards">
+      <div class="table-header">
+        <div class="finance-section-head">
+          <CreditCard :size="20" /> 今日开卡收款明细
+          <span v-if="todayLabel" class="finance-today-cards__date">（{{ todayLabel }}）</span>
+        </div>
+        <p class="finance-remark finance-today-cards__hint">
+          已缴工单按上海时间列出；时刻与卡型对应单笔收入。口径与上方「今日收入」中的开卡统计一致（工单
+          <span class="em">updated_at</span> 落入当日）。
+       </p>
+      </div>
+     <AdminTable variant="default" :data="todayPaidCardItems" :loading="loading" row-key="order_id"
+        empty-text="今日暂无已缴开卡记录">
+        <el-table-column prop="time_hm" label="时间" min-width="88" />
+        <el-table-column prop="card_kind" label="卡型" min-width="100" />
+        <el-table-column label="实收（元）" min-width="120" align="right" class-name="td-paid">
+          <template #default="{ row: r }">
+            <span class="font-black">¥ {{ fmtYuan(r.amount_yuan) }}</span>
+          </template>
+        </el-table-column>
+      </AdminTable>
+   </div>
     <div class="table-container table-container-finance">
       <div class="table-header">
         <div class="finance-section-head">
@@ -138,3 +155,17 @@ onMounted(loadSummary)
     </div>
   </section>
 </template>
+
+<style scoped>
+.finance-today-cards__date {
+  margin-left: 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.finance-today-cards__hint {
+  margin: 0.5rem 0 0;
+  max-width: 52rem;
+}
+</style>

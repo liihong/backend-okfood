@@ -39,7 +39,12 @@ const handleAdminLogin = async () => {
     syncAdminKindFromLoginPayload(data)
     showToast('登录成功')
     await router.replace({
-      name: adminKind.value === 'delivery' ? 'regions' : 'dashboard',
+      name:
+        adminKind.value === 'delivery'
+          ? 'regions'
+          : adminKind.value === 'system'
+            ? 'system-tenants'
+            : 'dashboard',
     })
   } catch (e) {
     loginError.value = true

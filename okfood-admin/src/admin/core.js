@@ -14,7 +14,7 @@ export const API_BASE = ENV_API_BASE.replace(/\/$/, '')
 
 export const adminAccessToken = ref('')
 export const rememberLogin = ref(false)
-/** `full` | `delivery` | `support`，与登录 JWT / 接口 admin_kind 一致 */
+/** `full` | `delivery` | `support` | `system`，与登录 JWT / 接口 admin_kind 一致 */
 export const adminKind = ref('full')
 /** 会员列表：会员档案页写入，营业概览预览读取 */
 export const memberList = ref([])
@@ -46,7 +46,14 @@ function peekJwtRole(token) {
 }
 
 function persistAdminKind(kind) {
-  const k = kind === 'delivery' ? 'delivery' : kind === 'support' ? 'support' : 'full'
+  const k =
+    kind === 'delivery'
+      ? 'delivery'
+      : kind === 'support'
+        ? 'support'
+        : kind === 'system'
+          ? 'system'
+          : 'full'
   adminKind.value = k
   try {
     if (rememberLogin.value) {
@@ -72,11 +79,19 @@ function applyAdminKindFromCurrentToken(loginPayload = null) {
   let kind = 'full'
   if (role === 'admin_delivery') kind = 'delivery'
   else if (role === 'admin_support') kind = 'support'
+  else if (role === 'admin_system') kind = 'system'
   else if (role === 'admin') kind = 'full'
   else {
     const raw = loginPayload && loginPayload.admin_kind
-    if (raw === 'delivery' || raw === 'support' || raw === 'full')
-      kind = raw === 'delivery' ? 'delivery' : raw === 'support' ? 'support' : 'full'
+    if (raw === 'delivery' || raw === 'support' || raw === 'system' || raw === 'full')
+      kind =
+        raw === 'delivery'
+          ? 'delivery'
+          : raw === 'support'
+            ? 'support'
+            : raw === 'system'
+              ? 'system'
+              : 'full'
   }
   persistAdminKind(kind)
 }

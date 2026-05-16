@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def apply_wechat_pay_notify(db: Session, data: dict[str, str]) -> tuple[bool, str]:
     """验签后依次尝试单笔点餐、开卡工单；返回 (是否 SUCCESS, 原因)。"""
-    ok, reason, parsed = parse_wechat_pay_notify(data)
+    ok, reason, parsed = parse_wechat_pay_notify(data, db=db)
     if not ok or parsed is None:
         return False, reason
 

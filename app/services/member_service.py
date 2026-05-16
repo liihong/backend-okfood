@@ -21,6 +21,8 @@ from app.models.menu_dish import MenuDish, SPICE_LEVEL_MEMBER_LABELS
 
 from app.models.menu_schedule import MenuSchedule
 
+from app.models.store import Store
+
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 
 from app.constants import STUB_MEMBER_NAME, UNASSIGNED_DELIVERY_AREA
@@ -87,9 +89,15 @@ def sql_effective_daily_meal_units_column():
     )
 
 
-def _member_by_phone(db: Session, phone: str) -> Member | None:
+def _member_by_phone(db: Session, phone: str, store_id: int) -> Member | None:
 
-    return db.scalar(select(Member).where(Member.phone == phone, Member.deleted_at.is_(None)))
+    return db.scalar(
+        select(Member).where(
+            Member.phone == phone,
+            Member.store_id == int(store_id),
+            Member.deleted_at.is_(None),
+        )
+    )
 
 
 
@@ -113,17 +121,23 @@ def ensure_member_stub(
     db: Session,
     phone: str,
     *,
+    tenant_id: int,
+    store_id: int,
     wx_mini_openid: str | None = None,
 ) -> int:
 
     """登录成功时保证存在会员行；返回 members.id 用于签发 JWT。
 
-    仅按手机号解析 id，避免加载整行（与历史库结构更易兼容）。
-
-    微信登录可对已存在会员更新 wx_mini_openid；新号则创建占位档案并写入 openid。
+    手机号与 openid 均在同一门店内唯一；微信登录可更新 openid。
     """
 
-    row_id = db.scalar(select(Member.id).where(Member.phone == phone, Member.deleted_at.is_(None)))
+    row_id = db.scalar(
+        select(Member.id).where(
+            Member.phone == phone,
+            Member.store_id == int(store_id),
+            Member.deleted_at.is_(None),
+        )
+    )
 
     if row_id is not None:
 
@@ -146,6 +160,10 @@ def ensure_member_stub(
         return mid
 
     member = Member(
+
+        tenant_id=int(tenant_id),
+
+        store_id=int(store_id),
 
         phone=phone,
 
@@ -219,8 +237,9 @@ def _to_member_out(
 
         lr = {"start": m.leave_range_start, "end": m.leave_range_end}
 
-    settings_row = ensure_app_settings_row(db)
-    ldt = settings_row.leave_deadline_time
+    from app.services.store_config_service import get_leave_deadline_time_for_store
+
+    ldt = get_leave_deadline_time_for_store(db, int(m.store_id))
     leave_deadline_str = ldt.isoformat() if ldt is not None else "21:00:00"
 
     plan_out: PlanType | None = None
@@ -303,9 +322,15 @@ def get_member(db: Session, member_id: int) -> MemberOut:
 
 
 
-def register_member(db: Session, body: RegisterIn) -> MemberOut:
+def register_member(
+    db: Session,
+    body: RegisterIn,
+    *,
+    tenant_id: int,
+    store_id: int,
+) -> MemberOut:
 
-    existing = _member_by_phone(db, body.phone)
+    existing = _member_by_phone(db, body.phone, int(store_id))
 
     if existing and not _is_placeholder_profile(db, existing):
 
@@ -317,7 +342,7 @@ def register_member(db: Session, body: RegisterIn) -> MemberOut:
 
         lng, lat = coords[0], coords[1]
 
-        r = assign_region_for_coords(db, lng, lat)
+        r = assign_region_for_coords(db, lng, lat, tenant_id=int(tenant_id))
 
         rid = int(r.id) if r else None
 
@@ -364,6 +389,10 @@ def register_member(db: Session, body: RegisterIn) -> MemberOut:
         return _to_member_out(db, existing, get_default_address(db, existing.id))
 
     member = Member(
+
+        tenant_id=int(tenant_id),
+
+        store_id=int(store_id),
 
         phone=body.phone,
 
@@ -911,11 +940,13 @@ def _by_date_from_weekly_rows(rows: list[tuple[WeeklyMenuSlot, MenuDish]]) -> di
 
 
 
-def get_tomorrow_menu(db: Session) -> dict:
+def get_tomorrow_menu(db: Session, *, store_id: int) -> dict:
 
     d = tomorrow_shanghai()
 
     ws, slot = _week_start_and_slot(d)
+
+    sid = int(store_id)
 
     row = db.execute(
 
@@ -923,7 +954,11 @@ def get_tomorrow_menu(db: Session) -> dict:
 
         .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
 
-        .where(WeeklyMenuSlot.week_start == ws, WeeklyMenuSlot.slot == slot)
+        .where(
+            WeeklyMenuSlot.store_id == sid,
+            WeeklyMenuSlot.week_start == ws,
+            WeeklyMenuSlot.slot == slot,
+        )
 
     ).first()
 
@@ -957,7 +992,7 @@ def get_tomorrow_menu(db: Session) -> dict:
 
         .join(MenuDish, MenuSchedule.dish_id == MenuDish.id)
 
-        .where(MenuSchedule.menu_date == d)
+        .where(MenuSchedule.menu_date == d, MenuSchedule.store_id == sid)
 
     ).first()
 
@@ -1070,11 +1105,13 @@ def _dish_to_member_card(*, menu_date: date, dish: MenuDish | None, slot: int | 
 
 
 
-def get_weekly_menu(db: Session, week_start: date | None) -> dict:
+def get_weekly_menu(db: Session, week_start: date | None, *, store_id: int) -> dict:
 
     anchor = _monday_of_week(week_start) if week_start else _monday_of_week(today_shanghai())
 
     dates = [anchor + timedelta(days=i) for i in range(7)]
+
+    sid = int(store_id)
 
     weekly_rows = db.execute(
 
@@ -1082,7 +1119,7 @@ def get_weekly_menu(db: Session, week_start: date | None) -> dict:
 
         .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
 
-        .where(WeeklyMenuSlot.week_start == anchor)
+        .where(WeeklyMenuSlot.week_start == anchor, WeeklyMenuSlot.store_id == sid)
 
     ).all()
 
@@ -1098,7 +1135,7 @@ def get_weekly_menu(db: Session, week_start: date | None) -> dict:
 
             .join(MenuDish, MenuSchedule.dish_id == MenuDish.id)
 
-            .where(MenuSchedule.menu_date.in_(missing))
+            .where(MenuSchedule.menu_date.in_(missing), MenuSchedule.store_id == sid)
 
         ).all()
 
@@ -1118,11 +1155,17 @@ def get_weekly_menu(db: Session, week_start: date | None) -> dict:
 
 
 
-def get_menu_detail_by_dish_id(db: Session, dish_id: int, *, service_date: date | None = None) -> dict:
+def get_menu_detail_by_dish_id(
+    db: Session, dish_id: int, *, service_date: date | None = None, store_id: int
+) -> dict:
 
     dish = db.get(MenuDish, dish_id)
 
     if not dish:
+
+        raise HTTPException(status_code=404, detail="餐品不存在")
+
+    if int(dish.store_id) != int(store_id):
 
         raise HTTPException(status_code=404, detail="餐品不存在")
 
@@ -1149,7 +1192,9 @@ def get_menu_detail_by_dish_id(db: Session, dish_id: int, *, service_date: date 
     if service_date is not None:
         from app.services.menu_day_stock_service import single_order_stock_for_dish_date
 
-        out.update(single_order_stock_for_dish_date(db, int(dish_id), service_date).to_detail_dict())
+        out.update(
+            single_order_stock_for_dish_date(db, int(dish_id), service_date, store_id=int(store_id)).to_detail_dict()
+        )
 
     return out
 

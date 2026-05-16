@@ -140,7 +140,13 @@ class UserMemberCardOrderOut(BaseModel):
 
 
 class MemberCardPricesOut(BaseModel):
-    """小程序展示用：当前周卡/月卡标价（与自助开卡下单金额一致，来源于 app_settings）。"""
+    """小程序展示用：当前周卡/月卡标价（与自助开卡下单金额一致，来源于门店或 app_settings）。"""
 
     week_price_yuan: str
     month_price_yuan: str
+    week_list_price_yuan: str | None = Field(None, description="周卡划线价；高于售价时表示活动折扣")
+    month_list_price_yuan: str | None = Field(None, description="月卡划线价；高于售价时表示活动折扣")
+    promotion_active: bool = Field(
+        False,
+        description="任一侧划线价高于售价时为 true，启用「活动价」整体样式",
+    )

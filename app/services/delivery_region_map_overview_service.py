@@ -6,12 +6,14 @@ from sqlalchemy import func, select
 
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.timeutil import today_shanghai, tomorrow_shanghai
 from app.models.delivery_log import DeliveryLog
 from app.models.enums import DeliveryStatus
 from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.models.single_meal_order import SingleMealOrder
+from app.models.store import Store
 from app.schemas.delivery_region import (
     DeliveryRegionMapOverviewOut,
     MapOverviewMemberMarkerOut,
@@ -23,9 +25,11 @@ from app.services.member_address_service import delivery_region_name_map, routin
 from app.services.leave import is_absent_on_delivery_date
 
 
-def delivery_region_map_overview(db: Session) -> DeliveryRegionMapOverviewOut:
+def delivery_region_map_overview(db: Session, *, store_id: int) -> DeliveryRegionMapOverviewOut:
     """有余额会员（与列表 active 口径一致）及其默认地址上的坐标与展示片区。"""
-    regions = list_delivery_regions(db, include_polygon=True)
+    st = db.get(Store, int(store_id))
+    tenant_id = int(st.tenant_id) if st is not None else int(get_settings().DEFAULT_TENANT_ID)
+    regions = list_delivery_regions(db, include_polygon=True, tenant_id=tenant_id)
 
     default_addr_pick = (
         select(
@@ -41,7 +45,11 @@ def delivery_region_map_overview(db: Session) -> DeliveryRegionMapOverviewOut:
         .select_from(Member)
         .join(default_addr_pick, default_addr_pick.c.mid == Member.id)
         .join(MemberAddress, MemberAddress.id == default_addr_pick.c.addr_id)
-        .where(Member.balance > 0, Member.deleted_at.is_(None))
+        .where(
+            Member.balance > 0,
+            Member.deleted_at.is_(None),
+            Member.store_id == int(store_id),
+        )
         .order_by(Member.id.asc())
     )
     rows = db.execute(stmt).all()
@@ -100,7 +108,7 @@ def delivery_region_map_overview(db: Session) -> DeliveryRegionMapOverviewOut:
             )
         )
 
-    sc = get_store_config(db)
+    sc = get_store_config(db, store_id=int(store_id))
     store_anchor = StoreMapAnchorOut(
         store_name=sc.store_name,
         store_logo_url=sc.store_logo_url,

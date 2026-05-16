@@ -17,8 +17,11 @@ from app.integrations.wechat_pay_v2 import (
     build_miniprogram_pay_params,
     parse_wechat_pay_notify,
     unified_order_jsapi,
-    wechat_pay_misconfiguration_detail,
     yuan_decimal_to_fen,
+)
+from app.services.tenant_integration_service import (
+    get_merged_pay_config,
+    wechat_pay_misconfiguration_detail_merged,
 )
 from app.models.courier import Courier
 from app.models.delivery_region import DeliveryRegion, DeliveryRegionCourier
@@ -57,10 +60,22 @@ def _final_out_trade_no(order_id: int) -> str:
     return s
 
 
-def dish_planned_for_date(db: Session, dish_id: int, d: date) -> bool:
-    if db.scalar(select(MenuSchedule.id).where(MenuSchedule.menu_date == d, MenuSchedule.dish_id == dish_id)):
+def dish_planned_for_date(db: Session, dish_id: int, d: date, *, store_id: int) -> bool:
+    sid = int(store_id)
+    if db.scalar(
+        select(MenuSchedule.id).where(
+            MenuSchedule.menu_date == d,
+            MenuSchedule.dish_id == dish_id,
+            MenuSchedule.store_id == sid,
+        )
+    ):
         return True
-    slots = db.scalars(select(WeeklyMenuSlot).where(WeeklyMenuSlot.dish_id == dish_id)).all()
+    slots = db.scalars(
+        select(WeeklyMenuSlot).where(
+            WeeklyMenuSlot.dish_id == dish_id,
+            WeeklyMenuSlot.store_id == sid,
+        )
+    ).all()
     for s in slots:
         svc = s.week_start + timedelta(days=int(s.slot) - 1)
         if svc == d:
@@ -100,9 +115,14 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
     dish = db.get(MenuDish, body.dish_id)
     if not dish or not dish.is_enabled:
         raise HTTPException(status_code=404, detail="餐品不存在或已停用")
+    mem = db.get(Member, member_id)
+    if not mem or mem.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if int(dish.store_id) != int(mem.store_id):
+        raise HTTPException(status_code=404, detail="餐品不存在或已停用")
     if dish.single_order_price_yuan is None:
         raise HTTPException(status_code=400, detail="该餐品暂未开放单点")
-    if not dish_planned_for_date(db, int(dish.id), body.delivery_date):
+    if not dish_planned_for_date(db, int(dish.id), body.delivery_date, store_id=int(mem.store_id)):
         raise HTTPException(status_code=400, detail="所选日期未排该餐品")
 
     qty = int(body.quantity)
@@ -124,13 +144,11 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
         address_summary = f"{area} {detail_line}".strip()
         addr_id = int(addr.id)
 
-    mem = db.get(Member, member_id)
-    if not mem or mem.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
     from app.services.menu_day_stock_service import assert_single_order_stock_available
 
-    assert_single_order_stock_available(db, int(dish.id), body.delivery_date, qty)
+    assert_single_order_stock_available(
+        db, int(dish.id), body.delivery_date, qty, store_id=int(mem.store_id)
+    )
 
     # 单点：上海时间当日 10:00 起不可再下「当日供餐」单（与小程序规则一致，不分会员套餐）
     if body.delivery_date == today_shanghai() and now_shanghai().time() >= time(10, 0, 0):
@@ -145,6 +163,8 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
     amt = (Decimal(unit) * Decimal(qty)).quantize(Decimal("0.01"))
 
     row = SingleMealOrder(
+        tenant_id=int(mem.tenant_id),
+        store_id=int(mem.store_id),
         out_trade_no=_new_temp_out_trade_no(),
         member_id=member_id,
         dish_id=int(dish.id),
@@ -242,15 +262,16 @@ def get_member_single_meal_order(db: Session, member_id: int, order_id: int) -> 
 
 def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, client_ip: str) -> dict[str, str]:
     """调微信统一下单并返回小程序调起支付参数。"""
-    pay_cfg = wechat_pay_misconfiguration_detail()
-    if pay_cfg:
-        raise HTTPException(status_code=503, detail=pay_cfg)
-
     order = db.get(SingleMealOrder, order_id)
     if not order or int(order.member_id) != int(member_id):
         raise HTTPException(status_code=404, detail="订单不存在")
     if order.pay_status == "已支付":
         raise HTTPException(status_code=400, detail="订单已支付")
+
+    pay_cfg = get_merged_pay_config(db, int(order.tenant_id))
+    perr = wechat_pay_misconfiguration_detail_merged(pay_cfg)
+    if perr:
+        raise HTTPException(status_code=503, detail=perr)
 
     member = db.get(Member, member_id)
     if not member or member.deleted_at is not None:
@@ -272,11 +293,14 @@ def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, c
             total_fee_fen=yuan_decimal_to_fen(order.amount_yuan),
             openid=openid,
             spbill_create_ip=client_ip,
+            pay=pay_cfg,
         )
     except WeChatPayV2Error as e:
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
 
-    return build_miniprogram_pay_params(prepay_id)
+    return build_miniprogram_pay_params(
+        prepay_id, appid=pay_cfg.wx_mini_appid, api_key=pay_cfg.wechat_pay_api_key
+    )
 
 
 def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyParsed) -> tuple[bool, str]:
@@ -323,7 +347,7 @@ def apply_single_meal_order_wechat_notify(db: Session, data: dict[str, str]) -> 
     处理微信支付结果通知（仅单笔点餐订单）。
     返回 (是否应回复微信 SUCCESS, 日志/失败原因)。
     """
-    ok, reason, parsed = parse_wechat_pay_notify(data)
+    ok, reason, parsed = parse_wechat_pay_notify(data, db=db)
     if not ok or parsed is None:
         return False, reason
     return finalize_single_meal_order_wechat_pay(db, parsed)
@@ -399,7 +423,7 @@ def confirm_single_order_delivery(db: Session, courier_id: str, order_id: int) -
     if bool(getattr(row, "store_pickup", False)):
         raise HTTPException(status_code=400, detail="门店自提订单无需骑手确认")
     qty = max(1, int(row.quantity or 1))
-    fee_yuan = courier_delivery_fee_yuan_for_meal_units(db, qty)
+    fee_yuan = courier_delivery_fee_yuan_for_meal_units(db, qty, store_id=int(row.store_id))
     courier_row = db.execute(select(Courier).where(Courier.courier_id == courier_id).with_for_update()).scalar_one_or_none()
     if not courier_row:
         raise HTTPException(status_code=500, detail="配送员账户异常")

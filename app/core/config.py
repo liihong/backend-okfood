@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     MYSQL_DATABASE: str = "meal_delivery"
     MYSQL_CHARSET: str = "utf8mb4"
 
+    # 多门店：未传 X-Store-Id 时小程序/公开接口默认落在该门店（与迁移回填 id=1 对齐）
+    DEFAULT_TENANT_ID: int = 1
+    DEFAULT_STORE_ID: int = 1
+
     JWT_SECRET: str = "change-me"
     JWT_ALGORITHM: str = "HS256"
     # 小程序登录签发会员 JWT；默认约 10 年，可按安全策略改短

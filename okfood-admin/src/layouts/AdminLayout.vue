@@ -22,15 +22,21 @@ const route = useRoute()
 
 const isDeliveryOnly = computed(() => adminKind.value === 'delivery')
 const isSupportOnly = computed(() => adminKind.value === 'support')
+const isSystemOnly = computed(() => adminKind.value === 'system')
 
 /** 与模板绑定：明确布尔，避免 Element Plus 菜单缓存旧结构 */
-const showFullAdminMenus = computed(() => !isDeliveryOnly.value)
+const showFullAdminMenus = computed(() => !isDeliveryOnly.value && !isSystemOnly.value)
 /** 仅店主完整账号：财务中心、门店配置 */
-const showOwnerAdminMenus = computed(() => !isDeliveryOnly.value && !isSupportOnly.value)
+const showOwnerAdminMenus = computed(
+  () => !isDeliveryOnly.value && !isSupportOnly.value && !isSystemOnly.value,
+)
+/** 平台管理员：租户维护等 */
+const showSystemAdminMenus = computed(() => isSystemOnly.value)
 
 const portalSubtitle = computed(() => {
   if (isDeliveryOnly.value) return '配送管理'
   if (isSupportOnly.value) return '客服工作台'
+  if (isSystemOnly.value) return '平台管理'
   return 'SUPER ADMIN'
 })
 
@@ -177,14 +183,15 @@ watch(sidebarCollapsedPref, (v) => {
           <el-menu-item index="/weekly-menu">本周菜单</el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="showOwnerAdminMenus" index="sub-system">
+        <el-sub-menu v-if="showOwnerAdminMenus || showSystemAdminMenus" index="sub-system">
           <template #title>
             <div class="menu-item-inner">
               <Settings :size="18" stroke-width="2" />
               <span class="menu-item-label">系统管理</span>
             </div>
           </template>
-          <el-menu-item index="/store-config">门店配置</el-menu-item>
+          <el-menu-item v-if="showSystemAdminMenus" index="/system/tenants">租户管理</el-menu-item>
+          <el-menu-item v-if="showOwnerAdminMenus" index="/store-config">门店配置</el-menu-item>
         </el-sub-menu>
       </el-menu>
 
@@ -195,7 +202,7 @@ watch(sidebarCollapsedPref, (v) => {
         @click="handleAdminLogout"
       >
         <div v-show="!sidebarCollapsed" class="admin-info">
-          <div class="avatar">{{ isDeliveryOnly ? '配送' : isSupportOnly ? '客服' : 'Admin' }}</div>
+          <div class="avatar">{{ isDeliveryOnly ? '配送' : isSupportOnly ? '客服' : isSystemOnly ? '平台' : 'Admin' }}</div>
           <span>安全退出</span>
         </div>
         <LogOut :size="16" />

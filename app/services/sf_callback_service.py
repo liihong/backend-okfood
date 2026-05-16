@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models.sf_same_city_callback import SfSameCityCallback
 from app.models.sf_same_city_push import SfSameCityPush
+from app.services.tenant_integration_service import resolve_sf_notify_app_key
 from app.services.sf_open.sign import _canonical_json, generate_open_sign, normalize_payload_for_sf_sign
 
 logger = logging.getLogger(__name__)
@@ -449,7 +450,6 @@ def process_sf_notify(
     settings = get_settings()
     skip = bool(settings.SF_CALLBACK_SKIP_SIGN_VERIFY)
     settings_dev = int(settings.SF_OPEN_DEV_ID or 0)
-    app_key = (settings.SF_OPEN_SECRET or "").strip()
 
     verify_err: str | None = None
     payload: dict[str, Any] | None = None
@@ -466,6 +466,8 @@ def process_sf_notify(
                 verify_err = "invalid body (neither JSON nor x-www-form-urlencoded)"
     else:
         verify_err = "empty body"
+
+    app_key = resolve_sf_notify_app_key(db, payload).strip()
 
     dev_ids_try = _dev_ids_for_verify(settings_dev, payload)
     eff_sign = _effective_sign_query(sign_query, payload)

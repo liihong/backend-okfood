@@ -10,13 +10,17 @@ from app.services.region_geo import extract_outer_ring, point_in_polygon
 logger = logging.getLogger(__name__)
 
 
-def assign_region_for_coords(db: Session, lng: float, lat: float) -> DeliveryRegion | None:
+def assign_region_for_coords(
+    db: Session, lng: float, lat: float, *, tenant_id: int | None = None
+) -> DeliveryRegion | None:
     """按启用区域的 priority 顺序做点选，返回首个命中的区域行；否则 None（未分配）。"""
     stmt = (
         select(DeliveryRegion)
         .where(DeliveryRegion.is_active.is_(True))
         .order_by(DeliveryRegion.priority.asc(), DeliveryRegion.id.asc())
     )
+    if tenant_id is not None:
+        stmt = stmt.where(DeliveryRegion.tenant_id == int(tenant_id))
     regions = db.scalars(stmt).all()
     for r in regions:
         try:
@@ -34,9 +38,11 @@ def assign_region_for_coords(db: Session, lng: float, lat: float) -> DeliveryReg
     return None
 
 
-def assign_area_name_for_coords(db: Session, lng: float, lat: float) -> str:
+def assign_area_name_for_coords(
+    db: Session, lng: float, lat: float, *, tenant_id: int | None = None
+) -> str:
     """兼容：返回首个命中区域名，否则「未分配」。"""
-    r = assign_region_for_coords(db, lng, lat)
+    r = assign_region_for_coords(db, lng, lat, tenant_id=tenant_id)
     if r is None:
         return UNASSIGNED_DELIVERY_AREA
     n = (r.name or "").strip()

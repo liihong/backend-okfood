@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.single_meal_order import SingleMealOrder
+from app.core.config import get_settings
 from app.models.sf_same_city_push import SfSameCityPush
 from app.services.admin_delivery_fulfillment_service import subscription_fulfilled_try_sf_home_no_commit
 from app.services.sf_same_city_service import aggs_for_delivery_date, load_agg_for_stop_id
@@ -106,15 +106,16 @@ def _member_rows_from_agg(db: Session, agg: Any) -> list[dict[str, Any]]:
 def _sf_push_monitor_row_dict(
     db: Session,
     r: SfSameCityPush,
-    agg_by_date: dict[date, dict[str, Any]],
+    aggs: dict[str, Any],
 ) -> dict[str, Any]:
-    agg = agg_by_date.get(r.delivery_date, {}).get(str(r.stop_id)) if r.delivery_date else None
+    agg = aggs.get(str(r.stop_id)) if aggs else None
     members = _member_rows_from_agg(db, agg) if agg is not None else []
     if not members:
         members = _fallback_members_from_snapshot(r.request_snapshot)
 
     return {
         "id": int(r.id),
+        "store_id": int(r.store_id) if getattr(r, "store_id", None) is not None else 1,
         "delivery_date": r.delivery_date.isoformat() if r.delivery_date else "",
         "stop_id": str(r.stop_id),
         "shop_order_id": str(r.shop_order_id),
@@ -138,9 +139,15 @@ def _apply_sf_same_city_stop_fulfillment(db: Session, pus: SfSameCityPush, *, op
     """
     if int(pus.error_code or -1) != 0:
         return
-    agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id)
+    sid = int(pus.store_id) if getattr(pus, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
+    agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
     if agg is None:
-        logger.warning("顺丰履约未解析到停靠点 stop_id=%s date=%s", pus.stop_id, pus.delivery_date)
+        logger.warning(
+            "顺丰履约未解析到停靠点 stop_id=%s date=%s store_id=%s",
+            pus.stop_id,
+            pus.delivery_date,
+            sid,
+        )
         return
     for sl in agg.sub_lines:
         if sl.get("is_delivered"):
@@ -151,7 +158,11 @@ def _apply_sf_same_city_stop_fulfillment(db: Session, pus: SfSameCityPush, *, op
         mid = int(sl["member_id"])
         try:
             subscription_fulfilled_try_sf_home_no_commit(
-                db, member_id=mid, delivery_date=pus.delivery_date, operator_tag=operator_tag
+                db,
+                member_id=mid,
+                delivery_date=pus.delivery_date,
+                operator_tag=operator_tag,
+                store_id=sid,
             )
         except HTTPException as e:
             logger.info(
@@ -197,6 +208,7 @@ def list_sf_same_city_pushes_for_monitor(
     page_size: int,
     sf_callback_order_status: int | None = None,
     callback_order_status_unknown: bool = False,
+    store_id: int | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """按业务日、顺丰回调配送状态可选筛选，创建时间倒序分页。"""
     if callback_order_status_unknown and sf_callback_order_status is not None:
@@ -205,6 +217,8 @@ def list_sf_same_city_pushes_for_monitor(
     fq = select(func.count()).select_from(SfSameCityPush)
     if delivery_date is not None:
         fq = fq.where(SfSameCityPush.delivery_date == delivery_date)
+    if store_id is not None:
+        fq = fq.where(SfSameCityPush.store_id == int(store_id))
     if callback_order_status_unknown:
         fq = fq.where(SfSameCityPush.sf_callback_order_status.is_(None))
     elif sf_callback_order_status is not None:
@@ -214,6 +228,8 @@ def list_sf_same_city_pushes_for_monitor(
     q = select(SfSameCityPush)
     if delivery_date is not None:
         q = q.where(SfSameCityPush.delivery_date == delivery_date)
+    if store_id is not None:
+        q = q.where(SfSameCityPush.store_id == int(store_id))
     if callback_order_status_unknown:
         q = q.where(SfSameCityPush.sf_callback_order_status.is_(None))
     elif sf_callback_order_status is not None:
@@ -222,11 +238,19 @@ def list_sf_same_city_pushes_for_monitor(
     off = max(0, (page - 1) * page_size)
     rows = list(db.scalars(q.offset(off).limit(page_size)).all())
 
-    agg_by_date: dict[date, dict[str, Any]] = {}
-    for d0 in {r.delivery_date for r in rows if r.delivery_date is not None}:
-        agg_by_date[d0] = aggs_for_delivery_date(db, d0)
+    agg_cache: dict[tuple[date, int], dict[str, Any]] = {}
 
-    out = [_sf_push_monitor_row_dict(db, r, agg_by_date) for r in rows]
+    def _aggs_for_row(r: SfSameCityPush) -> dict[str, Any]:
+        d0 = r.delivery_date
+        if d0 is None:
+            return {}
+        sid = int(r.store_id) if getattr(r, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
+        k = (d0, sid)
+        if k not in agg_cache:
+            agg_cache[k] = aggs_for_delivery_date(db, d0, store_id=sid)
+        return agg_cache[k]
+
+    out = [_sf_push_monitor_row_dict(db, r, _aggs_for_row(r)) for r in rows]
     return out, total
 
 
@@ -236,6 +260,7 @@ def list_sf_same_city_pushes_for_monitor_export(
     delivery_date: date | None,
     sf_callback_order_status: int | None = None,
     callback_order_status_unknown: bool = False,
+    store_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """与监控列表同源筛选，不分页；用于 Excel 导出。"""
     if delivery_date is None:
@@ -245,6 +270,8 @@ def list_sf_same_city_pushes_for_monitor_export(
         raise ValueError("不可同时指定具体回调状态与「暂无回调状态」筛选")
 
     q = select(SfSameCityPush).where(SfSameCityPush.delivery_date == delivery_date)
+    if store_id is not None:
+        q = q.where(SfSameCityPush.store_id == int(store_id))
     if callback_order_status_unknown:
         q = q.where(SfSameCityPush.sf_callback_order_status.is_(None))
     elif sf_callback_order_status is not None:
@@ -252,9 +279,17 @@ def list_sf_same_city_pushes_for_monitor_export(
     q = q.order_by(SfSameCityPush.id.desc())
     rows = list(db.scalars(q).all())
 
-    agg_by_date: dict[date, dict[str, Any]] = {}
-    if rows:
-        agg_by_date[delivery_date] = aggs_for_delivery_date(db, delivery_date)
+    agg_cache: dict[tuple[date, int], dict[str, Any]] = {}
 
-    return [_sf_push_monitor_row_dict(db, r, agg_by_date) for r in rows]
+    def _aggs_for_row(r: SfSameCityPush) -> dict[str, Any]:
+        d0 = r.delivery_date
+        if d0 is None:
+            return {}
+        sid = int(r.store_id) if getattr(r, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
+        k = (d0, sid)
+        if k not in agg_cache:
+            agg_cache[k] = aggs_for_delivery_date(db, d0, store_id=sid)
+        return agg_cache[k]
+
+    return [_sf_push_monitor_row_dict(db, r, _aggs_for_row(r)) for r in rows]
 

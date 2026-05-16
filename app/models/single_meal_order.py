@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -11,9 +11,16 @@ class SingleMealOrder(Base):
     """会员单次点餐：支付与履约状态独立；片区派单字段见 routing_area / courier_id。"""
 
     __tablename__ = "single_meal_orders"
+    __table_args__ = (UniqueConstraint("store_id", "out_trade_no", name="uk_smo_store_out_trade_no"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    out_trade_no: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", onupdate="CASCADE"), nullable=False, index=True
+    )
+    store_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("stores.id", onupdate="CASCADE"), nullable=False, index=True
+    )
+    out_trade_no: Mapped[str] = mapped_column(String(32), index=True)
     member_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("members.id", onupdate="CASCADE"), index=True)
     dish_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("menu_dish.id", onupdate="CASCADE"), index=True)
     member_address_id: Mapped[int | None] = mapped_column(

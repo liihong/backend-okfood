@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, String
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -8,16 +8,26 @@ from app.db.base import Base
 
 class Member(Base):
     __tablename__ = "members"
+    __table_args__ = (
+        UniqueConstraint("store_id", "phone", name="uk_members_store_phone"),
+        UniqueConstraint("store_id", "wx_mini_openid", name="uk_members_store_wx_mini_openid"),
+    )
 
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer(), "sqlite"),
         primary_key=True,
         autoincrement=True,
     )
-    phone: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", onupdate="CASCADE"), nullable=False, index=True
+    )
+    store_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("stores.id", onupdate="CASCADE"), nullable=False, index=True
+    )
+    phone: Mapped[str] = mapped_column(String(20), index=True)
     name: Mapped[str] = mapped_column(String(100))
     wechat_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    wx_mini_openid: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    wx_mini_openid: Mapped[str | None] = mapped_column(String(64), nullable=True)
     remarks: Mapped[str | None] = mapped_column(String(500), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     balance: Mapped[int] = mapped_column(Integer, default=0)

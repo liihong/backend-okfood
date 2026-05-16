@@ -230,6 +230,7 @@ def upsert_default_address_from_admin_map_pick(
     door_detail: str | None,
     lng: float,
     lat: float,
+    tenant_id: int | None = None,
 ) -> None:
     """
     管理端地图选点写入或更新默认配送地址（含 map_location_text / door_detail），按坐标自动划区；不 commit。
@@ -238,7 +239,7 @@ def upsert_default_address_from_admin_map_pick(
     map_raw = _opt_str(map_location_text)
     door_raw = (door_detail or "").strip()[:500]
     lng_f, lat_f = float(lng), float(lat)
-    r = assign_region_for_coords(db, lng_f, lat_f)
+    r = assign_region_for_coords(db, lng_f, lat_f, tenant_id=tenant_id)
     rid = int(r.id) if r else None
     row = get_default_address(db, member_id)
     old_pca_compact: str | None = None
@@ -345,12 +346,14 @@ def admin_set_default_address_plain_line(
     )
 
 
-def _geocode_bundle(db: Session, detail: str) -> tuple[float | None, float | None, int | None]:
+def _geocode_bundle(
+    db: Session, detail: str, *, tenant_id: int | None = None
+) -> tuple[float | None, float | None, int | None]:
     line = (detail or "").strip()
     coords = amap.geocode_address(line) if line else None
     if coords:
         lng_f, lat_f = float(coords[0]), float(coords[1])
-        r = assign_region_for_coords(db, lng_f, lat_f)
+        r = assign_region_for_coords(db, lng_f, lat_f, tenant_id=tenant_id)
         return lng_f, lat_f, (int(r.id) if r else None)
     return None, None, None
 
@@ -423,10 +426,10 @@ def _assign_default_if_none(db: Session, member_id: int) -> None:
 
 
 def check_coords_in_delivery_region(
-    db: Session, lng: float, lat: float
+    db: Session, lng: float, lat: float, *, tenant_id: int | None = None
 ) -> tuple[bool, int | None, str | None]:
     """判断坐标是否落在启用的配送片区内；命中时返回片区 id 与名称。"""
-    r = assign_region_for_coords(db, float(lng), float(lat))
+    r = assign_region_for_coords(db, float(lng), float(lat), tenant_id=tenant_id)
     if r is None:
         return False, None, None
     name = (r.name or "").strip() or UNASSIGNED_DELIVERY_AREA
@@ -447,6 +450,8 @@ def list_addresses(db: Session, member_id: int) -> list[MemberAddressOut]:
 
 def create_address(db: Session, member_id: int, body: MemberAddressCreateIn, *, ip_address: str | None = None) -> MemberAddressOut:
     _ensure_member_exists(db, member_id)
+    mem = db.get(Member, member_id)
+    tid = int(mem.tenant_id) if mem and mem.tenant_id is not None else None
     count = (
         db.scalar(select(func.count()).select_from(MemberAddress).where(MemberAddress.member_id == member_id)) or 0
     )
@@ -461,7 +466,7 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn, *, 
     if body.location is not None:
         lng_f, lat_f = float(body.location.lng), float(body.location.lat)
         lng, lat = lng_f, lat_f
-        r = assign_region_for_coords(db, lng_f, lat_f)
+        r = assign_region_for_coords(db, lng_f, lat_f, tenant_id=tid)
         rid = int(r.id) if r else None
         snap = amap.fetch_regeo_snapshot(lng_f, lat_f)
         pca_ln = snap.pca_prefix_line if snap else None
@@ -474,7 +479,7 @@ def create_address(db: Session, member_id: int, body: MemberAddressCreateIn, *, 
         )
     else:
         line = full_address_line(map_raw, door_eff)
-        lng, lat, rid = _geocode_bundle(db, line)
+        lng, lat, rid = _geocode_bundle(db, line, tenant_id=tid)
         map_eff = map_raw
 
     if effective_default:
@@ -530,6 +535,8 @@ def update_address(
     row = db.get(MemberAddress, address_id)
     if not row or row.member_id != member_id:
         raise HTTPException(status_code=404, detail="地址不存在")
+    mem = db.get(Member, member_id)
+    tid = int(mem.tenant_id) if mem and mem.tenant_id is not None else None
 
     # 采集变更前快照，供操作日志 before/after 对比
     prev = {
@@ -567,11 +574,11 @@ def update_address(
         lng_f = float(location_patch["lng"])
         lat_f = float(location_patch["lat"])
         row.lng, row.lat = lng_f, lat_f
-        r = assign_region_for_coords(db, lng_f, lat_f)
+        r = assign_region_for_coords(db, lng_f, lat_f, tenant_id=tid)
         row.delivery_region_id = int(r.id) if r else None
     elif "map_location_text" in patch or "door_detail" in patch:
         line = full_address_line(row.map_location_text, row.door_detail)
-        lng, lat, rid = _geocode_bundle(db, line)
+        lng, lat, rid = _geocode_bundle(db, line, tenant_id=tid)
         row.lng, row.lat, row.delivery_region_id = lng, lat, rid
 
     lnglat = _row_coords(row)

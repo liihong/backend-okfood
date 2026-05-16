@@ -19,6 +19,7 @@ const WeeklyMenuView = () => import('../views/WeeklyMenuView.vue')
 const CardOrdersView = () => import('../views/CardOrdersView.vue')
 const StoreConfigView = () => import('../views/StoreConfigView.vue')
 const SfOrdersMonitorView = () => import('../views/SfOrdersMonitorView.vue')
+const TenantsView = () => import('../views/TenantsView.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -38,7 +39,9 @@ const router = createRouter({
           path: '',
           redirect: () => {
             hydrateTokenFromStorage()
-            return { name: adminKind.value === 'delivery' ? 'regions' : 'dashboard' }
+            if (adminKind.value === 'delivery') return { name: 'regions' }
+            if (adminKind.value === 'system') return { name: 'system-tenants' }
+            return { name: 'dashboard' }
           },
         },
         {
@@ -97,6 +100,12 @@ const router = createRouter({
           component: StoreConfigView,
           meta: { title: '门店配置', ownerAdminOnly: true },
         },
+        {
+          path: 'system/tenants',
+          name: 'system-tenants',
+          component: TenantsView,
+          meta: { title: '租户管理', systemAdminOnly: true },
+        },
       ],
     },
   ],
@@ -111,7 +120,16 @@ router.beforeEach((to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (to.name === 'login' && hasToken) {
-    return { name: adminKind.value === 'delivery' ? 'regions' : 'dashboard' }
+    if (adminKind.value === 'delivery') return { name: 'regions' }
+    if (adminKind.value === 'system') return { name: 'system-tenants' }
+    return { name: 'dashboard' }
+  }
+  const isSystemAdminRoute = to.matched.some((record) => record.meta.systemAdminOnly)
+  if (hasToken && isSystemAdminRoute && adminKind.value !== 'system') {
+    return { name: 'dashboard', replace: true }
+  }
+  if (hasToken && adminKind.value === 'system' && !isSystemAdminRoute) {
+    return { name: 'system-tenants', replace: true }
   }
   if (hasToken && to.meta.ownerAdminOnly) {
     if (adminKind.value === 'delivery') {

@@ -22,4 +22,6 @@ class AppSettings(Base):
     # 小程序自助开卡微信支付标价（元）
     member_card_week_price_yuan: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("168.00"))
     member_card_month_price_yuan: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("669.00"))
+    member_card_week_list_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    member_card_month_list_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

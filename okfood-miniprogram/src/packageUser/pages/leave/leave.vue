@@ -334,10 +334,13 @@ function parseDeadlineToSeconds(str) {
   return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] ?? 0)
 }
 
-/** 与后端 is_leave_deadline_passed 一致：当前上海时刻严格晚于截止时刻 */
-const isLeavePastDeadline = computed(() => {
+/** 与后端 is_leave_deadline_passed 一致：当前上海时刻严格晚于截止时刻（仅用于展示；提交前须再调一次） */
+function isLeavePastDeadlineNow() {
   return shanghaiSecondsSinceMidnight() > parseDeadlineToSeconds(leaveDeadlineTime.value)
-})
+}
+
+/** 展示用：因未用定时器，长时间停留可能不会自动切换为「已截止」，以提交时校验与后端为准 */
+const isLeavePastDeadline = computed(() => isLeavePastDeadlineNow())
 
 function formatDeadlineHint(t) {
   const s = String(t || '21:00:00')
@@ -513,6 +516,13 @@ onShow(() => {
 async function toggleTomorrow() {
   if (leaveActionBusy.value) return
   const wasTomorrow = isTomorrowLeave.value
+  if (!wasTomorrow && isLeavePastDeadlineNow()) {
+    uni.showToast({
+      title: `已超过当日请假时间（${formatDeadlineHint(leaveDeadlineTime.value)} 前可提交）`,
+      icon: 'none',
+    })
+    return
+  }
   leaveActionBusy.value = true
   try {
     if (wasTomorrow) {
@@ -542,6 +552,13 @@ async function toggleTomorrow() {
 
 async function submitRange() {
   if (leaveActionBusy.value) return
+  if (isLeavePastDeadlineNow()) {
+    uni.showToast({
+      title: `已超过当日请假时间（${formatDeadlineHint(leaveDeadlineTime.value)} 前可提交）`,
+      icon: 'none',
+    })
+    return
+  }
   if (!rangeStart.value || !rangeEnd.value) {
     uni.showToast({ title: '请选择起止日期', icon: 'none' })
     return

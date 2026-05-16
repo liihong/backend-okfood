@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.timeutil import beijing_now_naive
 from app.db.base import Base
 
 
@@ -32,4 +33,5 @@ class MemberOperationLog(Base):
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 操作者标识：会员操作填 "member:<id>"；管理端代操作填 "admin:<username>"
     operator: Mapped[str] = mapped_column(String(100), default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    # 北京时间（naive），与运营查看库表、对账一致；非 UTC。
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, index=True)

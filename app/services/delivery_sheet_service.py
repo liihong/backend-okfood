@@ -12,10 +12,12 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.constants import UNASSIGNED_DELIVERY_AREA
+from app.core.config import get_settings
 from app.core.delivery_calendar import is_subscription_delivery_day
 from app.core.timeutil import today_shanghai
 from app.models.delivery_log import DeliveryLog
@@ -23,6 +25,7 @@ from app.models.delivery_region import DeliveryRegion
 from app.models.enums import DeliveryStatus
 from app.models.member import Member
 from app.models.member_address import MemberAddress
+from app.models.store import Store
 from app.schemas.admin import DeliverySheetGroupOut, DeliverySheetMemberOut, DeliverySheetOut, DeliverySheetStopOut
 from app.services.courier_service import (
     eligible_members_for_delivery,
@@ -67,11 +70,11 @@ def _member_line_remarks(m: Member, addr: MemberAddress | None) -> str | None:
     return "；".join(parts) if parts else None
 
 
-def _active_regions_meta(db: Session) -> tuple[list[str], set[int]]:
-    """启用片区：一次查询同时得到排序后的名称列表与 id 集合（减少高延迟库上的往返）。"""
+def _active_regions_meta(db: Session, *, tenant_id: int) -> tuple[list[str], set[int]]:
+    """启用片区：限定租户，与会员/门店维度一致。"""
     rows = db.execute(
         select(DeliveryRegion.id, DeliveryRegion.name)
-        .where(DeliveryRegion.is_active.is_(True))
+        .where(DeliveryRegion.is_active.is_(True), DeliveryRegion.tenant_id == int(tenant_id))
         .order_by(DeliveryRegion.priority.asc(), DeliveryRegion.id.asc())
     ).all()
     names: list[str] = []
@@ -131,11 +134,13 @@ def _member_ids_delivered_on_date(db: Session, delivery_date: date, member_ids: 
     return {int(x) for x in rows}
 
 
-def total_meal_units_for_delivery_sheet(db: Session, *, delivery_date: date) -> int:
+def total_meal_units_for_delivery_sheet(
+    db: Session, *, delivery_date: date, store_id: int | None = None
+) -> int:
     """与 ``build_delivery_sheet`` 各分组 ``meal_total`` 之和一致（到家+自提，含已送后不再应送仍并入大表者）。"""
     if not is_subscription_delivery_day(delivery_date):
         return 0
-    sheet = build_delivery_sheet(db, delivery_date=delivery_date)
+    sheet = build_delivery_sheet(db, delivery_date=delivery_date, store_id=store_id)
     return int(sum(g.meal_total for g in sheet.groups))
 
 
@@ -145,15 +150,27 @@ def build_delivery_sheet(
     delivery_date: date | None = None,
     area: str | None = None,
     phone: str | None = None,
+    store_id: int | None = None,
 ) -> DeliverySheetOut:
+    cfg = get_settings()
+    sid = int(store_id) if store_id is not None else int(cfg.DEFAULT_STORE_ID)
+    st = db.get(Store, sid)
+    if not st or not st.is_active:
+        raise HTTPException(status_code=404, detail="门店不存在或已停用")
+    tid = int(st.tenant_id)
     d = delivery_date or today_shanghai()
     sub_ok = is_subscription_delivery_day(d)
-    active_region_list, known_ids = _active_regions_meta(db)
+    active_region_list, known_ids = _active_regions_meta(db, tenant_id=tid)
     known_names = set(active_region_list)
 
     region_filter_id: int | None = None
     if area and (a := area.strip()):
-        rid = db.scalar(select(DeliveryRegion.id).where(DeliveryRegion.name == a))
+        rid = db.scalar(
+            select(DeliveryRegion.id).where(
+                DeliveryRegion.name == a,
+                DeliveryRegion.tenant_id == tid,
+            )
+        )
         if rid is None:
             return DeliverySheetOut(
                 delivery_date=d.isoformat(),
@@ -167,16 +184,17 @@ def build_delivery_sheet(
         region_filter_id = int(rid)
 
     members, default_by_id = eligible_members_for_delivery(
-        db, delivery_date=d, delivery_region_id=region_filter_id
+        db, delivery_date=d, delivery_region_id=region_filter_id, store_id=sid
     )
     # 与到家列表一并拉取自提会员，便于单次查询 delivery_logs（片区筛选不改变自提分组是否出现）
-    pu_members, pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d)
+    pu_members, pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d, store_id=sid)
     ex_h, ex_dh, ex_pu, ex_pud = extra_delivered_ineligible_subscribers(
         db,
         delivery_date=d,
         already_home={int(m.id) for m in members},
         already_pickup={int(m.id) for m in pu_members},
         delivery_region_id=region_filter_id,
+        store_id=sid,
     )
     for m in ex_h:
         members.append(m)

@@ -1,6 +1,9 @@
 from app.models.admin_dashboard_biz_day_snapshot import AdminDashboardBizDaySnapshot
 from app.models.admin_user import AdminUser
 from app.models.app_settings import AppSettings
+from app.models.tenant import Tenant
+from app.models.tenant_integration_settings import TenantIntegrationSettings
+from app.models.store import Store
 from app.models.balance_log import BalanceLog
 from app.models.courier import Courier
 from app.models.menu_dish import MenuDish
@@ -21,6 +24,9 @@ __all__ = [
     "AdminDashboardBizDaySnapshot",
     "AdminUser",
     "AppSettings",
+    "Tenant",
+    "TenantIntegrationSettings",
+    "Store",
     "BalanceLog",
     "Courier",
     "MenuDish",

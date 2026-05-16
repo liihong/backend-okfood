@@ -86,11 +86,24 @@ class WechatPayNotifyParsed:
     total_fee: int
 
 
-def parse_wechat_pay_notify(data: dict[str, str]) -> tuple[bool, str, WechatPayNotifyParsed | None]:
+def parse_wechat_pay_notify(
+    data: dict[str, str],
+    *,
+    db: Any | None = None,
+) -> tuple[bool, str, WechatPayNotifyParsed | None]:
     """校验微信异步通知签名与 return/result_code，解析 out_trade_no、transaction_id、total_fee（分）。"""
     if (data.get("return_code") or "").upper() != "SUCCESS":
         return False, (data.get("return_msg") or "return_fail")[:200], None
-    if not verify_response_sign(data):
+    api_key: str | None = None
+    if db is not None:
+        from app.services.tenant_integration_service import (
+            get_merged_pay_config,
+            resolve_tenant_id_for_wechat_out_trade_no,
+        )
+
+        tid = resolve_tenant_id_for_wechat_out_trade_no(db, (data.get("out_trade_no") or "").strip())
+        api_key = get_merged_pay_config(db, tid).wechat_pay_api_key
+    if not verify_response_sign(data, api_key=api_key):
         logger.error("微信回调签名校验失败: %s", {k: data.get(k) for k in ("out_trade_no", "result_code")})
         return False, "sign", None
     if (data.get("result_code") or "").upper() != "SUCCESS":
@@ -108,15 +121,16 @@ def parse_wechat_pay_notify(data: dict[str, str]) -> tuple[bool, str, WechatPayN
     return True, "", WechatPayNotifyParsed(out_trade_no=out_no, transaction_id=tx_id, total_fee=total_fee)
 
 
-def verify_response_sign(data: dict[str, str]) -> bool:
+def verify_response_sign(data: dict[str, str], api_key: str | None = None) -> bool:
     sign = (data.get("sign") or "").strip()
     if not sign:
         return False
     st = (data.get("sign_type") or "MD5").strip().upper()
+    key = (api_key if api_key is not None else _api_key()).strip()
     if st == "HMAC-SHA256":
-        expect = sign_params_hmac_sha256(data)
+        expect = sign_params_hmac_sha256(data, api_key=key)
     else:
-        expect = sign_params_md5(data)
+        expect = sign_params_md5(data, api_key=key)
     return secrets.compare_digest(sign.upper(), expect.upper())
 
 
@@ -160,14 +174,26 @@ def unified_order_jsapi(
     total_fee_fen: int,
     openid: str,
     spbill_create_ip: str,
+    pay: Any | None = None,
 ) -> str:
-    """统一下单 JSAPI，返回 prepay_id。失败抛 WeChatPayV2Error。"""
-    cfg = wechat_pay_misconfiguration_detail()
-    if cfg:
-        raise WeChatPayV2Error(503, cfg)
-    appid = (settings.WX_MINI_APPID or "").strip()
-    mch_id = (settings.WECHAT_PAY_MCH_ID or "").strip()
-    notify_url = (settings.WECHAT_PAY_NOTIFY_URL or "").strip()
+    """统一下单 JSAPI，返回 prepay_id。``pay`` 为空时使用全局 .env（兼容旧行为）。"""
+    from app.services.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
+
+    cfg = pay
+    if cfg is None:
+        cfg = MergedPayConfig(
+            wx_mini_appid=(settings.WX_MINI_APPID or "").strip(),
+            wechat_pay_mch_id=(settings.WECHAT_PAY_MCH_ID or "").strip(),
+            wechat_pay_api_key=(settings.WECHAT_PAY_API_KEY or "").strip(),
+            wechat_pay_notify_url=(settings.WECHAT_PAY_NOTIFY_URL or "").strip(),
+        )
+    perr = wechat_pay_misconfiguration_detail_merged(cfg)
+    if perr:
+        raise WeChatPayV2Error(503, perr)
+    appid = cfg.wx_mini_appid
+    mch_id = cfg.wechat_pay_mch_id
+    notify_url = cfg.wechat_pay_notify_url
+    api_key = cfg.wechat_pay_api_key
 
     params: dict[str, Any] = {
         "appid": appid,
@@ -181,7 +207,7 @@ def unified_order_jsapi(
         "trade_type": "JSAPI",
         "openid": openid.strip(),
     }
-    params["sign"] = sign_params_md5(params)
+    params["sign"] = sign_params_md5(params, api_key=api_key)
 
     xml_body = dict_to_xml(params)
     try:
@@ -202,7 +228,7 @@ def unified_order_jsapi(
         msg = data.get("return_msg") or "通信失败"
         logger.warning("微信统一下单 return_code 失败: %s", data)
         raise WeChatPayV2Error(502, f"微信接口：{msg}")
-    if not verify_response_sign(data):
+    if not verify_response_sign(data, api_key=api_key):
         logger.error("微信统一下单响应签名校验失败: %s", data)
         raise WeChatPayV2Error(502, "微信响应签名校验失败")
     if (data.get("result_code") or "").upper() != "SUCCESS":
@@ -222,27 +248,38 @@ def unified_order_jsapi(
     return prepay_id
 
 
-def query_order_by_out_trade_no(out_trade_no: str) -> dict[str, str]:
+def query_order_by_out_trade_no(out_trade_no: str, *, pay: Any | None = None) -> dict[str, str]:
     """
     调用微信支付 v2「查询订单」，成功返回与通知类似的字段（需对返回验签）。
 
     用于异步通知未达服务端时，由小程序主动拉单完成入账（与 /pay/wechat/notify 等效验签后字段）。
     """
-    cfg = wechat_pay_misconfiguration_detail()
-    if cfg:
-        raise WeChatPayV2Error(503, cfg)
+    from app.services.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
+
+    cfg = pay
+    if cfg is None:
+        cfg = MergedPayConfig(
+            wx_mini_appid=(settings.WX_MINI_APPID or "").strip(),
+            wechat_pay_mch_id=(settings.WECHAT_PAY_MCH_ID or "").strip(),
+            wechat_pay_api_key=(settings.WECHAT_PAY_API_KEY or "").strip(),
+            wechat_pay_notify_url=(settings.WECHAT_PAY_NOTIFY_URL or "").strip(),
+        )
+    perr = wechat_pay_misconfiguration_detail_merged(cfg)
+    if perr:
+        raise WeChatPayV2Error(503, perr)
     otn = (out_trade_no or "").strip()[:32]
     if not otn:
         raise WeChatPayV2Error(400, "缺少商户单号")
-    appid = (settings.WX_MINI_APPID or "").strip()
-    mch_id = (settings.WECHAT_PAY_MCH_ID or "").strip()
+    appid = cfg.wx_mini_appid
+    mch_id = cfg.wechat_pay_mch_id
+    api_key = cfg.wechat_pay_api_key
     params: dict[str, Any] = {
         "appid": appid,
         "mch_id": mch_id,
         "out_trade_no": otn,
         "nonce_str": random_nonce_str(),
     }
-    params["sign"] = sign_params_md5(params)
+    params["sign"] = sign_params_md5(params, api_key=api_key)
     xml_body = dict_to_xml(params)
     try:
         resp = httpx.post(
@@ -259,21 +296,27 @@ def query_order_by_out_trade_no(out_trade_no: str) -> dict[str, str]:
     if (data.get("return_code") or "").upper() != "SUCCESS":
         msg = (data.get("return_msg") or "通信失败")[:200]
         raise WeChatPayV2Error(502, f"微信查询订单：{msg}")
-    if not verify_response_sign(data):
+    if not verify_response_sign(data, api_key=api_key):
         logger.error("微信 orderquery 响应签名校验失败: %s", {k: data.get(k) for k in data.keys() if k != "sign"})
         raise WeChatPayV2Error(502, "微信查询订单响应签名校验失败")
     return data
 
 
-def build_miniprogram_pay_params(prepay_id: str) -> dict[str, str]:
+def build_miniprogram_pay_params(
+    prepay_id: str,
+    *,
+    appid: str | None = None,
+    api_key: str | None = None,
+) -> dict[str, str]:
     """生成小程序 wx.requestPayment / uni.requestPayment 所需字段。"""
-    appid = (settings.WX_MINI_APPID or "").strip()
+    aid = ((appid if appid is not None else settings.WX_MINI_APPID) or "").strip()
+    key = api_key if api_key is not None else _api_key()
     time_stamp = str(int(time.time()))
     nonce_str = random_nonce_str()
     pkg = f"prepay_id={prepay_id}"
     sign_type = "MD5"
     pay_params: dict[str, Any] = {
-        "appId": appid,
+        "appId": aid,
         "timeStamp": time_stamp,
         "nonceStr": nonce_str,
         "package": pkg,
@@ -281,13 +324,13 @@ def build_miniprogram_pay_params(prepay_id: str) -> dict[str, str]:
     }
     # 小程序支付签名：字段名区分大小写 appId、timeStamp、package、signType、nonceStr
     sign_src = {
-        "appId": appid,
+        "appId": aid,
         "nonceStr": nonce_str,
         "package": pkg,
         "signType": sign_type,
         "timeStamp": time_stamp,
     }
-    pay_sign = sign_params_md5(sign_src)
+    pay_sign = sign_params_md5(sign_src, api_key=key)
     pay_params["paySign"] = pay_sign
     return {k: str(v) for k, v in pay_params.items()}
 

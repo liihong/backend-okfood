@@ -116,6 +116,7 @@ class SettingsIn(BaseModel):
 class StoreConfigOut(BaseModel):
     """门店基础信息：用于管理端展示与配送地图锚点。"""
 
+    store_id: int = Field(1, ge=1, description="门店主键 stores.id")
     store_name: str | None = Field(None, max_length=128)
     store_logo_url: str | None = Field(None, max_length=512)
     store_lng: float | None = Field(None, description="GCJ-02 经度")
@@ -147,6 +148,20 @@ class StoreConfigOut(BaseModel):
         max_digits=12,
         decimal_places=2,
         description="小程序月卡微信支付标价（元）",
+    )
+    member_card_week_list_price_yuan: Decimal | None = Field(
+        None,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="周卡划线原价（元）；高于微信支付标价时小程序展示活动价样式",
+    )
+    member_card_month_list_price_yuan: Decimal | None = Field(
+        None,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="月卡划线原价（元）；高于微信支付标价时小程序展示活动价样式",
     )
 
 
@@ -180,6 +195,20 @@ class StoreConfigUpdateIn(BaseModel):
         ge=0,
         max_digits=12,
         decimal_places=2,
+    )
+    member_card_week_list_price_yuan: Decimal | None = Field(
+        None,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="留空或不传表示清除划线价",
+    )
+    member_card_month_list_price_yuan: Decimal | None = Field(
+        None,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="留空或不传表示清除划线价",
     )
 
     @model_validator(mode="after")
@@ -395,6 +424,28 @@ class FinanceReceivedSummaryOut(BaseModel):
     cumulative: FinanceReceivedWindowOut = Field(..., description="历史全部已标记已收")
     this_month: FinanceReceivedWindowOut = Field(..., description="本月内（按 updated_at 落入上海月界）")
     today: FinanceReceivedWindowOut = Field(..., description="今日内（按 updated_at 落入上海日界）")
+
+
+class FinanceTodayPaidCardOrderRowOut(BaseModel):
+    """当日已缴开卡工单明细一行（归属日与汇总同为：工单 updated_at 换算后是否落入上海自然日）。"""
+
+    order_id: int = Field(..., ge=1, description="开卡工单 id")
+    time_hm: str = Field(..., description="上海时间 HH:MM（由 updated_at 换算）")
+    card_kind: str = Field(..., description="周卡 / 月卡 / 次卡")
+    amount_yuan: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=14,
+        decimal_places=2,
+        description="实收（元）；工单未填金额时按 0",
+    )
+
+
+class FinanceTodayPaidCardOrdersOut(BaseModel):
+    """今日已缴开卡工单明细（微信、线下、后台标记已缴等凡 pay_status=已缴 且落入今日者）。"""
+
+    shanghai_today: date = Field(..., description="列表对应的上海日历日")
+    items: list[FinanceTodayPaidCardOrderRowOut] = Field(default_factory=list)
 
 
 class DeliverySheetMemberOut(BaseModel):
@@ -684,6 +735,7 @@ class SfSameCityPushMonitorRow(BaseModel):
     """顺丰推单列表：订单监控页，与同城创单落地库字段一致。"""
 
     id: int
+    store_id: int = Field(default=1, description="门店 id，与推单行一致")
     delivery_date: str
     stop_id: str
     shop_order_id: str
@@ -732,3 +784,113 @@ class CardOrderOut(BaseModel):
     created_by: str
     created_at: str
     updated_at: str
+
+
+TenantManagedAdminRole = Literal["full", "delivery", "support"]
+
+
+class PlatformTenantOut(BaseModel):
+    id: int
+    name: str
+    is_active: bool
+    created_at: str
+    store_count: int = 0
+    admin_count: int = 0
+
+
+class PlatformTenantCreateIn(BaseModel):
+    name: str = Field(..., max_length=128)
+    is_active: bool = True
+
+
+class PlatformTenantPatchIn(BaseModel):
+    name: str | None = Field(None, max_length=128)
+    is_active: bool | None = None
+
+
+class PlatformTenantAdminOut(BaseModel):
+    id: int
+    tenant_id: int
+    username: str
+    role: str
+    is_active: bool
+    created_at: str
+
+
+class PlatformTenantAdminCreateIn(BaseModel):
+    username: str = Field(..., max_length=64)
+    password: str = Field(..., min_length=6, max_length=128)
+    role: TenantManagedAdminRole = "full"
+
+
+class PlatformTenantAdminPatchIn(BaseModel):
+    password: str | None = Field(None, min_length=6, max_length=128)
+    role: TenantManagedAdminRole | None = None
+    is_active: bool | None = None
+
+
+class PlatformSystemOverviewOut(BaseModel):
+    """全库规模统计（平台管理员）。"""
+
+    tenants_total: int
+    tenants_active: int
+    stores_total: int
+    stores_active: int
+    admin_users_active: int
+
+
+class PlatformStoreOut(BaseModel):
+    id: int
+    tenant_id: int
+    name: str
+    is_active: bool
+    leave_deadline_time: str = Field("", description="HH:MM:SS")
+    created_at: str
+
+
+class PlatformStoreCreateIn(BaseModel):
+    name: str = Field(..., max_length=128)
+    leave_deadline_time: str = Field(
+        "21:00:00",
+        max_length=16,
+        description="当日请假截止时间，如 21:00 或 21:00:00",
+    )
+    is_active: bool = True
+
+
+class TenantIntegrationSettingsOut(BaseModel):
+    """租户对接配置（密钥仅以是否已设置展示，不回显明文）。"""
+
+    tenant_id: int
+    wx_mini_appid: str | None = None
+    wx_mini_secret_set: bool = False
+    wechat_pay_mch_id: str | None = None
+    wechat_pay_api_key_set: bool = False
+    wechat_pay_notify_url: str | None = None
+    wx_subscribe_delivery_tmpl_id: str | None = None
+    sf_open_dev_id: int | None = None
+    sf_open_secret_set: bool = False
+    sf_open_shop_id: str | None = None
+    sf_open_shop_type: int | None = None
+    sf_pickup_phone: str | None = None
+    sf_pickup_address: str | None = None
+    sf_city_name: str | None = None
+    extra_json: str | None = Field(None, description="扩展 JSON，预留其它对接字段")
+    updated_at: str = ""
+
+
+class TenantIntegrationSettingsPatchIn(BaseModel):
+    wx_mini_appid: str | None = Field(None, max_length=64)
+    wx_mini_secret: str | None = Field(None, max_length=128, description="传空字符串表示清除租户覆盖")
+    wechat_pay_mch_id: str | None = Field(None, max_length=32)
+    wechat_pay_api_key: str | None = Field(None, max_length=128)
+    wechat_pay_notify_url: str | None = Field(None, max_length=512)
+    wx_subscribe_delivery_tmpl_id: str | None = Field(None, max_length=128)
+    sf_open_dev_id: int | None = Field(None, ge=0)
+    sf_open_secret: str | None = Field(None, max_length=255)
+    sf_open_shop_id: str | None = Field(None, max_length=64)
+    sf_open_shop_type: int | None = Field(None, ge=1, le=2)
+    sf_pickup_phone: str | None = Field(None, max_length=32)
+    sf_pickup_address: str | None = Field(None, max_length=512)
+    sf_city_name: str | None = Field(None, max_length=64)
+    extra_json: str | None = Field(None, description="JSON 字符串；空字符串清除")

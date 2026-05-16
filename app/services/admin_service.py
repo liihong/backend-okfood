@@ -3,7 +3,7 @@ from decimal import Decimal
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import and_, case, exists, func, literal, or_, select, true
+from sqlalchemy import and_, case, delete, exists, func, literal, or_, select, true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
@@ -19,6 +19,7 @@ from app.constants import UNASSIGNED_DELIVERY_AREA
 from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.models.member_card_order import MemberCardOrder
+from app.models.member_operation_log import MemberOperationLog
 from app.models.menu_dish import MenuDish
 from app.models.menu_schedule import MenuSchedule
 from app.models.product_category import ProductCategory
@@ -93,8 +94,11 @@ def _apply_member_list_filters(
     unassigned_region: bool = False,
     plan_type: str | None = None,
     on_leave_only: bool = False,
+    store_id: int | None = None,
 ):
     stmt = stmt.where(Member.deleted_at.is_(None))
+    if store_id is not None:
+        stmt = stmt.where(Member.store_id == int(store_id))
     if q_phone:
         q = q_phone.strip()
         if q:
@@ -188,15 +192,16 @@ def admin_login_user(db: Session, username: str, password: str) -> AdminUser:
     return u
 
 
-def member_list_overview_counts(db: Session) -> MemberListStatsOut:
+def member_list_overview_counts(db: Session, *, store_id: int | None = None) -> MemberListStatsOut:
     """全库会员数：与列表 `validity=active|expired` 口径一致（仅按 balance，不受搜索/片区筛选影响）。"""
-    row = db.execute(
-        select(
-            func.count().label("total"),
-            func.coalesce(func.sum(case((Member.balance > 0, 1), else_=0)), 0).label("active"),
-            func.coalesce(func.sum(case((Member.balance == 0, 1), else_=0)), 0).label("expired"),
-        ).select_from(Member).where(Member.deleted_at.is_(None))
-    ).one()
+    base = select(
+        func.count().label("total"),
+        func.coalesce(func.sum(case((Member.balance > 0, 1), else_=0)), 0).label("active"),
+        func.coalesce(func.sum(case((Member.balance == 0, 1), else_=0)), 0).label("expired"),
+    ).select_from(Member).where(Member.deleted_at.is_(None))
+    if store_id is not None:
+        base = base.where(Member.store_id == int(store_id))
+    row = db.execute(base).one()
     return MemberListStatsOut(
         total=int(row.total or 0),
         active=int(row.active or 0),
@@ -217,6 +222,7 @@ def list_members_paged(
     unassigned_region: bool = False,
     plan_type: str | None = None,
     on_leave_only: bool = False,
+    store_id: int | None = None,
 ) -> tuple[list[MemberAdminOut], int]:
     # 每人至多一条「默认地址」：避免多条 is_default=1 时 JOIN 放大行数、拖慢 ORDER BY + LIMIT
     default_addr_pick = default_address_pick_subquery()
@@ -232,6 +238,7 @@ def list_members_paged(
         unassigned_region=unassigned_region,
         plan_type=plan_type,
         on_leave_only=on_leave_only,
+        store_id=store_id,
     ).subquery("cnt")
     page_sq = _apply_member_list_filters(
         select(Member.id.label("pid")).select_from(Member),
@@ -243,6 +250,7 @@ def list_members_paged(
         unassigned_region=unassigned_region,
         plan_type=plan_type,
         on_leave_only=on_leave_only,
+        store_id=store_id,
     )
     page_sq = (
         page_sq.order_by(Member.created_at.desc())
@@ -322,13 +330,21 @@ def apply_member_recharge_delta(
     *,
     operator: str,
     log_detail: str | None = None,
+    member_id: int | None = None,
 ) -> Member:
     """调整会员剩余次数并写入 balance_logs；由调用方 commit。"""
     if body.amount == 0:
         raise HTTPException(status_code=400, detail="调整幅度不能为 0")
-    m = db.execute(select(Member).where(Member.phone == body.phone, Member.deleted_at.is_(None))).scalar_one_or_none()
-    if not m:
-        raise HTTPException(status_code=404, detail="用户不存在")
+    if member_id is not None:
+        m = db.get(Member, int(member_id))
+        if not m or m.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        if (m.phone or "").strip() != (body.phone or "").strip():
+            raise HTTPException(status_code=400, detail="手机号与会员档案不一致")
+    else:
+        m = db.execute(select(Member).where(Member.phone == body.phone, Member.deleted_at.is_(None))).scalar_one_or_none()
+        if not m:
+            raise HTTPException(status_code=404, detail="用户不存在")
     m.balance += body.amount
     if m.balance < 0:
         raise HTTPException(status_code=400, detail="次数不足，无法扣减到负数")
@@ -374,6 +390,7 @@ def admin_delete_member(db: Session, member_id: int) -> dict[str, str]:
     )
     can_hard = n_bal == 0 and n_del == 0 and n_smo == 0 and n_card == 0
     if can_hard:
+        db.execute(delete(MemberOperationLog).where(MemberOperationLog.member_id == mid))
         db.delete(m)
         db.commit()
         return {"mode": "hard", "msg": "已物理删除（无余额流水、配送记录、单次点餐与开卡工单）"}
@@ -387,12 +404,17 @@ def admin_delete_member(db: Session, member_id: int) -> dict[str, str]:
     }
 
 
-def upsert_dish(db: Session, body: DishUpsertIn) -> DishAdminOut:
-    if body.category_id is not None and db.get(ProductCategory, body.category_id) is None:
-        raise HTTPException(status_code=400, detail="分类不存在")
+def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminOut:
+    sid = int(store_id)
+    if body.category_id is not None:
+        cat = db.get(ProductCategory, body.category_id)
+        if cat is None or int(cat.store_id) != sid:
+            raise HTTPException(status_code=400, detail="分类不存在")
     if body.id is not None:
         row = db.get(MenuDish, body.id)
         if not row:
+            raise HTTPException(status_code=404, detail="菜品不存在")
+        if int(row.store_id) != sid:
             raise HTTPException(status_code=404, detail="菜品不存在")
         row.name = body.name
         row.description = body.description
@@ -404,6 +426,7 @@ def upsert_dish(db: Session, body: DishUpsertIn) -> DishAdminOut:
         row.internal_view_sop = body.internal_view_sop
     else:
         row = MenuDish(
+            store_id=sid,
             name=body.name,
             description=body.description,
             image_url=body.image_url,
@@ -430,8 +453,9 @@ def upsert_dish(db: Session, body: DishUpsertIn) -> DishAdminOut:
     )
 
 
-def list_dishes_admin(db: Session, *, enabled_only: bool, q: str | None = None) -> list[DishAdminOut]:
-    stmt = select(MenuDish).order_by(MenuDish.id.desc())
+def list_dishes_admin(db: Session, *, enabled_only: bool, q: str | None = None, store_id: int) -> list[DishAdminOut]:
+    sid = int(store_id)
+    stmt = select(MenuDish).where(MenuDish.store_id == sid).order_by(MenuDish.id.desc())
     if enabled_only:
         stmt = stmt.where(MenuDish.is_enabled.is_(True))
     if q and q.strip():
@@ -454,9 +478,10 @@ def list_dishes_admin(db: Session, *, enabled_only: bool, q: str | None = None) 
     ]
 
 
-def delete_dish(db: Session, dish_id: int) -> None:
+def delete_dish(db: Session, dish_id: int, *, store_id: int) -> None:
+    sid = int(store_id)
     row = db.get(MenuDish, dish_id)
-    if not row:
+    if not row or int(row.store_id) != sid:
         raise HTTPException(status_code=404, detail="菜品不存在")
     try:
         db.delete(row)
@@ -469,16 +494,19 @@ def delete_dish(db: Session, dish_id: int) -> None:
         )
 
 
-def assign_menu_schedule(db: Session, body: MenuScheduleAssignIn) -> None:
+def assign_menu_schedule(db: Session, body: MenuScheduleAssignIn, *, store_id: int) -> None:
+    sid = int(store_id)
     dish = db.get(MenuDish, body.dish_id)
     if not dish:
         raise HTTPException(status_code=404, detail="菜品不存在")
-    existing = db.scalar(select(MenuSchedule).where(MenuSchedule.menu_date == body.date))
+    if int(dish.store_id) != sid:
+        raise HTTPException(status_code=404, detail="菜品不存在")
+    existing = db.scalar(select(MenuSchedule).where(MenuSchedule.menu_date == body.date, MenuSchedule.store_id == sid))
     try:
         if existing:
             existing.dish_id = body.dish_id
         else:
-            db.add(MenuSchedule(menu_date=body.date, dish_id=body.dish_id))
+            db.add(MenuSchedule(store_id=sid, menu_date=body.date, dish_id=body.dish_id))
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -488,8 +516,11 @@ def assign_menu_schedule(db: Session, body: MenuScheduleAssignIn) -> None:
         )
 
 
-def list_categories_admin(db: Session) -> list[CategoryAdminOut]:
-    rows = db.scalars(select(ProductCategory).order_by(ProductCategory.sort_order, ProductCategory.id)).all()
+def list_categories_admin(db: Session, *, store_id: int) -> list[CategoryAdminOut]:
+    sid = int(store_id)
+    rows = db.scalars(
+        select(ProductCategory).where(ProductCategory.store_id == sid).order_by(ProductCategory.sort_order, ProductCategory.id)
+    ).all()
     return [
         CategoryAdminOut(
             id=r.id,
@@ -502,8 +533,11 @@ def list_categories_admin(db: Session) -> list[CategoryAdminOut]:
     ]
 
 
-def create_category_admin(db: Session, body: CategoryCreateIn) -> CategoryAdminOut:
-    row = ProductCategory(code=body.code, name=body.name, sort_order=body.sort_order, is_active=True)
+def create_category_admin(db: Session, body: CategoryCreateIn, *, store_id: int) -> CategoryAdminOut:
+    sid = int(store_id)
+    row = ProductCategory(
+        store_id=sid, code=body.code, name=body.name, sort_order=body.sort_order, is_active=True
+    )
     db.add(row)
     try:
         db.commit()
@@ -520,11 +554,12 @@ def create_category_admin(db: Session, body: CategoryCreateIn) -> CategoryAdminO
     )
 
 
-def _weekly_slots_payload(db: Session, anchor: date) -> list[dict]:
+def _weekly_slots_payload(db: Session, anchor: date, store_id: int) -> list[dict]:
+    sid = int(store_id)
     rows = db.execute(
         select(WeeklyMenuSlot, MenuDish)
         .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
-        .where(WeeklyMenuSlot.week_start == anchor)
+        .where(WeeklyMenuSlot.week_start == anchor, WeeklyMenuSlot.store_id == sid)
         .order_by(WeeklyMenuSlot.slot)
     ).all()
     from app.services.menu_day_stock_service import weekly_slot_stock_extras
@@ -541,10 +576,10 @@ def _weekly_slots_payload(db: Session, anchor: date) -> list[dict]:
         }
         for w, d in rows
     ]
-    return weekly_slot_stock_extras(db, anchor, raw)
+    return weekly_slot_stock_extras(db, anchor, raw, store_id=sid)
 
 
-def admin_weekly_menu_preview(db: Session, week_start: date | None) -> dict:
+def admin_weekly_menu_preview(db: Session, week_start: date | None, *, store_id: int) -> dict:
     """不传 week_start 时返回本周 + 下周槽位，便于预告维护。"""
     t = today_shanghai()
     this_a = _monday_of_week(t)
@@ -553,21 +588,23 @@ def admin_weekly_menu_preview(db: Session, week_start: date | None) -> dict:
         anchor = _monday_of_week(week_start)
         return {
             "week_start": anchor.isoformat(),
-            "slots": _weekly_slots_payload(db, anchor),
+            "slots": _weekly_slots_payload(db, anchor, store_id),
         }
     return {
         "this_week_start": this_a.isoformat(),
         "next_week_start": next_a.isoformat(),
-        "this_week": _weekly_slots_payload(db, this_a),
-        "next_week": _weekly_slots_payload(db, next_a),
+        "this_week": _weekly_slots_payload(db, this_a, store_id),
+        "next_week": _weekly_slots_payload(db, next_a, store_id),
     }
 
 
-def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn) -> None:
+def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: int) -> None:
     anchor = _monday_of_week(body.week_start)
+    sid = int(store_id)
     if body.dish_id is None:
         row = db.scalar(
             select(WeeklyMenuSlot).where(
+                WeeklyMenuSlot.store_id == sid,
                 WeeklyMenuSlot.week_start == anchor,
                 WeeklyMenuSlot.slot == body.slot,
             )
@@ -576,10 +613,12 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn) -> None:
             db.delete(row)
             db.commit()
         return
-    if db.get(MenuDish, body.dish_id) is None:
+    dish = db.get(MenuDish, body.dish_id)
+    if dish is None or int(dish.store_id) != sid:
         raise HTTPException(status_code=404, detail="菜品不存在")
     row = db.scalar(
         select(WeeklyMenuSlot).where(
+            WeeklyMenuSlot.store_id == sid,
             WeeklyMenuSlot.week_start == anchor,
             WeeklyMenuSlot.slot == body.slot,
         )
@@ -590,7 +629,14 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn) -> None:
                 row.total_stock = None
             row.dish_id = body.dish_id
         else:
-            db.add(WeeklyMenuSlot(week_start=anchor, slot=body.slot, dish_id=body.dish_id))
+            db.add(
+                WeeklyMenuSlot(
+                    store_id=sid,
+                    week_start=anchor,
+                    slot=body.slot,
+                    dish_id=body.dish_id,
+                )
+            )
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -600,23 +646,32 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn) -> None:
         )
 
 
-def set_weekly_slot_menu_total_stock(db: Session, body: MenuDayTotalStockIn) -> None:
+def set_weekly_slot_menu_total_stock(db: Session, body: MenuDayTotalStockIn, *, store_id: int) -> None:
     from app.services.menu_day_stock_service import set_weekly_slot_total_stock
 
     set_weekly_slot_total_stock(
-        db, _monday_of_week(body.week_start), body.slot, body.total_stock
+        db,
+        _monday_of_week(body.week_start),
+        body.slot,
+        body.total_stock,
+        store_id=int(store_id),
     )
 
 
-def update_settings(db: Session, body: SettingsIn) -> None:
-    from app.services.store_config_service import ensure_app_settings_row
+def update_settings(db: Session, body: SettingsIn, *, store_id: int) -> None:
+    from app.models.store import Store
 
-    row = ensure_app_settings_row(db)
-    row.leave_deadline_time = body.leave_deadline_time
+    st = db.get(Store, int(store_id))
+    if not st:
+        raise HTTPException(status_code=404, detail="门店不存在")
+    st.leave_deadline_time = body.leave_deadline_time
     db.commit()
 
 
-def count_leave_members_for_delivery_day(db: Session, d: date) -> int:
+def count_leave_members_for_delivery_day(db: Session, d: date, *, store_id: int | None = None) -> int:
+    from app.core.config import get_settings
+
+    sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
     if not is_subscription_delivery_day(d):
         return 0
     tomorrow_as_date = tomorrow_shanghai()
@@ -646,8 +701,12 @@ def count_leave_members_for_delivery_day(db: Session, d: date) -> int:
     if d.weekday() == 5:
         base = and_(base, Member.skip_subscription_saturday.is_(False))
     active_only = Member.deleted_at.is_(None)
+    store_scope = Member.store_id == sid
     return int(
-        db.scalar(select(func.count()).select_from(Member).where(active_only, base, absent)) or 0
+        db.scalar(
+            select(func.count()).select_from(Member).where(active_only, store_scope, base, absent)
+        )
+        or 0
     )
 
 
@@ -656,6 +715,7 @@ def dashboard_meal_summary(
     *,
     business_anchor_date: date | None = None,
     force_recompute: bool = False,
+    store_id: int | None = None,
 ) -> DashboardMealSummaryOut:
     """
     今日/明日请假人数与备餐份数。
@@ -663,12 +723,18 @@ def dashboard_meal_summary(
     锚定日早于当前上海日时：优先读 ``admin_dashboard_biz_day_snapshots``，无则按当前库计算并落库（之后不变），
     ``force_recompute=true`` 时管理员可强制按当前库重算并覆盖归档。
     """
+    from app.core.config import get_settings
+
+    sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
     anchor = business_anchor_date or today_shanghai()
     day_after = date.fromordinal(anchor.toordinal() + 1)
     cal_today = today_shanghai()
 
     if anchor < cal_today and not force_recompute:
-        row = db.get(AdminDashboardBizDaySnapshot, anchor)
+        row = db.get(
+            AdminDashboardBizDaySnapshot,
+            {"store_id": sid, "business_anchor_date": anchor},
+        )
         if row is not None:
             return DashboardMealSummaryOut(
                 shanghai_today=cal_today,
@@ -682,11 +748,11 @@ def dashboard_meal_summary(
                 snapshot_recorded_at=row.recorded_at,
             )
 
-    tl = count_leave_members_for_delivery_day(db, anchor)
-    tp = total_meal_units_for_delivery_sheet(db, delivery_date=anchor)
-    nl = count_leave_members_for_delivery_day(db, day_after)
-    np = total_meal_units_for_delivery_sheet(db, delivery_date=day_after)
-    te = count_expire_one_unit_members_for_business_day(db, delivery_date=anchor)
+    tl = count_leave_members_for_delivery_day(db, anchor, store_id=sid)
+    tp = total_meal_units_for_delivery_sheet(db, delivery_date=anchor, store_id=sid)
+    nl = count_leave_members_for_delivery_day(db, day_after, store_id=sid)
+    np = total_meal_units_for_delivery_sheet(db, delivery_date=day_after, store_id=sid)
+    te = count_expire_one_unit_members_for_business_day(db, delivery_date=anchor, store_id=sid)
 
     out = DashboardMealSummaryOut(
         shanghai_today=cal_today,
@@ -702,9 +768,13 @@ def dashboard_meal_summary(
 
     if anchor < cal_today:
         now = datetime.utcnow()
-        row = db.get(AdminDashboardBizDaySnapshot, anchor)
+        row = db.get(
+            AdminDashboardBizDaySnapshot,
+            {"store_id": sid, "business_anchor_date": anchor},
+        )
         if row is None:
             row = AdminDashboardBizDaySnapshot(
+                store_id=sid,
                 business_anchor_date=anchor,
                 today_leave_members=tl,
                 today_meals_to_prepare=tp,

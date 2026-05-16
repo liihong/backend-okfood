@@ -7,17 +7,19 @@ from sqlalchemy.orm import Session
 from app.services.store_config_service import get_courier_delivery_fee_config
 
 
-def courier_delivery_fee_yuan_for_meal_units(db: Session, meal_units: int) -> Decimal:
+def courier_delivery_fee_yuan_for_meal_units(
+    db: Session, meal_units: int, *, store_id: int | None = None
+) -> Decimal:
     """
     计算一单（同一会员、同一默认地址的一次确认送达）应付骑手配送费。
 
     - meal_units：当日扣次份数，与 Member.daily_meal_units 封顶规则一致，调用方已规范化时传入即可。
-    - 单价来自 `app_settings`（后台门店配置），无记录时回退 .env 默认。
+    - store_id：门店维度单价；不传时回退 app_settings / .env。
     """
     try:
         u = int(meal_units)
     except (TypeError, ValueError):
         u = 1
     u = max(1, u)
-    base, extra = get_courier_delivery_fee_config(db)
+    base, extra = get_courier_delivery_fee_config(db, store_id=store_id)
     return base + extra * Decimal(u - 1)

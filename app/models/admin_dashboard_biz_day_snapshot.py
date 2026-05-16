@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Integer
+from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -13,6 +13,9 @@ from app.db.base import Base
 class AdminDashboardBizDaySnapshot(Base):
     __tablename__ = "admin_dashboard_biz_day_snapshots"
 
+    store_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("stores.id", onupdate="CASCADE"), primary_key=True
+    )
     business_anchor_date: Mapped[date] = mapped_column(
         Date,
         primary_key=True,
