@@ -194,7 +194,12 @@ onMounted(() => {
         <el-table-column label="姓名" min-width="88">
           <template #default="{ row: c }">{{ c.name || '—' }}</template>
         </el-table-column>
-        <el-table-column label="电话" min-width="120" class-name="td-phone">
+        <el-table-column
+          label="电话"
+          min-width="132"
+          class-name="td-phone"
+          label-class-name="td-phone"
+        >
           <template #default="{ row: c }">
             <div class="member-phone-cell">
               <Phone :size="12" class="member-phone-icon" />

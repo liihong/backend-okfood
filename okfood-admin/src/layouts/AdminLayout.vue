@@ -42,7 +42,7 @@ const portalSubtitle = computed(() => {
 
 const pageTitle = computed(() => route.meta.title || 'OK Fine Admin')
 
-/** 地图类页面可隐藏大号页标题，节省主内容区纵向空间 */
+/** 营业概览等页在内容区内自带头图，布局顶栏可完全省略 */
 const hidePageTitle = computed(() => Boolean(route.meta.hidePageTitle))
 
 const activeMenuPath = computed(() => route.path)
@@ -210,15 +210,8 @@ watch(sidebarCollapsedPref, (v) => {
     </aside>
 
     <main class="main-body">
-      <header class="top-header" :class="{ 'top-header--compact': hidePageTitle }">
-        <div class="title-wrap">
-          <div class="live-indicator">
-            <span class="dot"></span> System Live · New Xiang
-          </div>
-          <div class="page-title-row">
-            <h2 v-if="!hidePageTitle" class="page-title">{{ pageTitle }}</h2>
-          </div>
-        </div>
+      <header v-if="!hidePageTitle" class="top-header top-header--page-title-only">
+        <h2 class="page-title">{{ pageTitle }}</h2>
       </header>
 
       <router-view />

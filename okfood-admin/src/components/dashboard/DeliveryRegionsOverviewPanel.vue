@@ -1,12 +1,12 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import {
   RefreshCw,
-  ChevronRight,
-  MapPin,
-  UserMinus,
+  CalendarMinus,
   Utensils,
+  Users,
+  Info,
+  TrendingUp,
   CalendarClock,
 } from 'lucide-vue-next'
 import { useDeliveryRegionMapOverview } from '../../composables/useDeliveryRegionMapOverview.js'
@@ -15,13 +15,9 @@ import { UNASSIGNED_AREA_LABEL } from '../../utils/regionAssignment.js'
 import { apiJson, adminAccessToken, adminKind, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 
-const router = useRouter()
-
-const showStoreConfigShortcut = computed(() => adminKind.value === 'full')
-
 const dashboardStats = ref([])
 const dashboardStatsLoading = ref(false)
-/** @type {import('vue').Ref<string>} YYYY-MM-DD，与营业概览四张卡片锚定业务日一致 */
+/** @type {import('vue').Ref<string>} */
 const summaryAnchorDate = ref('')
 /** @type {import('vue').Ref<Record<string, unknown> | null>} */
 const summaryMeta = ref(null)
@@ -49,51 +45,11 @@ async function fetchDashboardSummary() {
     const np = Number(d?.tomorrow_meals_to_prepare) || 0
     const te = Number(d?.today_expire_one_unit_members) || 0
     dashboardStats.value = [
-      {
-        label: '今日请假会员',
-        value: tl,
-        unit: '人',
-        icon: UserMinus,
-        bg: '#ffe4e6',
-        color: '#e11d48',
-        mapFilter: 'today_leave',
-      },
-      {
-        label: '今日需准备餐品',
-        value: tp,
-        unit: '份',
-        icon: Utensils,
-        bg: '#d1fae5',
-        color: '#059669',
-        mapFilter: 'today_prep',
-      },
-      {
-        label: '明日请假会员',
-        value: nl,
-        unit: '人',
-        icon: UserMinus,
-        bg: '#ffedd5',
-        color: '#ea580c',
-        mapFilter: 'tomorrow_leave',
-      },
-      {
-        label: '明日需准备餐品',
-        value: np,
-        unit: '份',
-        icon: Utensils,
-        bg: '#e0f2fe',
-        color: '#0284c7',
-        mapFilter: 'tomorrow_prep',
-      },
-      {
-        label: '今日到期剩1次会员',
-        value: te,
-        unit: '人',
-        icon: CalendarClock,
-        bg: '#f3e8ff',
-        color: '#7c3aed',
-        mapFilter: null,
-      },
+      { label: '今日请假会员', value: tl, unit: '人', mapFilter: 'today_leave' },
+      { label: '明日请假会员', value: nl, unit: '人', mapFilter: 'tomorrow_leave' },
+      { label: '今日需准备餐品', value: tp, unit: '份', mapFilter: 'today_prep' },
+      { label: '明日需准备餐品', value: np, unit: '份', mapFilter: 'tomorrow_prep' },
+      { label: '今日到期会员', value: te, unit: '人', mapFilter: null },
     ]
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
@@ -119,27 +75,21 @@ const {
   load,
   regionsSorted,
   regionColorById,
-  memberPoints,
   mapMemberPoints,
-  mapFilterKey,
-  toggleMapFilter,
   storeAnchor,
   stats,
   membersCountByArea,
 } = useDeliveryRegionMapOverview()
 
-function onBizStatClick(mapFilter) {
-  if (!summaryIsLiveToday.value) return
-  if (!mapFilter) return
-  toggleMapFilter(mapFilter)
-}
-
-function onBizStatKeydown(e, mapFilter) {
-  if (!summaryIsLiveToday.value) return
-  if (e.key !== 'Enter' && e.key !== ' ') return
-  e.preventDefault()
-  onBizStatClick(mapFilter)
-}
+/** 与 layout 一致：完整店主菜单可见性 */
+const showFullAdminMenus = computed(() => {
+  const k = adminKind.value
+  return k !== 'delivery' && k !== 'system'
+})
+const showOwnerAdminMenus = computed(() => {
+  const k = adminKind.value
+  return k !== 'delivery' && k !== 'support' && k !== 'system'
+})
 
 function onSummaryDateChange() {
   void fetchDashboardSummary()
@@ -161,9 +111,54 @@ const regionRows = computed(() =>
 
 const unassignedMemberCount = computed(() => membersCountByArea.value[UNASSIGNED_AREA_LABEL] || 0)
 
-function refreshPanel() {
-  void load()
-  void fetchDashboardSummary()
+const regionCoverageRows = computed(() => {
+  const rows = regionRows.value
+  const extra = unassignedMemberCount.value || 0
+  const total = rows.reduce((s, r) => s + r.memberCount, 0) + extra
+  const pct = (n) => (total > 0 ? Math.round((n / total) * 100) : 0)
+  const out = rows.map((r) => ({
+    ...r,
+    coveragePercent: pct(r.memberCount),
+  }))
+  if (extra > 0) {
+    out.push({
+      id: '__unassigned__',
+      name: UNASSIGNED_AREA_LABEL,
+      color: '#94a3b8',
+      memberCount: extra,
+      coveragePercent: pct(extra),
+      is_active: true,
+    })
+  }
+  return out
+})
+
+/** [0]今日请假 [1]明日请假 [2]今日备餐 [3]明日备餐 */
+const summarySlice = computed(() => ({
+  todayLeave: Number(dashboardStats.value[0]?.value) || 0,
+  tomorrowLeave: Number(dashboardStats.value[1]?.value) || 0,
+  todayMeals: Number(dashboardStats.value[2]?.value) || 0,
+  tomorrowMeals: Number(dashboardStats.value[3]?.value) || 0,
+}))
+
+const expireCount = computed(() => Number(dashboardStats.value[4]?.value) || 0)
+
+const storePinLegendCount = computed(() =>
+  storeAnchor.value?.store_lng != null && storeAnchor.value?.store_lat != null ? 1 : 0,
+)
+
+/** 勾选时仅显示「门店自提」会员坐标（档案 store_pickup） */
+const showSelfPickupPoints = ref(false)
+const mapPointsForDisplay = computed(() => {
+  const pts = mapMemberPoints.value
+  if (!showSelfPickupPoints.value) return pts
+  return pts.filter((p) => p.store_pickup === true || p.store_pickup === 1)
+})
+
+const refreshBusy = computed(() => dashboardStatsLoading.value || loading.value)
+
+async function onRefreshAll() {
+  await Promise.all([fetchDashboardSummary(), load()])
 }
 
 onMounted(() => {
@@ -173,516 +168,1128 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="dro-panel">
-    <header class="dro-head">
-      <div class="dro-title">
-        <MapPin :size="20" class="dro-title-icon" aria-hidden="true" />
-        <div>
-          <h3 class="dro-h">配送区域总览</h3>
-          <p class="dro-sub">
-            下方前四张卡片可点击筛选地图标点（再点一次取消）；默认不显示「暂停配送」会员坐标；玫红点为今日请假、橙点为仅明日请假，绿/黄仍为今日是否已送达。
-            <template v-if="!summaryIsLiveToday">
-              当前为历史锚定时，卡片不与地图联动；地图送达状态仍为服务器「今日」。
-            </template>
-          </p>
-        </div>
-      </div>
-      <div class="dro-actions">
-        <button type="button" class="dro-btn-ghost" :disabled="loading" @click="refreshPanel">
-          <RefreshCw :size="16" :class="{ 'dro-spin': loading }" />
-          刷新
+  <section class="dro-page dro-page--modern">
+    <div class="dro-dash-title-row">
+      <h2 class="dro-dash-title">配送区域总览</h2>
+      <div class="dro-dash-title-actions">
+        <button
+          type="button"
+          class="dro-btn-refresh"
+          :disabled="refreshBusy"
+          @click="onRefreshAll"
+        >
+          <RefreshCw :size="15" class="dro-btn-refresh-ico" :class="{ 'dro-btn-refresh-ico--spin': refreshBusy }" />
+          数据刷新
         </button>
-        <label class="dro-date-wrap">
-          <span class="dro-date-lbl">营业概览锚定日</span>
+        <label class="dro-date-inline">
+          <span class="dro-sr-only">营业概览锚定日</span>
           <input
             v-model="summaryAnchorDate"
             type="date"
-            class="dro-date-input"
+            class="dro-date-inline-input"
             :disabled="dashboardStatsLoading"
+            aria-describedby="dro-summary-anchor-hint"
             @change="onSummaryDateChange"
           />
         </label>
-        <button
-          v-if="showStoreConfigShortcut"
-          type="button"
-          class="dro-btn-link"
-          @click="router.push({ name: 'store-config' })"
-        >
-          门店配置 <ChevronRight :size="14" />
-        </button>
-        <button type="button" class="dro-btn-link" @click="router.push({ name: 'regions' })">
-          管理片区 <ChevronRight :size="14" />
-        </button>
       </div>
-    </header>
+    </div>
+    <span id="dro-summary-anchor-hint" class="dro-sr-only"
+      >切换日期将重拉营业概览；地图送达状态仍为服务端当日口径。</span
+    >
 
     <p v-if="summaryMeta?.from_snapshot" class="dro-snapshot-hint">
       已显示归档数据（与智能配送大表口径对齐的首读留存）。
       <template v-if="summaryMeta.snapshot_recorded_at">
         归档时间 {{ summaryMeta.snapshot_recorded_at }}。
       </template>
-      管理员可通过 API 参数 force_recompute 按当前库重算并覆盖。
     </p>
 
     <p v-if="dashboardStatsLoading" class="dro-loading">正在加载营业概览…</p>
-    <p v-else-if="!dashboardStats.length" class="dro-loading">暂无营业概览数据，配送地图仍可查看。</p>
+    <p v-else-if="!dashboardStats.length && !loading" class="dro-loading">
+      暂无营业概览数据，配送地图仍可查看。
+    </p>
 
+    <!-- 四张合并指标卡 -->
     <div
-      v-if="
-        (!dashboardStatsLoading && dashboardStats.length) || showDeliveryMetrics
-      "
-      class="dro-stats dro-stats--band"
+      v-if="(!dashboardStatsLoading && dashboardStats.length) || showDeliveryMetrics"
+      class="dro-dash-stat-grid"
     >
-      <template v-if="!dashboardStatsLoading && dashboardStats.length">
-        <div
-          v-for="(s, i) in dashboardStats"
-          :key="'biz-' + i"
-          class="dro-stat dro-stat--biz"
-          :class="{
-            'dro-stat--clickable': summaryIsLiveToday && s.mapFilter,
-            'dro-stat--filter-on':
-              summaryIsLiveToday && s.mapFilter && mapFilterKey === s.mapFilter,
-            'dro-stat--muted': !summaryIsLiveToday,
-          }"
-          :role="summaryIsLiveToday && s.mapFilter ? 'button' : undefined"
-          :tabindex="summaryIsLiveToday && s.mapFilter ? 0 : -1"
-          :aria-pressed="
-            summaryIsLiveToday && s.mapFilter && mapFilterKey === s.mapFilter ? 'true' : 'false'
-          "
-          :aria-label="
-            (s.label || '') + (summaryIsLiveToday && s.mapFilter ? '，点击筛选地图' : '')
-          "
-          @click="onBizStatClick(s.mapFilter)"
-          @keydown="onBizStatKeydown($event, s.mapFilter)"
-        >
-          <span class="dro-stat-ico" :style="{ backgroundColor: s.bg, color: s.color }">
-            <component :is="s.icon" :size="16" aria-hidden="true" />
-          </span>
-          <div class="dro-stat-body">
-            <span class="dro-stat-val">
-              {{ s.value }}<small>{{ s.unit }}</small>
-            </span>
-            <span class="dro-stat-label">{{ s.label }}</span>
+      <article
+        class="dro-stat-card dro-stat-card--leave"
+        :class="{ 'dro-stat-card--historical': !summaryIsLiveToday }"
+      >
+        <div class="dro-stat-card-top dro-stat-card-top--dense-icon">
+          <span class="dro-stat-card-k">今日请假总览</span>
+          <CalendarMinus :size="17" class="dro-stat-card-ico" aria-hidden="true" />
+        </div>
+        <div class="dro-stat-card-metric-wrap dro-stat-card-metric-wrap--lift">
+          <div class="dro-stat-card-metric dro-stat-card-metric--leave">
+            <span class="dro-stat-card-num dro-stat-card-num--xl">{{ summarySlice.todayLeave }}</span>
+            <span class="dro-stat-card-unit dro-stat-card-unit--leave">人</span>
           </div>
         </div>
-      </template>
+        <div class="dro-stat-card-foot dro-stat-card-foot--dock">
+          <p class="dro-stat-card-foot-caption">
+            明日预计请假:
+            <span class="dro-stat-card-foot-strong dro-stat-card-foot-strong--tomorrow-leave"
+              >{{ summarySlice.tomorrowLeave }}人</span
+            >
+          </p>
+        </div>
+      </article>
 
-      <template v-if="showDeliveryMetrics">
-        <div class="dro-stat">
-          <span class="dro-stat-val">{{ stats.total }}</span>
-          <span class="dro-stat-label">地图会员（有余额）</span>
+      <article
+        class="dro-stat-card dro-stat-card--meal"
+        :class="{ 'dro-stat-card--historical': !summaryIsLiveToday }"
+      >
+        <div class="dro-stat-card-top dro-stat-card-top--dense-icon">
+          <span class="dro-stat-card-k">今日需备餐品</span>
+          <Utensils :size="17" class="dro-stat-card-ico dro-stat-card-ico--emerald" aria-hidden="true" />
         </div>
-        <div class="dro-stat dro-stat--ok">
-          <span class="dro-stat-val">{{ stats.deliveredToday }}</span>
-          <span class="dro-stat-label">今日已送达</span>
+        <div class="dro-stat-card-metric-wrap dro-stat-card-metric-wrap--lift">
+          <div class="dro-stat-card-metric dro-stat-card-metric--emerald">
+            <span class="dro-stat-card-num dro-stat-card-num--xl">{{ summarySlice.todayMeals }}</span>
+            <span class="dro-stat-card-unit">份</span>
+          </div>
         </div>
-        <div class="dro-stat dro-stat--warn">
-          <span class="dro-stat-val">{{ stats.pendingToday }}</span>
-          <span class="dro-stat-label">今日未送达</span>
+        <div class="dro-stat-card-foot dro-stat-card-foot--dock">
+          <p class="dro-stat-card-foot-caption">
+            明日需备餐:
+            <span class="dro-stat-card-foot-strong dro-stat-card-foot-strong--tomorrow-meals"
+              >{{ summarySlice.tomorrowMeals }}份</span
+            >
+          </p>
         </div>
-      </template>
+      </article>
+
+      <article
+        class="dro-stat-card dro-stat-card--asset"
+        :class="{ 'dro-stat-card--historical': !summaryIsLiveToday }"
+      >
+        <div class="dro-stat-card-top dro-stat-card-top--asset">
+          <div class="dro-stat-card-title-inline">
+            <span class="dro-stat-card-k">到期与活跃</span>
+            <el-tooltip content="仅统计当前账户有余额会员" placement="top" :show-after="250">
+              <button type="button" class="dro-stat-card-tip dro-stat-card-tip--soft" aria-label="口径说明">
+                <Info :size="14" stroke-width="2.5" aria-hidden="true" />
+              </button>
+            </el-tooltip>
+          </div>
+          <Users :size="17" class="dro-stat-card-ico dro-stat-card-ico--blue" aria-hidden="true" />
+        </div>
+        <div class="dro-stat-card-asset-mid">
+          <div class="dro-stat-card-split dro-stat-card-split--around">
+            <div class="dro-stat-card-split-cell">
+              <p class="dro-stat-card-split-k">今日到期</p>
+              <p class="dro-stat-card-split-v dro-stat-card-split-v--lg dro-stat-card-split-v--expire-today">{{ expireCount }}</p>
+            </div>
+            <span class="dro-stat-card-split-vsep dro-stat-card-split-vsep--refined" aria-hidden="true" />
+            <div class="dro-stat-card-split-cell">
+              <p class="dro-stat-card-split-k">地图会员</p>
+              <p class="dro-stat-card-split-v dro-stat-card-split-v--lg dro-stat-card-split-v--map-total">{{ stats.total }}</p>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article
+        class="dro-stat-card dro-stat-card--renewal-prep"
+        :class="{ 'dro-stat-card--historical': !summaryIsLiveToday }"
+      >
+        <div class="dro-stat-card-top dro-stat-card-top--asset">
+          <span class="dro-stat-card-k">续费与备餐</span>
+          <CalendarClock :size="17" class="dro-stat-card-ico dro-stat-card-ico--amber" aria-hidden="true" />
+        </div>
+        <div class="dro-stat-card-asset-mid">
+          <div class="dro-stat-card-split dro-stat-card-split--around">
+            <div class="dro-stat-card-split-cell">
+              <p class="dro-stat-card-split-k">今日即将到期会员</p>
+              <p class="dro-stat-card-split-vrow">
+                <span class="dro-stat-card-split-v dro-stat-card-split-v--lg dro-stat-card-split-v--soon-expire">{{
+                  expireCount
+                }}</span>
+                <span class="dro-stat-card-split-u dro-stat-card-split-u--soon-expire">人</span>
+              </p>
+            </div>
+            <span class="dro-stat-card-split-vsep dro-stat-card-split-vsep--refined" aria-hidden="true" />
+            <div class="dro-stat-card-split-cell">
+              <p class="dro-stat-card-split-k">明天需准备餐品</p>
+              <p class="dro-stat-card-split-vrow">
+                <span
+                  class="dro-stat-card-split-v dro-stat-card-split-v--lg dro-stat-card-split-v--nextday-prep"
+                  >{{ summarySlice.tomorrowMeals }}</span
+                >
+                <span class="dro-stat-card-split-u dro-stat-card-split-u--nextday-prep">份</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </article>
     </div>
 
     <p v-if="loading && !regionsSorted.length" class="dro-loading">加载配送数据…</p>
     <p v-else-if="error" class="dro-error">{{ error }}</p>
 
-    <template v-else-if="showDeliveryMetrics">
+    <div v-else-if="showDeliveryMetrics" class="dro-dash-main">
       <div class="dro-map-shell">
-               <DeliveryOverviewMap
-          :amap-key="amapKey"
-          :amap-security="amapSecurity"
-          :regions-sorted="regionsSorted"
-          :region-color-by-id="regionColorById"
-          :member-points="mapMemberPoints"
-          :store-anchor="storeAnchor"
-        />
-        <div class="dro-float-legends" aria-label="地图图例">
-          <div class="dro-legend-card dro-legend-card--float">
-            <h4 class="dro-legend-h">会员图钉颜色（今日送达）</h4>
-            <ul class="dro-legend-list dro-legend-list--compact">
-              <li><span class="dro-dot" style="background: #dc2626" />门店位置（后台「门店配置」坐标）</li>
-              <li><span class="dro-dot" style="background: #e11d48" />今日请假（配送日缺席）</li>
-              <li><span class="dro-dot" style="background: #ea580c" />仅明日请假（今日不请）</li>
-              <li><span class="dro-dot" style="background: #22c55e" />当日已送达（订阅扣次或单次点餐已履约）</li>
-              <li><span class="dro-dot" style="background: #eab308" />尚未送达（非请假）</li>
-            </ul>
+        <div class="dro-map-toolbar">
+          <div class="dro-map-toolbar-left">
+            <span class="dro-map-toolbar-live-dot" aria-hidden="true" />
+            <span class="dro-map-toolbar-title">实时地理分布 (LIVE)</span>
           </div>
-          <div class="dro-legend-card dro-legend-card--float">
-            <h4 class="dro-legend-h">片区覆盖（档案会员数）</h4>
-            <ul class="dro-region-chips dro-region-chips--float">
-              <li v-for="row in regionRows" :key="row.id" class="dro-chip">
-                <span class="dro-swatch" :style="{ background: row.color }" />
-                <span class="dro-chip-name">
-                  {{ row.name }}
-                  <span
-                    v-if="row.is_active === false || row.is_active === 0"
-                    class="dro-chip-off"
-                  >（停用）</span>
-                </span>
-                <span class="dro-chip-n">{{ row.memberCount }} 人</span>
-              </li>
-              <li v-if="unassignedMemberCount" class="dro-chip dro-chip--extra">
-                <span class="dro-swatch dro-swatch--dash" />
-                <span class="dro-chip-name">{{ UNASSIGNED_AREA_LABEL }}</span>
-                <span class="dro-chip-n">{{ unassignedMemberCount }} 人</span>
-              </li>
-            </ul>
+          <label class="dro-map-pickup-toggle">
+            <input v-model="showSelfPickupPoints" type="checkbox" class="dro-map-pickup-cb" />
+            <span class="dro-map-pickup-label">自提显示</span>
+          </label>
+        </div>
+        <div class="dro-map-body">
+          <DeliveryOverviewMap
+            :amap-key="amapKey"
+            :amap-security="amapSecurity"
+            :regions-sorted="regionsSorted"
+            :region-color-by-id="regionColorById"
+            :member-points="mapPointsForDisplay"
+            :store-anchor="storeAnchor"
+          />
+          <div class="dro-float-legends dro-float-legends--glass" aria-label="地图图例">
+            <div class="dro-legend-card dro-glass-legend">
+              <h4 class="dro-legend-h">标注图例</h4>
+              <ul class="dro-legend-metrics">
+                <li>
+                  <span class="dro-legend-metrics-left">
+                    <span class="dro-dot dro-dot--store" />
+                    <span>门店位置</span>
+                  </span>
+                  <span class="dro-legend-metrics-n">{{ storePinLegendCount }}</span>
+                </li>
+                <li>
+                  <span class="dro-legend-metrics-left">
+                    <span class="dro-dot dro-dot--leave" />
+                    <span>今日请假</span>
+                  </span>
+                  <span class="dro-legend-metrics-n">{{ summarySlice.todayLeave }}</span>
+                </li>
+                <li>
+                  <span class="dro-legend-metrics-left">
+                    <span class="dro-dot dro-dot--done" />
+                    <span>当日已送达</span>
+                  </span>
+                  <span class="dro-legend-metrics-n">{{ stats.deliveredToday }}</span>
+                </li>
+                <li>
+                  <span class="dro-legend-metrics-left">
+                    <span class="dro-dot dro-dot--pending" />
+                    <span>尚未送达</span>
+                  </span>
+                  <span class="dro-legend-metrics-n">{{ stats.pendingToday }}</span>
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
-    </template>
+
+      <aside class="dro-rank-card" aria-label="片区覆盖排行">
+        <div class="dro-rank-head">
+          <h3 class="dro-rank-title">片区覆盖排行</h3>
+          <TrendingUp :size="18" class="dro-rank-trend-ico" aria-hidden="true" />
+        </div>
+        <div class="dro-rank-list custom-scrollbar">
+          <div v-for="row in regionCoverageRows" :key="row.id" class="dro-rank-item">
+            <div class="dro-rank-item-head">
+              <div class="dro-rank-item-meta">
+                <p class="dro-rank-name">{{ row.name }}</p>
+                <p class="dro-rank-count">
+                  {{ row.memberCount }}
+                  <span class="dro-rank-count-unit">Member</span>
+                </p>
+              </div>
+              <span class="dro-rank-pct-wrap"
+                ><span class="dro-rank-pct">{{ row.coveragePercent }}%</span></span
+              >
+            </div>
+            <div class="dro-rank-bar">
+              <div
+                class="dro-rank-bar-fill"
+                :style="{ width: row.coveragePercent + '%', background: row.color }"
+              />
+            </div>
+          </div>
+        </div>
+        <!-- <div v-if="showFullAdminMenus" class="dro-rank-actions">
+          <router-link v-if="showOwnerAdminMenus" class="dro-rank-btn dro-rank-btn--primary" to="/store-config">
+            门店配置
+          </router-link>
+          <router-link class="dro-rank-btn dro-rank-btn--secondary" to="/regions">片区管理</router-link>
+        </div> -->
+      </aside>
+    </div>
   </section>
 </template>
 
 <style scoped>
-.dro-panel {
-  margin-top: 0.5rem;
-  padding: 1.25rem 1.35rem;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 1.25rem;
+.dro-page--modern {
+  /* 与 main-body 下其他页一致：占满内容区宽度，不额外居中收窄 */
+  margin: 0;
+  padding: 0 0 2rem;
+  background: transparent;
+  font-family:
+    'Plus Jakarta Sans',
+    'Noto Sans SC',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    sans-serif;
 }
-.dro-head {
+
+.dro-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.dro-dash-title-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 }
-.dro-title {
-  display: flex;
-  gap: 0.65rem;
-  align-items: flex-start;
-}
-.dro-title-icon {
-  color: #0e5a44;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-.dro-h {
+
+.dro-dash-title {
   margin: 0;
-  font-size: 1.05rem;
-  font-weight: 800;
-  color: #0f172a;
+  font-size: 1.65rem;
+  font-weight: 900;
+  color: #1e293b;
+  letter-spacing: -0.02em;
+  font-style: italic;
 }
-.dro-sub {
-  margin: 0.25rem 0 0;
-  font-size: 12px;
-  color: #64748b;
-  line-height: 1.45;
-  max-width: 36rem;
-}
-.dro-actions {
+
+.dro-dash-title-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
 }
-.dro-btn-ghost {
+
+.dro-btn-refresh {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 0.4rem;
+  padding: 0.45rem 1rem;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 800;
   color: #334155;
-  background: #f1f5f9;
-  border:1px solid #e2e8f0;
-  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   cursor: pointer;
-  font-family: inherit;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
-.dro-btn-ghost:disabled {
-  opacity: 0.6;
+
+.dro-btn-refresh:hover:not(:disabled) {
+  border-color: #10b981;
+}
+
+.dro-btn-refresh:disabled {
+  opacity: 0.65;
   cursor: not-allowed;
 }
-.dro-btn-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 8px 10px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #0e5a44;
-  background: transparent;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-family: inherit;
+
+.dro-btn-refresh-ico--spin {
+  animation: dro-spin 0.8s linear infinite;
 }
-.dro-btn-link:hover {
-  background: #ecfdf5;
-}
-.dro-date-wrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #475569;
-}
-.dro-date-lbl {
-  white-space: nowrap;
-  font-weight: 600;
-}
-.dro-date-input {
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  font-size: 13px;
-  font-family: inherit;
-}
-.dro-snapshot-hint {
-  font-size: 13px;
-  color: #0369a1;
-  background: #f0f9ff;
-  border: 1px solid #bae6fd;
-  border-radius: 10px;
-  padding: 10px 12px;
-  margin: 0 0 1rem;
-  line-height: 1.45;
-}
-.dro-spin {
-  animation: dro-spin 0.85s linear infinite;
-}
+
 @keyframes dro-spin {
   to {
     transform: rotate(360deg);
   }
 }
+
+.dro-date-inline-input {
+  padding: 0.45rem 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  font-size: 13px;
+  font-weight: 800;
+  color: #334155;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  font-family: inherit;
+}
+
+.dro-date-inline-input:focus {
+  outline: none;
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+}
+
+.dro-snapshot-hint {
+  font-size: 13px;
+  color: #0369a1;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 0 0 1rem;
+  line-height: 1.45;
+}
+
 .dro-loading,
 .dro-error {
   margin: 0 0 1rem;
   font-size: 14px;
   color: #64748b;
 }
+
 .dro-error {
   color: #b91c1c;
 }
-.dro-stats {
+
+.dro-dash-stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 0.65rem;
-  margin-bottom: 1rem;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+  align-items: stretch;
 }
-.dro-stats--band {
-  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+
+@media (min-width: 768px) {
+  .dro-dash-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
-.dro-stat {
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+
+@media (min-width: 1280px) {
+  .dro-dash-stat-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
-.dro-stat--biz {
+
+.dro-stat-card {
+  background: #fff;
+  border-radius: 24px;
+  padding: 1.5rem;
+  border: 1px solid #f1f5f9;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
+  transition:
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
+  min-height: 160px;
+  box-sizing: border-box;
+}
+
+.dro-stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05);
+}
+
+.dro-stat-card--renewal-prep .dro-stat-card-split-k {
+  line-height: 1.35;
+}
+
+.dro-stat-card-ico--amber {
+  color: #fde68a;
+}
+
+.dro-stat-card-split-vrow {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.25rem;
+  margin: 0;
+  flex-wrap: wrap;
+}
+
+.dro-stat-card-split-u {
+  font-size: 13px;
+  font-weight: 800;
+  color: #94a3b8;
+}
+
+.dro-stat-card--historical {
+  opacity: 0.88;
+}
+
+.dro-stat-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.65rem;
+  flex-shrink: 0;
+}
+
+.dro-stat-card-top--dense-icon {
+  align-items: flex-start;
+}
+
+.dro-stat-card-top--asset {
+  margin-bottom: 0.5rem;
+}
+
+.dro-stat-card-ico--emerald {
+  color: #d1fae5;
+}
+
+.dro-stat-card-ico--blue {
+  color: #dbeafe;
+}
+
+.dro-stat-card-tip--soft {
+  color: #93c5fd;
+}
+
+.dro-stat-card-tip--soft:hover {
+  color: #3b82f6;
+}
+
+.dro-stat-card-metric-wrap--lift {
+  margin-top: -0.5rem;
+}
+
+.dro-stat-card-foot-caption {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #cbd5e1;
+  text-align: center;
+}
+
+.dro-stat-card-foot-strong {
+  color: #94a3b8;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.dro-stat-card-foot-strong--tomorrow-leave {
+  color: #0891b2;
+}
+
+.dro-stat-card-foot-strong--tomorrow-meals {
+  color: #0f766e;
+}
+
+.dro-stat-card-title-inline {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 0.35rem;
   min-width: 0;
 }
-.dro-stat-ico {
+
+.dro-stat-card-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  border-radius: 0.35rem;
+  cursor: help;
+  line-height: 1;
+  transition: color 0.15s ease;
+}
+
+.dro-stat-card-tip:hover {
+  color: #3b82f6;
+}
+
+.dro-stat-card-k {
+  font-size: 11px;
+  font-weight: 800;
+  color: #94a3b8;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dro-stat-card-ico {
+  color: #e2e8f0;
   flex-shrink: 0;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+}
+
+.dro-stat-card-metric-wrap {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  min-height: 4rem;
+  padding: 0.35rem 0;
 }
-.dro-stat-body {
-  min-width: 0;
+
+.dro-stat-card-metric {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: baseline;
+  gap: 0.4rem;
+  justify-content: center;
 }
-.dro-stat--biz .dro-stat-val {
-  font-size: 1.1rem;
-  line-height: 1.15;
+
+.dro-stat-card-metric--emerald .dro-stat-card-num {
+  color: #059669;
 }
-.dro-stat--biz .dro-stat-val small {
-  font-size: 10px;
-  margin-left: 2px;
-  color: #94a3b8;
-  font-weight: 700;
+
+.dro-stat-card-metric--emerald .dro-stat-card-unit {
+  color: #34d399;
 }
-.dro-stat--biz .dro-stat-label {
-  font-size: 10px;
-  line-height: 1.25;
-  white-space: normal;
+
+/* 请假卡主数值：靛紫，与备餐绿区分 */
+.dro-stat-card-metric--leave .dro-stat-card-num {
+  color: #4f46e5;
 }
-.dro-stat--clickable {
-  cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+.dro-stat-card-unit--leave {
+  color: #6366f1;
 }
-.dro-stat--clickable:hover {
-  border-color: #cbd5e1;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
-}
-.dro-stat--clickable:focus {
-  outline: none;
-  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #0e5a44;
-}
-.dro-stat--filter-on {
-  border-color: #0e5a44;
-  box-shadow: 0 0 0 1px #0e5a44;
-  background: #f0fdf4;
-}
-.dro-stat--biz.dro-stat--muted {
-  cursor: default;
-  opacity: 0.94;
-}
-.dro-stat-val {
-  display: block;
-  font-size: 1.35rem;
-  font-weight: 800;
+
+.dro-stat-card-num {
+  font-size: 2.5rem;
+  font-weight: 900;
   color: #0f172a;
-  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
-.dro-stat-val small {
-  font-size: 11px;
-  margin-left: 2px;
+
+.dro-stat-card-num.dro-stat-card-num--xl {
+  font-size: 3.125rem;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.dro-stat-card-unit {
+  font-size: 13px;
+  font-weight: 800;
   color: #94a3b8;
-  font-weight: 700;
 }
-.dro-stat-label {
-  font-size: 11px;
-  color: #64748b;
+
+.dro-stat-card-foot--dock {
+  margin-top: auto;
+  padding-top: 0.35rem;
+  flex-shrink: 0;
+  text-align: center;
+  border-top: none;
+}
+
+.dro-stat-card-foot-line {
+  font-size: 10px;
   font-weight: 600;
+  color: #cbd5e1;
+  letter-spacing: 0.02em;
 }
-.dro-stat--ok .dro-stat-val {
-  color: #15803d;
+
+.dro-stat-card-foot-num {
+  font-weight: 800;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
 }
-.dro-stat--warn .dro-stat-val {
-  color: #b45309;
-}
-.dro-stat--danger .dro-stat-val {
-  color: #b91c1c;
-}
-.dro-stat--muted .dro-stat-val {
-  color: #64748b;
-}
-.dro-map-shell {
-  position: relative;
-  width: 100%;
-}
-.dro-float-legends {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  z-index: 400;
+
+.dro-stat-card-asset-mid {
+  flex: 1;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: min(308px, calc(100% - 24px));
-  max-height: min(calc(76vh - 100px), 720px);
-  overflow-y: auto;
-  pointer-events: auto;
-  -webkit-overflow-scrolling: touch;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0 0.5rem;
 }
-@media (max-width: 520px) {
-  .dro-float-legends {
-    width: calc(100% - 20px);
-    right: 10px;
-    bottom: 10px;
-    max-height: 42vh;
+
+.dro-stat-card-split {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 100%;
+  max-width: 15rem;
+}
+
+.dro-stat-card-split--around {
+  justify-content: space-around;
+  max-width: none;
+}
+
+.dro-stat-card-split-cell {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+
+.dro-stat-card-split-k {
+  margin: 0 0 0.25rem;
+  font-size: 12px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.dro-stat-card-split-v {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.dro-stat-card-split-vsep {
+  align-self: stretch;
+  width: 1px;
+  min-height: 2.75rem;
+  margin: 0 0.85rem;
+  background: rgba(148, 163, 184, 0.38);
+  flex-shrink: 0;
+}
+
+.dro-stat-card-split-vsep--refined {
+  align-self: center;
+  min-height: 2.5rem;
+  margin: 0 0.5rem;
+  background: #f1f5f9;
+}
+
+.dro-stat-card-split-v--lg {
+  font-size: 2rem;
+  letter-spacing: -0.03em;
+}
+
+/* 双栏卡大数字：橙/蓝/玫/琥珀，彼此错开 */
+.dro-stat-card-split-v--expire-today {
+  color: #ea580c;
+}
+
+.dro-stat-card-split-v--map-total {
+  color: #2563eb;
+}
+
+.dro-stat-card-split-v--soon-expire {
+  color: #be185d;
+}
+
+.dro-stat-card-split-u--soon-expire {
+  color: #db2777;
+}
+
+.dro-stat-card-split-v--nextday-prep {
+  color: #a16207;
+}
+
+.dro-stat-card-split-u--nextday-prep {
+  color: #ca8a04;
+}
+
+/* 主区：地图宽 + 右侧排行 */
+.dro-dash-main {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (min-width: 1280px) {
+  .dro-dash-main {
+    grid-template-columns: minmax(0, 9fr) minmax(260px, 3fr);
   }
 }
-.dro-legend-card--float {
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(226, 232, 240, 0.95);
-  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.14);
-  backdrop-filter: blur(10px);
-}
-.dro-legend-h {
-  margin: 0 0 6px;
-  font-size: 11px;
-  font-weight: 800;
-  color: #475569;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.dro-legend-list {
-  margin: 0;
-  padding-left: 0;
-  list-style: none;
-  font-size: 12px;
-  color: #475569;
-  line-height: 1.55;
-}
-.dro-legend-list--compact {
-  font-size: 11px;
-  line-height: 1.45;
-}
-.dro-legend-list li {
+
+.dro-map-shell {
+  background: #fff;
+  border-radius: 2.5rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 6px;
+  flex-direction: column;
+  min-height: min(calc(100vh - 300px), 880px);
 }
-.dro-legend-list--compact li {
-  margin-bottom: 4px;
-}
-.dro-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
+
+.dro-map-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 1.5rem;
+  border-bottom: 1px solid #f8fafc;
   flex-shrink: 0;
-  margin-top: 3px;
-  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.12);
 }
-.dro-region-chips {
+
+.dro-map-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dro-map-toolbar-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  flex-shrink: 0;
+}
+
+.dro-map-toolbar-title {
+  font-size: 14px;
+  font-weight: 900;
+  color: #334155;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.dro-map-pickup-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.dro-map-pickup-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.dro-map-pickup-cb {
+  width: 14px;
+  height: 14px;
+  accent-color: #10b981;
+}
+
+.dro-map-body {
+  position: relative;
+  flex: 1;
+  min-height: 500px;
+  background-color: #f8fafc;
+  background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.dro-map-body :deep(.delivery-overview-map) {
+  border: none;
+  border-radius: 0;
+  height: min(calc(100vh - 360px), 900px);
+  min-height: 500px;
+}
+
+.dro-map-body :deep(.delivery-overview-map-hint) {
+  border-radius: 0;
+  min-height: 240px;
+}
+
+.dro-float-legends {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  left: auto;
+  z-index: 400;
+  width: min(17rem, calc(100% - 2rem));
+  max-height: min(40vh, 320px);
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.dro-float-legends--glass {
+  left: 2rem;
+  right: auto;
+  bottom: 2rem;
+}
+
+.dro-legend-card {
+  padding: 0.8rem 0.95rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.42);
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+}
+
+/* 与 HTML 一致：图例卡为更强的毛玻璃（需置于 .dro-legend-card 之后以覆盖基础样式） */
+.dro-legend-card.dro-glass-legend {
+  padding: 1.5rem;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06);
+}
+
+.dro-legend-h {
+  margin: 0 0 0.65rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 12px;
+  font-weight: 900;
+  color: #64748b;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.dro-legend-metrics {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.dro-legend-metrics li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 0.45rem;
+}
+
+.dro-legend-metrics li:last-of-type {
+  margin-bottom: 0;
+}
+
+.dro-legend-metrics-left {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.dro-legend-metrics-n {
+  font-weight: 900;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 精雕版图例：标题字距与数字等宽字体（置于通用 .dro-legend-h 之后以保证覆盖） */
+.dro-legend-card.dro-glass-legend .dro-legend-h {
+  border-bottom-color: rgba(15, 23, 42, 0.05);
+  letter-spacing: 0.2em;
+}
+
+.dro-legend-card.dro-glass-legend .dro-legend-metrics li {
+  margin-bottom: 0.6rem;
+}
+
+.dro-legend-card.dro-glass-legend .dro-legend-metrics-n {
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
+}
+
+.dro-legend-foot {
+  margin: 0.65rem 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  font-size: 9px;
+  line-height: 1.5;
+  color: #64748b;
+  font-style: italic;
+}
+
+.dro-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.12);
+}
+
+.dro-dot--store {
+  background: #059669;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+}
+.dro-dot--leave {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+.dro-dot--done {
+  background: #34d399;
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+}
+.dro-dot--pending {
+  background: #f97316;
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18);
+}
+
+/* 右侧排行卡 */
+.dro-rank-card {
+  background: #fff;
+  border-radius: 2.5rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  padding: 2rem;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 220px;
-  overflow: auto;
+  min-height: min(calc(100vh - 300px), 880px);
 }
-.dro-region-chips--float {
-  max-height: 200px;
-}
-.dro-chip {
-  display: grid;
-  grid-template-columns: 14px 1fr auto;
+
+.dro-rank-head {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #334155;
+  justify-content: space-between;
+  margin-bottom: 2rem;
 }
-.dro-swatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 4px;
-  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
+
+.dro-rank-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 900;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
 }
-.dro-swatch--dash {
-  background: repeating-linear-gradient(-45deg, #e2e8f0, #e2e8f0 3px, #fff 3px, #fff 6px);
+
+.dro-rank-trend-ico {
+  color: #10b981;
+  flex-shrink: 0;
 }
-.dro-chip-name {
-  font-weight: 650;
+
+.dro-rank-list {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.dro-rank-item-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.dro-rank-item-meta {
   min-width: 0;
+}
+
+.dro-rank-name {
+  margin: 0 0 0.2rem;
+  font-size: 12px;
+  font-weight: 900;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.dro-chip-off {
-  font-size: 10px;
-  color: #94a3b8;
-  font-weight: 600;
-  margin-left: 4px;
-}
-.dro-chip-n {
-  font-weight: 700;
-  color: #64748b;
+
+.dro-rank-count {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: #334155;
   font-variant-numeric: tabular-nums;
 }
-.dro-chip--extra {
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px dashed #e2e8f0;
+
+.dro-rank-count-unit {
+  font-size: 11px;
+  font-weight: 400;
+  color: #cbd5e1;
+}
+
+.dro-rank-pct-wrap {
+  flex: 0 0 3.35rem;
+  width: 3.35rem;
+  text-align: right;
+}
+
+.dro-rank-pct {
+  font-size: 13px;
+  font-weight: 900;
+  color: #059669;
+  font-variant-numeric: tabular-nums;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
+}
+
+.dro-rank-bar {
+  height: 6px;
+  background: #f8fafc;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.dro-rank-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.45s ease;
+}
+
+.dro-rank-actions {
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 1px solid #f1f5f9;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.dro-rank-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.875rem 0.5rem;
+  border-radius: 1rem;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  text-align: center;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.dro-rank-btn--primary {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.dro-rank-btn--primary:hover {
+  background: #d1fae5;
+}
+
+.dro-rank-btn--secondary {
+  background: #f8fafc;
+  color: #475569;
+}
+
+.dro-rank-btn--secondary:hover {
+  background: #f1f5f9;
+}
+
+/* 滚动条（设计稿 custom-scrollbar） */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
 }
 </style>

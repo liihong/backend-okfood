@@ -10,6 +10,7 @@ import {
   Pencil,
   Download,
   Receipt,
+  ChevronDown,
 } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import {
@@ -143,6 +144,17 @@ async function deleteMemberRow(u) {
     showToast(e instanceof Error ? e.message : '删除失败', 'error')
   } finally {
     memberDeletingId.value = null
+  }
+}
+
+/** 操作列「更多」下拉：消费记录、删除等低频操作，减少表格右侧视觉噪音 */
+function onMembersActionDropdown(command, row) {
+  if (command === 'records') {
+    void openMemberDeliveryRecords(row)
+    return
+  }
+  if (command === 'delete') {
+    void deleteMemberRow(row)
   }
 }
 
@@ -449,6 +461,20 @@ function memberAddressDetailWithoutArea(u) {
   return rawAddr
 }
 
+/** Tooltip 内：片区 + 门牌/地图选点详情，便于运营快速核对完整地址 */
+function memberAddressTooltipContent(u) {
+  const detail = memberAddressDetailWithoutArea(u).trim()
+  const area = String(u.area || '').trim()
+  const raw = String(u.address || '').trim()
+  if (!detail && !area && !raw) return ''
+  if (area && area !== '—') {
+    if (detail) return `${area} · ${detail}`.trim()
+    return area
+  }
+  if (detail) return detail
+  return raw
+}
+
 function openEditMember(u) {
   editTargetMember.value = u
   showEditModal.value = true
@@ -665,7 +691,12 @@ onMounted(async () => {
             <div v-if="u.wechat_name" class="t-sub t-wechat">微信 {{ u.wechat_name }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="电话" min-width="120" class-name="td-phone">
+        <el-table-column
+          label="电话"
+          min-width="132"
+          class-name="td-phone"
+          label-class-name="td-phone"
+        >
           <template #default="{ row: u }">
             <div class="member-phone-cell">
               <Phone :size="12" class="member-phone-icon" />
@@ -678,9 +709,19 @@ onMounted(async () => {
             <span class="t-plan" :class="planTagClass(u.plan)">{{ u.plan }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="配送地址" min-width="300" show-overflow-tooltip>
+        <el-table-column label="配送地址" min-width="300" class-name="td-col-delivery-address">
           <template #default="{ row: u }">
-            {{ memberAddressDetailWithoutArea(u) || '—' }}
+            <el-tooltip
+              :content="memberAddressTooltipContent(u)"
+              placement="top-start"
+              :show-after="400"
+              :disabled="!memberAddressTooltipContent(u)"
+              popper-class="members-address-tooltip-popper"
+            >
+              <span class="members-address-cell-ellipsis">
+                {{ memberAddressDetailWithoutArea(u) || '—' }}
+              </span>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column label="请假时间" min-width="150" width="120" class-name="td-col-leave">
@@ -716,39 +757,72 @@ onMounted(async () => {
             {{ u.remarks || '—' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" align="right" min-width="300" fixed="right">
+        <el-table-column label="操作" align="right" min-width="220" fixed="right">
           <template #default="{ row: u }">
-            <div class="members-row-actions">
-              <el-button class="btn-members-op" type="success" plain title="套餐已确认送达的业务日（扣次记录）"
-                @click="openMemberDeliveryRecords(u)">
-                <Receipt :size="12" aria-hidden="true" style="margin-right: 5px;" />
-                消费记录
+            <div class="members-row-actions members-row-actions--denoised">
+              <el-button
+                type="primary"
+                link
+                size="small"
+                class="btn-members-link"
+                title="手工请假"
+                @click="openLeaveMember(u)"
+              >
+                <CalendarOff :size="12" aria-hidden="true" style="margin-right: 4px" />
+                请假
               </el-button>
               <el-button
-                class="btn-members-op"
                 type="primary"
+                link
+                size="small"
+                class="btn-members-link"
                 title="地址管理：查看全部配送地址，编辑、地图选点，并可代为切换默认地址"
                 @click="openMemberAddresses(u)"
               >
-                <MapPin :size="12" aria-hidden="true" style="margin-right: 5px;" />
+                <MapPin :size="12" aria-hidden="true" style="margin-right: 4px" />
                 地址
               </el-button>
-              <el-button class="btn-members-op" type="warning" title="手工请假" @click="openLeaveMember(u)">
-                <CalendarOff :size="12" aria-hidden="true" style="margin-right: 5px;" />
-                请假
-              </el-button>
-              <el-button class="btn-members-op" type="primary" title="修改会员信息" @click="openEditMember(u)">
-                <Pencil :size="12" aria-hidden="true" style="margin-right: 5px;" />
+              <el-button
+                type="primary"
+                link
+                size="small"
+                class="btn-members-link"
+                title="修改会员信息"
+                @click="openEditMember(u)"
+              >
+                <Pencil :size="12" aria-hidden="true" style="margin-right: 4px" />
                 修改
               </el-button>
-              <el-button type="danger" class="btn-members-op"
-                :disabled="memberDeletingId === u.id"
-                title="删除会员"
-                @click="deleteMemberRow(u)"
+              <el-dropdown
+                trigger="click"
+                @command="(cmd) => onMembersActionDropdown(cmd, u)"
               >
-                <Trash2 :size="12" aria-hidden="true" />
-                删除
-              </el-button>
+                <el-button type="primary" link size="small" class="btn-members-link">
+                  更多
+                  <ChevronDown :size="14" aria-hidden="true" class="members-more-chevron" />
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="records">
+                      <span class="members-dropdown-item-inner" title="套餐已确认送达的业务日（扣次记录）">
+                        <Receipt :size="14" aria-hidden="true" />
+                        消费记录
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      command="delete"
+                      divided
+                      :disabled="memberDeletingId === u.id"
+                      class="members-dd-item-delete"
+                    >
+                      <span class="members-dropdown-item-inner">
+                        <Trash2 :size="14" aria-hidden="true" />
+                        {{ memberDeletingId === u.id ? '删除中…' : '删除' }}
+                      </span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </template>
         </el-table-column>

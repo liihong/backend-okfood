@@ -45,21 +45,21 @@ function plotStatusLabel(st) {
   }
 }
 
-/** 门店锚点图钉（与会员黄/绿区分） */
+/** 门店锚点图钉（与会员黄/绿区分）— 尺寸与下方 STORE_W/H 一致 */
 function storePinIconDataUrl() {
   const svg =
-    '<svg xmlns="http://www.w3.org/2000/svg" width="38" height="46" viewBox="0 0 38 46">' +
-    '<path fill="#dc2626" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" ' +
+    '<svg xmlns="http://www.w3.org/2000/svg" width="27" height="32" viewBox="0 0 38 46">' +
+    '<path fill="#059669" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" ' +
     'd="M19 3C11.8 3 6 8.5 6 15.2c0 7.2 11.2 23.5 13 25.8 1.8-2.3 13-18.6 13-25.8C32 8.5 26.2 3 19 3z"/>' +
     '<text x="19" y="19" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="700" ' +
     "font-family=\"system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif\">店</text></svg>"
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
 }
 
-/** GCJ-02 会员图钉：白描边 + 中心高光，颜色与图例一致 */
+/** GCJ-02 会员图钉：白描边 + 中心高光，颜色与图例一致 — 尺寸与下方 PIN_W/H 一致 */
 function memberPinIconDataUrl(hexColor) {
   const fill = String(hexColor || '#eab308').trim()
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="46" viewBox="0 0 36 46"><path fill="${fill}" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" d="M18 3C10.3 3 4 9.1 4 16.4c0 8.5 14 25.6 14 25.6s14-17.1 14-25.6C32 9.1 25.7 3 18 3z"/><circle cx="18" cy="16" r="5" fill="#ffffff" fill-opacity="0.92"/></svg>`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="25" height="32" viewBox="0 0 36 46"><path fill="${fill}" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" d="M18 3C10.3 3 4 9.1 4 16.4c0 8.5 14 25.6 14 25.6s14-17.1 14-25.6C32 9.1 25.7 3 18 3z"/><circle cx="18" cy="16" r="5" fill="#ffffff" fill-opacity="0.92"/></svg>`
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
 }
 
@@ -195,8 +195,8 @@ function renderOverlays(AMap) {
   const slng = sa?.store_lng != null ? Number(sa.store_lng) : NaN
   const slat = sa?.store_lat != null ? Number(sa.store_lat) : NaN
   if (Number.isFinite(slng) && Number.isFinite(slat)) {
-    const STORE_W = 38
-    const STORE_H = 46
+    const STORE_W = 27
+    const STORE_H = 32
     const sicon = new AMap.Icon({
       size: new AMap.Size(STORE_W, STORE_H),
       image: storePinIconDataUrl(),
@@ -213,8 +213,8 @@ function renderOverlays(AMap) {
     map.add(sm)
     overlays.push(sm)
   }
-  const PIN_W = 36
-  const PIN_H = 46
+  const PIN_W = 25
+  const PIN_H = 32
   for (const m of props.memberPoints) {
     const lng = m.lng != null ? Number(m.lng) : null
     const lat = m.lat != null ? Number(m.lat) : null
@@ -354,8 +354,8 @@ onUnmounted(() => {
 <style scoped>
 .delivery-overview-map {
   width: 100%;
-  height: min(76vh, 880px);
-  min-height: 520px;
+  height: min(78vh, 920px);
+  min-height: 560px;
   border-radius: 16px;
   border: 1px solid #e2e8f0;
   overflow: hidden;
