@@ -214,6 +214,11 @@ function flatStopsForSheet(sheet) {
 
 const flatStops = computed(() => flatStopsForSheet(sheetToday.value))
 
+/** 大表停靠点合计份数（与列表「餐」汇总一致：后厨需出） */
+const sheetKitchenMealTotal = computed(() =>
+  flatStops.value.reduce((s, x) => s + (Number(x.meal_count) || 0), 0)
+)
+
 /** 片区 Tab 副文案：到家展示待/已送达份数；自提单独说明 */
 function groupTabMetaLine(group) {
   if (!group) return ''
@@ -623,71 +628,62 @@ async function markDelivery(memberId, kind) {
 <template>
   <section class="tab-content animate-up delivery-view">
     <div class="delivery-toolbar no-print">
-      <!-- 单行：左日期/片区，右统计文案 + 刷新/打印 -->
+      <!-- 左：筛选；右：操作按钮。下一行：左侧汇总文案、右侧片区卡片，同一行对齐 -->
       <div class="delivery-toolbar__row delivery-toolbar__row--primary">
-        <div class="delivery-toolbar__filters">
-          <label class="delivery-field">
-            <span>配送业务日</span>
-            <el-date-picker
-              v-model="deliveryDateQuery"
-              type="date"
-              value-format="YYYY-MM-DD"
-              placeholder="选择日期"
-              :disabled="loading"
-              :clearable="true"
-              class="delivery-el-date"
-              @change="fetchSheet"
-            />
-          </label>
-          <label class="delivery-field">
-            <span>片区</span>
-            <el-select
-              v-model="areaFilter"
-              placeholder="全部"
-              clearable
-              :disabled="loading"
-              class="delivery-el-select"
-              @change="fetchSheet"
-            >
-              <el-option label="全部" value="" />
-              <el-option v-for="n in activeRegions" :key="n" :label="n" :value="n" />
-            </el-select>
-          </label>
-          <label class="delivery-field delivery-field--phone">
-            <span>手机号</span>
-            <div class="delivery-phone-row">
-              <el-input
-                v-model="phoneQuery"
-                placeholder="后四位或完整号码"
+        <div class="delivery-toolbar__left">
+          <div class="delivery-toolbar__filters">
+            <label class="delivery-field">
+              <span>配送业务日</span>
+              <el-date-picker
+                v-model="deliveryDateQuery"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="选择日期"
+                :disabled="loading"
+                :clearable="true"
+                class="delivery-el-date"
+                @change="fetchSheet"
+              />
+            </label>
+            <label class="delivery-field">
+              <span>片区</span>
+              <el-select
+                v-model="areaFilter"
+                placeholder="全部"
                 clearable
                 :disabled="loading"
-                class="delivery-el-phone"
-                @clear="fetchSheet"
-                @keyup.enter="fetchSheet"
-              />
-              <button
-                type="button"
-                class="btn-ghost delivery-phone-search"
-                :disabled="loading"
-                @click="fetchSheet"
+                class="delivery-el-select"
+                @change="fetchSheet"
               >
-                查询
-              </button>
-            </div>
-          </label>
+                <el-option label="全部" value="" />
+                <el-option v-for="n in activeRegions" :key="n" :label="n" :value="n" />
+              </el-select>
+            </label>
+            <label class="delivery-field delivery-field--phone">
+              <span>手机号</span>
+              <div class="delivery-phone-row">
+                <el-input
+                  v-model="phoneQuery"
+                  placeholder="后四位或完整号码"
+                  clearable
+                  :disabled="loading"
+                  class="delivery-el-phone"
+                  @clear="fetchSheet"
+                  @keyup.enter="fetchSheet"
+                />
+                <button
+                  type="button"
+                  class="btn-ghost delivery-phone-search"
+                  :disabled="loading"
+                  @click="fetchSheet"
+                >
+                  查询
+                </button>
+              </div>
+            </label>
+          </div>
         </div>
         <div class="delivery-toolbar__actions">
-          <p class="delivery-meta">
-            到家：待送达 <strong>{{ sheetToday.home_pending_meal_total }}</strong> 份、已送达
-            <strong>{{ sheetToday.home_delivered_meal_total }}</strong> 份
-            <template v-if="sheetToday.pickup_meal_total > 0">
-              · 门店自提 <strong>{{ sheetToday.pickup_meal_total }}</strong> 份
-            </template>
-            <br />
-            共 <strong>{{ flatStops.length }}</strong> 个配送点 ·
-            <strong>{{ flatStops.reduce((s, x) => s + (x.meal_count || 0), 0) }}</strong>
-            份（已排除请假区间覆盖该业务日、以及「明天请假」命中该日的会员）
-          </p>
           <button type="button" class="btn-ghost delivery-icon-btn" :disabled="loading" @click="fetchSheet">
             <RefreshCw :size="18" :class="{ 'spin': loading }" />
             刷新
@@ -726,28 +722,43 @@ async function markDelivery(memberId, kind) {
           </el-button>
         </div>
       </div>
-      <!-- 片区统计与切换：单独一行，右对齐，不占表格区 -->
-      <div
-        v-if="!loading && sheetToday.groups?.length"
-        class="delivery-toolbar__region-tabs"
-      >
-        <div class="delivery-tablist" role="tablist" aria-label="配送片区">
-          <button
-            v-for="group in sheetToday.groups"
-            :key="'t-tab-' + group.area"
-            type="button"
-            role="tab"
-            class="delivery-region-tab"
-            :class="{
-              'delivery-region-tab--active': activeRegionTab === group.area,
-              'delivery-region-tab--warn': group.has_area_issue,
-            }"
-            :aria-selected="activeRegionTab === group.area"
-            @click="activeRegionTab = group.area"
+      <div class="delivery-toolbar__band">
+        <div class="delivery-toolbar__band-inner">
+          <div class="delivery-summary-strip" aria-live="polite">
+            <div class="delivery-summary-strip__stats">
+              <p class="delivery-summary-strip__inline">
+                共 <strong>{{ flatStops.length }}</strong> 个配送点，后厨需出
+                <strong>{{ sheetKitchenMealTotal }}</strong> 份餐
+                <span class="delivery-summary-strip__sep" aria-hidden="true"> / </span>
+                待送达 <strong>{{ sheetToday.home_pending_meal_total }}</strong> 份，已送达
+                <strong>{{ sheetToday.home_delivered_meal_total }}</strong> 份，自提
+                <strong>{{ sheetToday.pickup_meal_total }}</strong> 份
+              </p>
+            </div>
+          </div>
+          <div
+            v-if="!loading && sheetToday.groups?.length"
+            class="delivery-tablist delivery-tablist--in-band"
+            role="tablist"
+            aria-label="配送片区"
           >
-            <span class="delivery-region-tab__label">{{ group.area }}</span>
-            <span class="delivery-region-tab__meta">{{ groupTabMetaLine(group) }}</span>
-          </button>
+            <button
+              v-for="group in sheetToday.groups"
+              :key="'t-tab-' + group.area"
+              type="button"
+              role="tab"
+              class="delivery-region-tab"
+              :class="{
+                'delivery-region-tab--active': activeRegionTab === group.area,
+                'delivery-region-tab--warn': group.has_area_issue,
+              }"
+              :aria-selected="activeRegionTab === group.area"
+              @click="activeRegionTab = group.area"
+            >
+              <span class="delivery-region-tab__label">{{ group.area }}</span>
+              <span class="delivery-region-tab__meta">{{ groupTabMetaLine(group) }}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1111,9 +1122,17 @@ async function markDelivery(memberId, kind) {
 .delivery-toolbar__row--primary {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem 1rem;
+}
+.delivery-toolbar__left {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  flex: 1 1 auto;
+  min-width: min(100%, 18rem);
 }
 .delivery-toolbar__filters {
   display: flex;
@@ -1221,13 +1240,18 @@ async function markDelivery(memberId, kind) {
   color: #64748b;
   font-size: 0.9rem;
 }
-.delivery-toolbar__region-tabs {
-  display: flex;
-  justify-content: flex-end;
+.delivery-toolbar__band {
+  width: 100%;
+  padding-top: 0.5rem;
+  border-top: 1px solid #e2e8f0;
 }
-.delivery-toolbar__region-tabs .delivery-tablist {
-  justify-content: flex-end;
-  max-width: 100%;
+.delivery-toolbar__band-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.75rem 1rem;
+  width: 100%;
 }
 .delivery-main {
   display: flex;
@@ -1264,6 +1288,12 @@ async function markDelivery(memberId, kind) {
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: stretch;
+}
+/** 与顶部汇总并排：片区卡片靠右侧；空间不足时可换行，仍贴在行末对齐 */
+.delivery-tablist--in-band {
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 .delivery-region-tab {
   display: inline-flex;
@@ -1409,14 +1439,23 @@ async function markDelivery(memberId, kind) {
     transform: rotate(360deg);
   }
 }
-.delivery-meta {
+.delivery-summary-strip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.delivery-summary-strip__stats {
+  margin: 0;
+  text-align: left;
+}
+.delivery-summary-strip__inline {
   margin: 0;
   font-size: 0.8rem;
   color: #64748b;
-  text-align: right;
-  line-height: 1.4;
-  flex: 1 1 14rem;
-  min-width: min(100%, 12rem);
+  line-height: 1.45;
+}
+.delivery-summary-strip__sep {
+  color: #94a3b8;
 }
 .inline-icon {
   vertical-align: -0.2em;

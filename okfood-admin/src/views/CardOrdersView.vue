@@ -17,8 +17,8 @@ const pageSize = ref(20)
 const total = ref(0)
 const searchQuery = ref('')
 const payFilter = ref('')
-/** 默认 false：仅待处理（未缴或已缴未入账）；勾选后查全部历史 */
-const includeHistory = ref(false)
+/** 默认 true：进入页面即查全部历史；取消勾选则仅待处理（未缴或已缴未入账） */
+const includeHistory = ref(true)
 
 function todayInputDate() {
   const d = new Date()
@@ -53,6 +53,16 @@ function remarkPreview(text) {
   const t = (text == null ? '' : String(text)).trim()
   if (!t) return '—'
   return truncateText(t, 22)
+}
+
+/** 列表「实收」列：按元展示整数（不改变接口字段） */
+function formatAmountYuanInteger(v) {
+  if (v === null || v === undefined) return '—'
+  const s = String(v).trim()
+  if (!s) return '—'
+  const n = Number(s)
+  if (!Number.isFinite(n)) return '—'
+  return String(Math.round(n))
 }
 
 /** 创建人 + 时间单行：MM-DD HH:mm */
@@ -482,10 +492,11 @@ onMounted(() => {
           <input v-model="searchQuery" placeholder="搜索手机、姓名或微信昵称…" />
         </div>
         <div class="card-orders-filters">
-         <label class="card-orders-filter-label card-orders-filter-label--check">
-            <input v-model="includeHistory" type="checkbox" class="card-orders-history-check" />
-            查看历史开卡记录
-          </label>
+         <div class="card-orders-filter-label card-orders-filter-label--check">
+            <el-checkbox v-model="includeHistory" class="card-orders-history-el-checkbox">
+              查看历史开卡记录
+            </el-checkbox>
+          </div>
           <label class="card-orders-filter-label">
             缴费
             <select v-model="payFilter" class="card-orders-select">
@@ -546,7 +557,7 @@ size="small"
        <el-table-column label="实收" align="right" width="72" min-width="64" class-name="co-amt">
           <template #default="{ row }">
            <span class="font-black co-amt-num">
-              {{ row.amount_yuan != null && row.amount_yuan !== '' ? row.amount_yuan : '—' }}
+              {{ formatAmountYuanInteger(row.amount_yuan) }}
             </span>
           </template>
         </el-table-column>
@@ -993,12 +1004,17 @@ class="member-pill co-sync-pill"
   cursor: pointer;
 }
 
-.card-orders-history-check {
-  width: 1rem;
-  height: 1rem;
-  margin: 0;
-  accent-color: var(--primary, #3b82f6);
-  cursor: pointer;
+/* 查看历史记录：Element Plus Checkbox，默认 v-model=true */
+.card-orders-history-el-checkbox.el-checkbox {
+  margin-right: 0;
+  height: auto;
+}
+
+.card-orders-history-el-checkbox.el-checkbox :deep(.el-checkbox__label) {
+  padding-left: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted, #64748b);
 }
 .card-orders-select {
   padding: 8px 10px;
