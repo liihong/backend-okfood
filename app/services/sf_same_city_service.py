@@ -39,6 +39,7 @@ from app.services.delivery_sheet_service import (
 )
 from app.services.member_address_service import delivery_region_name_map, full_address_line, routing_area_label
 from app.services.member_service import effective_daily_meal_units
+from app.services.store_config_service import get_store_config
 from app.services.sf_open import sign as sf_sign_mod
 from app.services.sf_open.client import SfOpenApiError, SfOpenClient
 from app.services.tenant_integration_service import merged_sf_integration_namespace
