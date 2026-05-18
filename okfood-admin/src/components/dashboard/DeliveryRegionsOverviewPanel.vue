@@ -21,6 +21,14 @@ const dashboardStatsLoading = ref(false)
 const summaryAnchorDate = ref('')
 /** @type {import('vue').Ref<Record<string, unknown> | null>} */
 const summaryMeta = ref(null)
+/** 与智能配送大表同源拆分（/api/admin/delivery-sheet），锚定日与营业概览一致
+ * @type {import('vue').Ref<{ total: number, delivery: number, pickup: number } | null>}
+ */
+const sheetPrepBreakdown = ref(null)
+/** 锚定日「次日」大表拆分（明日需备餐的配送/自提）
+ * @type {import('vue').Ref<{ total: number, delivery: number, pickup: number } | null>}
+ */
+const tomorrowPrepBreakdown = ref(null)
 
 const summaryIsLiveToday = computed(() => {
   const m = summaryMeta.value
@@ -28,9 +36,103 @@ const summaryIsLiveToday = computed(() => {
   return String(m.business_anchor_date || '') === String(m.shanghai_today || '')
 })
 
+/** 营业锚定日 → YYYY/MM/DD，与日期选择器、概览接口一致 */
+const businessAnchorDateDisplay = computed(() => {
+  const raw = summaryMeta.value?.business_anchor_date ?? summaryAnchorDate.value
+  if (raw == null || String(raw).trim() === '') return ''
+  const s = String(raw).trim().slice(0, 10)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (m) return `${m[1]}/${m[2]}/${m[3]}`
+  return s
+})
+
+/** 锚定日的次日（概览中的「明日」），YYYY/MM/DD；按日历日 +1，用 UTC 避免本机时区偏移 */
+const businessAnchorTomorrowDisplay = computed(() => {
+  const raw = summaryMeta.value?.business_anchor_date ?? summaryAnchorDate.value
+  if (raw == null || String(raw).trim() === '') return ''
+  const s = String(raw).trim().slice(0, 10)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (!m) return ''
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+  dt.setUTCDate(dt.getUTCDate() + 1)
+  const y = dt.getUTCFullYear()
+  const mo = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(dt.getUTCDate()).padStart(2, '0')
+  return `${y}/${mo}/${d}`
+})
+
+/** 请假卡标题：有锚定日时为「2026/05/18请假总览」，加载前仍为「今日请假总览」 */
+const leaveOverviewTitle = computed(() => {
+  const d = businessAnchorDateDisplay.value
+  return d ? `${d} - 请假总览` : '今日请假总览'
+})
+
+/** 备餐 / 到期卡标题：同一锚定日前缀 */
+const mealPrepTitle = computed(() => {
+  const d = businessAnchorDateDisplay.value
+  return d ? `${d} - 需备餐品` : '今日需备餐品'
+})
+const expiryActivityTitle = computed(() => {
+  const d = businessAnchorDateDisplay.value
+  return d ? `${d} - 到期与活跃` : '到期与活跃'
+})
+
+/** 续费与备餐卡：展示「明日」日期（锚定日+1 天），与概览中明日备餐等指标同日 */
+const renewalPrepTitle = computed(() => {
+  const t = businessAnchorTomorrowDisplay.value
+  return t ? `${t} - 续费与备餐` : '续费与备餐'
+})
+
+/** ISO 日历日 YYYY-MM-DD 的次日（UTC，与业务日一致） */
+function addOneDayIso(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso).trim().slice(0, 10))
+  if (!m) return ''
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+  dt.setUTCDate(dt.getUTCDate() + 1)
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(
+    dt.getUTCDate(),
+  ).padStart(2, '0')}`
+}
+
+/** 解析 delivery-sheet 汇总为总份数 / 配送 / 自提 */
+function parseDeliverySheetBreakdown(sh) {
+  if (!sh || typeof sh !== 'object') return null
+  const hp = Number(sh.home_pending_meal_total) || 0
+  const hd = Number(sh.home_delivered_meal_total) || 0
+  const pu = Number(sh.pickup_meal_total) || 0
+  return { total: hp + hd + pu, delivery: hp + hd, pickup: pu }
+}
+
+/** 拉取配送大表汇总行，与 DeliveryView 顶部「后厨需出 / 待送达 / 自提」同一口径 */
+async function fetchSheetPrepBreakdowns(anchorIso) {
+  sheetPrepBreakdown.value = null
+  tomorrowPrepBreakdown.value = null
+  if (!adminAccessToken.value || !anchorIso) return
+  const day = String(anchorIso).trim().slice(0, 10)
+  const nextDay = addOneDayIso(day)
+  if (!nextDay) return
+  try {
+    const qs1 = new URLSearchParams()
+    qs1.set('delivery_date', day)
+    const qs2 = new URLSearchParams()
+    qs2.set('delivery_date', nextDay)
+    const [shToday, shTomorrow] = await Promise.all([
+      apiJson(`/api/admin/delivery-sheet?${qs1.toString()}`, {}, { auth: true }),
+      apiJson(`/api/admin/delivery-sheet?${qs2.toString()}`, {}, { auth: true }),
+    ])
+    sheetPrepBreakdown.value = parseDeliverySheetBreakdown(shToday)
+    tomorrowPrepBreakdown.value = parseDeliverySheetBreakdown(shTomorrow)
+  } catch {
+    sheetPrepBreakdown.value = null
+    tomorrowPrepBreakdown.value = null
+  }
+}
+
 async function fetchDashboardSummary() {
   if (!adminAccessToken.value) return
   dashboardStatsLoading.value = true
+  sheetPrepBreakdown.value = null
+  tomorrowPrepBreakdown.value = null
   try {
     const q = summaryAnchorDate.value.trim()
     const qs = q ? `?business_date=${encodeURIComponent(q)}` : ''
@@ -39,6 +141,9 @@ async function fetchDashboardSummary() {
     if (d && typeof d.business_anchor_date === 'string') {
       summaryAnchorDate.value = d.business_anchor_date
     }
+    await fetchSheetPrepBreakdowns(
+      d && typeof d.business_anchor_date === 'string' ? d.business_anchor_date : '',
+    )
     const tl = Number(d?.today_leave_members) || 0
     const tp = Number(d?.today_meals_to_prepare) || 0
     const nl = Number(d?.tomorrow_leave_members) || 0
@@ -60,6 +165,8 @@ async function fetchDashboardSummary() {
     }
     dashboardStats.value = []
     summaryMeta.value = null
+    sheetPrepBreakdown.value = null
+    tomorrowPrepBreakdown.value = null
     showToast(e instanceof Error ? e.message : '加载营业概览失败', 'error')
   } finally {
     dashboardStatsLoading.value = false
@@ -143,6 +250,41 @@ const summarySlice = computed(() => ({
 
 const expireCount = computed(() => Number(dashboardStats.value[4]?.value) || 0)
 
+/** 备餐卡片「总数」：优先大表停靠点合计（与智能配送页一致），否则回落营业概览 */
+const cardPrepTotal = computed(() => {
+  if (sheetPrepBreakdown.value != null) return sheetPrepBreakdown.value.total
+  return Number(dashboardStats.value[2]?.value) || 0
+})
+
+/** 配送=到家待送达+已送达；自提=门店自提分组。优先大表接口，与图1 红框一致 */
+const todayMealsDelivery = computed(() => {
+  if (sheetPrepBreakdown.value != null) return sheetPrepBreakdown.value.delivery
+  const v = summaryMeta.value?.today_meals_delivery
+  if (v == null) return null
+  return Number(v) || 0
+})
+const todayMealsPickup = computed(() => {
+  if (sheetPrepBreakdown.value != null) return sheetPrepBreakdown.value.pickup
+  const v = summaryMeta.value?.today_meals_pickup
+  if (v == null) return null
+  return Number(v) || 0
+})
+
+/** 明日备餐：总份优先大表次日合计，否则营业概览 tomorrow_meals_to_prepare */
+const cardTomorrowPrepTotal = computed(() => {
+  if (tomorrowPrepBreakdown.value != null) return tomorrowPrepBreakdown.value.total
+  return Number(dashboardStats.value[3]?.value) || 0
+})
+
+const tomorrowPrepDelivery = computed(() => {
+  if (tomorrowPrepBreakdown.value != null) return tomorrowPrepBreakdown.value.delivery
+  return null
+})
+const tomorrowPrepPickup = computed(() => {
+  if (tomorrowPrepBreakdown.value != null) return tomorrowPrepBreakdown.value.pickup
+  return null
+})
+
 const storePinLegendCount = computed(() =>
   storeAnchor.value?.store_lng != null && storeAnchor.value?.store_lat != null ? 1 : 0,
 )
@@ -220,8 +362,8 @@ onMounted(() => {
         :class="{ 'dro-stat-card--historical': !summaryIsLiveToday }"
       >
         <div class="dro-stat-card-top dro-stat-card-top--dense-icon">
-          <span class="dro-stat-card-k">今日请假总览</span>
-          <CalendarMinus :size="17" class="dro-stat-card-ico" aria-hidden="true" />
+          <span class="dro-stat-card-k">{{ leaveOverviewTitle }}</span>
+          <CalendarMinus :size="18" class="dro-stat-card-ico" aria-hidden="true" />
         </div>
         <div class="dro-stat-card-metric-wrap dro-stat-card-metric-wrap--lift">
           <div class="dro-stat-card-metric dro-stat-card-metric--leave">
@@ -244,22 +386,29 @@ onMounted(() => {
         :class="{ 'dro-stat-card--historical': !summaryIsLiveToday }"
       >
         <div class="dro-stat-card-top dro-stat-card-top--dense-icon">
-          <span class="dro-stat-card-k">今日需备餐品</span>
-          <Utensils :size="17" class="dro-stat-card-ico dro-stat-card-ico--emerald" aria-hidden="true" />
+          <span class="dro-stat-card-k">{{ mealPrepTitle }}</span>
+          <Utensils :size="18" class="dro-stat-card-ico dro-stat-card-ico--meal-prep" aria-hidden="true" />
         </div>
-        <div class="dro-stat-card-metric-wrap dro-stat-card-metric-wrap--lift">
-          <div class="dro-stat-card-metric dro-stat-card-metric--emerald">
-            <span class="dro-stat-card-num dro-stat-card-num--xl">{{ summarySlice.todayMeals }}</span>
-            <span class="dro-stat-card-unit">份</span>
+        <div class="dro-stat-card-metric-wrap dro-stat-card-metric-wrap--prep-rows">
+          <div class="dro-stat-card-prep-row dro-stat-card-prep-row--total dro-stat-card-metric--emerald">
+            <span class="dro-stat-card-num dro-stat-card-num--xl">{{ cardPrepTotal }}</span>
+            <span class="dro-stat-card-unit dro-stat-card-unit--prep-hero">份</span>
           </div>
-        </div>
-        <div class="dro-stat-card-foot dro-stat-card-foot--dock">
-          <p class="dro-stat-card-foot-caption">
-            明日需备餐:
-            <span class="dro-stat-card-foot-strong dro-stat-card-foot-strong--tomorrow-meals"
-              >{{ summarySlice.tomorrowMeals }}份</span
+          <div class="dro-stat-card-prep-row dro-stat-card-prep-row--split">
+            <span class="dro-stat-card-prep-split-chunk"
+              >配送<span class="dro-stat-card-prep-split-num">{{
+                todayMealsDelivery === null ? '—' : todayMealsDelivery
+              }}</span
+              >份</span
             >
-          </p>
+            <span class="dro-stat-card-prep-split-gap" aria-hidden="true" />
+            <span class="dro-stat-card-prep-split-chunk"
+              >自提<span class="dro-stat-card-prep-split-num">{{
+                todayMealsPickup === null ? '—' : todayMealsPickup
+              }}</span
+              >份</span
+            >
+          </div>
         </div>
       </article>
 
@@ -269,14 +418,14 @@ onMounted(() => {
       >
         <div class="dro-stat-card-top dro-stat-card-top--asset">
           <div class="dro-stat-card-title-inline">
-            <span class="dro-stat-card-k">到期与活跃</span>
+            <span class="dro-stat-card-k">{{ expiryActivityTitle }}</span>
             <el-tooltip content="仅统计当前账户有余额会员" placement="top" :show-after="250">
               <button type="button" class="dro-stat-card-tip dro-stat-card-tip--soft" aria-label="口径说明">
                 <Info :size="14" stroke-width="2.5" aria-hidden="true" />
               </button>
             </el-tooltip>
           </div>
-          <Users :size="17" class="dro-stat-card-ico dro-stat-card-ico--blue" aria-hidden="true" />
+          <Users :size="18" class="dro-stat-card-ico dro-stat-card-ico--blue" aria-hidden="true" />
         </div>
         <div class="dro-stat-card-asset-mid">
           <div class="dro-stat-card-split dro-stat-card-split--around">
@@ -298,8 +447,8 @@ onMounted(() => {
         :class="{ 'dro-stat-card--historical': !summaryIsLiveToday }"
       >
         <div class="dro-stat-card-top dro-stat-card-top--asset">
-          <span class="dro-stat-card-k">续费与备餐</span>
-          <CalendarClock :size="17" class="dro-stat-card-ico dro-stat-card-ico--amber" aria-hidden="true" />
+          <span class="dro-stat-card-k">{{ renewalPrepTitle }}</span>
+          <CalendarClock :size="18" class="dro-stat-card-ico dro-stat-card-ico--amber" aria-hidden="true" />
         </div>
         <div class="dro-stat-card-asset-mid">
           <div class="dro-stat-card-split dro-stat-card-split--around">
@@ -313,15 +462,31 @@ onMounted(() => {
               </p>
             </div>
             <span class="dro-stat-card-split-vsep dro-stat-card-split-vsep--refined" aria-hidden="true" />
-            <div class="dro-stat-card-split-cell">
+            <div class="dro-stat-card-split-cell dro-stat-card-split-cell--tomorrow-prep">
               <p class="dro-stat-card-split-k">明天需准备餐品</p>
-              <p class="dro-stat-card-split-vrow">
-                <span
-                  class="dro-stat-card-split-v dro-stat-card-split-v--lg dro-stat-card-split-v--nextday-prep"
-                  >{{ summarySlice.tomorrowMeals }}</span
-                >
-                <span class="dro-stat-card-split-u dro-stat-card-split-u--nextday-prep">份</span>
-              </p>
+              <div
+                class="dro-stat-card-metric-wrap dro-stat-card-metric-wrap--prep-rows dro-stat-card-metric-wrap--prep-rows--nested"
+              >
+                <div class="dro-stat-card-prep-row dro-stat-card-prep-row--total dro-stat-card-metric--nextday-embed">
+                  <span class="dro-stat-card-num dro-stat-card-num--nest-xl">{{ cardTomorrowPrepTotal }}</span>
+                  <span class="dro-stat-card-unit dro-stat-card-unit--nest-nextday">份</span>
+                </div>
+                <div class="dro-stat-card-prep-row dro-stat-card-prep-row--split">
+                  <span class="dro-stat-card-prep-split-chunk"
+                    >配送<span class="dro-stat-card-prep-split-num dro-stat-card-prep-split-num--nest">{{
+                      tomorrowPrepDelivery === null ? '—' : tomorrowPrepDelivery
+                    }}</span
+                    >份</span
+                  >
+                  <span class="dro-stat-card-prep-split-gap" aria-hidden="true" />
+                  <span class="dro-stat-card-prep-split-chunk"
+                    >自提<span class="dro-stat-card-prep-split-num dro-stat-card-prep-split-num--nest">{{
+                      tomorrowPrepPickup === null ? '—' : tomorrowPrepPickup
+                    }}</span
+                    >份</span
+                  >
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -644,6 +809,11 @@ onMounted(() => {
   color: #d1fae5;
 }
 
+/** 备餐卡：餐具图标与请假卡等处同为深绿 #047857 */
+.dro-stat-card-ico--meal-prep {
+  flex-shrink: 0;
+}
+
 .dro-stat-card-ico--blue {
   color: #dbeafe;
 }
@@ -660,6 +830,142 @@ onMounted(() => {
   margin-top: -0.5rem;
 }
 
+.dro-stat-card-metric-wrap--prep-rows {
+  margin-top: -0.35rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  min-height: 4.25rem;
+}
+
+.dro-stat-card-prep-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.dro-stat-card-prep-row--split {
+  font-size: 14px;
+  font-weight: 700;
+  color: #475569;
+  line-height: 1.4;
+}
+
+/** 备餐卡主行「份」与第二行数字略加大、对比度提高 */
+.dro-stat-card--meal .dro-stat-card-unit--prep-hero {
+  font-size: 16px;
+  font-weight: 800;
+  color: #047857;
+}
+
+.dro-stat-card--meal .dro-stat-card-num--xl {
+  font-size: 3.35rem;
+}
+
+.dro-stat-card--meal .dro-stat-card-prep-split-num {
+  color: #047857;
+  font-weight: 900;
+  font-size: 1.05em;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0.05rem;
+}
+
+.dro-stat-card-prep-split-gap {
+  display: inline-block;
+  width: 0.5rem;
+}
+
+/** 续费卡右栏：明日备餐嵌套（与「今日需备餐品」相同配送/自提拆分，栏宽较窄略缩小主数字） */
+.dro-stat-card-metric-wrap--prep-rows--nested {
+  min-height: 0;
+  margin-top: 0.1rem;
+  padding: 0.15rem 0 0;
+  gap: 0.35rem;
+}
+
+.dro-stat-card--renewal-prep .dro-stat-card-split-cell--tomorrow-prep .dro-stat-card-split-k {
+  margin-bottom: 0.3rem;
+}
+
+.dro-stat-card-metric--nextday-embed .dro-stat-card-num--nest-xl {
+  font-size: 2.35rem;
+  font-weight: 900;
+  color: #a16207;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.dro-stat-card-unit--nest-nextday {
+  font-size: 14px;
+  font-weight: 800;
+  color: #ca8a04;
+}
+
+.dro-stat-card--renewal-prep .dro-stat-card-prep-split-num--nest {
+  color: #047857;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+/**
+ * 与备餐卡黄框「配送…自提…」行一致：14px / 700 / #475569；数字强调 #047857（同 dro-stat-card-prep-split-num）
+ */
+.dro-stat-card--leave .dro-stat-card-k,
+.dro-stat-card--meal .dro-stat-card-k,
+.dro-stat-card--asset .dro-stat-card-k,
+.dro-stat-card--renewal-prep .dro-stat-card-k {
+  font-size: 14px;
+  font-weight: 700;
+  color: #475569;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.dro-stat-card--leave .dro-stat-card-foot-caption {
+  font-size: 14px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.dro-stat-card--leave .dro-stat-card-foot-strong--tomorrow-leave {
+  color: #047857;
+  font-weight: 900;
+}
+
+.dro-stat-card--leave .dro-stat-card-ico,
+.dro-stat-card--meal .dro-stat-card-ico {
+  color: #047857;
+}
+
+.dro-stat-card--asset .dro-stat-card-split-k {
+  font-size: 14px;
+  font-weight: 700;
+  color: #475569;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.dro-stat-card--asset .dro-stat-card-ico--blue {
+  color: #047857;
+}
+
+.dro-stat-card--asset .dro-stat-card-tip--soft {
+  color: #475569;
+}
+
+.dro-stat-card--asset .dro-stat-card-tip--soft:hover {
+  color: #334155;
+}
+
+.dro-stat-card--renewal-prep .dro-stat-card-ico--amber {
+  color: #047857;
+}
+
+
 .dro-stat-card-foot-caption {
   margin: 0;
   font-size: 12px;
@@ -669,13 +975,8 @@ onMounted(() => {
 }
 
 .dro-stat-card-foot-strong {
-  color: #94a3b8;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-}
-
-.dro-stat-card-foot-strong--tomorrow-leave {
-  color: #0891b2;
 }
 
 .dro-stat-card-foot-strong--tomorrow-meals {
@@ -1180,11 +1481,11 @@ onMounted(() => {
 
 .dro-rank-name {
   margin: 0 0 0.2rem;
-  font-size: 12px;
-  font-weight: 900;
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-size: 14px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: none;
+  letter-spacing: normal;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
