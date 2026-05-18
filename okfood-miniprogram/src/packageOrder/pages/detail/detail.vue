@@ -33,13 +33,35 @@
               <text class="p-hint">包月订阅更优惠 👌</text>
               <view v-if="showDayStockBlock" class="day-stock-line">
                 <block v-if="dish.singleStockLimited">
-                  <text class="day-stock-txt">当日剩余</text>
-                  <text class="day-stock-num">{{ dish.singleStockRemaining ?? 0 }}</text>
-                  <text class="day-stock-unit">份</text>
+                  <template v-if="singleDayStockSoldOut">
+                    <text class="day-stock-soldout">售罄</text>
+                  </template>
+                  <template v-else>
+                    <text class="day-stock-txt">当日剩余</text>
+                    <text class="day-stock-num">{{ dish.singleStockRemaining ?? 0 }}</text>
+                    <text class="day-stock-unit">份</text>
+                  </template>
                 </block>
                 <text v-else class="day-stock-unlimited">当日单点不限量</text>
               </view>
             </view>
+          </view>
+          <view v-if="showMainStockBanner" class="stock-main-banner">
+            <template v-if="dish.singleStockLimited">
+              <text v-if="singleDayStockSoldOut" class="stock-main-stock stock-main-stock--soldout">
+                当日单次卡配额已售罄
+              </text>
+              <view v-else class="stock-main-stock">
+                <text class="stock-main-prefix">单次卡·本供餐日剩余库存</text>
+                <view class="stock-main-count">
+                  <text class="stock-main-num">{{ dish.singleStockRemaining ?? 0 }}</text>
+                  <text class="stock-main-unit">份</text>
+                </view>
+              </view>
+            </template>
+            <text v-else-if="serviceDateYmd" class="stock-main-unlimited">
+              本供餐日单次卡：<text class="stock-main-strong">不限量供应</text>（以实际接单为准）
+            </text>
           </view>
           <view class="ingredient-box">
             <text class="ingredient-title">🔍 核心配料明细</text>
@@ -75,19 +97,28 @@ const loading = ref(true)
 const loadError = ref('')
 /** 供餐日 YYYY-MM-DD，来自周菜单跳转 */
 const serviceDateYmd = ref('')
+
+/** 已设单日总上限且单次卡配额已用尽（或与后端对齐时 remaining 不可售） */
+const singleDayStockSoldOut = computed(() => {
+  const d = dish.value
+  if (!d || !d.singleStockLimited) return false
+  const n = d.singleStockRemaining
+  return n == null || Number(n) <= 0
+})
+
 const canSubmitSingleOrder = computed(() => {
   if (!isSingleOrderServiceDate(serviceDateYmd.value)) return false
   const d = dish.value
-  if (!d) return true
-  if (d.singleStockLimited) {
-    const n = d.singleStockRemaining
-    if (n == null || n <= 0) return false
-  }
+  if (!d) return false
+  if (singleDayStockSoldOut.value) return false
   return true
 })
 
 /** 有供餐日才展示「当日剩余」与订阅提示同列，否则仅保留原右侧一句提示在下方 v-else 分支 */
 const showDayStockBlock = computed(() => !!(serviceDateYmd.value && dish.value))
+
+/** 有供餐日时在价格卡片下展示整块库存说明（有限额 / 不限量 / 售罄） */
+const showMainStockBanner = computed(() => !!(serviceDateYmd.value && dish.value))
 /** scroll-view 必须用确定 px高度，微信里 flex+calc 易导致子节点不渲染 */
 const scrollStyle = ref({ height: '400px' })
 
@@ -156,6 +187,10 @@ function onImgErr() {
 
 function handleBuy() {
   if (!dish.value) return
+  if (singleDayStockSoldOut.value) {
+    uni.showToast({ title: '当日单次卡已无库存', icon: 'none' })
+    return
+  }
   if (!canSubmitSingleOrder.value) {
     const msg = singleOrderServiceDateError(serviceDateYmd.value)
     uni.showToast({ title: msg, icon: 'none' })
@@ -338,6 +373,74 @@ function handleBuy() {
   font-size: 24rpx;
   color: $ok-slate-400;
   font-weight: 700;
+}
+
+.day-stock-soldout {
+  font-size: 32rpx;
+  font-weight: 950;
+  color: $ok-slate-400;
+  letter-spacing: 4rpx;
+}
+
+.stock-main-banner {
+  padding: 28rpx 32rpx;
+  margin-bottom: 40rpx;
+  border-radius: 36rpx;
+  background: #f8faf8;
+  border: 2rpx solid rgba(14, 90, 68, 0.12);
+  box-sizing: border-box;
+}
+
+.stock-main-stock {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.stock-main-prefix {
+  display: block;
+  font-size: 26rpx;
+  color: $ok-slate-500;
+  font-weight: 800;
+}
+
+.stock-main-count {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8rpx;
+}
+
+.stock-main-num {
+  font-size: 48rpx;
+  font-weight: 1000;
+  color: $ok-forest-green;
+  line-height: 1;
+}
+
+.stock-main-unit {
+  font-size: 26rpx;
+  color: $ok-slate-500;
+  font-weight: 800;
+}
+
+.stock-main-stock--soldout {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 950;
+  color: $ok-slate-500;
+}
+
+.stock-main-unlimited {
+  font-size: 26rpx;
+  color: $ok-slate-400;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.stock-main-strong {
+  color: $ok-forest-green;
+  font-weight: 950;
 }
 
 .p-sub {

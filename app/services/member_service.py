@@ -1144,11 +1144,16 @@ def get_weekly_menu(db: Session, week_start: date | None, *, store_id: int) -> d
 
             by_date[sched.menu_date] = dish
 
-    items = [
+    from app.services.menu_day_stock_service import single_order_stock_for_dish_date
 
-        _dish_to_member_card(menu_date=d, dish=by_date.get(d), slot=i + 1) for i, d in enumerate(dates)
-
-    ]
+    items: list[dict] = []
+    for i, d in enumerate(dates):
+        dish = by_date.get(d)
+        card = _dish_to_member_card(menu_date=d, dish=dish, slot=i + 1)
+        if dish is not None:
+            stock = single_order_stock_for_dish_date(db, int(dish.id), d, store_id=sid)
+            card.update(stock.to_detail_dict())
+        items.append(card)
 
     return {"week_start": anchor.isoformat(), "items": items}
 
