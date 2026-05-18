@@ -387,6 +387,44 @@ class DashboardMealSummaryOut(BaseModel):
         ge=0,
         description="锚定日应履约（到家+自提口径）且剩余次数恰为 1 次（balance 等于每配送日份数）的会员数",
     )
+    total_members: int = Field(
+        ...,
+        ge=0,
+        description="门店内未删除会员总户数（含周/月/次卡及未标注套餐者）；与配送大表接口同源，为当前库实时值",
+    )
+    active_weekly_members: int = Field(
+        ...,
+        ge=0,
+        description="周卡且 balance>0，与会员列表 validity=active 一致",
+    )
+    expired_weekly_members: int = Field(
+        ...,
+        ge=0,
+        description="周卡且 balance=0",
+    )
+    active_monthly_members: int = Field(
+        ...,
+        ge=0,
+        description="月卡且 balance>0",
+    )
+    expired_monthly_members: int = Field(
+        ...,
+        ge=0,
+        description="月卡且 balance=0",
+    )
+    tomorrow_first_meal_new_members: int = Field(
+        ...,
+        ge=0,
+        description="明日首餐新客人数：起送业务日恰为锚定日之次日，且次日应履约（到家+自提，与大表一致）",
+    )
+    today_meals_week_over_week_caption: str = Field(
+        ...,
+        description="「今日」(锚定日) 备餐份数周同比文案，如「较上周+12份」「较上周持平」",
+    )
+    tomorrow_meals_week_over_week_caption: str = Field(
+        ...,
+        description="「明日」(锚定日次日) 备餐份数周同比文案，如「较上周+12份」「较上周持平」",
+    )
     from_snapshot: bool = Field(False, description="过去日：是否直接读取 admin_dashboard_biz_day_snapshots")
     snapshot_recorded_at: datetime | None = Field(
         None, description="归档写入时间；当日实时计算时通常为空（过去日首算写入后同次响应亦可为空）"

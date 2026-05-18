@@ -34,6 +34,12 @@ CREATE TABLE IF NOT EXISTS `membership_card_templates` (
   `kind_label` VARCHAR(64) NOT NULL COMMENT '种类：手动填写（周卡/季卡/午晚餐卡等）',
   `name` VARCHAR(128) NOT NULL,
   `meals_grant` INT NOT NULL COMMENT '单笔购买入账餐次（占位，未接线支付入账）',
+  `list_price_yuan` DECIMAL(12,2) NULL DEFAULT NULL COMMENT '原价（划线价，展示）',
+  `sale_price_yuan` DECIMAL(12,2) NULL DEFAULT NULL COMMENT '优惠价（展示）',
+  `card_style_image_url` VARCHAR(512) NULL DEFAULT NULL COMMENT '卡片样式图 URL',
+  `validity_days` INT NULL DEFAULT NULL COMMENT '有效天数（展示）',
+  `intro_short` VARCHAR(512) NULL DEFAULT NULL COMMENT '商品简介',
+  `purchase_notice` TEXT NULL DEFAULT NULL COMMENT '购买须知',
   `remark` TEXT NULL DEFAULT NULL,
   `sort_order` INT NOT NULL DEFAULT 0,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
@@ -85,6 +91,40 @@ ALTER TABLE `membership_card_templates`
         logger.info("补库: membership_card_templates 已增加 kind_label 并放宽 period_kind")
 
 
+def _upgrade_membership_templates_marketing_columns(conn) -> None:
+    """会员卡模版：原价/优惠价、样式图与小程序文案列。"""
+    specs: list[tuple[str, str]] = [
+        (
+            "list_price_yuan",
+            "`list_price_yuan` DECIMAL(12,2) NULL DEFAULT NULL COMMENT '原价（划线价，展示）' AFTER `meals_grant`",
+        ),
+        (
+            "sale_price_yuan",
+            "`sale_price_yuan` DECIMAL(12,2) NULL DEFAULT NULL COMMENT '优惠价（展示）' AFTER `list_price_yuan`",
+        ),
+        (
+            "card_style_image_url",
+            "`card_style_image_url` VARCHAR(512) NULL DEFAULT NULL COMMENT '卡片样式图 URL' AFTER `sale_price_yuan`",
+        ),
+        (
+            "validity_days",
+            "`validity_days` INT NULL DEFAULT NULL COMMENT '有效天数（展示）' AFTER `card_style_image_url`",
+        ),
+        (
+            "intro_short",
+            "`intro_short` VARCHAR(512) NULL DEFAULT NULL COMMENT '商品简介' AFTER `validity_days`",
+        ),
+        (
+            "purchase_notice",
+            "`purchase_notice` TEXT NULL DEFAULT NULL COMMENT '购买须知' AFTER `intro_short`",
+        ),
+    ]
+    for col, ddl_fragment in specs:
+        if not _mysql_column_exists(conn, "membership_card_templates", col):
+            conn.execute(text(f"ALTER TABLE `membership_card_templates` ADD COLUMN {ddl_fragment}"))
+            logger.info("补库: membership_card_templates 已增加列 %s", col)
+
+
 def ensure_catalog_admin_tables() -> None:
     dname = engine.dialect.name
     if dname not in ("mysql", "mariadb"):
@@ -109,6 +149,9 @@ def ensure_catalog_admin_tables() -> None:
                 _create_membership_table_new(conn)
             elif not _mysql_column_exists(conn, "membership_card_templates", "kind_label"):
                 _upgrade_membership_templates_add_kind_label(conn)
+
+            if _mysql_column_exists(conn, "membership_card_templates", "meals_grant"):
+                _upgrade_membership_templates_marketing_columns(conn)
 
             if not has_cat:
                 conn.execute(

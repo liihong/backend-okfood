@@ -42,6 +42,7 @@ from app.schemas.user import (
     ActivateIn,
     LeaveIn,
     MemberCardPricesOut,
+    MembershipCardTemplateMemberOut,
     ProfilePatchIn,
     RegisterIn,
     UserMemberCardOrderCreateIn,
@@ -84,6 +85,10 @@ from app.services.member_card_pay_service import (
     member_card_order_user_dict,
     prepare_wechat_jsapi_for_member_card_order,
     sync_member_card_from_wechat_or_raise,
+)
+from app.services.catalog_admin_service import (
+    list_membership_templates,
+    membership_template_public_dump,
 )
 from app.services.single_meal_order_service import (
     create_single_meal_order,
@@ -283,6 +288,21 @@ def read_member_card_prices(db: SessionDep, auth: MemberAuthScope = Depends(memb
         promotion_active=ext.promotion_active,
     )
     return success(data=dump_model(payload), msg="获取成功")
+
+
+@router.get("/membership-card-templates")
+def read_membership_card_templates_catalog(
+    db: SessionDep, auth: MemberAuthScope = Depends(member_auth_scope)
+):
+    """当前门店已启用的会员卡模版（样式图、划线价/优惠价与文案）；不计价，自助开卡仍以门店周/月卡配置为准。"""
+    tid = int(auth.member.tenant_id)
+    sid = int(auth.store_id)
+    rows = list_membership_templates(db, tenant_id=tid, store_id=sid, active_only=True)
+    items = [
+        dump_model(MembershipCardTemplateMemberOut.model_validate(membership_template_public_dump(r)))
+        for r in rows
+    ]
+    return success(data=items, msg="获取成功")
 
 
 @router.get("/me/addresses")

@@ -168,6 +168,65 @@ def eligible_members_for_delivery(
     return members, defaults
 
 
+def count_members_first_scheduled_delivery_day(
+    db: Session,
+    *,
+    delivery_date: date,
+    tenant_id: int | None = None,
+    store_id: int | None = None,
+) -> int:
+    """起送业务日恰为 ``delivery_date``，且当日计入配送大表（到家或自提）的会员人数，即「首餐」新客。
+
+    规则与 :func:`eligible_members_for_delivery` / :func:`eligible_members_for_store_pickup` 一致；
+    额外限定 ``members.delivery_start_date == delivery_date``（不含起送日为空的即日生效老口径）。
+    """
+    if not is_subscription_delivery_day(delivery_date):
+        return 0
+    today = today_shanghai()
+    tomorrow = date.fromordinal(today.toordinal() + 1)
+    in_leave_range = and_(
+        Member.leave_range_start.is_not(None),
+        Member.leave_range_end.is_not(None),
+        Member.leave_range_start <= delivery_date,
+        Member.leave_range_end >= delivery_date,
+    )
+    target_hit = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date == delivery_date,
+    )
+    legacy_tomorrow = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date.is_(None),
+        literal(delivery_date) == literal(tomorrow),
+    )
+    tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
+    absent = or_(in_leave_range, tomorrow_leave_hit)
+    units_sql = sql_effective_daily_meal_units_column()
+    daf = default_address_pick_subquery()
+    first_day = Member.delivery_start_date == delivery_date
+
+    def _cnt(*, store_pickup: bool) -> int:
+        q = (
+            select(func.count())
+            .select_from(Member)
+            .outerjoin(daf, daf.c.mid == Member.id)
+            .outerjoin(MemberAddress, MemberAddress.id == daf.c.addr_id)
+            .where(
+                Member.deleted_at.is_(None),
+                Member.is_active.is_(True),
+                Member.balance >= units_sql,
+                Member.store_pickup.is_(store_pickup),
+                not_(absent),
+                first_day,
+                _member_not_skip_subscription_saturday(delivery_date),
+                _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
+            )
+        )
+        return int(db.scalar(q) or 0)
+
+    return _cnt(store_pickup=False) + _cnt(store_pickup=True)
+
+
 def eligible_members_for_store_pickup(
     db: Session,
     *,

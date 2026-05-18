@@ -1,7 +1,13 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Plus } from 'lucide-vue-next'
-import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
+import { Camera, Plus } from 'lucide-vue-next'
+import {
+  apiForm,
+  apiJson,
+  adminAccessToken,
+  dishImageDisplayUrl,
+  handleAdminLogout,
+} from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
 const storeId = ref(1)
@@ -10,14 +16,70 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const saving = ref(false)
 const editingId = ref(null)
+const cardPhotoInput = ref(null)
+const cardPhotoUploading = ref(false)
 const form = ref({
   kind_label: '',
   name: '',
   meals_grant: 6,
+  list_price_yuan: '',
+  sale_price_yuan: '',
+  card_style_image_url: '',
+  validity_days: null,
+  intro_short: '',
+  purchase_notice: '',
   remark: '',
   sort_order: 0,
   is_active: true,
 })
+
+function parseOptionalMoney(raw) {
+  const t = String(raw ?? '').trim()
+  if (!t) return null
+  const n = Number(t)
+  if (!Number.isFinite(n) || n < 0) {
+    return undefined
+  }
+  return n.toFixed(2)
+}
+
+function triggerCardPhotoPick() {
+  if (cardPhotoUploading.value) return
+  cardPhotoInput.value?.click()
+}
+
+async function onCardPhotoChange(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''
+  if (!file || !file.type.startsWith('image/')) return
+  if (!adminAccessToken.value) {
+    showToast('请先登录', 'error')
+    return
+  }
+  cardPhotoUploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    const data = await apiForm('/api/admin/upload', fd, { auth: true })
+    const url = data && typeof data.url === 'string' ? data.url.trim() : ''
+    if (url) {
+      form.value.card_style_image_url = url
+      showToast('卡片图已上传', 'success')
+    } else {
+      showToast('上传成功但未返回地址', 'error')
+    }
+  } catch (err) {
+    const status = err && typeof err.status === 'number' ? err.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(err instanceof Error ? err.message : '上传失败', 'error')
+  } finally {
+    cardPhotoUploading.value = false
+  }
+}
 
 const qs = computed(() => {
   const p = new URLSearchParams({ store_id: String(storeId.value || 1) })
@@ -48,6 +110,12 @@ function openCreate() {
     kind_label: '',
     name: '',
     meals_grant: 6,
+    list_price_yuan: '',
+    sale_price_yuan: '',
+    card_style_image_url: '',
+    validity_days: null,
+    intro_short: '',
+    purchase_notice: '',
     remark: '',
     sort_order: 0,
     is_active: true,
@@ -61,6 +129,12 @@ function openEdit(row) {
     kind_label: row.kind_label ?? '',
     name: row.name || '',
     meals_grant: row.meals_grant,
+    list_price_yuan: row.list_price_yuan != null ? String(row.list_price_yuan).trim() : '',
+    sale_price_yuan: row.sale_price_yuan != null ? String(row.sale_price_yuan).trim() : '',
+    card_style_image_url: row.card_style_image_url || '',
+    validity_days: row.validity_days != null ? Number(row.validity_days) : null,
+    intro_short: row.intro_short || '',
+    purchase_notice: row.purchase_notice || '',
     remark: row.remark || '',
     sort_order: row.sort_order,
     is_active: row.is_active,
@@ -80,33 +154,49 @@ async function saveForm() {
     showToast('请填写名称', 'error')
     return
   }
+  const listPx = parseOptionalMoney(form.value.list_price_yuan)
+  const salePx = parseOptionalMoney(form.value.sale_price_yuan)
+  if (listPx === undefined || salePx === undefined) {
+    showToast('原价、优惠价须为非负数字，留空表示不展示', 'error')
+    return
+  }
+  let validityDays = null
+  const rawVd = form.value.validity_days
+  if (rawVd != null && rawVd !== '') {
+    const n = Math.floor(Number(rawVd))
+    if (!Number.isFinite(n) || n < 0) {
+      showToast('有效天数须为非负整数或留空', 'error')
+      return
+    }
+    validityDays = n
+  }
   saving.value = true
   try {
     const sid = encodeURIComponent(String(storeId.value || 1))
+    const common = {
+      kind_label: kind,
+      name,
+      meals_grant: Number(form.value.meals_grant),
+      list_price_yuan: listPx,
+      sale_price_yuan: salePx,
+      card_style_image_url: String(form.value.card_style_image_url || '').trim() || null,
+      validity_days: validityDays,
+      intro_short: String(form.value.intro_short || '').trim() || null,
+      purchase_notice: String(form.value.purchase_notice || '').trim() || null,
+      remark: String(form.value.remark || '').trim() || null,
+      sort_order: Number(form.value.sort_order) || 0,
+      is_active: Boolean(form.value.is_active),
+    }
     if (editingId.value) {
-      const body = {}
-      body.kind_label = kind
-      body.name = name
-      body.meals_grant = Number(form.value.meals_grant)
-      body.remark = String(form.value.remark || '').trim() || null
-      body.sort_order = Number(form.value.sort_order) || 0
-      body.is_active = Boolean(form.value.is_active)
       await apiJson(`/api/admin/catalog/membership-templates/${editingId.value}?store_id=${sid}`, {
         method: 'PATCH',
-        body: JSON.stringify(body),
+        body: JSON.stringify(common),
       }, { auth: true })
       showToast('已保存')
     } else {
       await apiJson(`/api/admin/catalog/membership-templates?store_id=${sid}`, {
         method: 'POST',
-        body: JSON.stringify({
-          kind_label: kind,
-          name,
-          meals_grant: Number(form.value.meals_grant) || 1,
-          remark: String(form.value.remark || '').trim() || null,
-          sort_order: Number(form.value.sort_order) || 0,
-          is_active: Boolean(form.value.is_active),
-        }),
+        body: JSON.stringify(common),
       }, { auth: true })
       showToast('已创建')
     }
@@ -150,16 +240,32 @@ onMounted(fetchList)
 
     <el-alert
       type="info"
-      title="种类可自定义（周卡 / 季卡 / 午晚餐卡等）；本期仅入库，不改变小程序与原开卡入账逻辑。"
+      title="种类可自定义；划线价/优惠价与卡片图为小程序展示用。自助微信支付开卡仍以「门店配置」周卡/月卡金额为准，与模版标价独立。"
       show-icon
       class="banner"
     />
 
     <el-card shadow="never" class="tbl-card">
       <el-table v-loading="loading" :data="list" stripe empty-text="暂无模版">
+        <el-table-column label="样式图" width="76" align="center">
+          <template #default="{ row }">
+            <img
+              v-if="row.card_style_image_url"
+              :src="dishImageDisplayUrl(row.card_style_image_url)"
+              alt=""
+              class="thumb"
+            />
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="kind_label" label="种类" width="120" show-overflow-tooltip />
         <el-table-column prop="name" label="名称" min-width="160" />
         <el-table-column prop="meals_grant" label="入账餐次/次购买" width="140" align="center" />
+        <el-table-column prop="list_price_yuan" label="原价(元)" width="88" align="right" />
+        <el-table-column prop="sale_price_yuan" label="优惠价(元)" width="96" align="right" />
+        <el-table-column prop="validity_days" label="有效天数" width="88" align="center">
+          <template #default="{ row }">{{ row.validity_days != null ? row.validity_days : '—' }}</template>
+        </el-table-column>
         <el-table-column prop="sort_order" label="排序" width="80" align="center" />
         <el-table-column prop="is_active" label="启用" width="80" align="center">
           <template #default="{ row }">{{ row.is_active ? '是' : '否' }}</template>
@@ -174,7 +280,7 @@ onMounted(fetchList)
       </el-table>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑模版' : '新建模版'" width="480px">
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑模版' : '新建模版'" width="640px">
       <el-form label-width="112px">
         <el-form-item label="种类">
           <el-input
@@ -188,6 +294,45 @@ onMounted(fetchList)
         </el-form-item>
         <el-form-item label="单笔入账次数">
           <el-input-number v-model="form.meals_grant" :min="1" :max="366" controls-position="right" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="原价(元)">
+          <el-input v-model="form.list_price_yuan" placeholder="划线价，留空不在小程序展示" />
+        </el-form-item>
+        <el-form-item label="优惠价(元)">
+          <el-input v-model="form.sale_price_yuan" placeholder="主推价，留空不在小程序展示" />
+        </el-form-item>
+        <el-form-item label="有效天数">
+          <el-input-number
+            v-model="form.validity_days"
+            :min="0"
+            :max="3660"
+            :precision="0"
+            controls-position="right"
+            placeholder="展示用"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="卡片样式图">
+          <input ref="cardPhotoInput" type="file" accept="image/*" class="hidden-file" @change="onCardPhotoChange" />
+          <div class="upload-row">
+            <div class="upload-hit" @click="triggerCardPhotoPick">
+              <Camera v-if="!form.card_style_image_url" :size="28" stroke-width="1.75" class="upload-icon" />
+              <img
+                v-else
+                :src="dishImageDisplayUrl(form.card_style_image_url)"
+                alt=""
+                class="upload-preview"
+              />
+              <span class="upload-text">{{ cardPhotoUploading ? '上传中…' : form.card_style_image_url ? '点击更换' : '上传图片' }}</span>
+            </div>
+            <el-input v-model="form.card_style_image_url" placeholder="/static/uploads/... 或上传" class="upload-url" />
+          </div>
+        </el-form-item>
+        <el-form-item label="商品简介">
+          <el-input v-model="form.intro_short" type="textarea" :rows="2" maxlength="512" show-word-limit placeholder="一句话卖点，对应小程序「商品简介」" />
+        </el-form-item>
+        <el-form-item label="购买须知">
+          <el-input v-model="form.purchase_notice" type="textarea" :rows="3" maxlength="6000" show-word-limit placeholder="有效期说明、使用限制、适用门店等" />
         </el-form-item>
         <el-form-item label="排序">
           <el-input-number v-model="form.sort_order" :min="0" controls-position="right" style="width: 100%" />
@@ -237,5 +382,51 @@ onMounted(fetchList)
 }
 .tbl-card :deep(.el-card__body) {
   padding: 0;
+}
+.thumb {
+  width: 52px;
+  height: 52px;
+  object-fit: cover;
+  border-radius: 6px;
+  vertical-align: middle;
+}
+.hidden-file {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.upload-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+.upload-hit {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px dashed rgba(15, 23, 42, 0.2);
+  border-radius: 8px;
+  cursor: pointer;
+  max-width: 100%;
+}
+.upload-icon {
+  color: rgba(15, 23, 42, 0.45);
+}
+.upload-preview {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.upload-text {
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.55);
+}
+.upload-url {
+  width: 100%;
 }
 </style>

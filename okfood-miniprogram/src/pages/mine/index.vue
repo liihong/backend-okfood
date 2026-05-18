@@ -3,129 +3,208 @@
     <OkNavbar show-brand />
     <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="profile-container">
-        <view v-if="!isLoggedIn" class="user-header user-header--guest">
-          <view :class="['avatar-box', 'avatar-box--guest']">
-            <text class="avatar-txt avatar-txt--guest">?</text>
-          </view>
-          <view class="user-header-guest-main">
-            <button
-              class="wx-login-btn"
-              hover-class="wx-login-btn--hover"
-              open-type="getPhoneNumber"
-              @getphonenumber="onWxGetPhoneNumber"
-            >
-              登录
-            </button>
-            <text class="level-text level-text--guest-hint">
-              授权手机号后与会员档案、餐次同步
-            </text>
-          </view>
-        </view>
-        <view v-else-if="needsMemberSetupPage" class="user-header user-header--setup" @click="goMemberSetup">
-          <button
-            class="avatar-btn"
-            open-type="chooseAvatar"
-            @chooseavatar="onChooseAvatar"
-            @tap.stop
-          >
-            <view class="avatar-box avatar-box--setup">
-              <image
-                v-if="setupRowAvatarUrl"
-                class="avatar-img"
-                :src="setupRowAvatarUrl"
-                mode="aspectFill"
-              />
-              <text v-else class="avatar-txt">填</text>
+        <!-- 未登录 -->
+        <view v-if="!isLoggedIn" class="mine-hero mine-hero--guest">
+          <view class="hero-guest-inner">
+            <view class="avatar-ring avatar-ring--guest">
+              <text class="avatar-fallback">?</text>
             </view>
-          </button>
-          <view class="user-name-box user-name-box--flex">
-            <text class="nick-name nick-name--action">{{ setupRowTitle }}</text>
-            <text class="level-text">{{ setupRowPhoneLine }}</text>
-          </view>
-          <text class="setup-chevron">›</text>
-        </view>
-        <view v-else class="user-header">
-          <button class="avatar-btn" open-type="chooseAvatar" @chooseavatar="onChooseAvatar">
-            <view class="avatar-box">
-              <image
-                v-if="wxProfile?.avatarUrl"
-                class="avatar-img"
-                :src="wxProfile.avatarUrl"
-                mode="aspectFill"
-              />
-              <text v-else class="avatar-txt">{{ avatarChar }}</text>
+            <view class="hero-guest-copy">
+              <button
+                class="wx-login-btn"
+                hover-class="wx-login-btn--hover"
+                open-type="getPhoneNumber"
+                @getphonenumber="onWxGetPhoneNumber"
+              >
+                手机号登录
+              </button>
+              <text class="guest-hint">授权后与会员档案、餐次同步</text>
             </view>
-          </button>
-          <view class="user-name-box user-name-box--flex">
-            <text class="nick-name">{{ displayNick }}</text>
-            <text v-if="profileSub" class="level-text">{{ profileSub }}</text>
           </view>
         </view>
 
-        <view :class="['vip-card', { 'vip-card--month': isVipMonthlyCard }]">
-          <view class="vip-card-head">
-            <text class="vip-tag">OK 饭 自律计划</text>
-            <text v-if="planTypeMemberLabel" class="member-plan-kind">{{ planTypeMemberLabel }}</text>
-          </view>
-          <view class="balance-line">
-            <text class="num">{{ displayBalance }}</text>
-            <text class="unit">剩余餐次</text>
-            <view
-              v-if="showResumeDeliveryEntry"
-              class="type-label-slot"
-              @tap.stop="goResumeDelivery"
-            >
-              <text class="vip-renew-btn">恢复配送</text>
-            </view>
-            <view
-              v-else-if="showVipRenewEntry"
-              class="type-label-slot"
-              @tap.stop="goMemberSetup"
-            >
-              <text class="vip-renew-btn">开卡续费</text>
-            </view>
-            <text v-else :class="['type-label', { 'type-label--leave-detail': isLeaveCardDetailStatus }]">{{
-              memberDeliveryStatus }}</text>
-          </view>
-          <text v-if="isLoggedIn" class="today-delivery-addr">{{ todayDeliveryAddressLine }}</text>
-          <view class="footer-info">
-            <text class="footer-info-left">{{ cardFooter }}</text>
-            <text v-if="isLoggedIn" class="footer-info-right"
-              >每日送达份数：{{ displayDailyMealUnits }}</text>
-          </view>
-        </view>
-
-        <view class="action-list">
-         <!-- <view v-if="!isLoggedIn" class="menu-row" @click="goCourier">
-            <text class="menu-label">配送员工作台</text>
-            <text class="arrow">›</text>
-        </view> -->
-          <view class="menu-row" @click="goDailyMealUnits">
-            <text class="menu-label">📦 修改每日送达份数</text>
-            <text class="arrow">›</text>
-          </view>
-          <view class="menu-row" @click="goLeave">
-            <text class="menu-label">😴 请假管理</text>
-            <text class="arrow">›</text>
-          </view>
+        <!-- 已登录：参考稿式头部 + 数据卡片 + 宫格 -->
+        <template v-else>
           <view
-            v-if="showPauseDeliveryMenuRow"
-            class="menu-row"
-            @click="onPauseDeliveryTap"
+            class="mine-hero"
+            :class="{ 'mine-hero--tap': needsMemberSetupPage }"
+            @tap="onMineHeroTap"
           >
-            <text class="menu-label">⏸️ 暂停配送</text>
-            <text class="arrow">›</text>
+            <view class="hero-stats-row">
+              <view class="hero-stat">
+                <text class="hero-stat-num">{{ disciplineDays }}</text>
+                <text class="hero-stat-label">累计自律天数</text>
+              </view>
+              <view class="hero-avatar-wrap">
+                <button
+                  v-if="needsMemberSetupPage"
+                  class="hero-avatar-btn"
+                  open-type="chooseAvatar"
+                  @chooseavatar="onChooseAvatar"
+                  @tap.stop
+                >
+                  <view class="avatar-ring">
+                    <image
+                      v-if="setupRowAvatarUrl"
+                      class="avatar-img"
+                      :src="setupRowAvatarUrl"
+                      mode="aspectFill"
+                    />
+                    <text v-else class="avatar-fallback-sm">填</text>
+                  </view>
+                </button>
+                <button
+                  v-else
+                  class="hero-avatar-btn"
+                  open-type="chooseAvatar"
+                  @chooseavatar="onChooseAvatar"
+                >
+                  <view class="avatar-ring">
+                    <image
+                      v-if="wxProfile?.avatarUrl"
+                      class="avatar-img"
+                      :src="wxProfile.avatarUrl"
+                      mode="aspectFill"
+                    />
+                    <text v-else class="avatar-fallback-sm">{{ avatarChar }}</text>
+                  </view>
+                </button>
+              </view>
+              <view class="hero-stat">
+                <text class="hero-stat-num">{{ cumulativeMealsDisplay }}</text>
+                <text class="hero-stat-label">累计就餐/次</text>
+              </view>
+            </view>
+            <text
+              class="hero-nick"
+              :class="{ 'hero-nick--action': needsMemberSetupPage }"
+            >
+              {{ needsMemberSetupPage ? setupRowTitle : displayNick }}
+            </text>
+            <view class="hero-phone-row" @tap.stop>
+              <text class="hero-phone">{{ maskedPhone }}</text>
+              <view class="hero-gear" @tap.stop="goMemberSetup">
+                <text class="hero-gear-icon">⚙</text>
+              </view>
+            </view>
+            <text v-if="needsMemberSetupPage" class="hero-setup-hint">点按此处完善微信头像与昵称 ›</text>
           </view>
-          <view class="menu-row" @click="goAddress">
-            <text class="menu-label">🏠 地址管理</text>
-            <text class="arrow">›</text>
+
+          <view class="archive-card">
+            <view class="archive-head">
+              <text class="archive-title">本月自律档案</text>
+              <text class="archive-link" @tap="onArchiveReportTap">详情报告 ›</text>
+            </view>
+            <view class="archive-status-row">
+              <text :class="['archive-status', { 'archive-status--alert': needsMemberSetupPage }]">{{
+                memberDeliveryStatus
+              }}</text>
+              <view v-if="showResumeDeliveryEntry" class="archive-chip" @tap.stop="goResumeDelivery">
+                <text class="archive-chip-txt">恢复配送</text>
+              </view>
+              <view v-else-if="showVipRenewEntry" class="archive-chip" @tap.stop="goMemberSetup">
+                <text class="archive-chip-txt">开卡续费</text>
+              </view>
+            </view>
+            <view class="archive-metrics">
+              <view class="archive-metric">
+                <text class="archive-metric-val">{{ serverBalance }}</text>
+                <text class="archive-metric-lab">剩余餐次</text>
+              </view>
+              <view class="archive-metric">
+                <text class="archive-metric-val">{{ streakDaysDisplay }}</text>
+                <text class="archive-metric-lab">连续就餐/天</text>
+              </view>
+              <view class="archive-metric">
+                <text class="archive-metric-val">{{ calorieDisplay }}</text>
+                <text class="archive-metric-lab">控卡摄入/kcal</text>
+              </view>
+            </view>
+            <text v-if="planTypeMemberLabel" class="archive-plan">{{ planTypeMemberLabel }}</text>
+            <text class="archive-addr">{{ todayDeliveryAddressLine }}</text>
+            <view class="archive-foot">
+              <text class="archive-foot-left">{{ cardFooter }}</text>
+              <text class="archive-foot-right">每日 {{ displayDailyMealUnits }} 份</text>
+            </view>
           </view>
-         <view class="menu-row" @click="goSingleOrders">
-            <text class="menu-label">🍽️ 消费记录</text>
-            <text class="arrow">›</text>
-         </view>
-        </view>
-       <text class="page-version">版本 1.1.8</text>
+
+          <text class="section-cap">个人自律管理</text>
+          <view class="menu-card">
+            <view class="menu-grid">
+              <view class="menu-cell" @tap="goMemberSetup">
+                <view class="menu-ico-wrap">
+                  <text class="menu-ico">👑</text>
+                </view>
+                <text class="menu-cap">我的会员卡</text>
+              </view>
+              <view class="menu-cell" @tap="goDailyMealUnits">
+                <view class="menu-ico-wrap">
+                  <text class="menu-ico">🚚</text>
+                </view>
+                <text class="menu-cap">修改送达份数</text>
+              </view>
+              <view class="menu-cell" @tap="goLeave">
+                <view class="menu-ico-wrap">
+                  <text class="menu-ico">📅</text>
+                </view>
+                <text class="menu-cap">请假休假管理</text>
+              </view>
+              <view class="menu-cell" @tap="goAddress">
+                <view class="menu-ico-wrap">
+                  <text class="menu-ico">📍</text>
+                </view>
+                <text class="menu-cap">我的地址管理</text>
+              </view>
+              <view class="menu-cell" @tap="goSingleOrders">
+                <view class="menu-ico-wrap">
+                  <text class="menu-ico">📋</text>
+                </view>
+                <text class="menu-cap">就餐消费记录</text>
+              </view>
+              <view class="menu-cell" @tap="onReminderSettingsTap">
+                <view class="menu-ico-wrap">
+                  <text class="menu-ico">🔔</text>
+                </view>
+                <text class="menu-cap">消息提醒设置</text>
+              </view>
+            </view>
+            <view v-if="showPauseDeliveryMenuRow" class="menu-extra" @tap="onPauseDeliveryTap">
+              <text class="menu-extra-txt">⏸ 暂停配送（保留剩余餐次）</text>
+              <text class="menu-extra-arr">›</text>
+            </view>
+          </view>
+
+          <text class="section-cap section-cap--sp">OK 饭 · 尊享特色服务</text>
+          <view class="menu-card menu-card--narrow">
+            <view class="menu-grid menu-grid--3">
+              <view class="menu-cell" @tap="onVipFeatureTap('health')">
+                <view class="menu-ico-wrap">
+                  <text class="menu-ico">📈</text>
+                </view>
+                <text class="menu-cap">指标健康管理</text>
+              </view>
+              <view class="menu-cell" @tap="onVipFeatureTap('agreement')">
+                <view class="menu-ico-wrap">
+                  <text class="menu-ico">📄</text>
+                </view>
+                <text class="menu-cap">健康定制协议</text>
+              </view>
+              <view class="menu-cell" @tap="onVipFeatureTap('coupon')">
+                <view class="menu-ico-wrap">
+                  <text class="menu-ico">🎟</text>
+                </view>
+                <text class="menu-cap">美团抖音验券</text>
+              </view>
+            </view>
+          </view>
+
+          <button class="cta-purchase" hover-class="cta-purchase--hover" @tap="goMemberSetup">
+            <text class="cta-purchase-ico">💳</text>
+            <text class="cta-purchase-txt">自律卡包购买入口</text>
+          </button>
+        </template>
+
+        <text class="page-version">版本 1.1.8</text>
       </view>
     </scroll-view>
   </view>
@@ -181,6 +260,8 @@ const wxProfile = ref(null)
 /** 昵称输入（type=nickname 可走微信键盘同步） */
 const wxNickDraft = ref('')
 const serverBalance = ref(0)
+/** 与 GET /api/user/me.meal_quota_total 一致，用于估算累计已消耗订餐次数 */
+const mealQuotaTotal = ref(0)
 const userName = ref('')
 const planType = ref('')
 const leaveRange = ref(null)
@@ -344,12 +425,6 @@ const setupRowTitle = computed(() => {
   return '点我：完善个人资料'
 })
 
-const setupRowPhoneLine = computed(() => {
-  if (!needsMemberSetupPage.value) return ''
-  const p = memberPhone.value?.trim() || ''
-  return p || '请绑定手机号'
-})
-
 const displayNick = computed(() => {
   const w = wxProfile.value?.nickName?.trim()
   if (w && w !== WX_DEFAULT_NICK) return w
@@ -484,6 +559,54 @@ async function onChooseAvatar(e) {
   }
 }
 
+function maskPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '')
+  if (digits.length < 7) return raw && String(raw).trim() ? String(raw).trim() : '未绑定手机'
+  return `${digits.slice(0, 3)}****${digits.slice(-4)}`
+}
+
+const maskedPhone = computed(() => {
+  if (!isLoggedIn.value) return ''
+  return maskPhone(memberPhone.value)
+})
+
+const disciplineDays = computed(() => {
+  if (!isLoggedIn.value) return 0
+  return daysSinceCreated(createdAt.value)
+})
+
+const cumulativeMealsDisplay = computed(() => {
+  if (!isLoggedIn.value) return '—'
+  const total = Math.floor(Number(mealQuotaTotal.value) || 0)
+  if (total <= 0) return '—'
+  const used = Math.max(0, total - Math.floor(Number(serverBalance.value) || 0))
+  return String(used)
+})
+
+const streakDaysDisplay = computed(() => '—')
+const calorieDisplay = computed(() => '—')
+
+function onMineHeroTap() {
+  if (needsMemberSetupPage.value) goMemberSetup()
+}
+
+function onArchiveReportTap() {
+  uni.showToast({ title: '详情报告即将上线', icon: 'none' })
+}
+
+function onReminderSettingsTap() {
+  uni.showToast({ title: '可稍后在订餐页开启配送提醒', icon: 'none' })
+}
+
+function onVipFeatureTap(key) {
+  const map = {
+    health: '指标健康管理即将开放',
+    agreement: '健康定制协议即将开放',
+    coupon: '美团 / 抖音验券即将开放',
+  }
+  uni.showToast({ title: map[key] || '即将开放', icon: 'none' })
+}
+
 function onNickInput(e) {
   wxNickDraft.value = e.detail?.value ?? ''
 }
@@ -504,12 +627,6 @@ function onNicknameBlurConfirm() {
     uni.showToast({ title: '已保存', icon: 'success' })
   }
 }
-
-const profileSub = computed(() => {
-  if (!isLoggedIn.value || needsMemberSetupPage.value) return ''
-  return String(memberPhone.value || '').trim()
-})
-
 
 function shanghaiTodayYmd() {
   try {
@@ -619,11 +736,6 @@ const planTypeMemberLabel = computed(() => {
   return p ? `${p}会员` : ''
 })
 
-/** 月卡：会员卡采用独立配色，与周卡绿区形成区分 */
-const isVipMonthlyCard = computed(
-  () => isLoggedIn.value && !needsMemberSetupPage.value && String(planType.value || '').trim() === '月卡',
-)
-
 const cardFooter = computed(() => {
   if (!isLoggedIn.value) return '自律，从今天第一顿 OK 饭开始 👌'
   const d = daysSinceCreated(createdAt.value)
@@ -653,6 +765,7 @@ function mergeMemberApiProfile(data) {
   }
   userName.value = data.name != null ? String(data.name) : ''
   serverBalance.value = Math.max(0, Math.floor(Number(data.balance) || 0))
+  mealQuotaTotal.value = Math.max(0, Math.floor(Number(data.meal_quota_total) || 0))
   planType.value = data.plan_type != null ? String(data.plan_type) : ''
   leaveRange.value =
     data.leave_range && typeof data.leave_range === 'object' ? data.leave_range : null
@@ -701,6 +814,7 @@ async function refreshMember(options = {}) {
   if (!isLoggedIn.value) {
     memberProfileRaw.value = null
     serverBalance.value = 0
+    mealQuotaTotal.value = 0
     userName.value = ''
     planType.value = ''
     leaveRange.value = null
@@ -748,6 +862,7 @@ async function refreshMember(options = {}) {
       }
       memberProfileRaw.value = null
       serverBalance.value = 0
+      mealQuotaTotal.value = 0
       userName.value = ''
       planType.value = ''
       leaveRange.value = null
@@ -957,165 +1072,460 @@ function onPauseDeliveryTap() {
 }
 
 .profile-container {
-  padding: 40rpx;
+  padding: 28rpx 32rpx 40rpx;
   padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
 }
 
-.user-header {
+.mine-hero {
+  margin-bottom: 28rpx;
+  padding: 8rpx 0 24rpx;
+}
+
+.mine-hero--tap {
+  opacity: 0.98;
+}
+
+.mine-hero--guest {
+  padding: 20rpx 0 36rpx;
+  margin-bottom: 8rpx;
+}
+
+.hero-guest-inner {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 30rpx;
-  margin-bottom: 50rpx;
+  gap: 28rpx;
 }
 
-.user-header--guest {
-  align-items: center;
-}
-
-.user-header-guest-main {
+.hero-guest-copy {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 16rpx;
+  gap: 12rpx;
 }
 
-.user-header--setup {
-  padding: 8rpx 0;
-  box-sizing: border-box;
+.guest-hint {
+  font-size: 24rpx;
+  color: $ok-slate-500;
+  font-weight: 600;
+  line-height: 1.45;
 }
 
-.avatar-box--setup {
-  background: linear-gradient(135deg, #fbbf24, #f59e0b);
-  border-color: #fff8e7;
+.hero-stats-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20rpx;
+  padding: 0 8rpx;
 }
 
-.setup-chevron {
-  margin-left: auto;
+.hero-stat {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.hero-stat-num {
   font-size: 44rpx;
-  font-weight: 300;
-  color: #cbd5e1;
+  font-weight: 950;
+  color: $ok-forest-green;
   line-height: 1;
-  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.avatar-btn {
+.hero-stat-label {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: $ok-slate-500;
+  text-align: center;
+}
+
+.hero-avatar-wrap {
+  flex-shrink: 0;
+  margin: 0 12rpx;
+}
+
+.hero-avatar-btn {
   padding: 0;
   margin: 0;
   background: transparent;
   border: none;
   line-height: 0;
-  flex-shrink: 0;
+}
+
+.hero-avatar-btn::after {
+  border: none;
+}
+
+.avatar-ring {
+  width: 148rpx;
+  height: 148rpx;
+  border-radius: 50%;
+  background: linear-gradient(145deg, $ok-forest-green 0%, $ok-forest-green-dark 100%);
+  border: 8rpx solid #fff;
+  box-shadow: 0 16rpx 40rpx rgba(14, 90, 68, 0.22);
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: auto;
-  min-height: 0;
-  align-self: center;
 }
 
-.avatar-btn::after {
-  border: none;
+.avatar-ring--guest {
+  width: 120rpx;
+  height: 120rpx;
+  background: $ok-slate-300;
+  border-color: #fff;
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.08);
 }
 
-.user-name-box--flex {
-  flex: 1;
-  min-width: 0;
-  position: relative;
-}
-
-.nick-field-wrap {
-  position: relative;
+.avatar-img {
   width: 100%;
-}
-
-/* 仅昵称一行时：与左侧头像（含白边约 140rpx）垂直居中对齐 */
-.user-name-box--center-col {
-  min-height: 140rpx;
-  justify-content: center;
-  gap: 0;
-}
-
-.nick-guide {
+  height: 100%;
   display: block;
-  font-size: 22rpx;
-  color: $ok-slate-400;
-  font-weight: 700;
-  line-height: 1.4;
+}
+
+.avatar-fallback {
+  font-size: 56rpx;
+  font-weight: 950;
+  color: #fff;
+}
+
+.avatar-fallback-sm {
+  font-size: 48rpx;
+  font-weight: 950;
+  color: #fff;
+}
+
+.hero-nick {
+  display: block;
+  text-align: center;
+  font-size: 40rpx;
+  font-weight: 950;
+  color: #0f172a;
   margin-bottom: 12rpx;
 }
 
-.nick-input {
-  width: 100%;
-  font-size: 40rpx;
-  font-weight: 950;
-  color: $ok-slate-800;
-  padding: 12rpx 0;
-  margin-bottom: 4rpx;
-  border-bottom: 2rpx solid $ok-slate-200;
-  box-sizing: border-box;
-  line-height: 1.35;
+.hero-nick--action {
+  color: $ok-forest-green;
 }
 
-/* 真机 placeholder 易不可见：text 叠在条上且 pointer-events:none，点击穿透到 input */
-.nick-static-label {
-  position: absolute;
-  left: 36rpx;
-  top: 50%;
-  transform: translateY(-50%);
-  pointer-events: none;
-  font-size: 30rpx;
+.hero-phone-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+}
+
+.hero-phone {
+  font-size: 26rpx;
   font-weight: 700;
-  color: #64748b;
-  z-index: 2;
-  max-width: calc(100% - 72rpx);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: $ok-slate-600;
 }
 
-/* 完善资料：圆角条；输入文字用实色 hex，避免真机继承成白字 */
-.nick-input--single {
-  position: relative;
-  z-index: 1;
-  border: none;
-  border-bottom: none;
-  background: #f1f5f9;
-  border-radius: 999rpx;
-  padding: 22rpx 36rpx;
-  margin-bottom: 0;
-  font-size: 30rpx;
-  font-weight: 800;
-  line-height: 1.5;
-  color: #0f172a;
-  min-height: 88rpx;
-  box-sizing: border-box;
+.hero-gear {
+  padding: 6rpx 10rpx;
+  border-radius: 12rpx;
+  background: rgba(14, 90, 68, 0.08);
 }
 
-.nick-placeholder {
-  color: #64748b;
-  font-weight: 700;
+.hero-gear-icon {
+  font-size: 28rpx;
+  color: $ok-forest-green;
+  line-height: 1;
 }
 
-.nick-hint {
-  margin-top: 8rpx;
-}
-
-.level-text--guest-hint {
+.hero-setup-hint {
+  display: block;
+  text-align: center;
   font-size: 24rpx;
+  font-weight: 700;
+  color: $ok-forest-green;
+  margin-top: 16rpx;
+}
+
+.archive-card {
+  background: #fff;
+  border-radius: 28rpx;
+  padding: 28rpx 28rpx 24rpx;
+  margin-bottom: 28rpx;
+  border: 2rpx solid $ok-slate-100;
+  box-shadow: 0 12rpx 36rpx rgba(15, 23, 42, 0.06);
+}
+
+.archive-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16rpx;
+}
+
+.archive-title {
+  font-size: 30rpx;
+  font-weight: 950;
+  color: #0f172a;
+}
+
+.archive-link {
+  font-size: 26rpx;
+  font-weight: 800;
+  color: #0d9488;
+}
+
+.archive-status-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  margin-bottom: 20rpx;
+  flex-wrap: wrap;
+}
+
+.archive-status {
+  font-size: 24rpx;
+  font-weight: 800;
+  color: $ok-slate-600;
+  flex: 1;
+  min-width: 0;
+}
+
+.archive-status--alert {
+  color: $ok-forest-green;
+}
+
+.archive-chip {
+  flex-shrink: 0;
+  background: rgba(14, 90, 68, 0.12);
+  padding: 10rpx 22rpx;
+  border-radius: 999rpx;
+}
+
+.archive-chip-txt {
+  font-size: 24rpx;
+  font-weight: 900;
+  color: $ok-forest-green;
+}
+
+.archive-metrics {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20rpx 0 8rpx;
+  border-top: 2rpx solid $ok-slate-50;
+}
+
+.archive-metric {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.archive-metric-val {
+  font-size: 36rpx;
+  font-weight: 950;
+  color: $ok-forest-green;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.archive-metric-lab {
+  font-size: 22rpx;
+  font-weight: 700;
   color: $ok-slate-500;
+  text-align: center;
+}
+
+.archive-plan {
+  display: block;
+  font-size: 24rpx;
+  font-weight: 800;
+  color: $ok-forest-green;
+  margin-top: 16rpx;
+}
+
+.archive-addr {
+  display: block;
+  font-size: 22rpx;
+  font-weight: 700;
+  color: $ok-slate-600;
+  margin-top: 12rpx;
   line-height: 1.45;
 }
 
-/* 微信授权手机号：与说明同宽、偏大的主按钮 */
+.archive-foot {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16rpx;
+  margin-top: 20rpx;
+  padding-top: 20rpx;
+  border-top: 2rpx solid $ok-slate-50;
+}
+
+.archive-foot-left {
+  flex: 1;
+  min-width: 0;
+  font-size: 20rpx;
+  font-weight: 700;
+  color: $ok-slate-400;
+  line-height: 1.4;
+}
+
+.archive-foot-right {
+  flex-shrink: 0;
+  font-size: 22rpx;
+  font-weight: 800;
+  color: $ok-slate-500;
+}
+
+.section-cap {
+  display: block;
+  font-size: 24rpx;
+  font-weight: 800;
+  color: $ok-slate-500;
+  margin-bottom: 16rpx;
+  padding-left: 6rpx;
+}
+
+.section-cap--sp {
+  margin-top: 12rpx;
+}
+
+.menu-card {
+  background: #fff;
+  border-radius: 28rpx;
+  padding: 28rpx 20rpx 20rpx;
+  margin-bottom: 24rpx;
+  border: 2rpx solid $ok-slate-100;
+  box-shadow: 0 8rpx 28rpx rgba(15, 23, 42, 0.05);
+}
+
+.menu-card--narrow {
+  padding-bottom: 28rpx;
+}
+
+.menu-grid {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.menu-grid--3 .menu-cell {
+  width: 33.333%;
+}
+
+.menu-cell {
+  width: 33.333%;
+  box-sizing: border-box;
+  padding: 12rpx 8rpx 20rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.menu-ico-wrap {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 22rpx;
+  background: rgba(14, 90, 68, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.menu-ico {
+  font-size: 40rpx;
+  line-height: 1;
+}
+
+.menu-cap {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: #334155;
+  text-align: center;
+  line-height: 1.35;
+  padding: 0 4rpx;
+}
+
+.menu-extra {
+  margin-top: 12rpx;
+  padding: 20rpx 24rpx;
+  background: $ok-slate-50;
+  border-radius: 20rpx;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.menu-extra-txt {
+  font-size: 26rpx;
+  font-weight: 800;
+  color: #475569;
+}
+
+.menu-extra-arr {
+  font-size: 36rpx;
+  color: #cbd5e1;
+}
+
+.cta-purchase {
+  width: 100%;
+  margin: 8rpx 0 0;
+  padding: 28rpx 24rpx;
+  background: $ok-forest-green;
+  color: #fff;
+  font-size: 30rpx;
+  font-weight: 950;
+  border-radius: 999rpx;
+  border: none;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  line-height: 1.3;
+  box-shadow: 0 16rpx 40rpx rgba(14, 90, 68, 0.35);
+}
+
+.cta-purchase::after {
+  border: none;
+}
+
+.cta-purchase--hover {
+  opacity: 0.92;
+}
+
+.cta-purchase-ico {
+  font-size: 32rpx;
+}
+
+.cta-purchase-txt {
+  color: #fff;
+  font-weight: 950;
+}
+
+/* 微信授权手机号 */
 .wx-login-btn {
   margin: 0;
   padding: 26rpx 40rpx;
   width: 100%;
   max-width: 420rpx;
   box-sizing: border-box;
-  font-size: 34rpx;
+  font-size: 32rpx;
   font-weight: 800;
   color: #fff;
   background: $ok-forest-green;
@@ -1133,303 +1543,8 @@ function onPauseDeliveryTap() {
   opacity: 0.9;
 }
 
-.avatar-box {
-  width: 128rpx;
-  height: 128rpx;
-  border-radius: 50%;
-  background: $ok-forest-green;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 6rpx solid #fff;
-  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.1);
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.avatar-img {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.avatar-box--guest {
-  background: #94a3b8;
-  border-color: #e2e8f0;
-}
-
-.avatar-txt {
-  font-size: 48rpx;
-  font-weight: 900;
-  color: #fff;
-}
-
-.avatar-txt--guest {
-  font-size: 64rpx;
-  font-weight: 950;
-}
-
-/* 待选头像占位：显示「点」 */
-.avatar-txt--dot {
-  font-size: 56rpx;
-  font-weight: 950;
-  letter-spacing: 0;
-}
-
-.user-name-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-}
-
-.nick-name {
-  font-size: 44rpx;
-  font-weight: 950;
-  color: #0f172a;
-}
-
-.nick-name--action {
-  color: $ok-forest-green;
-}
-
-.level-text {
-  font-size: 24rpx;
-  color: #334155;
-  font-weight: 700;
-}
-
-.vip-card {
-  background: $ok-forest-green;
-  border-radius: 70rpx;
-  padding: 56rpx;
-  color: #fff;
-  margin-bottom: 60rpx;
-  box-shadow: 0 40rpx 80rpx rgba(14, 90, 68, 0.25);
-}
-
-/* 月卡：深靛紫渐变 + 香槟金强调，与周卡绿金区分 */
-.vip-card--month {
-  background: linear-gradient(165deg, #1a2744 0%, #2d2248 42%, #121c32 100%);
-  box-shadow:
-    0 40rpx 100rpx rgba(8, 10, 28, 0.52),
-    0 0 0 1rpx rgba(212, 175, 55, 0.22);
-}
-
-.vip-card--month .vip-tag {
-  color: #f5ead6;
-  background: rgba(255, 220, 160, 0.12);
-  border: 1rpx solid rgba(212, 175, 55, 0.38);
-}
-
-.vip-card--month .member-plan-kind {
-  color: #ffd98a;
-  text-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.35);
-}
-
-.vip-card--month .num {
-  color: #ffe082;
-  text-shadow: 0 4rpx 20rpx rgba(255, 200, 90, 0.22);
-}
-
-.vip-card--month .unit {
-  color: #e8e0d5;
-  opacity: 0.95;
-}
-
-.vip-card--month .type-label {
-  color: #ffd98a;
-}
-
-.vip-card--month .type-label--leave-detail {
-  color: #f0c97a;
-}
-
-.vip-card--month .vip-renew-btn {
-  color: #1a1f2e;
-  background: linear-gradient(180deg, #fff0c2 0%, #e8b84a 100%);
-  box-shadow: 0 8rpx 28rpx rgba(0, 0, 0, 0.32);
-  border: 1rpx solid rgba(255, 255, 255, 0.35);
-}
-
-.vip-card--month .today-delivery-addr {
-  color: rgba(255, 248, 235, 0.94);
-}
-
-.vip-card--month .footer-info {
-  color: rgba(230, 215, 190, 0.82);
-  opacity: 0.88;
-  border-top-color: rgba(212, 175, 55, 0.22);
-}
-
-.vip-card--month .footer-info-right {
-  color: rgba(230, 215, 190, 0.88);
-  opacity: 0.9;
-}
-
-.vip-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20rpx;
-  flex-wrap: wrap;
-  margin-bottom: 36rpx;
-}
-
-.vip-tag {
-  display: inline-block;
-  font-size: 20rpx;
-  font-weight: 950;
-  background: rgba(255, 255, 255, 0.15);
-  padding: 10rpx 24rpx;
-  border-radius: 20rpx;
-  letter-spacing: 2rpx;
-}
-
-.member-plan-kind {
-  font-size: 26rpx;
-  font-weight: 950;
-  color: $ok-sunshine-yellow;
-  letter-spacing: 1rpx;
-}
-
-.balance-line {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 16rpx;
-}
-
-.num {
-  font-size: 120rpx;
-  font-weight: 950;
-  color: $ok-sunshine-yellow;
-  letter-spacing: -4rpx;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.unit {
-  font-size: 30rpx;
-  font-weight: 900;
-  opacity: 0.8;
-}
-
-.type-label {
-  flex: 1;
-  text-align: right;
-  font-weight: 950;
-  font-style: italic;
-  color: $ok-sunshine-yellow;
-  font-size: 30rpx;
-  min-width: 200rpx;
-}
-
-/* 区间 / 明日 等略长文案，略缩小以免挤压剩余餐次数字 */
-.type-label--leave-detail {
-  font-size: 24rpx;
-  line-height: 1.25;
-}
-.type-label-slot {
-  flex: 1;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  min-width: 200rpx;
-}
-
-.vip-renew-btn {
-  font-size: 26rpx;
-  font-weight: 950;
-  font-style: normal;
-  color: $ok-forest-green;
-  background: $ok-sunshine-yellow;
-  padding: 14rpx 32rpx;
-  border-radius: 999rpx;
-  line-height: 1.2;
-  box-shadow: 0 6rpx 20rpx rgba(0, 0, 0, 0.12);
-}
-
-.today-delivery-addr {
-  display: block;
-  font-size: 24rpx;
-  font-weight: 800;
-  color: rgba(255, 255, 255, 0.92);
-  margin-top: 28rpx;
-  line-height: 1.45;
-  text-align: left;
-}
-
-.footer-info {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 20rpx;
-  flex-wrap: wrap;
-  font-size: 22rpx;
-  opacity: 0.6;
-  font-weight: 800;
-  margin-top: 20rpx;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 24rpx;
-}
-
-.footer-info-left {
-  flex: 1;
-  min-width: 0;
-  line-height: 1.35;
-}
-
-.footer-info-right {
-  flex-shrink: 0;
-  text-align: right;
-  line-height: 1.35;
-  font-size: 22rpx;
-  font-weight: 800;
-}
-
-.action-list {
-  background: #fff;
-  border-radius: 48rpx;
-  overflow: hidden;
-  border: 1px solid $ok-slate-100;
-  margin-bottom: 0;
-}
-
-.menu-row {
-  padding: 44rpx 40rpx;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid $ok-slate-50;
-}
-
-.menu-row:last-child {
-  border-bottom: none;
-}
-
-.menu-row--muted {
-  opacity: 0.6;
-  margin-top: 20rpx;
-}
-
-.menu-label {
-  font-size: 30rpx;
-  font-weight: 900;
-  color: #333;
-}
-
-.menu-label--small {
-  font-size: 24rpx;
-}
-
-.arrow {
-  color: #ccc;
-  font-size: 40rpx;
-}
-
 /* 页面底部版本号（低调展示） */
-.page-version {
-  display: block;
+.page-version {  display: block;
   margin-top: 40rpx;
   text-align: center;
   font-size: 18rpx;

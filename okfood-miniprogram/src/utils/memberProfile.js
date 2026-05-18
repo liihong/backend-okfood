@@ -12,27 +12,26 @@ export function isPlaceholderWxProfile(p) {
   return false
 }
 
-function hasNonEmptyField(v) {
-  return v != null && String(v).trim() !== ''
-}
-
 /**
- * 是否需要引导「完善资料」：占位姓名、缺展示用昵称、或既未选起送日又未选「暂停配送」
- * 与「开卡/支付」解耦，不因剩余次数为 0 而强制进资料页（购卡在独立模块中完成）。
+ * 是否有可用的会员展示名（微信昵称、或非占位真实姓名）
  * @param {object | null | undefined} profile GET /api/user/me 的 data
  */
-export function shouldOpenMemberSetup(profile) {
-  if (!profile || typeof profile !== 'object') return true
+export function hasUsableMemberDisplayName(profile) {
+  if (!profile || typeof profile !== 'object') return false
   const nm = (profile.name != null ? String(profile.name) : '').trim()
   const stub = nm === MEMBER_STUB_NAME || nm === ''
   const wn = (profile.wechat_name != null ? String(profile.wechat_name) : '').trim()
   const wxOk = wn !== '' && wn !== WX_DEFAULT_NICK
-  const hasUsableName = wxOk || (!stub && nm !== '')
-  const deferred = profile.delivery_deferred === true
-  const noDeliveryStart =
-    !hasNonEmptyField(profile.delivery_start_date) && !deferred
-  if (!hasUsableName || noDeliveryStart) return true
-  return false
+  return wxOk || (!stub && nm !== '')
+}
+
+/**
+ * 是否需要引导「完善资料」：仅检查头像/称呼（起送日、配送方式在资料与开卡流程中另行设置）
+ * @param {object | null | undefined} profile GET /api/user/me 的 data
+ */
+export function shouldOpenMemberSetup(profile) {
+  if (!profile || typeof profile !== 'object') return true
+  return !hasUsableMemberDisplayName(profile)
 }
 
 /**

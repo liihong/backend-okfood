@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -25,6 +26,12 @@ class MembershipCardTemplate(Base):
     kind_label: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     meals_grant: Mapped[int] = mapped_column(Integer, nullable=False)
+    list_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    sale_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    card_style_image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    validity_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    intro_short: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    purchase_notice: Mapped[str | None] = mapped_column(Text, nullable=True)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

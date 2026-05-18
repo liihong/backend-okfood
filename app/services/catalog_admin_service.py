@@ -56,6 +56,12 @@ def create_membership_template(
         kind_label=kl[:64],
         name=body.name.strip(),
         meals_grant=int(body.meals_grant),
+        list_price_yuan=Decimal(body.list_price_yuan) if body.list_price_yuan is not None else None,
+        sale_price_yuan=Decimal(body.sale_price_yuan) if body.sale_price_yuan is not None else None,
+        card_style_image_url=(body.card_style_image_url.strip() or None) if body.card_style_image_url else None,
+        validity_days=int(body.validity_days) if body.validity_days is not None else None,
+        intro_short=(body.intro_short.strip() or None) if body.intro_short else None,
+        purchase_notice=(body.purchase_notice.strip() or None) if body.purchase_notice else None,
         remark=(body.remark.strip() if body.remark else None),
         sort_order=int(body.sort_order),
         is_active=bool(body.is_active),
@@ -99,6 +105,21 @@ def patch_membership_template(
         row.sort_order = int(body.sort_order)
     if body.is_active is not None:
         row.is_active = bool(body.is_active)
+    fs = body.model_fields_set
+    if "list_price_yuan" in fs:
+        row.list_price_yuan = Decimal(body.list_price_yuan) if body.list_price_yuan is not None else None
+    if "sale_price_yuan" in fs:
+        row.sale_price_yuan = Decimal(body.sale_price_yuan) if body.sale_price_yuan is not None else None
+    if "card_style_image_url" in fs:
+        row.card_style_image_url = (
+            (body.card_style_image_url.strip() or None) if body.card_style_image_url else None
+        )
+    if "validity_days" in fs:
+        row.validity_days = int(body.validity_days) if body.validity_days is not None else None
+    if "intro_short" in fs:
+        row.intro_short = (body.intro_short.strip() or None) if body.intro_short else None
+    if "purchase_notice" in fs:
+        row.purchase_notice = (body.purchase_notice.strip() or None) if body.purchase_notice else None
     db.commit()
     db.refresh(row)
     return row
@@ -286,6 +307,27 @@ def _fallback_kind_from_period(period_kind: str | None) -> str:
     return "会员卡"
 
 
+def membership_template_public_dump(row: MembershipCardTemplate) -> dict:
+    """会员端列表：不含备注与租户内部字段。"""
+    kl = (getattr(row, "kind_label", None) or "").strip()
+    if not kl:
+        kl = _fallback_kind_from_period(row.period_kind)
+    vd = getattr(row, "validity_days", None)
+    return {
+        "id": int(row.id),
+        "kind_label": kl[:64],
+        "name": row.name,
+        "meals_grant": int(row.meals_grant),
+        "list_price_yuan": decimal_to_str_money(getattr(row, "list_price_yuan", None)),
+        "sale_price_yuan": decimal_to_str_money(getattr(row, "sale_price_yuan", None)),
+        "card_style_image_url": getattr(row, "card_style_image_url", None),
+        "validity_days": int(vd) if vd is not None else None,
+        "intro_short": getattr(row, "intro_short", None),
+        "purchase_notice": getattr(row, "purchase_notice", None),
+        "sort_order": int(row.sort_order),
+    }
+
+
 def membership_template_dump(row: MembershipCardTemplate) -> dict:
     kl = (getattr(row, "kind_label", None) or "").strip()
     if not kl:
@@ -298,6 +340,12 @@ def membership_template_dump(row: MembershipCardTemplate) -> dict:
         "period_kind": row.period_kind,
         "name": row.name,
         "meals_grant": int(row.meals_grant),
+        "list_price_yuan": decimal_to_str_money(getattr(row, "list_price_yuan", None)),
+        "sale_price_yuan": decimal_to_str_money(getattr(row, "sale_price_yuan", None)),
+        "card_style_image_url": getattr(row, "card_style_image_url", None),
+        "validity_days": int(row.validity_days) if getattr(row, "validity_days", None) is not None else None,
+        "intro_short": getattr(row, "intro_short", None),
+        "purchase_notice": getattr(row, "purchase_notice", None),
         "remark": row.remark,
         "sort_order": int(row.sort_order),
         "is_active": bool(row.is_active),

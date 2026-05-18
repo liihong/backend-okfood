@@ -39,8 +39,11 @@ from app.schemas.admin import (
     WeeklySlotAssignIn,
     MenuDayTotalStockIn,
 )
-from app.services.courier_service import count_expire_one_unit_members_for_business_day
-from app.services.delivery_sheet_service import total_meal_units_for_delivery_sheet
+from app.services.courier_service import (
+    count_expire_one_unit_members_for_business_day,
+    count_members_first_scheduled_delivery_day,
+)
+from app.services.delivery_sheet_service import _store_membership_counts, total_meal_units_for_delivery_sheet
 from app.services.member_address_service import (
     default_address_pick_subquery,
     delivery_region_name_map,
@@ -710,6 +713,22 @@ def count_leave_members_for_delivery_day(db: Session, d: date, *, store_id: int 
     )
 
 
+def _dashboard_meals_week_over_week_caption(
+    db: Session,
+    *,
+    meals: int,
+    for_delivery_date: date,
+    store_id: int,
+) -> str:
+    """某业务日备餐份数相对上周同一日历日的差值文案（基准为 for_delivery_date 往前 7 天当日的备餐份数）。"""
+    prev_same_weekday = date.fromordinal(for_delivery_date.toordinal() - 7)
+    baseline = total_meal_units_for_delivery_sheet(db, delivery_date=prev_same_weekday, store_id=store_id)
+    delta = int(meals) - int(baseline)
+    if delta == 0:
+        return "较上周持平"
+    return f"较上周{delta:+d}份"
+
+
 def dashboard_meal_summary(
     db: Session,
     *,
@@ -729,6 +748,7 @@ def dashboard_meal_summary(
     anchor = business_anchor_date or today_shanghai()
     day_after = date.fromordinal(anchor.toordinal() + 1)
     cal_today = today_shanghai()
+    mem_kw = _store_membership_counts(db, store_id=sid)
 
     if anchor < cal_today and not force_recompute:
         row = db.get(
@@ -736,14 +756,27 @@ def dashboard_meal_summary(
             {"store_id": sid, "business_anchor_date": anchor},
         )
         if row is not None:
+            tp_snap = int(row.today_meals_to_prepare)
+            np_snap = int(row.tomorrow_meals_to_prepare)
+            t_first = count_members_first_scheduled_delivery_day(db, delivery_date=day_after, store_id=sid)
+            today_wow_cap = _dashboard_meals_week_over_week_caption(
+                db, meals=tp_snap, for_delivery_date=anchor, store_id=sid
+            )
+            tomorrow_wow_cap = _dashboard_meals_week_over_week_caption(
+                db, meals=np_snap, for_delivery_date=day_after, store_id=sid
+            )
             return DashboardMealSummaryOut(
                 shanghai_today=cal_today,
                 business_anchor_date=anchor,
                 today_leave_members=int(row.today_leave_members),
-                today_meals_to_prepare=int(row.today_meals_to_prepare),
+                today_meals_to_prepare=tp_snap,
                 tomorrow_leave_members=int(row.tomorrow_leave_members),
-                tomorrow_meals_to_prepare=int(row.tomorrow_meals_to_prepare),
+                tomorrow_meals_to_prepare=np_snap,
                 today_expire_one_unit_members=int(row.today_expire_one_unit_members),
+                **mem_kw,
+                tomorrow_first_meal_new_members=t_first,
+                today_meals_week_over_week_caption=today_wow_cap,
+                tomorrow_meals_week_over_week_caption=tomorrow_wow_cap,
                 from_snapshot=True,
                 snapshot_recorded_at=row.recorded_at,
             )
@@ -753,6 +786,11 @@ def dashboard_meal_summary(
     nl = count_leave_members_for_delivery_day(db, day_after, store_id=sid)
     np = total_meal_units_for_delivery_sheet(db, delivery_date=day_after, store_id=sid)
     te = count_expire_one_unit_members_for_business_day(db, delivery_date=anchor, store_id=sid)
+    t_first = count_members_first_scheduled_delivery_day(db, delivery_date=day_after, store_id=sid)
+    today_wow_cap = _dashboard_meals_week_over_week_caption(db, meals=tp, for_delivery_date=anchor, store_id=sid)
+    tomorrow_wow_cap = _dashboard_meals_week_over_week_caption(
+        db, meals=np, for_delivery_date=day_after, store_id=sid
+    )
 
     out = DashboardMealSummaryOut(
         shanghai_today=cal_today,
@@ -762,6 +800,10 @@ def dashboard_meal_summary(
         tomorrow_leave_members=nl,
         tomorrow_meals_to_prepare=np,
         today_expire_one_unit_members=te,
+        **mem_kw,
+        tomorrow_first_meal_new_members=t_first,
+        today_meals_week_over_week_caption=today_wow_cap,
+        tomorrow_meals_week_over_week_caption=tomorrow_wow_cap,
         from_snapshot=False,
         snapshot_recorded_at=None,
     )
@@ -800,6 +842,14 @@ def dashboard_meal_summary(
             tomorrow_leave_members=out.tomorrow_leave_members,
             tomorrow_meals_to_prepare=out.tomorrow_meals_to_prepare,
             today_expire_one_unit_members=out.today_expire_one_unit_members,
+            total_members=out.total_members,
+            active_weekly_members=out.active_weekly_members,
+            expired_weekly_members=out.expired_weekly_members,
+            active_monthly_members=out.active_monthly_members,
+            expired_monthly_members=out.expired_monthly_members,
+            tomorrow_first_meal_new_members=out.tomorrow_first_meal_new_members,
+            today_meals_week_over_week_caption=out.today_meals_week_over_week_caption,
+            tomorrow_meals_week_over_week_caption=out.tomorrow_meals_week_over_week_caption,
             from_snapshot=False,
             snapshot_recorded_at=row.recorded_at,
         )

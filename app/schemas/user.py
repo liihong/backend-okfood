@@ -150,3 +150,19 @@ class MemberCardPricesOut(BaseModel):
         False,
         description="任一侧划线价高于售价时为 true，启用「活动价」整体样式",
     )
+
+
+class MembershipCardTemplateMemberOut(BaseModel):
+    """后台会员卡模版：会员端展示（不参与下单计价；自助支付仍以门店周/月卡价为准）。"""
+
+    id: int
+    kind_label: str
+    name: str
+    meals_grant: int = Field(..., ge=1)
+    list_price_yuan: str | None = Field(None, description="原价（划线价）")
+    sale_price_yuan: str | None = Field(None, description="优惠价")
+    card_style_image_url: str | None = None
+    validity_days: int | None = Field(None, description="有效天数（展示）")
+    intro_short: str | None = Field(None, description="商品简介")
+    purchase_notice: str | None = Field(None, description="购买须知")
+    sort_order: int = 0

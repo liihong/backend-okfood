@@ -1,6 +1,6 @@
 <template>
   <view class="page">
-   <OkNavbar show-back :title="resumeOnlyMode ? '恢复配送' : '会员资料与开卡'" />
+   <OkNavbar show-back :title="navbarTitle" />
     <scroll-view scroll-y class="scroll" :show-scrollbar="false">
      <view class="wrap">
 
@@ -40,9 +40,49 @@
              请在上方选择「配送到家」或「门店自提」，并选择开始的业务日期。
             </text>
           </view>
+        <button
+          class="submit-btn"
+          :loading="submitting"
+          :disabled="avatarUploading"
+          @click="onSubmit"
+        >
+          {{ submitButtonText }}
+        </button>
       </view>
 
-      <view v-else class="setup-module">
+      <!-- 登录后第一步：仅需微信头像 + 昵称 -->
+      <view v-else-if="identityOnlyPhase" class="setup-module">
+        <text class="module-title">完善资料</text>
+        <text class="identity-lead">请同步微信头像与昵称，便于在「我的」与客服侧识别您。</text>
+        <view class="section">
+          <text class="sec-title">微信头像</text>
+          <button class="avatar-btn" open-type="chooseAvatar" @chooseavatar="onChooseAvatar">
+            <view class="avatar-box avatar-box--hero">
+              <image v-if="avatarUrl" class="avatar-img" :src="avatarUrl" mode="aspectFill" />
+              <text v-else class="avatar-hint">点击选择头像</text>
+            </view>
+          </button>
+        </view>
+        <view class="section">
+          <text class="sec-title">微信昵称</text>
+          <view class="nick-wrap">
+            <text v-show="showNickHint" class="nick-hint-overlay">与微信一致的昵称</text>
+            <input class="nick-input" type="nickname" :value="nickDraft" placeholder=""
+              placeholder-style="color: #64748b;" @input="onNickInput" />
+          </view>
+        </view>
+        <button
+          class="submit-btn"
+          :loading="submitting"
+          :disabled="avatarUploading"
+          @click="onSubmit"
+        >
+          保存并返回「我的」
+        </button>
+      </view>
+
+      <view v-else class="full-setup-wrap">
+        <view class="setup-module">
          <text class="module-title">一、个人资料</text>
           <view v-if="!skipProfileIdentityEdit" class="section">
             <text class="sec-title">头像（可选）</text>
@@ -125,7 +165,7 @@
             </button>
           </view>
         </view>
-       </view>
+        </view>
 
         <view v-if="!resumeOnlyMode && needsCardPayment" class="setup-module setup-module--card">
          <text class="module-title">二、开通会员卡</text>
@@ -134,6 +174,31 @@
             <text class="sec-sub">
              支付成功后自动增加对应餐次（周卡 +6 / 月卡 +24）。
             </text>
+            <view v-if="membershipTemplates.length" class="mct-catalog">
+              <text class="mct-catalog-title">门店会员卡展示</text>
+              <text class="mct-catalog-tip">以下为后台配置的样式与文案；实际微信支付金额仍以下方「周卡 / 月卡」标价为准。</text>
+              <view v-for="t in membershipTemplates" :key="t.id" class="mct-card">
+                <image
+                  v-if="resolveMediaUrl(t.card_style_image_url)"
+                  class="mct-visual"
+                  :src="resolveMediaUrl(t.card_style_image_url)"
+                  mode="aspectFill"
+                />
+                <view class="mct-body">
+                  <text class="mct-name">{{ t.name }}</text>
+                  <text class="mct-kind">{{ t.kind_label }} · 入账 {{ t.meals_grant }} 次</text>
+                  <view v-if="t.list_price_yuan || t.sale_price_yuan" class="mct-price-row">
+                    <text v-if="t.list_price_yuan" class="mct-list">¥{{ t.list_price_yuan }}</text>
+                    <text v-if="t.sale_price_yuan" class="mct-sale">¥{{ t.sale_price_yuan }}</text>
+                  </view>
+                  <text v-if="t.validity_days != null" class="mct-meta">
+                    有效天数：{{ t.validity_days }} 天
+                  </text>
+                  <text v-if="t.intro_short" class="mct-intro">{{ t.intro_short }}</text>
+                  <text v-if="t.purchase_notice" class="mct-notice">{{ t.purchase_notice }}</text>
+                </view>
+              </view>
+            </view>
            <!-- 活动价：绿底双白卡 -->
             <view v-if="!useDeluxePlanUi" class="plan-premium-wrap">
               <view class="plan-grid plan-grid--premium">
@@ -246,11 +311,13 @@
           </view>
         </view>
 
-        <view v-else-if="!resumeOnlyMode && !needsCardPayment" class="section">
+        <view v-else-if="!resumeOnlyMode && !needsCardPayment" class="setup-module">
+          <view class="section">
           <text class="sec-title">会员状态</text>
           <text class="sec-sub">
-            您当前仍有剩余订餐次数（{{ serverBalance }} 次），无需再次购买会员卡，完善资料即可。
+            您当前仍有剩余订餐次数（{{ serverBalance }} 次），无需再次购买会员卡。可在下方保存配送信息。
           </text>
+          </view>
         </view>
 
         <button
@@ -262,6 +329,7 @@
           {{ submitButtonText }}
         </button>
       </view>
+    </view>
     </scroll-view>
   </view>
 </template>
@@ -276,6 +344,7 @@ import {
   uploadMemberAvatarFile,
   clearMemberSession,
   isUserMeNotFoundError,
+  API_BASE,
 } from '@/utils/api.js'
 import {
   shouldOpenMemberSetup,
@@ -313,8 +382,27 @@ const promoActive = ref(false)
 /** 来自接口的划线价（可空） */
 const weekListStr = ref('')
 const monthListStr = ref('')
+/** 后台会员卡模版（展示：样式图、价签与文案；不计价） */
+const membershipTemplates = ref([])
 /** 资料已完备、仅开卡续费时隐藏头像与昵称编辑（与 shouldOpenMemberSetup 判定一致） */
 const skipProfileIdentityEdit = ref(false)
+
+function resolveMediaUrl(u) {
+  const s = String(u || '').trim()
+  if (!s) return ''
+  if (/^https?:\/\//i.test(s)) return s
+  return `${API_BASE}${s.startsWith('/') ? s : `/${s}`}`
+}
+
+async function loadMembershipTemplates() {
+  if (!getMemberToken()) return
+  try {
+    const data = await request('/api/user/membership-card-templates', { method: 'GET', retry: 1 })
+    membershipTemplates.value = Array.isArray(data) ? data : []
+  } catch {
+    membershipTemplates.value = []
+  }
+}
 
 const showNickHint = computed(() => !String(nickDraft.value || '').trim())
 
@@ -382,6 +470,14 @@ function onDeliveryModeChange(e) {
 /** 从「我的」恢复配送进入：仅展示配送方式与起送日 */
 const resumeOnlyMode = ref(false)
 const resumeHintShown = ref(false)
+/** 登录后昵称未就绪时，仅展示微信头像 + 昵称 */
+const identityOnlyPhase = ref(false)
+
+const navbarTitle = computed(() => {
+  if (resumeOnlyMode.value) return '恢复配送'
+  if (identityOnlyPhase.value) return '完善资料'
+  return '会员资料与开卡'
+})
 
 onLoad((options) => {
   const raw = options?.preCard != null ? String(options.preCard) : ''
@@ -407,6 +503,7 @@ onShow(() => {
     return
   }
   void loadCardPrices()
+  void loadMembershipTemplates()
   void loadProfile()
 })
 
@@ -434,10 +531,12 @@ async function loadProfile() {
   const phone = memberPhone.value || uni.getStorageSync('memberPhone') || ''
   if (!phone) return
   skipProfileIdentityEdit.value = false
+  identityOnlyPhase.value = false
   try {
     const data = await request('/api/user/me', { method: 'GET' })
     minDeliveryYmd.value = minMemberDeliveryStartYmd()
     serverBalance.value = Math.max(0, Math.floor(Number(data.balance) || 0))
+    identityOnlyPhase.value = !resumeOnlyMode.value && shouldOpenMemberSetup(data)
     skipProfileIdentityEdit.value =
       shouldPromptMemberCardPay(data) && !shouldOpenMemberSetup(data)
     /** 有余额且暂停配送时仍须停留本页以便改为「恢复配送」并重选起送日 */
@@ -498,6 +597,7 @@ async function loadProfile() {
     }
   } catch (e) {
     skipProfileIdentityEdit.value = false
+    identityOnlyPhase.value = false
     if (isUserMeNotFoundError(e)) {
       clearMemberSession()
       uni.showToast({ title: '登录已失效，请重新登录', icon: 'none' })
@@ -600,6 +700,45 @@ async function onSubmit() {
       setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
     } catch (err) {
       uni.hideLoading()
+      uni.showToast({ title: err?.message || '保存失败', icon: 'none', duration: 2800 })
+    } finally {
+      submitting.value = false
+    }
+    return
+  }
+
+  if (identityOnlyPhase.value) {
+    if (!getMemberToken() || !phone) {
+      uni.showToast({ title: '登录已失效', icon: 'none' })
+      return
+    }
+    if (!nick || nick === WX_DEFAULT_NICK) {
+      uni.showToast({ title: '请填写微信昵称', icon: 'none' })
+      return
+    }
+    if (avatarUploading.value) {
+      uni.showToast({ title: '头像正在上传，请稍候', icon: 'none' })
+      return
+    }
+    submitting.value = true
+    try {
+      const patch = { wechat_name: nick, name: nick }
+      const av = String(avatarUrl.value || '').trim()
+      if (isPersistableAvatarUrl(av)) patch.avatar_url = av
+      await request('/api/user/profile', { method: 'PATCH', data: patch })
+      const storedAvatar =
+        (isPersistableAvatarUrl(av) ? av : remoteAvatarUrl.value || '').trim()
+      try {
+        uni.setStorageSync(`okfood_wx_profile:${phone}`, {
+          nickName: nick,
+          avatarUrl: storedAvatar,
+        })
+      } catch {
+        /* ignore */
+      }
+      uni.showToast({ title: '已保存', icon: 'success', duration: 2000 })
+      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+    } catch (err) {
       uni.showToast({ title: err?.message || '保存失败', icon: 'none', duration: 2800 })
     } finally {
       submitting.value = false
@@ -913,6 +1052,117 @@ async function onSubmit() {
   
   .pay-radio-group--delivery .pay-radio-label {
     font-size: 24rpx;
+}
+
+.mct-catalog {
+  margin-top: 28rpx;
+  padding: 24rpx;
+  background: #f8fafc;
+  border-radius: 24rpx;
+  border: 2rpx solid #e2e8f0;
+  box-sizing: border-box;
+}
+
+.mct-catalog-title {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 900;
+  color: #0f172a;
+  margin-bottom: 12rpx;
+}
+
+.mct-catalog-tip {
+  display: block;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #64748b;
+  line-height: 1.5;
+  margin-bottom: 20rpx;
+}
+
+.mct-card {
+  display: flex;
+  flex-direction: row;
+  gap: 20rpx;
+  padding: 20rpx;
+  background: #fff;
+  border-radius: 20rpx;
+  margin-bottom: 16rpx;
+  border: 2rpx solid #f1f5f9;
+  box-sizing: border-box;
+}
+
+.mct-card:last-child {
+  margin-bottom: 0;
+}
+
+.mct-visual {
+  width: 200rpx;
+  height: 120rpx;
+  flex-shrink: 0;
+  border-radius: 16rpx;
+  background: #e2e8f0;
+}
+
+.mct-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.mct-name {
+  font-size: 30rpx;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.mct-kind {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.mct-price-row {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 16rpx;
+}
+
+.mct-list {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #94a3b8;
+  text-decoration: line-through;
+}
+
+.mct-sale {
+  font-size: 34rpx;
+  font-weight: 900;
+  color: #dc2626;
+}
+
+.mct-meta {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #334155;
+}
+
+.mct-intro {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.45;
+}
+
+.mct-notice {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #475569;
+  line-height: 1.55;
+  white-space: pre-wrap;
 }
 
 .plan-premium-wrap {
