@@ -42,6 +42,15 @@ const portalSubtitle = computed(() => {
 
 const pageTitle = computed(() => route.meta.title || 'OK Fine Admin')
 
+/** 顶栏主标题下可选副文案（如配送大表说明） */
+const pageSubtitle = computed(() => {
+  const s = route.meta.pageSubtitle
+  return s != null && String(s).trim() !== '' ? String(s).trim() : ''
+})
+
+/** 配送大表：顶栏右侧挂载工具栏（Teleport 目标） */
+const isDeliveryPage = computed(() => route.name === 'delivery')
+
 /** 营业概览等页在内容区内自带头图，布局顶栏可完全省略 */
 const hidePageTitle = computed(() => Boolean(route.meta.hidePageTitle))
 
@@ -225,8 +234,21 @@ watch(sidebarCollapsedPref, (v) => {
     </aside>
 
     <main class="main-body">
-      <header v-if="!hidePageTitle" class="top-header top-header--page-title-only">
-        <h2 class="page-title">{{ pageTitle }}</h2>
+      <header
+        v-if="!hidePageTitle"
+        class="top-header top-header--page-title-only"
+        :class="{ 'top-header--delivery-toolbar': isDeliveryPage }"
+      >
+        <div class="page-heading">
+          <h2 class="page-title">{{ pageTitle }}</h2>
+          <p v-if="pageSubtitle" class="page-subtitle">{{ pageSubtitle }}</p>
+        </div>
+        <div
+          v-if="isDeliveryPage"
+          id="delivery-header-toolbar"
+          class="page-header-toolbar"
+          aria-label="配送大表筛选与操作"
+        />
       </header>
 
       <router-view />

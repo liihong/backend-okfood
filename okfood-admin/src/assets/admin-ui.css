@@ -594,6 +594,8 @@
 
 .main-body {
   flex: 1;
+  /* 允许在 admin-layout 横向 flex 下收缩，避免子内容把主区宽度撑破出现「横向不断增长」 */
+  min-width: 0;
   margin-left: 235px;
   padding: 1rem 1rem;
   transition: margin-left 0.22s ease;
@@ -613,6 +615,39 @@
 /* 已移除 System Live / 通知 / 日期条；非 hidePageTitle 路由仅保留大号页面标题 */
 .top-header--page-title-only {
   margin-bottom: 1.25rem;
+}
+
+/* 配送大表：标题与右侧工具条卡片垂直居中对齐 */
+.top-header--delivery-toolbar {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  width: 100%;
+  min-width: 0;
+}
+.top-header--delivery-toolbar .page-heading {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+@media (max-width: 1200px) {
+  .top-header--delivery-toolbar {
+    flex-wrap: wrap;
+  }
+  .top-header--delivery-toolbar .page-header-toolbar {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+}
+.page-header-toolbar {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 .page-title-row {
@@ -635,6 +670,22 @@
   letter-spacing: -1px;
   margin: 0;
   color: #1e293b;
+}
+
+.page-heading {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+}
+
+.page-subtitle {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #94a3b8;
+  line-height: 1.45;
+  max-width: 42rem;
 }
 
 .members-header-stats {
@@ -1309,17 +1360,30 @@
 .admin-table--delivery.el-table {
   /* 列 min-width 合计约 700px+，避免窄主栏把前几列压成一条 */
   min-width: 720px;
+  --el-table-border-color: transparent;
+  --el-table-header-bg-color: #f8fafc;
+}
+.admin-table--delivery.el-table .el-table__inner-wrapper::before {
+  display: none;
 }
 .admin-table--delivery.el-table .el-table__header th.el-table__cell {
-  padding: 0.5rem 0.65rem;
+  padding: 1rem 0.85rem;
   text-align: left;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.94);
-    background: var(--okfood-el-table-header-bg, #0e5a44);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  background: #f8fafc !important;
+  border-bottom: 1px solid #f1f5f9 !important;
 }
 .admin-table--delivery.el-table .el-table__body td.el-table__cell {
-  padding: 0.42rem 0.65rem;
-  border-bottom: 1px solid #f8fafc;
+  padding: 1rem 0.85rem;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: top;
+}
+.admin-table--delivery.el-table .el-table__body tr:hover > td.el-table__cell {
+  background: rgba(248, 250, 252, 0.65) !important;
 }
 .admin-table--delivery.el-table .el-table__cell.col-sel .cell {
   padding: 0;
@@ -1330,12 +1394,12 @@
   border-bottom-color: #fde68a;
 }
 .admin-table--delivery.el-table tr.delivery-row--done:not(.delivery-row--area-warn) > td.el-table__cell {
-  background: #f0fdf4;
-  border-bottom-color: #bbf7d0;
+  background: #f7fdf9;
+  border-bottom-color: #ecfdf5;
 }
 .admin-table--delivery.el-table tr.delivery-row--partial:not(.delivery-row--area-warn) > td.el-table__cell {
-  background: #f8fafc;
-  border-bottom-color: #e2e8f0;
+  background: #fafafa;
+  border-bottom-color: #f1f5f9;
 }
 /* 序号、餐数列：保证最小宽度，且不让 Element Plus .cell 的省略样式裁掉徽章 */
 .admin-table--delivery.el-table .el-table__cell.col-idx {

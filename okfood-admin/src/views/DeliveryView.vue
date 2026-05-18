@@ -1,9 +1,10 @@
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
-import { Printer, RefreshCw, MapPin, Truck, FileDown } from 'lucide-vue-next'
+import { ref, computed, watch, onMounted } from 'vue'
+import { RefreshCw, MapPin, Truck, FileDown, Search } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import { useAnimatedInteger } from '../composables/useAnimatedInteger.js'
 
 /** 与后端业务日一致：Asia/Shanghai 的日历日期 YYYY-MM-DD */
 function ymdInTimeZone(date, timeZone) {
@@ -118,13 +119,11 @@ const emptySheet = () => ({
   expired_monthly_members: 0,
 })
 
-const areaFilter = ref('')
 /** 按手机号筛选大表（与 GET delivery-sheet ?phone= 一致；可后几位或完整号码） */
 const phoneQuery = ref('')
 /** 查询用的配送业务日（日历日 YYYY-MM-DD），可与「今天」不同 */
 const deliveryDateQuery = ref(todayShanghaiStr())
-/** 与后端 delivery_regions 启用列表同源（来自 delivery-sheet 响应） */
-const activeRegions = ref([])
+
 const sheetToday = ref(emptySheet())
 const loading = ref(false)
 /** 正在提交人工标记的 member_id，用于防重复点按 */
@@ -146,7 +145,7 @@ const sfBizDayPast = computed(() => {
   return Boolean(d && d < todayShanghaiStr())
 })
 const sfSelectAll = ref(true)
-/** 勾选后预览不按片区过滤（当日全部到家停靠点）；不勾选时优先顶部片区下拉，否则用当前 Tab，默认减少一次推单量 */
+/** 勾选后预览不按片区过滤（当日全部到家停靠点）；不勾选时用当前 Tab 对应片区（自提 Tab 不传 area） */
 const sfPreviewAllRegions = ref(false)
 /** 顺丰弹窗内：按收货人手机（表格「手机」列）再筛选，支持后几位或完整号 */
 const sfModalPhoneFilter = ref('')
@@ -165,11 +164,9 @@ const sfModalFilterActive = computed(() =>
   Boolean((sfModalPhoneFilter.value || '').trim().replace(/\s/g, ''))
 )
 
-/** 顺丰预览请求：与顶部筛选同源；未勾选「全部片区」时优先下拉片区，否则用当前 Tab（自提 Tab 不传 area，与原先全量到家一致） */
+/** 顺丰预览请求：未勾选「全部片区」时用当前 Tab（自提 Tab 不传 area，与原先全量到家一致） */
 function sfPreviewQueryArea() {
   if (sfPreviewAllRegions.value) return ''
-  const fromToolbar = (areaFilter.value || '').trim()
-  if (fromToolbar) return fromToolbar
   const tab = (activeRegionTab.value || '').trim()
   if (tab === '门店自提') return ''
   return tab
@@ -224,19 +221,49 @@ const sheetKitchenMealTotal = computed(() =>
   flatStops.value.reduce((s, x) => s + (Number(x.meal_count) || 0), 0)
 )
 
-/** 片区 Tab 副文案：到家展示待/已送达份数；自提单独说明 */
+/** 到家合计份数（待送达 + 已送达），与接口根字段一致 */
+const sheetHomeMealTotal = computed(
+  () =>
+    (Number(sheetToday.value.home_pending_meal_total) || 0) +
+    (Number(sheetToday.value.home_delivered_meal_total) || 0),
+)
+
+/** 列表行汇总：各停靠点已履约餐数，用于顶部履约进度条 */
+const sheetDeliveredMealCount = computed(() =>
+  flatStops.value.reduce((s, x) => s + (Number(x.delivered_meal_count) || 0), 0),
+)
+
+/** 0–100，已履约份数 / 后厨需出总份数 */
+const sheetFulfillmentProgressPct = computed(() => {
+  const t = sheetKitchenMealTotal.value
+  if (!t) return 0
+  return Math.min(100, Math.round((sheetDeliveredMealCount.value / t) * 100))
+})
+
+/** 备单量卡片：数值缓动滚动（切换业务日/刷新时过渡） */
+const displayKitchenMealTotal = useAnimatedInteger(() => sheetKitchenMealTotal.value, { duration: 820 })
+const displayStopCount = useAnimatedInteger(() => flatStops.value.length, { duration: 820 })
+const displayHomeMealTotal = useAnimatedInteger(() => sheetHomeMealTotal.value, { duration: 820 })
+const displayPickupMealTotal = useAnimatedInteger(
+  () => Number(sheetToday.value.pickup_meal_total) || 0,
+  { duration: 820 },
+)
+
+/** 当前所选业务日是否为上海「今天」（用于「今日实时」徽标） */
+const deliveryQueryIsTodayShanghai = computed(
+  () => String(deliveryDateQuery.value).trim() === todayShanghaiStr(),
+)
+
+/** 片区 Tab 副文案（与新版控制台 Tab 视觉一致：紧凑一行） */
 function groupTabMetaLine(group) {
   if (!group) return ''
   const meal = group.meal_total ?? 0
   const stops = group.stop_count ?? 0
   if (group.area === '门店自提') {
-    const p = group.pending_meal_total ?? meal
-    const d = group.delivered_meal_total ?? 0
-    return `${meal} 份 · 待${p} · 已${d} · 自提`
+    return `${meal}份 · ${stops}点 · 自提`
   }
   const p = group.pending_meal_total ?? meal
-  const d = group.delivered_meal_total ?? 0
-  return `${meal} 份 · ${stops} 点 · 待${p} · 已${d}`
+  return `${meal}份 · ${stops}点 · 待${p}`
 }
 
 /** 联系人旁：到家为待/已送达；自提为待/已取 */
@@ -277,8 +304,6 @@ async function fetchSheet() {
   const d0 = (deliveryDateQuery.value || '').trim() || todayShanghaiStr()
   try {
     const base = new URLSearchParams()
-    const a = (areaFilter.value || '').trim()
-    if (a) base.set('area', a)
     const ph = (phoneQuery.value || '').trim()
     if (ph) base.set('phone', ph)
 
@@ -288,7 +313,6 @@ async function fetchSheet() {
     const data0 = await apiJson(`/api/admin/delivery-sheet?${q0.toString()}`, {}, { auth: true })
 
     const regions0 = Array.isArray(data0?.active_regions) ? data0.active_regions : []
-    activeRegions.value = regions0
 
     const resolvedDate = data0?.delivery_date || d0
     if (data0?.delivery_date) deliveryDateQuery.value = data0.delivery_date
@@ -313,20 +337,10 @@ async function fetchSheet() {
     }
     sheetToday.value = emptySheet()
     activeRegionTab.value = ''
-    activeRegions.value = []
     showToast(e instanceof Error ? e.message : '加载配送表失败', 'error')
   } finally {
     loading.value = false
   }
-}
-
-async function printLabels() {
-  if (!flatStops.value.length) {
-    showToast('没有可打印的配送点', 'error')
-    return
-  }
-  await nextTick()
-  window.print()
 }
 
 /** 与后端配送大表一致：address_line 为「片区 + 空格 + 详细」；导出 Excel 时配送地址列仅保留详细段（片区另列「地址片区」）。自提整行保留原样。 */
@@ -347,7 +361,7 @@ function addressLineForExcelExport(st) {
 
 /**
  * 将当前大表导出为 xlsx：一行对应一名会员，地址为停靠点级别（同址多会员时地址重复）。
- * 数据与页面列表一致（同一配送日 + 当前片区/手机号筛选）；清空筛选即为当日全量。
+ * 数据与页面列表一致（同一配送日 + 手机号筛选）；清空手机号即为当日全量。
  */
 function exportSheetToExcel() {
   const d = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
@@ -399,12 +413,6 @@ function exportSheetToExcel() {
   XLSX.utils.book_append_sheet(wb, ws, '配送清单')
   XLSX.writeFile(wb, `配送清单_${d}.xlsx`)
   showToast(`已导出 ${out.length} 行`, 'success')
-}
-
-/** 标签用：仅姓名，顿号分隔（不印电话、地址） */
-function labelNamesText(st) {
-  const names = (st.members || []).map((m) => (m.name || '').trim()).filter(Boolean)
-  return names.length ? names.join('、') : '—'
 }
 
 watch(adminAccessToken, (t) => {
@@ -632,121 +640,148 @@ async function markDelivery(memberId, kind) {
 
 <template>
   <section class="tab-content animate-up delivery-view">
-    <div class="delivery-toolbar no-print">
-      <!-- 左：筛选；右：操作按钮。下一行：左侧汇总文案、右侧片区卡片，同一行对齐 -->
-      <div class="delivery-toolbar__row delivery-toolbar__row--primary">
-        <div class="delivery-toolbar__left">
-          <div class="delivery-toolbar__filters">
-            <label class="delivery-field">
-              <span>配送业务日</span>
-              <el-date-picker
-                v-model="deliveryDateQuery"
-                type="date"
-                value-format="YYYY-MM-DD"
-                placeholder="选择日期"
-                :disabled="loading"
-                :clearable="true"
-                class="delivery-el-date"
-                @change="fetchSheet"
-              />
-            </label>
-            <label class="delivery-field">
-              <span>片区</span>
-              <el-select
-                v-model="areaFilter"
-                placeholder="全部"
-                clearable
-                :disabled="loading"
-                class="delivery-el-select"
-                @change="fetchSheet"
-              >
-                <el-option label="全部" value="" />
-                <el-option v-for="n in activeRegions" :key="n" :label="n" :value="n" />
-              </el-select>
-            </label>
-            <label class="delivery-field delivery-field--phone">
-              <span>手机号</span>
-              <div class="delivery-phone-row">
-                <el-input
-                  v-model="phoneQuery"
-                  placeholder="后四位或完整号码"
-                  clearable
-                  :disabled="loading"
-                  class="delivery-el-phone"
-                  @clear="fetchSheet"
-                  @keyup.enter="fetchSheet"
-                />
-                <button
-                  type="button"
-                  class="btn-ghost delivery-phone-search"
-                  :disabled="loading"
-                  @click="fetchSheet"
-                >
-                  查询
-                </button>
-              </div>
-            </label>
-          </div>
-        </div>
-        <div class="delivery-toolbar__actions">
-          <button type="button" class="btn-ghost delivery-icon-btn" :disabled="loading" @click="fetchSheet">
-            <RefreshCw :size="18" :class="{ 'spin': loading }" />
-            刷新
-          </button>
-          <button
-            type="button"
-            class="delivery-excel-btn"
-            :disabled="loading || !flatStops.length"
-            title="与下方列表数据一致；清空片区/手机号可导出该业务日全量"
-            @click="exportSheetToExcel"
-          >
-            <FileDown :size="18" />
-            导出 Excel
-          </button>
-          <button
-            type="button"
-            class="btn-primary delivery-print-btn"
-            :disabled="loading || !flatStops.length"
-            @click="printLabels"
-          >
-            <Printer :size="18" />
-            打印标签
-          </button>
-          <el-button
-            plain
-            round
-            class="delivery-sf-btn"
+    <!-- 顶栏右侧：与 AdminLayout #delivery-header-toolbar 对齐，单列一排 -->
+    <Teleport to="#delivery-header-toolbar">
+      <!-- Teleport 到 layout 后主卡 .delivery-view 不是祖先，须在卡片上重复定义 --dv-* 变量，否则会丢底色/主色 -->
+      <div class="delivery-header-toolbar-card no-print">
+        <div class="delivery-top-toolbar">
+        <label class="delivery-field delivery-field--toolbar">
+          <span class="delivery-field-label">配送业务日</span>
+          <el-date-picker
+            v-model="deliveryDateQuery"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="选择日期"
             :disabled="loading"
-            :title="!sfPreview.sf_configured ? '请在后端 .env 配置顺丰开发者参数' : ''"
-            @click="openSfDialog"
-          >
-            <span class="delivery-sf-btn__inner">
-              <Truck :size="18" stroke-width="2" />
-              顺丰推单
-            </span>
-          </el-button>
+            :clearable="true"
+            class="delivery-el-date delivery-el-date--toolbar"
+            @change="fetchSheet"
+          />
+        </label>
+        <label class="delivery-field delivery-field--toolbar delivery-field--toolbar-grow">
+          <span class="delivery-field-label">客户搜索</span>
+          <div class="delivery-search-row delivery-search-row--toolbar">
+            <el-input
+              v-model="phoneQuery"
+              placeholder="手机后四位或完整号码"
+              clearable
+              :disabled="loading"
+              class="delivery-el-phone delivery-el-phone--search delivery-el-phone--toolbar"
+              @clear="fetchSheet"
+              @keyup.enter="fetchSheet"
+            >
+              <template #prefix>
+                <Search class="delivery-search-icon" :size="16" stroke-width="2" aria-hidden="true" />
+              </template>
+            </el-input>
+            <button
+              type="button"
+              class="delivery-btn delivery-btn--outline delivery-search-submit"
+              :disabled="loading"
+              @click="fetchSheet"
+            >
+              查询
+            </button>
+          </div>
+        </label>
+        <button
+          type="button"
+          class="delivery-btn delivery-btn--outline"
+          :disabled="loading"
+          @click="fetchSheet"
+        >
+          <RefreshCw :size="16" stroke-width="2" :class="{ spin: loading }" />
+          数据刷新
+        </button>
+        <button
+          type="button"
+          class="delivery-btn delivery-btn--outline"
+          :disabled="loading || !flatStops.length"
+          title="与下方列表数据一致；清空手机号可导出该业务日全量"
+          @click="exportSheetToExcel"
+        >
+          <FileDown :size="16" stroke-width="2" />
+          导出 Excel
+        </button>
+        <button
+          type="button"
+          class="delivery-btn delivery-btn--sf"
+          :disabled="loading"
+          :title="!sfPreview.sf_configured ? '请在后端 .env 配置顺丰开发者参数' : ''"
+          @click="openSfDialog"
+        >
+          <Truck :size="16" stroke-width="2.5" />
+          顺丰推单
+        </button>
         </div>
       </div>
-      <div class="delivery-toolbar__band">
-        <div class="delivery-toolbar__band-inner">
-          <div class="delivery-summary-strip" aria-live="polite">
-            <div class="delivery-summary-strip__stats">
-              <p class="delivery-summary-strip__inline">
-                共 <strong>{{ flatStops.length }}</strong> 个配送点，后厨需出
-                <strong>{{ sheetKitchenMealTotal }}</strong> 份餐
-                <span class="delivery-summary-strip__sep" aria-hidden="true"> / </span>
-                待送达 <strong>{{ sheetToday.home_pending_meal_total }}</strong> 份，已送达
-                <strong>{{ sheetToday.home_delivered_meal_total }}</strong> 份，自提
-                <strong>{{ sheetToday.pickup_meal_total }}</strong> 份
-              </p>
+    </Teleport>
+
+    <div class="delivery-page no-print">
+      <!-- 左侧：今日需备单量；右侧：片区快速过滤（独立卡片，Tab 过多时横向滚动） -->
+      <div class="delivery-stats-and-areas">
+        <div class="delivery-hero-card delivery-hero-card--stats-left">
+          <aside class="delivery-stats-panel" aria-label="今日需备单量">
+            <div class="delivery-stats-panel__head">
+              <span class="delivery-stats-panel__label">今日需备单量</span>
+              <span
+                v-if="deliveryQueryIsTodayShanghai"
+                class="delivery-stats-panel__badge"
+              >今日实时</span>
             </div>
-          </div>
-          <div
-            v-if="!loading && sheetToday.groups?.length"
-            class="delivery-tablist delivery-tablist--in-band"
-            role="tablist"
-            aria-label="配送片区"
-          >
+            <div class="delivery-stats-panel__body">
+              <div class="delivery-stats-panel__primary">
+                <div class="delivery-stats-panel__big">
+                  <span class="delivery-stats-panel__num delivery-stats-panel__num--primary">{{
+                    displayKitchenMealTotal
+                  }}</span>
+                  <span class="delivery-stats-panel__unit">份已确定</span>
+                </div>
+                <p class="delivery-stats-panel__hint">
+                  共
+                  <strong class="delivery-stats-panel__stat delivery-stats-panel__stat--stops">{{
+                    displayStopCount
+                  }}</strong>
+                  个配送网点
+                </p>
+              </div>
+              <div class="delivery-stats-panel__split">
+                <div class="delivery-stats-panel__row">
+                  配送单
+                  <span class="delivery-stats-panel__stat delivery-stats-panel__stat--home">
+                    {{ displayHomeMealTotal }} 份
+                  </span>
+                </div>
+                <div class="delivery-stats-panel__row delivery-stats-panel__row--muted">
+                  自提单
+                  <span class="delivery-stats-panel__stat delivery-stats-panel__stat--pickup">
+                    {{ displayPickupMealTotal }} 份
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div
+              class="delivery-stats-progress"
+              role="progressbar"
+              :aria-valuenow="sheetFulfillmentProgressPct"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-label="`履约进度 ${sheetFulfillmentProgressPct}%`"
+            >
+              <div
+                class="delivery-stats-progress__fill"
+                :style="{ width: `${sheetFulfillmentProgressPct}%` }"
+              />
+            </div>
+          </aside>
+        </div>
+
+        <div
+          v-if="!loading && sheetToday.groups?.length"
+          class="delivery-areas-card delivery-areas-card--beside-stats"
+        >
+          <span class="delivery-areas-card__title">片区快速过滤</span>
+          <div class="delivery-tablist-scroll custom-scrollbar" role="tablist" aria-label="配送片区">
             <button
               v-for="group in sheetToday.groups"
               :key="'t-tab-' + group.area"
@@ -951,13 +986,8 @@ async function markDelivery(memberId, kind) {
     <p v-if="loading" class="members-loading no-print">加载中…</p>
 
     <template v-else>
-      <div class="delivery-main no-print">
+      <div class="delivery-main delivery-page delivery-page--table no-print">
         <section class="delivery-day-block">
-          <h3 class="delivery-day-title">
-            <MapPin :size="20" class="inline-icon" />
-            配送列表
-            <span class="delivery-day-date">{{ sheetToday.delivery_date }}</span>
-          </h3>
           <p v-if="!sheetToday.groups?.length" class="members-loading">
             <template v-if="sheetToday.is_subscription_delivery_day === false">
               该日非订阅配送业务日：周日、国家法定节假日及国务院调休放假日不生成大表，份数不计入该日。请选择其它业务日，或在「营业概览」核对备餐人数是否为 0。
@@ -966,39 +996,54 @@ async function markDelivery(memberId, kind) {
               该业务日无与「{{ (phoneQuery || '').trim() }}」匹配的配送记录（或该会员已请假/未在配送名单中）。
             </template>
             <template v-else>
-              当日暂无符合大表条件的会员（请假、未激活、余额不足、起送日晚于该日、片区筛选无匹配等）。单点餐在「顺丰同城」预览里与订阅合并，本页仅含订阅与自提。
+              当日暂无符合大表条件的会员（请假、未激活、余额不足、起送日晚于该日、手机号筛选无匹配等）。单点餐在「顺丰同城」预览里与订阅合并，本页仅含订阅与自提。
             </template>
           </p>
           <div v-else class="delivery-region-tabs">
             <div v-if="selectedGroup" role="tabpanel" :aria-label="selectedGroup.area" class="delivery-tabpanel">
-              <div class="group-card">
+              <div class="delivery-table-card">
+                <header class="delivery-table-card__head">
+                  <h3 class="delivery-table-card__title">
+                    <MapPin :size="18" stroke-width="2" class="inline-icon" aria-hidden="true" />
+                    配送列表
+                    <span class="delivery-table-card__date">{{ sheetToday.delivery_date }}</span>
+                  </h3>
+                </header>
                 <div class="delivery-batch-bar">
-                  <span class="delivery-batch-bar__hint">
-                    勾选左侧行可批量操作；已选 <strong>{{ selectedDeliveryStops.length }}</strong> 个配送点，待标记
-                    <strong>{{ batchPendingMemberCount }}</strong> 位会员
-                  </span>
-                  <div class="delivery-batch-bar__actions">
-                    <button
-                      type="button"
-                      class="btn-primary delivery-batch-bar__btn"
-                      :disabled="
-                        loading ||
-                        batchMarking ||
-                        !batchPendingMemberCount ||
-                        !selectedDeliveryStops.length
-                      "
-                      @click="markSelectedStopsDelivered"
-                    >
-                      {{ selectedGroup.area === '门店自提' ? '批量自提完成' : '批量标记送达' }}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn-ghost delivery-batch-bar__btn"
-                      :disabled="!selectedDeliveryStops.length || batchMarking"
-                      @click="clearDeliverySelection"
-                    >
-                      清空选择
-                    </button>
+                  <div class="delivery-batch-bar__left">
+                    <span class="delivery-batch-bar__pulse" aria-hidden="true" />
+                    <span class="delivery-batch-bar__hint">
+                      勾选配送列表，可对选中停靠点批量标记；待标记
+                      <strong>{{ batchPendingMemberCount }}</strong> 位会员
+                    </span>
+                  </div>
+                  <div class="delivery-batch-bar__right">
+                    <span class="delivery-batch-bar__count">
+                      已选择：<strong>{{ selectedDeliveryStops.length }}</strong> 个配送点
+                    </span>
+                    <div class="delivery-batch-bar__actions">
+                      <button
+                        type="button"
+                        class="delivery-btn delivery-btn--primary delivery-batch-bar__btn"
+                        :disabled="
+                          loading ||
+                          batchMarking ||
+                          !batchPendingMemberCount ||
+                          !selectedDeliveryStops.length
+                        "
+                        @click="markSelectedStopsDelivered"
+                      >
+                        {{ selectedGroup.area === '门店自提' ? '批量自提完成' : '批量标记送达' }}
+                      </button>
+                      <button
+                        type="button"
+                        class="delivery-btn delivery-btn--outline delivery-batch-bar__btn"
+                        :disabled="!selectedDeliveryStops.length || batchMarking"
+                        @click="clearDeliverySelection"
+                      >
+                        清空选择
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div class="group-card__table-scroll">
@@ -1006,6 +1051,7 @@ async function markDelivery(memberId, kind) {
                   ref="deliveryTableRef"
                   variant="delivery"
                   size="small"
+                  :border="false"
                   :data="selectedGroup.stops"
                   :row-key="deliveryStopRowKey"
                   :row-class-name="deliveryStopRowClassName"
@@ -1015,7 +1061,7 @@ async function markDelivery(memberId, kind) {
                 >
                   <el-table-column
                     type="selection"
-                    width="44"
+                    width="48"
                     align="center"
                     fixed
                     class-name="col-sel"
@@ -1039,12 +1085,17 @@ async function markDelivery(memberId, kind) {
                       </div>
                     </template>
                   </el-table-column>
-                  <el-table-column label="收件地址" min-width="200" class-name="col-addr">
+                  <el-table-column label="收餐目的地 / 区域" min-width="220" class-name="col-addr">
                     <template #default="{ row: st }">
-                      <span class="t-addr">{{ st.address_line }}</span>
+                      <div class="delivery-addr-cell">
+                        <div class="delivery-addr-cell__main">{{ st.address_line }}</div>
+                        <div class="delivery-addr-cell__sub">
+                          {{ selectedGroup?.area }}<template v-if="st.area"> · {{ st.area }}</template>
+                        </div>
+                      </div>
                     </template>
                   </el-table-column>
-                  <el-table-column label="联系人" min-width="200" class-name="col-contact">
+                  <el-table-column label="联系人信息" min-width="200" class-name="col-contact">
                     <template #default="{ row: st }">
                       <div
                         v-for="(m, mi) in st.members"
@@ -1052,22 +1103,24 @@ async function markDelivery(memberId, kind) {
                         class="contact-line"
                         :class="{ 'contact-line--area-warn': m.area_issue }"
                       >
-                        <span class="delivery-status-tag" :class="deliveryMemberStatusClass(selectedGroup, m)">
-                          {{ deliveryMemberStatusLabel(selectedGroup, m) }}
-                        </span>
-                        <span class="t-name">{{ m.name }}</span>
-                        <span v-if="m.area_issue" class="member-area-tag">未分配片区</span>
+                        <div class="contact-line__head">
+                          <span class="t-name">{{ m.name }}</span>
+                          <span class="delivery-status-tag" :class="deliveryMemberStatusClass(selectedGroup, m)">
+                            {{ deliveryMemberStatusLabel(selectedGroup, m) }}
+                          </span>
+                          <span v-if="m.area_issue" class="member-area-tag">未分配片区</span>
+                        </div>
                         <span class="t-sub">{{ m.phone }}</span>
                       </div>
                     </template>
                   </el-table-column>
-                  <el-table-column label="备注" min-width="120" class-name="col-rmk">
+                  <el-table-column label="配餐说明 / 备注" min-width="140" class-name="col-rmk">
                     <template #default="{ row: st }">
-                      <span v-if="st.remarks_combined" class="remark-tag">{{ st.remarks_combined }}</span>
-                      <span v-else class="empty-text">无</span>
+                      <span v-if="st.remarks_combined" class="delivery-remark-chip">{{ st.remarks_combined }}</span>
+                      <span v-else class="delivery-empty-rmk">无备注说明</span>
                     </template>
                   </el-table-column>
-                  <el-table-column label="操作" width="128" min-width="108" class-name="col-actions" fixed="right">
+                  <el-table-column label="状态操作" width="128" min-width="108" class-name="col-actions" fixed="right">
                     <template #default="{ row: st }">
                       <div
                         v-for="(m, mi) in st.members"
@@ -1102,65 +1155,620 @@ async function markDelivery(memberId, kind) {
       </div>
     </template>
 
-    <!-- 仅用于打印：每配送点一页；不含电话与门牌等地址敏感信息 -->
-    <div class="label-print-root">
-      <div v-for="(st, li) in flatStops" :key="'lbl-' + li + st.address_line" class="label-page">
-        <div class="label-sheet">
-          <div class="label-names">{{ labelNamesText(st) }}</div>
-          <div class="label-area">区域 {{ st.groupArea }}</div>
-          <div class="label-meal-line">{{ st.meal_count }} 份</div>
-          <div v-if="st.remarks_combined" class="label-rmk">{{ st.remarks_combined }}</div>
-        </div>
-      </div>
-    </div>
   </section>
 </template>
 
 <style scoped>
-.delivery-toolbar {
-  margin-bottom: 1.5rem;
+/* 智能配送大表：控制台 + 单量看板 + 浅表头表格（与 2026 控制台稿对齐） */
+.delivery-view {
+  --dv-green: #1a5344;
+  --dv-green-hover: #133e33;
+  --dv-line: rgba(226, 232, 240, 0.65);
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* 顶栏 Teleport 挂载点不在 .delivery-view 内，须自带变量与白底卡片，否则按钮主色丢失、整体「没底色」 */
+.delivery-header-toolbar-card {
+  --dv-green: #1a5344;
+  --dv-green-hover: #133e33;
+  --dv-line: rgba(226, 232, 240, 0.65);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 100%;
+  padding: 0.55rem 0.75rem;
+  background: #fff;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 0.875rem;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.07);
+}
+.delivery-header-toolbar-card :deep(.el-input__wrapper) {
+  box-sizing: border-box;
+}
+.delivery-header-toolbar-card .delivery-btn {
+  min-height: 2.125rem;
+}
+.delivery-header-toolbar-card .delivery-btn--sf {
+  color: #fff;
+  background: var(--dv-green);
+  border: 1px solid rgba(26, 83, 68, 0.35);
+  box-shadow: 0 2px 8px rgba(26, 83, 68, 0.2);
+}
+.delivery-header-toolbar-card .delivery-btn--sf:hover:not(:disabled) {
+  background: var(--dv-green-hover);
+  color: #fff;
+}
+
+.delivery-page {
+  /* 占满主内容区宽度；min-width:0 防止内部宽表把整页撑开 */
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 1rem;
 }
-/* 顶栏首行：左日期/片区，右统计 + 按钮 */
-.delivery-toolbar__row--primary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem 1rem;
+.delivery-page--table {
+  margin-top: 0.35rem;
 }
-.delivery-toolbar__left {
+
+.delivery-hero-card {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 0.45rem;
-  flex: 1 1 auto;
-  min-width: min(100%, 18rem);
-}
-.delivery-toolbar__filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 1rem;
-  flex: 0 1 auto;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  background: #fff;
+  border: 1px solid var(--dv-line);
+  border-radius: 32px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   min-width: 0;
 }
-.delivery-toolbar__actions {
+
+/* 左侧备单量卡片 + 右侧片区卡片同一行；窄屏自动换行 */
+.delivery-stats-and-areas {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 1rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.delivery-hero-card--stats-left {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 1.1rem 1.35rem;
+}
+
+/* 顶栏工具条：标签与控件同一行基线对齐，客户搜索与「查询」并排 */
+.delivery-top-toolbar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  min-width: 0;
+}
+.delivery-top-toolbar .delivery-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.delivery-field--toolbar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 0 0 auto;
+}
+.delivery-field--toolbar-grow {
+  flex: 1 1 18rem;
+  min-width: min(100%, 16rem);
+  max-width: 40rem;
+}
+
+.delivery-field-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.delivery-field--toolbar :deep(.delivery-el-date--toolbar) {
+  width: 10.25rem;
+  max-width: 100%;
+}
+.delivery-field--toolbar :deep(.delivery-el-phone--toolbar) {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+.delivery-field--toolbar :deep(.delivery-el-date .el-input__wrapper),
+.delivery-field--toolbar :deep(.delivery-el-phone .el-input__wrapper) {
+  border-radius: 0.75rem;
+  background: #f8fafc;
+  border: 1px solid var(--dv-line);
+  box-shadow: none;
+}
+.delivery-field--toolbar :deep(.delivery-el-phone .el-input__wrapper.is-focus) {
+  border-color: var(--dv-green);
+}
+
+.delivery-search-row--toolbar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.delivery-search-row--toolbar .delivery-search-submit {
+  flex: 0 0 auto;
+}
+.delivery-search-row--toolbar :deep(.delivery-el-phone--toolbar) {
+  flex: 1 1 auto;
+  /* 约可完整展示 11 位手机号 + 左右图标与内边距（tabular 数字下约 ≥12rem） */
+  min-width: 12.75rem;
+  width: 0;
+}
+
+.delivery-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+.delivery-search-icon {
+  color: #94a3b8;
+}
+
+.delivery-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+  border: none;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    box-shadow 0.15s;
+}
+.delivery-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.delivery-btn--outline {
+  background: #fff;
+  color: #334155;
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.delivery-btn--outline:hover:not(:disabled) {
+  background: #f8fafc;
+}
+.delivery-btn--secondary {
+  background: var(--dv-green);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(26, 83, 68, 0.18);
+}
+.delivery-btn--secondary:hover:not(:disabled) {
+  background: var(--dv-green-hover);
+}
+.delivery-btn--primary {
+  background: #059669;
+  color: #fff;
+}
+.delivery-btn--primary:hover:not(:disabled) {
+  background: #047857;
+}
+
+.delivery-btn--sf {
+  background: var(--dv-green);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(26, 83, 68, 0.22);
+}
+.delivery-btn--sf:hover:not(:disabled) {
+  background: var(--dv-green-hover);
+  color: #fff;
+}
+
+.delivery-stats-panel {
+  flex: 1;
+  min-width: min(100%, 17rem);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.55rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+.delivery-stats-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.delivery-stats-panel__label {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.delivery-stats-panel__badge {
+  font-size: 11px;
+  font-weight: 900;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #d1fae5;
+}
+.delivery-stats-panel__body {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  flex-wrap: wrap;
+}
+.delivery-stats-panel__big {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+.delivery-stats-panel__num {
+  font-size: 2.2rem;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.delivery-stats-panel__num--primary {
+  color: var(--dv-green);
+}
+.delivery-stats-panel__unit {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: #64748b;
+}
+.delivery-stats-panel__hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: #64748b;
+}
+.delivery-stats-panel__stat {
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  margin-left: 0.25rem;
+}
+.delivery-stats-panel__stat--stops {
+  color: #4338ca;
+  margin-left: 0.2rem;
+  margin-right: 0.15rem;
+  font-size: 1.05em;
+}
+.delivery-stats-panel__stat--home {
+  color: #0369a1;
+  margin-left: 0.35rem;
+}
+.delivery-stats-panel__stat--pickup {
+  color: #b45309;
+  margin-left: 0.35rem;
+}
+.delivery-stats-panel__split {
+  text-align: right;
+  font-size: 0.875rem;
+  font-weight: 700;
+  padding-left: 1.2rem;
+  border-left: 1px solid var(--dv-line);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.delivery-stats-panel__row {
+  color: #64748b;
+}
+.delivery-stats-panel__row + .delivery-stats-panel__row {
+  margin-top: 0;
+}
+.delivery-stats-panel__row--muted {
+  color: #94a3b8;
+}
+
+.delivery-stats-progress {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.65);
+  overflow: hidden;
+}
+.delivery-stats-progress__fill {
+  height: 100%;
+  background: var(--dv-green);
+  border-radius: inherit;
+  transition: width 0.35s ease;
+}
+
+.delivery-areas-card {
+  padding: 1.1rem 1.25rem;
+  background: #fff;
+  border: 1px solid var(--dv-line);
+  border-radius: 32px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.delivery-areas-card--beside-stats {
+  flex: 1 1 17rem;
+  min-width: 0;
+  max-width: 100%;
+  justify-content: center;
+}
+.delivery-areas-card--beside-stats .delivery-tablist-scroll {
+  flex: 1 1 auto;
+  min-height: 2.85rem;
+  align-items: center;
+}
+
+.delivery-areas-card__title {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.delivery-tablist-scroll {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+  -webkit-overflow-scrolling: touch;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+}
+
+.delivery-region-tab {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.08rem;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  background: #f8fafc;
+  color: #475569;
+  font: inherit;
+  padding: 0.55rem 0.9rem;
+  border-radius: 1rem;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.delivery-region-tab:hover {
+  background: #f1f5f9;
+}
+.delivery-region-tab--active {
+  background: var(--dv-green);
+  color: #fff;
+  border-color: var(--dv-green);
+  box-shadow: 0 4px 12px rgba(26, 83, 68, 0.15);
+}
+.delivery-region-tab--active .delivery-region-tab__meta {
+  color: rgba(209, 250, 229, 0.95);
+}
+.delivery-region-tab--warn:not(.delivery-region-tab--active) {
+  border-color: #fdba74;
+  background: #fffbeb;
+}
+.delivery-region-tab--warn.delivery-region-tab--active {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px #fb923c;
+}
+.delivery-region-tab__label {
+  font-size: 0.875rem;
+  font-weight: 900;
+  line-height: 1.15;
+  word-break: break-all;
+}
+.delivery-region-tab__meta {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.delivery-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.delivery-day-block {
+  padding-top: 0;
+  border-top: none;
+}
+.delivery-region-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.delivery-tabpanel {
+  min-width: 0;
+}
+
+.delivery-table-card {
+  background: #fff;
+  border: 1px solid var(--dv-line);
+  border-radius: 32px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+  min-width: 0;
+}
+.delivery-table-card__head {
+  padding: 1rem 1.35rem 0;
+}
+.delivery-table-card__title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  font-size: 1rem;
+  font-weight: 900;
+  color: #0f172a;
+}
+.delivery-table-card__date {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #94a3b8;
+}
+
+.delivery-batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem 0.85rem;
+  margin: 0.75rem 1.35rem 0;
+  padding: 0.8rem 1rem;
+  background: #ecfdf5;
+  border: 1px solid #d1fae5;
+  border-radius: 1rem;
+  box-shadow: 0 1px 2px rgba(16, 185, 129, 0.06);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #065f46;
+}
+.delivery-batch-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.delivery-batch-bar__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  flex-shrink: 0;
+  animation: dv-pulse 1.8s ease-in-out infinite;
+}
+@keyframes dv-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+.delivery-batch-bar__hint strong {
+  color: #064e3b;
+}
+.delivery-batch-bar__right {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.75rem 1rem;
-  flex: 1 1 auto;
-  min-width: 0;
+  gap: 0.6rem 1rem;
 }
-.delivery-sf-btn__inner {
-  display: inline-flex;
+.delivery-batch-bar__count {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+.delivery-batch-bar__count strong {
+  color: #0f172a;
+  font-weight: 900;
+}
+.delivery-batch-bar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.delivery-batch-bar__btn {
+  padding: 0.38rem 0.8rem;
+  font-size: 0.72rem;
+}
+
+.group-card__table-scroll {
+  padding: 0.75rem 0 0;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.group-card__table-scroll :deep(.admin-table--delivery.el-table) {
+  margin: 0 1.15rem 1rem;
+}
+
+.delivery-addr-cell__main {
+  font-weight: 800;
+  font-size: 0.875rem;
+  color: #0f172a;
+  line-height: 1.35;
+}
+.delivery-addr-cell__sub {
+  margin-top: 0.25rem;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.contact-line__head {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem;
 }
+
+.delivery-remark-chip {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.75rem;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.35;
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+.delivery-empty-rmk {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #cbd5e1;
+}
+
 .sf-warn {
   margin: 0 0 0.75rem;
   padding: 0.5rem 0.75rem;
@@ -1245,197 +1853,7 @@ async function markDelivery(memberId, kind) {
   color: #64748b;
   font-size: 0.9rem;
 }
-.delivery-toolbar__band {
-  width: 100%;
-  padding-top: 0.5rem;
-  border-top: 1px solid #e2e8f0;
-}
-.delivery-toolbar__band-inner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0.75rem 1rem;
-  width: 100%;
-}
-.delivery-main {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-.delivery-day-block {
-  padding-top: 0.5rem;
-  border-top: 1px solid #e2e8f0;
-}
-.delivery-day-title {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.5rem;
-  margin: 0 0 0.75rem;
-  font-size: 1.05rem;
-  font-weight: 900;
-  color: #0f172a;
-}
-.delivery-day-date {
-  font-size: 0.85rem;
-  font-weight: 700;
-  color: #64748b;
-}
 
-.delivery-region-tabs {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-.delivery-tablist {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: stretch;
-}
-/** 与顶部汇总并排：片区卡片靠右侧；空间不足时可换行，仍贴在行末对齐 */
-.delivery-tablist--in-band {
-  flex: 0 1 auto;
-  justify-content: flex-end;
-  margin-left: auto;
-}
-.delivery-region-tab {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.2rem;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #475569;
-  font: inherit;
-  padding: 0.45rem 0.9rem;
-  border-radius: 0.75rem;
-  cursor: pointer;
-  text-align: left;
-  transition:
-    background 0.2s,
-    color 0.2s,
-    border-color 0.2s,
-    box-shadow 0.2s;
-  max-width: 100%;
-}
-.delivery-region-tab:hover {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
-}
-.delivery-region-tab--active {
-  background: #0e5a44;
-  color: #fff;
-  border-color: #0e5a44;
-  box-shadow: 0 1px 3px rgba(14, 90, 68, 0.35);
-}
-.delivery-region-tab--active .delivery-region-tab__meta {
-  color: rgba(255, 255, 255, 0.85);
-}
-.delivery-region-tab--warn:not(.delivery-region-tab--active) {
-  border-color: #fdba74;
-  background: #fffbeb;
-}
-.delivery-region-tab--warn.delivery-region-tab--active {
-  box-shadow:
-    0 0 0 2px #fff,
-    0 0 0 4px #fb923c;
-}
-.delivery-region-tab__label {
-  font-size: 0.8rem;
-  font-weight: 900;
-  line-height: 1.2;
-  word-break: break-all;
-}
-.delivery-region-tab__meta {
-  font-size: 0.65rem;
-  font-weight: 700;
-  color: #64748b;
-}
-.delivery-tabpanel {
-  min-width: 0;
-}
-
-.delivery-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  font-size: 11px;
-  font-weight: 700;
-  color: #64748b;
-}
-/* Element Plus：与原先原生控件宽度、圆角风格接近 */
-.delivery-field :deep(.delivery-el-date) {
-  width: 11rem;
-  max-width: 100%;
-}
-.delivery-field :deep(.delivery-el-date .el-input__wrapper) {
-  border-radius: 0.75rem;
-}
-.delivery-field :deep(.delivery-el-select) {
-  width: 11rem;
-  max-width: 100%;
-}
-.delivery-field :deep(.delivery-el-select .el-select__wrapper) {
-  border-radius: 0.75rem;
-}
-.delivery-field--phone {
-  min-width: 0;
-}
-.delivery-phone-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-.delivery-field :deep(.delivery-el-phone) {
-  width: 11rem;
-  max-width: 100%;
-}
-.delivery-field :deep(.delivery-el-phone .el-input__wrapper) {
-  border-radius: 0.75rem;
-}
-.delivery-phone-search {
-  padding: 0.45rem 0.85rem;
-  border-radius: 0.75rem;
-  font-weight: 800;
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-.delivery-icon-btn,
-.delivery-excel-btn,
-.delivery-print-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border-radius: 999px;
-  font-weight: 700;
-  font-size: 0.8rem;
-  cursor: pointer;
-  border: none;
-}
-.delivery-icon-btn {
-  background: #f1f5f9;
-  color: #475569;
-}
-.delivery-excel-btn {
-  background: #e8f5e9;
-  color: #1b5e20;
-}
-.delivery-excel-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.delivery-print-btn {
-  background: #0e5a44;
-  color: white;
-}
-.delivery-print-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 .spin {
   animation: spin 0.8s linear infinite;
 }
@@ -1444,52 +1862,38 @@ async function markDelivery(memberId, kind) {
     transform: rotate(360deg);
   }
 }
-.delivery-summary-strip {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-}
-.delivery-summary-strip__stats {
-  margin: 0;
-  text-align: left;
-}
-.delivery-summary-strip__inline {
-  margin: 0;
-  font-size: 0.8rem;
-  color: #64748b;
-  line-height: 1.45;
-}
-.delivery-summary-strip__sep {
-  color: #94a3b8;
-}
+
 .inline-icon {
-  vertical-align: -0.2em;
-  margin-right: 0.25rem;
+  vertical-align: -0.15em;
+  margin-right: 0.15rem;
+  color: #64748b;
 }
+
 .col-contact {
   min-width: 10rem;
 }
 .contact-line {
-  margin-bottom: 0.15rem;
-  line-height: 1.25;
+  margin-bottom: 0.35rem;
+  line-height: 1.35;
 }
 .contact-line:last-child {
   margin-bottom: 0;
 }
+
 .meal-pill {
-  display: inline-block;
-  min-width: 1.85rem;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
   font-weight: 900;
-  font-size: 1rem;
-  line-height: 1.2;
-  color: #0e5a44;
-  background: #d1fae5;
-  padding: 0.12rem 0.42rem;
-  border-radius: 0.4rem;
-  white-space: nowrap;
+  font-size: 0.875rem;
+  color: var(--dv-green);
+  background: #ecfdf5;
+  border-radius: 50%;
   box-sizing: border-box;
 }
+
 .t-contact {
   font-size: 0.8rem;
   vertical-align: top;
@@ -1501,7 +1905,7 @@ async function markDelivery(memberId, kind) {
 
 .member-area-tag {
   display: inline-block;
-  margin: 0 0.35rem;
+  margin: 0;
   font-size: 9px;
   font-weight: 900;
   padding: 2px 6px;
@@ -1513,10 +1917,10 @@ async function markDelivery(memberId, kind) {
 
 .delivery-status-tag {
   display: inline-block;
-  margin-right: 0.3rem;
-  font-size: 9px;
+  margin-right: 0;
+  font-size: 8px;
   font-weight: 900;
-  padding: 1px 5px;
+  padding: 2px 6px;
   border-radius: 4px;
   vertical-align: middle;
 }
@@ -1527,57 +1931,29 @@ async function markDelivery(memberId, kind) {
 .delivery-status-tag--pending {
   background: #fef3c7;
   color: #92400e;
+  border: 1px solid #fde68a;
 }
 .delivery-status-tag--pickup {
   background: #e0e7ff;
   color: #3730a3;
 }
 
-.delivery-batch-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem 1rem;
-  padding: 0.45rem 1rem;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  font-size: 0.75rem;
-  color: #64748b;
-}
-.delivery-batch-bar__hint strong {
-  color: #0f172a;
-}
-.delivery-batch-bar__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-.delivery-batch-bar__btn {
-  padding: 0.35rem 0.85rem;
-  font-size: 0.75rem;
-  font-weight: 800;
-  border-radius: 0.5rem;
-  white-space: nowrap;
-}
-
 .meal-cell {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 0.08rem;
+  align-items: center;
+  gap: 0.12rem;
 }
 .meal-pill-sub {
   font-size: 0.65rem;
   font-weight: 700;
-  color: #64748b;
+  color: #059669;
   white-space: nowrap;
 }
 </style>
 
 <style>
-/* 全局打印：隐藏侧栏与顶栏，仅输出标签区域 */
+/* 全局打印：隐藏侧栏与顶栏 */
 @media print {
   .admin-layout .sidebar,
   .admin-layout .top-header,
@@ -1595,81 +1971,6 @@ async function markDelivery(memberId, kind) {
   }
 }
 
-@page {
-  size: 50mm 40mm;
-  margin: 2mm;
-}
-
-.label-print-root {
-  display: none;
-}
-
-@media print {
-  .label-print-root {
-    display: block !important;
-  }
-}
-
-.label-page {
-  page-break-after: always;
-  break-after: page;
-  width: 50mm;
-  height: 40mm;
-  box-sizing: border-box;
-}
-
-.label-page:last-child {
-  page-break-after: auto;
-  break-after: auto;
-}
-
-.label-sheet {
-  width: 100%;
-  height: 100%;
-  box-sizing: border-box;
-  border: 0.3mm solid #333;
-  padding: 2mm 2.5mm;
-  font-family: system-ui, 'Segoe UI', sans-serif;
-  display: flex;
-  flex-direction: column;
-  gap: 1mm;
-  overflow: hidden;
-}
-
-.label-names {
-  font-size: 13pt;
-  font-weight: 900;
-  line-height: 1.15;
-  color: #111;
-  flex: 0 1 auto;
-  max-height: 14mm;
-  overflow: hidden;
-  word-break: break-all;
-}
-
-.label-area {
-  font-size: 8pt;
-  font-weight: 800;
-  color: #333;
-}
-
-.label-meal-line {
-  font-size: 12pt;
-  font-weight: 900;
-  color: #0e5a44;
-}
-
-.label-rmk {
-  font-size: 7pt;
-  font-weight: 700;
-  color: #b91c1c;
-  line-height: 1.15;
-  flex: 1 1 auto;
-  max-height: 12mm;
-  overflow: hidden;
-  word-break: break-word;
-}
-
 .delivery-action-line {
   display: flex;
   align-items: center;
@@ -1681,17 +1982,18 @@ async function markDelivery(memberId, kind) {
 }
 .btn-delivery-mark {
   display: inline-block;
-  padding: 0.2rem 0.55rem;
-  border-radius: 0.45rem;
-  font-size: 0.7rem;
-  font-weight: 800;
+  padding: 0.35rem 1rem;
+  border-radius: 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 900;
   cursor: pointer;
-  border: 1px solid #0e5a44;
-  background: #ecfdf3;
-  color: #0e5a44;
+  border: none;
+  background: #059669;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.2);
 }
 .btn-delivery-mark:hover:not(:disabled) {
-  background: #0e5a44;
+  background: #047857;
   color: #fff;
 }
 .btn-delivery-mark:disabled {
@@ -1699,8 +2001,12 @@ async function markDelivery(memberId, kind) {
   cursor: not-allowed;
 }
 .delivery-action-done {
-  font-size: 0.7rem;
+  display: inline-block;
+  font-size: 0.75rem;
   font-weight: 800;
-  color: #0e5a44;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.75rem;
 }
 </style>
