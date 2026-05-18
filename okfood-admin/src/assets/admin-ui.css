@@ -2431,6 +2431,98 @@
   font-size: 14px;
 }
 
+/* 会员档案 — 操作记录（审计日志分页） */
+.modal-card--operation-logs {
+  max-width: min(52rem, calc(100vw - 1.25rem));
+}
+.modal-card--operation-logs .modal-body--operation-logs {
+  padding: 1.75rem 2.5rem 2.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.operation-logs-caption {
+  font-size: 12px;
+  opacity: 0.78;
+  margin: 0;
+  line-height: 1.45;
+}
+.operation-logs-summary-line {
+  margin: 0;
+}
+.operation-logs-page-inline {
+  font-weight: 600;
+  font-size: 13px;
+  opacity: 0.85;
+}
+.operation-logs-table-wrap {
+  max-height: min(420px, 50vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: rgba(248, 250, 247, 0.95);
+}
+.operation-logs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.operation-logs-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 0.55rem 0.75rem;
+  background: rgba(14, 90, 68, 0.12);
+  color: #0e3d2f;
+  font-weight: 800;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  white-space: nowrap;
+}
+.operation-logs-table tbody td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  vertical-align: top;
+}
+.operation-logs-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.operation-logs-td-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: #334155;
+  font-weight: 600;
+}
+.operation-logs-td-op {
+  white-space: nowrap;
+  font-weight: 700;
+  color: #0e5a44;
+}
+.operation-logs-td-summary {
+  min-width: 160px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+.operation-logs-td-src {
+  white-space: nowrap;
+}
+.operation-logs-src {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(14, 90, 68, 0.1);
+  color: #0e5a44;
+}
+.operation-logs-pagination {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-top: 0.35rem;
+}
+
 /* 会员管理 — 修改会员信息：单列居中（MemberEditModal.vue scoped 细调） */
 .modal-card.modal-card--member-edit {
   max-width: min(48rem, calc(100vw - 1.25rem));

@@ -192,6 +192,8 @@ watch(sidebarCollapsedPref, (v) => {
           </template>
           <el-menu-item v-if="showSystemAdminMenus" index="/system/tenants">租户管理</el-menu-item>
           <el-menu-item v-if="showOwnerAdminMenus" index="/store-config">门店配置</el-menu-item>
+          <el-menu-item v-if="showOwnerAdminMenus" index="/system/membership-templates">会员卡管理</el-menu-item>
+          <el-menu-item v-if="showOwnerAdminMenus" index="/system/retail-catalog">普通商品管理</el-menu-item>
         </el-sub-menu>
       </el-menu>
 

@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from app.api import admin, admin_couriers, admin_regions, admin_system, admin_uploads, courier, menu, sf_open_notify, user, wechat_pay
+from app.api import admin, admin_catalog, admin_couriers, admin_regions, admin_system, admin_uploads, courier, menu, sf_open_notify, user, wechat_pay
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.db.schema_patches import (
@@ -23,6 +23,7 @@ from app.db.schema_patches import (
     apply_sf_same_city_callback_support,
     apply_tenant_integration_settings_table,
 )
+from app.db.catalog_tables_migration import ensure_catalog_admin_tables
 from app.db.tenant_store_migration import (
     apply_tenant_store_multitenancy,
     ensure_member_card_list_price_columns,
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI):
     ensure_upload_root()
     ensure_member_card_list_price_columns()
     apply_tenant_store_multitenancy()
+    ensure_catalog_admin_tables()
     apply_tenant_integration_settings_table()
     apply_drop_menu_dish_month_unique_constraints()
     apply_menu_dish_spice_internal_sop_columns()
@@ -91,6 +93,7 @@ app.include_router(wechat_pay.router, prefix="/api")
 app.include_router(menu.router, prefix="/api")
 app.include_router(courier.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(admin_catalog.router, prefix="/api")
 app.include_router(admin_system.router, prefix="/api")
 app.include_router(admin_couriers.router, prefix="/api")
 app.include_router(admin_regions.router, prefix="/api")

@@ -11,6 +11,7 @@ import {
   Download,
   Receipt,
   ChevronDown,
+  History,
 } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import {
@@ -147,10 +148,14 @@ async function deleteMemberRow(u) {
   }
 }
 
-/** 操作列「更多」下拉：消费记录、删除等低频操作，减少表格右侧视觉噪音 */
+/** 操作列「更多」下拉：消费记录、操作记录、删除等低频操作，减少表格右侧视觉噪音 */
 function onMembersActionDropdown(command, row) {
   if (command === 'records') {
     void openMemberDeliveryRecords(row)
+    return
+  }
+  if (command === 'operation_logs') {
+    void openMemberOperationLogs(row)
     return
   }
   if (command === 'delete') {
@@ -559,6 +564,106 @@ watch(showDeliveryRecordModal, (v) => {
   }
 })
 
+/** --- 操作记录：小程序 / 后台对该会员的自助与关键变更审计（按时间倒序分页） --- */
+const showOperationLogModal = ref(false)
+const operationLogTarget = ref(null)
+const operationLogLoading = ref(false)
+const operationLogItems = ref([])
+const operationLogTotal = ref(0)
+const operationLogPage = ref(1)
+const operationLogPageSize = 20
+
+const operationLogTotalPages = computed(() =>
+  Math.max(1, Math.ceil(operationLogTotal.value / operationLogPageSize)),
+)
+
+function formatOperationLogTime(iso) {
+  const s = typeof iso === 'string' ? iso.trim() : ''
+  if (!s) return '—'
+  try {
+    const d = new Date(s)
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(d)
+  } catch {
+    return s
+  }
+}
+
+function operationLogSourceLabel(src) {
+  const k = String(src || '').trim().toLowerCase()
+  if (k === 'admin') return '后台'
+  if (k === 'miniprogram') return '小程序'
+  return src ? String(src) : '—'
+}
+
+async function fetchMemberOperationLogsPage() {
+  if (!operationLogTarget.value?.id) return
+  operationLogLoading.value = true
+  try {
+    const mid = Number(operationLogTarget.value.id)
+    const p = operationLogPage.value
+    const ps = operationLogPageSize
+    const data = await apiJson(
+      `/api/admin/users/${mid}/operation-logs?page=${p}&page_size=${ps}`,
+      {},
+      { auth: true },
+    )
+    operationLogItems.value = Array.isArray(data?.items) ? data.items : []
+    operationLogTotal.value = Number(data?.total) || 0
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '加载失败', 'error')
+    showOperationLogModal.value = false
+    operationLogTarget.value = null
+  } finally {
+    operationLogLoading.value = false
+  }
+}
+
+async function openMemberOperationLogs(u) {
+  if (!u?.id) return
+  operationLogTarget.value = u
+  operationLogPage.value = 1
+  operationLogItems.value = []
+  operationLogTotal.value = 0
+  showOperationLogModal.value = true
+  await fetchMemberOperationLogsPage()
+}
+
+function goOperationLogPrev() {
+  if (operationLogPage.value <= 1) return
+  operationLogPage.value -= 1
+  void fetchMemberOperationLogsPage()
+}
+
+function goOperationLogNext() {
+  if (operationLogPage.value >= operationLogTotalPages.value) return
+  operationLogPage.value += 1
+  void fetchMemberOperationLogsPage()
+}
+
+watch(showOperationLogModal, (v) => {
+  if (!v) {
+    operationLogTarget.value = null
+    operationLogItems.value = []
+    operationLogTotal.value = 0
+    operationLogPage.value = 1
+  }
+})
+
 async function onMemberAddressesSaved() {
   await fetchMembers()
 }
@@ -809,6 +914,15 @@ onMounted(async () => {
                         消费记录
                       </span>
                     </el-dropdown-item>
+                    <el-dropdown-item command="operation_logs">
+                      <span
+                        class="members-dropdown-item-inner"
+                        title="该会员在小程序或后台触发的配送、地址、请假等操作留痕"
+                      >
+                        <History :size="14" aria-hidden="true" />
+                        操作记录
+                      </span>
+                    </el-dropdown-item>
                     <el-dropdown-item
                       command="delete"
                       divided
@@ -949,6 +1063,85 @@ onMounted(async () => {
               </li>
             </ul>
             <p v-else class="delivery-records-empty">暂无记录。未产生「确认送达」或无套餐扣次时为空。</p>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="showOperationLogModal"
+      class="modal-overlay"
+      v-esc-close="() => (showOperationLogModal = false)"
+      @click.self="showOperationLogModal = false"
+    >
+      <div class="modal-card modal-card--operation-logs">
+        <div class="modal-header">
+          <div class="header-info">
+            <h3>操作记录</h3>
+            <p>审计日志 · 新到旧</p>
+          </div>
+          <el-button text circle class="close-btn" @click="showOperationLogModal = false">
+            <X :size="20" />
+          </el-button>
+        </div>
+        <div class="modal-body modal-body--operation-logs">
+          <p v-if="operationLogTarget" class="modal-hint modal-hint--tight">
+            {{ operationLogTarget.name || '—' }} · {{ operationLogTarget.phone || '' }}
+          </p>
+          <p class="modal-hint operation-logs-caption">
+            记录该会员通过小程序或后台产生的关键操作（暂停配送、修改份数、地址与请假等），含时间与摘要。
+          </p>
+          <div v-if="operationLogLoading" class="delivery-records-loading">加载中…</div>
+          <template v-else>
+            <p class="delivery-records-summary operation-logs-summary-line">
+              共 <strong>{{ operationLogTotal }}</strong> 条
+              <span v-if="operationLogTotalPages > 1" class="operation-logs-page-inline">
+                · 第 {{ operationLogPage }} / {{ operationLogTotalPages }} 页
+              </span>
+            </p>
+            <div v-if="operationLogItems.length" class="operation-logs-table-wrap">
+              <table class="operation-logs-table">
+                <thead>
+                  <tr>
+                    <th scope="col">时间</th>
+                    <th scope="col">操作</th>
+                    <th scope="col">摘要</th>
+                    <th scope="col">来源</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in operationLogItems" :key="row.id">
+                    <td class="operation-logs-td-time">{{ formatOperationLogTime(row.created_at) }}</td>
+                    <td class="operation-logs-td-op">
+                      {{ row.operation_label || row.operation_type || '—' }}
+                    </td>
+                    <td class="operation-logs-td-summary">{{ row.summary || '—' }}</td>
+                    <td class="operation-logs-td-src">
+                      <span class="operation-logs-src">{{ operationLogSourceLabel(row.source) }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-else class="delivery-records-empty">暂无操作记录。</p>
+            <div v-if="operationLogTotal > 0" class="operation-logs-pagination">
+              <el-button
+                plain
+                size="small"
+                :disabled="operationLogPage <= 1 || operationLogLoading"
+                @click="goOperationLogPrev"
+              >
+                上一页
+              </el-button>
+              <el-button
+                plain
+                size="small"
+                :disabled="operationLogPage >= operationLogTotalPages || operationLogLoading"
+                @click="goOperationLogNext"
+              >
+                下一页
+              </el-button>
+            </div>
           </template>
         </div>
       </div>

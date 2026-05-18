@@ -20,6 +20,8 @@ const CardOrdersView = () => import('../views/CardOrdersView.vue')
 const StoreConfigView = () => import('../views/StoreConfigView.vue')
 const SfOrdersMonitorView = () => import('../views/SfOrdersMonitorView.vue')
 const TenantsView = () => import('../views/TenantsView.vue')
+const MembershipTemplatesView = () => import('../views/MembershipTemplatesView.vue')
+const RetailCatalogView = () => import('../views/RetailCatalogView.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -105,6 +107,18 @@ const router = createRouter({
           name: 'system-tenants',
           component: TenantsView,
           meta: { title: '租户管理', systemAdminOnly: true },
+        },
+        {
+          path: 'system/membership-templates',
+          name: 'system-membership-templates',
+          component: MembershipTemplatesView,
+          meta: { title: '会员卡管理', ownerAdminOnly: true },
+        },
+        {
+          path: 'system/retail-catalog',
+          name: 'system-retail-catalog',
+          component: RetailCatalogView,
+          meta: { title: '普通商品管理', ownerAdminOnly: true },
         },
       ],
     },
