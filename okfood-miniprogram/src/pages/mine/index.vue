@@ -1166,11 +1166,31 @@ function onPauseDeliveryTap() {
   background: transparent;
   border: none;
   line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: top;
+  border-radius: 0;
+  min-width: 0;
+  width: auto;
+  height: auto;
+}
+
+.hero-avatar-btn::after {
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
 }
 
 .hero-avatar-btn--static {
   display: inline-block;
   vertical-align: top;
+}
+
+.hero-stats-row .avatar-ring {
+  border-width: 4rpx;
+  box-shadow: 0 10rpx 28rpx rgba(14, 90, 68, 0.14);
 }
 
 .avatar-ring {

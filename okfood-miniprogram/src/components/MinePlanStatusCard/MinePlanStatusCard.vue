@@ -2,8 +2,11 @@
   <view class="plan-card">
     <text class="plan-card__watermark">OK</text>
 
-    <view class="plan-card__pill">
-      <text class="plan-card__pill-txt">OK 饭 自律计划</text>
+    <view class="plan-card__head">
+      <view class="plan-card__pill">
+        <text class="plan-card__pill-txt">OK 饭 自律计划</text>
+      </view>
+      <text v-if="planLabel" class="plan-card__plan-type">{{ planLabel }}</text>
     </view>
 
     <view class="plan-card__hero-row">
@@ -24,7 +27,6 @@
       </view>
     </view>
 
-    <text v-if="planLabel" class="plan-card__plan-type">{{ planLabel }}</text>
     <text v-if="addressLine" class="plan-card__addr">{{ addressLine }}</text>
 
     <view class="plan-card__foot">
@@ -78,13 +80,21 @@ const remainingDisplay = computed(() =>
   pointer-events: none;
 }
 
+.plan-card__head {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-bottom: 28rpx;
+}
+
 .plan-card__pill {
-  align-self: flex-start;
+  flex-shrink: 0;
   display: inline-flex;
   padding: 8rpx 20rpx;
   border-radius: 999rpx;
   background: rgba(255, 255, 255, 0.18);
-  margin-bottom: 28rpx;
 }
 
 .plan-card__pill-txt {
@@ -167,11 +177,13 @@ const remainingDisplay = computed(() =>
 }
 
 .plan-card__plan-type {
-  display: block;
-  margin-top: 16rpx;
-  font-size: 24rpx;
-  font-weight: 800;
+  flex-shrink: 0;
+  max-width: 52%;
+  text-align: right;
+  font-size: 30rpx;
+  font-weight: 900;
   color: rgba(254, 240, 138, 0.95);
+  line-height: 1.25;
 }
 
 .plan-card__addr {
