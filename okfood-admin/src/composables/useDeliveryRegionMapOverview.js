@@ -197,6 +197,19 @@ export function useDeliveryRegionMapOverview() {
     return counts
   })
 
+  /** 地图标点（排除暂停配送）按 plan_type 统计周卡 / 月卡，与地图上默认可见图钉口径一致 */
+  const mapEligiblePlanCounts = computed(() => {
+    const pts = memberPoints.value.filter((p) => !(p.delivery_deferred === true || p.delivery_deferred === 1))
+    let week = 0
+    let month = 0
+    for (const p of pts) {
+      const t = String(p.plan_type ?? '').trim()
+      if (t === '周卡') week += 1
+      else if (t === '月卡') month += 1
+    }
+    return { week, month, eligibleTotal: pts.length }
+  })
+
   return {
     loading,
     error,
@@ -213,5 +226,6 @@ export function useDeliveryRegionMapOverview() {
     toggleMapFilter,
     stats,
     membersCountByArea,
+    mapEligiblePlanCounts,
   }
 }
