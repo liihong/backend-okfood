@@ -17,6 +17,7 @@ from app.db.schema_patches import (
     apply_drop_menu_dish_month_unique_constraints,
     apply_member_addresses_drop_legacy_columns,
     apply_member_addresses_map_door_columns,
+    apply_member_card_orders_membership_template_id_column,
     apply_members_skip_subscription_saturday_column,
     apply_members_tomorrow_leave_target_column,
     apply_menu_dish_spice_internal_sop_columns,
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI):
     ensure_member_card_list_price_columns()
     apply_tenant_store_multitenancy()
     ensure_catalog_admin_tables()
+    apply_member_card_orders_membership_template_id_column()
     apply_tenant_integration_settings_table()
     apply_drop_menu_dish_month_unique_constraints()
     apply_menu_dish_spice_internal_sop_columns()

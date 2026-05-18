@@ -10,6 +10,7 @@ from app.core.timeutil import min_member_delivery_start_shanghai
 from app.models.enums import CardOpenMode, CardOrderKind, CardOrderPayStatus, CardPayChannel, PlanType
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
+from app.models.membership_card_template import MembershipCardTemplate
 from app.schemas.admin import CardOrderCreateIn, CardOrderOut, CardOrderPatchIn, RechargeIn
 from app.services.admin_service import apply_member_recharge_delta, _escape_like_fragment
 from app.services.member_address_service import upsert_default_address_from_admin_map_pick
@@ -27,6 +28,32 @@ def _quota_for_card_kind(kind: str) -> tuple[PlanType, int]:
     if k == CardOrderKind.TIMES.value:
         return PlanType.TIMES, 1
     raise HTTPException(status_code=400, detail="无效开卡类型")
+
+
+def _plan_for_membership_template(tpl: MembershipCardTemplate) -> PlanType:
+    """计划类型影响会员 plan_type 与是否累加 meal_quota_total（配合 bump_meal_quota_total）。"""
+    kl = (tpl.kind_label or "").strip()
+    pk = (tpl.period_kind or "").strip().lower()
+    if "月" in kl or pk == "monthly":
+        return PlanType.MONTH
+    if "周" in kl or pk == "weekly":
+        return PlanType.WEEK
+    mg = int(tpl.meals_grant)
+    if mg >= 18:
+        return PlanType.MONTH
+    if mg >= 6:
+        return PlanType.WEEK
+    return PlanType.TIMES
+
+
+def enum_card_kind_for_template(tpl: MembershipCardTemplate) -> str:
+    """库表 card_kind 枚举仅允许周卡/月卡/次卡：与 _plan_for_membership_template 对齐便于后台展示。"""
+    p = _plan_for_membership_template(tpl)
+    if p == PlanType.MONTH:
+        return CardOrderKind.MONTH.value
+    if p == PlanType.WEEK:
+        return CardOrderKind.WEEK.value
+    return CardOrderKind.TIMES.value
 
 
 def _format_amount_yuan(v: Decimal | None) -> str | None:
@@ -142,10 +169,20 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
     m = db.get(Member, order.member_id)
     if not m:
         raise HTTPException(status_code=404, detail="会员不存在")
-    plan, amt = _quota_for_card_kind(order.card_kind)
+    tpl_id = getattr(order, "membership_template_id", None)
+    if tpl_id is not None:
+        tpl = db.get(MembershipCardTemplate, int(tpl_id))
+        if not tpl:
+            raise HTTPException(status_code=404, detail="会员卡模版不存在")
+        plan = _plan_for_membership_template(tpl)
+        amt = int(tpl.meals_grant)
+        kind_label = f"{tpl.name}（{tpl.kind_label}）"
+    else:
+        plan, amt = _quota_for_card_kind(order.card_kind)
+        kind_label = order.card_kind
     parts = [
         f"开卡工单#{order.id}",
-        f"{order.card_kind}",
+        f"{kind_label}",
         f"同步入账+{amt}次",
         f"渠道{order.pay_channel}",
     ]
@@ -165,9 +202,10 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
     if rmk:
         parts.append(f"备注{rmk[:180]}")
     log_detail = "；".join(parts)
+    bump_quota = tpl_id is not None
     apply_member_recharge_delta(
         db,
-        RechargeIn(phone=m.phone, amount=amt, plan_type=plan),
+        RechargeIn(phone=m.phone, amount=amt, plan_type=plan, bump_meal_quota_total=bump_quota),
         operator=operator,
         log_detail=log_detail,
         member_id=int(m.id),

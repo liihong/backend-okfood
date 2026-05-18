@@ -29,6 +29,12 @@ class MemberCardOrder(Base):
         ForeignKey("members.id", ondelete="CASCADE", onupdate="CASCADE"),
         index=True,
     )
+    membership_template_id: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("membership_card_templates.id", onupdate="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     card_kind: Mapped[str] = mapped_column(String(10))
     pay_channel: Mapped[str] = mapped_column(String(10))
     pay_status: Mapped[str] = mapped_column(String(10), default="未缴")

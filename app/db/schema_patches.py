@@ -559,3 +559,57 @@ CREATE TABLE IF NOT EXISTS tenant_integration_settings (
         logger.info("补库: 已创建 tenant_integration_settings")
     except Exception as e:
         logger.error("补库: tenant_integration_settings 创建失败: %s", e)
+
+
+def apply_member_card_orders_membership_template_id_column() -> None:
+    """member_card_orders 增加 membership_template_id（自律卡包下单）。"""
+    try:
+        insp = inspect(engine)
+        if not insp.has_table("member_card_orders"):
+            return
+        col_names = {c["name"].lower() for c in insp.get_columns("member_card_orders")}
+    except Exception as e:
+        logger.warning("补库: 无法检查 member_card_orders 表结构: %s", e)
+        return
+
+    if "membership_template_id" in col_names:
+        return
+
+    dname = engine.dialect.name
+    try:
+        with engine.begin() as conn:
+            if dname in ("mysql", "mariadb"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE `member_card_orders` ADD COLUMN `membership_template_id` BIGINT UNSIGNED NULL "
+                        "DEFAULT NULL COMMENT '会员卡模版 id' AFTER `member_id`"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE `member_card_orders` ADD KEY `idx_mco_membership_template` (`membership_template_id`)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE `member_card_orders` ADD CONSTRAINT `fk_mco_membership_template` "
+                        "FOREIGN KEY (`membership_template_id`) REFERENCES `membership_card_templates` (`id`) "
+                        "ON UPDATE CASCADE ON DELETE SET NULL"
+                    )
+                )
+            elif dname == "sqlite":
+                conn.execute(text("ALTER TABLE member_card_orders ADD COLUMN membership_template_id INTEGER"))
+            else:
+                logger.error(
+                    "补库: 当前库类型 %s 需手动执行 "
+                    "sql/migrations/20260518_member_card_orders_membership_template_id.sql",
+                    dname,
+                )
+                return
+        logger.info("补库: 已添加 member_card_orders.membership_template_id")
+    except Exception as e:
+        logger.error(
+            "补库: 添加 membership_template_id 失败，请手动执行 "
+            "sql/migrations/20260518_member_card_orders_membership_template_id.sql: %s",
+            e,
+        )

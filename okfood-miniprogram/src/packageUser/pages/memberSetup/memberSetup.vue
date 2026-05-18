@@ -54,7 +54,7 @@
       <view v-else-if="identityOnlyPhase" class="setup-module">
         <text class="module-title">完善资料</text>
         <text class="identity-lead">请同步微信头像与昵称，便于在「我的」与客服侧识别您。</text>
-        <view class="section">
+        <view class="section section--avatar-center">
           <text class="sec-title">微信头像</text>
           <button class="avatar-btn" open-type="chooseAvatar" @chooseavatar="onChooseAvatar">
             <view class="avatar-box avatar-box--hero">
@@ -885,6 +885,20 @@ async function onSubmit() {
   padding: 32rpx 40rpx calc(48rpx + env(safe-area-inset-bottom));
 }
 
+.full-setup-wrap {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.identity-lead {
+  display: block;
+  font-size: 26rpx;
+  font-weight: 700;
+  color: $ok-slate-600;
+  line-height: 1.5;
+  margin: -8rpx 0 28rpx;
+}
+
 .lead {
   display: block;
   font-size: 28rpx;
@@ -922,6 +936,19 @@ async function onSubmit() {
 }
 .section {
   margin-bottom: 44rpx;
+}
+
+.section--avatar-center {
+  text-align: center;
+}
+
+.section--avatar-center .sec-title {
+  text-align: left;
+}
+
+.section--avatar-center .avatar-btn {
+  display: inline-block;
+  vertical-align: top;
 }
 
 .sec-title {
@@ -965,6 +992,13 @@ async function onSubmit() {
   border: 6rpx solid #fff;
   box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.08);
   overflow: hidden;
+}
+
+.avatar-box.avatar-box--hero {
+  width: 200rpx;
+  height: 200rpx;
+  margin: 0 auto;
+  display: flex;
 }
 
 .avatar-img {

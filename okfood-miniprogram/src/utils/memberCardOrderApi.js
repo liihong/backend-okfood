@@ -1,7 +1,9 @@
 import { request } from '@/utils/api.js'
 
 /**
- * @param {{ card_kind: string, delivery_start_date: string }} body card_kind: 周卡 | 月卡；delivery_start_date: YYYY-MM-DD
+ * @param {{ card_kind?: string, delivery_start_date?: string, membership_template_id?: number }} body
+ *   - 经典周/月卡：card_kind + delivery_start_date
+ *   - 自律卡包：membership_template_id
  */
 export function createMemberCardOrder(body) {
   return request('/api/user/member-card-orders', {

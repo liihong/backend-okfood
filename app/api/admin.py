@@ -39,6 +39,7 @@ from app.schemas.admin import (
     StoreConfigUpdateIn,
     WeeklySlotAssignIn,
     MenuDayTotalStockIn,
+    AdminDashboardSummaryApiOut,
     SfSameCityPreviewOut,
     SfSameCityPushIn,
     SfSameCityPushOut,
@@ -117,7 +118,7 @@ def login(request: Request, body: AdminLoginIn, db: SessionDep):
     return success(data=dump_model(token), msg="登录成功")
 
 
-@router.get("/dashboard-summary")
+@router.get("/dashboard-summary", response_model=AdminDashboardSummaryApiOut)
 def dashboard_summary(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
@@ -139,7 +140,7 @@ def dashboard_summary(
         force_recompute=force_recompute,
         store_id=store_id,
     )
-    return success(data=dump_model(summary), msg="获取成功")
+    return AdminDashboardSummaryApiOut(data=summary, msg="获取成功")
 
 
 @router.get("/finance/received-summary")

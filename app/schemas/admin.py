@@ -26,6 +26,10 @@ class RechargeIn(BaseModel):
     phone: str
     amount: int = Field(..., description="正数为增加次数，负数为扣减")
     plan_type: PlanType | None = None
+    bump_meal_quota_total: bool = Field(
+        False,
+        description="正向入账时同步累加 meal_quota_total（自律卡包模版等标准周/月枚举无法覆盖的餐次）",
+    )
 
 
 DishSpiceLevelCode = Literal["none", "mild", "medium", "hot"]
@@ -429,6 +433,14 @@ class DashboardMealSummaryOut(BaseModel):
     snapshot_recorded_at: datetime | None = Field(
         None, description="归档写入时间；当日实时计算时通常为空（过去日首算写入后同次响应亦可为空）"
     )
+
+
+class AdminDashboardSummaryApiOut(BaseModel):
+    """``GET /api/admin/dashboard-summary`` 标准成功包（便于 OpenAPI 展示完整 data 字段）。"""
+
+    code: int = Field(200, description="业务状态码")
+    data: DashboardMealSummaryOut
+    msg: str = Field(..., description="提示文案")
 
 
 class FinanceReceivedBucketOut(BaseModel):

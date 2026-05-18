@@ -1,6 +1,6 @@
 <template>
   <view class="page">
-    <OkNavbar show-back title="地址管理 👌" />
+    <OkNavbar show-back :title="navbarTitle" />
     <scroll-view scroll-y class="scroll" :show-scrollbar="false">
       <view class="page-address">
         <view class="form-box">
@@ -95,6 +95,9 @@ import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { request, getMemberToken } from '@/utils/api.js'
 import { normalizeAddressList, addressLineFromStructured } from '@/utils/addressApi.js'
 import { hasWxPhoneAuthDetail, wxMiniMemberLoginAndStore } from '@/utils/wxMemberLogin.js'
+
+/** 导航标题；购卡成功后跳转时可传 title=完善配送信息 */
+const navbarTitle = ref('地址管理 👌')
 
 const form = reactive({
   name: '',
@@ -366,6 +369,14 @@ function buildAddressBody() {
 }
 
 onLoad((options) => {
+  const tRaw = options && options.title != null ? String(options.title).trim() : ''
+  if (tRaw && tRaw !== 'undefined') {
+    try {
+      navbarTitle.value = decodeURIComponent(tRaw)
+    } catch {
+      navbarTitle.value = tRaw
+    }
+  }
   const raw =
     options && options.id != null ? String(options.id).trim() : ''
   const decoded = raw ? decodeURIComponent(raw) : ''

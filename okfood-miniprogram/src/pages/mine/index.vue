@@ -89,81 +89,129 @@
             </view>
             <text v-if="needsMemberSetupPage" class="hero-setup-hint">点按此处完善微信头像与昵称 ›</text>
           </view>
+        </template>
 
-          <view class="archive-card">
-            <view class="archive-head">
-              <text class="archive-title">本月自律档案</text>
-              <text class="archive-link" @tap="onArchiveReportTap">详情报告 ›</text>
+        <MinePlanStatusCard
+          :remaining-meals="planCardRemainingMeals"
+          :status-text="memberDeliveryStatus"
+          :status-alert="planCardStatusAlert"
+          :footer-tagline="cardFooter"
+          :plan-label="planTypeMemberLabel"
+          :address-line="planCardAddressLine"
+          :daily-units-text="planCardDailyUnitsText"
+          :show-resume-chip="showResumeDeliveryEntry"
+          @resume="goResumeDelivery"
+        />
+
+        <text class="section-cap">OK 饭 · 尊享特色服务</text>
+        <view class="menu-card menu-card--vip">
+          <view class="menu-grid menu-grid--3">
+            <view class="menu-cell" @tap="onVipFeatureTap('health')">
+              <view class="menu-ico-wrap">
+                <image
+                  class="menu-ico-img"
+                  src="/static/mine-icons/activity.svg"
+                  mode="aspectFit"
+                />
+              </view>
+              <text class="menu-cap">指标健康管理</text>
             </view>
-            <view class="archive-status-row">
-              <text :class="['archive-status', { 'archive-status--alert': needsMemberSetupPage }]">{{
-                memberDeliveryStatus
-              }}</text>
-              <view v-if="showResumeDeliveryEntry" class="archive-chip" @tap.stop="goResumeDelivery">
-                <text class="archive-chip-txt">恢复配送</text>
+            <view class="menu-cell" @tap="onVipFeatureTap('agreement')">
+              <view class="menu-ico-wrap">
+                <image
+                  class="menu-ico-img"
+                  src="/static/mine-icons/file-text.svg"
+                  mode="aspectFit"
+                />
               </view>
-              <view v-else-if="showVipRenewEntry" class="archive-chip" @tap.stop="goMemberSetup">
-                <text class="archive-chip-txt">开卡续费</text>
-              </view>
+              <text class="menu-cap">健康定制协议</text>
             </view>
-            <view class="archive-metrics">
-              <view class="archive-metric">
-                <text class="archive-metric-val">{{ serverBalance }}</text>
-                <text class="archive-metric-lab">剩余餐次</text>
+            <view class="menu-cell" @tap="onVipFeatureTap('coupon')">
+              <view class="menu-ico-wrap">
+                <image
+                  class="menu-ico-img"
+                  src="/static/mine-icons/ticket.svg"
+                  mode="aspectFit"
+                />
               </view>
-              <view class="archive-metric">
-                <text class="archive-metric-val">{{ streakDaysDisplay }}</text>
-                <text class="archive-metric-lab">连续就餐/天</text>
-              </view>
-              <view class="archive-metric">
-                <text class="archive-metric-val">{{ calorieDisplay }}</text>
-                <text class="archive-metric-lab">控卡摄入/kcal</text>
-              </view>
-            </view>
-            <text v-if="planTypeMemberLabel" class="archive-plan">{{ planTypeMemberLabel }}</text>
-            <text class="archive-addr">{{ todayDeliveryAddressLine }}</text>
-            <view class="archive-foot">
-              <text class="archive-foot-left">{{ cardFooter }}</text>
-              <text class="archive-foot-right">每日 {{ displayDailyMealUnits }} 份</text>
+              <text class="menu-cap">美团抖音验券</text>
             </view>
           </view>
+          <button
+            class="cta-purchase cta-purchase--in-card"
+            hover-class="cta-purchase--hover"
+            @tap="onPurchaseEntryTap"
+          >
+            <image
+              class="cta-purchase-ico-img"
+              src="/static/mine-icons/credit-card-light.svg"
+              mode="aspectFit"
+            />
+            <text class="cta-purchase-txt">自律卡包购买入口</text>
+          </button>
+        </view>
 
-          <text class="section-cap">个人自律管理</text>
+        <template v-if="isLoggedIn">
+          <text class="section-cap section-cap--sp">个人自律管理</text>
           <view class="menu-card">
             <view class="menu-grid">
               <view class="menu-cell" @tap="goMemberSetup">
                 <view class="menu-ico-wrap">
-                  <text class="menu-ico">👑</text>
+                  <image
+                    class="menu-ico-img"
+                    src="/static/mine-icons/crown.svg"
+                    mode="aspectFit"
+                  />
                 </view>
                 <text class="menu-cap">我的会员卡</text>
               </view>
               <view class="menu-cell" @tap="goDailyMealUnits">
                 <view class="menu-ico-wrap">
-                  <text class="menu-ico">🚚</text>
+                  <image
+                    class="menu-ico-img"
+                    src="/static/mine-icons/truck.svg"
+                    mode="aspectFit"
+                  />
                 </view>
                 <text class="menu-cap">修改送达份数</text>
               </view>
               <view class="menu-cell" @tap="goLeave">
                 <view class="menu-ico-wrap">
-                  <text class="menu-ico">📅</text>
+                  <image
+                    class="menu-ico-img"
+                    src="/static/mine-icons/calendar.svg"
+                    mode="aspectFit"
+                  />
                 </view>
                 <text class="menu-cap">请假休假管理</text>
               </view>
               <view class="menu-cell" @tap="goAddress">
                 <view class="menu-ico-wrap">
-                  <text class="menu-ico">📍</text>
+                  <image
+                    class="menu-ico-img"
+                    src="/static/mine-icons/map-pin.svg"
+                    mode="aspectFit"
+                  />
                 </view>
                 <text class="menu-cap">我的地址管理</text>
               </view>
               <view class="menu-cell" @tap="goSingleOrders">
                 <view class="menu-ico-wrap">
-                  <text class="menu-ico">📋</text>
+                  <image
+                    class="menu-ico-img"
+                    src="/static/mine-icons/clipboard-list.svg"
+                    mode="aspectFit"
+                  />
                 </view>
                 <text class="menu-cap">就餐消费记录</text>
               </view>
               <view class="menu-cell" @tap="onReminderSettingsTap">
                 <view class="menu-ico-wrap">
-                  <text class="menu-ico">🔔</text>
+                  <image
+                    class="menu-ico-img"
+                    src="/static/mine-icons/bell.svg"
+                    mode="aspectFit"
+                  />
                 </view>
                 <text class="menu-cap">消息提醒设置</text>
               </view>
@@ -173,38 +221,9 @@
               <text class="menu-extra-arr">›</text>
             </view>
           </view>
-
-          <text class="section-cap section-cap--sp">OK 饭 · 尊享特色服务</text>
-          <view class="menu-card menu-card--narrow">
-            <view class="menu-grid menu-grid--3">
-              <view class="menu-cell" @tap="onVipFeatureTap('health')">
-                <view class="menu-ico-wrap">
-                  <text class="menu-ico">📈</text>
-                </view>
-                <text class="menu-cap">指标健康管理</text>
-              </view>
-              <view class="menu-cell" @tap="onVipFeatureTap('agreement')">
-                <view class="menu-ico-wrap">
-                  <text class="menu-ico">📄</text>
-                </view>
-                <text class="menu-cap">健康定制协议</text>
-              </view>
-              <view class="menu-cell" @tap="onVipFeatureTap('coupon')">
-                <view class="menu-ico-wrap">
-                  <text class="menu-ico">🎟</text>
-                </view>
-                <text class="menu-cap">美团抖音验券</text>
-              </view>
-            </view>
-          </view>
-
-          <button class="cta-purchase" hover-class="cta-purchase--hover" @tap="goMemberSetup">
-            <text class="cta-purchase-ico">💳</text>
-            <text class="cta-purchase-txt">自律卡包购买入口</text>
-          </button>
         </template>
 
-        <text class="page-version">版本 1.1.8</text>
+        <text class="page-version">版本 1.1.8 · OK饭健康自律厨房</text>
       </view>
     </scroll-view>
   </view>
@@ -214,6 +233,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import MinePlanStatusCard from '@/components/MinePlanStatusCard/MinePlanStatusCard.vue'
 import {
   request,
   getMemberToken,
@@ -370,7 +390,7 @@ const needsMemberSetupPage = computed(() => {
   return shouldOpenMemberSetup(memberProfileRaw.value)
 })
 
-/** 开卡/续费区：与「完善资料」解耦，仅看服务端剩余餐次是否为 0（用于绿卡「开卡续费」按钮） */
+/** 与绿卡状态文案配套：资料或余额达到需引导购卡/续费时展示「待开卡/续费」等 */
 const showMemberCardModule = computed(() => {
   if (!isLoggedIn.value) return false
   const p = memberProfileRaw.value
@@ -378,16 +398,10 @@ const showMemberCardModule = computed(() => {
   return serverBalance.value <= 0
 })
 
-/** 有余额且暂停配送：会员卡右侧展示「恢复配送」（与「开卡续费」互斥；资料待完善也可点此进入资料页恢复） */
+/** 有余额且暂停配送：计划卡上展示「恢复配送」（资料待完善也可点此进入资料页恢复） */
 const showResumeDeliveryEntry = computed(() => {
   if (!isLoggedIn.value) return false
   return isDeliveryPausedWithBalance(memberProfileRaw.value)
-})
-
-/** 绿区右侧：剩余次数为 0 或资料待完善时展示「开卡续费」；暂停且有次数时不展示 */
-const showVipRenewEntry = computed(() => {
-  if (!isLoggedIn.value || showResumeDeliveryEntry.value) return false
-  return needsMemberSetupPage.value || showMemberCardModule.value
 })
 
 /** 仍有餐次且当前未暂停：菜单中提供一键暂停（等同资料页「暂停配送」选项） */
@@ -583,15 +597,38 @@ const cumulativeMealsDisplay = computed(() => {
   return String(used)
 })
 
-const streakDaysDisplay = computed(() => '—')
-const calorieDisplay = computed(() => '—')
+/** 计划卡片：未登录展示 0，已登录用动效后的余额（含体验加餐次） */
+const planCardRemainingMeals = computed(() => {
+  if (!isLoggedIn.value) return 0
+  return displayBalance.value
+})
+
+const planCardStatusAlert = computed(
+  () => isLoggedIn.value && needsMemberSetupPage.value,
+)
+
+const planCardAddressLine = computed(() => {
+  if (!isLoggedIn.value) return ''
+  return todayDeliveryAddressLine.value
+})
+
+const planCardDailyUnitsText = computed(() => {
+  if (!isLoggedIn.value) return ''
+  return `每日 ${displayDailyMealUnits.value} 份`
+})
 
 function onMineHeroTap() {
   if (needsMemberSetupPage.value) goMemberSetup()
 }
 
-function onArchiveReportTap() {
-  uni.showToast({ title: '详情报告即将上线', icon: 'none' })
+function onPurchaseEntryTap() {
+  if (!getMemberToken()) {
+    uni.showToast({ title: '请先手机号登录', icon: 'none' })
+    return
+  }
+  uni.navigateTo({
+    url: '/packageUser/pages/membershipCardList/membershipCardList',
+  })
 }
 
 function onReminderSettingsTap() {
@@ -1249,147 +1286,6 @@ function onPauseDeliveryTap() {
   margin-top: 16rpx;
 }
 
-.archive-card {
-  background: #fff;
-  border-radius: 28rpx;
-  padding: 28rpx 28rpx 24rpx;
-  margin-bottom: 28rpx;
-  border: 2rpx solid $ok-slate-100;
-  box-shadow: 0 12rpx 36rpx rgba(15, 23, 42, 0.06);
-}
-
-.archive-head {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16rpx;
-}
-
-.archive-title {
-  font-size: 30rpx;
-  font-weight: 950;
-  color: #0f172a;
-}
-
-.archive-link {
-  font-size: 26rpx;
-  font-weight: 800;
-  color: #0d9488;
-}
-
-.archive-status-row {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12rpx;
-  margin-bottom: 20rpx;
-  flex-wrap: wrap;
-}
-
-.archive-status {
-  font-size: 24rpx;
-  font-weight: 800;
-  color: $ok-slate-600;
-  flex: 1;
-  min-width: 0;
-}
-
-.archive-status--alert {
-  color: $ok-forest-green;
-}
-
-.archive-chip {
-  flex-shrink: 0;
-  background: rgba(14, 90, 68, 0.12);
-  padding: 10rpx 22rpx;
-  border-radius: 999rpx;
-}
-
-.archive-chip-txt {
-  font-size: 24rpx;
-  font-weight: 900;
-  color: $ok-forest-green;
-}
-
-.archive-metrics {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 20rpx 0 8rpx;
-  border-top: 2rpx solid $ok-slate-50;
-}
-
-.archive-metric {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8rpx;
-}
-
-.archive-metric-val {
-  font-size: 36rpx;
-  font-weight: 950;
-  color: $ok-forest-green;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.archive-metric-lab {
-  font-size: 22rpx;
-  font-weight: 700;
-  color: $ok-slate-500;
-  text-align: center;
-}
-
-.archive-plan {
-  display: block;
-  font-size: 24rpx;
-  font-weight: 800;
-  color: $ok-forest-green;
-  margin-top: 16rpx;
-}
-
-.archive-addr {
-  display: block;
-  font-size: 22rpx;
-  font-weight: 700;
-  color: $ok-slate-600;
-  margin-top: 12rpx;
-  line-height: 1.45;
-}
-
-.archive-foot {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 16rpx;
-  margin-top: 20rpx;
-  padding-top: 20rpx;
-  border-top: 2rpx solid $ok-slate-50;
-}
-
-.archive-foot-left {
-  flex: 1;
-  min-width: 0;
-  font-size: 20rpx;
-  font-weight: 700;
-  color: $ok-slate-400;
-  line-height: 1.4;
-}
-
-.archive-foot-right {
-  flex-shrink: 0;
-  font-size: 22rpx;
-  font-weight: 800;
-  color: $ok-slate-500;
-}
-
 .section-cap {
   display: block;
   font-size: 24rpx;
@@ -1412,8 +1308,8 @@ function onPauseDeliveryTap() {
   box-shadow: 0 8rpx 28rpx rgba(15, 23, 42, 0.05);
 }
 
-.menu-card--narrow {
-  padding-bottom: 28rpx;
+.menu-card--vip {
+  padding-bottom: 24rpx;
 }
 
 .menu-grid {
@@ -1441,14 +1337,16 @@ function onPauseDeliveryTap() {
   height: 96rpx;
   border-radius: 22rpx;
   background: rgba(14, 90, 68, 0.08);
+  border: 2rpx solid rgba(167, 243, 208, 0.35);
+  box-shadow: 0 4rpx 14rpx rgba(15, 23, 42, 0.05);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.menu-ico {
-  font-size: 40rpx;
-  line-height: 1;
+.menu-ico-img {
+  width: 44rpx;
+  height: 44rpx;
 }
 
 .menu-cap {
@@ -1501,6 +1399,13 @@ function onPauseDeliveryTap() {
   box-shadow: 0 16rpx 40rpx rgba(14, 90, 68, 0.35);
 }
 
+.cta-purchase--in-card {
+  margin-top: 28rpx;
+  margin-bottom: 0;
+  width: 100%;
+  box-shadow: 0 12rpx 32rpx rgba(14, 90, 68, 0.28);
+}
+
 .cta-purchase::after {
   border: none;
 }
@@ -1509,8 +1414,9 @@ function onPauseDeliveryTap() {
   opacity: 0.92;
 }
 
-.cta-purchase-ico {
-  font-size: 32rpx;
+.cta-purchase-ico-img {
+  width: 32rpx;
+  height: 32rpx;
 }
 
 .cta-purchase-txt {
@@ -1544,7 +1450,8 @@ function onPauseDeliveryTap() {
 }
 
 /* 页面底部版本号（低调展示） */
-.page-version {  display: block;
+.page-version {
+  display: block;
   margin-top: 40rpx;
   text-align: center;
   font-size: 18rpx;
