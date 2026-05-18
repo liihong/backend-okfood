@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from app.core.deps import SessionDep, admin_system_subject
 from app.schemas.admin import (
     PlatformStoreCreateIn,
+    PlatformStorePatchIn,
     PlatformTenantAdminCreateIn,
     PlatformTenantAdminPatchIn,
     PlatformTenantCreateIn,
@@ -27,6 +28,7 @@ from app.services.platform_tenant_service import (
     list_tenant_admins_for_platform,
     list_tenant_stores_for_platform,
     patch_platform_tenant,
+    patch_store_for_platform,
     patch_tenant_admin_for_platform,
     soft_delete_platform_tenant,
 )
@@ -124,6 +126,18 @@ def platform_create_tenant_store(
 ):
     row = create_store_for_platform(db, tenant_id, body)
     return success(data=dump_model(row), msg="门店已创建")
+
+
+@router.patch("/tenants/{tenant_id}/stores/{store_id}")
+def platform_patch_tenant_store(
+    tenant_id: int,
+    store_id: int,
+    body: PlatformStorePatchIn,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    row = patch_store_for_platform(db, tenant_id, store_id, body)
+    return success(data=dump_model(row), msg="已保存")
 
 
 @router.get("/tenants/{tenant_id}/admins")

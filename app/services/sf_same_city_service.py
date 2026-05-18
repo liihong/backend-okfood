@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import re
 import time
@@ -51,6 +52,8 @@ from app.schemas.admin import (
     SfSameCityPushOut,
     SfSameCityRowBase,
 )
+
+logger = logging.getLogger(__name__)
 
 _SH = ZoneInfo("Asia/Shanghai")
 
@@ -811,3 +814,87 @@ def cancel_sf_same_city_push(
     if isinstance(res, dict):
         return {"message": "顺丰已受理取消", "sf_response": res}
     return {"message": "顺丰已受理取消", "sf_response": None}
+
+
+def auto_push_sf_next_business_day_for_store(db: Session, *, store_id: int) -> SfSameCityPushOut | None:
+    """
+    夜间定时任务：向顺丰推送「次日」上海业务日、当前仍待推的停靠点（与手动推单同一套预览/合并逻辑）。
+    门店须启用 ``sf_nightly_auto_push_enabled`` 且处于营业状态。
+    """
+    st = db.get(Store, int(store_id))
+    if st is None or not st.is_active:
+        return None
+    if not bool(getattr(st, "sf_nightly_auto_push_enabled", False)):
+        return None
+    d = today_shanghai() + timedelta(days=1)
+    preview = preview_sf_same_city(db, delivery_date=d, store_id=int(store_id))
+    if not preview.sf_configured:
+        logger.info("顺丰夜间自动推单跳过（未配置顺丰） store_id=%s", store_id)
+        return None
+    rows = [r for r in preview.rows if r.selected and not r.already_pushed]
+    if not rows:
+        logger.info("顺丰夜间自动推单跳过（无待推停靠点） store_id=%s date=%s", store_id, d)
+        return None
+    body = SfSameCityPushIn(delivery_date=d, rows=rows)
+    return push_sf_same_city(db, body, store_id=int(store_id))
+
+
+def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
+    """启用夜间推单的全部门店依次执行 ``auto_push_sf_next_business_day_for_store``。"""
+    ids = list(
+        db.scalars(
+            select(Store.id).where(
+                Store.is_active.is_(True),
+                Store.sf_nightly_auto_push_enabled.is_(True),
+            )
+        ).all()
+    )
+    for sid in ids:
+        sid_int = int(sid)
+        try:
+            auto_push_sf_next_business_day_for_store(db, store_id=sid_int)
+        except HTTPException as e:
+            logger.warning(
+                "顺丰夜间自动推单跳过 store_id=%s detail=%s",
+                sid_int,
+                e.detail,
+            )
+        except ValueError as e:
+            logger.warning("顺丰夜间自动推单跳过 store_id=%s err=%s", sid_int, e)
+        except Exception:
+            logger.exception("顺丰夜间自动推单失败 store_id=%s", sid_int)
+
+
+def retry_sf_same_city_push_by_id(db: Session, *, push_id: int) -> SfSameCityPushItemResult:
+    """监控页：对创单失败记录按当前大表数据重试单停靠点推单。"""
+    row = db.get(SfSameCityPush, push_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="推单记录不存在")
+    try:
+        ec_int = int(row.error_code) if row.error_code is not None else -1
+    except (TypeError, ValueError):
+        ec_int = -1
+    if ec_int == 0:
+        raise HTTPException(status_code=400, detail="创单已成功，无需重试")
+    sid = int(row.store_id)
+    d = row.delivery_date
+    if d is None:
+        raise HTTPException(status_code=400, detail="记录缺少业务日")
+    preview = preview_sf_same_city(db, delivery_date=d, store_id=sid)
+    prow: SfSameCityPreviewRow | None = None
+    for r in preview.rows:
+        if r.stop_id == row.stop_id:
+            prow = r
+            break
+    if prow is None:
+        raise HTTPException(
+            status_code=400,
+            detail="当前业务日已无此停靠点待配送数据，请在配送大表核对或改用手动推单",
+        )
+    if prow.already_pushed:
+        raise HTTPException(status_code=400, detail="该停靠点已有成功创单记录")
+    body = SfSameCityPushIn(delivery_date=d, rows=[prow])
+    out = push_sf_same_city(db, body, store_id=sid)
+    if not out.results:
+        raise HTTPException(status_code=500, detail="重试无返回结果")
+    return out.results[0]

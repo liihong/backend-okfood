@@ -15,6 +15,7 @@ from app.models.tenant import Tenant
 from app.schemas.admin import (
     PlatformStoreCreateIn,
     PlatformStoreOut,
+    PlatformStorePatchIn,
     PlatformSystemOverviewOut,
     PlatformTenantAdminCreateIn,
     PlatformTenantAdminOut,
@@ -78,6 +79,7 @@ def _store_to_out(st: Store) -> PlatformStoreOut:
         name=st.name,
         is_active=st.is_active,
         leave_deadline_time=_fmt_leave_time(st.leave_deadline_time),
+        sf_nightly_auto_push_enabled=bool(getattr(st, "sf_nightly_auto_push_enabled", False)),
         created_at=_fmt_dt(st.created_at),
     )
 
@@ -118,8 +120,37 @@ def create_store_for_platform(db: Session, tenant_id: int, body: PlatformStoreCr
     if not name:
         raise HTTPException(status_code=400, detail="门店名称不能为空")
     ld = _parse_leave_deadline(body.leave_deadline_time)
-    st = Store(tenant_id=tenant_id, name=name, leave_deadline_time=ld, is_active=body.is_active)
+    st = Store(
+        tenant_id=tenant_id,
+        name=name,
+        leave_deadline_time=ld,
+        is_active=body.is_active,
+        sf_nightly_auto_push_enabled=bool(body.sf_nightly_auto_push_enabled),
+    )
     db.add(st)
+    db.commit()
+    db.refresh(st)
+    return _store_to_out(st)
+
+
+def patch_store_for_platform(
+    db: Session, tenant_id: int, store_id: int, body: PlatformStorePatchIn
+) -> PlatformStoreOut:
+    _tenant_or_404(db, tenant_id)
+    st = db.get(Store, store_id)
+    if st is None or int(st.tenant_id) != int(tenant_id):
+        raise HTTPException(status_code=404, detail="门店不存在")
+    if body.name is not None:
+        n = body.name.strip()
+        if not n:
+            raise HTTPException(status_code=400, detail="门店名称不能为空")
+        st.name = n
+    if body.leave_deadline_time is not None:
+        st.leave_deadline_time = _parse_leave_deadline(body.leave_deadline_time)
+    if body.is_active is not None:
+        st.is_active = body.is_active
+    if body.sf_nightly_auto_push_enabled is not None:
+        st.sf_nightly_auto_push_enabled = bool(body.sf_nightly_auto_push_enabled)
     db.commit()
     db.refresh(st)
     return _store_to_out(st)

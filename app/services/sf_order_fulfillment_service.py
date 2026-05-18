@@ -7,7 +7,7 @@ from datetime import date
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import String, and_, cast, func, or_, select, true as sql_true
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -20,6 +20,51 @@ logger = logging.getLogger(__name__)
 
 # 顺丰开放平台配送推送 order_status：17=配送员妥投完单（与后台监控文案一致）
 SF_ORDER_STATUS_DELIVERED_TUOTOU = 17
+
+
+def _sf_push_monitor_where_clauses(
+    *,
+    delivery_date: date | None,
+    store_id: int | None,
+    sf_callback_order_status: int | None,
+    callback_order_status_unknown: bool,
+    sf_create_status: str | None = None,
+    sf_order_id_contains: str | None = None,
+    member_phone_contains: str | None = None,
+) -> list[Any]:
+    """
+    顺丰监控列表 / 导出共用 WHERE 条件。
+    会员手机：在 request_snapshot JSON 文本中 LIKE（停靠点快照含 recv_phone 等）。
+    顺丰单号：sf_order_id 模糊匹配。
+    创单状态：ok=error_code==0；fail=非成功（含 NULL，兼容历史数据）。
+    """
+    clauses: list[Any] = []
+    if delivery_date is not None:
+        clauses.append(SfSameCityPush.delivery_date == delivery_date)
+    if store_id is not None:
+        clauses.append(SfSameCityPush.store_id == int(store_id))
+    if callback_order_status_unknown:
+        clauses.append(SfSameCityPush.sf_callback_order_status.is_(None))
+    elif sf_callback_order_status is not None:
+        clauses.append(SfSameCityPush.sf_callback_order_status == int(sf_callback_order_status))
+
+    st = (sf_create_status or "").strip().lower()
+    if st in ("ok", "success"):
+        clauses.append(SfSameCityPush.error_code == 0)
+    elif st in ("fail", "failed"):
+        clauses.append(or_(SfSameCityPush.error_code.is_(None), SfSameCityPush.error_code != 0))
+
+    oid = (sf_order_id_contains or "").strip()
+    if oid:
+        clauses.append(SfSameCityPush.sf_order_id.isnot(None))
+        clauses.append(SfSameCityPush.sf_order_id.like(f"%{oid}%"))
+
+    ph = (member_phone_contains or "").strip()
+    if ph:
+        clauses.append(SfSameCityPush.request_snapshot.isnot(None))
+        clauses.append(cast(SfSameCityPush.request_snapshot, String).like(f"%{ph}%"))
+
+    return clauses
 
 
 def _iso_dt(x: Any) -> str | None:
@@ -209,32 +254,28 @@ def list_sf_same_city_pushes_for_monitor(
     sf_callback_order_status: int | None = None,
     callback_order_status_unknown: bool = False,
     store_id: int | None = None,
+    sf_create_status: str | None = None,
+    sf_order_id_contains: str | None = None,
+    member_phone_contains: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """按业务日、顺丰回调配送状态可选筛选，创建时间倒序分页。"""
     if callback_order_status_unknown and sf_callback_order_status is not None:
         raise ValueError("不可同时指定具体回调状态与「暂无回调状态」筛选")
 
-    fq = select(func.count()).select_from(SfSameCityPush)
-    if delivery_date is not None:
-        fq = fq.where(SfSameCityPush.delivery_date == delivery_date)
-    if store_id is not None:
-        fq = fq.where(SfSameCityPush.store_id == int(store_id))
-    if callback_order_status_unknown:
-        fq = fq.where(SfSameCityPush.sf_callback_order_status.is_(None))
-    elif sf_callback_order_status is not None:
-        fq = fq.where(SfSameCityPush.sf_callback_order_status == int(sf_callback_order_status))
+    wc = _sf_push_monitor_where_clauses(
+        delivery_date=delivery_date,
+        store_id=store_id,
+        sf_callback_order_status=sf_callback_order_status,
+        callback_order_status_unknown=callback_order_status_unknown,
+        sf_create_status=sf_create_status,
+        sf_order_id_contains=sf_order_id_contains,
+        member_phone_contains=member_phone_contains,
+    )
+    flt = and_(*wc) if wc else sql_true()
+    fq = select(func.count()).select_from(SfSameCityPush).where(flt)
     total = int(db.scalar(fq) or 0)
 
-    q = select(SfSameCityPush)
-    if delivery_date is not None:
-        q = q.where(SfSameCityPush.delivery_date == delivery_date)
-    if store_id is not None:
-        q = q.where(SfSameCityPush.store_id == int(store_id))
-    if callback_order_status_unknown:
-        q = q.where(SfSameCityPush.sf_callback_order_status.is_(None))
-    elif sf_callback_order_status is not None:
-        q = q.where(SfSameCityPush.sf_callback_order_status == int(sf_callback_order_status))
-    q = q.order_by(SfSameCityPush.id.desc())
+    q = select(SfSameCityPush).where(flt).order_by(SfSameCityPush.id.desc())
     off = max(0, (page - 1) * page_size)
     rows = list(db.scalars(q.offset(off).limit(page_size)).all())
 
@@ -261,6 +302,9 @@ def list_sf_same_city_pushes_for_monitor_export(
     sf_callback_order_status: int | None = None,
     callback_order_status_unknown: bool = False,
     store_id: int | None = None,
+    sf_create_status: str | None = None,
+    sf_order_id_contains: str | None = None,
+    member_phone_contains: str | None = None,
 ) -> list[dict[str, Any]]:
     """与监控列表同源筛选，不分页；用于 Excel 导出。"""
     if delivery_date is None:
@@ -269,14 +313,17 @@ def list_sf_same_city_pushes_for_monitor_export(
     if callback_order_status_unknown and sf_callback_order_status is not None:
         raise ValueError("不可同时指定具体回调状态与「暂无回调状态」筛选")
 
-    q = select(SfSameCityPush).where(SfSameCityPush.delivery_date == delivery_date)
-    if store_id is not None:
-        q = q.where(SfSameCityPush.store_id == int(store_id))
-    if callback_order_status_unknown:
-        q = q.where(SfSameCityPush.sf_callback_order_status.is_(None))
-    elif sf_callback_order_status is not None:
-        q = q.where(SfSameCityPush.sf_callback_order_status == int(sf_callback_order_status))
-    q = q.order_by(SfSameCityPush.id.desc())
+    wc = _sf_push_monitor_where_clauses(
+        delivery_date=delivery_date,
+        store_id=store_id,
+        sf_callback_order_status=sf_callback_order_status,
+        callback_order_status_unknown=callback_order_status_unknown,
+        sf_create_status=sf_create_status,
+        sf_order_id_contains=sf_order_id_contains,
+        member_phone_contains=member_phone_contains,
+    )
+    flt = and_(*wc) if wc else sql_true()
+    q = select(SfSameCityPush).where(flt).order_by(SfSameCityPush.id.desc())
     rows = list(db.scalars(q).all())
 
     agg_cache: dict[tuple[date, int], dict[str, Any]] = {}
@@ -292,4 +339,30 @@ def list_sf_same_city_pushes_for_monitor_export(
         return agg_cache[k]
 
     return [_sf_push_monitor_row_dict(db, r, _aggs_for_row(r)) for r in rows]
+
+
+def count_sf_same_city_pushes_for_delivery_date(
+    db: Session,
+    *,
+    store_id: int | None,
+    delivery_date: date,
+) -> dict[str, int]:
+    """按推送记录上的配送业务日 ``delivery_date`` 统计创单成功 / 失败条数（与列表「业务日」筛选一致）。"""
+    conds = [SfSameCityPush.delivery_date == delivery_date]
+    if store_id is not None:
+        conds.append(SfSameCityPush.store_id == int(store_id))
+
+    flt = and_(*conds)
+    total = int(db.scalar(select(func.count()).select_from(SfSameCityPush).where(flt)) or 0)
+    success = int(
+        db.scalar(
+            select(func.count()).select_from(SfSameCityPush).where(
+                flt,
+                SfSameCityPush.error_code == 0,
+            )
+        )
+        or 0
+    )
+    failed = max(0, total - success)
+    return {"total": total, "success": success, "failed": failed}
 

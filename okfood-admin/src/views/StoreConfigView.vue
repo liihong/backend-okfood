@@ -21,6 +21,8 @@ const form = ref({
   store_logo_url: '',
   store_lng: '',
   store_lat: '',
+  /** 每日 22:00（上海）自动顺丰推送次日配送单 */
+  sf_nightly_auto_push_enabled: false,
   courier_delivery_base_yuan: '',
   courier_delivery_extra_per_unit_yuan: '',
   member_card_week_price_yuan: '',
@@ -47,6 +49,7 @@ async function loadConfig() {
     form.value.member_card_month_price_yuan = fmtMoney(d?.member_card_month_price_yuan)
     form.value.member_card_week_list_price_yuan = fmtMoney(d?.member_card_week_list_price_yuan)
     form.value.member_card_month_list_price_yuan = fmtMoney(d?.member_card_month_list_price_yuan)
+    form.value.sf_nightly_auto_push_enabled = d?.sf_nightly_auto_push_enabled === true
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -128,6 +131,7 @@ async function saveConfig() {
   payload.member_card_month_price_yuan = monthP
   payload.member_card_week_list_price_yuan = weekList
   payload.member_card_month_list_price_yuan = monthList
+  payload.sf_nightly_auto_push_enabled = form.value.sf_nightly_auto_push_enabled === true
 
   saving.value = true
   try {
@@ -258,6 +262,16 @@ onMounted(() => {
           <label class="sc-label" for="sc-lat">纬度 lat（可微调）</label>
           <input id="sc-lat" v-model="form.store_lat" type="text" class="sc-input sc-input--mono" placeholder="例：35.303" />
         </div>
+      </div>
+
+      <div class="sc-field sc-switch-row">
+        <div class="sc-switch-text">
+          <span class="sc-label sc-label--inline">顺丰夜间自动推单</span>
+          <p class="sc-hint sc-hint--tight">
+            开启后系统于每日<strong>22:00（上海时间）</strong>自动将<strong>次日</strong>待配送订单推送至顺丰同城；关闭后不执行定时任务，请在配送管理页面<strong>手动推单</strong>。
+          </p>
+        </div>
+        <el-switch v-model="form.sf_nightly_auto_push_enabled" size="large" />
       </div>
 
       <h3 class="sc-subtitle">骑手配送费（元）</h3>
@@ -411,6 +425,27 @@ onMounted(() => {
   font-weight: 700;
   color: #334155;
   margin-bottom: 0.35rem;
+}
+.sc-label--inline {
+  margin-bottom: 0.25rem;
+}
+.sc-switch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 0;
+  margin-bottom: 0.5rem;
+  border-top: 1px solid #f1f5f9;
+  border-bottom: 1px solid #f1f5f9;
+}
+.sc-switch-text {
+  flex: 1;
+  min-width: 220px;
+}
+.sc-hint--tight {
+  margin: 0.25rem 0 0;
 }
 .sc-input {
   width: 100%;

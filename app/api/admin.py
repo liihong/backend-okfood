@@ -44,6 +44,8 @@ from app.schemas.admin import (
     SfSameCityPushIn,
     SfSameCityPushOut,
     SfSameCityPushMonitorRow,
+    SfSameCityPushRetryOut,
+    SfSameCityPushStatsOut,
     SfSameCityCancelIn,
     SfSameCityCancelOut,
 )
@@ -66,10 +68,16 @@ from app.services.admin_service import (
     upsert_dish,
 )
 from app.services.sf_order_fulfillment_service import (
+    count_sf_same_city_pushes_for_delivery_date,
     list_sf_same_city_pushes_for_monitor,
     list_sf_same_city_pushes_for_monitor_export,
 )
-from app.services.sf_same_city_service import cancel_sf_same_city_push, preview_sf_same_city, push_sf_same_city
+from app.services.sf_same_city_service import (
+    cancel_sf_same_city_push,
+    preview_sf_same_city,
+    push_sf_same_city,
+    retry_sf_same_city_push_by_id,
+)
 from app.services.store_config_service import get_store_config, update_store_config
 from app.services.delivery_sheet_service import build_delivery_sheet
 from app.services.admin_delivery_fulfillment_service import admin_mark_subscription_fulfilled
@@ -95,6 +103,19 @@ from app.integrations.wechat_pay_v2 import resolve_request_client_ip
 from app.utils.response import dump_model, page_response, success
 
 router = APIRouter(prefix="/admin", tags=["管理端"])
+
+
+def _normalize_sf_monitor_create_status(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    s = raw.strip().lower()
+    if not s or s == "all":
+        return None
+    if s in ("ok", "success"):
+        return "ok"
+    if s in ("fail", "failed"):
+        return "fail"
+    raise HTTPException(status_code=400, detail="sf_create_status 仅支持 ok、fail 或留空（全部）")
 
 
 @router.post("/login")
@@ -230,6 +251,22 @@ def delivery_sf_push(
     return success(data=dump_model(out), msg="处理完成")
 
 
+@router.get("/delivery-sf/pushes/stats", response_model=None)
+def delivery_sf_push_stats(
+    db: SessionDep,
+    delivery_date: Annotated[date, Query(description="配送业务日，与下方列表「业务日」筛选一致")],
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """按配送业务日统计：该日待配送订单对应的推单记录总数 / 创单成功 / 创单失败（与创单时刻无关）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    raw = count_sf_same_city_pushes_for_delivery_date(
+        db, store_id=store_id, delivery_date=delivery_date
+    )
+    out = SfSameCityPushStatsOut(delivery_date=delivery_date.isoformat(), **raw)
+    return success(data=dump_model(out), msg="获取成功")
+
+
 @router.get("/delivery-sf/pushes", response_model=None)
 def delivery_sf_pushes(
     db: SessionDep,
@@ -244,12 +281,25 @@ def delivery_sf_pushes(
         bool,
         Query(description="为真时仅返回尚未收到配送状态回调（sf_callback_order_status 为空）的记录"),
     ] = False,
+    sf_create_status: Annotated[
+        str | None,
+        Query(description="创单状态：留空=全部；ok=创单成功；fail=创单失败"),
+    ] = None,
+    member_phone: Annotated[
+        str | None,
+        Query(description="会员手机号包含；匹配创单快照 JSON 中的号码"),
+    ] = None,
+    sf_order_id: Annotated[
+        str | None,
+        Query(description="顺丰运单号包含（sf_order_id）"),
+    ] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ):
     """顺丰同城创单落地记录列表（控制台回调状态），用于后台订单监控。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
+        st = _normalize_sf_monitor_create_status(sf_create_status)
         items_raw, total = list_sf_same_city_pushes_for_monitor(
             db,
             delivery_date=delivery_date,
@@ -258,6 +308,9 @@ def delivery_sf_pushes(
             sf_callback_order_status=sf_callback_order_status,
             callback_order_status_unknown=callback_order_status_unknown,
             store_id=store_id,
+            sf_create_status=st,
+            sf_order_id_contains=(sf_order_id or "").strip() or None,
+            member_phone_contains=(member_phone or "").strip() or None,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -283,18 +336,28 @@ def delivery_sf_pushes_export_xlsx(
         bool,
         Query(description="为真时仅导出尚未收到配送状态回调的记录"),
     ] = False,
+    sf_create_status: Annotated[
+        str | None,
+        Query(description="创单状态：留空=全部；ok=成功；fail=失败"),
+    ] = None,
+    member_phone: Annotated[str | None, Query(description="会员手机号包含")] = None,
+    sf_order_id: Annotated[str | None, Query(description="顺丰运单号包含")] = None,
     admin_username: str = Depends(admin_or_delivery_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """导出顺丰订单监控列表同源数据（不分页），用于按业务日与控制台核对。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
+        st = _normalize_sf_monitor_create_status(sf_create_status)
         rows = list_sf_same_city_pushes_for_monitor_export(
             db,
             delivery_date=delivery_date,
             sf_callback_order_status=sf_callback_order_status,
             callback_order_status_unknown=callback_order_status_unknown,
             store_id=store_id,
+            sf_create_status=st,
+            sf_order_id_contains=(sf_order_id or "").strip() or None,
+            member_phone_contains=(member_phone or "").strip() or None,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -312,6 +375,24 @@ def delivery_sf_pushes_export_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{fn}"'},
     )
+
+
+@router.post("/delivery-sf/pushes/{push_id}/retry", response_model=None)
+def delivery_sf_retry_push(
+    push_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
+):
+    """创单失败记录：按当前配送大表数据对该停靠点重试推单（已成功创单不可重试）。"""
+    _ = admin_username
+    try:
+        r = retry_sf_same_city_push_by_id(db, push_id=push_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    out = SfSameCityPushRetryOut(
+        stop_id=r.stop_id, ok=r.ok, message=r.message, sf_order_id=r.sf_order_id
+    )
+    return success(data=dump_model(out), msg="处理完成")
 
 
 @router.post("/delivery-sf/pushes/{push_id}/cancel", response_model=None)

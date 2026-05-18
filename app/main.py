@@ -12,23 +12,6 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.api import admin, admin_catalog, admin_couriers, admin_regions, admin_system, admin_uploads, courier, menu, sf_open_notify, user, wechat_pay
 from app.core.config import settings
 from app.core.limiter import limiter
-from app.db.schema_patches import (
-    apply_admin_dashboard_biz_day_snapshot_expire_one_unit_column,
-    apply_drop_menu_dish_month_unique_constraints,
-    apply_member_addresses_drop_legacy_columns,
-    apply_member_addresses_map_door_columns,
-    apply_member_card_orders_membership_template_id_column,
-    apply_members_skip_subscription_saturday_column,
-    apply_members_tomorrow_leave_target_column,
-    apply_menu_dish_spice_internal_sop_columns,
-    apply_sf_same_city_callback_support,
-    apply_tenant_integration_settings_table,
-)
-from app.db.catalog_tables_migration import ensure_catalog_admin_tables
-from app.db.tenant_store_migration import (
-    apply_tenant_store_multitenancy,
-    ensure_member_card_list_price_columns,
-)
 from app.jobs.scheduler import setup_scheduler, shutdown_scheduler
 from app.services.upload_service import ensure_upload_root
 from app.utils.response import success
@@ -58,19 +41,6 @@ def _http_detail_to_msg(detail: str | list | dict) -> str:
 async def lifespan(app: FastAPI):
     _ = app
     ensure_upload_root()
-    ensure_member_card_list_price_columns()
-    apply_tenant_store_multitenancy()
-    ensure_catalog_admin_tables()
-    apply_member_card_orders_membership_template_id_column()
-    apply_tenant_integration_settings_table()
-    apply_drop_menu_dish_month_unique_constraints()
-    apply_menu_dish_spice_internal_sop_columns()
-    apply_admin_dashboard_biz_day_snapshot_expire_one_unit_column()
-    apply_members_tomorrow_leave_target_column()
-    apply_members_skip_subscription_saturday_column()
-    apply_member_addresses_map_door_columns()
-    apply_member_addresses_drop_legacy_columns()
-    apply_sf_same_city_callback_support()
     setup_scheduler()
     yield
     shutdown_scheduler()

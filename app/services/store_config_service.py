@@ -88,6 +88,7 @@ def _store_out_from_row(st: Store) -> StoreConfigOut:
         member_card_month_price_yuan=s.MEMBER_CARD_MONTH_PRICE_YUAN if mo is None else Decimal(mo),
         member_card_week_list_price_yuan=wl,
         member_card_month_list_price_yuan=ml,
+        sf_nightly_auto_push_enabled=bool(getattr(st, "sf_nightly_auto_push_enabled", False)),
     )
 
 
@@ -107,6 +108,7 @@ def get_store_config(db: Session, *, store_id: int) -> StoreConfigOut:
             member_card_month_price_yuan=s.MEMBER_CARD_MONTH_PRICE_YUAN,
             member_card_week_list_price_yuan=None,
             member_card_month_list_price_yuan=None,
+            sf_nightly_auto_push_enabled=False,
         )
     wk, mo = row.member_card_week_price_yuan, row.member_card_month_price_yuan
     wl = _decimal_or_none(row.member_card_week_list_price_yuan)
@@ -123,6 +125,7 @@ def get_store_config(db: Session, *, store_id: int) -> StoreConfigOut:
         member_card_month_price_yuan=s.MEMBER_CARD_MONTH_PRICE_YUAN if mo is None else Decimal(mo),
         member_card_week_list_price_yuan=wl,
         member_card_month_list_price_yuan=ml,
+        sf_nightly_auto_push_enabled=False,
     )
 
 
@@ -213,6 +216,8 @@ def update_store_config(db: Session, store_id: int, body: StoreConfigUpdateIn) -
         st.member_card_week_list_price_yuan = body.member_card_week_list_price_yuan
     if "member_card_month_list_price_yuan" in fs:
         st.member_card_month_list_price_yuan = body.member_card_month_list_price_yuan
+    if "sf_nightly_auto_push_enabled" in fs and body.sf_nightly_auto_push_enabled is not None:
+        st.sf_nightly_auto_push_enabled = bool(body.sf_nightly_auto_push_enabled)
     db.add(st)
     db.commit()
     db.refresh(st)

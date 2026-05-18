@@ -33,7 +33,13 @@ const roleLabel = (r) => {
 
 const storeDialog = ref(false)
 const storeSaving = ref(false)
-const storeForm = ref({ name: '', leave_deadline_time: '21:00', is_active: true })
+const storePatchingId = ref(null)
+const storeForm = ref({
+  name: '',
+  leave_deadline_time: '21:00',
+  is_active: true,
+  sf_nightly_auto_push_enabled: false,
+})
 
 const integrationDialog = ref(false)
 const integrationLoading = ref(false)
@@ -334,7 +340,12 @@ async function loadStoresForTenant(tenantId) {
 }
 
 function openCreateStore() {
-  storeForm.value = { name: '', leave_deadline_time: '21:00', is_active: true }
+  storeForm.value = {
+    name: '',
+    leave_deadline_time: '21:00',
+    is_active: true,
+    sf_nightly_auto_push_enabled: false,
+  }
   storeDialog.value = true
 }
 
@@ -356,6 +367,7 @@ async function saveStore() {
           name,
           leave_deadline_time: String(storeForm.value.leave_deadline_time || '21:00').trim(),
           is_active: storeForm.value.is_active !== false,
+          sf_nightly_auto_push_enabled: storeForm.value.sf_nightly_auto_push_enabled === true,
         }),
       },
       { auth: true },
@@ -376,6 +388,35 @@ async function saveStore() {
     showToast(e instanceof Error ? e.message : '创建失败', 'error')
   } finally {
     storeSaving.value = false
+  }
+}
+
+async function patchStoreNightly(row, enabled) {
+  const tid = currentTenant.value && currentTenant.value.id
+  if (tid == null || !row) return
+  storePatchingId.value = row.id
+  try {
+    await apiJson(
+      `/api/admin/system/tenants/${tid}/stores/${row.id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ sf_nightly_auto_push_enabled: enabled }),
+      },
+      { auth: true },
+    )
+    row.sf_nightly_auto_push_enabled = enabled
+    showToast('已保存自动推单设置', 'success')
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '保存失败', 'error')
+    void loadStoresForTenant(tid)
+  } finally {
+    storePatchingId.value = null
   }
 }
 
@@ -612,6 +653,18 @@ onMounted(async () => {
         <el-table-column prop="id" label="门店ID" width="88" />
         <el-table-column prop="name" label="名称" min-width="120" />
         <el-table-column prop="leave_deadline_time" label="请假截止" width="100" />
+        <el-table-column label="夜间顺丰推单" min-width="120">
+          <template #default="{ row }">
+            <el-switch
+              :model-value="row.sf_nightly_auto_push_enabled === true"
+              :disabled="storesLoading || storePatchingId === row.id"
+              inline-prompt
+              active-text="开"
+              inactive-text="关"
+              @change="(v) => patchStoreNightly(row, v)"
+            />
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="84">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
@@ -632,6 +685,12 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="storeForm.is_active" />
+        </el-form-item>
+        <el-form-item label="夜间顺丰自动推单">
+          <div class="store-nightly-wrap">
+            <el-switch v-model="storeForm.sf_nightly_auto_push_enabled" />
+            <span class="store-nightly-hint">每日 22:00（上海）自动推送<strong>次日</strong>待配送订单；关闭后仅能在配送大表手动推单</span>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -947,5 +1006,16 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+.store-nightly-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.store-nightly-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.45;
 }
 </style>

@@ -167,6 +167,10 @@ class StoreConfigOut(BaseModel):
         decimal_places=2,
         description="月卡划线原价（元）；高于微信支付标价时小程序展示活动价样式",
     )
+    sf_nightly_auto_push_enabled: bool = Field(
+        False,
+        description="每日 22:00（上海）自动向顺丰推送次日业务日配送单；关闭则仅手动推单",
+    )
 
 
 class StoreConfigUpdateIn(BaseModel):
@@ -213,6 +217,10 @@ class StoreConfigUpdateIn(BaseModel):
         max_digits=12,
         decimal_places=2,
         description="留空或不传表示清除划线价",
+    )
+    sf_nightly_auto_push_enabled: bool | None = Field(
+        None,
+        description="顺丰夜间自动推单；不传表示不修改",
     )
 
     @model_validator(mode="after")
@@ -794,6 +802,15 @@ class SfSameCityPushOut(BaseModel):
     results: list[SfSameCityPushItemResult] = Field(default_factory=list)
 
 
+class SfSameCityPushRetryOut(BaseModel):
+    """失败创单记录在监控页重试后的结果（单停靠点）。"""
+
+    stop_id: str
+    ok: bool
+    message: str
+    sf_order_id: str | None = None
+
+
 class SfSameCityPushMonitorMemberRow(BaseModel):
     """监控页：停靠点对应的系统会员（订阅行 + 单点餐）；无匹配时可能来自快照收件人。"""
 
@@ -920,6 +937,10 @@ class PlatformStoreOut(BaseModel):
     name: str
     is_active: bool
     leave_deadline_time: str = Field("", description="HH:MM:SS")
+    sf_nightly_auto_push_enabled: bool = Field(
+        False,
+        description="是否启用每日 22:00 自动顺丰推单（次日业务日）",
+    )
     created_at: str
 
 
@@ -931,6 +952,32 @@ class PlatformStoreCreateIn(BaseModel):
         description="当日请假截止时间，如 21:00 或 21:00:00",
     )
     is_active: bool = True
+    sf_nightly_auto_push_enabled: bool = Field(
+        False,
+        description="启用后系统于每日 22:00（上海）自动推送次日待配送订单至顺丰",
+    )
+
+
+class PlatformStorePatchIn(BaseModel):
+    """平台管理员 PATCH 门店；仅传需修改的字段。"""
+
+    name: str | None = Field(None, max_length=128)
+    leave_deadline_time: str | None = Field(
+        None,
+        max_length=16,
+        description="当日请假截止时间，如 21:00 或 21:00:00",
+    )
+    is_active: bool | None = None
+    sf_nightly_auto_push_enabled: bool | None = None
+
+
+class SfSameCityPushStatsOut(BaseModel):
+    """按配送业务日（与 ``sf_same_city_pushes.delivery_date`` 一致）统计推单条数。"""
+
+    delivery_date: str = Field(..., description="配送业务日 YYYY-MM-DD")
+    total: int
+    success: int
+    failed: int
 
 
 class TenantIntegrationSettingsOut(BaseModel):

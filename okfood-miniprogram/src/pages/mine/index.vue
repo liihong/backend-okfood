@@ -102,7 +102,7 @@
                   mode="aspectFit"
                 />
               </view>
-              <text class="menu-cap">指标健康管理</text>
+             <text class="menu-cap">持证营养师搭配</text>
             </view>
             <view class="menu-cell" @tap="onVipFeatureTap('agreement')">
               <view class="menu-ico-wrap">
@@ -122,7 +122,7 @@
                   mode="aspectFit"
                 />
               </view>
-              <text class="menu-cap">美团抖音验券</text>
+             <text class="menu-cap">顺丰全程跟踪</text>
             </view>
           </view>
           <button

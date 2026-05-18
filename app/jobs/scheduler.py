@@ -98,11 +98,25 @@ def job_low_balance_notify() -> None:
         db.close()
 
 
+def job_sf_nightly_auto_push() -> None:
+    """
+    每日 22:00（上海）：对启用「夜间顺丰自动推单」的门店，自动推送次日业务日待配送停靠点至顺丰。
+    """
+    from app.services.sf_same_city_service import run_sf_nightly_auto_push_for_all_stores
+
+    db = SessionLocal()
+    try:
+        run_sf_nightly_auto_push_for_all_stores(db)
+    finally:
+        db.close()
+
+
 def setup_scheduler() -> None:
     if scheduler.running:
         return
     scheduler.add_job(job_reset_leave_flags, "cron", hour=0, minute=1, id="reset_leave", replace_existing=True)
     scheduler.add_job(job_low_balance_notify, "cron", hour=18, minute=0, id="low_balance", replace_existing=True)
+    scheduler.add_job(job_sf_nightly_auto_push, "cron", hour=22, minute=0, id="sf_nightly_push", replace_existing=True)
     scheduler.start()
 
 

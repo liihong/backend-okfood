@@ -33,5 +33,7 @@ class Store(Base):
     member_card_week_list_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     member_card_month_list_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # 每日 22:00（上海）自动向顺丰推送「次日」配送业务日订单；关闭时仍走管理端手动推单
+    sf_nightly_auto_push_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
