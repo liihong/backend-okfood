@@ -87,6 +87,7 @@ from app.services.member_card_pay_service import (
     sync_member_card_from_wechat_or_raise,
 )
 from app.services.catalog_admin_service import (
+    get_membership_template_row,
     list_membership_templates,
     membership_template_public_dump,
 )
@@ -290,11 +291,29 @@ def read_member_card_prices(db: SessionDep, auth: MemberAuthScope = Depends(memb
     return success(data=dump_model(payload), msg="获取成功")
 
 
+@router.get("/membership-card-templates/{template_id}")
+def read_membership_card_template_public_detail(
+    template_id: int,
+    db: SessionDep,
+    auth: MemberAuthScope = Depends(member_auth_scope),
+):
+    """当前门店单条会员卡模版（须启用）；用于购卡详情页。"""
+    tid = int(auth.member.tenant_id)
+    sid = int(auth.store_id)
+    row = get_membership_template_row(db, template_id=int(template_id), tenant_id=tid, store_id=sid)
+    if not bool(row.is_active):
+        raise HTTPException(status_code=404, detail="卡包不存在或已下架")
+    item = dump_model(
+        MembershipCardTemplateMemberOut.model_validate(membership_template_public_dump(row))
+    )
+    return success(data=item, msg="获取成功")
+
+
 @router.get("/membership-card-templates")
 def read_membership_card_templates_catalog(
     db: SessionDep, auth: MemberAuthScope = Depends(member_auth_scope)
 ):
-    """当前门店已启用的会员卡模版（样式图、划线价/优惠价与文案）；不计价，自助开卡仍以门店周/月卡配置为准。"""
+    """当前门店已启用的会员卡模版（划线价/优惠价、餐次与文案）；自律卡包下单金额以 sale_price_yuan 为准。"""
     tid = int(auth.member.tenant_id)
     sid = int(auth.store_id)
     rows = list_membership_templates(db, tenant_id=tid, store_id=sid, active_only=True)
@@ -519,8 +538,9 @@ def create_member_card_order_me(
     row = create_miniprogram_member_card_order(
         db,
         member_id,
-        card_kind=body.card_kind.value,
+        card_kind=body.card_kind.value if body.card_kind else None,
         delivery_start_date=body.delivery_start_date,
+        membership_template_id=body.membership_template_id,
     )
     payload = UserMemberCardOrderOut.model_validate(member_card_order_user_dict(row))
     return success(data=dump_model(payload), msg="订单已创建，请继续支付")

@@ -354,12 +354,10 @@ def apply_member_recharge_delta(
     if body.plan_type is not None:
         m.plan_type = body.plan_type.value
     # 周卡/月卡正向入账：剩余次数与累计总次数同步增加（续卡叠加）
-    if (
-        body.amount > 0
-        and body.plan_type is not None
-        and body.plan_type in (PlanType.WEEK, PlanType.MONTH)
-    ):
-        m.meal_quota_total = int(m.meal_quota_total or 0) + body.amount
+    if body.amount > 0 and body.plan_type is not None:
+        bump_q = body.plan_type in (PlanType.WEEK, PlanType.MONTH) or bool(body.bump_meal_quota_total)
+        if bump_q:
+            m.meal_quota_total = int(m.meal_quota_total or 0) + body.amount
     detail = (log_detail or "").strip() or None
     if detail and len(detail) > 500:
         detail = detail[:500]

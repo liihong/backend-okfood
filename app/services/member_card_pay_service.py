@@ -28,7 +28,12 @@ from app.services.tenant_integration_service import (
 from app.models.enums import CardOrderKind, CardOrderPayStatus, CardPayChannel
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
-from app.services.member_card_order_service import apply_paid_card_order_to_member_if_pending
+from app.models.membership_card_template import MembershipCardTemplate
+from app.services.catalog_admin_service import get_membership_template_row
+from app.services.member_card_order_service import (
+    apply_paid_card_order_to_member_if_pending,
+    enum_card_kind_for_template,
+)
 from app.services.store_config_service import get_member_card_prices_yuan
 
 logger = logging.getLogger(__name__)
@@ -66,38 +71,80 @@ def create_miniprogram_member_card_order(
     db: Session,
     member_id: int,
     *,
-    card_kind: str,
-    delivery_start_date: date,
+    card_kind: str | None = None,
+    delivery_start_date: date | None = None,
+    membership_template_id: int | None = None,
 ) -> MemberCardOrder:
-    k = (card_kind or "").strip()
-    if k not in (CardOrderKind.WEEK.value, CardOrderKind.MONTH.value):
-        raise HTTPException(status_code=400, detail="无效开卡类型")
-    if delivery_start_date < min_member_delivery_start_shanghai():
-        raise HTTPException(
-            status_code=400,
-            detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早今天，10:00 及之后最早明天）",
-        )
-
     m = db.get(Member, member_id)
     if not m or m.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    amt = card_order_amount_yuan_for_kind(db, k, store_id=int(m.store_id))
-    row = MemberCardOrder(
-        member_id=member_id,
-        tenant_id=int(m.tenant_id),
-        store_id=int(m.store_id),
-        card_kind=k,
-        pay_channel=CardPayChannel.WECHAT.value,
-        pay_status=CardOrderPayStatus.UNPAID.value,
-        amount_yuan=amt,
-        remark=None,
-        delivery_start_date=delivery_start_date,
-        applied_to_member=False,
-        out_trade_no=_new_temp_out_trade_no(),
-        wx_transaction_id=None,
-        created_by="miniprogram",
-    )
+    tpl: MembershipCardTemplate | None = None
+    if membership_template_id is not None:
+        tpl = get_membership_template_row(
+            db,
+            template_id=int(membership_template_id),
+            tenant_id=int(m.tenant_id),
+            store_id=int(m.store_id),
+        )
+        if not bool(tpl.is_active):
+            raise HTTPException(status_code=400, detail="该卡包已下架")
+        price = tpl.sale_price_yuan if tpl.sale_price_yuan is not None else tpl.list_price_yuan
+        if price is None or Decimal(price) <= 0:
+            raise HTTPException(status_code=400, detail="该卡包未设置有效售价")
+        amt = Decimal(price).quantize(Decimal("0.01"))
+        ck = enum_card_kind_for_template(tpl)
+        d0 = delivery_start_date
+        if d0 is not None and d0 < min_member_delivery_start_shanghai():
+            raise HTTPException(
+                status_code=400,
+                detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早今天，10:00 及之后最早明天）",
+            )
+        rmk = f"卡包模版#{tpl.id}·{tpl.name.strip()}"[:500]
+        row = MemberCardOrder(
+            member_id=member_id,
+            tenant_id=int(m.tenant_id),
+            store_id=int(m.store_id),
+            membership_template_id=int(tpl.id),
+            card_kind=ck,
+            pay_channel=CardPayChannel.WECHAT.value,
+            pay_status=CardOrderPayStatus.UNPAID.value,
+            amount_yuan=amt,
+            remark=rmk,
+            delivery_start_date=d0,
+            applied_to_member=False,
+            out_trade_no=_new_temp_out_trade_no(),
+            wx_transaction_id=None,
+            created_by="miniprogram",
+        )
+    else:
+        k = (card_kind or "").strip()
+        if k not in (CardOrderKind.WEEK.value, CardOrderKind.MONTH.value):
+            raise HTTPException(status_code=400, detail="无效开卡类型")
+        if delivery_start_date is None:
+            raise HTTPException(status_code=400, detail="请选择起送日期")
+        if delivery_start_date < min_member_delivery_start_shanghai():
+            raise HTTPException(
+                status_code=400,
+                detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早今天，10:00 及之后最早明天）",
+            )
+        amt = card_order_amount_yuan_for_kind(db, k, store_id=int(m.store_id))
+        row = MemberCardOrder(
+            member_id=member_id,
+            tenant_id=int(m.tenant_id),
+            store_id=int(m.store_id),
+            membership_template_id=None,
+            card_kind=k,
+            pay_channel=CardPayChannel.WECHAT.value,
+            pay_status=CardOrderPayStatus.UNPAID.value,
+            amount_yuan=amt,
+            remark=None,
+            delivery_start_date=delivery_start_date,
+            applied_to_member=False,
+            out_trade_no=_new_temp_out_trade_no(),
+            wx_transaction_id=None,
+            created_by="miniprogram",
+        )
     db.add(row)
     db.flush()
     row.out_trade_no = _final_out_trade_no(int(row.id))
@@ -134,8 +181,16 @@ def prepare_wechat_jsapi_for_member_card_order(
     if not out_no:
         raise HTTPException(status_code=500, detail="订单缺少商户单号")
 
+    tid = getattr(order, "membership_template_id", None)
     kind_label = (order.card_kind or "").strip() or "套卡"
     body_desc = f"会员{kind_label}开卡"
+    if tid:
+        tpl = db.get(MembershipCardTemplate, int(tid))
+        if tpl:
+            nm = (tpl.name or "").strip() or kind_label
+            body_desc = f"OK饭自律卡·{nm}"
+            if len(body_desc) > 42:
+                body_desc = body_desc[:42]
     try:
         prepay_id = unified_order_jsapi(
             out_trade_no=out_no,

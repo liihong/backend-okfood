@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import CardOrderKind, LeaveType, PlanType
 
@@ -124,10 +124,24 @@ class WxMiniJsCodeIn(BaseModel):
 
 
 class UserMemberCardOrderCreateIn(BaseModel):
-    """小程序自助开卡/续卡：创建未缴工单，后续调 `.../pay/wechat-jsapi`。"""
+    """小程序自助开卡/续卡：创建未缴工单，后续调 `.../pay/wechat-jsapi`。
+    - 经典周/月卡：传 card_kind + delivery_start_date
+    - 自律卡包（后台模版）：传 membership_template_id；起送日可延后至资料完善时写入
+    """
 
-    card_kind: CardOrderKind
-    delivery_start_date: date
+    card_kind: CardOrderKind | None = None
+    delivery_start_date: date | None = None
+    membership_template_id: int | None = Field(None, ge=1)
+
+    @model_validator(mode="after")
+    def _validate_mode(self):
+        if self.membership_template_id is not None:
+            if self.card_kind is not None:
+                raise ValueError("请勿同时提交 membership_template_id 与 card_kind")
+            return self
+        if self.card_kind is None or self.delivery_start_date is None:
+            raise ValueError("请选择卡型并填写起送日期，或使用 membership_template_id 购买卡包")
+        return self
 
 
 class UserMemberCardOrderOut(BaseModel):

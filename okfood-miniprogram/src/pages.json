@@ -138,6 +138,20 @@
           }
         },
         {
+          "path": "pages/membershipCardList/membershipCardList",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
+        },
+        {
+          "path": "pages/membershipCardDetail/membershipCardDetail",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
+        },
+        {
           "path": "pages/dailyMealUnits/dailyMealUnits",
           "style": {
             "navigationStyle": "custom",

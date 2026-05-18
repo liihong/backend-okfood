@@ -79,3 +79,60 @@ export async function runMemberCardWechatPay({
   }
   return { order, orderId }
 }
+
+/**
+ * 自律卡包：按后台模版创建订单并微信支付（成功后跳转「完善配送信息」页）。
+ * @param {{ membershipTemplateId: number }} opts
+ */
+export async function runMembershipTemplateWechatPay({ membershipTemplateId }) {
+  const tid = Number(membershipTemplateId)
+  if (!Number.isFinite(tid) || tid < 1) {
+    throw new Error('卡包无效')
+  }
+  await syncWxMiniOpenidFromLogin()
+  const order = await createMemberCardOrder({
+    membership_template_id: Math.floor(tid),
+  })
+  const orderId = order && typeof order === 'object' ? order.id : null
+  if (orderId == null) {
+    throw new Error('开卡订单创建异常')
+  }
+  const pay = await fetchMemberCardWechatJsapiPayParams(orderId)
+  await new Promise((resolve, reject) => {
+    uni.requestPayment({
+      provider: 'wxpay',
+      timeStamp: String(pay.timeStamp),
+      nonceStr: pay.nonceStr,
+      package: pay.package,
+      signType: pay.signType || 'MD5',
+      paySign: pay.paySign,
+      success: resolve,
+      fail: reject,
+    })
+  })
+  const maxTries = 6
+  for (let i = 0; i < maxTries; i++) {
+    try {
+      await syncMemberCardWechatPayResult(orderId)
+      break
+    } catch (e) {
+      const m = (e && e.message) || ''
+      const maybeWait =
+        m.includes('处理中') ||
+        m.includes('稍候') ||
+        m.includes('稍后再试') ||
+        m.includes('未支付') ||
+        m.includes('not_paid') ||
+        /PAY_USERPAYING/i.test(m)
+      if (maybeWait && i < maxTries - 1) {
+        await new Promise((r) => setTimeout(r, 1500))
+        continue
+      }
+      if (maybeWait) {
+        throw new Error('支付已提交。若「我的」中次数未更新，请下拉刷新或稍后再看；仍无请联客服。')
+      }
+      throw e
+    }
+  }
+  return { order, orderId }
+}
