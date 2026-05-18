@@ -81,6 +81,7 @@ import {
   isUserMeNotFoundError,
 } from '@/utils/api.js'
 import { runMembershipTemplateWechatPay } from '@/utils/memberCardPay.js'
+import { shouldOpenMemberSetup } from '@/utils/memberProfile.js'
 
 const DEFAULT_PRIV = [
   '全城顺丰免运费',
@@ -165,14 +166,32 @@ async function onPay() {
   if (!agreed.value || paying.value || !tpl.value) return
   paying.value = true
   try {
+    let preProfile = null
+    try {
+      preProfile = await request('/api/user/me', { method: 'GET', retry: 0 })
+    } catch {
+      preProfile = null
+    }
+    const balBefore = Math.max(0, Math.floor(Number(preProfile?.balance) || 0))
+    /** 仍有剩余餐次且履约信息已齐：视为有效期内续卡，仅叠加次数 */
+    const activeRenewal =
+      balBefore > 0 &&
+      preProfile &&
+      typeof preProfile === 'object' &&
+      !shouldOpenMemberSetup(preProfile)
+
     await runMembershipTemplateWechatPay({
       membershipTemplateId: templateId.value,
     })
     uni.showToast({ title: '支付成功', icon: 'success' })
     setTimeout(() => {
-      uni.redirectTo({
-        url: '/packageUser/pages/memberSetup/memberSetup?from=pay',
-      })
+      if (activeRenewal) {
+        uni.switchTab({ url: '/pages/mine/index' })
+      } else {
+        uni.redirectTo({
+          url: '/packageUser/pages/memberSetup/memberSetup?from=pay',
+        })
+      }
     }, 400)
   } catch (e) {
     const msg =

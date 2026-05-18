@@ -3,11 +3,7 @@
     <OkNavbar show-back :title="navbarTitle" />
     <scroll-view scroll-y class="scroll" :show-scrollbar="false">
       <view class="wrap">
-        <text class="lead">{{
-          resumeOnlyMode
-            ? '请选择恢复方式与开始的业务日期，提交后立即生效。'
-            : '请确认用餐履约方式：配送到家需默认收货地址；门店自提请确认取餐门店与首日。'
-        }}</text>
+        <text class="lead">{{ leadText }}</text>
 
         <view class="setup-module">
           <view class="section">
@@ -114,6 +110,8 @@ const memberPhone = ref('')
 const serverBalance = ref(0)
 
 const resumeOnlyMode = ref(false)
+/** 购卡/续卡支付成功跳转（from=pay）：须重新选择起始业务日，不因档案已有旧日期而自动退回「我的」 */
+const postPaySetupMode = ref(false)
 const resumeHintShown = ref(false)
 
 const defaultAddressLine = ref('')
@@ -129,9 +127,18 @@ const submitButtonText = computed(() =>
   resumeOnlyMode.value ? '确认恢复配送' : '保存并返回「我的」',
 )
 
+const leadText = computed(() => {
+  if (resumeOnlyMode.value) return '请选择恢复方式与开始的业务日期，提交后立即生效。'
+  if (postPaySetupMode.value) {
+    return '购卡或续卡已成功入账，请重新确认配送方式与收货信息，并选择新一周期的开始业务日期（续卡必须重选起始日），保存后将返回「我的」。'
+  }
+  return '请确认用餐履约方式：配送到家需默认收货地址；门店自提请确认取餐门店与首日。'
+})
+
 onLoad((options) => {
   const fr = options?.from != null ? String(options.from).trim() : ''
   resumeOnlyMode.value = fr === 'resume'
+  postPaySetupMode.value = fr === 'pay'
   resumeHintShown.value = false
 })
 
@@ -197,7 +204,11 @@ async function loadProfile() {
         setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
         return
       }
-    } else if (!shouldOpenMemberSetup(data) && !pausedWithBalance) {
+    } else if (
+      !postPaySetupMode.value &&
+      !shouldOpenMemberSetup(data) &&
+      !pausedWithBalance
+    ) {
       uni.showToast({ title: '配送信息已完善', icon: 'success' })
       setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
       return
@@ -234,6 +245,11 @@ async function loadProfile() {
       let dPick = ds.length >= 10 ? ds.slice(0, 10) : ''
       if (dPick && dPick < minDeliveryYmd.value) dPick = ''
       deliveryYmd.value = dPick
+    }
+
+    if (postPaySetupMode.value && !resumeOnlyMode.value) {
+      deliveryYmd.value = ''
+      pickupAcknowledged.value = false
     }
   } catch (e) {
     if (isUserMeNotFoundError(e)) {
