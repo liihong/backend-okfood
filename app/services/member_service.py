@@ -891,6 +891,7 @@ def admin_member_leave(
     db: Session,
     *,
     phone: str,
+    store_id: int,
     typ: LeaveType,
     start: date | None,
     end: date | None,
@@ -900,7 +901,7 @@ def admin_member_leave(
     """管理端代会员设置请假：不校验当日 `leave_deadline_time`（小程序端提交「明天/区间」仍受截止限制）。"""
 
     p = (phone or "").strip()
-    m = _member_by_phone(db, p)
+    m = _member_by_phone(db, p, int(store_id))
     if not m:
         raise HTTPException(status_code=404, detail="用户不存在")
     return leave_request(
@@ -1202,11 +1203,11 @@ def get_menu_detail_by_dish_id(
 
 
 
-def admin_update_member_address(db: Session, phone: str, address: str, *, operator: str) -> MemberOut:
+def admin_update_member_address(db: Session, phone: str, address: str, *, operator: str, store_id: int) -> MemberOut:
 
     _ = operator
 
-    m = _member_by_phone(db, phone)
+    m = _member_by_phone(db, phone, int(store_id))
 
     if not m:
 
@@ -1253,6 +1254,8 @@ def admin_patch_member_profile(
     use_auto_area: bool,
 
     operator: str,
+
+    store_id: int,
 
     daily_meal_units: int | None = None,
 
@@ -1318,7 +1321,7 @@ def admin_patch_member_profile(
 
         raise HTTPException(status_code=400, detail="请至少修改一项内容")
 
-    m = _member_by_phone(db, phone)
+    m = _member_by_phone(db, phone, int(store_id))
 
     if not m:
 

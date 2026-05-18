@@ -528,7 +528,13 @@ def card_orders_delete(
 
 
 @router.post("/member/profile")
-def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
+def member_profile_patch(
+    body: AdminMemberPatchIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     fs = body.model_fields_set
     member = admin_patch_member_profile(
         db,
@@ -538,6 +544,7 @@ def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_usernam
         address=body.address,
         use_auto_area=body.use_auto_area,
         operator=admin_username,
+        store_id=store_id,
         daily_meal_units=body.daily_meal_units,
         plan_type=body.plan_type,
         set_balance="balance" in fs,
@@ -558,13 +565,21 @@ def member_profile_patch(body: AdminMemberPatchIn, db: SessionDep, admin_usernam
 
 
 @router.post("/member/leave")
-def member_leave(request: Request, body: AdminMemberLeaveIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
+def member_leave(
+    request: Request,
+    body: AdminMemberLeaveIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
     """代会员设置请假（明日 / 区间 / 取消），不受小程序当日请假截止时间限制。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     xf = request.headers.get("x-forwarded-for")
     ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
     member = admin_member_leave(
         db,
         phone=body.phone,
+        store_id=store_id,
         typ=body.type,
         start=body.start,
         end=body.end,
@@ -819,7 +834,15 @@ def admin_store_config_put(
 
 
 @router.post("/member/address")
-def member_address(body: AdminAddressIn, db: SessionDep, admin_username: str = Depends(admin_staff_subject)):
+def member_address(
+    body: AdminAddressIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
     """修改会员地址并触发高德地理编码（失败则清空坐标）。"""
-    member = admin_update_member_address(db, body.phone, body.address, operator=admin_username)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    member = admin_update_member_address(
+        db, body.phone, body.address, operator=admin_username, store_id=store_id
+    )
     return success(data=dump_model(member), msg="地址已更新")
