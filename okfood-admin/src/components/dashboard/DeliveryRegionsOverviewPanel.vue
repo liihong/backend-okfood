@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { RefreshCw, Sun, Users, TrendingUp } from 'lucide-vue-next'
 import { useDeliveryRegionMapOverview } from '../../composables/useDeliveryRegionMapOverview.js'
 import DeliveryOverviewMap from './DeliveryOverviewMap.vue'
@@ -7,6 +8,19 @@ import { UNASSIGNED_AREA_LABEL } from '../../utils/regionAssignment.js'
 import { apiJson, adminAccessToken, adminKind, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 import { useAnimatedInteger } from '../../composables/useAnimatedInteger.js'
+
+const route = useRoute()
+
+/** 与路由 meta 一致：本页自带顶栏（hidePageTitle），主标题与详情描述与智能配送大表同级样式 */
+const pageTitleText = computed(() =>
+  route.meta.title != null && String(route.meta.title).trim() !== ''
+    ? String(route.meta.title).trim()
+    : '今日营业概览',
+)
+const pageSubtitleText = computed(() => {
+  const s = route.meta.pageSubtitle
+  return s != null && String(s).trim() !== '' ? String(s).trim() : ''
+})
 
 const dashboardStats = ref([])
 const dashboardStatsLoading = ref(false)
@@ -653,7 +667,10 @@ onMounted(() => {
 <template>
   <section class="dro-page dro-page--modern">
     <div class="dro-dash-title-row">
-      <h2 class="dro-dash-title">配送区域总览</h2>
+      <div class="page-heading">
+        <h2 class="page-title">{{ pageTitleText }}</h2>
+        <p v-if="pageSubtitleText" class="page-subtitle">{{ pageSubtitleText }}</p>
+      </div>
       <div class="dro-dash-title-actions">
         <button
           type="button"
@@ -1143,19 +1160,10 @@ onMounted(() => {
 .dro-dash-title-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1.5rem;
-}
-
-.dro-dash-title {
-  margin: 0;
-  font-size: 1.65rem;
-  font-weight: 900;
-  color: #1e293b;
-  letter-spacing: -0.02em;
-  font-style: italic;
 }
 
 .dro-dash-title-actions {

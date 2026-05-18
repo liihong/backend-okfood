@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { CreditCard, MapPin, Phone, Plus, Search, UserRound, X, Zap } from 'lucide-vue-next'
+import { CreditCard, MapPin, Plus, Search, UserRound, X, Zap } from 'lucide-vue-next'
 import {
   apiJson,
   adminAccessToken,
@@ -41,18 +41,11 @@ function planTagClass(kind) {
   return 't-plan--count'
 }
 
-function truncateText(s, max) {
-  const t = (s == null ? '' : String(s)).trim()
-  if (!t) return ''
-  if (t.length <= max) return t
-  return `${t.slice(0, Math.max(0, max - 1))}…`
-}
-
-/** 列表格内备注缩略（完整内容用单元格 title 展示） */
+/** 列表格内备注（列宽加大后以换行展示全文；空为 —） */
 function remarkPreview(text) {
   const t = (text == null ? '' : String(text)).trim()
   if (!t) return '—'
-  return truncateText(t, 22)
+  return t
 }
 
 /** 列表「实收」列：按元展示整数（不改变接口字段） */
@@ -65,9 +58,9 @@ function formatAmountYuanInteger(v) {
   return String(Math.round(n))
 }
 
-/** 创建人 + 时间单行：MM-DD HH:mm */
+/** 创建人 + 时间（可与列内换行；hover title 仍为完整串） */
 function cardOrderCreatedLine(row) {
-  const who = truncateText(row.created_by, 10)
+  const who = (row.created_by == null ? '' : String(row.created_by).trim())
   const iso = row.created_at
   let when = ''
   if (iso) {
@@ -79,13 +72,6 @@ function cardOrderCreatedLine(row) {
   if (who) return who
   if (when) return when
   return '—'
-}
-
-function memberLine2Title(row) {
-  const p = (row.member_phone || '').trim()
-  const w = (row.member_wechat_name || '').trim()
-  if (w) return `${p} · 微信 ${w}`
-  return p || ''
 }
 
 async function fetchList() {
@@ -516,48 +502,68 @@ size="small"
         row-key="id"
         empty-text="暂无工单"
       >
-       <el-table-column label="单号" width="72" class-name="td-mono td-co-id">
+       <el-table-column label="单号" width="62" class-name="td-mono td-co-id">
           <template #default="{ row }">#{{ row.id }}</template>
         </el-table-column>
-       <el-table-column label="会员" class-name="td-co-member">
+       <el-table-column label="名称" min-width="88" class-name="td-co-name">
           <template #default="{ row }">
-           <div class="co-member-compact">
-              <div class="co-member-line1">
-                <span class="co-member-name" :title="row.member_name || ''">{{
-                  row.member_name || '—'
-                }}</span>
-                <span class="t-plan co-plan-tag" :class="planTagClass(row.card_kind)">{{
-                  row.card_kind
-                }}</span>
-              </div>
-             <div class="co-member-line2" :title="memberLine2Title(row)">
-                <Phone :size="11" class="member-phone-icon co-phone-icon" />
-                <span class="co-phone-num">{{ row.member_phone }}</span>
-                <template v-if="row.member_wechat_name">
-                  <span class="co-sep">·</span>
-                  <span class="co-wx">{{ truncateText(row.member_wechat_name, 6) }}</span>
-                </template>
-              </div>
-           </div>
+            <span class="co-member-name" :title="row.member_name || ''">{{
+              row.member_name || '—'
+            }}</span>
           </template>
         </el-table-column>
-       <el-table-column label="起送日" width="112" class-name="td-mono co-nowrap">
+        <el-table-column
+          label="卡状态"
+          width="76"
+          min-width="68"
+          align="center"
+          class-name="co-nowrap td-co-card-kind"
+        >
+          <template #default="{ row }">
+            <span v-if="row.card_kind" class="t-plan co-plan-tag" :class="planTagClass(row.card_kind)">{{
+              row.card_kind
+            }}</span>
+            <span v-else class="co-card-kind-empty">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="电话" width="118" min-width="108" class-name="td-mono co-nowrap td-co-phone-col">
+          <template #default="{ row }">
+            <span :title="(row.member_phone || '').trim() || undefined">{{
+              (row.member_phone || '').trim() || '—'
+            }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="微信名称" min-width="108" class-name="td-co-wxname">
+          <template #default="{ row }">
+            <span
+              class="co-wxname-text"
+              :title="(row.member_wechat_name || '').trim() || undefined"
+              >{{ (row.member_wechat_name || '').trim() || '—' }}</span
+            >
+          </template>
+        </el-table-column>
+       <el-table-column
+          label="起送日"
+          width="118"
+          min-width="112"
+          class-name="td-mono co-nowrap td-co-start-date"
+        >
           <template #default="{ row }">{{ row.delivery_start_date || '—' }}</template>
         </el-table-column>
-       <el-table-column prop="pay_channel" label="渠道" min-width="24" class-name="co-nowrap" />
-        <el-table-column label="状态" min-width="34" class-name="co-nowrap">
+       <el-table-column prop="pay_channel" label="渠道" width="72" min-width="68" class-name="co-nowrap td-co-channel" />
+        <el-table-column label="状态" width="76" min-width="70" class-name="co-nowrap td-co-pay-status">
           <template #default="{ row }">
             <span :class="payStatusClass(row.pay_status)">{{ row.pay_status }}</span>
           </template>
         </el-table-column>
-       <el-table-column label="实收" align="right" width="72" min-width="64" class-name="co-amt">
+       <el-table-column label="实收" align="right" width="60" class-name="co-amt">
           <template #default="{ row }">
            <span class="font-black co-amt-num">
               {{ formatAmountYuanInteger(row.amount_yuan) }}
             </span>
           </template>
         </el-table-column>
-       <el-table-column label="入账" width="82" min-width="74" align="center" class-name="co-nowrap">
+       <el-table-column label="入账" width="92" min-width="86" align="center" class-name="co-nowrap td-co-sync">
           <template #default="{ row }">
             <span
 class="member-pill co-sync-pill"
@@ -567,21 +573,21 @@ class="member-pill co-sync-pill"
             </span>
           </template>
         </el-table-column>
-       <el-table-column label="备注" min-width="200" width="152" class-name="td-co-remark">
+       <el-table-column label="备注" min-width="268" class-name="td-co-remark">
           <template #default="{ row }">
             <span class="co-remark-text" :title="(row.remark || '').trim() || undefined">{{
               remarkPreview(row.remark)
             }}</span>
           </template>
         </el-table-column>
-       <el-table-column label="创建" min-width="150" width="132" class-name="td-co-created">
+       <el-table-column label="创建" min-width="228" class-name="td-co-created">
           <template #default="{ row }">
            <span class="co-created-line" :title="`${row.created_by || ''} ${row.created_at || ''}`">{{
               cardOrderCreatedLine(row)
             }}</span>
           </template>
         </el-table-column>
-       <el-table-column label="操作" align="right" width="128" fixed="right" class-name="td-co-actions">
+       <el-table-column label="操作" align="right" width="112" fixed="right" class-name="td-co-actions">
           <template #default="{ row }">
             <span class="co-row-actions">
               <button type="button" class="btn-sm" @click="openEditModal(row)">更新</button>
@@ -1439,7 +1445,7 @@ class="member-pill co-sync-pill"
   min-height: auto;
   padding: 0.8rem;
 }
-/* 开卡工单列表：更小行高、备注/创建信息缩略 */
+/* 开卡工单列表：紧凑列宽；备注/创建列加宽并允许换行展示全文 */
 .card-orders-page :deep(.card-orders-table.admin-table--members.el-table--small .el-table__header th.el-table__cell) {
   padding: 0.32rem 0.45rem;
   font-size: 11px;
@@ -1454,19 +1460,8 @@ class="member-pill co-sync-pill"
   font-size: 12px;
 }
 
-.co-member-compact {
-  min-width: 0;
-  line-height: 1.18;
-}
-
-.co-member-line1 {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-width: 0;
-}
-
 .co-member-name {
+  display: block;
   font-weight: 800;
   font-size: 12px;
   color: #1e293b;
@@ -1474,7 +1469,7 @@ class="member-pill co-sync-pill"
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-  flex: 1;
+  max-width: 100%;
 }
 
 .co-plan-tag {
@@ -1485,41 +1480,36 @@ class="member-pill co-sync-pill"
   line-height: 1.2;
 }
 
-.co-member-line2 {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  margin-top: 1px;
-  min-width: 0;
-  font-size: 11px;
-  color: #64748b;
+.co-card-kind-empty {
+  font-size: 12px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.co-wxname-text {
+  display: block;
+  font-size: 12px;
+  color: #475569;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.co-phone-icon {
-  flex-shrink: 0;
-  opacity: 0.85;
-}
-
-.co-phone-num {
-  flex-shrink: 0;
-}
-
-.co-sep {
-  opacity: 0.55;
-  flex-shrink: 0;
-}
-
-.co-wx {
-  overflow: hidden;
-  text-overflow: ellipsis;
   min-width: 0;
+  max-width: 100%;
 }
 
 .card-orders-page :deep(.co-nowrap .cell) {
   white-space: nowrap;
+}
+
+/* 起送日 / 渠道 / 入账 / 电话：避免表头与内容被截成「…」 */
+.card-orders-page :deep(.td-co-start-date .cell),
+.card-orders-page :deep(.td-co-channel .cell),
+.card-orders-page :deep(.td-co-sync .cell),
+.card-orders-page :deep(.td-co-phone-col .cell),
+.card-orders-page :deep(.td-co-card-kind .cell),
+.card-orders-page :deep(.td-co-pay-status .cell) {
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .co-amt-num {
@@ -1535,20 +1525,22 @@ class="member-pill co-sync-pill"
 
 .co-remark-text {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.35;
   color: #475569;
   max-width: 100%;
 }
 
 .co-created-line {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
+  white-space: normal;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.35;
   color: #64748b;
   max-width: 100%;
 }

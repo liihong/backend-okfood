@@ -50,19 +50,32 @@ const router = createRouter({
           path: 'dashboard',
           name: 'dashboard',
           component: DashboardView,
-          meta: { title: '今日营业概览', hidePageTitle: true, fullAdminOnly: true },
+          meta: {
+            title: '今日营业概览',
+            pageSubtitle: '总览今日与明日备餐、请假与卡到期，地图展示会员分布与送达状态',
+            hidePageTitle: true,
+            fullAdminOnly: true,
+          },
         },
         {
           path: 'users',
           name: 'users',
           component: MembersView,
-          meta: { title: '会员档案库', fullAdminOnly: true },
+          meta: {
+            title: '会员档案库',
+            pageSubtitle: '检索、导出与维护会员资料、套餐周期、配送地址及业务状态',
+            fullAdminOnly: true,
+          },
         },
         {
           path: 'card-orders',
           name: 'card-orders',
           component: CardOrdersView,
-          meta: { title: '开卡工单', fullAdminOnly: true },
+          meta: {
+            title: '开卡工单',
+            pageSubtitle: '新建与跟踪线下/微信开卡，管理缴费、入账同步与起送日期',
+            fullAdminOnly: true,
+          },
         },
         {
           path: 'delivery',
