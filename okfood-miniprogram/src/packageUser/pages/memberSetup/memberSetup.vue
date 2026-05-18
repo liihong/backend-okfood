@@ -1,16 +1,20 @@
 <template>
   <view class="page">
-   <OkNavbar show-back :title="navbarTitle" />
+    <OkNavbar show-back :title="navbarTitle" />
     <scroll-view scroll-y class="scroll" :show-scrollbar="false">
-     <view class="wrap">
+      <view class="wrap">
+        <text class="lead">{{
+          resumeOnlyMode
+            ? '请选择恢复方式与开始的业务日期，提交后立即生效。'
+            : '请确认用餐履约方式：配送到家需默认收货地址；门店自提请确认取餐门店与首日。'
+        }}</text>
 
-      <!-- 从「我的」恢复配送：仅配送方式 + 起送日 -->
-      <view v-if="resumeOnlyMode" class="setup-module">
-        <view class="section section--resume-only">
-           <text class="sec-title">配送或门店自提</text>
-           <radio-group class="pay-radio-group pay-radio-group--delivery" @change="onDeliveryModeChange">
+        <view class="setup-module">
+          <view class="section">
+            <text class="sec-title">配送或门店自提</text>
+            <radio-group class="pay-radio-group pay-radio-group--delivery" @change="onDeliveryModeChange">
               <label class="pay-radio-row">
-               <radio value="delivery" :checked="deliveryMode === 'delivery'" :color="payRadioColor" />
+                <radio value="delivery" :checked="deliveryMode === 'delivery'" :color="payRadioColor" />
                 <text class="pay-radio-label">配送到家</text>
               </label>
               <label class="pay-radio-row">
@@ -18,318 +22,60 @@
                 <text class="pay-radio-label">门店自提</text>
               </label>
             </radio-group>
-           <template v-if="deliveryMode === 'delivery' || deliveryMode === 'pickup'">
+
+            <!-- 配送：地址 -->
+            <template v-if="deliveryMode === 'delivery'">
+              <text class="sec-sub">顺丰同城配送，请指定默认收货地址（与「我的地址管理」同步）。</text>
+              <view class="addr-box" @tap="goManageAddresses">
+                <view class="addr-box-main">
+                  <text :class="['addr-line', defaultAddressLine ? '' : 'addr-line--ph']">
+                    {{ defaultAddressLine || '请添加并选择默认配送地址' }}
+                  </text>
+                  <text v-if="defaultAddressArea" class="addr-area">{{ defaultAddressArea }}</text>
+                </view>
+                <text class="addr-go">管理 ›</text>
+              </view>
+            </template>
+
+            <!-- 自提：门店 + 确认 -->
+            <template v-else-if="deliveryMode === 'pickup'">
+              <text class="sec-title sec-title--inline">取餐门店</text>
+              <view class="store-card">
+                <text class="store-name">OK饭健康自律厨房</text>
+                <text class="store-addr">{{ pickupStoreAddress }}</text>
+              </view>
+              <view class="ack-row" @tap="pickupAcknowledged = !pickupAcknowledged">
+                <view :class="['ack-box', pickupAcknowledged ? 'ack-box--on' : '']">
+                  <text v-if="pickupAcknowledged" class="ack-tick">✓</text>
+                </view>
+                <text class="ack-txt">我已确认到店自取位置与营业时间说明</text>
+              </view>
+            </template>
+
+            <!-- 开始日期 -->
+            <template v-if="deliveryMode === 'delivery' || deliveryMode === 'pickup'">
+              <text class="sec-title sec-title--sp">{{
+                deliveryMode === 'pickup' ? '开始自提日期' : '开始配送日期'
+              }}</text>
               <text class="sec-sub">
-               <template v-if="deliveryMode === 'delivery'">
-                 顺丰小哥全程保驾护航。
-               </template>
-                <template v-else>
-                 OK饭健康餐门店位置：天安名邸小区门面房
-                </template>
+                以上海业务日历为准；10:00 前可选当日为起点，否则从次日起选。
               </text>
               <picker mode="date" :value="pickerDeliveryYmd" :start="minDeliveryYmd" @change="onDeliveryPick">
                 <view class="date-picker-row">
                   <text :class="['date-picker-text', deliveryYmd ? '' : 'date-picker-text--ph']">
-                   {{ deliveryYmd || '请选择开始的业务日期' }}
+                    {{ deliveryYmd || '请选择业务日期' }}
                   </text>
                   <text class="date-picker-arrow">›</text>
                 </view>
               </picker>
             </template>
-            <text v-else class="sec-sub">
-             请在上方选择「配送到家」或「门店自提」，并选择开始的业务日期。
-            </text>
           </view>
-        <button
-          class="submit-btn"
-          :loading="submitting"
-          :disabled="avatarUploading"
-          @click="onSubmit"
-        >
-          {{ submitButtonText }}
-        </button>
-      </view>
 
-      <!-- 登录后第一步：仅需微信头像 + 昵称 -->
-      <view v-else-if="identityOnlyPhase" class="setup-module">
-        <text class="module-title">完善资料</text>
-        <text class="identity-lead">请同步微信头像与昵称，便于在「我的」与客服侧识别您。</text>
-        <view class="section section--avatar-center">
-          <text class="sec-title">微信头像</text>
-          <button class="avatar-btn" open-type="chooseAvatar" @chooseavatar="onChooseAvatar">
-            <view class="avatar-box avatar-box--hero">
-              <image v-if="avatarUrl" class="avatar-img" :src="avatarUrl" mode="aspectFill" />
-              <text v-else class="avatar-hint">点击选择头像</text>
-            </view>
+          <button class="submit-btn" :loading="submitting" @click="onSubmit">
+            {{ submitButtonText }}
           </button>
         </view>
-        <view class="section">
-          <text class="sec-title">微信昵称</text>
-          <view class="nick-wrap">
-            <text v-show="showNickHint" class="nick-hint-overlay">与微信一致的昵称</text>
-            <input class="nick-input" type="nickname" :value="nickDraft" placeholder=""
-              placeholder-style="color: #64748b;" @input="onNickInput" />
-          </view>
-        </view>
-        <button
-          class="submit-btn"
-          :loading="submitting"
-          :disabled="avatarUploading"
-          @click="onSubmit"
-        >
-          保存并返回「我的」
-        </button>
       </view>
-
-      <view v-else class="full-setup-wrap">
-        <view class="setup-module">
-         <text class="module-title">一、个人资料</text>
-          <view v-if="!skipProfileIdentityEdit" class="section">
-            <text class="sec-title">头像（可选）</text>
-            <button class="avatar-btn" open-type="chooseAvatar" @chooseavatar="onChooseAvatar">
-              <view class="avatar-box">
-                <image v-if="avatarUrl" class="avatar-img" :src="avatarUrl" mode="aspectFill" />
-                <text v-else class="avatar-hint">点击选择头像</text>
-              </view>
-            </button>
-          </view>
-
-        <view v-if="!skipProfileIdentityEdit" class="section">
-            <text class="sec-title">昵称 / 用户名</text>
-            <view class="nick-wrap">
-              <text v-show="showNickHint" class="nick-hint-overlay">微信昵称或常用称呼</text>
-              <input class="nick-input" type="nickname" :value="nickDraft" placeholder=""
-                placeholder-style="color: #64748b;" @input="onNickInput" />
-            </view>
-          </view>
-
-        <view class="section">
-           <text class="sec-title">配送或门店自提</text>
-           <radio-group class="pay-radio-group pay-radio-group--delivery" @change="onDeliveryModeChange">
-              <label class="pay-radio-row">
-               <radio value="delivery" :checked="deliveryMode === 'delivery'" :color="payRadioColor" />
-                <text class="pay-radio-label">配送到家</text>
-              </label>
-              <label class="pay-radio-row">
-                <radio value="pickup" :checked="deliveryMode === 'pickup'" :color="payRadioColor" />
-                <text class="pay-radio-label">门店自提</text>
-              </label>
-              <label v-if="!resumeOnlyMode" class="pay-radio-row">
-                <radio value="defer" :checked="deliveryMode === 'defer'" :color="payRadioColor" />
-                <text class="pay-radio-label">暂停配送</text>
-              </label>
-            </radio-group>
-           <template v-if="deliveryMode === 'delivery' || deliveryMode === 'pickup'">
-              <text class="sec-sub">
-               <template v-if="deliveryMode === 'delivery'">
-                 顺丰小哥全程保驾护航。
-               </template>
-                <template v-else>
-                 OK饭健康餐门店位置：天安名邸小区门面房
-                </template>
-              </text>
-              <picker mode="date" :value="pickerDeliveryYmd" :start="minDeliveryYmd" @change="onDeliveryPick">
-                <view class="date-picker-row">
-                  <text :class="['date-picker-text', deliveryYmd ? '' : 'date-picker-text--ph']">
-                   {{ deliveryYmd || '请选择开始的业务日期' }}
-                  </text>
-                  <text class="date-picker-arrow">›</text>
-                </view>
-              </picker>
-            </template>
-            <text v-else class="sec-sub">
-             暂停配送后剩余次数保留；恢复时在「我的」点「恢复配送」或在此改选配送方式与日期。
-            </text>
-          </view>
-
-        <view class="section">
-          <text class="sec-title">每日送达数量</text>
-          <text class="sec-sub">
-            每个配送日需送达的份数；确认送达时按此倍数从剩余次数中扣减（1～20 份）。
-          </text>
-          <view class="units-stepper">
-            <button
-              class="units-stepper-btn"
-              :disabled="dailyMealUnits <= 1"
-              @click="bumpDailyUnits(-1)"
-            >
-              -
-            </button>
-            <text class="units-stepper-value">{{ dailyMealUnits }}</text>
-            <button
-              class="units-stepper-btn"
-              :disabled="dailyMealUnits >= 20"
-              @click="bumpDailyUnits(1)"
-            >
-              +
-            </button>
-          </view>
-        </view>
-        </view>
-
-        <view v-if="!resumeOnlyMode && needsCardPayment" class="setup-module setup-module--card">
-         <text class="module-title">二、开通会员卡</text>
-          <view class="section">
-           <text class="sec-title">选择卡种</text>
-            <text class="sec-sub">
-             支付成功后自动增加对应餐次（周卡 +6 / 月卡 +24）。
-            </text>
-            <view v-if="membershipTemplates.length" class="mct-catalog">
-              <text class="mct-catalog-title">门店会员卡展示</text>
-              <text class="mct-catalog-tip">以下为后台配置的样式与文案；实际微信支付金额仍以下方「周卡 / 月卡」标价为准。</text>
-              <view v-for="t in membershipTemplates" :key="t.id" class="mct-card">
-                <image
-                  v-if="resolveMediaUrl(t.card_style_image_url)"
-                  class="mct-visual"
-                  :src="resolveMediaUrl(t.card_style_image_url)"
-                  mode="aspectFill"
-                />
-                <view class="mct-body">
-                  <text class="mct-name">{{ t.name }}</text>
-                  <text class="mct-kind">{{ t.kind_label }} · 入账 {{ t.meals_grant }} 次</text>
-                  <view v-if="t.list_price_yuan || t.sale_price_yuan" class="mct-price-row">
-                    <text v-if="t.list_price_yuan" class="mct-list">¥{{ t.list_price_yuan }}</text>
-                    <text v-if="t.sale_price_yuan" class="mct-sale">¥{{ t.sale_price_yuan }}</text>
-                  </view>
-                  <text v-if="t.validity_days != null" class="mct-meta">
-                    有效天数：{{ t.validity_days }} 天
-                  </text>
-                  <text v-if="t.intro_short" class="mct-intro">{{ t.intro_short }}</text>
-                  <text v-if="t.purchase_notice" class="mct-notice">{{ t.purchase_notice }}</text>
-                </view>
-              </view>
-            </view>
-           <!-- 活动价：绿底双白卡 -->
-            <view v-if="!useDeluxePlanUi" class="plan-premium-wrap">
-              <view class="plan-grid plan-grid--premium">
-               <view :class="['plan-card', 'plan-card--premium', selectedPlan === '周卡' ? 'plan-card--on' : '']"
-                  @click="pickPlan('周卡')">
-                  <view v-if="selectedPlan === '周卡'" class="plan-picked-pill">
-                    <text class="plan-picked-pill-txt">已选</text>
-                  </view>
-                  <text class="plan-headline">自律周卡 / 6天</text>
-                 <text v-if="weekShowStrike" class="plan-origin">原价 ¥{{ weekListStr }}</text>
-                  <view class="plan-activity">
-                    <view class="plan-activity-tag">
-                      <text class="plan-activity-tag-line">活</text>
-                      <text class="plan-activity-tag-line">动</text>
-                      <text class="plan-activity-tag-line">价</text>
-                    </view>
-                    <view class="plan-activity-amount">
-                      <text class="pa-yen">¥</text>
-                      <text class="pa-num">{{ cardPriceWeek }}</text>
-                    </view>
-                  </view>
-                  <view class="plan-save">立省 ¥{{ saveAmountWeek }}</view>
-                  <view class="plan-card-dash" />
-                  <text class="plan-footnote">轻盈重启首选</text>
-                </view>
-                <view
-:class="[
-                  'plan-card',
-                  'plan-card--premium',
-                  'plan-card--rec',
-                  selectedPlan === '月卡' ? 'plan-card--on' : '',
-]" @click="pickPlan('月卡')">
-                  <view v-if="selectedPlan === '月卡'" class="plan-picked-pill">
-                    <text class="plan-picked-pill-txt">已选</text>
-                  </view>
-                  <text class="plan-rec-pill">推荐</text>
-                  <text class="plan-headline">全能月卡 / 24天</text>
-                 <text v-if="monthShowStrike" class="plan-origin">原价 ¥{{ monthListStr }}</text>
-                  <view class="plan-activity">
-                    <view class="plan-activity-tag">
-                      <text class="plan-activity-tag-line">活</text>
-                      <text class="plan-activity-tag-line">动</text>
-                      <text class="plan-activity-tag-line">价</text>
-                    </view>
-                    <view class="plan-activity-amount">
-                      <text class="pa-yen">¥</text>
-                      <text class="pa-num">{{ cardPriceMonth }}</text>
-                    </view>
-                  </view>
-                  <view class="plan-save">立省 ¥{{ saveAmountMonth }}</view>
-                  <view class="plan-card-dash" />
-                  <text class="plan-footnote">终极管理方案</text>
-                </view>
-              </view>
-            </view>
-           <!-- 标准价：尊享月卡深卡 + 轻食周卡浅卡 -->
-            <view v-else class="plan-deluxe-wrap">
-              <view class="plan-deluxe-grid">
-                <view :class="[
-                  'plan-deluxe',
-                  'plan-deluxe--month',
-                  selectedPlan === '月卡' ? 'plan-deluxe--on' : '',
-                ]" @click="pickPlan('月卡')">
-                  <text class="plan-deluxe-corner-tag plan-deluxe-corner-tag--vip">VIP MONTHLY</text>
-                  <view class="plan-deluxe-head-row">
-                    <view class="plan-deluxe-price-stack">
-                      <text class="plan-deluxe-kicker plan-deluxe-kicker--gold">省心推荐</text>
-                      <text class="plan-deluxe-big-price plan-deluxe-big-price--gold">¥{{ cardPriceMonth }}</text>
-                      <text class="plan-deluxe-sub plan-deluxe-sub--muted-gold">24天/全包</text>
-                    </view>
-                  </view>
-                  <text class="plan-deluxe-hero-title">全月尊享自律计划</text>
-                  <view class="plan-deluxe-benefits plan-deluxe-benefits--vip">
-                    <text class="plan-deluxe-benefit-line">★ 顺丰同城转送</text>
-                    <text class="plan-deluxe-benefit-line">★ 自由请假改地址</text>
-                    <text class="plan-deluxe-benefit-line">★ 菜品专享折上折</text>
-                    <text class="plan-deluxe-benefit-line">★ 生日尊享神秘厚礼</text>
-                  </view>
-                  <button class="plan-deluxe-btn plan-deluxe-btn--gold" hover-class="none"
-                    @click.stop="runPayFlow('月卡')">
-                    立即解锁尊贵月卡
-                  </button>
-                </view>
-
-                <view :class="[
-                  'plan-deluxe',
-                  'plan-deluxe--week',
-                  selectedPlan === '周卡' ? 'plan-deluxe--on' : '',
-                ]" @click="pickPlan('周卡')">
-                  <text class="plan-deluxe-corner-tag plan-deluxe-corner-tag--week">WEEKLY PASS</text>
-                  <view class="plan-deluxe-head-row plan-deluxe-head-row--week">
-                    <view class="plan-deluxe-price-stack">
-                      <text class="plan-deluxe-kicker plan-deluxe-kicker--muted">限时尝鲜</text>
-                      <text class="plan-deluxe-big-price plan-deluxe-big-price--teal">¥{{ cardPriceWeek }}</text>
-                      <text class="plan-deluxe-sub plan-deluxe-sub--muted">6天/周</text>
-                    </view>
-                  </view>
-                  <text class="plan-deluxe-hero-title plan-deluxe-hero-title--week">单周体验轻食计划</text>
-                  <view class="plan-deluxe-benefits plan-deluxe-benefits--week">
-                    <text class="plan-deluxe-benefit-line plan-deluxe-benefit-line--week">🌱 适合1周入门，轻松管理餐次</text>
-                    <text class="plan-deluxe-benefit-line plan-deluxe-benefit-line--week">🌱 同样尊享不重样和临时停改配权</text>
-                  </view>
-                  <button class="plan-deluxe-btn plan-deluxe-btn--dark" hover-class="none"
-                    @click.stop="runPayFlow('周卡')">
-                    周餐体验轻生活
-                  </button>
-               </view>
-             </view>
-            </view>
-          </view>
-        </view>
-
-        <view v-else-if="!resumeOnlyMode && !needsCardPayment" class="setup-module">
-          <view class="section">
-          <text class="sec-title">会员状态</text>
-          <text class="sec-sub">
-            您当前仍有剩余订餐次数（{{ serverBalance }} 次），无需再次购买会员卡。可在下方保存配送信息。
-          </text>
-          </view>
-        </view>
-
-        <button
-          class="submit-btn"
-          :loading="submitting"
-          :disabled="avatarUploading"
-          @click="onSubmit"
-        >
-          {{ submitButtonText }}
-        </button>
-      </view>
-    </view>
     </scroll-view>
   </view>
 </template>
@@ -341,150 +87,49 @@ import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
   request,
   getMemberToken,
-  uploadMemberAvatarFile,
   clearMemberSession,
   isUserMeNotFoundError,
-  API_BASE,
 } from '@/utils/api.js'
 import {
   shouldOpenMemberSetup,
   shouldPromptMemberCardPay,
-  MEMBER_STUB_NAME,
-  WX_DEFAULT_NICK,
 } from '@/utils/memberProfile.js'
 import { minMemberDeliveryStartYmd } from '@/utils/menuApi.js'
-import { runMemberCardWechatPay } from '@/utils/memberCardPay.js'
+import {
+  normalizeAddressList,
+  addressListRow,
+  sortAddressesDefaultFirst,
+  isAddressItemDefault,
+} from '@/utils/addressApi.js'
 
-/** 与 uni.scss $ok-forest-green 一致，供 radio 组件 color 使用 */
+/** 与 uni.scss $ok-forest-green 一致 */
 const payRadioColor = '#0e5a44'
 
-const nickDraft = ref('')
-/** 展示用：可能是临时路径或已上传的 http(s) 地址 */
-const avatarUrl = ref('')
-/** 服务端已保存的头像 URL，上传失败时用于恢复展示且不写入非法本地路径 */
-const remoteAvatarUrl = ref('')
-const selectedPlan = ref('周卡')
-/** delivery=配送到家；pickup=门店自提；defer=暂停配送（服务端 delivery_deferred） */
+const pickupStoreAddress = '天安名邸小区门面房（OK饭健康餐门店）'
 const deliveryMode = ref('delivery')
 const deliveryYmd = ref('')
 const minDeliveryYmd = ref(minMemberDeliveryStartYmd())
-/** 每配送日份数，与 members.daily_meal_units 一致；自助范围 1～20 */
-const dailyMealUnits = ref(1)
 const submitting = ref(false)
-const avatarUploading = ref(false)
 const memberPhone = ref('')
 const serverBalance = ref(0)
-/** 与后台 app_settings 同步，请求失败时用默认展示 */
-const cardPriceWeek = ref('168')
-const cardPriceMonth = ref('669')
-/** 后端：任一侧划线价高于实付价时为 true → 活动价整体样式 */
-const promoActive = ref(false)
-/** 来自接口的划线价（可空） */
-const weekListStr = ref('')
-const monthListStr = ref('')
-/** 后台会员卡模版（展示：样式图、价签与文案；不计价） */
-const membershipTemplates = ref([])
-/** 资料已完备、仅开卡续费时隐藏头像与昵称编辑（与 shouldOpenMemberSetup 判定一致） */
-const skipProfileIdentityEdit = ref(false)
 
-function resolveMediaUrl(u) {
-  const s = String(u || '').trim()
-  if (!s) return ''
-  if (/^https?:\/\//i.test(s)) return s
-  return `${API_BASE}${s.startsWith('/') ? s : `/${s}`}`
-}
-
-async function loadMembershipTemplates() {
-  if (!getMemberToken()) return
-  try {
-    const data = await request('/api/user/membership-card-templates', { method: 'GET', retry: 1 })
-    membershipTemplates.value = Array.isArray(data) ? data : []
-  } catch {
-    membershipTemplates.value = []
-  }
-}
-
-const showNickHint = computed(() => !String(nickDraft.value || '').trim())
-
-/** 未选日期时让滚轮落在合法最小日上，避免默认停在「今天」却仍受 start 限制 */
-const pickerDeliveryYmd = computed(() => deliveryYmd.value || minDeliveryYmd.value)
-
-const useDeluxePlanUi = computed(() => !promoActive.value)
-
-const weekShowStrike = computed(() => {
-  const o = Number(weekListStr.value)
-  const c = Number(cardPriceWeek.value)
-  return Number.isFinite(o) && Number.isFinite(c) && o > c
-})
-
-const monthShowStrike = computed(() => {
-  const o = Number(monthListStr.value)
-  const c = Number(cardPriceMonth.value)
-  return Number.isFinite(o) && Number.isFinite(c) && o > c
-})
-
-const saveAmountWeek = computed(() => {
-  if (!weekShowStrike.value) return 0
-  const o = Math.floor(Number(weekListStr.value) || 0)
-  const c = Math.floor(Number(cardPriceWeek.value) || 0)
-  return Math.max(0, o - c)
-})
-const saveAmountMonth = computed(() => {
-  if (!monthShowStrike.value) return 0
-  const o = Math.floor(Number(monthListStr.value) || 0)
-  const c = Math.floor(Number(cardPriceMonth.value) || 0)
-  return Math.max(0, o - c)
-})
-
-const needsCardPayment = computed(() => serverBalance.value <= 0)
-
-const submitButtonText = computed(() => {
-  if (resumeOnlyMode.value) return '确认恢复配送'
-  if (!needsCardPayment.value) return '保存并返回「我的」'
-  return '微信支付并开通'
-})
-
-function pickPlan(p) {
-  if (p === '周卡' || p === '月卡') {
-    selectedPlan.value = p
-  }
-}
-
-function bumpDailyUnits(delta) {
-  const n = Math.floor(Number(dailyMealUnits.value) || 1) + delta
-  dailyMealUnits.value = Math.max(1, Math.min(20, n))
-}
-
-function onDeliveryModeChange(e) {
-  const v = e?.detail?.value
-  if (v === 'defer') {
-    deliveryMode.value = 'defer'
-    deliveryYmd.value = ''
-  } else if (v === 'pickup') {
-    deliveryMode.value = 'pickup'
-  } else {
-    deliveryMode.value = 'delivery'
-  }
-}
-
-/** 从「我的」恢复配送进入：仅展示配送方式与起送日 */
 const resumeOnlyMode = ref(false)
 const resumeHintShown = ref(false)
-/** 登录后昵称未就绪时，仅展示微信头像 + 昵称 */
-const identityOnlyPhase = ref(false)
 
-const navbarTitle = computed(() => {
-  if (resumeOnlyMode.value) return '恢复配送'
-  if (identityOnlyPhase.value) return '完善资料'
-  return '会员资料与开卡'
-})
+const defaultAddressLine = ref('')
+const defaultAddressArea = ref('')
+
+const pickupAcknowledged = ref(false)
+
+const pickerDeliveryYmd = computed(() => deliveryYmd.value || minDeliveryYmd.value)
+
+const navbarTitle = computed(() => (resumeOnlyMode.value ? '恢复配送' : '完善配送信息'))
+
+const submitButtonText = computed(() =>
+  resumeOnlyMode.value ? '确认恢复配送' : '保存并返回「我的」',
+)
 
 onLoad((options) => {
-  const raw = options?.preCard != null ? String(options.preCard) : ''
-  const k = decodeURIComponent(raw).trim()
-  if (k === '周卡' || k === '月卡') {
-    selectedPlan.value = k
-  }
   const fr = options?.from != null ? String(options.from).trim() : ''
   resumeOnlyMode.value = fr === 'resume'
   resumeHintShown.value = false
@@ -495,78 +140,73 @@ onShow(() => {
   if (deliveryYmd.value && deliveryYmd.value < minDeliveryYmd.value) {
     deliveryYmd.value = ''
   }
-  const phone = uni.getStorageSync('memberPhone') || ''
-  memberPhone.value = phone
-  if (!getMemberToken() || !phone) {
+  memberPhone.value = uni.getStorageSync('memberPhone') || ''
+  if (!getMemberToken() || !memberPhone.value) {
     uni.showToast({ title: '请先登录', icon: 'none' })
     setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
     return
   }
-  void loadCardPrices()
-  void loadMembershipTemplates()
   void loadProfile()
+  void refreshDefaultAddress()
 })
 
-async function loadCardPrices() {
-  if (!getMemberToken()) return
+async function refreshDefaultAddress() {
+  if (!getMemberToken()) {
+    defaultAddressLine.value = ''
+    defaultAddressArea.value = ''
+    return
+  }
   try {
-    const d = await request('/api/user/member-card-prices', { method: 'GET' })
-    if (d && typeof d === 'object') {
-      promoActive.value = !!d.promotion_active
-      const w = d.week_price_yuan != null ? String(d.week_price_yuan).trim() : ''
-      const m = d.month_price_yuan != null ? String(d.month_price_yuan).trim() : ''
-      if (w) cardPriceWeek.value = w
-      if (m) cardPriceMonth.value = m
-      weekListStr.value =
-        d.week_list_price_yuan != null ? String(d.week_list_price_yuan).trim() : ''
-      monthListStr.value =
-        d.month_list_price_yuan != null ? String(d.month_list_price_yuan).trim() : ''
-    }
+    const data = await request('/api/user/me/addresses', { method: 'GET' })
+    const sorted = sortAddressesDefaultFirst(normalizeAddressList(data))
+    const defItem = sorted.find((item) => isAddressItemDefault(item))
+    const row = defItem ? addressListRow(defItem, 0) : sorted.length ? addressListRow(sorted[0], 0) : null
+    defaultAddressLine.value = row?.line?.trim() || ''
+    defaultAddressArea.value = ''
   } catch {
-    /* 使用页面默认值 */
+    defaultAddressLine.value = ''
+    defaultAddressArea.value = ''
   }
 }
 
 async function loadProfile() {
   const phone = memberPhone.value || uni.getStorageSync('memberPhone') || ''
   if (!phone) return
-  skipProfileIdentityEdit.value = false
-  identityOnlyPhase.value = false
   try {
     const data = await request('/api/user/me', { method: 'GET' })
     minDeliveryYmd.value = minMemberDeliveryStartYmd()
     serverBalance.value = Math.max(0, Math.floor(Number(data.balance) || 0))
-    identityOnlyPhase.value = !resumeOnlyMode.value && shouldOpenMemberSetup(data)
-    skipProfileIdentityEdit.value =
-      shouldPromptMemberCardPay(data) && !shouldOpenMemberSetup(data)
-    /** 有余额且暂停配送时仍须停留本页以便改为「恢复配送」并重选起送日 */
-    const pausedWithBalance =
-      data.delivery_deferred === true && serverBalance.value > 0
-    if (!shouldOpenMemberSetup(data) && !shouldPromptMemberCardPay(data) && !pausedWithBalance) {
-      uni.showToast({ title: '资料与餐次已就绪', icon: 'success' })
-      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 600)
+
+    if (shouldPromptMemberCardPay(data)) {
+      uni.showToast({ title: '请先购买自律卡包', icon: 'none' })
+      setTimeout(
+        () =>
+          uni.redirectTo({
+            url: '/packageUser/pages/membershipCardList/membershipCardList',
+          }),
+        400,
+      )
       return
     }
-    const wn = data.wechat_name != null ? String(data.wechat_name).trim() : ''
-    const nm = data.name != null ? String(data.name).trim() : ''
-    nickDraft.value =
-      wn && wn !== WX_DEFAULT_NICK ? wn : nm && nm !== MEMBER_STUB_NAME ? nm : ''
-    if (data.avatar_url) {
-      const au = String(data.avatar_url).trim()
-      avatarUrl.value = au
-      remoteAvatarUrl.value = au
-    } else {
-      avatarUrl.value = ''
-      remoteAvatarUrl.value = ''
+
+    const pausedWithBalance = data.delivery_deferred === true && serverBalance.value > 0
+
+    if (resumeOnlyMode.value) {
+      if (!pausedWithBalance) {
+        uni.showToast({ title: '当前无需恢复配送', icon: 'none' })
+        setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+        return
+      }
+    } else if (!shouldOpenMemberSetup(data) && !pausedWithBalance) {
+      uni.showToast({ title: '配送信息已完善', icon: 'success' })
+      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+      return
     }
-    const pt = data.plan_type != null ? String(data.plan_type).trim() : ''
-    if (pt === '周卡' || pt === '月卡') selectedPlan.value = pt
-    dailyMealUnits.value = Math.max(
-      1,
-      Math.min(20, Math.floor(Number(data.daily_meal_units) || 1)),
-    )
+
+    pickupAcknowledged.value = false
+
     if (data.delivery_deferred === true) {
-      deliveryMode.value = 'defer'
+      deliveryMode.value = data.store_pickup ? 'pickup' : 'delivery'
       deliveryYmd.value = ''
       if (
         resumeOnlyMode.value &&
@@ -596,8 +236,6 @@ async function loadProfile() {
       deliveryYmd.value = dPick
     }
   } catch (e) {
-    skipProfileIdentityEdit.value = false
-    identityOnlyPhase.value = false
     if (isUserMeNotFoundError(e)) {
       clearMemberSession()
       uni.showToast({ title: '登录已失效，请重新登录', icon: 'none' })
@@ -605,6 +243,16 @@ async function loadProfile() {
       return
     }
     console.warn('loadProfile', e)
+  }
+}
+
+function onDeliveryModeChange(e) {
+  const v = e?.detail?.value
+  if (v === 'pickup') {
+    deliveryMode.value = 'pickup'
+    pickupAcknowledged.value = false
+  } else {
+    deliveryMode.value = 'delivery'
   }
 }
 
@@ -621,243 +269,68 @@ function onDeliveryPick(e) {
   deliveryYmd.value = v
 }
 
-function isPersistableAvatarUrl(u) {
-  const s = String(u || '').trim()
-  if (!s) return false
-  return /^https?:\/\//i.test(s)
-}
-
-async function onChooseAvatar(e) {
-  const localPath = e.detail?.avatarUrl
-  if (!localPath) return
-  avatarUrl.value = localPath
-  avatarUploading.value = true
-  try {
-    uni.showLoading({ title: '上传头像…', mask: true })
-    const permanentUrl = await uploadMemberAvatarFile(localPath)
-    avatarUrl.value = permanentUrl
-    remoteAvatarUrl.value = permanentUrl
-  } catch (err) {
-    avatarUrl.value = remoteAvatarUrl.value || ''
-    uni.showToast({
-      title: `${err?.message || '头像上传失败'}，可继续保存其他资料`,
-      icon: 'none',
-      duration: 2800,
-    })
-  } finally {
-    avatarUploading.value = false
-    uni.hideLoading()
-  }
-}
-
-function onNickInput(e) {
-  nickDraft.value = e.detail?.value ?? ''
-}
-
-async function runPayFlow(kind) {
-  if (kind === '周卡' || kind === '月卡') {
-    selectedPlan.value = kind
-  }
-  await onSubmit()
+function goManageAddresses() {
+  uni.navigateTo({ url: '/packageUser/pages/address/list' })
 }
 
 async function onSubmit() {
   const phone = memberPhone.value || uni.getStorageSync('memberPhone') || ''
-  const nick = String(nickDraft.value || '').trim()
-
-  if (resumeOnlyMode.value) {
-    if (!getMemberToken() || !phone) {
-      uni.showToast({ title: '登录已失效', icon: 'none' })
-      return
-    }
-    if (deliveryMode.value === 'defer') {
-      uni.showToast({ title: '请选择配送到家或门店自提', icon: 'none' })
-      return
-    }
-    const d0 = deliveryYmd.value?.trim()
-    if (!d0) {
-      uni.showToast({ title: '请选择开始的业务日期', icon: 'none' })
-      return
-    }
-    if (d0 < minDeliveryYmd.value) {
-      uni.showToast({
-        title: '起送日须不早于当前允许的最小业务日（上海；10:00 前可今日起，10:00 后仅次日起）',
-        icon: 'none',
-      })
-      return
-    }
-    submitting.value = true
-    try {
-      await request('/api/user/profile', {
-        method: 'PATCH',
-        data: {
-          delivery_deferred: false,
-          delivery_start_date: d0,
-          store_pickup: deliveryMode.value === 'pickup',
-        },
-      })
-      uni.showToast({ title: '已恢复配送', icon: 'success', duration: 2000 })
-      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
-    } catch (err) {
-      uni.hideLoading()
-      uni.showToast({ title: err?.message || '保存失败', icon: 'none', duration: 2800 })
-    } finally {
-      submitting.value = false
-    }
-    return
-  }
-
-  if (identityOnlyPhase.value) {
-    if (!getMemberToken() || !phone) {
-      uni.showToast({ title: '登录已失效', icon: 'none' })
-      return
-    }
-    if (!nick || nick === WX_DEFAULT_NICK) {
-      uni.showToast({ title: '请填写微信昵称', icon: 'none' })
-      return
-    }
-    if (avatarUploading.value) {
-      uni.showToast({ title: '头像正在上传，请稍候', icon: 'none' })
-      return
-    }
-    submitting.value = true
-    try {
-      const patch = { wechat_name: nick, name: nick }
-      const av = String(avatarUrl.value || '').trim()
-      if (isPersistableAvatarUrl(av)) patch.avatar_url = av
-      await request('/api/user/profile', { method: 'PATCH', data: patch })
-      const storedAvatar =
-        (isPersistableAvatarUrl(av) ? av : remoteAvatarUrl.value || '').trim()
-      try {
-        uni.setStorageSync(`okfood_wx_profile:${phone}`, {
-          nickName: nick,
-          avatarUrl: storedAvatar,
-        })
-      } catch {
-        /* ignore */
-      }
-      uni.showToast({ title: '已保存', icon: 'success', duration: 2000 })
-      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
-    } catch (err) {
-      uni.showToast({ title: err?.message || '保存失败', icon: 'none', duration: 2800 })
-    } finally {
-      submitting.value = false
-    }
-    return
-  }
-
-  if (submitting.value) return
-
-  if (
-    !skipProfileIdentityEdit.value &&
-    (!nick || nick === WX_DEFAULT_NICK)
-  ) {
-    uni.showToast({ title: '请填写昵称', icon: 'none' })
-    return
-  }
-  if (needsCardPayment.value && !selectedPlan.value) {
-    uni.showToast({ title: '请选择周卡或月卡', icon: 'none' })
-    return
-  }
-  if (needsCardPayment.value && deliveryMode.value === 'defer') {
-    uni.showToast({
-      title: '开通会员卡请先选择配送或门店自提，并选定开始日期',
-      icon: 'none',
-    })
-    return
-  }
-  const d0 = deliveryYmd.value?.trim()
-  if (deliveryMode.value === 'delivery' || deliveryMode.value === 'pickup') {
-    if (!d0) {
-      uni.showToast({ title: '请选择开始的业务日期', icon: 'none' })
-      return
-    }
-    if (d0 < minDeliveryYmd.value) {
-      uni.showToast({
-        title: '起送日须不早于当前允许的最小业务日（上海；10:00 前可今日起，10:00 后仅次日起）',
-        icon: 'none',
-      })
-      return
-    }
-  }
   if (!getMemberToken() || !phone) {
     uni.showToast({ title: '登录已失效', icon: 'none' })
     return
   }
-  if (avatarUploading.value) {
-    uni.showToast({ title: '头像正在上传，请稍候', icon: 'none' })
+  if (deliveryMode.value !== 'delivery' && deliveryMode.value !== 'pickup') {
+    uni.showToast({ title: '请选择配送到家或门店自提', icon: 'none' })
     return
   }
-  submitting.value = true
-  try {
-    const patch = {
-      wechat_name: nick,
-      name: nick,
-    }
-    if (deliveryMode.value === 'defer') {
-      patch.delivery_deferred = true
-    } else {
-      patch.delivery_deferred = false
-      patch.delivery_start_date = d0
-      patch.store_pickup = deliveryMode.value === 'pickup'
-    }
-    if (needsCardPayment.value) {
-      patch.plan_type = selectedPlan.value === '月卡' ? '月卡' : '周卡'
-    }
-    const av = String(avatarUrl.value || '').trim()
-    if (isPersistableAvatarUrl(av)) {
-      patch.avatar_url = av
-    }
-    patch.daily_meal_units = Math.max(
-      1,
-      Math.min(20, Math.floor(Number(dailyMealUnits.value) || 1)),
-    )
-    await request('/api/user/profile', {
-      method: 'PATCH',
-      data: patch,
-    })
-    const storedAvatar =
-      (isPersistableAvatarUrl(av) ? av : remoteAvatarUrl.value || '').trim()
-    try {
-      uni.setStorageSync(`okfood_wx_profile:${phone}`, {
-        nickName: nick,
-        avatarUrl: storedAvatar,
-      })
-    } catch {
-      /*忽略 */
-    }
 
-    if (needsCardPayment.value) {
-      uni.showLoading({ title: '微信支付…', mask: true })
-      try {
-        await runMemberCardWechatPay({
-          cardKind: selectedPlan.value === '月卡' ? '月卡' : '周卡',
-          deliveryStartYmd: d0,
-          patchProfile: false,
-        })
-      } catch (payErr) {
-        const raw = `${payErr?.errMsg || payErr?.message || ''}`
-        if (/cancel|取消/i.test(raw)) {
-          uni.showToast({ title: '已取消支付', icon: 'none' })
-          return
-        }
-        throw payErr
-      } finally {
-        uni.hideLoading()
-      }
-      uni.showToast({ title: '支付成功，餐次已入账', icon: 'success', duration: 2000 })
-      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+  const d0 = deliveryYmd.value?.trim()
+  if (!d0) {
+    uni.showToast({
+      title: deliveryMode.value === 'pickup' ? '请选择开始自提日期' : '请选择开始配送日期',
+      icon: 'none',
+    })
+    return
+  }
+  if (d0 < minDeliveryYmd.value) {
+    uni.showToast({
+      title: '起始日须不早于当前允许的最小业务日（上海）',
+      icon: 'none',
+    })
+    return
+  }
+
+  if (deliveryMode.value === 'delivery') {
+    await refreshDefaultAddress()
+    const line = String(defaultAddressLine.value || '').trim()
+    if (!line) {
+      uni.showToast({ title: '请先添加默认配送地址', icon: 'none' })
       return
     }
+  } else if (!pickupAcknowledged.value) {
+    uni.showToast({ title: '请确认已知晓门店自取位置', icon: 'none' })
+    return
+  }
 
-    uni.showToast({
-      title: '已保存',
-      icon: 'success',
-      duration: 2000,
+  submitting.value = true
+  try {
+    await request('/api/user/profile', {
+      method: 'PATCH',
+      data: {
+        delivery_deferred: false,
+        delivery_start_date: d0,
+        store_pickup: deliveryMode.value === 'pickup',
+      },
     })
-    setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+    uni.showToast({
+      title: resumeOnlyMode.value ? '已恢复配送' : '已保存',
+      icon: 'success',
+      duration: 1800,
+    })
+    setTimeout(() => {
+      uni.switchTab({ url: '/pages/mine/index' })
+    }, 380)
   } catch (err) {
-    uni.hideLoading()
     uni.showToast({ title: err?.message || '保存失败', icon: 'none', duration: 2800 })
   } finally {
     submitting.value = false
@@ -885,70 +358,25 @@ async function onSubmit() {
   padding: 32rpx 40rpx calc(48rpx + env(safe-area-inset-bottom));
 }
 
-.full-setup-wrap {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.identity-lead {
-  display: block;
-  font-size: 26rpx;
-  font-weight: 700;
-  color: $ok-slate-600;
-  line-height: 1.5;
-  margin: -8rpx 0 28rpx;
-}
-
 .lead {
   display: block;
   font-size: 28rpx;
   color: $ok-slate-600;
   font-weight: 700;
   line-height: 1.5;
-  margin-bottom: 40rpx;
+  margin-bottom: 28rpx;
 }
 
 .setup-module {
-  margin-bottom: 32rpx;
-  padding: 28rpx 24rpx 8rpx;
+  padding: 28rpx 24rpx 32rpx;
   background: #fff;
   border-radius: 24rpx;
   border: 2rpx solid $ok-slate-100;
   box-sizing: border-box;
 }
 
-.setup-module--card {
-  padding-bottom: 20rpx;
-}
-
-.module-title {
-  display: block;
-  font-size: 30rpx;
-  font-weight: 950;
-  color: $ok-forest-green;
-  margin-bottom: 8rpx;
-  padding-bottom: 16rpx;
-  border-bottom: 2rpx solid $ok-slate-100;
-}
-
-.setup-module--card .module-title {
-  border-bottom-color: rgba(14, 90, 68, 0.15);
-}
 .section {
-  margin-bottom: 44rpx;
-}
-
-.section--avatar-center {
-  text-align: center;
-}
-
-.section--avatar-center .sec-title {
-  text-align: left;
-}
-
-.section--avatar-center .avatar-btn {
-  display: inline-block;
-  vertical-align: top;
+  margin-bottom: 8rpx;
 }
 
 .sec-title {
@@ -959,6 +387,14 @@ async function onSubmit() {
   margin-bottom: 20rpx;
 }
 
+.sec-title--inline {
+  margin-top: 8rpx;
+}
+
+.sec-title--sp {
+  margin-top: 28rpx;
+}
+
 .sec-sub {
   display: block;
   font-size: 22rpx;
@@ -966,83 +402,6 @@ async function onSubmit() {
   font-weight: 700;
   margin: -8rpx 0 20rpx;
   line-height: 1.4;
-}
-
-.avatar-btn {
-  padding: 0;
-  margin: 0;
-  background: transparent;
-  border: none;
-  line-height: 0;
-  display: inline-block;
-}
-
-.avatar-btn::after {
-  border: none;
-}
-
-.avatar-box {
-  width: 160rpx;
-  height: 160rpx;
-  border-radius: 50%;
-  background: #e2e8f0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 6rpx solid #fff;
-  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.08);
-  overflow: hidden;
-}
-
-.avatar-box.avatar-box--hero {
-  width: 200rpx;
-  height: 200rpx;
-  margin: 0 auto;
-  display: flex;
-}
-
-.avatar-img {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.avatar-hint {
-  font-size: 24rpx;
-  font-weight: 800;
-  color: $ok-slate-500;
-  padding: 16rpx;
-  text-align: center;
-}
-
-.nick-wrap {
-  position: relative;
-}
-
-.nick-hint-overlay {
-  position: absolute;
-  left: 36rpx;
-  top: 50%;
-  transform: translateY(-50%);
-  pointer-events: none;
-  font-size: 28rpx;
-  font-weight: 700;
-  color: #64748b;
-  z-index: 2;
-}
-
-.nick-input {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  background: #f1f5f9;
-  border-radius: 999rpx;
-  padding: 24rpx 36rpx;
-  font-size: 30rpx;
-  font-weight: 800;
-  color: #0f172a;
-  box-sizing: border-box;
-  min-height: 88rpx;
 }
 
 .pay-radio-group {
@@ -1077,510 +436,124 @@ async function onSubmit() {
 .pay-radio-group--delivery {
   margin-bottom: 20rpx;
   gap: 12rpx;
-  }
-  
-  .pay-radio-group--delivery .pay-radio-row {
-    padding: 18rpx 14rpx;
-    gap: 10rpx;
-  }
-  
-  .pay-radio-group--delivery .pay-radio-label {
-    font-size: 24rpx;
 }
 
-.mct-catalog {
-  margin-top: 28rpx;
-  padding: 24rpx;
-  background: #f8fafc;
-  border-radius: 24rpx;
-  border: 2rpx solid #e2e8f0;
-  box-sizing: border-box;
-}
-
-.mct-catalog-title {
-  display: block;
-  font-size: 30rpx;
-  font-weight: 900;
-  color: #0f172a;
-  margin-bottom: 12rpx;
-}
-
-.mct-catalog-tip {
-  display: block;
-  font-size: 24rpx;
-  font-weight: 600;
-  color: #64748b;
-  line-height: 1.5;
-  margin-bottom: 20rpx;
-}
-
-.mct-card {
-  display: flex;
-  flex-direction: row;
-  gap: 20rpx;
-  padding: 20rpx;
-  background: #fff;
-  border-radius: 20rpx;
-  margin-bottom: 16rpx;
-  border: 2rpx solid #f1f5f9;
-  box-sizing: border-box;
-}
-
-.mct-card:last-child {
-  margin-bottom: 0;
-}
-
-.mct-visual {
-  width: 200rpx;
-  height: 120rpx;
-  flex-shrink: 0;
-  border-radius: 16rpx;
-  background: #e2e8f0;
-}
-
-.mct-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-}
-
-.mct-name {
-  font-size: 30rpx;
-  font-weight: 900;
-  color: #0f172a;
-}
-
-.mct-kind {
-  font-size: 24rpx;
-  font-weight: 700;
-  color: #64748b;
-}
-
-.mct-price-row {
-  display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  gap: 16rpx;
-}
-
-.mct-list {
-  font-size: 26rpx;
-  font-weight: 700;
-  color: #94a3b8;
-  text-decoration: line-through;
-}
-
-.mct-sale {
-  font-size: 34rpx;
-  font-weight: 900;
-  color: #dc2626;
-}
-
-.mct-meta {
-  font-size: 24rpx;
-  font-weight: 700;
-  color: #334155;
-}
-
-.mct-intro {
-  font-size: 26rpx;
-  font-weight: 700;
-  color: #0f172a;
-  line-height: 1.45;
-}
-
-.mct-notice {
-  font-size: 24rpx;
-  font-weight: 600;
-  color: #475569;
-  line-height: 1.55;
-  white-space: pre-wrap;
-}
-
-.plan-premium-wrap {
-  margin-top: 24rpx;
-  background: $ok-forest-green;
-  padding: 32rpx 20rpx;
-  border-radius: 36rpx;
-  box-sizing: border-box;
-}
-.plan-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20rpx;
-}
-
-.plan-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  box-sizing: border-box;
-  }
-  
-  .plan-card--premium {
-    background: #fff;
-    border-radius: 48rpx;
-    padding: 32rpx 20rpx 24rpx;
-    border: 3rpx solid rgba(255, 255, 255, 0.55);
-    min-height: 0;
-    transition:
-      border-color 0.18s ease,
-      box-shadow 0.18s ease,
-      background 0.18s ease,
-      transform 0.18s ease;
-  }
-  
-  .plan-card--rec.plan-card--premium {
-    background: #fff;
-  }
-  
-  .plan-card--premium.plan-card--on {
-  border: 6rpx solid #ffd869;
-    background: linear-gradient(180deg, #f4fbf7 0%, #ffffff 42%, #ffffff 100%);
-    box-shadow:
-      0 0 0 4rpx rgba(14, 90, 68, 0.14),
-      0 8rpx 0 rgba(14, 90, 68, 0.06),
-      0 20rpx 40rpx rgba(14, 90, 68, 0.18);
-    transform: scale(1.02);
-    z-index: 1;
-}
-
-.plan-picked-pill {
-  position: absolute;
-  top: 10rpx;
-  left: 10rpx;
-  z-index: 3;
-  background: $ok-forest-green;
-  padding: 6rpx 16rpx;
-  border-radius: 999rpx;
-  line-height: 1;
-  box-shadow: 0 4rpx 12rpx rgba(14, 90, 68, 0.35);
-}
-
-.plan-picked-pill-txt {
-  font-size: 20rpx;
-  font-weight: 950;
-  color: #fff;
-  letter-spacing: 0.5rpx;
-}
-
-.plan-rec-pill {
-  position: absolute;
-  top: 12rpx;
-  right: 12rpx;
-    z-index: 2;
-  background: $ok-sunshine-yellow;
-  color: $ok-forest-green;
-  font-size: 18rpx;
-  font-weight: 950;
-  padding: 6rpx 14rpx;
-  border-radius: 999rpx;
-}
-
-.plan-headline {
-  display: block;
-  text-align: center;
-  font-size: 28rpx;
-  font-weight: 950;
-  color: $ok-forest-green;
-  line-height: 1.35;
-  padding: 0 8rpx;
-  margin-top: 8rpx;
-}
-.plan-origin {
-  display: block;
-  text-align: center;
-  font-size: 24rpx;
-  font-weight: 700;
-  color: #94a3b8;
-  text-decoration: line-through;
-  margin-top: 12rpx;
-}
-
-.plan-activity {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  background: #e6f4ef;
-  border-radius: 20rpx;
-  overflow: hidden;
-  margin-top: 16rpx;
-}
-
-.plan-activity-tag {
-  background: $ok-forest-green;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 12rpx 8rpx;
-  flex-shrink: 0;
-}
-
-.plan-activity-tag-line {
-  font-size: 20rpx;
-  font-weight: 800;
-  color: #fff;
-  line-height: 1.12;
-}
-
-.plan-activity-amount {
-  flex: 1;
-  display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  justify-content: center;
-  padding: 14rpx 12rpx 18rpx;
-}
-
-.pa-yen {
-  font-size: 30rpx;
-  font-weight: 950;
-  color: $ok-forest-green;
-}
-
-.pa-num {
-  font-size: 46rpx;
-  font-weight: 1000;
-  color: $ok-forest-green;
-  line-height: 1;
-  margin-left: 4rpx;
-  }
-  
-  .plan-save {
-    align-self: center;
-    margin-top: 16rpx;
-    background: #e63946;
-    color: #fff;
-    font-size: 22rpx;
-    font-weight: 950;
-    padding: 10rpx 32rpx;
-    border-radius: 999rpx;
-    box-shadow: 0 6rpx 16rpx rgba(230, 57, 70, 0.3);
-  }
-  
-  .plan-card-dash {
-    height: 0;
-    border-top: 2rpx dashed #cbd5e1;
-    margin: 20rpx 4rpx 12rpx;
-}
-
-.plan-footnote {
-  display: block;
-  text-align: center;
-  font-size: 22rpx;
-  font-weight: 700;
-  color: #64748b;
-    line-height: 1.4;
-}
-
-.plan-deluxe-wrap {
-  margin-top: 24rpx;
-}
-
-.plan-deluxe-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16rpx;
-}
-
-.plan-deluxe {
-  position: relative;
-  border-radius: 36rpx;
-  padding: 24rpx 16rpx 20rpx;
-  box-sizing: border-box;
-  min-height: 440rpx;
-  display: flex;
-  flex-direction: column;
-  border: 4rpx solid transparent;
-  transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease,
-    border-color 0.18s ease;
-}
-
-.plan-deluxe--on {
-  transform: scale(1.02);
-  z-index: 1;
-}
-
-.plan-deluxe--month {
-  background: linear-gradient(165deg, #134e3a 0%, #052e21 52%, #020617 100%);
-  border-color: rgba(255, 216, 105, 0.45);
-  box-shadow: 0 12rpx 32rpx rgba(2, 6, 23, 0.45);
-}
-
-.plan-deluxe--month.plan-deluxe--on {
-  border-color: #ffd869;
-}
-
-.plan-deluxe--week {
-  background: #ffffff;
-  border-color: #e2e8f0;
-  box-shadow: 0 8rpx 24rpx rgba(15, 23, 42, 0.06);
-}
-
-.plan-deluxe--week.plan-deluxe--on {
-  border-color: rgba(14, 90, 68, 0.55);
-}
-
-.plan-deluxe-corner-tag {
-  align-self: flex-start;
-  font-size: 17rpx;
-  font-weight: 950;
-  padding: 8rpx 16rpx;
-  border-radius: 999rpx;
-  margin-bottom: 12rpx;
-}
-
-.plan-deluxe-corner-tag--vip {
-  background: rgba(15, 23, 42, 0.45);
-  color: #ffd869;
-}
-
-.plan-deluxe-corner-tag--week {
-  background: #e6f4ef;
-  color: $ok-forest-green;
-}
-
-.plan-deluxe-head-row {
-  display: flex;
-  flex-direction: row;
-  justify-content: flex-end;
-  margin-bottom: 8rpx;
-}
-
-.plan-deluxe-price-stack {
-  text-align: right;
-}
-
-.plan-deluxe-kicker {
-  display: block;
-  font-size: 20rpx;
-  font-weight: 800;
-}
-
-.plan-deluxe-kicker--gold {
-  color: #fbbf24;
-}
-
-.plan-deluxe-kicker--muted {
-  color: #94a3b8;
-}
-
-.plan-deluxe-big-price {
-  display: block;
-  font-size: 44rpx;
-  font-weight: 1000;
-  line-height: 1.1;
-}
-
-.plan-deluxe-big-price--gold {
-  color: #ffd869;
-}
-
-.plan-deluxe-big-price--teal {
-  color: #0f766e;
-}
-
-.plan-deluxe-sub {
-  display: block;
-  font-size: 20rpx;
-  font-weight: 700;
-}
-
-.plan-deluxe-sub--muted-gold {
-  color: rgba(254, 243, 199, 0.88);
-}
-
-.plan-deluxe-sub--muted {
-  color: #94a3b8;
-}
-
-.plan-deluxe-hero-title {
-  font-size: 30rpx;
-  font-weight: 950;
-  color: #ffffff;
-  line-height: 1.35;
-  margin-bottom: 16rpx;
-  text-align: left;
-}
-
-.plan-deluxe-hero-title--week {
-  color: #0f172a;
-}
-
-.plan-deluxe-benefits {
-  flex: 1;
-  border-radius: 20rpx;
-  padding: 16rpx 14rpx;
-  margin-bottom: 16rpx;
-  display: flex;
-  flex-direction: column;
+.pay-radio-group--delivery .pay-radio-row {
+  padding: 18rpx 14rpx;
   gap: 10rpx;
 }
 
-.plan-deluxe-benefits--vip {
-  background: rgba(15, 23, 42, 0.38);
-}
-
-.plan-deluxe-benefits--week {
-  background: #f1f5f9;
-}
-
-.plan-deluxe-benefit-line {
-  font-size: 20rpx;
-  font-weight: 700;
-  color: #fef9c3;
-  line-height: 1.35;
-}
-
-.plan-deluxe-benefit-line--week {
-  color: #334155;
-}
-
-.plan-deluxe-btn {
-  margin-top: auto;
-  width: 100%;
-  border-radius: 999rpx;
+.pay-radio-group--delivery .pay-radio-label {
   font-size: 24rpx;
+}
+
+.addr-box {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 20rpx;
+  padding: 24rpx 28rpx;
+  background: $ok-slate-50;
+  border-radius: 20rpx;
+  border: 2rpx solid $ok-slate-100;
+  margin-bottom: 8rpx;
+}
+
+.addr-box-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.addr-line {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: $ok-slate-800;
+  line-height: 1.4;
+}
+
+.addr-line--ph {
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.addr-area {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  font-weight: 700;
+  color: $ok-slate-500;
+}
+
+.addr-go {
+  flex-shrink: 0;
+  font-size: 28rpx;
+  font-weight: 900;
+  color: $ok-forest-green;
+}
+
+.store-card {
+  padding: 24rpx 28rpx;
+  background: linear-gradient(145deg, rgba(14, 90, 68, 0.08) 0%, #fff 100%);
+  border-radius: 20rpx;
+  border: 2rpx solid rgba(14, 90, 68, 0.18);
+  margin-bottom: 20rpx;
+}
+
+.store-name {
+  display: block;
+  font-size: 30rpx;
   font-weight: 950;
-  padding: 20rpx 12rpx;
-  border: none;
-  line-height: 1.3;
+  color: $ok-forest-green;
+  margin-bottom: 12rpx;
 }
 
-.plan-deluxe-btn--gold {
-  background: linear-gradient(180deg, #fde68a 0%, #fbbf24 100%);
-  color: #0f172a;
+.store-addr {
+  display: block;
+  font-size: 26rpx;
+  font-weight: 800;
+  color: $ok-slate-700;
+  line-height: 1.45;
 }
 
-.plan-deluxe-btn--dark {
-  background: #0f172a;
-  color: #ffffff;
+.ack-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 16rpx;
+  padding: 16rpx 0 8rpx;
 }
 
-.plan-deluxe-btn::after {
-  border: none;
+.ack-box {
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 10rpx;
+  border: 3rpx solid $ok-slate-200;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2rpx;
 }
-.submit-btn {
-  margin-top: 20rpx;
-  width: 100%;
+
+.ack-box--on {
   background: $ok-forest-green;
-  color: #fff;
-  font-size: 32rpx;
-  font-weight: 950;
-  border-radius: 999rpx;
-  padding: 28rpx 0;
-  border: none;
-  line-height: 1.3;
+  border-color: $ok-forest-green;
 }
 
-.submit-btn::after {
-  border: none;
+.ack-tick {
+  font-size: 24rpx;
+  font-weight: 900;
+  color: #fff;
+  line-height: 1;
+}
+
+.ack-txt {
+  flex: 1;
+  font-size: 26rpx;
+  font-weight: 700;
+  color: $ok-slate-700;
+  line-height: 1.45;
 }
 
 .date-picker-row {
@@ -1615,45 +588,20 @@ async function onSubmit() {
   flex-shrink: 0;
 }
 
-.units-stepper {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 28rpx;
-  padding: 8rpx 0 4rpx;
-}
-
-.units-stepper-btn {
-  min-width: 88rpx;
-  height: 88rpx;
-  padding: 0;
-  margin: 0;
-  line-height: 86rpx;
-  text-align: center;
-  font-size: 40rpx;
-  font-weight: 900;
-  color: $ok-forest-green;
-  background: #f1f5f9;
-  border: 3rpx solid $ok-slate-100;
-  border-radius: 20rpx;
-  box-sizing: border-box;
-}
-
-.units-stepper-btn::after {
-  border: none;
-}
-
-.units-stepper-btn[disabled] {
-  opacity: 0.35;
-  color: $ok-slate-500;
-}
-
-.units-stepper-value {
-  min-width: 100rpx;
-  text-align: center;
-  font-size: 40rpx;
+.submit-btn {
+  margin-top: 36rpx;
+  width: 100%;
+  background: $ok-forest-green;
+  color: #fff;
+  font-size: 32rpx;
   font-weight: 950;
-  color: $ok-slate-800;
+  border-radius: 999rpx;
+  padding: 28rpx 0;
+  border: none;
+  line-height: 1.3;
+}
+
+.submit-btn::after {
+  border: none;
 }
 </style>

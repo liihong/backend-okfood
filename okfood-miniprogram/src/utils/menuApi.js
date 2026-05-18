@@ -91,6 +91,12 @@ function mapWeeklyListItem(item, index) {
     typeof item.spice_label === 'string' && item.spice_label.trim()
       ? item.spice_label.trim()
       : ''
+  const singleStockLimited = item.single_stock_limited === true
+  const singleStockRemainingRaw = item.single_stock_remaining
+  const singleStockRemaining =
+    singleStockRemainingRaw != null && singleStockRemainingRaw !== ''
+      ? Math.max(0, Math.floor(Number(singleStockRemainingRaw)))
+      : null
   return {
     dishId,
     serviceDate: date,
@@ -115,6 +121,8 @@ function mapWeeklyListItem(item, index) {
     img:
       (typeof pic === 'string' && pic) || (dishId ? PLACEHOLDER_IMG : ''),
     spiceLabel,
+    singleStockLimited,
+    singleStockRemaining,
   }
 }
 
@@ -195,6 +203,21 @@ export function isSingleOrderServiceDate(serviceDateYmd, opts) {
   const today = ymdTodayShanghai(now)
   if (t < today) return false
   if (t === today && isShanghaiPastDailyCutoff(now)) return false
+  return true
+}
+
+/**
+ * 首页周菜单卡片是否展示「立即下单」：供餐日窗口内且对该日单次卡尚有库存（或未设限额）。
+ * @param {ReturnType<typeof mapWeeklyListItem>} row
+ */
+export function isMenuRowQuickOrderVisible(row, opts) {
+  if (!row || typeof row !== 'object') return false
+  if (!row.dishId) return false
+  if (!isSingleOrderServiceDate(row.serviceDate, opts)) return false
+  if (row.singleStockLimited === true) {
+    const r = row.singleStockRemaining
+    return r != null && Number(r) > 0
+  }
   return true
 }
 

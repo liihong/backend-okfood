@@ -169,10 +169,9 @@ async function onPay() {
       membershipTemplateId: templateId.value,
     })
     uni.showToast({ title: '支付成功', icon: 'success' })
-    const q = `title=${encodeURIComponent('完善配送信息')}`
     setTimeout(() => {
       uni.redirectTo({
-        url: `/packageUser/pages/address/address?${q}`,
+        url: '/packageUser/pages/memberSetup/memberSetup?from=pay',
       })
     }, 400)
   } catch (e) {

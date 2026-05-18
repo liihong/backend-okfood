@@ -394,19 +394,15 @@ function openEditModal(row) {
   showEditModal.value = true
 }
 
-function canDeleteCardOrder(row) {
-  return row && !row.applied_to_member && row.pay_status !== '已缴'
-}
-
 const deletingId = ref(0)
 
 async function deleteCardOrder(row) {
-  if (!canDeleteCardOrder(row)) return
+  if (!row || !row.id) return
   const phone = (row.member_phone || '').trim()
   const label = `#${row.id} ${phone ? phone : '会员'}`
   if (
     !confirm(
-      `确定删除该开卡工单？\n${label}\n\n仅可删除未缴且未入账同步的工单，删除后不可恢复。`,
+      `确定删除该开卡工单？\n${label}\n\n删除后不可恢复。若工单已缴或已同步入账，系统可能拒绝删除（以提示为准）。`,
     )
   ) {
     return
@@ -590,7 +586,6 @@ class="member-pill co-sync-pill"
             <span class="co-row-actions">
               <button type="button" class="btn-sm" @click="openEditModal(row)">更新</button>
               <button
-                v-if="canDeleteCardOrder(row)"
                 type="button"
                 class="btn-sm danger"
                 :disabled="deletingId === row.id"

@@ -56,7 +56,7 @@
               </view>
               <text class="dish-ingredients">配料：{{ m.ingredients }}</text>
               <button
-                v-if="isSingleOrderServiceDate(m.serviceDate)"
+                v-if="isMenuRowQuickOrderVisible(m)"
                 class="btn-quick-buy"
                 @click.stop="goDetail(m)">立即下单</button>
             </view>
@@ -75,7 +75,7 @@ import {
   addDaysIso,
   fetchWeeklyMenu,
   formatMenuPrice,
-  isSingleOrderServiceDate,
+  isMenuRowQuickOrderVisible,
 } from '@/utils/menuApi.js'
 import { getTabPageLayoutStyles } from '@/utils/tabPageLayout.js'
 import { syncCustomTabBar } from '@/utils/customTabBar.js'

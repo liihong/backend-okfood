@@ -1,3 +1,5 @@
+import { minMemberDeliveryStartYmd } from '@/utils/menuApi.js'
+
 /** 与后端 `STUB_MEMBER_NAME` 一致 */
 export const MEMBER_STUB_NAME = '待完善'
 
@@ -25,13 +27,33 @@ export function hasUsableMemberDisplayName(profile) {
   return wxOk || (!stub && nm !== '')
 }
 
+/** @param {unknown} d */
+function ymdFromApiField(d) {
+  if (d == null || d === '') return ''
+  const s = String(d).trim()
+  return s.length >= 10 ? s.slice(0, 10) : ''
+}
+
 /**
- * 是否需要引导「完善资料」：仅检查头像/称呼（起送日、配送方式在资料与开卡流程中另行设置）
+ * 是否需要引导「完善配送信息」：有余额、非暂停状态下，需补齐起送日与（配送到家时）默认地址
  * @param {object | null | undefined} profile GET /api/user/me 的 data
  */
 export function shouldOpenMemberSetup(profile) {
-  if (!profile || typeof profile !== 'object') return true
-  return !hasUsableMemberDisplayName(profile)
+  if (!profile || typeof profile !== 'object') return false
+  const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
+  if (balance <= 0) return false
+  if (profile.delivery_deferred === true) return false
+
+  const start = ymdFromApiField(profile.delivery_start_date)
+  if (!start) return true
+  const minD = minMemberDeliveryStartYmd()
+  if (start < minD) return true
+
+  if (profile.store_pickup === true) return false
+
+  const addr = profile.address != null ? String(profile.address).trim() : ''
+  if (!addr) return true
+  return false
 }
 
 /**

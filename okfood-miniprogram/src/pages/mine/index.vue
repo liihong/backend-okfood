@@ -36,23 +36,11 @@
                 <text class="hero-stat-label">累计自律天数</text>
               </view>
               <view class="hero-avatar-wrap">
-                <button
-                  v-if="needsMemberSetupPage"
-                  class="hero-avatar-btn"
-                  open-type="chooseAvatar"
-                  @chooseavatar="onChooseAvatar"
-                  @tap.stop
-                >
+                <view v-if="needsMemberSetupPage" class="hero-avatar-btn hero-avatar-btn--static">
                   <view class="avatar-ring">
-                    <image
-                      v-if="setupRowAvatarUrl"
-                      class="avatar-img"
-                      :src="setupRowAvatarUrl"
-                      mode="aspectFill"
-                    />
-                    <text v-else class="avatar-fallback-sm">填</text>
+                    <text class="avatar-fallback-sm">配</text>
                   </view>
-                </button>
+                </view>
                 <button
                   v-else
                   class="hero-avatar-btn"
@@ -87,7 +75,7 @@
                 <text class="hero-gear-icon">⚙</text>
               </view>
             </view>
-            <text v-if="needsMemberSetupPage" class="hero-setup-hint">点按此处完善微信头像与昵称 ›</text>
+            <text v-if="needsMemberSetupPage" class="hero-setup-hint">点按此处完善配送或自提信息 ›</text>
           </view>
         </template>
 
@@ -413,21 +401,6 @@ const showPauseDeliveryMenuRow = computed(() => {
   return Math.max(0, Math.floor(Number(p.balance) || 0)) > 0
 })
 
-function isHttpAvatarUrl(u) {
-  const s = String(u || '').trim()
-  return /^https?:\/\//i.test(s)
-}
-
-/** 待完善资料横幅：优先展示已同步的 http(s) 头像 */
-const setupRowAvatarUrl = computed(() => {
-  if (!needsMemberSetupPage.value) return ''
-  const w = wxProfile.value?.avatarUrl
-  if (isHttpAvatarUrl(w)) return String(w).trim()
-  const raw = memberProfileRaw.value?.avatar_url
-  if (raw != null && isHttpAvatarUrl(raw)) return String(raw).trim()
-  return ''
-})
-
 const setupRowTitle = computed(() => {
   if (!needsMemberSetupPage.value) return ''
   const w = wxProfile.value?.nickName?.trim()
@@ -436,7 +409,7 @@ const setupRowTitle = computed(() => {
   if (un && un !== MEMBER_STUB_NAME) return un
   const p = String(memberPhone.value || '').trim()
   if (p) return p
-  return '点我：完善个人资料'
+  return '点我：完善配送信息'
 })
 
 const displayNick = computed(() => {
@@ -728,7 +701,7 @@ const isLeaveCardDetailStatus = computed(
 
 const memberDeliveryStatus = computed(() => {
   if (!isLoggedIn.value) return '尚未开启计划'
-  if (needsMemberSetupPage.value) return '资料待完善'
+  if (needsMemberSetupPage.value) return '待完善配送'
   if (isOnLeaveTodayShanghai() || isLeavedTomorrow.value || hasLeaveRangeConfigured()) {
     if (isOnLeaveTodayShanghai()) {
       const lr = leaveRange.value
@@ -971,7 +944,7 @@ async function onWxGetPhoneNumber(e) {
           url: '/packageUser/pages/memberSetup/memberSetup?from=login',
           fail: (e) => {
             console.error('navigateTo memberSetup', e)
-            uni.showToast({ title: '无法打开完善资料页，请重试', icon: 'none' })
+            uni.showToast({ title: '无法打开页面，请重试', icon: 'none' })
           },
         })
       }, 120)
@@ -1195,8 +1168,9 @@ function onPauseDeliveryTap() {
   line-height: 0;
 }
 
-.hero-avatar-btn::after {
-  border: none;
+.hero-avatar-btn--static {
+  display: inline-block;
+  vertical-align: top;
 }
 
 .avatar-ring {
