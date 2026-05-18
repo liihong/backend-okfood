@@ -68,7 +68,11 @@ const router = createRouter({
           path: 'delivery',
           name: 'delivery',
           component: DeliveryView,
-          meta: { title: '智能配送大表', fullAdminOnly: true },
+          meta: {
+            title: '智能配送大表',
+            pageSubtitle: '精细化管理每日配餐、自提、请假及顺丰履约调度',
+            fullAdminOnly: true,
+          },
         },
         { path: 'regions', name: 'regions', component: RegionsView, meta: { title: '配送区域管理' } },
         { path: 'couriers', name: 'couriers', component: CouriersView, meta: { title: '配送员管理' } },
