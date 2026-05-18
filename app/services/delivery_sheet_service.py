@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.constants import UNASSIGNED_DELIVERY_AREA
@@ -134,6 +134,40 @@ def _member_ids_delivered_on_date(db: Session, delivery_date: date, member_ids: 
     return {int(x) for x in rows}
 
 
+def _store_membership_counts(db: Session, *, store_id: int) -> dict[str, int]:
+    """与会员列表 ``validity=active|expired`` 一致：仅按 balance；按 ``plan_type`` 拆周卡/月卡。"""
+    row = db.execute(
+        select(
+            func.count().label("total"),
+            func.coalesce(
+                func.sum(case((and_(Member.plan_type == "周卡", Member.balance > 0), 1), else_=0)),
+                0,
+            ).label("wa"),
+            func.coalesce(
+                func.sum(case((and_(Member.plan_type == "周卡", Member.balance == 0), 1), else_=0)),
+                0,
+            ).label("we"),
+            func.coalesce(
+                func.sum(case((and_(Member.plan_type == "月卡", Member.balance > 0), 1), else_=0)),
+                0,
+            ).label("ma"),
+            func.coalesce(
+                func.sum(case((and_(Member.plan_type == "月卡", Member.balance == 0), 1), else_=0)),
+                0,
+            ).label("me"),
+        )
+        .select_from(Member)
+        .where(Member.deleted_at.is_(None), Member.store_id == int(store_id))
+    ).one()
+    return {
+        "total_members": int(row.total or 0),
+        "active_weekly_members": int(row.wa or 0),
+        "expired_weekly_members": int(row.we or 0),
+        "active_monthly_members": int(row.ma or 0),
+        "expired_monthly_members": int(row.me or 0),
+    }
+
+
 def total_meal_units_for_delivery_sheet(
     db: Session, *, delivery_date: date, store_id: int | None = None
 ) -> int:
@@ -158,6 +192,7 @@ def build_delivery_sheet(
     if not st or not st.is_active:
         raise HTTPException(status_code=404, detail="门店不存在或已停用")
     tid = int(st.tenant_id)
+    mem_stats = _store_membership_counts(db, store_id=sid)
     d = delivery_date or today_shanghai()
     sub_ok = is_subscription_delivery_day(d)
     active_region_list, known_ids = _active_regions_meta(db, tenant_id=tid)
@@ -180,6 +215,7 @@ def build_delivery_sheet(
                 home_delivered_meal_total=0,
                 pickup_meal_total=0,
                 is_subscription_delivery_day=sub_ok,
+                **mem_stats,
             )
         region_filter_id = int(rid)
 
@@ -366,4 +402,5 @@ def build_delivery_sheet(
         home_delivered_meal_total=home_delivered,
         pickup_meal_total=pickup_total,
         is_subscription_delivery_day=sub_ok,
+        **mem_stats,
     )

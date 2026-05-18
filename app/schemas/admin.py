@@ -538,6 +538,31 @@ class DeliverySheetOut(BaseModel):
         True,
         description="该日是否视为订阅配送业务日；false 时（周日/法定及调休等）不生成列表，大表为空属正常",
     )
+    total_members: int = Field(
+        0,
+        ge=0,
+        description="门店内未删除会员总户数（含周/月/次卡及未标注套餐者）",
+    )
+    active_weekly_members: int = Field(
+        0,
+        ge=0,
+        description="周卡且剩余次数 balance>0，与会员列表 validity=active 口径一致",
+    )
+    expired_weekly_members: int = Field(
+        0,
+        ge=0,
+        description="周卡且 balance=0",
+    )
+    active_monthly_members: int = Field(
+        0,
+        ge=0,
+        description="月卡且 balance>0",
+    )
+    expired_monthly_members: int = Field(
+        0,
+        ge=0,
+        description="月卡且 balance=0",
+    )
 
 
 class CardOrderDeliveryAddressIn(BaseModel):

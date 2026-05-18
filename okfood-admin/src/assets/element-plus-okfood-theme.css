@@ -162,41 +162,7 @@
   display: none;
 }
 
-@media (max-width: 900px) {
-  .admin-layout .sidebar .sidebar-menu.el-menu {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
-    width: 100%;
-    gap: 0.35rem;
-    order: 3;
-    flex: 1 1 100%;
-  }
-
-  .admin-layout .sidebar .sidebar-menu .el-sub-menu {
-    flex: 1 1 100%;
-  }
-
-  .admin-layout .sidebar .sidebar-menu .el-menu-item,
-  .admin-layout .sidebar .sidebar-menu .el-sub-menu__title {
-    flex: 1 1 auto;
-    min-width: 120px;
-    margin-bottom: 0;
-  }
-
-  .admin-layout .sidebar .sidebar-menu .el-sub-menu .el-menu {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
-    width: 100%;
-    padding-left: 0 !important;
-  }
-
-  .admin-layout .sidebar .sidebar-menu .el-sub-menu .el-menu-item {
-    flex: 1 1 140px;
-    padding-left: 1rem !important;
-  }
-}
+/* 窄屏侧栏改为默认图标收起后，沿用竖向菜单与桌面一致的交互（子菜单仍为弹出层），不再使用横向铺满布局 */
 
 /* --- el-table 表头：墨绿背景（与侧栏 / 主色 #0e5a44 一致）--- */
 .el-table thead th.el-table__cell {

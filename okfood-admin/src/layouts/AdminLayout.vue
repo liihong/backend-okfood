@@ -47,25 +47,38 @@ const hidePageTitle = computed(() => Boolean(route.meta.hidePageTitle))
 
 const activeMenuPath = computed(() => route.path)
 
-/** 用户选择的收起状态（窄屏下不生效，避免与移动端横向菜单冲突） */
+/** 桌面：侧栏收起偏好（持久化） */
 const sidebarCollapsedPref = ref(false)
 
-const isNarrowScreen = ref(false)
+/** 窄屏：是否与桌面一致展开侧栏文案（默认 false = 自动窄图标栏） */
+const narrowSidebarExpanded = ref(false)
+
+const isNarrowScreen = ref(
+  typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches,
+)
 
 let sidebarMediaQuery = null
 
 function syncNarrowScreen() {
   if (!sidebarMediaQuery) return
-  isNarrowScreen.value = sidebarMediaQuery.matches
+  const narrow = sidebarMediaQuery.matches
+  if (narrow && !isNarrowScreen.value) {
+    narrowSidebarExpanded.value = false
+  }
+  isNarrowScreen.value = narrow
 }
 
-/** 实际是否收起侧栏（桌面有效） */
-const sidebarCollapsed = computed(
-  () => sidebarCollapsedPref.value && !isNarrowScreen.value,
+/** 实际是否收起侧栏：手机默认收起；桌面来自用户偏好 */
+const sidebarCollapsed = computed(() =>
+  isNarrowScreen.value ? !narrowSidebarExpanded.value : sidebarCollapsedPref.value,
 )
 
 function toggleSidebar() {
-  sidebarCollapsedPref.value = !sidebarCollapsedPref.value
+  if (isNarrowScreen.value) {
+    narrowSidebarExpanded.value = !narrowSidebarExpanded.value
+  } else {
+    sidebarCollapsedPref.value = !sidebarCollapsedPref.value
+  }
 }
 
 onMounted(() => {

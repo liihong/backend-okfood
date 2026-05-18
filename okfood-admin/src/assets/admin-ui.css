@@ -2947,18 +2947,12 @@
 }
 
 @media (max-width: 900px) {
+  /* 窄屏默认侧栏收起为图标栏（与桌面 .sidebar--collapsed 一致），保持 fixed 占位，为主区留出宽度 */
   .sidebar {
-    width: 100%;
-    height: auto;
-    position: relative;
-    flex-direction: row;
-    flex-wrap: wrap;
-    padding: 1.25rem;
+    padding: 1.25rem 0.85rem;
   }
-   /* 侧栏导航已由 Element Plus el-menu 接管，移动端样式见 element-plus-okfood-theme.css */
   .main-body {
-    margin-left: 0;
-    padding: 1.5rem;
+    padding: 1rem 1rem;
   }
   .form-row {
     grid-template-columns: 1fr;

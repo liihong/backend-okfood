@@ -111,6 +111,11 @@ const emptySheet = () => ({
   pickup_meal_total: 0,
   /** 与后端一致：false 表示周日/法定假等不生成订阅大表 */
   is_subscription_delivery_day: true,
+  total_members: 0,
+  active_weekly_members: 0,
+  expired_weekly_members: 0,
+  active_monthly_members: 0,
+  expired_monthly_members: 0,
 })
 
 const areaFilter = ref('')
