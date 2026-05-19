@@ -111,8 +111,8 @@ async function submitEditMember() {
       address: editForm.value.address.trim() || null,
       daily_meal_units: Math.max(1, Math.min(50, Number(editForm.value.daily_meal_units) || 1)),
       balance: Math.max(0, Math.min(999999, Math.floor(Number(editForm.value.balance) || 0))),
-      delivery_start_date: editForm.value.delivery_start_date?.trim()
-        ? editForm.value.delivery_start_date.trim().slice(0, 10)
+      delivery_start_date: String(editForm.value.delivery_start_date ?? '').trim()
+        ? String(editForm.value.delivery_start_date).trim().slice(0, 10)
         : null,
       store_pickup: editForm.value.store_pickup === true,
       skip_subscription_saturday: editForm.value.skip_subscription_saturday === true,
@@ -184,22 +184,20 @@ async function submitEditMember() {
               <div class="mem-grid-2">
                 <div class="mem-field">
                   <label class="mem-lab">会员手机号</label>
-                  <input
-                    class="mem-input mem-input-readonly font-mono"
-                    type="text"
-                    :value="editForm.phone"
-                    readonly
+                  <el-input
+                    class="mem-input-el mem-input-readonly"
+                    :model-value="editForm.phone"
+                    disabled
                   />
                 </div>
                 <div class="mem-field">
                   <label class="mem-lab">姓名</label>
-                  <input
+                  <el-input
                     v-model="editForm.name"
-                    type="text"
-                    required
                     maxlength="100"
-                    class="mem-input"
                     placeholder="请输入姓名"
+                    clearable
+                    class="mem-input-el"
                   />
                 </div>
               </div>
@@ -239,41 +237,39 @@ async function submitEditMember() {
                       title="直接修改将产生余额流水（管理端调整）；常规续卡请走开卡工单入账"
                     />
                   </label>
-                  <div class="mem-affix">
-                    <input
-                      v-model.number="editForm.balance"
-                      type="number"
-                      min="0"
-                      max="999999"
-                      step="1"
-                      required
-                      class="mem-input mem-input-em mem-affix-inp"
+                  <div class="mem-affix mem-affix--el-row">
+                    <el-input-number
+                      v-model="editForm.balance"
+                      :min="0"
+                      :max="999999"
+                      :step="1"
+                      controls-position="right"
+                      class="mem-input-el mem-affix-inp-el"
                     />
-                    <span class="mem-affix-suf">次</span>
+                    <span class="mem-affix-suf-el">次</span>
                   </div>
                 </div>
                 <div class="mem-field">
                   <label class="mem-lab">每配送日份数</label>
-                  <div class="mem-affix">
-                    <input
-                      v-model.number="editForm.daily_meal_units"
-                      type="number"
-                      min="1"
-                      max="50"
-                      step="1"
-                      required
-                      class="mem-input mem-affix-inp"
+                  <div class="mem-affix mem-affix--el-row">
+                    <el-input-number
+                      v-model="editForm.daily_meal_units"
+                      :min="1"
+                      :max="50"
+                      :step="1"
+                      controls-position="right"
+                      class="mem-input-el mem-affix-inp-el"
                     />
-                    <span class="mem-affix-suf">份</span>
+                    <span class="mem-affix-suf-el">份</span>
                   </div>
                 </div>
                 <div class="mem-field">
                   <label class="mem-lab">套餐类型</label>
-                  <select v-model="editForm.plan_type" class="mem-input">
-                    <option value="周卡">周卡</option>
-                    <option value="月卡">月卡</option>
-                    <option value="次卡">次卡</option>
-                  </select>
+                  <el-select v-model="editForm.plan_type" class="mem-input-el mem-select-el">
+                    <el-option label="周卡" value="周卡" />
+                    <el-option label="月卡" value="月卡" />
+                    <el-option label="次卡" value="次卡" />
+                  </el-select>
                 </div>
               </div>
             </section>
@@ -295,48 +291,52 @@ async function submitEditMember() {
                       title="勾选自动划区后保存将忽略此处手动所选；否则先地理编码再以所选片区覆盖"
                     />
                   </label>
-                  <select
+                  <el-select
                     v-model="editForm.delivery_region_id"
-                    class="mem-input"
+                    class="mem-input-el mem-select-el"
                     :disabled="editForm.use_auto_area"
+                    clearable
+                    placeholder="未分配"
                   >
-                    <option value="">未分配</option>
-                    <option v-for="r in regionOptions" :key="r.id" :value="String(r.id)">
-                      {{ r.name || '—' }}
-                    </option>
-                  </select>
+                    <el-option label="未分配" value="" />
+                    <el-option
+                      v-for="r in regionOptions"
+                      :key="r.id"
+                      :label="r.name || '—'"
+                      :value="String(r.id)"
+                    />
+                  </el-select>
                 </div>
                 <div class="mem-field">
                   <label class="mem-lab">业务起送日期</label>
-                  <input v-model="editForm.delivery_start_date" type="date" class="mem-input" />
+                  <el-date-picker
+                    v-model="editForm.delivery_start_date"
+                    type="date"
+                    value-format="YYYY-MM-DD"
+                    placeholder="选择日期"
+                    class="mem-date-picker"
+                    clearable
+                  />
                 </div>
               </div>
 
-              <label class="mem-auto-chk">
-                <input v-model="editForm.use_auto_area" type="checkbox" />
-                <span>保存时按当前地址重新自动划区</span>
+              <label class="mem-auto-chk mem-auto-chk--el">
+                <el-checkbox v-model="editForm.use_auto_area">保存时按当前地址重新自动划区</el-checkbox>
               </label>
               <p class="mem-hint-soft">
                 未勾选时：保存会先按地址地理编码划区，再以您所选片区覆盖。勾选后忽略手动片区。
               </p>
 
               <div class="mem-chk-band">
-                <label class="mem-chk mem-chk--red">
-                  <input v-model="editForm.delivery_deferred" type="checkbox" />
-                  <span>暂停配送</span>
-                </label>
-                <label class="mem-chk mem-chk--blue">
-                  <input
-                    v-model="editForm.store_pickup"
-                    type="checkbox"
-                    :disabled="editForm.delivery_deferred"
-                  />
-                  <span>门店自提</span>
-                </label>
-                <label class="mem-chk mem-chk--amber">
-                  <input v-model="editForm.skip_subscription_saturday" type="checkbox" />
-                  <span>周六不参与</span>
-                </label>
+                <el-checkbox v-model="editForm.delivery_deferred" class="mem-chk-el mem-chk-el--red">
+                  暂停配送
+                </el-checkbox>
+                <el-checkbox v-model="editForm.store_pickup" :disabled="editForm.delivery_deferred" class="mem-chk-el mem-chk-el--blue">
+                  门店自提
+                </el-checkbox>
+                <el-checkbox v-model="editForm.skip_subscription_saturday" class="mem-chk-el mem-chk-el--amber">
+                  周六不参与
+                </el-checkbox>
               </div>
             </section>
 
@@ -346,12 +346,15 @@ async function submitEditMember() {
                 <span class="mem-bar" aria-hidden="true"></span>
                 <h2 class="mem-sec-title">备注</h2>
               </div>
-              <textarea
+              <el-input
                 v-model="editForm.remarks"
+                type="textarea"
+                :rows="4"
                 maxlength="500"
-                class="mem-input mem-ta"
+                show-word-limit
+                class="mem-input-el mem-ta-el"
                 placeholder="请在此输入特别说明或客户需求..."
-              ></textarea>
+              />
             </section>
           </div>
         </div>
@@ -682,6 +685,37 @@ select.mem-input {
   color: #94a3b8;
 }
 
+.mem-affix--el-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.mem-affix-inp-el {
+  flex: 1;
+  min-width: 0;
+}
+.mem-affix-suf-el {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+.mem-input-el {
+  width: 100%;
+}
+.mem-input-readonly :deep(.el-input__wrapper) {
+  background: #f1f5f9;
+}
+.mem-select-el {
+  width: 100%;
+}
+.mem-date-picker {
+  width: 100%;
+}
+.mem-ta-el {
+  width: 100%;
+}
+
 .mem-auto-chk {
   display: flex;
   align-items: center;
@@ -713,8 +747,8 @@ select.mem-input {
   border-top: 1px solid #f1f5f9;
   display: flex;
   flex-wrap: wrap;
+  gap: 0.75rem 1rem;
   align-items: center;
-  gap: 0.5rem 1.35rem;
 }
 
 .mem-chk {

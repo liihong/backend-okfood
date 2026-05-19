@@ -31,15 +31,16 @@ const pageSizeOptions = [10, 20, 50, 100]
 const deliveryDate = ref(todayShanghaiStr())
 /** 回调订单状态筛：空=全部；unknown=尚无回调状态；其余为顺丰 order_status 数值字符串 */
 const orderStatusFilter = ref('')
-/** 创单状态：空=全部；ok=成功；fail=失败 */
+/** 创单状态：空=全部；ok=成功未取消；fail=失败；cancelled=取消订单 */
 const createStatusFilter = ref('')
 const memberPhoneFilter = ref('')
 const sfOrderIdFilter = ref('')
 
 const createStatusOptions = [
   { value: '', label: '全部创单' },
-  { value: 'ok', label: '创单成功' },
+  { value: 'ok', label: '创单成功（未取消）' },
   { value: 'fail', label: '创单失败' },
+  { value: 'cancelled', label: '取消订单' },
 ]
 
 const pushStats = ref(null)
@@ -89,7 +90,7 @@ function appendMonitorListQuery(q) {
   if (os === 'unknown') q.set('callback_order_status_unknown', 'true')
   else if (os !== '') q.set('sf_callback_order_status', os)
   const cs = (createStatusFilter.value || '').trim()
-  if (cs === 'ok' || cs === 'fail') q.set('sf_create_status', cs)
+  if (cs === 'ok' || cs === 'fail' || cs === 'cancelled') q.set('sf_create_status', cs)
   const ph = (memberPhoneFilter.value || '').trim()
   if (ph) q.set('member_phone', ph)
   const oid = (sfOrderIdFilter.value || '').trim()
@@ -197,6 +198,8 @@ function goNext() {
 }
 
 function sfStatusLabel(row) {
+  const label = row?.sf_create_status_label
+  if (label) return label
   const code = row.error_code
   if (code === 0 || code === '0') return '创单成功'
   if (code === undefined || code === null) return '—'
@@ -237,6 +240,7 @@ const SF_CALLBACK_KIND_ZH = {
   delivery_status: '配送状态变更',
   order_complete: '订单完成',
   cancel_by_sf: '顺丰取消',
+  merchant_cancel: '商家取消配送',
   delivery_exception: '配送异常',
   rider_cancel: '骑士取消',
   auto_shop: '自动店铺',
@@ -277,6 +281,7 @@ function formatMemberPhones(row) {
 function canCancelSfRow(row) {
   const code = row?.error_code
   if (code !== 0 && code !== '0') return false
+  if (row?.merchant_cancel_requested_at) return false
   const stRaw = row?.sf_callback_order_status
   if (stRaw !== undefined && stRaw !== null && stRaw !== '') {
     const stNum = Number(stRaw)
@@ -387,7 +392,8 @@ onMounted(() => {
         </p>
         <p v-if="pushStats" class="sf-monitor-stats">
           <strong>业务日 {{ pushStats.delivery_date }}</strong>：共 {{ pushStats.total }} 单 · 成功
-          {{ pushStats.success }} · 失败 {{ pushStats.failed }}
+          {{ pushStats.success }} · 失败 {{ pushStats.failed }} · 取消
+          {{ pushStats.cancelled != null ? pushStats.cancelled : 0 }}
           <span class="sf-monitor-stats-sub">（按配送业务日统计，与下方列表「业务日」一致；夜间推送记在该配送日）</span>
         </p>
         <div class="sf-monitor-filters">

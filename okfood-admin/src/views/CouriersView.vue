@@ -95,6 +95,10 @@ async function submitCourierModal() {
   courierModalSubmitting.value = true
   try {
     if (courierModalMode.value === 'create') {
+      if (!(courierForm.courier_id || '').trim()) {
+        showToast('请填写工号', 'error')
+        return
+      }
       const pin = (courierForm.pin || '').trim()
       if (pin.length < 4) {
         showToast('初始 PIN 至少 4 位', 'error')
@@ -259,56 +263,41 @@ onMounted(() => {
           <div v-if="courierModalMode === 'create'" class="form-row">
             <div class="form-group">
               <label>工号</label>
-              <input v-model="courierForm.courier_id" required placeholder="如 C001" />
+              <el-input v-model="courierForm.courier_id" placeholder="如 C001" clearable />
             </div>
             <div class="form-group">
               <label>初始 PIN</label>
-              <input
+              <el-input
                 v-model="courierForm.pin"
                 type="password"
-                required
-                minlength="4"
+                show-password
                 placeholder="至少 4 位"
+                autocomplete="new-password"
               />
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
               <label>姓名</label>
-              <input v-model="courierForm.name" placeholder="配送员姓名" />
+              <el-input v-model="courierForm.name" placeholder="配送员姓名" clearable />
             </div>
             <div class="form-group">
               <label>电话</label>
-              <input v-model="courierForm.phone" maxlength="20" placeholder="手机号" />
+              <el-input v-model="courierForm.phone" maxlength="20" placeholder="手机号" clearable />
             </div>
           </div>
           <div v-if="courierModalMode === 'edit'" class="form-row">
             <div class="form-group">
               <label>待结算金额(元)</label>
-              <input
-                v-model="courierForm.fee_pending"
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="0.00"
-              />
+              <el-input v-model="courierForm.fee_pending" placeholder="0.00" clearable />
             </div>
             <div class="form-group">
               <label>已结算累计(元)</label>
-              <input
-                v-model="courierForm.fee_settled"
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="0.00"
-              />
+              <el-input v-model="courierForm.fee_settled" placeholder="0.00" clearable />
             </div>
           </div>
           <div v-if="courierModalMode === 'edit'" class="form-group">
-            <label class="checkbox-inline">
-              <input v-model="courierForm.is_active" type="checkbox" />
-              在职（取消勾选即停用）
-            </label>
+            <el-checkbox v-model="courierForm.is_active">在职（取消勾选即停用）</el-checkbox>
           </div>
           <button type="submit" class="btn-submit-order" :disabled="courierModalSubmitting">
             {{ courierModalSubmitting ? '提交中…' : '保存' }}
@@ -336,12 +325,12 @@ onMounted(() => {
         <form class="modal-form" @submit.prevent="submitCourierPinReset">
           <div class="form-group">
             <label>新 PIN</label>
-            <input
+            <el-input
               v-model="pinResetValue"
               type="password"
-              required
-              minlength="4"
+              show-password
               placeholder="至少 4 位"
+              autocomplete="new-password"
             />
           </div>
           <button type="submit" class="btn-submit-order" :disabled="pinResetSubmitting">

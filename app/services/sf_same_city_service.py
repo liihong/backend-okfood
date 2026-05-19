@@ -811,6 +811,13 @@ def cancel_sf_same_city_push(
         )
     except SfOpenApiError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+    row.sf_callback_order_status = 31
+    row.merchant_cancel_requested_at = datetime.utcnow()
+    row.last_callback_at = datetime.utcnow()
+    row.last_callback_kind = "merchant_cancel"
+    db.commit()
+
     if isinstance(res, dict):
         return {"message": "顺丰已受理取消", "sf_response": res}
     return {"message": "顺丰已受理取消", "sf_response": None}

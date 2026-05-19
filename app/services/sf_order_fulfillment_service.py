@@ -22,6 +22,35 @@ logger = logging.getLogger(__name__)
 SF_ORDER_STATUS_DELIVERED_TUOTOU = 17
 
 
+def _sf_push_monitor_cancelled_clause():
+    """商户已发起取消（本地标记）或顺丰回调已为取消/撤单终态；与监控页「取消订单」口径一致。"""
+    return or_(
+        SfSameCityPush.merchant_cancel_requested_at.isnot(None),
+        SfSameCityPush.sf_callback_order_status.in_((2, 22)),
+    )
+
+
+def sf_monitor_create_status_label(
+    *,
+    error_code: int | None,
+    sf_callback_order_status: int | None,
+    merchant_cancel_requested_at: Any,
+) -> str:
+    """
+    监控列表 / 导出「创单状态」列：顺丰确认取消优先于本地取消标记，其次创单 error_code。
+    """
+    cb = int(sf_callback_order_status) if sf_callback_order_status is not None else None
+    if cb is not None and cb in (2, 22):
+        return "取消订单"
+    if merchant_cancel_requested_at is not None:
+        return "取消订单"
+    if error_code == 0:
+        return "创单成功"
+    if error_code is None:
+        return "—"
+    return f"失败 ({error_code})"
+
+
 def _sf_push_monitor_where_clauses(
     *,
     delivery_date: date | None,
@@ -36,7 +65,7 @@ def _sf_push_monitor_where_clauses(
     顺丰监控列表 / 导出共用 WHERE 条件。
     会员手机：在 request_snapshot JSON 文本中 LIKE（停靠点快照含 recv_phone 等）。
     顺丰单号：sf_order_id 模糊匹配。
-    创单状态：ok=error_code==0；fail=非成功（含 NULL，兼容历史数据）。
+    创单状态：ok=创单成功且未取消；fail=创单非成功；cancelled=取消订单（本地取消标记或回调 2/22）。
     """
     clauses: list[Any] = []
     if delivery_date is not None:
@@ -51,8 +80,11 @@ def _sf_push_monitor_where_clauses(
     st = (sf_create_status or "").strip().lower()
     if st in ("ok", "success"):
         clauses.append(SfSameCityPush.error_code == 0)
+        clauses.append(~_sf_push_monitor_cancelled_clause())
     elif st in ("fail", "failed"):
         clauses.append(or_(SfSameCityPush.error_code.is_(None), SfSameCityPush.error_code != 0))
+    elif st in ("cancelled", "canceled"):
+        clauses.append(_sf_push_monitor_cancelled_clause())
 
     oid = (sf_order_id_contains or "").strip()
     if oid:
@@ -174,8 +206,30 @@ def _sf_push_monitor_row_dict(
         "sf_callback_order_status": int(r.sf_callback_order_status)
         if r.sf_callback_order_status is not None
         else None,
+        "merchant_cancel_requested_at": _iso_dt(getattr(r, "merchant_cancel_requested_at", None)),
+        "sf_create_status_label": sf_monitor_create_status_label(
+            error_code=int(r.error_code) if r.error_code is not None else None,
+            sf_callback_order_status=int(r.sf_callback_order_status)
+            if r.sf_callback_order_status is not None
+            else None,
+            merchant_cancel_requested_at=getattr(r, "merchant_cancel_requested_at", None),
+        ),
         "members": members,
     }
+
+
+def _sf_push_skip_auto_fulfillment_due_to_cancel(pus: SfSameCityPush) -> bool:
+    """商户已发起取消或顺丰侧已为取消流程/终态时，勿再自动扣次/标履约。"""
+    if getattr(pus, "merchant_cancel_requested_at", None) is not None:
+        return True
+    st = pus.sf_callback_order_status
+    if st is None:
+        return False
+    try:
+        n = int(st)
+    except (TypeError, ValueError):
+        return False
+    return n in (2, 22, 31)
 
 
 def _apply_sf_same_city_stop_fulfillment(db: Session, pus: SfSameCityPush, *, operator_tag: str) -> None:
@@ -183,6 +237,8 @@ def _apply_sf_same_city_stop_fulfillment(db: Session, pus: SfSameCityPush, *, op
     同一停靠点的订阅扣次 + 单点餐履约标记；已由各类顺丰回调按需调用。
     """
     if int(pus.error_code or -1) != 0:
+        return
+    if _sf_push_skip_auto_fulfillment_due_to_cancel(pus):
         return
     sid = int(pus.store_id) if getattr(pus, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
     agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
@@ -347,22 +403,35 @@ def count_sf_same_city_pushes_for_delivery_date(
     store_id: int | None,
     delivery_date: date,
 ) -> dict[str, int]:
-    """按推送记录上的配送业务日 ``delivery_date`` 统计创单成功 / 失败条数（与列表「业务日」筛选一致）。"""
+    """按推送记录上的配送业务日 ``delivery_date`` 统计创单成功 / 失败 / 取消（与列表筛选口径一致）。"""
     conds = [SfSameCityPush.delivery_date == delivery_date]
     if store_id is not None:
         conds.append(SfSameCityPush.store_id == int(store_id))
 
     flt = and_(*conds)
+    cancelled_flt = _sf_push_monitor_cancelled_clause()
     total = int(db.scalar(select(func.count()).select_from(SfSameCityPush).where(flt)) or 0)
+    cancelled = int(
+        db.scalar(select(func.count()).select_from(SfSameCityPush).where(flt, cancelled_flt)) or 0
+    )
     success = int(
         db.scalar(
             select(func.count()).select_from(SfSameCityPush).where(
                 flt,
                 SfSameCityPush.error_code == 0,
+                ~cancelled_flt,
             )
         )
         or 0
     )
-    failed = max(0, total - success)
-    return {"total": total, "success": success, "failed": failed}
+    failed = int(
+        db.scalar(
+            select(func.count()).select_from(SfSameCityPush).where(
+                flt,
+                or_(SfSameCityPush.error_code.is_(None), SfSameCityPush.error_code != 0),
+            )
+        )
+        or 0
+    )
+    return {"total": total, "success": success, "failed": failed, "cancelled": cancelled}
 

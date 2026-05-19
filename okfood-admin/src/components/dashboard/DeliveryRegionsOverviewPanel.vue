@@ -683,10 +683,11 @@ onMounted(() => {
         </button>
         <label class="dro-date-inline">
           <span class="dro-sr-only">营业概览锚定日</span>
-          <input
+          <el-date-picker
             v-model="summaryAnchorDate"
             type="date"
-            class="dro-date-inline-input"
+            value-format="YYYY-MM-DD"
+            class="dro-date-inline-picker"
             :disabled="dashboardStatsLoading"
             aria-describedby="dro-summary-anchor-hint"
             @change="onSummaryDateChange"
@@ -1041,8 +1042,7 @@ onMounted(() => {
             <span class="dro-map-toolbar-title">实时地理分布 (LIVE)</span>
           </div>
           <label class="dro-map-pickup-toggle">
-            <input v-model="showSelfPickupPoints" type="checkbox" class="dro-map-pickup-cb" />
-            <span class="dro-map-pickup-label">自提显示</span>
+            <el-checkbox v-model="showSelfPickupPoints" class="dro-map-pickup-cb">自提显示</el-checkbox>
           </label>
         </div>
         <div class="dro-map-body">
@@ -1210,21 +1210,25 @@ onMounted(() => {
   }
 }
 
-.dro-date-inline-input {
+.dro-date-inline-picker {
+  width: auto;
+  min-width: 170px;
+}
+
+.dro-date-inline-picker :deep(.el-input__wrapper) {
   padding: 0.45rem 0.85rem;
-  border: 1px solid #e2e8f0;
   border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.dro-date-inline-picker :deep(.el-input__inner) {
   font-size: 13px;
   font-weight: 800;
   color: #334155;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   font-family: inherit;
 }
 
-.dro-date-inline-input:focus {
-  outline: none;
-  border-color: #10b981;
+.dro-date-inline-picker :deep(.el-input__wrapper.is-focus) {
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
 }
 

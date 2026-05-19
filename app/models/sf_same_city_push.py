@@ -30,4 +30,6 @@ class SfSameCityPush(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_callback_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_callback_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 管理端 cancelorder 成功时间；顺丰回调仍会刷新 sf_callback_order_status 等
+    merchant_cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     sf_callback_order_status: Mapped[int | None] = mapped_column(Integer, nullable=True)

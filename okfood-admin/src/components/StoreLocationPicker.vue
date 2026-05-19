@@ -291,12 +291,12 @@ onUnmounted(() => {
     </p>
     <template v-else>
       <div class="slp-search">
-        <input
+        <el-input
           :id="searchInputId"
           v-model="searchKeyword"
-          type="text"
           class="slp-search-input"
           placeholder="搜索地点（下拉联想或输入后点搜索），如：宝龙城市广场 新乡"
+          clearable
           autocomplete="off"
           @keydown.enter.prevent="runKeywordSearch"
         />

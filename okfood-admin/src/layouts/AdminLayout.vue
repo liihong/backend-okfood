@@ -10,6 +10,7 @@ import {
   DollarSign,
   LogOut,
   ClipboardList,
+  Package,
   ChevronsLeft,
   ChevronsRight,
   Settings,
@@ -166,6 +167,12 @@ watch(sidebarCollapsedPref, (v) => {
           <div class="menu-item-inner">
             <ClipboardList :size="18" stroke-width="2" />
             <span class="menu-item-label">开卡工单</span>
+          </div>
+        </el-menu-item>
+        <el-menu-item v-if="showFullAdminMenus" index="/orders">
+          <div class="menu-item-inner">
+            <Package :size="18" stroke-width="2" />
+            <span class="menu-item-label">订单管理</span>
           </div>
         </el-menu-item>
         <el-menu-item v-if="showFullAdminMenus" index="/delivery">

@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
 
 from fastapi import HTTPException
 from sqlalchemy import and_, case, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.constants import UNASSIGNED_DELIVERY_AREA
 from app.core.config import get_settings
@@ -171,11 +173,94 @@ def _store_membership_counts(db: Session, *, store_id: int) -> dict[str, int]:
 def total_meal_units_for_delivery_sheet(
     db: Session, *, delivery_date: date, store_id: int | None = None
 ) -> int:
-    """与 ``build_delivery_sheet`` 各分组 ``meal_total`` 之和一致（到家+自提，含已送后不再应送仍并入大表者）。"""
+    """与 ``build_delivery_sheet`` 各分组 ``meal_total`` 之和一致（到家+自提，含已送后不再应送仍并入大表者）。
+
+    不构建停靠点分组与 Pydantic 结构，仅复用同源会员名单做一次份数聚合，供仪表盘等大表同源统计。
+    """
     if not is_subscription_delivery_day(delivery_date):
         return 0
-    sheet = build_delivery_sheet(db, delivery_date=delivery_date, store_id=store_id)
-    return int(sum(g.meal_total for g in sheet.groups))
+    cfg = get_settings()
+    sid = int(store_id) if store_id is not None else int(cfg.DEFAULT_STORE_ID)
+    members, _default_home = eligible_members_for_delivery(
+        db, delivery_date=delivery_date, delivery_region_id=None, store_id=sid
+    )
+    pu_members, _pu_defaults = eligible_members_for_store_pickup(db, delivery_date=delivery_date, store_id=sid)
+    already_home = {int(m.id) for m in members}
+    already_pickup = {int(m.id) for m in pu_members}
+    ex_h, _ex_dh, ex_pu, _ex_pud = extra_delivered_ineligible_subscribers(
+        db,
+        delivery_date=delivery_date,
+        already_home=already_home,
+        already_pickup=already_pickup,
+        delivery_region_id=None,
+        store_id=sid,
+    )
+    members.extend(ex_h)
+    pu_members.extend(ex_pu)
+    total = 0
+    for m in members:
+        total += effective_daily_meal_units(m)
+    for m in pu_members:
+        total += effective_daily_meal_units(m)
+    return int(total)
+
+
+def meal_units_totals_for_delivery_dates(
+    db: Session,
+    *,
+    dates: Iterable[date],
+    store_id: int | None = None,
+) -> dict[date, int]:
+    """与 ``total_meal_units_for_delivery_sheet`` 同源的对日映射；可多日一次拉齐。
+
+    非 SQLite 且多日均为订阅配送日时，独占会话并行查库以降低 dashboard 等场景的串行延迟。
+    """
+    cfg = get_settings()
+    sid = int(store_id) if store_id is not None else int(cfg.DEFAULT_STORE_ID)
+
+    uniq: list[date] = []
+    seen: set[date] = set()
+    for d in dates:
+        if d not in seen:
+            seen.add(d)
+            uniq.append(d)
+
+    out: dict[date, int] = {}
+    todo: list[date] = []
+    for d in uniq:
+        if not is_subscription_delivery_day(d):
+            out[d] = 0
+        else:
+            todo.append(d)
+
+    if not todo:
+        return out
+
+    bind = db.get_bind()
+    use_threads = bind.dialect.name != "sqlite" and len(todo) > 1
+    if not use_threads:
+        for d in todo:
+            out[d] = total_meal_units_for_delivery_sheet(db, delivery_date=d, store_id=sid)
+        return out
+
+    mk = sessionmaker(bind=bind, autoflush=False, autocommit=False, expire_on_commit=False)
+
+    def _compute_one(delivery_d: date) -> tuple[date, int]:
+        sess = mk()
+        try:
+            val = total_meal_units_for_delivery_sheet(sess, delivery_date=delivery_d, store_id=sid)
+            return delivery_d, val
+        finally:
+            sess.close()
+
+    max_workers = min(4, len(todo))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_compute_one, d) for d in todo]
+        for fut in as_completed(futures):
+            d_key, val = fut.result()
+            out[d_key] = val
+
+    return out
 
 
 def build_delivery_sheet(

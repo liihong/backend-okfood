@@ -64,7 +64,6 @@ function dishSpiceBadge(row) {
   if (!k) return '未标注'
   return SPICE_ADMIN_LABELS[k] || '未标注'
 }
-const dishFileInput = ref(null)
 const dishPhotoUploading = ref(false)
 
 async function fetchCategoriesForDishes() {
@@ -142,14 +141,10 @@ const closeDishModal = () => {
   showDishModal.value = false
 }
 
-const triggerDishPhotoPick = () => {
-  if (dishPhotoUploading.value) return
-  dishFileInput.value?.click()
-}
+const dishPhotoUploadKey = ref(0)
 
-const onDishPhotoChange = async (e) => {
-  const file = e.target.files?.[0]
-  e.target.value = ''
+const onDishPhotoUploadChange = async (uploadFile) => {
+  const file = uploadFile?.raw
   if (!file || !file.type.startsWith('image/')) return
   if (!adminAccessToken.value) {
     showToast('请先登录', 'error')
@@ -177,6 +172,7 @@ const onDishPhotoChange = async (e) => {
     showToast(err instanceof Error ? err.message : '上传失败', 'error')
   } finally {
     dishPhotoUploading.value = false
+    dishPhotoUploadKey.value += 1
   }
 }
 
@@ -278,7 +274,13 @@ onMounted(() => {
     <div class="dish-toolbar">
       <div class="dish-toolbar-search">
         <Search :size="18" />
-        <input v-model="dishSearchQuery" type="search" placeholder="按菜品名称筛选…" />
+        <el-input
+          v-model="dishSearchQuery"
+          type="search"
+          clearable
+          placeholder="按菜品名称筛选…"
+          class="dish-toolbar-search-input"
+        />
       </div>
       <p v-if="dishesLoading" class="dish-toolbar-status">正在加载菜品库…</p>
       <p v-else class="dish-toolbar-status">共 {{ filteredDishes.length }} 道</p>
@@ -338,109 +340,112 @@ onMounted(() => {
           <button type="button" class="close-btn" @click="closeDishModal"><X :size="20" /></button>
         </div>
         <div class="modal-body menu-editor-body">
-          <input
-            ref="dishFileInput"
-            type="file"
-            class="menu-file-input-hidden"
+          <el-upload
+            :key="dishPhotoUploadKey"
+            class="menu-dish-photo-upload"
+            :show-file-list="false"
+            :auto-upload="false"
             accept="image/*"
-            @change="onDishPhotoChange"
-          />
-          <label class="menu-editor-label">展示图（可选）</label>
-          <button
-            type="button"
-            class="menu-upload-sim"
-            :disabled="dishPhotoUploading"
-            @click="triggerDishPhotoPick"
+            @change="onDishPhotoUploadChange"
           >
-            <img
-              v-if="dishForm.image_url"
-              :src="dishImageDisplayUrl(dishForm.image_url)"
-              alt=""
-              class="menu-upload-preview"
-            />
-            <div v-else class="menu-upload-inner">
-              <Camera :size="32" stroke-width="1.75" class="menu-upload-icon" />
-              <p class="menu-upload-text">
-                {{ dishPhotoUploading ? '正在上传…' : '点击上传至服务器，或下方粘贴外链' }}
-              </p>
-            </div>
-            <span v-if="dishForm.image_url && !dishPhotoUploading" class="menu-upload-change-hint"
-              >点击更换</span
+            <button
+              type="button"
+              class="menu-upload-sim"
+              :disabled="dishPhotoUploading"
             >
-          </button>
+              <img
+                v-if="dishForm.image_url"
+                :src="dishImageDisplayUrl(dishForm.image_url)"
+                alt=""
+                class="menu-upload-preview"
+              />
+              <div v-else class="menu-upload-inner">
+                <Camera :size="32" stroke-width="1.75" class="menu-upload-icon" />
+                <p class="menu-upload-text">
+                  {{ dishPhotoUploading ? '正在上传…' : '点击上传至服务器，或下方粘贴外链' }}
+                </p>
+              </div>
+              <span v-if="dishForm.image_url && !dishPhotoUploading" class="menu-upload-change-hint"
+                >点击更换</span
+              >
+            </button>
+          </el-upload>
           <label class="menu-editor-label" for="dish-image-url">图片链接（可选，支持 https外链）</label>
-          <input
+          <el-input
             id="dish-image-url"
             v-model="dishForm.image_url"
-            type="url"
-            class="menu-editor-input"
+            class="menu-editor-input-el"
             placeholder="https://… 或上传后自动填入相对路径"
+            clearable
           />
 
           <label class="menu-editor-label" for="dish-name">菜品名称</label>
-          <input
+          <el-input
             id="dish-name"
             v-model="dishForm.name"
-            type="text"
-            class="menu-editor-input menu-editor-input-name"
+            class="menu-editor-input-el menu-editor-input-name"
             placeholder="如：盐葱鸡腿排能量碗"
+            clearable
           />
 
           <div class="menu-editor-row">
             <div class="menu-editor-field menu-editor-field-grow">
               <label class="menu-editor-label" for="dish-category">分类</label>
-              <select id="dish-category" v-model="dishForm.category_id" class="menu-editor-input">
-                <option value="">未分类</option>
-                <option v-for="c in categoriesList" :key="c.id" :value="String(c.id)">
-                  {{ c.name }} ({{ c.code }})
-                </option>
-              </select>
+              <el-select id="dish-category" v-model="dishForm.category_id" class="menu-editor-input-el" clearable placeholder="未分类">
+                <el-option label="未分类" value="" />
+                <el-option
+                  v-for="c in categoriesList"
+                  :key="c.id"
+                  :label="`${c.name} (${c.code})`"
+                  :value="String(c.id)"
+                />
+              </el-select>
             </div>
             <div class="menu-editor-field dish-enabled-field">
               <label class="menu-editor-label" for="dish-enabled">状态</label>
-              <label class="dish-switch">
-                <input id="dish-enabled" v-model="dishForm.is_enabled" type="checkbox" />
+              <div class="dish-switch-el">
+                <el-switch id="dish-enabled" v-model="dishForm.is_enabled" />
                 <span>{{ dishForm.is_enabled ? '启用' : '停用' }}</span>
-              </label>
+              </div>
             </div>
           </div>
 
           <label class="menu-editor-label" for="dish-desc">配料 / 描述</label>
-          <textarea
+          <el-input
             id="dish-desc"
             v-model="dishForm.description"
-            class="menu-editor-textarea"
-            rows="3"
+            type="textarea"
+            :rows="3"
+            class="menu-editor-textarea-el"
             placeholder="原切鸡腿肉、秘制盐葱酱、杂粮基底、时令蔬果。"
-          ></textarea>
+          />
 
           <label class="menu-editor-label" for="dish-spice">辣度（会员端可见）</label>
-          <select id="dish-spice" v-model="dishForm.spice_level" class="menu-editor-input">
-            <option value="">未标注</option>
-            <option value="none">不辣</option>
-            <option value="mild">微微辣</option>
-            <option value="medium">微辣</option>
-            <option value="hot">较辣</option>
-          </select>
+          <el-select id="dish-spice" v-model="dishForm.spice_level" class="menu-editor-input-el" clearable placeholder="未标注">
+            <el-option label="未标注" value="" />
+            <el-option label="不辣" value="none" />
+            <el-option label="微微辣" value="mild" />
+            <el-option label="微辣" value="medium" />
+            <el-option label="较辣" value="hot" />
+          </el-select>
 
           <label class="menu-editor-label" for="dish-internal-sop">内部操作说明（仅后台，不对会员展示）</label>
-          <textarea
+          <el-input
             id="dish-internal-sop"
             v-model="dishForm.internal_view_sop"
-            class="menu-editor-textarea"
-            rows="3"
+            type="textarea"
+            :rows="3"
+            class="menu-editor-textarea-el"
             placeholder="备餐衔接、内部话术等；会员可见信息请写在配料/描述中。"
-          ></textarea>
+          />
 
           <label class="menu-editor-label" for="dish-single-price">单点价格（元，可选）</label>
-          <input
+          <el-input
             id="dish-single-price"
             v-model="dishForm.single_order_price_yuan"
-            type="number"
-            min="0"
-            step="0.01"
-            class="menu-editor-input"
+            class="menu-editor-input-el"
             placeholder="留空表示未定价，会员端显示「待公布」"
+            clearable
           />
 
           <div class="menu-editor-footer-btns">
@@ -459,3 +464,29 @@ onMounted(() => {
     </div>
   </section>
 </template>
+
+<style scoped>
+.dish-toolbar-search-input {
+  flex: 1;
+  min-width: 0;
+}
+.menu-dish-photo-upload {
+  display: block;
+  width: 100%;
+}
+.menu-dish-photo-upload :deep(.el-upload) {
+  display: block;
+  width: 100%;
+}
+.menu-editor-input-el {
+  width: 100%;
+}
+.menu-editor-textarea-el {
+  width: 100%;
+}
+.dish-switch-el {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+</style>

@@ -375,9 +375,13 @@ def extra_delivered_ineligible_subscribers(
     log_ids: set[int] = {
         int(x)
         for x in db.scalars(
-            select(DeliveryLog.member_id).where(
+            select(DeliveryLog.member_id)
+            .distinct()
+            .join(Member, Member.id == DeliveryLog.member_id)
+            .where(
                 DeliveryLog.delivery_date == delivery_date,
                 DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+                _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
             )
         ).all()
     }

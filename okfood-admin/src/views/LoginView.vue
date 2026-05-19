@@ -16,12 +16,15 @@ const router = useRouter()
 
 const loginUsername = ref(LOGIN_PRESET_USER)
 const loginPassword = ref(LOGIN_PRESET_PASSWORD)
-const showPassword = ref(false)
 const loginLoading = ref(false)
 const loginError = ref(false)
 
 const handleAdminLogin = async () => {
   if (loginLoading.value) return
+  if (!loginUsername.value.trim() || !String(loginPassword.value ?? '').trim()) {
+    showToast('请填写账号和密码', 'error')
+    return
+  }
   loginLoading.value = true
   loginError.value = false
 
@@ -94,7 +97,7 @@ const handleAdminLogin = async () => {
           <form class="login-form" @submit.prevent="handleAdminLogin">
             <div class="form-group login-form-group">
               <label>管理员账号 / Account</label>
-              <div class="input-box">
+              <div class="input-box input-box--el">
                 <svg
                   class="input-icon"
                   viewBox="0 0 24 24"
@@ -105,19 +108,19 @@ const handleAdminLogin = async () => {
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                   <circle cx="12" cy="7" r="4" />
                 </svg>
-                <input
+                <el-input
                   v-model="loginUsername"
-                  type="text"
                   placeholder="Admin ID"
-                  required
+                  clearable
                   autocomplete="username"
+                  class="login-el-field"
                 />
               </div>
             </div>
 
             <div class="form-group login-form-group">
               <label>登录密码 / Password</label>
-              <div class="input-box">
+              <div class="input-box input-box--el">
                 <svg
                   class="input-icon"
                   viewBox="0 0 24 24"
@@ -128,24 +131,19 @@ const handleAdminLogin = async () => {
                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                   <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                 </svg>
-                <input
+                <el-input
                   v-model="loginPassword"
-                  :type="showPassword ? 'text' : 'password'"
+                  type="password"
                   placeholder="********"
-                  required
+                  show-password
                   autocomplete="current-password"
+                  class="login-el-field login-el-field--pwd"
                 />
-                <button type="button" class="btn-eye" @click="showPassword = !showPassword">
-                  <span v-if="showPassword">&#128584;</span>
-                  <span v-else>&#128065;</span>
-                </button>
               </div>
             </div>
 
             <div class="form-extras">
-              <label class="remember-me">
-                <input v-model="rememberLogin" type="checkbox" /> 记住登录
-              </label>
+              <el-checkbox v-model="rememberLogin" class="login-remember-el">记住登录</el-checkbox>
               <a href="#" class="forgot-link" @click.prevent>忘记密码？</a>
             </div>
 

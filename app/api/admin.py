@@ -22,6 +22,7 @@ from app.core.deps import (
 from app.models.member import Member
 from app.models.enums import PlanType
 from app.core.limiter import limiter
+from app.core.timeutil import today_shanghai
 from app.schemas.member_address import MemberAddressUpdateIn
 from app.schemas.admin import (
     AdminAddressIn,
@@ -92,10 +93,12 @@ from app.services.member_service import (
     admin_patch_member_profile,
     admin_update_member_address,
 )
+from app.services.single_meal_order_service import list_admin_store_single_meal_orders_by_order_day
 from app.services.member_card_order_service import (
     create_card_order,
     delete_card_order,
     list_card_orders_paged,
+    list_mall_template_card_orders_for_order_day,
     update_card_order,
 )
 from app.services.finance_received_service import finance_received_summary, finance_today_paid_card_orders
@@ -115,7 +118,11 @@ def _normalize_sf_monitor_create_status(raw: str | None) -> str | None:
         return "ok"
     if s in ("fail", "failed"):
         return "fail"
-    raise HTTPException(status_code=400, detail="sf_create_status 仅支持 ok、fail 或留空（全部）")
+    if s in ("cancelled", "canceled"):
+        return "cancelled"
+    raise HTTPException(
+        status_code=400, detail="sf_create_status 仅支持 ok、fail、cancelled 或留空（全部）"
+    )
 
 
 @router.post("/login")
@@ -258,7 +265,7 @@ def delivery_sf_push_stats(
     admin_username: str = Depends(admin_or_delivery_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """按配送业务日统计：该日待配送订单对应的推单记录总数 / 创单成功 / 创单失败（与创单时刻无关）。"""
+    """按配送业务日统计：推单记录总数 / 创单成功（未取消）/ 创单失败 / 取消订单。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     raw = count_sf_same_city_pushes_for_delivery_date(
         db, store_id=store_id, delivery_date=delivery_date
@@ -283,7 +290,7 @@ def delivery_sf_pushes(
     ] = False,
     sf_create_status: Annotated[
         str | None,
-        Query(description="创单状态：留空=全部；ok=创单成功；fail=创单失败"),
+        Query(description="创单状态：留空=全部；ok=创单成功且未取消；fail=创单失败；cancelled=取消订单"),
     ] = None,
     member_phone: Annotated[
         str | None,
@@ -338,7 +345,7 @@ def delivery_sf_pushes_export_xlsx(
     ] = False,
     sf_create_status: Annotated[
         str | None,
-        Query(description="创单状态：留空=全部；ok=成功；fail=失败"),
+        Query(description="创单状态：留空=全部；ok=成功且未取消；fail=失败；cancelled=取消订单"),
     ] = None,
     member_phone: Annotated[str | None, Query(description="会员手机号包含")] = None,
     sf_order_id: Annotated[str | None, Query(description="顺丰运单号包含")] = None,
@@ -607,6 +614,80 @@ def card_orders_delete(
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     delete_card_order(db, order_id, store_id=store_id)
     return success(data=None, msg="工单已删除")
+
+
+@router.get("/orders/daily/single-meals")
+def admin_orders_daily_single_meals(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    order_date: Annotated[
+        date | None,
+        Query(description="下单业务日（上海日历日），默认当天"),
+    ] = None,
+    q: Annotated[str | None, Query(description="会员手机前缀或姓名模糊")] = None,
+    pay_status: Annotated[str | None, Query(description="支付状态，如 未支付 / 已支付")] = None,
+    page: int = 1,
+    page_size: int = 20,
+):
+    """订单管理：当日单次点餐订单（按 created_at 落在上海自然日）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    day = order_date or today_shanghai()
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    items, total = list_admin_store_single_meal_orders_by_order_day(
+        db,
+        store_id=store_id,
+        order_day=day,
+        q=q,
+        pay_status=pay_status,
+        page=page,
+        page_size=page_size,
+    )
+    return page_response(
+        items=[dump_model(i) for i in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        msg="获取成功",
+    )
+
+
+@router.get("/orders/daily/mall-card-orders")
+def admin_orders_daily_mall_card_orders(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    order_date: Annotated[
+        date | None,
+        Query(description="下单业务日（上海日历日），默认当天"),
+    ] = None,
+    q: Annotated[str | None, Query(description="会员手机前缀或姓名模糊")] = None,
+    pay_status: Annotated[str | None, Query(description="未缴 | 已缴")] = None,
+    page: int = 1,
+    page_size: int = 20,
+):
+    """订单管理：当日商城会员卡模版订单（开卡工单且含 membership_template_id）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    day = order_date or today_shanghai()
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    items, total = list_mall_template_card_orders_for_order_day(
+        db,
+        store_id=store_id,
+        order_day=day,
+        q=q,
+        pay_status=pay_status,
+        page=page,
+        page_size=page_size,
+    )
+    return page_response(
+        items=[dump_model(i) for i in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        msg="获取成功",
+    )
 
 
 @router.post("/member/profile")

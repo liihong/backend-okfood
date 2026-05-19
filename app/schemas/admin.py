@@ -839,6 +839,10 @@ class SfSameCityPushMonitorRow(BaseModel):
     last_callback_at: str | None = None
     last_callback_kind: str | None = None
     sf_callback_order_status: int | None = None
+    merchant_cancel_requested_at: str | None = Field(
+        None, description="管理端发起顺丰取消配送成功的时间（UTC ISO）；顺丰回调仍会刷新配送状态"
+    )
+    sf_create_status_label: str = Field(..., description="监控列表「创单状态」展示文案")
     members: list[SfSameCityPushMonitorMemberRow] = Field(
         default_factory=list,
         description="该顺丰单停靠点在当前系统聚合中的会员明细（可多人物流合并）",
@@ -876,6 +880,12 @@ class CardOrderOut(BaseModel):
     created_by: str
     created_at: str
     updated_at: str
+    membership_template_id: int | None = Field(
+        None, description="会员卡模版 id；经典周/月/次卡手工工单通常为 null"
+    )
+    template_product_label: str | None = Field(
+        None, description="商城卡包展示文案：模版名称（种类）"
+    )
 
 
 TenantManagedAdminRole = Literal["full", "delivery", "support"]
@@ -978,6 +988,7 @@ class SfSameCityPushStatsOut(BaseModel):
     total: int
     success: int
     failed: int
+    cancelled: int = Field(0, description="取消订单：商户发起取消或顺丰回调为取消/撤单(2/22)")
 
 
 class TenantIntegrationSettingsOut(BaseModel):

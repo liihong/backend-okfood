@@ -23,6 +23,7 @@ _SF_CALLBACK_KIND_ZH: dict[str, str] = {
     "delivery_status": "配送状态变更",
     "order_complete": "订单完成",
     "cancel_by_sf": "顺丰取消",
+    "merchant_cancel": "商家取消配送",
     "delivery_exception": "配送异常",
     "rider_cancel": "骑士取消",
     "auto_shop": "自动店铺",
@@ -113,6 +114,7 @@ def build_sf_push_monitor_xlsx(rows: list[dict[str, Any]]) -> bytes:
             continue
         err_code = r.get("error_code")
         cb_code = r.get("sf_callback_order_status")
+        create_zh = (r.get("sf_create_status_label") or "").strip() or _sf_create_status_zh(err_code)
         ws.append(
             [
                 r.get("id"),
@@ -123,7 +125,7 @@ def build_sf_push_monitor_xlsx(rows: list[dict[str, Any]]) -> bytes:
                 r.get("sf_bill_id") or "",
                 _member_join(r, "name"),
                 _member_join(r, "phone"),
-                _sf_create_status_zh(err_code),
+                create_zh,
                 _sf_order_status_label(cb_code),
                 cb_code if cb_code is not None else "",
                 _sf_callback_kind_label(r.get("last_callback_kind")),

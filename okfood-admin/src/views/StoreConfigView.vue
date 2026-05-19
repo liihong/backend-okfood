@@ -14,8 +14,6 @@ import StoreLocationPicker from '../components/StoreLocationPicker.vue'
 const loading = ref(false)
 const saving = ref(false)
 const logoUploading = ref(false)
-const fileInput = ref(null)
-
 const form = ref({
   store_name: '',
   store_logo_url: '',
@@ -158,14 +156,10 @@ async function saveConfig() {
   }
 }
 
-function triggerLogoPick() {
-  if (logoUploading.value) return
-  fileInput.value?.click()
-}
+const logoUploadKey = ref(0)
 
-async function onLogoFileChange(e) {
-  const file = e.target.files?.[0]
-  e.target.value = ''
+async function onLogoUploadChange(uploadFile) {
+  const file = uploadFile?.raw
   if (!file || !file.type.startsWith('image/')) return
   if (!adminAccessToken.value) {
     showToast('请先登录', 'error')
@@ -193,6 +187,7 @@ async function onLogoFileChange(e) {
     showToast(err instanceof Error ? err.message : '上传失败', 'error')
   } finally {
     logoUploading.value = false
+    logoUploadKey.value += 1
   }
 }
 
@@ -226,22 +221,34 @@ onMounted(() => {
     <div v-else class="sc-card">
       <div class="sc-field">
         <label class="sc-label" for="sc-name">门店名称</label>
-        <input id="sc-name" v-model="form.store_name" type="text" class="sc-input" maxlength="128" />
+        <el-input id="sc-name" v-model="form.store_name" class="sc-input-el" maxlength="128" clearable />
       </div>
 
       <div class="sc-field">
         <span class="sc-label">门店 Logo</span>
-        <input ref="fileInput" type="file" accept="image/*" class="sc-file" @change="onLogoFileChange" />
         <div class="sc-logo-row">
           <div class="sc-logo-preview-wrap">
             <img v-if="logoPreviewUrl()" :src="logoPreviewUrl()" alt="" class="sc-logo-preview" />
             <span v-else class="sc-logo-placeholder">未设置</span>
           </div>
-          <button type="button" class="sc-btn-secondary" :disabled="logoUploading" @click="triggerLogoPick">
-            {{ logoUploading ? '上传中…' : '上传图片' }}
-          </button>
+          <el-upload
+            :key="logoUploadKey"
+            :show-file-list="false"
+            :auto-upload="false"
+            accept="image/*"
+            @change="onLogoUploadChange"
+          >
+            <el-button type="default" :disabled="logoUploading">{{
+              logoUploading ? '上传中…' : '上传图片'
+            }}</el-button>
+          </el-upload>
         </div>
-        <input v-model="form.store_logo_url" type="text" class="sc-input sc-input--mono" placeholder="或直接粘贴图片 URL" />
+        <el-input
+          v-model="form.store_logo_url"
+          class="sc-input-el sc-input-el--mono"
+          placeholder="或直接粘贴图片 URL"
+          clearable
+        />
       </div>
 
       <div class="sc-field">
@@ -256,11 +263,23 @@ onMounted(() => {
       <div class="sc-coord-grid">
         <div class="sc-field">
           <label class="sc-label" for="sc-lng">经度 lng（可微调）</label>
-          <input id="sc-lng" v-model="form.store_lng" type="text" class="sc-input sc-input--mono" placeholder="例：113.9268" />
+          <el-input
+            id="sc-lng"
+            v-model="form.store_lng"
+            class="sc-input-el sc-input-el--mono"
+            placeholder="例：113.9268"
+            clearable
+          />
         </div>
         <div class="sc-field">
           <label class="sc-label" for="sc-lat">纬度 lat（可微调）</label>
-          <input id="sc-lat" v-model="form.store_lat" type="text" class="sc-input sc-input--mono" placeholder="例：35.303" />
+          <el-input
+            id="sc-lat"
+            v-model="form.store_lat"
+            class="sc-input-el sc-input-el--mono"
+            placeholder="例：35.303"
+            clearable
+          />
         </div>
       </div>
 
@@ -279,24 +298,22 @@ onMounted(() => {
       <div class="sc-coord-grid">
         <div class="sc-field">
           <label class="sc-label" for="sc-fee-base">首份基础价</label>
-          <input
+          <el-input
             id="sc-fee-base"
             v-model="form.courier_delivery_base_yuan"
-            type="text"
-            class="sc-input sc-input--mono"
-            inputmode="decimal"
+            class="sc-input-el sc-input-el--mono"
             placeholder="例：4"
+            clearable
           />
         </div>
         <div class="sc-field">
           <label class="sc-label" for="sc-fee-extra">同地址每多一份加价</label>
-          <input
+          <el-input
             id="sc-fee-extra"
             v-model="form.courier_delivery_extra_per_unit_yuan"
-            type="text"
-            class="sc-input sc-input--mono"
-            inputmode="decimal"
+            class="sc-input-el sc-input-el--mono"
             placeholder="例：1"
+            clearable
           />
         </div>
       </div>
@@ -308,46 +325,42 @@ onMounted(() => {
       <div class="sc-coord-grid">
         <div class="sc-field">
           <label class="sc-label" for="sc-card-week">周卡</label>
-          <input
+          <el-input
             id="sc-card-week"
             v-model="form.member_card_week_price_yuan"
-            type="text"
-            class="sc-input sc-input--mono"
-            inputmode="decimal"
+            class="sc-input-el sc-input-el--mono"
             placeholder="例：168"
+            clearable
           />
         </div>
         <div class="sc-field">
           <label class="sc-label" for="sc-card-month">月卡</label>
-          <input
+          <el-input
             id="sc-card-month"
             v-model="form.member_card_month_price_yuan"
-            type="text"
-            class="sc-input sc-input--mono"
-            inputmode="decimal"
+            class="sc-input-el sc-input-el--mono"
             placeholder="例：669"
+            clearable
           />
         </div>
         <div class="sc-field">
           <label class="sc-label" for="sc-card-week-list">周卡划线价（可选）</label>
-          <input
+          <el-input
             id="sc-card-week-list"
             v-model="form.member_card_week_list_price_yuan"
-            type="text"
-            class="sc-input sc-input--mono"
-            inputmode="decimal"
+            class="sc-input-el sc-input-el--mono"
             placeholder="高于标价时出现「活动价」样式；留空关闭"
+            clearable
           />
         </div>
         <div class="sc-field">
           <label class="sc-label" for="sc-card-month-list">月卡划线价（可选）</label>
-          <input
+          <el-input
             id="sc-card-month-list"
             v-model="form.member_card_month_list_price_yuan"
-            type="text"
-            class="sc-input sc-input--mono"
-            inputmode="decimal"
+            class="sc-input-el sc-input-el--mono"
             placeholder="高于标价时出现「活动价」样式；留空关闭"
+            clearable
           />
         </div>
       </div>
@@ -457,6 +470,13 @@ onMounted(() => {
   font-family: inherit;
 }
 .sc-input--mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+}
+.sc-input-el {
+  width: 100%;
+}
+.sc-input-el--mono :deep(.el-input__inner) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
 }

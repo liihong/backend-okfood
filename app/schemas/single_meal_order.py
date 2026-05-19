@@ -38,3 +38,11 @@ class SingleMealOrderOut(BaseModel):
     courier_id: str | None = None
     address_summary: str
     created_at: datetime | None = Field(None, description="下单时间(UTC)")
+
+
+class AdminSingleMealOrderListOut(SingleMealOrderOut):
+    """管理端列表：在单次点餐订单上附带会员标识。"""
+
+    member_id: int
+    member_phone: str = ""
+    member_name: str = ""

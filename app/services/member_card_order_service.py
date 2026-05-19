@@ -6,13 +6,14 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.timeutil import min_member_delivery_start_shanghai
+from app.core.timeutil import min_member_delivery_start_shanghai, utc_naive_range_for_shanghai_calendar_day
 from app.models.enums import CardOpenMode, CardOrderKind, CardOrderPayStatus, CardPayChannel, PlanType
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
 from app.models.membership_card_template import MembershipCardTemplate
 from app.schemas.admin import CardOrderCreateIn, CardOrderOut, CardOrderPatchIn, RechargeIn
-from app.services.admin_service import apply_member_recharge_delta, _escape_like_fragment
+from app.services.admin_service import apply_member_recharge_delta
+from app.utils.sql_like import escape_like_fragment
 from app.services.member_address_service import upsert_default_address_from_admin_map_pick
 from app.services.store_config_service import get_member_card_prices_yuan
 
@@ -145,6 +146,12 @@ def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
     wn = (m.wechat_name if m else None) or None
     if wn is not None:
         wn = str(wn).strip() or None
+    tpl_id = getattr(order, "membership_template_id", None)
+    tpl_label: str | None = None
+    if tpl_id is not None:
+        tpl = db.get(MembershipCardTemplate, int(tpl_id))
+        if tpl:
+            tpl_label = f"{tpl.name}（{tpl.kind_label}）"
     return CardOrderOut(
         id=int(order.id),
         member_id=int(order.member_id),
@@ -161,6 +168,8 @@ def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
         created_by=order.created_by,
         created_at=ca,
         updated_at=ua,
+        membership_template_id=int(tpl_id) if tpl_id is not None else None,
+        template_product_label=tpl_label,
     )
 
 
@@ -257,7 +266,7 @@ def list_card_orders_paged(
             )
         )
     if q and q.strip():
-        esc = _escape_like_fragment(q.strip())
+        esc = escape_like_fragment(q.strip())
         filters.append(
             or_(
                 Member.phone.like(f"{esc}%", escape="\\"),
@@ -278,6 +287,59 @@ def list_card_orders_paged(
         select(MemberCardOrder)
         .join(Member, join_on)
         .order_by(MemberCardOrder.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    for f in filters:
+        list_stmt = list_stmt.where(f)
+    rows = db.scalars(list_stmt).all()
+    return [_order_to_out(db, r) for r in rows], total
+
+
+def list_mall_template_card_orders_for_order_day(
+    db: Session,
+    *,
+    store_id: int,
+    order_day: date,
+    q: str | None,
+    pay_status: str | None,
+    page: int,
+    page_size: int,
+) -> tuple[list[CardOrderOut], int]:
+    """当日（上海自然日）创建的、绑定会员卡模版的开卡工单（小程序商城卡包等）。"""
+    start_utc, end_utc = utc_naive_range_for_shanghai_calendar_day(order_day)
+    join_on = Member.id == MemberCardOrder.member_id
+    filters = [
+        MemberCardOrder.store_id == int(store_id),
+        MemberCardOrder.membership_template_id.isnot(None),
+        MemberCardOrder.created_at >= start_utc,
+        MemberCardOrder.created_at < end_utc,
+    ]
+    if q and q.strip():
+        esc = escape_like_fragment(q.strip())
+        filters.append(
+            or_(
+                Member.phone.like(f"{esc}%", escape="\\"),
+                Member.name.like(f"%{esc}%", escape="\\"),
+                Member.wechat_name.like(f"%{esc}%", escape="\\"),
+            )
+        )
+    ps = (pay_status or "").strip()
+    if ps in (CardOrderPayStatus.UNPAID.value, CardOrderPayStatus.PAID.value):
+        filters.append(MemberCardOrder.pay_status == ps)
+
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+
+    count_stmt = select(func.count()).select_from(MemberCardOrder).join(Member, join_on)
+    for f in filters:
+        count_stmt = count_stmt.where(f)
+    total = int(db.scalar(count_stmt) or 0)
+
+    list_stmt = (
+        select(MemberCardOrder)
+        .join(Member, join_on)
+        .order_by(MemberCardOrder.created_at.desc(), MemberCardOrder.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )

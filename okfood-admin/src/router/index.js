@@ -17,6 +17,7 @@ const FinanceView = () => import('../views/FinanceView.vue')
 const MenuView = () => import('../views/MenuView.vue')
 const WeeklyMenuView = () => import('../views/WeeklyMenuView.vue')
 const CardOrdersView = () => import('../views/CardOrdersView.vue')
+const OrdersManageView = () => import('../views/OrdersManageView.vue')
 const StoreConfigView = () => import('../views/StoreConfigView.vue')
 const SfOrdersMonitorView = () => import('../views/SfOrdersMonitorView.vue')
 const TenantsView = () => import('../views/TenantsView.vue')
@@ -74,6 +75,16 @@ const router = createRouter({
           meta: {
             title: '开卡工单',
             pageSubtitle: '新建与跟踪线下/微信开卡，管理缴费、入账同步与起送日期',
+            fullAdminOnly: true,
+          },
+        },
+        {
+          path: 'orders',
+          name: 'orders',
+          component: OrdersManageView,
+          meta: {
+            title: '订单管理',
+            pageSubtitle: '按下单日查看单次点餐与商城卡包工单；零售 SKU 订单待业务接入后展示',
             fullAdminOnly: true,
           },
         },

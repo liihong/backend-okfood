@@ -822,14 +822,16 @@ async function markDelivery(memberId, kind) {
         </p>
         <div class="sf-bar">
           <div class="sf-bar__left">
-            <label class="sf-check-all"
-              ><input v-model="sfSelectAll" type="checkbox" @change="applySfSelectAll(sfSelectAll)" />
-              全选</label
-            >
-            <label class="sf-check-all sf-check-all--muted"
-              ><input v-model="sfPreviewAllRegions" type="checkbox" @change="loadSfPreviewData" />
-              加载全部片区</label
-            >
+            <label class="sf-check-all">
+              <el-checkbox v-model="sfSelectAll" @change="() => applySfSelectAll(sfSelectAll)">
+                全选
+              </el-checkbox>
+            </label>
+            <label class="sf-check-all sf-check-all--muted">
+              <el-checkbox v-model="sfPreviewAllRegions" @change="() => loadSfPreviewData()">
+                加载全部片区
+              </el-checkbox>
+            </label>
             <span class="sf-hint"
               >业务日 <strong>{{ sfPreview.delivery_date || deliveryDateQuery }}</strong> · 范围
               <strong>{{ sfPreviewScopeHint }}</strong> · 共 {{ sfModalFilteredRows.length }} 个停靠点<span

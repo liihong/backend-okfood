@@ -16,8 +16,8 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const saving = ref(false)
 const editingId = ref(null)
-const cardPhotoInput = ref(null)
 const cardPhotoUploading = ref(false)
+const cardPhotoUploadKey = ref(0)
 const form = ref({
   kind_label: '',
   name: '',
@@ -43,14 +43,8 @@ function parseOptionalMoney(raw) {
   return n.toFixed(2)
 }
 
-function triggerCardPhotoPick() {
-  if (cardPhotoUploading.value) return
-  cardPhotoInput.value?.click()
-}
-
-async function onCardPhotoChange(e) {
-  const file = e.target.files?.[0]
-  e.target.value = ''
+async function onCardPhotoUploadChange(uploadFile) {
+  const file = uploadFile?.raw
   if (!file || !file.type.startsWith('image/')) return
   if (!adminAccessToken.value) {
     showToast('请先登录', 'error')
@@ -78,6 +72,7 @@ async function onCardPhotoChange(e) {
     showToast(err instanceof Error ? err.message : '上传失败', 'error')
   } finally {
     cardPhotoUploading.value = false
+    cardPhotoUploadKey.value += 1
   }
 }
 
@@ -313,18 +308,26 @@ onMounted(fetchList)
           />
         </el-form-item>
         <el-form-item label="卡片样式图">
-          <input ref="cardPhotoInput" type="file" accept="image/*" class="hidden-file" @change="onCardPhotoChange" />
           <div class="upload-row">
-            <div class="upload-hit" @click="triggerCardPhotoPick">
-              <Camera v-if="!form.card_style_image_url" :size="28" stroke-width="1.75" class="upload-icon" />
-              <img
-                v-else
-                :src="dishImageDisplayUrl(form.card_style_image_url)"
-                alt=""
-                class="upload-preview"
-              />
-              <span class="upload-text">{{ cardPhotoUploading ? '上传中…' : form.card_style_image_url ? '点击更换' : '上传图片' }}</span>
-            </div>
+            <el-upload
+              :key="cardPhotoUploadKey"
+              class="card-style-upload"
+              :show-file-list="false"
+              :auto-upload="false"
+              accept="image/*"
+              @change="onCardPhotoUploadChange"
+            >
+              <div class="upload-hit" :class="{ 'upload-hit--busy': cardPhotoUploading }">
+                <Camera v-if="!form.card_style_image_url" :size="28" stroke-width="1.75" class="upload-icon" />
+                <img
+                  v-else
+                  :src="dishImageDisplayUrl(form.card_style_image_url)"
+                  alt=""
+                  class="upload-preview"
+                />
+                <span class="upload-text">{{ cardPhotoUploading ? '上传中…' : form.card_style_image_url ? '点击更换' : '上传图片' }}</span>
+              </div>
+            </el-upload>
             <el-input v-model="form.card_style_image_url" placeholder="/static/uploads/... 或上传" class="upload-url" />
           </div>
         </el-form-item>
@@ -390,12 +393,11 @@ onMounted(fetchList)
   border-radius: 6px;
   vertical-align: middle;
 }
-.hidden-file {
-  position: absolute;
-  width: 0;
-  height: 0;
-  opacity: 0;
-  pointer-events: none;
+.card-style-upload :deep(.el-upload) {
+  display: inline-block;
+}
+.card-style-upload {
+  flex-shrink: 0;
 }
 .upload-row {
   display: flex;

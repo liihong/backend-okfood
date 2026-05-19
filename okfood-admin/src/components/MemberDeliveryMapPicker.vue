@@ -332,10 +332,6 @@ function runKeywordSearch() {
   })
 }
 
-function onSearchInput(e) {
-  const v = e?.target?.value
-  searchKeyword.value = typeof v === 'string' ? v : ''
-}
 
 watch(
   () => [props.lngStr, props.latStr],
@@ -380,13 +376,13 @@ onUnmounted(() => {
     </p>
     <template v-else>
       <div class="mdmp-search">
-        <input
+        <el-input
           :id="searchInputId"
-          type="text"
+          v-model="searchKeyword"
           class="mdmp-search-input"
           placeholder="搜索配送地点"
+          clearable
           autocomplete="off"
-          @input="onSearchInput"
           @keydown.enter.prevent="runKeywordSearch"
         />
         <button type="button" class="mdmp-search-btn" @click="runKeywordSearch">搜索</button>

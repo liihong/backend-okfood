@@ -175,16 +175,17 @@ function buildMembersListParams(page, pageSize, { exportMode = false } = {}) {
     const vq = validityQuery()
     if (vq) params.set('validity', vq)
   }
-  const pq = membersPlanFilter.value.trim()
+  const pq = String(membersPlanFilter.value ?? '').trim()
   if (pq) params.set('plan_type', pq)
   const q = searchQuery.value.trim()
   if (q) params.set('q', q)
   if (membersStatusSegment.value === 'inactive') params.set('inactive_only', '1')
   else if (membersStatusSegment.value === 'paused') params.set('delivery_deferred_only', '1')
   else if (membersStatusSegment.value === 'leave') params.set('on_leave_only', '1')
-  if (membersRegionFilter.value === 'unassigned') params.set('unassigned_region', '1')
-  else if (membersRegionFilter.value) {
-    const rid = String(membersRegionFilter.value).trim()
+  const mrf = String(membersRegionFilter.value ?? '').trim()
+  if (mrf === 'unassigned') params.set('unassigned_region', '1')
+  else if (mrf) {
+    const rid = mrf
     if (rid && rid !== 'unassigned') params.set('delivery_region_id', rid)
   }
   return params
@@ -361,6 +362,17 @@ function shanghaiTodayYmd() {
   }
   const n = new Date()
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
+}
+
+/** el-date-picker：禁止选择早于 minYmd（YYYY-MM-DD）的日历日 */
+function calendarDateToYmd(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+function leaveDateDisabledBeforeMin(d, minYmd) {
+  return calendarDateToYmd(d) < minYmd
 }
 
 function addDaysYmdShanghai(ymd, deltaDays) {
@@ -683,7 +695,12 @@ onMounted(async () => {
         <div class="members-query-row">
           <div class="search-box search-box--members-inline">
             <Search :size="18" />
-            <input v-model="searchQuery" placeholder="搜索姓名、电话或片区地址..." />
+            <el-input
+              v-model="searchQuery"
+              clearable
+              placeholder="搜索姓名、电话或片区地址..."
+              class="members-search-el-input"
+            />
           </div>
           <div v-if="adminAccessToken" class="members-export-actions">
             <el-button type="primary" plain size="small" class="members-export-btn" :loading="membersExporting"
@@ -724,29 +741,37 @@ onMounted(async () => {
             </div>
             <div class="members-extra-filters" aria-label="套餐、片区与状态筛选">
               <label class="members-filter-label" for="members-plan-filter">套餐</label>
-              <select
+              <el-select
                 id="members-plan-filter"
                 v-model="membersPlanFilter"
-                class="members-region-select"
+                class="members-region-select-el"
+                placeholder="全部"
+                clearable
                 @change="onPlanFilterChange"
               >
-                <option value="">全部</option>
-                <option value="周卡">周卡</option>
-                <option value="月卡">月卡</option>
-              </select>
+                <el-option label="全部" value="" />
+                <el-option label="周卡" value="周卡" />
+                <el-option label="月卡" value="月卡" />
+              </el-select>
               <label class="members-filter-label" for="members-region-filter">片区</label>
-              <select
+              <el-select
                 id="members-region-filter"
                 v-model="membersRegionFilter"
-                class="members-region-select"
+                class="members-region-select-el members-region-select-el--wide"
+                placeholder="全部"
+                clearable
+                filterable
                 @change="onRegionFilterChange"
               >
-                <option value="">全部</option>
-                <option value="unassigned">未分配</option>
-                <option v-for="r in regionFilterOptions" :key="r.id" :value="String(r.id)">
-                  {{ r.name || '—' }}
-                </option>
-              </select>
+                <el-option label="全部" value="" />
+                <el-option label="未分配" value="unassigned" />
+                <el-option
+                  v-for="r in regionFilterOptions"
+                  :key="r.id"
+                  :label="r.name || '—'"
+                  :value="String(r.id)"
+                />
+              </el-select>
               <el-button
                 role="tab"
                 class="members-validity-tab"
@@ -977,31 +1002,33 @@ onMounted(async () => {
           </p>
           <div class="form-group">
             <label>操作类型</label>
-            <select v-model="leaveMode" class="input-delivery-area">
-              <option value="tomorrow">明日配送请假（与小程序「明天有事」一致）</option>
-              <option value="range">多天配送请假（与小程序「多天请假」一致，需选起止日期）</option>
-              <option value="clear_tomorrow">仅取消「明日请假」</option>
-              <option value="cancel">清空全部请假</option>
-            </select>
+            <el-select v-model="leaveMode" class="leave-mode-select" placeholder="请选择">
+              <el-option value="tomorrow" label="明日配送请假（与小程序「明天有事」一致）" />
+              <el-option value="range" label="多天配送请假（与小程序「多天请假」一致，需选起止日期）" />
+              <el-option value="clear_tomorrow" label="仅取消「明日请假」" />
+              <el-option value="cancel" label="清空全部请假" />
+            </el-select>
             <template v-if="leaveMode === 'range'">
               <div class="form-group form-group--leave-range">
                 <label>开始日期</label>
-                <input
+                <el-date-picker
                   v-model="leaveRangeStart"
                   type="date"
-                  class="input-delivery-area"
-                  :min="shanghaiTodayYmd()"
-                  required
+                  value-format="YYYY-MM-DD"
+                  placeholder="开始日期"
+                  class="leave-range-picker"
+                  :disabled-date="(d) => leaveDateDisabledBeforeMin(d, shanghaiTodayYmd())"
                 />
               </div>
               <div class="form-group form-group--leave-range">
                 <label>结束日期</label>
-                <input
+                <el-date-picker
                   v-model="leaveRangeEnd"
                   type="date"
-                  class="input-delivery-area"
-                  :min="leaveRangeStart || shanghaiTodayYmd()"
-                  required
+                  value-format="YYYY-MM-DD"
+                  placeholder="结束日期"
+                  class="leave-range-picker"
+                  :disabled-date="(d) => leaveDateDisabledBeforeMin(d, leaveRangeStart || shanghaiTodayYmd())"
                 />
               </div>
             </template>
@@ -1149,3 +1176,22 @@ onMounted(async () => {
 
   </section>
 </template>
+
+<style scoped>
+.members-search-el-input {
+  flex: 1;
+  min-width: 0;
+}
+.members-region-select-el {
+  width: 118px;
+}
+.members-region-select-el--wide {
+  width: 168px;
+}
+.leave-mode-select {
+  width: 100%;
+}
+.leave-range-picker {
+  width: 100%;
+}
+</style>

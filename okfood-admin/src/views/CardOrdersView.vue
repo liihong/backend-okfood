@@ -84,7 +84,7 @@ async function fetchList() {
     })
     const q = searchQuery.value.trim()
     if (q) params.set('q', q)
-    const pf = payFilter.value.trim()
+    const pf = String(payFilter.value ?? '').trim()
     if (pf === '未缴' || pf === '已缴') params.set('pay_status', pf)
     if (includeHistory.value) params.set('include_history', 'true')
     const data = await apiJson(`/api/admin/card-orders?${params.toString()}`, {}, { auth: true })
@@ -471,7 +471,7 @@ onMounted(() => {
       <div class="table-header table-header--members table-header--couriers-row">
         <div class="search-box search-box--flex">
           <Search :size="18" />
-          <input v-model="searchQuery" placeholder="搜索手机、姓名或微信昵称…" />
+          <el-input v-model="searchQuery" clearable placeholder="搜索手机、姓名或微信昵称…" />
         </div>
         <div class="card-orders-filters">
          <div class="card-orders-filter-label card-orders-filter-label--check">
@@ -479,14 +479,14 @@ onMounted(() => {
               查看历史开卡记录
             </el-checkbox>
           </div>
-          <label class="card-orders-filter-label">
-            缴费
-            <select v-model="payFilter" class="card-orders-select">
-              <option value="">全部</option>
-              <option value="未缴">未缴</option>
-              <option value="已缴">已缴</option>
-            </select>
-          </label>
+          <div class="card-orders-filter-label card-orders-filter-el">
+            <span class="card-orders-filter-el-text">缴费</span>
+            <el-select v-model="payFilter" placeholder="全部" clearable class="card-orders-pay-select">
+              <el-option label="全部" value="" />
+              <el-option label="未缴" value="未缴" />
+              <el-option label="已缴" value="已缴" />
+            </el-select>
+          </div>
           <button type="button" class="btn-primary btn-primary--sm" @click="openCreateModal">
             <Plus :size="18" /> 新建开卡工单
           </button>
@@ -642,22 +642,22 @@ class="member-pill co-sync-pill"
               </div>
               <div class="form-group open-mode-group">
                 <label>办理类型</label>
-                <div class="open-mode-options">
-                  <label class="radio-tile">
-                    <span class="radio-tile-head">
-                      <input v-model="createForm.open_mode" type="radio" value="new_member" />
-                      <span class="radio-tile-title">新会员开卡</span>
-                    </span>
-                    <span class="radio-tile-sub">填写姓名、微信昵称并写入档案</span>
-                  </label>
-                  <label class="radio-tile">
-                    <span class="radio-tile-head">
-                      <input v-model="createForm.open_mode" type="radio" value="renew" />
-                      <span class="radio-tile-title">老会员续卡</span>
-                    </span>
-                    <span class="radio-tile-sub">仅核对手机号；入账叠加剩余与总次数</span>
-                  </label>
-                </div>
+                <el-radio-group v-model="createForm.open_mode" class="co-open-mode-radio-group">
+                  <div class="open-mode-options">
+                    <el-radio value="new_member" border class="co-open-mode-radio-item">
+                      <div class="co-open-mode-radio-body">
+                        <span class="radio-tile-title">新会员开卡</span>
+                        <span class="radio-tile-sub">填写姓名、微信昵称并写入档案</span>
+                      </div>
+                    </el-radio>
+                    <el-radio value="renew" border class="co-open-mode-radio-item">
+                      <div class="co-open-mode-radio-body">
+                        <span class="radio-tile-title">老会员续卡</span>
+                        <span class="radio-tile-sub">仅核对手机号；入账叠加剩余与总次数</span>
+                      </div>
+                    </el-radio>
+                  </div>
+                </el-radio-group>
               </div>
               <div
                 class="co-create-member-fields"
@@ -669,10 +669,10 @@ class="member-pill co-sync-pill"
               >
                 <div class="form-group">
                   <label>会员手机号</label>
-                  <input
+                  <el-input
                     v-model="createForm.phone"
-                    required
                     maxlength="20"
+                    clearable
                     :placeholder="
                       createForm.open_mode === 'new_member' ? '请输入11位手机号' : '已注册会员的手机号'
                     "
@@ -682,15 +682,15 @@ class="member-pill co-sync-pill"
                 <template v-if="createForm.open_mode === 'new_member'">
                   <div class="form-group">
                     <label>会员姓名</label>
-                    <input v-model="createForm.name" required maxlength="100" placeholder="写入档案 name" />
+                    <el-input v-model="createForm.name" maxlength="100" placeholder="写入档案 name" clearable />
                   </div>
                   <div class="form-group">
                     <label>微信昵称</label>
-                    <input
+                    <el-input
                       v-model="createForm.wechat_name"
-                      required
                       maxlength="100"
                       placeholder="写入档案 wechat_name"
+                      clearable
                     />
                   </div>
                 </template>
@@ -733,46 +733,49 @@ class="member-pill co-sync-pill"
               <div class="co-create-fees-row3">
                 <div class="form-group">
                   <label>卡类型</label>
-                  <select v-model="createForm.card_kind">
-                    <option value="周卡">周卡（默认 +{{ planDefaultTotal('周卡') }} 次）</option>
-                    <option value="月卡">月卡（默认 +{{ planDefaultTotal('月卡') }} 次）</option>
-                    <option value="次卡">次卡（默认 +{{ planDefaultTotal('次卡') }} 次）</option>
-                  </select>
+                  <el-select v-model="createForm.card_kind" class="co-create-fees-select">
+                    <el-option
+                      value="周卡"
+                      :label="`周卡（默认 +${planDefaultTotal('周卡')} 次）`"
+                    />
+                    <el-option
+                      value="月卡"
+                      :label="`月卡（默认 +${planDefaultTotal('月卡')} 次）`"
+                    />
+                    <el-option
+                      value="次卡"
+                      :label="`次卡（默认 +${planDefaultTotal('次卡')} 次）`"
+                    />
+                  </el-select>
                 </div>
                 <div class="form-group">
                   <label>缴费渠道</label>
-                  <select v-model="createForm.pay_channel">
-                    <option value="微信">微信</option>
-                    <option value="支付宝">支付宝</option>
-                    <option value="线下">线下</option>
-                  </select>
+                  <el-select v-model="createForm.pay_channel" class="co-create-fees-select">
+                    <el-option label="微信" value="微信" />
+                    <el-option label="支付宝" value="支付宝" />
+                    <el-option label="线下" value="线下" />
+                  </el-select>
                 </div>
                 <div class="form-group">
                   <label>缴费状态</label>
-                  <select
+                  <el-select
                     v-model="createForm.pay_status"
-                    class="co-create-pay-status-select"
+                    class="co-create-fees-select co-create-pay-status-select"
                     :class="{ 'co-create-pay-status-select--paid': createForm.pay_status === '已缴' }"
                   >
-                    <option value="未缴">未缴</option>
-                    <option value="已缴">已缴</option>
-                  </select>
+                    <el-option label="未缴" value="未缴" />
+                    <el-option label="已缴" value="已缴" />
+                  </el-select>
                 </div>
               </div>
               <div class="co-create-fees-row2">
                 <div class="form-group">
                   <label>实收金额</label>
-                  <input
-                    v-model="createForm.amount_yuan"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="留空表示未填"
-                  />
+                  <el-input v-model="createForm.amount_yuan" placeholder="留空表示未填" clearable />
                 </div>
                 <div class="form-group co-create-remark-field">
                   <label>备注</label>
-                  <textarea v-model="createForm.remark" rows="1" maxlength="500" placeholder="可选"></textarea>
+                  <el-input v-model="createForm.remark" type="textarea" :rows="2" maxlength="500" placeholder="可选" />
                 </div>
               </div>
             </div>
@@ -783,22 +786,22 @@ class="member-pill co-sync-pill"
                 激活设置
               </div>
               <div class="co-create-activation-row">
-                <div class="open-mode-options open-mode-options--activation">
-                  <label class="radio-tile radio-tile--compact">
-                    <span class="radio-tile-head">
-                      <input v-model="createForm.delivery_start_mode" type="radio" value="date" />
-                      <span class="radio-tile-title">指定起送日</span>
-                    </span>
-                    <span class="radio-tile-sub">选择具体业务日起参与配送大表</span>
-                  </label>
-                  <label class="radio-tile radio-tile--compact">
-                    <span class="radio-tile-head">
-                      <input v-model="createForm.delivery_start_mode" type="radio" value="defer" />
-                      <span class="radio-tile-title">暂不开卡</span>
-                    </span>
-                    <span class="radio-tile-sub">已缴仍入次数与套餐；暂不写入起送日，可日后在「更新」中补日期</span>
-                  </label>
-                </div>
+                <el-radio-group v-model="createForm.delivery_start_mode" class="co-activation-radio-group">
+                  <div class="open-mode-options open-mode-options--activation">
+                    <el-radio value="date" border class="co-activation-radio-item">
+                      <div class="co-open-mode-radio-body">
+                        <span class="radio-tile-title">指定起送日</span>
+                        <span class="radio-tile-sub">选择具体业务日起参与配送大表</span>
+                      </div>
+                    </el-radio>
+                    <el-radio value="defer" border class="co-activation-radio-item">
+                      <div class="co-open-mode-radio-body">
+                        <span class="radio-tile-title">暂不开卡</span>
+                        <span class="radio-tile-sub">已缴仍入次数与套餐；暂不写入起送日，可日后在「更新」中补日期</span>
+                      </div>
+                    </el-radio>
+                  </div>
+                </el-radio-group>
                 <div
                   v-if="createForm.delivery_start_mode === 'date'"
                   class="card-order-delivery-block co-create-activation-date"
@@ -842,9 +845,10 @@ class="member-pill co-sync-pill"
               />
               <div class="form-group">
                 <label>地图详细地址（只读）</label>
-                <textarea
+                <el-input
                   v-model="createForm.map_location_text"
-                  rows="2"
+                  type="textarea"
+                  :rows="2"
                   maxlength="500"
                   readonly
                   placeholder="选取地图坐标后自动填充"
@@ -852,7 +856,7 @@ class="member-pill co-sync-pill"
               </div>
               <div class="form-group">
                 <label>门牌号 / 单元楼层</label>
-                <input v-model="createForm.door_detail" maxlength="500" placeholder="如：3 号楼 1202" />
+                <el-input v-model="createForm.door_detail" maxlength="500" placeholder="如：3 号楼 1202" clearable />
               </div>
             </div>
             <div class="co-create-side-footer">
@@ -890,8 +894,8 @@ class="member-pill co-sync-pill"
         <form class="modal-form modal-form--card-order" @submit.prevent="submitEdit">
           <div class="form-group">
             <label>会员</label>
-            <input
-              :value="`${editForm.member_name || '—'}${editForm.member_wechat_name ? ' / 微信 ' + editForm.member_wechat_name : ''}（${editForm.member_phone}）`"
+            <el-input
+              :model-value="`${editForm.member_name || '—'}${editForm.member_wechat_name ? ' / 微信 ' + editForm.member_wechat_name : ''}（${editForm.member_phone}）`"
               type="text"
               disabled
               class="input-disabled"
@@ -899,31 +903,44 @@ class="member-pill co-sync-pill"
           </div>
           <div class="form-group">
             <label>卡类型</label>
-            <select v-model="editForm.card_kind" class="input-delivery-area" :disabled="editForm.applied_to_member">
-              <option value="周卡">周卡（同步入账 +{{ planDefaultTotal('周卡') }} 次）</option>
-              <option value="月卡">月卡（同步入账 +{{ planDefaultTotal('月卡') }} 次）</option>
-              <option value="次卡">次卡（同步入账 +{{ planDefaultTotal('次卡') }} 次）</option>
-            </select>
+            <el-select
+              v-model="editForm.card_kind"
+              class="input-delivery-area co-edit-card-kind-select"
+              :disabled="editForm.applied_to_member"
+            >
+              <el-option
+                value="周卡"
+                :label="`周卡（同步入账 +${planDefaultTotal('周卡')} 次）`"
+              />
+              <el-option
+                value="月卡"
+                :label="`月卡（同步入账 +${planDefaultTotal('月卡')} 次）`"
+              />
+              <el-option
+                value="次卡"
+                :label="`次卡（同步入账 +${planDefaultTotal('次卡')} 次）`"
+              />
+            </el-select>
             <p v-if="editForm.applied_to_member" class="modal-hint">已入账工单不可改卡类型；若档案套餐标签有误请在「会员管理」中修正。</p>
           </div>
           <div class="form-group open-mode-group">
             <label>开始配送日</label>
-            <div class="open-mode-options">
-              <label class="radio-tile">
-                <span class="radio-tile-head">
-                  <input v-model="editForm.delivery_start_mode" type="radio" value="date" />
-                  <span class="radio-tile-title">指定起送日</span>
-                </span>
-                <span class="radio-tile-sub">写入或修改具体业务日</span>
-              </label>
-              <label class="radio-tile">
-                <span class="radio-tile-head">
-                  <input v-model="editForm.delivery_start_mode" type="radio" value="defer" />
-                  <span class="radio-tile-title">暂不开卡</span>
-                </span>
-                <span class="radio-tile-sub">工单上不保存起送日；已入账的会员起送日以档案为准</span>
-              </label>
-            </div>
+            <el-radio-group v-model="editForm.delivery_start_mode" class="co-open-mode-radio-group">
+              <div class="open-mode-options">
+                <el-radio value="date" border class="co-open-mode-radio-item">
+                  <div class="co-open-mode-radio-body">
+                    <span class="radio-tile-title">指定起送日</span>
+                    <span class="radio-tile-sub">写入或修改具体业务日</span>
+                  </div>
+                </el-radio>
+                <el-radio value="defer" border class="co-open-mode-radio-item">
+                  <div class="co-open-mode-radio-body">
+                    <span class="radio-tile-title">暂不开卡</span>
+                    <span class="radio-tile-sub">工单上不保存起送日；已入账的会员起送日以档案为准</span>
+                  </div>
+                </el-radio>
+              </div>
+            </el-radio-group>
             <div
               v-if="editForm.delivery_start_mode === 'date'"
               class="card-order-delivery-block"
@@ -945,28 +962,28 @@ class="member-pill co-sync-pill"
           <div class="form-row">
             <div class="form-group">
               <label>缴费渠道</label>
-              <select v-model="editForm.pay_channel">
-                <option value="微信">微信</option>
-                <option value="支付宝">支付宝</option>
-                <option value="线下">线下</option>
-              </select>
+              <el-select v-model="editForm.pay_channel" class="co-edit-row-select">
+                <el-option label="微信" value="微信" />
+                <el-option label="支付宝" value="支付宝" />
+                <el-option label="线下" value="线下" />
+              </el-select>
             </div>
             <div class="form-group">
               <label>缴费状态</label>
-              <select v-model="editForm.pay_status" :disabled="editForm.applied_to_member">
-                <option value="未缴">未缴</option>
-                <option value="已缴">已缴</option>
-              </select>
+              <el-select v-model="editForm.pay_status" class="co-edit-row-select" :disabled="editForm.applied_to_member">
+                <el-option label="未缴" value="未缴" />
+                <el-option label="已缴" value="已缴" />
+              </el-select>
             </div>
           </div>
           <p v-if="editForm.applied_to_member" class="modal-hint">已入账的工单不可改回「未缴」。</p>
           <div class="form-group">
             <label>实收金额</label>
-            <input v-model="editForm.amount_yuan" type="number" min="0" step="0.01" placeholder="留空可清空金额" />
+            <el-input v-model="editForm.amount_yuan" placeholder="留空可清空金额" clearable />
           </div>
           <div class="form-group">
             <label>备注</label>
-            <textarea v-model="editForm.remark" rows="2" maxlength="500"></textarea>
+            <el-input v-model="editForm.remark" type="textarea" :rows="3" maxlength="500" />
           </div>
           <p v-if="!editForm.applied_to_member" class="modal-hint">
             缴费状态为「已缴」且尚未入账时，保存将自动同步剩余次数与套餐；仅「指定起送日」时同时写入会员起送日并激活。
@@ -1548,5 +1565,49 @@ class="member-pill co-sync-pill"
 .card-orders-page :deep(.td-co-actions .btn-sm) {
   padding: 0.22rem 0.42rem;
   font-size: 11px;
+}
+
+.card-orders-filter-el {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-orders-filter-el-text {
+  font-size: 13px;
+  color: var(--text-muted, #64748b);
+}
+.card-orders-pay-select {
+  width: 120px;
+}
+.co-create-fees-select,
+.co-edit-row-select,
+.co-edit-card-kind-select {
+  width: 100%;
+}
+.co-open-mode-radio-group,
+.co-activation-radio-group {
+  width: 100%;
+}
+.co-open-mode-radio-group :deep(.el-radio),
+.co-activation-radio-group :deep(.el-radio) {
+  width: 100%;
+  margin-right: 0;
+  height: auto;
+  align-items: flex-start;
+  padding: 10px 12px;
+  white-space: normal;
+}
+.co-open-mode-radio-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.35;
+  padding-left: 4px;
+}
+.open-mode-options--activation {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 8px;
 }
 </style>

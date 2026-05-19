@@ -6,11 +6,11 @@ from datetime import date, time, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.courier_delivery_fee import courier_delivery_fee_yuan_for_meal_units
-from app.core.timeutil import now_shanghai, today_shanghai
+from app.core.timeutil import now_shanghai, today_shanghai, utc_naive_range_for_shanghai_calendar_day
 from app.integrations.wechat_pay_v2 import (
     WeChatPayV2Error,
     WechatPayNotifyParsed,
@@ -32,7 +32,12 @@ from app.models.menu_schedule import MenuSchedule
 from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.schemas.courier import CourierTaskMemberOut
-from app.schemas.single_meal_order import SingleMealOrderCreateIn, SingleMealOrderOut
+from app.schemas.single_meal_order import (
+    AdminSingleMealOrderListOut,
+    SingleMealOrderCreateIn,
+    SingleMealOrderOut,
+)
+from app.utils.sql_like import escape_like_fragment
 from app.services.courier_task_sorting import (
     centroid_from_task_rows,
     distance_from_anchor_m,
@@ -230,6 +235,68 @@ def _single_meal_order_row_to_out(
         address_summary=address_summary,
         created_at=row.created_at,
     )
+
+
+def list_admin_store_single_meal_orders_by_order_day(
+    db: Session,
+    *,
+    store_id: int,
+    order_day: date,
+    q: str | None = None,
+    pay_status: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[AdminSingleMealOrderListOut], int]:
+    """管理端：按上海自然日筛选「下单时间」落在当日的单次点餐订单（created_at 存 UTC naive）。"""
+    start_utc, end_utc = utc_naive_range_for_shanghai_calendar_day(order_day)
+    page = max(1, page)
+    page_size = min(100, max(1, page_size))
+    join_on = Member.id == SingleMealOrder.member_id
+    filters = [
+        SingleMealOrder.store_id == int(store_id),
+        SingleMealOrder.created_at >= start_utc,
+        SingleMealOrder.created_at < end_utc,
+    ]
+    ps = (pay_status or "").strip()
+    if ps:
+        filters.append(SingleMealOrder.pay_status == ps)
+    if q and q.strip():
+        esc = escape_like_fragment(q.strip())
+        filters.append(
+            or_(
+                Member.phone.like(f"{esc}%", escape="\\"),
+                Member.name.like(f"%{esc}%", escape="\\"),
+            )
+        )
+
+    count_stmt = select(func.count()).select_from(SingleMealOrder).join(Member, join_on)
+    for f in filters:
+        count_stmt = count_stmt.where(f)
+    total = int(db.scalar(count_stmt) or 0)
+
+    list_stmt = (
+        select(SingleMealOrder)
+        .join(Member, join_on)
+        .order_by(SingleMealOrder.created_at.desc(), SingleMealOrder.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    for f in filters:
+        list_stmt = list_stmt.where(f)
+    rows = db.scalars(list_stmt).all()
+    out: list[AdminSingleMealOrderListOut] = []
+    for r in rows:
+        m = db.get(Member, r.member_id)
+        base = _single_meal_order_row_to_out(db, r)
+        out.append(
+            AdminSingleMealOrderListOut(
+                **base.model_dump(),
+                member_id=int(r.member_id),
+                member_phone=(m.phone or "") if m else "",
+                member_name=(((m.name or "").strip()) if m else "") or "",
+            )
+        )
+    return out, total
 
 
 def list_member_single_meal_orders(

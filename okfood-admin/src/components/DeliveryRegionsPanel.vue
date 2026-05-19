@@ -552,43 +552,37 @@ onUnmounted(() => {
             <div class="form-row-2">
               <label class="field">
                 <span>名称</span>
-                <input v-model="formName" type="text" placeholder="如：东片区" />
+                <el-input v-model="formName" placeholder="如：东片区" clearable />
               </label>
               <label class="field">
                 <span>编码（可选）</span>
-                <input v-model="formCode" type="text" placeholder="短码" />
+                <el-input v-model="formCode" placeholder="短码" clearable />
               </label>
             </div>
             <div class="form-row-2">
               <label class="field">
                 <span>优先级（越小越优先）</span>
-                <input v-model.number="formPriority" type="number" />
+                <el-input-number v-model="formPriority" :min="0" :step="1" controls-position="right" class="regions-prio-num" />
               </label>
-              <label class="field field-check">
-                <input v-model="formActive" type="checkbox" />
-                <span>启用</span>
+              <label class="field field-check field-check--el">
+                <el-checkbox v-model="formActive">启用</el-checkbox>
               </label>
             </div>
             <div class="field">
               <span>配送员（多选，单选主责）</span>
-              <div class="courier-pick">
-                <label v-for="c in couriers" :key="c.courier_id" class="courier-pick-row">
-                  <input
-                    type="checkbox"
-                    :checked="selectedCourierIds.includes(c.courier_id)"
+              <el-radio-group v-model="primaryCourierId" class="courier-pick courier-pick-radio-group">
+                <div v-for="c in couriers" :key="c.courier_id" class="courier-pick-row">
+                  <el-checkbox
+                    :model-value="selectedCourierIds.includes(c.courier_id)"
                     @change="toggleCourier(c.courier_id)"
                   />
                   <span>{{ c.courier_id }}{{ c.name ? ` · ${c.name}` : '' }}</span>
-                  <input
-                    v-if="selectedCourierIds.includes(c.courier_id)"
-                    v-model="primaryCourierId"
-                    type="radio"
-                    :value="c.courier_id"
-                    name="primaryCourier"
-                  />
-                </label>
-                <p v-if="!couriers.length" class="regions-muted">暂无配送员数据，请先在后台创建配送员账号</p>
-              </div>
+                  <el-radio v-if="selectedCourierIds.includes(c.courier_id)" :value="c.courier_id">
+                    主责
+                  </el-radio>
+                </div>
+              </el-radio-group>
+              <p v-if="!couriers.length" class="regions-muted">暂无配送员数据，请先在后台创建配送员账号</p>
             </div>
             <div class="form-actions">
               <button type="button" class="btn-secondary" @click="startDrawPolygon">
@@ -937,5 +931,18 @@ onUnmounted(() => {
   font-size: 12px;
   color: #94a3b8;
   margin: 0;
+}
+.regions-prio-num {
+  width: 100%;
+}
+.regions-form .field-check--el {
+  display: flex;
+  align-items: center;
+}
+.courier-pick-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
 }
 </style>

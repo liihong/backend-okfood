@@ -25,6 +25,7 @@ from app.models.menu_schedule import MenuSchedule
 from app.models.product_category import ProductCategory
 from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
+from app.utils.sql_like import escape_like_fragment
 from app.schemas.admin import (
     CategoryAdminOut,
     CategoryCreateIn,
@@ -43,7 +44,10 @@ from app.services.courier_service import (
     count_expire_one_unit_members_for_business_day,
     count_members_first_scheduled_delivery_day,
 )
-from app.services.delivery_sheet_service import _store_membership_counts, total_meal_units_for_delivery_sheet
+from app.services.delivery_sheet_service import (
+    _store_membership_counts,
+    meal_units_totals_for_delivery_dates,
+)
 from app.services.member_address_service import (
     default_address_pick_subquery,
     delivery_region_name_map,
@@ -81,11 +85,6 @@ def _member_on_leave_today(m: Member, today: date) -> bool:
     return False
 
 
-def _escape_like_fragment(s: str) -> str:
-    """避免用户输入 % / _ 放大 LIKE 匹配范围。"""
-    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
 def _apply_member_list_filters(
     stmt,
     *,
@@ -105,7 +104,7 @@ def _apply_member_list_filters(
     if q_phone:
         q = q_phone.strip()
         if q:
-            esc = _escape_like_fragment(q)
+            esc = escape_like_fragment(q)
             # 与列表页搜索框「姓名、电话、片区地址」提示一致：默认地址详细行
             dap = default_address_pick_subquery()
             ma = aliased(MemberAddress)
@@ -711,17 +710,9 @@ def count_leave_members_for_delivery_day(db: Session, d: date, *, store_id: int 
     )
 
 
-def _dashboard_meals_week_over_week_caption(
-    db: Session,
-    *,
-    meals: int,
-    for_delivery_date: date,
-    store_id: int,
-) -> str:
-    """某业务日备餐份数相对上周同一日历日的差值文案（基准为 for_delivery_date 往前 7 天当日的备餐份数）。"""
-    prev_same_weekday = date.fromordinal(for_delivery_date.toordinal() - 7)
-    baseline = total_meal_units_for_delivery_sheet(db, delivery_date=prev_same_weekday, store_id=store_id)
-    delta = int(meals) - int(baseline)
+def _dashboard_meals_week_over_week_caption(*, meals: int, baseline_meals: int) -> str:
+    """备餐份数相对「上周同日」baseline 的差值文案。"""
+    delta = int(meals) - int(baseline_meals)
     if delta == 0:
         return "较上周持平"
     return f"较上周{delta:+d}份"
@@ -746,6 +737,8 @@ def dashboard_meal_summary(
     anchor = business_anchor_date or today_shanghai()
     day_after = date.fromordinal(anchor.toordinal() + 1)
     cal_today = today_shanghai()
+    wow_prev_anchor = date.fromordinal(anchor.toordinal() - 7)
+    wow_prev_day_after = date.fromordinal(day_after.toordinal() - 7)
     mem_kw = _store_membership_counts(db, store_id=sid)
 
     if anchor < cal_today and not force_recompute:
@@ -754,14 +747,20 @@ def dashboard_meal_summary(
             {"store_id": sid, "business_anchor_date": anchor},
         )
         if row is not None:
+            # 快照已含锚日/次日备餐；环比文案仍按需重算两周前两日份数总和
+            wow_only = meal_units_totals_for_delivery_dates(
+                db, dates=[wow_prev_anchor, wow_prev_day_after], store_id=sid
+            )
+            baseline_meals_anchor_week = wow_only[wow_prev_anchor]
+            baseline_meals_day_after_week = wow_only[wow_prev_day_after]
             tp_snap = int(row.today_meals_to_prepare)
             np_snap = int(row.tomorrow_meals_to_prepare)
             t_first = count_members_first_scheduled_delivery_day(db, delivery_date=day_after, store_id=sid)
             today_wow_cap = _dashboard_meals_week_over_week_caption(
-                db, meals=tp_snap, for_delivery_date=anchor, store_id=sid
+                meals=tp_snap, baseline_meals=baseline_meals_anchor_week
             )
             tomorrow_wow_cap = _dashboard_meals_week_over_week_caption(
-                db, meals=np_snap, for_delivery_date=day_after, store_id=sid
+                meals=np_snap, baseline_meals=baseline_meals_day_after_week
             )
             return DashboardMealSummaryOut(
                 shanghai_today=cal_today,
@@ -779,16 +778,22 @@ def dashboard_meal_summary(
                 snapshot_recorded_at=row.recorded_at,
             )
 
+    meal_bundle = meal_units_totals_for_delivery_dates(
+        db,
+        dates=[wow_prev_anchor, wow_prev_day_after, anchor, day_after],
+        store_id=sid,
+    )
+    baseline_meals_anchor_week = meal_bundle[wow_prev_anchor]
+    baseline_meals_day_after_week = meal_bundle[wow_prev_day_after]
+
     tl = count_leave_members_for_delivery_day(db, anchor, store_id=sid)
-    tp = total_meal_units_for_delivery_sheet(db, delivery_date=anchor, store_id=sid)
+    tp = meal_bundle[anchor]
     nl = count_leave_members_for_delivery_day(db, day_after, store_id=sid)
-    np = total_meal_units_for_delivery_sheet(db, delivery_date=day_after, store_id=sid)
+    np = meal_bundle[day_after]
     te = count_expire_one_unit_members_for_business_day(db, delivery_date=anchor, store_id=sid)
     t_first = count_members_first_scheduled_delivery_day(db, delivery_date=day_after, store_id=sid)
-    today_wow_cap = _dashboard_meals_week_over_week_caption(db, meals=tp, for_delivery_date=anchor, store_id=sid)
-    tomorrow_wow_cap = _dashboard_meals_week_over_week_caption(
-        db, meals=np, for_delivery_date=day_after, store_id=sid
-    )
+    today_wow_cap = _dashboard_meals_week_over_week_caption(meals=tp, baseline_meals=baseline_meals_anchor_week)
+    tomorrow_wow_cap = _dashboard_meals_week_over_week_caption(meals=np, baseline_meals=baseline_meals_day_after_week)
 
     out = DashboardMealSummaryOut(
         shanghai_today=cal_today,
