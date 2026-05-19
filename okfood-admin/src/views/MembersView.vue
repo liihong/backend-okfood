@@ -22,6 +22,7 @@ import {
   handleAdminLogout,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import { parseApiDateTimeBeijing } from '../utils/beijingDateTime.js'
 import MemberEditModal from './components/MemberEditModal.vue'
 import MemberAddressesModal from './components/MemberAddressesModal.vue'
 
@@ -593,7 +594,8 @@ function formatOperationLogTime(iso) {
   const s = typeof iso === 'string' ? iso.trim() : ''
   if (!s) return '—'
   try {
-    const d = new Date(s)
+    const d = parseApiDateTimeBeijing(s)
+    if (Number.isNaN(d.getTime())) return s
     return new Intl.DateTimeFormat('zh-CN', {
       timeZone: 'Asia/Shanghai',
       year: 'numeric',

@@ -34,10 +34,13 @@ class SingleMealOrderOut(BaseModel):
     amount_yuan: str
     pay_status: str
     pay_channel: str | None = None
-    fulfillment_status: str
+    fulfillment_status: str = Field(
+        ...,
+        description="配送侧订单状态（英文枚举）：pending 待发货/待自提、accepted 配送中、delivered 已完成",
+    )
     courier_id: str | None = None
     address_summary: str
-    created_at: datetime | None = Field(None, description="下单时间(UTC)")
+    created_at: datetime | None = Field(None, description="下单时间（北京时间，无时区列）")
 
 
 class AdminSingleMealOrderListOut(SingleMealOrderOut):

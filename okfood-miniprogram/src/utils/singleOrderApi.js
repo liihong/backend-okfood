@@ -1,4 +1,29 @@
 import { request } from '@/utils/api.js'
+import { parseApiDateTimeBeijing } from '@/utils/beijingDateTime.js'
+
+/**
+ * 订单 created_at：库内北京时间 naive；`Z` 结尾兼容旧 UTC 响应。按 Asia/Shanghai 展示。
+ * @param {unknown} iso
+ * @returns {string}
+ */
+export function formatSingleOrderCreatedAt(iso) {
+  if (iso == null || iso === '') return '—'
+  const d = parseApiDateTimeBeijing(iso)  if (Number.isNaN(d.getTime())) {
+    return String(iso).replace('T', ' ').replace(/\.\d+Z?$/, '').slice(0, 19)
+  }
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(d)
+  const g = (t) => parts.find((p) => p.type === t)?.value ?? ''
+  return `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')}:${g('second')}`
+}
 
 /**
  * @param {Record<string, unknown>} o
@@ -21,14 +46,19 @@ export function singleOrderStatusMeta(o) {
 }
 
 /**
- * @param {{ page?: number, page_size?: number }} [params]
+ * @param {{ page?: number, page_size?: number, list_status?: string }} [params]
+ *   list_status: all（省略）| pending_pay | pending_delivery | completed
  * @returns {Promise<{ items: unknown[], total: number, page: number, page_size: number }>}
  */
 export function listSingleMealOrders(params = {}) {
   const page = Number(params.page) > 0 ? Math.floor(Number(params.page)) : 1
   const page_size =
     Number(params.page_size) > 0 ? Math.min(50, Math.floor(Number(params.page_size))) : 20
-  return request(`/api/user/single-orders?page=${page}&page_size=${page_size}`, {
+  const ls = params.list_status && params.list_status !== 'all' ? String(params.list_status).trim() : ''
+  const q = ls
+    ? `page=${page}&page_size=${page_size}&list_status=${encodeURIComponent(ls)}`
+    : `page=${page}&page_size=${page_size}`
+  return request(`/api/user/single-orders?${q}`, {
     method: 'GET',
   })
 }

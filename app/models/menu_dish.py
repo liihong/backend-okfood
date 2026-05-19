@@ -5,6 +5,7 @@ from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Numeric, Strin
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.timeutil import beijing_now_naive
 
 
 class MenuDish(Base):
@@ -26,8 +27,8 @@ class MenuDish(Base):
     single_order_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     spice_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     internal_view_sop: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)
 
 
 # 会员端文案（code → 中文）；未设置或 none 时不展示辣度提示

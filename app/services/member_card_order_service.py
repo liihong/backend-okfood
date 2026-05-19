@@ -6,7 +6,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.timeutil import min_member_delivery_start_shanghai, utc_naive_range_for_shanghai_calendar_day
+from app.core.timeutil import min_member_delivery_start_shanghai, shanghai_naive_range_for_calendar_day
 from app.models.enums import CardOpenMode, CardOrderKind, CardOrderPayStatus, CardPayChannel, PlanType
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
@@ -275,7 +275,11 @@ def list_card_orders_paged(
             )
         )
     ps = (pay_status or "").strip()
-    if ps in (CardOrderPayStatus.UNPAID.value, CardOrderPayStatus.PAID.value):
+    if ps in (
+        CardOrderPayStatus.UNPAID.value,
+        CardOrderPayStatus.PAID.value,
+        CardOrderPayStatus.REFUNDED.value,
+    ):
         filters.append(MemberCardOrder.pay_status == ps)
 
     count_stmt = select(func.count()).select_from(MemberCardOrder).join(Member, join_on)
@@ -307,13 +311,13 @@ def list_mall_template_card_orders_for_order_day(
     page_size: int,
 ) -> tuple[list[CardOrderOut], int]:
     """当日（上海自然日）创建的、绑定会员卡模版的开卡工单（小程序商城卡包等）。"""
-    start_utc, end_utc = utc_naive_range_for_shanghai_calendar_day(order_day)
+    start_bj, end_bj = shanghai_naive_range_for_calendar_day(order_day)
     join_on = Member.id == MemberCardOrder.member_id
     filters = [
         MemberCardOrder.store_id == int(store_id),
         MemberCardOrder.membership_template_id.isnot(None),
-        MemberCardOrder.created_at >= start_utc,
-        MemberCardOrder.created_at < end_utc,
+        MemberCardOrder.created_at >= start_bj,
+        MemberCardOrder.created_at < end_bj,
     ]
     if q and q.strip():
         esc = escape_like_fragment(q.strip())
@@ -325,7 +329,11 @@ def list_mall_template_card_orders_for_order_day(
             )
         )
     ps = (pay_status or "").strip()
-    if ps in (CardOrderPayStatus.UNPAID.value, CardOrderPayStatus.PAID.value):
+    if ps in (
+        CardOrderPayStatus.UNPAID.value,
+        CardOrderPayStatus.PAID.value,
+        CardOrderPayStatus.REFUNDED.value,
+    ):
         filters.append(MemberCardOrder.pay_status == ps)
 
     page = max(1, page)
@@ -452,6 +460,8 @@ def delete_card_order(db: Session, order_id: int, *, store_id: int | None = None
             status_code=400,
             detail="已缴工单不可删除；若实为误标请先在「更新」中改回未缴后再删",
         )
+    if order.pay_status == CardOrderPayStatus.REFUNDED.value:
+        raise HTTPException(status_code=400, detail="已微信退款的工单不可删除")
     db.delete(order)
     db.commit()
 
@@ -464,6 +474,9 @@ def update_card_order(
         raise HTTPException(status_code=404, detail="工单不存在")
     if store_id is not None and int(order.store_id) != int(store_id):
         raise HTTPException(status_code=404, detail="工单不存在")
+
+    if order.pay_status == CardOrderPayStatus.REFUNDED.value:
+        raise HTTPException(status_code=400, detail="已微信退款的工单不可编辑")
 
     patch = body.model_dump(exclude_unset=True)
     patch.pop("sync_member", None)

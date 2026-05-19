@@ -5,6 +5,7 @@ from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, JSON, St
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.timeutil import beijing_now_naive
 
 
 class SfSameCityPush(Base):
@@ -29,7 +30,7 @@ class SfSameCityPush(Base):
     error_msg: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     request_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     response_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     last_callback_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_callback_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 管理端 cancelorder 成功时间；顺丰回调仍会刷新 sf_callback_order_status 等

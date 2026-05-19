@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, aliased
 
 from app.core.delivery_calendar import is_subscription_delivery_day
 from app.core.security import verify_password
-from app.core.timeutil import today_shanghai, tomorrow_shanghai
+from app.core.timeutil import beijing_now_naive, today_shanghai, tomorrow_shanghai
 from app.models.admin_dashboard_biz_day_snapshot import AdminDashboardBizDaySnapshot
 from app.models.admin_user import AdminUser
 from app.models.balance_log import BalanceLog
@@ -394,7 +394,7 @@ def admin_delete_member(db: Session, member_id: int) -> dict[str, str]:
         db.delete(m)
         db.commit()
         return {"mode": "hard", "msg": "已物理删除（无余额流水、配送记录、单次点餐与开卡工单）"}
-    m.deleted_at = datetime.utcnow()
+    m.deleted_at = beijing_now_naive()
     m.wx_mini_openid = None
     m.phone = ("z" + uuid.uuid4().hex[:18])[:20]
     db.commit()
@@ -812,7 +812,7 @@ def dashboard_meal_summary(
     )
 
     if anchor < cal_today:
-        now = datetime.utcnow()
+        now = beijing_now_naive()
         row = db.get(
             AdminDashboardBizDaySnapshot,
             {"store_id": sid, "business_anchor_date": anchor},

@@ -109,6 +109,18 @@ def _store_out_from_row(st: Store) -> StoreConfigOut:
             if getattr(st, "uu_open_app_key", None) is not None
             else False
         ),
+        wechat_pay_ssl_cert_path=(
+            (str(st.wechat_pay_ssl_cert_path).strip() or None)
+            if getattr(st, "wechat_pay_ssl_cert_path", None) is not None
+            and str(st.wechat_pay_ssl_cert_path or "").strip()
+            else None
+        ),
+        wechat_pay_ssl_key_path=(
+            (str(st.wechat_pay_ssl_key_path).strip() or None)
+            if getattr(st, "wechat_pay_ssl_key_path", None) is not None
+            and str(st.wechat_pay_ssl_key_path or "").strip()
+            else None
+        ),
     )
 
 
@@ -133,6 +145,8 @@ def get_store_config(db: Session, *, store_id: int) -> StoreConfigOut:
             sf_retail_push_shop_type=None,
             uu_open_app_id=None,
             uu_open_app_key_set=False,
+            wechat_pay_ssl_cert_path=None,
+            wechat_pay_ssl_key_path=None,
         )
     wk, mo = row.member_card_week_price_yuan, row.member_card_month_price_yuan
     wl = _decimal_or_none(row.member_card_week_list_price_yuan)
@@ -154,6 +168,8 @@ def get_store_config(db: Session, *, store_id: int) -> StoreConfigOut:
         sf_retail_push_shop_type=None,
         uu_open_app_id=None,
         uu_open_app_key_set=False,
+        wechat_pay_ssl_cert_path=None,
+        wechat_pay_ssl_key_path=None,
     )
 
 
@@ -254,14 +270,12 @@ def update_store_config(db: Session, store_id: int, body: StoreConfigUpdateIn) -
     if "uu_open_app_id" in fs:
         raw_u = body.uu_open_app_id
         st.uu_open_app_id = None if raw_u is None else (str(raw_u).strip() or None)
-    if "uu_open_app_key" in fs:
-        raw_k = body.uu_open_app_key
-        if raw_k is None:
-            pass
-        elif str(raw_k).strip() == "":
-            st.uu_open_app_key = None
-        else:
-            st.uu_open_app_key = str(raw_k).strip()[:255]
+    if "wechat_pay_ssl_cert_path" in fs:
+        raw = body.wechat_pay_ssl_cert_path
+        st.wechat_pay_ssl_cert_path = None if raw is None else (str(raw).strip() or None)
+    if "wechat_pay_ssl_key_path" in fs:
+        raw = body.wechat_pay_ssl_key_path
+        st.wechat_pay_ssl_key_path = None if raw is None else (str(raw).strip() or None)
     db.add(st)
     db.commit()
     db.refresh(st)

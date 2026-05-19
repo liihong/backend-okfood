@@ -2,8 +2,8 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 # 业务日与时区：与定时任务、请假截止、菜单「明天」及运营对齐时间口径均为北京时间（Asia/Shanghai）。
+# 库内 DATETIME 列统一存「北京时间」naive（无时区，与 Asia/Shanghai 墙钟一致）；入库请用 ``beijing_now_naive()``。
 TZ_SHANGHAI = ZoneInfo("Asia/Shanghai")
-TZ_UTC = ZoneInfo("UTC")
 
 
 def beijing_now_naive() -> datetime:
@@ -34,32 +34,32 @@ def min_member_delivery_start_shanghai(now: datetime | None = None) -> date:
     return t
 
 
-def utc_naive_range_for_shanghai_calendar_day(d: date) -> tuple[datetime, datetime]:
-    """上海自然日 [d 00:00, 次日 00:00) 对应库内 naive UTC 时间戳区间（左闭右开）。
+def shanghai_naive_range_for_calendar_day(d: date) -> tuple[datetime, datetime]:
+    """上海自然日 [d 00:00, 次日 00:00)（左闭右开），墙钟与 Asia/Shanghai 一致。
 
-    适用于仍以 utcnow 写入 created_at/updated_at 的表；按上海当日筛选时使用。
-    （会员操作审计日志等已改为存北京时间，勿用本函数区间去筛此类列。）
+    适用于库内 **北京时间 naive** 的 ``created_at`` / ``updated_at`` 等列按业务日筛选。
     """
-    start_local = datetime.combine(d, time.min, tzinfo=TZ_SHANGHAI)
-    end_local = start_local + timedelta(days=1)
-    start_utc = start_local.astimezone(TZ_UTC).replace(tzinfo=None)
-    end_utc = end_local.astimezone(TZ_UTC).replace(tzinfo=None)
-    return start_utc, end_utc
+    start = datetime.combine(d, time.min)
+    return start, start + timedelta(days=1)
 
 
-def format_utc_naive_as_shanghai_hm(dt: datetime) -> str:
-    """将库内 naive UTC 的时刻转为上海时区，格式 HH:MM（用于财务日明细展示）。"""
-    aware = dt.replace(tzinfo=TZ_UTC)
-    return aware.astimezone(TZ_SHANGHAI).strftime("%H:%M")
-
-
-def utc_naive_range_for_shanghai_calendar_month(year: int, month: int) -> tuple[datetime, datetime]:
-    """上海自然月 [当月1日 00:00, 次月1日 00:00) 的 naive UTC 区间（左闭右开）。"""
+def shanghai_naive_range_for_calendar_month(year: int, month: int) -> tuple[datetime, datetime]:
+    """上海自然月 [当月1日 00:00, 次月1日 00:00) 的北京时间 naive 区间（左闭右开）。"""
     first = date(year, month, 1)
     if month == 12:
         next_first = date(year + 1, 1, 1)
     else:
         next_first = date(year, month + 1, 1)
-    start_utc, _ = utc_naive_range_for_shanghai_calendar_day(first)
-    _, end_utc = utc_naive_range_for_shanghai_calendar_day(next_first)
-    return start_utc, end_utc
+    start = datetime.combine(first, time.min)
+    end = datetime.combine(next_first, time.min)
+    return start, end
+
+
+def format_beijing_naive_hm(dt: datetime) -> str:
+    """库内北京时间 naive → ``HH:MM`` 展示。"""
+    return dt.strftime("%H:%M")
+
+
+def format_utc_naive_as_shanghai_hm(dt: datetime) -> str:
+    """兼容旧名：现已统一为北京时间存库，等价于 `format_beijing_naive_hm`。"""
+    return format_beijing_naive_hm(dt)

@@ -5,6 +5,7 @@ from sqlalchemy import BigInteger, DateTime, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.timeutil import beijing_now_naive
 
 
 class SfSameCityCallback(Base):
@@ -22,4 +23,4 @@ class SfSameCityCallback(Base):
     sf_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     raw_body: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)

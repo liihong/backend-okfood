@@ -10,6 +10,7 @@ import secrets
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 UNIFIED_ORDER_URL = "https://api.mch.weixin.qq.com/pay/unifiedorder"
 ORDER_QUERY_URL = "https://api.mch.weixin.qq.com/pay/orderquery"
+REFUND_URL = "https://api.mch.weixin.qq.com/secapi/pay/refund"
 
 
 def wechat_pay_misconfiguration_detail() -> str | None:
@@ -299,6 +301,113 @@ def query_order_by_out_trade_no(out_trade_no: str, *, pay: Any | None = None) ->
     if not verify_response_sign(data, api_key=api_key):
         logger.error("微信 orderquery 响应签名校验失败: %s", {k: data.get(k) for k in data.keys() if k != "sign"})
         raise WeChatPayV2Error(502, "微信查询订单响应签名校验失败")
+    return data
+
+
+def _secapi_ssl_cert_paths(*, pay: Any | None = None) -> tuple[str, str]:
+    """退款等资金接口使用的商户 API 证书（pem）。优先 MergedPayConfig 中门店/租户合并路径，否则 .env。"""
+    c = ""
+    k = ""
+    if pay is not None:
+        c = (getattr(pay, "wechat_pay_ssl_cert_path", None) or "").strip()
+        k = (getattr(pay, "wechat_pay_ssl_key_path", None) or "").strip()
+    if not c:
+        c = (settings.WECHAT_PAY_SSL_CERT_PATH or "").strip()
+    if not k:
+        k = (settings.WECHAT_PAY_SSL_KEY_PATH or "").strip()
+    if not c or not k:
+        raise WeChatPayV2Error(
+            503,
+            "未配置微信退款 API 证书路径：请在「门店配置」或租户「对接配置」中填写 apiclient_cert.pem / "
+            "apiclient_key.pem 路径，或在服务器环境配置 WECHAT_PAY_SSL_CERT_PATH / "
+            "WECHAT_PAY_SSL_KEY_PATH（生效优先级：门店 > 租户 > 全局）",
+        )
+    cp = Path(c)
+    kp = Path(k)
+    if not cp.is_file() or not kp.is_file():
+        raise WeChatPayV2Error(503, "微信支付 API 证书路径无效或文件不存在（请确认路径指向服务器可读文件）")
+    return str(cp.resolve()), str(kp.resolve())
+
+
+def refund_order_v2(
+    *,
+    out_trade_no: str,
+    out_refund_no: str,
+    total_fee_fen: int,
+    refund_fee_fen: int,
+    pay: Any | None = None,
+    transaction_id: str | None = None,
+) -> dict[str, str]:
+    """
+    微信支付 v2 申请退款（原路退至支付用户）。需配置 SSL 商户证书。
+
+    ``out_trade_no`` 与 ``transaction_id`` 至少其一必填（此处一般以商户单号为主）。
+    """
+    from app.services.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
+
+    cfg = pay
+    if cfg is None:
+        cfg = MergedPayConfig(
+            wx_mini_appid=(settings.WX_MINI_APPID or "").strip(),
+            wechat_pay_mch_id=(settings.WECHAT_PAY_MCH_ID or "").strip(),
+            wechat_pay_api_key=(settings.WECHAT_PAY_API_KEY or "").strip(),
+            wechat_pay_notify_url=(settings.WECHAT_PAY_NOTIFY_URL or "").strip(),
+        )
+    perr = wechat_pay_misconfiguration_detail_merged(cfg)
+    if perr:
+        raise WeChatPayV2Error(503, perr)
+    otn = (out_trade_no or "").strip()[:32]
+    orn = (out_refund_no or "").strip()[:32]
+    tx = (transaction_id or "").strip()
+    if not otn and not tx:
+        raise WeChatPayV2Error(400, "缺少商户单号与微信订单号")
+    if not orn:
+        raise WeChatPayV2Error(400, "缺少商户退款单号")
+    tf = int(total_fee_fen)
+    rf = int(refund_fee_fen)
+    if tf <= 0 or rf <= 0 or rf > tf:
+        raise WeChatPayV2Error(400, "退款金额不合法")
+
+    cert_pair = _secapi_ssl_cert_paths(pay=cfg)
+    appid = cfg.wx_mini_appid
+    mch_id = cfg.wechat_pay_mch_id
+    api_key = cfg.wechat_pay_api_key
+    params: dict[str, Any] = {
+        "appid": appid,
+        "mch_id": mch_id,
+        "nonce_str": random_nonce_str(),
+        "out_refund_no": orn,
+        "total_fee": str(tf),
+        "refund_fee": str(rf),
+        "op_user_id": mch_id,
+    }
+    if otn:
+        params["out_trade_no"] = otn
+    if tx:
+        params["transaction_id"] = tx
+    params["sign"] = sign_params_md5(params, api_key=api_key)
+    xml_body = dict_to_xml(params)
+    try:
+        with httpx.Client(verify=True, cert=cert_pair, timeout=30.0) as client:
+            resp = client.post(
+                REFUND_URL,
+                content=xml_body.encode("utf-8"),
+                headers={"Content-Type": "application/xml"},
+            )
+            resp.raise_for_status()
+    except httpx.HTTPError as e:
+        logger.warning("微信 refund HTTP 失败: %s", e)
+        raise WeChatPayV2Error(502, "微信退款接口网络失败") from e
+    data = xml_to_dict(resp.text)
+    if (data.get("return_code") or "").upper() != "SUCCESS":
+        msg = (data.get("return_msg") or "通信失败")[:200]
+        raise WeChatPayV2Error(502, f"微信退款：{msg}")
+    if not verify_response_sign(data, api_key=api_key):
+        logger.error("微信 refund 响应签名校验失败")
+        raise WeChatPayV2Error(502, "微信退款响应签名校验失败")
+    if (data.get("result_code") or "").upper() != "SUCCESS":
+        err = (data.get("err_code_des") or data.get("err_code") or "退款失败")[:200]
+        raise WeChatPayV2Error(400, f"微信：{err}")
     return data
 
 

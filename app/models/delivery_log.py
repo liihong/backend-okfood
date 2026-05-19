@@ -4,6 +4,7 @@ from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.timeutil import beijing_now_naive
 from app.models.enums import DeliveryStatus
 
 
@@ -23,5 +24,5 @@ class DeliveryLog(Base):
     courier_id: Mapped[str | None] = mapped_column(
         String(50), ForeignKey("couriers.courier_id", onupdate="CASCADE"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

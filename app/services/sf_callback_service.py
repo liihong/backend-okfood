@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
-from datetime import datetime
+from app.core.timeutil import beijing_now_naive
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlencode
 
@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models.sf_same_city_callback import SfSameCityCallback
 from app.models.sf_same_city_push import SfSameCityPush
+from app.services.sf_open_notify_payload import extract_order_status_deep, extract_shop_and_sf_order_ids
 from app.services.tenant_integration_service import resolve_sf_notify_app_key
 from app.services.sf_open.sign import _canonical_json, generate_open_sign, normalize_payload_for_sf_sign
 
@@ -276,84 +277,6 @@ def _hint_verify_grid(raw_body: str, _payload: dict[str, Any] | None) -> str:
     return f"candidates_wire={nw} form_aliases={nf} json_repr_aliases={nj}"
 
 
-_NEST_PAYLOAD_KEYS = ("data", "result", "body", "content")
-
-
-def _payload_dict_layers(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """顺丰部分推送把业务字段放在 data/result 等嵌套对象内；浅层合并查找。"""
-    layers: list[dict[str, Any]] = [payload]
-    for k in _NEST_PAYLOAD_KEYS:
-        inner = payload.get(k)
-        if isinstance(inner, dict) and inner not in layers:
-            layers.append(inner)
-    return layers
-
-
-def _first_str_from_layers(layers: list[dict[str, Any]], keys: tuple[str, ...]) -> Any:
-    for layer in layers:
-        for key in keys:
-            if key not in layer:
-                continue
-            v = layer[key]
-            if v is None:
-                continue
-            if isinstance(v, str) and not v.strip():
-                continue
-            return v
-    return None
-
-
-def _extract_ids(payload: dict[str, Any]) -> tuple[str | None, str | None]:
-    layers = _payload_dict_layers(payload)
-    shop_order_id = _first_str_from_layers(
-        layers,
-        (
-            "shop_order_id",
-            "shopOrderId",
-            "merchant_order_id",
-            "merchantOrderId",
-            "shop_order_no",
-            "shopOrderNo",
-        ),
-    )
-    shop_s = None
-    if shop_order_id is not None:
-        shop_s = str(shop_order_id)[:128]
-    sf_order_id = _first_str_from_layers(
-        layers,
-        (
-            "sf_order_id",
-            "sfOrderId",
-            "order_id",
-            "orderId",
-            "sf_bill_id",
-            "sfBillId",
-            "bill_id",
-            "billId",
-            "waybill_id",
-            "waybillId",
-        ),
-    )
-    sf_s = None
-    if sf_order_id is not None:
-        sf_s = str(sf_order_id)[:64]
-    return shop_s, sf_s
-
-
-def _extract_order_status(payload: dict[str, Any]) -> int | None:
-    layers = _payload_dict_layers(payload)
-    ost_raw = _first_str_from_layers(
-        layers,
-        ("order_status", "orderStatus", "delivery_status", "deliveryStatus"),
-    )
-    if ost_raw is None:
-        return None
-    try:
-        return int(ost_raw)
-    except (TypeError, ValueError):
-        return None
-
-
 def persist_sf_callback_and_sync_push(
     db: Session,
     *,
@@ -368,8 +291,8 @@ def persist_sf_callback_and_sync_push(
     sf_order_id = None
     parsed_callback_order_status: int | None = None
     if payload:
-        shop_order_id, sf_order_id = _extract_ids(payload)
-        parsed_callback_order_status = _extract_order_status(payload)
+        shop_order_id, sf_order_id = extract_shop_and_sf_order_ids(payload)
+        parsed_callback_order_status = extract_order_status_deep(payload)
 
     truncated = raw_body[:65000] if len(raw_body) > 65000 else raw_body
     row = SfSameCityCallback(
@@ -394,7 +317,7 @@ def persist_sf_callback_and_sync_push(
             pus = db.scalar(select(SfSameCityPush).where(SfSameCityPush.sf_bill_id == sf_order_id))
         if pus is not None:
             matched_push = pus
-            pus.last_callback_at = datetime.utcnow()
+            pus.last_callback_at = beijing_now_naive()
             pus.last_callback_kind = route_kind[:64]
             if parsed_callback_order_status is not None:
                 pus.sf_callback_order_status = parsed_callback_order_status
@@ -490,7 +413,7 @@ def process_sf_notify(
         if not sign_ok:
             verify_err = verify_err or "sign mismatch"
 
-    shop_tr, sf_tr = _extract_ids(payload) if payload else (None, None)
+    shop_tr, sf_tr = extract_shop_and_sf_order_ids(payload) if payload else (None, None)
     keys_csv = ",".join(sorted(payload.keys())) if payload else ""
     grid = _hint_verify_grid(raw_body or "", payload)
     logger.info(

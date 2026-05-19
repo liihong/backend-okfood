@@ -5,6 +5,7 @@ from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer,
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.timeutil import beijing_now_naive
 
 
 class MemberCardOrder(Base):
@@ -45,5 +46,5 @@ class MemberCardOrder(Base):
     out_trade_no: Mapped[str | None] = mapped_column(String(32), nullable=True)
     wx_transaction_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_by: Mapped[str] = mapped_column(String(64))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

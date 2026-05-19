@@ -4,11 +4,15 @@ from decimal import Decimal
 from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.timeutil import beijing_now_naive
 from app.db.base import Base
 
 
 class SingleMealOrder(Base):
-    """会员单次点餐：支付与履约状态独立；片区派单字段见 routing_area / courier_id。"""
+    """会员单次点餐：支付与履约状态独立；片区派单字段见 routing_area / courier_id。
+
+    ``created_at`` / ``updated_at`` 存 **北京时间**（无时区列，与 Asia/Shanghai 墙钟一致）。
+    """
 
     __tablename__ = "single_meal_orders"
     __table_args__ = (UniqueConstraint("store_id", "out_trade_no", name="uk_smo_store_out_trade_no"),)
@@ -41,5 +45,5 @@ class SingleMealOrder(Base):
     courier_id: Mapped[str | None] = mapped_column(
         String(50), ForeignKey("couriers.courier_id", onupdate="CASCADE"), nullable=True, index=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

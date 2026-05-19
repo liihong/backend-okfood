@@ -9,6 +9,7 @@ from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.timeutil import beijing_now_naive
 
 
 class Store(Base):
@@ -41,5 +42,7 @@ class Store(Base):
     # UU 跑腿开放平台参数（预留，尚未对接发单接口）
     uu_open_app_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     uu_open_app_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    wechat_pay_ssl_cert_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    wechat_pay_ssl_key_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

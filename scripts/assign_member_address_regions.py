@@ -21,11 +21,11 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core.timeutil import beijing_now_naive
 from sqlalchemy import select
 
 from app.db.session import SessionLocal
@@ -106,10 +106,10 @@ def _format_update_sql(
 
 
 def _build_sql_file_header(*, no_commit: bool) -> str:
-    gen_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    gen_at = beijing_now_naive().strftime("%Y-%m-%d %H:%M:%S")
     lines = [
         "-- 由 scripts/assign_member_address_regions.py 生成",
-        f"-- 生成时间(UTC) {gen_at}",
+        f"-- 生成时间(北京时间) {gen_at}",
     ]
     if no_commit:
         lines.append("-- 本文件由 --no-commit 试算生成，数据库未落库，请在目标库核对后执行。")
@@ -155,7 +155,7 @@ def main() -> None:
                     u_naive = u.replace(tzinfo=None) if getattr(u, "tzinfo", None) else u
                     updated_at_sql = u_naive.strftime("%Y-%m-%d %H:%M:%S")
                 else:
-                    updated_at_sql = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                    updated_at_sql = beijing_now_naive().strftime("%Y-%m-%d %H:%M:%S")
             else:
                 updated_at_sql = ""
 

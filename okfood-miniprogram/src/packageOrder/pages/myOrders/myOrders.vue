@@ -1,6 +1,39 @@
 <template>
   <view class="page">
     <OkNavbar show-back title="我的订单" />
+    <view class="tabs-bar">
+      <view
+        class="main-tab"
+        :class="{ 'main-tab--active': mainTab === 'single' }"
+        role="tab"
+        :aria-selected="mainTab === 'single'"
+        @tap="selectMainTab('single')"
+      >
+        <text class="main-tab-text">单次点餐订单</text>
+      </view>
+      <view
+        class="main-tab"
+        :class="{ 'main-tab--active': mainTab === 'mall' }"
+        role="tab"
+        :aria-selected="mainTab === 'mall'"
+        @tap="selectMainTab('mall')"
+      >
+        <text class="main-tab-text">商城订单</text>
+      </view>
+    </view>
+    <scroll-view scroll-x class="status-scroll" :show-scrollbar="false" enable-flex>
+      <view class="status-row">
+        <view
+          v-for="s in statusOptions"
+          :key="s.id"
+          class="status-chip"
+          :class="{ 'status-chip--active': listStatus === s.id }"
+          @tap="selectStatus(s.id)"
+        >
+          <text class="status-chip-text">{{ s.label }}</text>
+        </view>
+      </view>
+    </scroll-view>
     <scroll-view
       scroll-y
       class="scroll"
@@ -9,34 +42,47 @@
       @scrolltolower="loadMore"
     >
       <view class="list-inner">
-        <view class="scope-hint">
-          <text class="scope-hint-title">单次点餐订单</text>
-          <text class="scope-hint-sub">以下为单点菜的支付与履约状态；商城自营等其它订单将陆续接入此处。</text>
-        </view>
-        <view v-if="loading && !items.length" class="state-text">加载中…</view>
+        <view v-if="loading && !items.length" class="state-text">加载中&hellip;</view>
         <view v-else-if="!items.length" class="state-text state-text--muted">
-          暂无订单。在周菜单中选餐并完成支付后会显示于此。
+          {{ emptyHint }}
         </view>
         <template v-else>
-          <view
-            v-for="row in items"
-            :key="row.id"
-            class="order-row"
-            @tap="openDetail(row.id)"
-          >
-            <view class="order-row-head">
-              <text class="order-title">{{ row.dish_title || '餐品' }}</text>
-              <text class="order-amt">¥ {{ row.amount_yuan || '0.00' }}</text>
+          <template v-if="mainTab === 'single'">
+            <view
+              v-for="row in items"
+              :key="'s-' + row.id"
+              class="order-row"
+              @tap="openSingleDetail(row.id)"
+            >
+              <view class="order-row-head">
+                <text class="order-title">{{ row.dish_title || '餐品' }}</text>
+                <text class="order-amt">¥ {{ row.amount_yuan || '0.00' }}</text>
+              </view>
+              <text class="order-meta">{{ metaLineSingle(row) }}</text>
+              <view class="order-foot">
+                <text :class="['order-status', `order-status--${statusToneSingle(row)}`]">
+                  {{ statusLineSingle(row) }}
+                </text>
+                <text class="order-arr">&rsaquo;</text>
+              </view>
             </view>
-            <text class="order-meta">{{ metaLine(row) }}</text>
-            <view class="order-foot">
-              <text :class="['order-status', `order-status--${statusTone(row)}`]">
-                {{ statusLine(row) }}
-              </text>
-              <text class="order-arr">›</text>
+          </template>
+          <template v-else>
+            <view v-for="row in items" :key="'m-' + row.id" class="order-row" @tap="openMallHint(row)">
+              <view class="order-row-head">
+                <text class="order-title">{{ mallTitle(row) }}</text>
+                <text class="order-amt">¥ {{ row.amount_yuan || '0.00' }}</text>
+              </view>
+              <text class="order-meta">{{ metaLineMall(row) }}</text>
+              <view class="order-foot">
+                <text :class="['order-status', `order-status--${statusToneMall(row)}`]">
+                  {{ statusLineMall(row) }}
+                </text>
+                <text class="order-arr">&rsaquo;</text>
+              </view>
             </view>
-          </view>
-          <view v-if="loadingMore" class="state-text state-text--small">加载更多…</view>
+          </template>
+          <view v-if="loadingMore" class="state-text state-text--small">加载更多&hellip;</view>
           <view
             v-else-if="items.length && !hasMore"
             class="state-text state-text--small state-text--muted"
@@ -56,6 +102,37 @@ import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { getMemberToken } from '@/utils/api.js'
 import { listSingleMealOrders, singleOrderStatusMeta } from '@/utils/singleOrderApi.js'
+import { listMemberCardOrders } from '@/utils/memberCardOrderApi.js'
+
+const MAIN_SINGLE = 'single'
+const MAIN_MALL = 'mall'
+
+const STATUS_SINGLE = [
+  { id: 'all', label: '全部' },
+  { id: 'pending_pay', label: '待支付' },
+  { id: 'pending_delivery', label: '待送达' },
+  { id: 'completed', label: '已完成' },
+]
+
+const STATUS_MALL = [
+  { id: 'all', label: '全部' },
+  { id: 'pending_pay', label: '待支付' },
+  { id: 'completed', label: '已完成' },
+]
+
+const mainTab = ref(MAIN_SINGLE)
+const listStatus = ref('all')
+
+const statusOptions = computed(() =>
+  mainTab.value === MAIN_SINGLE ? STATUS_SINGLE : STATUS_MALL,
+)
+
+const emptyHint = computed(() => {
+  if (mainTab.value === MAIN_SINGLE) {
+    return '暂无订单。在周菜单中选餐并完成支付后会显示于此。'
+  }
+  return '暂无商城订单。购买周卡/月卡或卡包并完成支付后会显示于此。'
+})
 
 const items = ref([])
 const total = ref(0)
@@ -67,22 +144,70 @@ let fetchSeq = 0
 
 const hasMore = computed(() => items.value.length < total.value)
 
-function metaLine(o) {
+function metaLineSingle(o) {
   const d = o?.delivery_date != null ? String(o.delivery_date) : '—'
   const qty = Number(o?.quantity)
-  const q =
-    Number.isFinite(qty) && qty >= 1 ? `×${Math.floor(qty)}` : '×1'
+  const q = Number.isFinite(qty) && qty >= 1 ? `×${Math.floor(qty)}` : '×1'
   const mode = o?.store_pickup ? '门店自提' : '配送到家'
   return `${d} · ${q} · ${mode}`
 }
 
-function statusLine(o) {
+function statusLineSingle(o) {
   return singleOrderStatusMeta(o || {}).line1 || '—'
 }
 
-function statusTone(o) {
+function statusToneSingle(o) {
   const t = singleOrderStatusMeta(o || {}).tone
   return t === 'warn' || t === 'ok' || t === 'info' ? t : 'info'
+}
+
+function mallTitle(row) {
+  const r = row?.remark
+  if (r && String(r).length > 0) {
+    return String(r).replace(/^卡包模版#\d+·/, '卡包 · ')
+  }
+  const k = row?.card_kind || '会员'
+  return `${k} · 开卡订单`
+}
+
+function metaLineMall(row) {
+  const parts = []
+  const ca = row?.created_at
+  if (ca) {
+    const s = String(ca)
+    parts.push(s.length >= 10 ? s.slice(0, 10) : s)
+  }
+  if (row?.delivery_start_date) {
+    parts.push(`起送 ${row.delivery_start_date}`)
+  }
+  return parts.length ? parts.join(' · ') : '—'
+}
+
+function statusLineMall(row) {
+  const ps = String(row?.pay_status || '')
+  if (ps === '未缴') return '待支付'
+  if (ps === '已缴') return '已完成'
+  return ps || '—'
+}
+
+function statusToneMall(row) {
+  const ps = String(row?.pay_status || '')
+  if (ps === '未缴') return 'warn'
+  if (ps === '已缴') return 'ok'
+  return 'info'
+}
+
+function selectMainTab(id) {
+  if (mainTab.value === id) return
+  mainTab.value = id
+  listStatus.value = 'all'
+  void fetchPage(true)
+}
+
+function selectStatus(id) {
+  if (listStatus.value === id) return
+  listStatus.value = id
+  void fetchPage(true)
 }
 
 async function fetchPage(reset) {
@@ -112,7 +237,13 @@ async function fetchPage(reset) {
   }
   try {
     const p = reset ? 1 : page.value
-    const data = await listSingleMealOrders({ page: p, page_size: pageSize })
+    const st = listStatus.value === 'all' ? undefined : listStatus.value
+    let data
+    if (mainTab.value === MAIN_SINGLE) {
+      data = await listSingleMealOrders({ page: p, page_size: pageSize, list_status: st })
+    } else {
+      data = await listMemberCardOrders({ page: p, page_size: pageSize, list_status: st })
+    }
     if (seq !== fetchSeq) return
     const list = Array.isArray(data?.items) ? data.items : []
     const t = typeof data?.total === 'number' ? data.total : list.length
@@ -148,11 +279,22 @@ function loadMore() {
   void fetchPage(false)
 }
 
-function openDetail(orderId) {
+function openSingleDetail(orderId) {
   const id = Number(orderId)
   if (!Number.isFinite(id) || id < 1) return
   uni.navigateTo({
     url: `/packageOrder/pages/singleOrderDetail/singleOrderDetail?id=${encodeURIComponent(String(id))}`,
+  })
+}
+
+function openMallHint(row) {
+  const title = mallTitle(row)
+  const st = statusLineMall(row)
+  const amt = row?.amount_yuan != null ? `¥${row.amount_yuan}` : ''
+  uni.showModal({
+    title: '订单详情',
+    content: `${title}\n${amt ? `${amt} ` : ''}状态：${st}\n单号：${row?.out_trade_no || '—'}`,
+    showCancel: false,
   })
 }
 
@@ -170,6 +312,85 @@ onShow(() => {
   box-sizing: border-box;
 }
 
+.tabs-bar {
+  display: flex;
+  gap: 16rpx;
+  padding: 16rpx 40rpx 12rpx;
+  flex-shrink: 0;
+}
+
+.main-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20rpx 16rpx;
+  border-radius: 999rpx;
+  background: #fff;
+  border: 2rpx solid $ok-slate-200;
+  box-sizing: border-box;
+}
+
+.main-tab--active {
+  background: $ok-forest-green;
+  border-color: $ok-forest-green;
+}
+
+.main-tab-text {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: $ok-slate-600;
+  text-align: center;
+}
+
+.main-tab--active .main-tab-text {
+  color: #fff;
+  font-weight: 900;
+}
+
+.status-scroll {
+  flex-shrink: 0;
+  width: 100%;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.status-row {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 12rpx;
+  padding: 0 40rpx 16rpx;
+  box-sizing: border-box;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14rpx 28rpx;
+  border-radius: 999rpx;
+  background: #fff;
+  border: 2rpx solid $ok-slate-200;
+  flex-shrink: 0;
+}
+
+.status-chip--active {
+  background: #ecfdf5;
+  border-color: rgba(14, 90, 68, 0.35);
+}
+
+.status-chip-text {
+  font-size: 24rpx;
+  font-weight: 800;
+  color: $ok-slate-600;
+}
+
+.status-chip--active .status-chip-text {
+  color: $ok-forest-green;
+  font-weight: 900;
+}
+
 .scroll {
   flex: 1;
   min-height: 0;
@@ -178,31 +399,7 @@ onShow(() => {
 }
 
 .list-inner {
-  padding: 24rpx 40rpx 0;
-}
-
-.scope-hint {
-  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
-  border-radius: 36rpx;
-  padding: 28rpx 32rpx;
-  margin-bottom: 24rpx;
-  border: 1px solid rgba(14, 90, 68, 0.12);
-}
-
-.scope-hint-title {
-  display: block;
-  font-size: 28rpx;
-  font-weight: 950;
-  color: $ok-forest-green;
-  margin-bottom: 12rpx;
-}
-
-.scope-hint-sub {
-  display: block;
-  font-size: 22rpx;
-  font-weight: 650;
-  color: $ok-slate-500;
-  line-height: 1.5;
+  padding: 8rpx 40rpx 0;
 }
 
 .order-row {

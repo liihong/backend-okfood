@@ -4,6 +4,7 @@ from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, UniqueCo
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.timeutil import beijing_now_naive
 
 
 class WeeklyMenuSlot(Base):
@@ -22,5 +23,5 @@ class WeeklyMenuSlot(Base):
     total_stock: Mapped[int | None] = mapped_column(
         Integer, nullable=True, default=None, comment="日总份(含订阅与单次)；NULL=不限制单次卡"
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

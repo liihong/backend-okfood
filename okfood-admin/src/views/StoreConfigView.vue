@@ -29,6 +29,8 @@ const form = ref({
   uu_open_app_key_input: '',
   uu_clear_app_key: false,
   uu_open_app_key_set: false,
+  wechat_pay_ssl_cert_path: '',
+  wechat_pay_ssl_key_path: '',
   courier_delivery_base_yuan: '',
   courier_delivery_extra_per_unit_yuan: '',
 })
@@ -56,6 +58,10 @@ async function loadConfig() {
     form.value.uu_open_app_key_input = ''
     form.value.uu_clear_app_key = false
     form.value.uu_open_app_key_set = d?.uu_open_app_key_set === true
+    form.value.wechat_pay_ssl_cert_path =
+      d?.wechat_pay_ssl_cert_path != null ? String(d.wechat_pay_ssl_cert_path).trim() : ''
+    form.value.wechat_pay_ssl_key_path =
+      d?.wechat_pay_ssl_key_path != null ? String(d.wechat_pay_ssl_key_path).trim() : ''
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -134,6 +140,8 @@ async function saveConfig() {
     const uk = form.value.uu_open_app_key_input.trim()
     if (uk) payload.uu_open_app_key = uk
   }
+  payload.wechat_pay_ssl_cert_path = form.value.wechat_pay_ssl_cert_path.trim() || null
+  payload.wechat_pay_ssl_key_path = form.value.wechat_pay_ssl_key_path.trim() || null
 
   saving.value = true
   try {
@@ -385,6 +393,41 @@ onMounted(() => {
         </div>
         <div class="sc-field sc-checkbox-row sc-field--last">
           <el-checkbox v-model="form.uu_clear_app_key">清除已保存的 UU AppKey</el-checkbox>
+        </div>
+      </el-card>
+
+      <el-card class="sc-el-card" shadow="never">
+        <template #header>
+          <span class="sc-card-title">微信支付 · 退款证书（本门店）</span>
+        </template>
+        <p class="sc-hint sc-hint--card">
+          管理端「微信原路退款」使用微信
+          <strong>secapi 退款</strong> 接口，须商户平台下发的 <code class="sc-code">apiclient_cert.pem</code> 与
+          <code class="sc-code">apiclient_key.pem</code>。请填写<strong>服务器可读的本地路径</strong>（绝对路径或相对进程工作目录）。
+          <strong>优先级</strong>：本门店填写 &gt; 租户「对接配置」中的默认路径 &gt; 服务器环境变量
+          <code class="sc-code">WECHAT_PAY_SSL_*</code>。同一租户下多门店若共用同一商户号，也可仅在租户对接中配置一次。
+        </p>
+        <div class="sc-field">
+          <label class="sc-label" for="sc-wx-cert">apiclient_cert.pem 路径</label>
+          <el-input
+            id="sc-wx-cert"
+            v-model="form.wechat_pay_ssl_cert_path"
+            class="sc-input-el sc-input-el--mono"
+            maxlength="512"
+            clearable
+            placeholder="例：E:/certs/apiclient_cert.pem"
+          />
+        </div>
+        <div class="sc-field sc-field--last">
+          <label class="sc-label" for="sc-wx-key">apiclient_key.pem 路径</label>
+          <el-input
+            id="sc-wx-key"
+            v-model="form.wechat_pay_ssl_key_path"
+            class="sc-input-el sc-input-el--mono"
+            maxlength="512"
+            clearable
+            placeholder="例：E:/certs/apiclient_key.pem"
+          />
         </div>
       </el-card>
 

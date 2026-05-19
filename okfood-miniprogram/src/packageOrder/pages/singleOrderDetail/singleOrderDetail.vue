@@ -94,6 +94,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
   fetchWechatJsapiPayParams,
+  formatSingleOrderCreatedAt,
   getSingleMealOrder,
   singleOrderStatusMeta,
 } from '@/utils/singleOrderApi.js'
@@ -117,12 +118,7 @@ const fulfillLabel = computed(() => {
   return f || '—'
 })
 
-const createdAtText = computed(() => {
-  const raw = order.value?.created_at
-  if (raw == null || raw === '') return '—'
-  const s = typeof raw === 'string' ? raw : String(raw)
-  return s.replace('T', ' ').replace(/\.\d+Z?$/, '').slice(0, 19)
-})
+const createdAtText = computed(() => formatSingleOrderCreatedAt(order.value?.created_at))
 
 onLoad((options) => {
   const raw = options?.id || options?.order_id || options?.orderId || ''

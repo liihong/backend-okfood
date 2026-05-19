@@ -182,6 +182,16 @@ class StoreConfigOut(BaseModel):
     )
     uu_open_app_id: str | None = Field(None, max_length=64, description="UU 跑腿 AppId（预留）")
     uu_open_app_key_set: bool = Field(False, description="UU 跑腿 AppKey 是否已在库中填写（不回传密钥明文）")
+    wechat_pay_ssl_cert_path: str | None = Field(
+        None,
+        max_length=512,
+        description="本门店微信退款 apiclient_cert.pem 路径；空则回退租户对接或全局 .env",
+    )
+    wechat_pay_ssl_key_path: str | None = Field(
+        None,
+        max_length=512,
+        description="本门店微信退款 apiclient_key.pem 路径；空则回退租户对接或全局 .env",
+    )
 
 
 class StoreConfigUpdateIn(BaseModel):
@@ -247,6 +257,16 @@ class StoreConfigUpdateIn(BaseModel):
         None,
         max_length=255,
         description="UU 预留 AppKey；不传不修改，传空字符串可清空",
+    )
+    wechat_pay_ssl_cert_path: str | None = Field(
+        None,
+        max_length=512,
+        description="退款 cert 路径；传 null 或不传表示不修改，传空字符串可清空本门店覆盖",
+    )
+    wechat_pay_ssl_key_path: str | None = Field(
+        None,
+        max_length=512,
+        description="退款 key 路径；传 null 或不传表示不修改，传空字符串可清空本门店覆盖",
     )
 
     @model_validator(mode="after")
@@ -1037,6 +1057,12 @@ class TenantIntegrationSettingsOut(BaseModel):
     wechat_pay_mch_id: str | None = None
     wechat_pay_api_key_set: bool = False
     wechat_pay_notify_url: str | None = None
+    wechat_pay_ssl_cert_path: str | None = Field(
+        None, description="微信退款 apiclient_cert.pem 路径；空则回退门店或全局 .env"
+    )
+    wechat_pay_ssl_key_path: str | None = Field(
+        None, description="微信退款 apiclient_key.pem 路径；空则回退门店或全局 .env"
+    )
     wx_subscribe_delivery_tmpl_id: str | None = None
     sf_open_dev_id: int | None = None
     sf_open_secret_set: bool = False
@@ -1055,6 +1081,8 @@ class TenantIntegrationSettingsPatchIn(BaseModel):
     wechat_pay_mch_id: str | None = Field(None, max_length=32)
     wechat_pay_api_key: str | None = Field(None, max_length=128)
     wechat_pay_notify_url: str | None = Field(None, max_length=512)
+    wechat_pay_ssl_cert_path: str | None = Field(None, max_length=512, description="退款证书 cert 路径；空串清除租户默认")
+    wechat_pay_ssl_key_path: str | None = Field(None, max_length=512, description="退款证书 key 路径；空串清除租户默认")
     wx_subscribe_delivery_tmpl_id: str | None = Field(None, max_length=128)
     sf_open_dev_id: int | None = Field(None, ge=0)
     sf_open_secret: str | None = Field(None, max_length=255)

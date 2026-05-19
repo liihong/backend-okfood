@@ -5,6 +5,7 @@ from sqlalchemy import DateTime, Integer, Numeric, String, Time
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.timeutil import beijing_now_naive
 
 
 class AppSettings(Base):
@@ -24,4 +25,4 @@ class AppSettings(Base):
     member_card_month_price_yuan: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("669.00"))
     member_card_week_list_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     member_card_month_list_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

@@ -4,6 +4,7 @@ from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.timeutil import beijing_now_naive
 
 
 class MemberAddress(Base):
@@ -31,5 +32,5 @@ class MemberAddress(Base):
     lng: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
     lat: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

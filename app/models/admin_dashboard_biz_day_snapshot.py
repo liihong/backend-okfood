@@ -8,6 +8,7 @@ from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.timeutil import beijing_now_naive
 
 
 class AdminDashboardBizDaySnapshot(Base):
@@ -38,6 +39,6 @@ class AdminDashboardBizDaySnapshot(Base):
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=beijing_now_naive,
         comment="首次写入或 force_recompute 覆盖时间",
     )

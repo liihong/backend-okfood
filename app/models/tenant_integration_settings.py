@@ -8,6 +8,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.core.timeutil import beijing_now_naive
 
 
 class TenantIntegrationSettings(Base):
@@ -21,6 +22,8 @@ class TenantIntegrationSettings(Base):
     wechat_pay_mch_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     wechat_pay_api_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     wechat_pay_notify_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    wechat_pay_ssl_cert_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    wechat_pay_ssl_key_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     wx_subscribe_delivery_tmpl_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     sf_open_dev_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -33,4 +36,4 @@ class TenantIntegrationSettings(Base):
 
     extra_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

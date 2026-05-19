@@ -8,7 +8,7 @@ from datetime import date
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import min_member_delivery_start_shanghai
@@ -18,6 +18,7 @@ from app.integrations.wechat_pay_v2 import (
     WechatPayNotifyParsed,
     build_miniprogram_pay_params,
     query_order_by_out_trade_no,
+    refund_order_v2,
     unified_order_jsapi,
     yuan_decimal_to_fen,
 )
@@ -161,8 +162,10 @@ def prepare_wechat_jsapi_for_member_card_order(
         raise HTTPException(status_code=404, detail="开卡订单不存在")
     if order.pay_status == CardOrderPayStatus.PAID.value:
         raise HTTPException(status_code=400, detail="订单已支付")
+    if order.pay_status == CardOrderPayStatus.REFUNDED.value:
+        raise HTTPException(status_code=400, detail="订单已退款")
 
-    pay_cfg = get_merged_pay_config(db, int(order.tenant_id))
+    pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
     perr = wechat_pay_misconfiguration_detail_merged(pay_cfg)
     if perr:
         raise HTTPException(status_code=503, detail=perr)
@@ -230,11 +233,14 @@ def sync_member_card_order_from_wechat_query(
     if not out_no:
         return False, "missing_out_trade_no"
 
+    if order.pay_status == CardOrderPayStatus.REFUNDED.value:
+        return False, "order_refunded"
+
     if order.applied_to_member and order.pay_status == CardOrderPayStatus.PAID.value:
         return True, "already_synced"
 
     try:
-        pay_cfg = get_merged_pay_config(db, int(order.tenant_id))
+        pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
         data = query_order_by_out_trade_no(out_no, pay=pay_cfg)
     except WeChatPayV2Error as e:
         return False, f"wechat_query:{str(e)}"[:220]
@@ -290,6 +296,8 @@ def sync_member_card_from_wechat_or_raise(db: Session, member_id: int, order_id:
             raise HTTPException(status_code=404, detail="开卡订单不存在")
         if reason == "not_wechat_order":
             raise HTTPException(status_code=400, detail="该工单非微信自助支付，无需此同步")
+        if reason == "order_refunded":
+            raise HTTPException(status_code=400, detail="订单已退款")
         if reason.startswith("wechat_query:"):
             raise HTTPException(
                 status_code=502, detail=reason.replace("wechat_query:", "", 1)[:200]
@@ -305,6 +313,9 @@ def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     )
     if not order:
         return False, "order_not_found"
+
+    if order.pay_status == CardOrderPayStatus.REFUNDED.value:
+        return False, "order_refunded"
 
     if order.pay_status == CardOrderPayStatus.PAID.value:
         apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
@@ -341,4 +352,86 @@ def member_card_order_user_dict(order: MemberCardOrder) -> dict:
         "pay_status": order.pay_status,
         "delivery_start_date": order.delivery_start_date.isoformat() if order.delivery_start_date else None,
         "out_trade_no": (order.out_trade_no or "").strip() or None,
+        "created_at": order.created_at.isoformat() if order.created_at else None,
+        "remark": ((order.remark or "").strip() or None),
     }
+
+
+def list_member_card_orders_for_user(
+    db: Session,
+    member_id: int,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    list_status: str | None = None,
+) -> tuple[list[dict], int]:
+    """小程序「商城订单」：会员工单（周/月/次卡、卡包）列表。"""
+    page = max(1, page)
+    page_size = min(50, max(1, page_size))
+    filters = [MemberCardOrder.member_id == int(member_id)]
+    ls = (list_status or "all").strip().lower()
+    if ls == "pending_pay":
+        filters.append(MemberCardOrder.pay_status == CardOrderPayStatus.UNPAID.value)
+    elif ls == "completed":
+        filters.append(MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value)
+    elif ls != "all":
+        ls = "all"
+
+    total = int(
+        db.scalar(select(func.count()).select_from(MemberCardOrder).where(*filters)) or 0
+    )
+    rows = db.scalars(
+        select(MemberCardOrder)
+        .where(*filters)
+        .order_by(MemberCardOrder.created_at.desc(), MemberCardOrder.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    return [member_card_order_user_dict(r) for r in rows], total
+
+
+def admin_wechat_refund_member_card_order(
+    db: Session, *, order_id: int, store_id: int, require_mall_template: bool
+) -> dict[str, str]:
+    """管理端：微信已缴会员卡工单全额原路退款（须配置商户 API 证书）。"""
+    order = db.get(MemberCardOrder, int(order_id))
+    if not order or int(order.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    if require_mall_template and order.membership_template_id is None:
+        raise ValueError("该入口仅适用于商城卡包订单（绑定会员卡模版）")
+    if order.pay_status != CardOrderPayStatus.PAID.value:
+        raise ValueError('仅「已缴」订单可发起微信退款')
+    if (order.pay_channel or "").strip() != CardPayChannel.WECHAT.value:
+        raise ValueError("仅微信支付订单可原路退回")
+    if order.applied_to_member:
+        raise ValueError(
+            "该工单已同步入账会员权益，系统不支持直接原路退款；请先在后台调整会员次数/配额后另行协商",
+        )
+    out_no = (order.out_trade_no or "").strip()
+    if not out_no:
+        raise ValueError("订单缺少商户单号，无法退款")
+
+    pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
+    q = query_order_by_out_trade_no(out_no, pay=pay_cfg)
+    trade_state = (q.get("trade_state") or "").strip().upper()
+    if trade_state != "SUCCESS":
+        raise ValueError(
+            f"微信侧订单状态为「{trade_state or '未知'}」，需为支付成功（SUCCESS）才可退款",
+        )
+    try:
+        total_fee = int((q.get("total_fee") or "0").strip())
+    except ValueError as e:
+        raise ValueError("无法解析微信订单金额") from e
+    out_refund_no = f"RFMC{order.id}"[:32]
+    refund_order_v2(
+        out_trade_no=out_no,
+        out_refund_no=out_refund_no,
+        total_fee_fen=total_fee,
+        refund_fee_fen=total_fee,
+        pay=pay_cfg,
+        transaction_id=(order.wx_transaction_id or "").strip() or None,
+    )
+    order.pay_status = CardOrderPayStatus.REFUNDED.value
+    db.add(order)
+    db.commit()
+    return {"message": "微信退款已受理，资金将按支付渠道原路退回用户", "out_refund_no": out_refund_no}

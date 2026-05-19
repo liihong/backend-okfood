@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import logging
 import secrets
 from datetime import date, time, timedelta
@@ -10,12 +12,14 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.courier_delivery_fee import courier_delivery_fee_yuan_for_meal_units
-from app.core.timeutil import now_shanghai, today_shanghai, utc_naive_range_for_shanghai_calendar_day
+from app.core.timeutil import now_shanghai, shanghai_naive_range_for_calendar_day, today_shanghai
 from app.integrations.wechat_pay_v2 import (
     WeChatPayV2Error,
     WechatPayNotifyParsed,
     build_miniprogram_pay_params,
     parse_wechat_pay_notify,
+    query_order_by_out_trade_no,
+    refund_order_v2,
     unified_order_jsapi,
     yuan_decimal_to_fen,
 )
@@ -29,6 +33,7 @@ from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.models.menu_dish import MenuDish
 from app.models.menu_schedule import MenuSchedule
+from app.models.sf_same_city_push import SfSameCityPush
 from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.schemas.courier import CourierTaskMemberOut
@@ -244,22 +249,33 @@ def list_admin_store_single_meal_orders_by_order_day(
     order_day: date,
     q: str | None = None,
     pay_status: str | None = None,
+    delivery_phase: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[AdminSingleMealOrderListOut], int]:
-    """管理端：按上海自然日筛选「下单时间」落在当日的单次点餐订单（created_at 存 UTC naive）。"""
-    start_utc, end_utc = utc_naive_range_for_shanghai_calendar_day(order_day)
+    """管理端：按上海自然日筛选「下单时间」落在当日的单次点餐订单（created_at 存北京时间 naive）。
+
+    ``delivery_phase``：``awaiting``=待配送（履约未完成，含 pending/accepted）；``delivered``=已配送（delivered）。
+    """
+    start_bj, end_bj = shanghai_naive_range_for_calendar_day(order_day)
     page = max(1, page)
     page_size = min(100, max(1, page_size))
     join_on = Member.id == SingleMealOrder.member_id
     filters = [
         SingleMealOrder.store_id == int(store_id),
-        SingleMealOrder.created_at >= start_utc,
-        SingleMealOrder.created_at < end_utc,
+        SingleMealOrder.created_at >= start_bj,
+        SingleMealOrder.created_at < end_bj,
     ]
     ps = (pay_status or "").strip()
     if ps:
         filters.append(SingleMealOrder.pay_status == ps)
+    dp = (delivery_phase or "").strip().lower()
+    if dp == "awaiting":
+        filters.append(
+            SingleMealOrder.fulfillment_status.in_(("pending", "accepted")),
+        )
+    elif dp == "delivered":
+        filters.append(SingleMealOrder.fulfillment_status == "delivered")
     if q and q.strip():
         esc = escape_like_fragment(q.strip())
         filters.append(
@@ -305,14 +321,36 @@ def list_member_single_meal_orders(
     *,
     page: int = 1,
     page_size: int = 20,
+    list_status: str | None = None,
 ) -> tuple[list[SingleMealOrderOut], int]:
+    """会员端列表。``list_status``：``all``（默认）、``pending_pay`` 待支付、``pending_delivery`` 待送达（配送且未妥投）、``completed`` 已完成（自提或已送达）。"""
     page = max(1, page)
     page_size = min(50, max(1, page_size))
-    total = int(db.scalar(select(func.count()).where(SingleMealOrder.member_id == member_id)) or 0)
+    ls = (list_status or "all").strip().lower()
+    filters: list = [SingleMealOrder.member_id == member_id]
+    if ls == "pending_pay":
+        filters.append(SingleMealOrder.pay_status == "未支付")
+    elif ls == "pending_delivery":
+        filters.append(SingleMealOrder.pay_status == "已支付")
+        filters.append(SingleMealOrder.store_pickup.is_(False))
+        filters.append(SingleMealOrder.fulfillment_status.in_(("pending", "accepted")))
+    elif ls == "completed":
+        filters.append(SingleMealOrder.pay_status == "已支付")
+        filters.append(
+            or_(
+                SingleMealOrder.store_pickup.is_(True),
+                SingleMealOrder.fulfillment_status == "delivered",
+            )
+        )
+    elif ls != "all":
+        ls = "all"
+
+    count_stmt = select(func.count()).select_from(SingleMealOrder).where(*filters)
+    total = int(db.scalar(count_stmt) or 0)
     offset = (page - 1) * page_size
     rows = db.scalars(
         select(SingleMealOrder)
-        .where(SingleMealOrder.member_id == member_id)
+        .where(*filters)
         .order_by(SingleMealOrder.created_at.desc(), SingleMealOrder.id.desc())
         .offset(offset)
         .limit(page_size)
@@ -334,8 +372,10 @@ def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, c
         raise HTTPException(status_code=404, detail="订单不存在")
     if order.pay_status == "已支付":
         raise HTTPException(status_code=400, detail="订单已支付")
+    if order.pay_status == "已退款":
+        raise HTTPException(status_code=400, detail="订单已退款")
 
-    pay_cfg = get_merged_pay_config(db, int(order.tenant_id))
+    pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
     perr = wechat_pay_misconfiguration_detail_merged(pay_cfg)
     if perr:
         raise HTTPException(status_code=503, detail=perr)
@@ -379,6 +419,9 @@ def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     )
     if not order:
         return False, "order_not_found"
+
+    if order.pay_status == "已退款":
+        return False, "order_refunded"
 
     if order.pay_status == "已支付":
         return True, "already_paid"
@@ -517,6 +560,174 @@ def mark_single_meal_delivered_sf_completion_no_commit(db: Session, order_id: in
     row.fulfillment_status = "delivered"
 
 
+def admin_resync_single_meal_delivered_from_sf_monitor(
+    db: Session,
+    *,
+    order_id: int,
+    store_id: int,
+) -> str:
+    """
+    当顺丰开放平台回调妥投(17)并写入 ``sf_same_city_pushes.sf_callback_order_status``，
+    但 ``single_meal_orders`` 未完成状态时，可由管理端本条幂等对齐。
+
+    仅适用于单次零售推顺丰（``stop_id = retail-smo-{订单号}``）；非妥投不设为已完成。
+    """
+    o = db.get(SingleMealOrder, int(order_id))
+    if o is None or int(o.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    stop_id = f"retail-smo-{int(order_id)}"
+    pus = db.scalars(
+        select(SfSameCityPush)
+        .where(
+            SfSameCityPush.store_id == int(store_id),
+            SfSameCityPush.stop_id == stop_id,
+            SfSameCityPush.error_code == 0,
+        )
+        .order_by(SfSameCityPush.id.desc())
+        .limit(1)
+    ).first()
+    if pus is None:
+        raise ValueError("未找到本订单已成功创单的顺丰推送记录（请确认已推顺丰单次零售）")
+    if pus.merchant_cancel_requested_at is not None:
+        raise ValueError("该顺丰单商户侧已标记取消请求，不设为已完成")
+    st = pus.sf_callback_order_status
+    if st is None:
+        raise ValueError("尚未写入顺丰配送状态编码（请先确认开放平台回调可达且验签通过）")
+    try:
+        n = int(st)
+    except (TypeError, ValueError):
+        raise ValueError(f"顺丰回调状态异常：{st!r}") from None
+    if n in (2, 22):
+        raise ValueError(f"顺丰单为取消/撤单类状态（{n}），不设为已完成")
+    if n == 31:
+        raise ValueError("顺丰侧为取消中(31)，请待终态后再试")
+    if n != 17:
+        raise ValueError(
+            f"顺丰推送中当前状态编码为 {n}（妥投须为 17）。"
+            "若骑手端已点完成，请稍后待回调落库或在「顺丰订单监控」核对最近一次回调。"
+        )
+    prev = str(o.fulfillment_status or "").strip().lower()
+    mark_single_meal_delivered_sf_completion_no_commit(db, int(order_id))
+    db.commit()
+    db.refresh(o)
+    after = str(o.fulfillment_status or "").strip().lower()
+    if after != "delivered":
+        raise ValueError("不满足标为已完成条件（例如未支付、门店自提等），未修改订单状态")
+    if prev == "delivered":
+        return "订单已是已完成，无需重复同步"
+    return "已与顺丰监控中的妥投状态(编码 17)对齐"
+
+
+def bulk_admin_resync_single_meal_from_sf_monitor_for_order_day(
+    db: Session,
+    *,
+    store_id: int,
+    order_day: date,
+    max_orders: int = 500,
+) -> dict[str, Any]:
+    """
+    单日·单门店单次点餐：遍历「下单日」落在当天的订单，对已支付到家单若在 ``sf_same_city_pushes``
+    中为创单成功且回调妥投(17)，但未写回 ``single_meal_orders`` 的逐条幂等对齐。
+
+    依赖顺丰回调写入推送表（不向顺丰/UU 主动拉单）；不含门店自提、其他运力。
+    """
+    mx = max(1, min(500, int(max_orders or 500)))
+    start_bj, end_bj = shanghai_naive_range_for_calendar_day(order_day)
+    rows = list(
+        db.scalars(
+            select(SingleMealOrder)
+            .where(
+                SingleMealOrder.store_id == int(store_id),
+                SingleMealOrder.created_at >= start_bj,
+                SingleMealOrder.created_at < end_bj,
+            )
+            .order_by(SingleMealOrder.id.desc())
+            .limit(mx)
+        ).all()
+    )
+    scanned = len(rows)
+    counts: dict[str, int] = {
+        "updated": 0,
+        "already_completed": 0,
+        "skipped_unpaid": 0,
+        "skipped_store_pickup": 0,
+        "skipped_no_sf_push": 0,
+        "skipped_sf_not_success_push": 0,
+        "skipped_sf_status_not_tuotou": 0,
+        "skipped_sf_cancel": 0,
+        "skipped_merchant_cancel_marker": 0,
+    }
+
+    stop_prefix = "retail-smo-"
+    for o in rows:
+        if str(o.pay_status or "").strip() != "已支付":
+            counts["skipped_unpaid"] += 1
+            continue
+        if bool(getattr(o, "store_pickup", False)):
+            counts["skipped_store_pickup"] += 1
+            continue
+        if str(o.fulfillment_status or "").strip().lower() == "delivered":
+            counts["already_completed"] += 1
+            continue
+
+        pus = db.scalars(
+            select(SfSameCityPush)
+            .where(
+                SfSameCityPush.store_id == int(store_id),
+                SfSameCityPush.stop_id == f"{stop_prefix}{int(o.id)}",
+            )
+            .order_by(SfSameCityPush.id.desc())
+            .limit(1)
+        ).first()
+        if pus is None:
+            counts["skipped_no_sf_push"] += 1
+            continue
+        if int(pus.error_code or -1) != 0:
+            counts["skipped_sf_not_success_push"] += 1
+            continue
+        if pus.merchant_cancel_requested_at is not None:
+            counts["skipped_merchant_cancel_marker"] += 1
+            continue
+        st = pus.sf_callback_order_status
+        if st is None:
+            counts["skipped_sf_status_not_tuotou"] += 1
+            continue
+        try:
+            n = int(st)
+        except (TypeError, ValueError):
+            counts["skipped_sf_status_not_tuotou"] += 1
+            continue
+        if n in (2, 22, 31):
+            counts["skipped_sf_cancel"] += 1
+            continue
+        if n != 17:
+            counts["skipped_sf_status_not_tuotou"] += 1
+            continue
+
+        prev = str(o.fulfillment_status or "").strip().lower()
+        mark_single_meal_delivered_sf_completion_no_commit(db, int(o.id))
+        db.commit()
+        db.refresh(o)
+        if str(o.fulfillment_status or "").strip().lower() != "delivered":
+            counts["skipped_sf_status_not_tuotou"] += 1
+            continue
+        if prev != "delivered":
+            counts["updated"] += 1
+
+    parts = [
+        f"扫描 {scanned} 条",
+        f"新对齐 {counts['updated']} 条",
+        f"已是已完成 {counts['already_completed']}",
+        f"无顺丰推单 {counts['skipped_no_sf_push']}",
+        f"顺丰未妥投(17)或未回调 {counts['skipped_sf_status_not_tuotou']}",
+    ]
+    summary = (
+        "；".join(parts)
+        + "。（依据本系统收到的顺丰推送落库对齐；不向运力主动查询；UU/门店自配送仍由骑手端或手工标记）"
+    )
+    return {"scanned": scanned, **counts, "summary": summary}
+
+
 def admin_assign_courier_single_meal_order(
     db: Session,
     *,
@@ -530,7 +741,7 @@ def admin_assign_courier_single_meal_order(
     if o is None or int(o.store_id) != int(store_id):
         raise ValueError("订单不存在或不属于当前门店")
     if (o.fulfillment_status or "").strip() != "pending":
-        raise ValueError("仅「待履约」订单可指派配送员（已推顺丰请走顺丰履约）")
+        raise ValueError("仅「待发货」订单可指派门店配送员（已进入「配送中」请走运力侧完成送达）")
     cid = (courier_id or "").strip()
     if not cid:
         raise ValueError("请选择配送员")
@@ -551,3 +762,42 @@ def admin_assign_courier_single_meal_order(
         member_phone=(m.phone or "") if m else "",
         member_name=(((m.name or "").strip()) if m else "") or "",
     )
+
+
+def admin_wechat_refund_single_meal_order(db: Session, *, order_id: int, store_id: int) -> dict[str, str]:
+    """管理端：已支付且微信渠道的单次点餐订单，调用微信 v2 退款接口全额原路退回。"""
+    o = db.get(SingleMealOrder, int(order_id))
+    if o is None or int(o.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    if (o.pay_status or "").strip() != "已支付":
+        raise ValueError("仅「已支付」订单可发起微信退款")
+    if (o.pay_channel or "").strip() != "微信":
+        raise ValueError("仅微信支付订单可原路退回")
+    out_no = (o.out_trade_no or "").strip()
+    if not out_no:
+        raise ValueError("订单缺少商户单号，无法退款")
+
+    pay_cfg = get_merged_pay_config(db, int(o.tenant_id), store_id=int(o.store_id))
+    q = query_order_by_out_trade_no(out_no, pay=pay_cfg)
+    trade_state = (q.get("trade_state") or "").strip().upper()
+    if trade_state != "SUCCESS":
+        raise ValueError(
+            f"微信侧订单状态为「{trade_state or '未知'}」，需为支付成功（SUCCESS）才可退款；若已部分/全额退款请以微信商户平台为准",
+        )
+    try:
+        total_fee = int((q.get("total_fee") or "0").strip())
+    except ValueError as e:
+        raise ValueError("无法解析微信订单金额") from e
+    out_refund_no = f"RFSM{o.id}"[:32]
+    refund_order_v2(
+        out_trade_no=out_no,
+        out_refund_no=out_refund_no,
+        total_fee_fen=total_fee,
+        refund_fee_fen=total_fee,
+        pay=pay_cfg,
+        transaction_id=(o.wx_transaction_id or "").strip() or None,
+    )
+    o.pay_status = "已退款"
+    db.add(o)
+    db.commit()
+    return {"message": "微信退款已受理，资金将按支付渠道原路退回用户", "out_refund_no": out_refund_no}

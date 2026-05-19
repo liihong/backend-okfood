@@ -1,6 +1,8 @@
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 
 
 
@@ -82,6 +84,7 @@ from app.schemas.single_meal_order import SingleMealOrderCreateIn
 
 from app.services.member_card_pay_service import (
     create_miniprogram_member_card_order,
+    list_member_card_orders_for_user,
     member_card_order_user_dict,
     prepare_wechat_jsapi_for_member_card_order,
     sync_member_card_from_wechat_or_raise,
@@ -450,9 +453,15 @@ def list_single_orders_me(
     member_id: MemberIdScoped,
     page: int = 1,
     page_size: int = 20,
+    list_status: Annotated[
+        str | None,
+        Query(description="订单分组：all | pending_pay | pending_delivery | completed"),
+    ] = None,
 ):
     """当前会员的单次点餐订单列表（按下单时间倒序）。"""
-    items, total = list_member_single_meal_orders(db, member_id, page=page, page_size=page_size)
+    items, total = list_member_single_meal_orders(
+        db, member_id, page=page, page_size=page_size, list_status=list_status
+    )
     return page_response(
         items=[dump_model(x) for x in items],
         total=total,
@@ -523,6 +532,31 @@ def prepay_single_order_wechat(
     params = prepare_wechat_jsapi_for_order(db, member_id, order_id, ip)
 
     return success(data=params, msg="获取支付参数成功")
+
+
+@router.get("/member-card-orders")
+def list_member_card_orders_me(
+    db: SessionDep,
+    member_id: MemberIdScoped,
+    page: int = 1,
+    page_size: int = 20,
+    list_status: Annotated[
+        str | None,
+        Query(description="订单分组：all | pending_pay | completed"),
+    ] = None,
+):
+    """商城相关会员工单：周/月/次卡与卡包自助下单记录（按创建时间倒序）。"""
+    raw_items, total = list_member_card_orders_for_user(
+        db, member_id, page=page, page_size=page_size, list_status=list_status
+    )
+    items = [UserMemberCardOrderOut.model_validate(x) for x in raw_items]
+    return page_response(
+        items=[dump_model(x) for x in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        msg="获取成功",
+    )
 
 
 @router.post("/member-card-orders")

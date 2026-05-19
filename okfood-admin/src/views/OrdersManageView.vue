@@ -4,6 +4,7 @@ import { RefreshCw, Search } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import { parseApiDateTimeBeijing } from '../utils/beijingDateTime.js'
 
 function todayShanghaiStr() {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -18,16 +19,9 @@ function todayShanghaiStr() {
   return `${y}-${mo}-${da}`
 }
 
-/** ISO 或带 T 的 UTC 时间 → 上海本地 `MM-DD HH:mm` 展示 */
-function formatOrderTime(iso) {
-  if (iso == null || iso === '') return '—'
-  const s = String(iso).trim()
-  const d = new Date(s)
-  if (Number.isNaN(d.getTime())) {
-    const x = s.replace('T', ' ')
-    const m = x.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
-    return m ? `${m[2]}-${m[3]} ${m[4]}:${m[5]}` : x.slice(0, 16)
-  }
+/** 展示用：将 Date 格式化为上海日历的 `MM-DD HH:mm` */
+function formatShanghaiMdHm(d) {
+  if (Number.isNaN(d.getTime())) return null
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai',
     month: '2-digit',
@@ -40,14 +34,27 @@ function formatOrderTime(iso) {
   const da = parts.find((p) => p.type === 'day')?.value ?? ''
   const hr = parts.find((p) => p.type === 'hour')?.value ?? ''
   const mi = parts.find((p) => p.type === 'minute')?.value ?? ''
-  if (!mo || !da) return s.slice(0, 16)
+  if (!mo || !da) return null
   return `${mo}-${da} ${hr}:${mi}`
+}
+
+/** 下单时间：库内为北京时间 naive，统一解析后按上海展示为 `MM-DD HH:mm` */
+function formatOrderCreatedAtMdHm(iso) {
+  if (iso == null || iso === '') return '—'
+  const s = String(iso).trim()
+  const shown = formatShanghaiMdHm(parseApiDateTimeBeijing(s))
+  if (shown) return shown
+  const x = s.replace('T', ' ')
+  const m = x.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
+  return m ? `${m[2]}-${m[3]} ${m[4]}:${m[5]}` : x.slice(0, 16)
 }
 
 const activeTab = ref('single')
 const orderDate = ref(todayShanghaiStr())
 const searchQuery = ref('')
 const singlePayFilter = ref('')
+/** 单次点餐：配送维度筛选，对应接口 delivery_phase */
+const singleDeliveryFilter = ref('')
 const mallPayFilter = ref('')
 const loading = ref(false)
 const singleItems = ref([])
@@ -64,6 +71,8 @@ const assignOpen = ref(false)
 const assignOrder = ref(null)
 const assignCourierId = ref('')
 const dispatchLoadingId = ref(0)
+const refundLoadingId = ref(0)
+const syncDeliveryLoading = ref(false)
 
 const totalPages = computed(() => {
   const t = activeTab.value === 'single' ? singleTotal.value : mallTotal.value
@@ -87,7 +96,7 @@ async function loadCouriers() {
 
 async function onPushSfRetail(row) {
   if (!canDispatchActions(row)) {
-    showToast('仅「待履约」且已支付订单可推送顺丰', 'error')
+    showToast('仅「待发货」且已支付订单可推送顺丰', 'error')
     return
   }
   if (row.store_pickup) {
@@ -128,7 +137,7 @@ async function onPushSfRetail(row) {
 
 async function onPushUu(row) {
   if (!canDispatchActions(row)) {
-    showToast('仅「待履约」且已支付订单可操作', 'error')
+    showToast('仅「待发货」且已支付订单可操作', 'error')
     return
   }
   dispatchLoadingId.value = Number(row.id)
@@ -157,7 +166,7 @@ async function onPushUu(row) {
 
 function openAssignCourier(row) {
   if (!canDispatchActions(row)) {
-    showToast('仅「待履约」订单可指派门店配送员', 'error')
+    showToast('仅「待发货」订单可指派门店配送员', 'error')
     return
   }
   assignOrder.value = row
@@ -170,6 +179,102 @@ function handleDispatchCommand(cmd, row) {
   if (cmd === 'sf') void onPushSfRetail(row)
   else if (cmd === 'uu') void onPushUu(row)
   else if (cmd === 'courier') openAssignCourier(row)
+}
+
+function canRefundWechatSingle(row) {
+  if (!row || row.pay_status !== '已支付') return false
+  return String(row.pay_channel || '').trim() === '微信'
+}
+
+function canRefundWechatMall(row) {
+  if (!row || row.pay_status !== '已缴') return false
+  if (row.applied_to_member) return false
+  return String(row.pay_channel || '').trim() === '微信'
+}
+
+async function onRefundWechatSingle(row) {
+  if (!canRefundWechatSingle(row)) {
+    showToast('仅「已支付」且微信支付的单次订单可原路退款', 'error')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      [
+        `确认对单次点餐订单 #${row.id} 发起微信原路退款？`,
+        `金额：${row.amount_yuan ?? '—'} 元（全额退回支付用户）`,
+        '',
+        '证书路径请配置在「门店配置」或租户「对接配置」；均未配置时回退服务器环境变量 WECHAT_PAY_SSL_*。',
+        '退款成功后订单状态将变为「已退款」，不可撤销。',
+      ].join('\n'),
+      '微信原路退款',
+      { type: 'warning', confirmButtonText: '确定退款', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  refundLoadingId.value = Number(row.id)
+  try {
+    const r = await apiJson(
+      `/api/admin/orders/single-meals/${row.id}/refund/wechat`,
+      { method: 'POST' },
+      { auth: true },
+    )
+    const msg =
+      r && typeof r === 'object' && typeof r.message === 'string' ? r.message : '退款已受理'
+    showToast(msg, 'success')
+    await fetchSingleMeals()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '退款失败', 'error')
+  } finally {
+    refundLoadingId.value = 0
+  }
+}
+
+async function onRefundWechatMall(row) {
+  if (!canRefundWechatMall(row)) {
+    showToast('仅「已缴」、微信支付且未同步入账的卡包订单可原路退款', 'error')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      [
+        `确认对商城卡包订单 #${row.id} 发起微信原路退款？`,
+        `金额：${row.amount_yuan ?? '—'} 元（全额退回支付用户）`,
+        '',
+        '若工单已同步会员次数/配额，请先人工处理会员权益后再协商退款（本按钮对已入账工单禁用）。',
+      ].join('\n'),
+      '微信原路退款',
+      { type: 'warning', confirmButtonText: '确定退款', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  refundLoadingId.value = Number(row.id)
+  try {
+    const r = await apiJson(
+      `/api/admin/orders/mall-card/${row.id}/refund/wechat`,
+      { method: 'POST' },
+      { auth: true },
+    )
+    const msg =
+      r && typeof r === 'object' && typeof r.message === 'string' ? r.message : '退款已受理'
+    showToast(msg, 'success')
+    await fetchMallCardOrders()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '退款失败', 'error')
+  } finally {
+    refundLoadingId.value = 0
+  }
 }
 
 async function submitAssignCourier() {
@@ -203,29 +308,35 @@ async function submitAssignCourier() {
 
 function singlePayClass(s) {
   if (s === '已支付') return 'member-pill member-pill--emerald'
+  if (s === '已退款') return 'member-pill member-pill--rose'
   return 'member-pill member-pill--amber'
 }
 
 function mallPayClass(s) {
   if (s === '已缴') return 'member-pill member-pill--emerald'
+  if (s === '已退款') return 'member-pill member-pill--rose'
   return 'member-pill member-pill--amber'
 }
 
-const FULFILLMENT_STATUS_ZH = {
-  pending: '待履约',
-  accepted: '已接单',
-  delivered: '已履约',
+/** 单次点餐订单状态（与接口 fulfillment_status 对应，商城常用口径） */
+const SINGLE_ORDER_STATUS_ZH = {
+  pending: '待发货',
+  accepted: '配送中',
+  delivered: '已完成',
 }
 
-/** 单次点餐履约状态：接口为英文枚举，列表展示中文 */
-function fulfillmentLabelZh(s) {
+/** 门店自提且未核销完成前：pending 展示为待自提 */
+function singleOrderStatusLabelZh(row) {
+  if (!row) return '—'
+  const s = row.fulfillment_status
   if (s == null || s === '') return '—'
   const k = String(s).trim().toLowerCase()
-  return FULFILLMENT_STATUS_ZH[k] ?? String(s).trim()
+  if (k === 'pending' && row.store_pickup) return '待自提'
+  return SINGLE_ORDER_STATUS_ZH[k] ?? String(s).trim()
 }
 
-function fulfillmentClass(s) {
-  const x = (s || '').toLowerCase()
+function singleOrderStatusClass(row) {
+  const x = ((row && row.fulfillment_status) || '').toLowerCase()
   if (x === 'delivered') return 'member-pill member-pill--emerald'
   if (x === 'accepted') return 'member-pill member-pill--sky'
   if (x === 'pending') return 'member-pill member-pill--amber'
@@ -245,7 +356,9 @@ async function fetchSingleMeals() {
     const sq = searchQuery.value.trim()
     if (sq) q.set('q', sq)
     const pf = String(singlePayFilter.value ?? '').trim()
-    if (pf === '未支付' || pf === '已支付') q.set('pay_status', pf)
+    if (pf === '未支付' || pf === '已支付' || pf === '已退款') q.set('pay_status', pf)
+    const ds = String(singleDeliveryFilter.value ?? '').trim()
+    if (ds === 'awaiting' || ds === 'delivered') q.set('delivery_phase', ds)
     const data = await apiJson(`/api/admin/orders/daily/single-meals?${q.toString()}`, {}, { auth: true })
     singleItems.value = Array.isArray(data.items) ? data.items : []
     singleTotal.value = Number(data.total) || 0
@@ -276,7 +389,7 @@ async function fetchMallCardOrders() {
     const sq = searchQuery.value.trim()
     if (sq) q.set('q', sq)
     const pf = String(mallPayFilter.value ?? '').trim()
-    if (pf === '未缴' || pf === '已缴') q.set('pay_status', pf)
+    if (pf === '未缴' || pf === '已缴' || pf === '已退款') q.set('pay_status', pf)
     const data = await apiJson(`/api/admin/orders/daily/mall-card-orders?${q.toString()}`, {}, { auth: true })
     mallItems.value = Array.isArray(data.items) ? data.items : []
     mallTotal.value = Number(data.total) || 0
@@ -321,10 +434,54 @@ watch(searchQuery, () => {
   }, 320)
 })
 
-watch([orderDate, singlePayFilter, mallPayFilter, pageSize, activeTab], () => {
+watch([orderDate, singlePayFilter, singleDeliveryFilter, mallPayFilter, pageSize, activeTab], () => {
   page.value = 1
   void fetchActive()
 })
+
+async function onSyncDeliveryStatus() {
+  if (!adminAccessToken.value || activeTab.value !== 'single') return
+  const d0 = String(orderDate.value || '').trim() || todayShanghaiStr()
+  try {
+    await ElMessageBox.confirm(
+      [
+        `将扫描「单次点餐」中下单日为 ${d0} 的订单（至多 500 条，从新到旧），`,
+        `对「已支付、配送到家、尚未已完成」的单据：若顺丰推送表中回调状态已为妥投（编码 17），则将订单对齐为「已完成」。`,
+        '',
+        `仅依据本系统已收到的顺丰回调落库，不会主动向顺丰/UU 查询运力；`,
+        `门店自提、未推顺丰或由门店骑手配送的单据不会因本操作变更为已完成。`,
+      ].join('\n'),
+      '同步订单状态',
+      { type: 'info', confirmButtonText: '开始同步', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  syncDeliveryLoading.value = true
+  try {
+    const q = new URLSearchParams()
+    q.set('order_date', d0)
+    q.set('max_orders', '500')
+    /** @type {Record<string, unknown>} */
+    const d = await apiJson(
+      `/api/admin/orders/daily/single-meals/sync-delivery-status?${q.toString()}`,
+      { method: 'POST' },
+      { auth: true },
+    )
+    const msg = typeof d?.summary === 'string' ? d.summary : '同步已完成'
+    showToast(msg, 'success')
+    await fetchSingleMeals()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '同步失败', 'error')
+  } finally {
+    syncDeliveryLoading.value = false
+  }
+}
 
 onMounted(() => {
   void loadCouriers()
@@ -359,17 +516,31 @@ onMounted(() => {
           <RefreshCw :size="16" stroke-width="2" />
           刷新
         </button>
+       <button v-if="activeTab === 'single'" type="button" class="btn-sm orders-manage-sync-delivery"
+          :disabled="syncDeliveryLoading || loading" @click="onSyncDeliveryStatus">
+          {{ syncDeliveryLoading ? '同步中…' : '同步订单状态' }}
+        </button>
       </div>
 
       <el-tabs v-model="activeTab" class="orders-manage-tabs">
         <el-tab-pane label="单次点餐" name="single">
-          <div class="orders-manage-tab-bar">
+         <div class="orders-manage-tab-bar orders-manage-tab-bar--filters">
             <div class="orders-filter-el">
               <span class="orders-filter-el-label">支付</span>
               <el-select v-model="singlePayFilter" placeholder="全部" clearable class="orders-filter-el-select">
                 <el-option label="全部" value="" />
                 <el-option label="未支付" value="未支付" />
                 <el-option label="已支付" value="已支付" />
+                <el-option label="已退款" value="已退款" />
+              </el-select>
+            </div>
+           <div class="orders-filter-el">
+              <span class="orders-filter-el-label">配送</span>
+              <el-select v-model="singleDeliveryFilter" placeholder="全部" clearable
+                class="orders-filter-el-select orders-filter-el-select--wide">
+                <el-option label="全部" value="" />
+                <el-option label="待配送" value="awaiting" />
+                <el-option label="已配送" value="delivered" />
               </el-select>
             </div>
           </div>
@@ -385,7 +556,7 @@ onMounted(() => {
               <template #default="{ row }">{{ row.id }}</template>
             </el-table-column>
             <el-table-column label="下单时间" width="108" class-name="td-mono co-nowrap">
-              <template #default="{ row }">{{ formatOrderTime(row.created_at) }}</template>
+              <template #default="{ row }">{{ formatOrderCreatedAtMdHm(row.created_at) }}</template>
             </el-table-column>
             <el-table-column label="会员" min-width="120">
               <template #default="{ row }">
@@ -408,7 +579,7 @@ onMounted(() => {
            <el-table-column label="供餐日" width="120" class-name="td-mono">
               <template #default="{ row }">{{ row.delivery_date || '—' }}</template>
             </el-table-column>
-            <el-table-column label="金额" width="72" align="right" class-name="td-mono">
+           <el-table-column label="金额" width="90" align="right" class-name="td-mono">
               <template #default="{ row }">{{ row.amount_yuan ?? '—' }}</template>
             </el-table-column>
            <el-table-column label="支付" width="100" class-name="co-nowrap">
@@ -416,11 +587,9 @@ onMounted(() => {
                 <span :class="singlePayClass(row.pay_status)">{{ row.pay_status || '—' }}</span>
               </template>
             </el-table-column>
-           <el-table-column label="履约" width="100" class-name="co-nowrap">
+           <el-table-column label="订单状态" width="100" class-name="co-nowrap">
               <template #default="{ row }">
-                <span :class="fulfillmentClass(row.fulfillment_status)">{{
-                  fulfillmentLabelZh(row.fulfillment_status)
-                }}</span>
+               <span :class="singleOrderStatusClass(row)">{{ singleOrderStatusLabelZh(row) }}</span>
               </template>
             </el-table-column>
             <el-table-column label="配送/自提" min-width="160" show-overflow-tooltip>
@@ -431,28 +600,41 @@ onMounted(() => {
             <el-table-column label="单号" width="120" class-name="td-mono" show-overflow-tooltip>
               <template #default="{ row }">{{ row.out_trade_no || '—' }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="200" fixed="right" align="center">
+            <el-table-column label="操作" width="248" fixed="right" align="center">
               <template #default="{ row }">
-                <el-dropdown trigger="click" @command="(cmd) => handleDispatchCommand(cmd, row)">                  <el-button
-                    type="primary"
+                <div class="orders-op-btns">
+                  <el-dropdown trigger="click" @command="(cmd) => handleDispatchCommand(cmd, row)">
+                    <el-button
+                      type="primary"
+                      size="small"
+                      :loading="dispatchLoadingId === row.id"
+                      :disabled="!canDispatchActions(row)"
+                    >
+                      配送操作
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="sf" :disabled="!canDispatchActions(row) || row.store_pickup">
+                          推送到顺丰
+                        </el-dropdown-item>
+                        <el-dropdown-item command="uu" :disabled="!canDispatchActions(row)">推送到 UU</el-dropdown-item>
+                        <el-dropdown-item command="courier" :disabled="!canDispatchActions(row)">
+                          门店自配送
+                        </el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                  <el-button
+                    type="warning"
                     size="small"
-                    :loading="dispatchLoadingId === row.id"
-                    :disabled="!canDispatchActions(row)"
+                    plain
+                    :disabled="!canRefundWechatSingle(row)"
+                    :loading="refundLoadingId === row.id"
+                    @click="onRefundWechatSingle(row)"
                   >
-                    配送操作
+                    微信退款
                   </el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="sf" :disabled="!canDispatchActions(row) || row.store_pickup">
-                        推送到顺丰
-                      </el-dropdown-item>
-                      <el-dropdown-item command="uu" :disabled="!canDispatchActions(row)">推送到 UU</el-dropdown-item>
-                      <el-dropdown-item command="courier" :disabled="!canDispatchActions(row)">
-                        门店自配送
-                      </el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
+                </div>
               </template>
             </el-table-column>
           </AdminTable>
@@ -466,6 +648,7 @@ onMounted(() => {
                 <el-option label="全部" value="" />
                 <el-option label="未缴" value="未缴" />
                 <el-option label="已缴" value="已缴" />
+                <el-option label="已退款" value="已退款" />
               </el-select>
             </div>
           </div>
@@ -481,7 +664,7 @@ onMounted(() => {
               <template #default="{ row }">{{ row.id }}</template>
             </el-table-column>
             <el-table-column label="下单时间" width="108" class-name="td-mono co-nowrap">
-              <template #default="{ row }">{{ formatOrderTime(row.created_at) }}</template>
+              <template #default="{ row }">{{ formatOrderCreatedAtMdHm(row.created_at) }}</template>
             </el-table-column>
             <el-table-column label="会员" min-width="120">
               <template #default="{ row }">
@@ -526,6 +709,20 @@ onMounted(() => {
               <template #default="{ row }">{{
                 (row.remark || '').trim() ? row.remark : '—'
               }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="116" fixed="right" align="center">
+              <template #default="{ row }">
+                <el-button
+                  type="warning"
+                  size="small"
+                  plain
+                  :disabled="!canRefundWechatMall(row)"
+                  :loading="refundLoadingId === row.id"
+                  @click="onRefundWechatMall(row)"
+                >
+                  微信退款
+                </el-button>
+              </template>
             </el-table-column>
             <el-table-column label="配送" width="108" align="center" class-name="co-nowrap">
               <template #default>
@@ -649,6 +846,16 @@ onMounted(() => {
 .orders-manage-tab-bar {
   margin-bottom: 0.65rem;
 }
+.orders-manage-tab-bar--filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+}
+
+.orders-filter-el-select--wide {
+  width: 152px;
+}
 .orders-m-cell {
   display: flex;
   flex-direction: column;
@@ -681,5 +888,13 @@ onMounted(() => {
 .orders-mall-no-dispatch {
   font-size: 12px;
   color: var(--text-muted, #94a3b8);
+}
+.orders-op-btns {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  max-width: 236px;
 }
 </style>

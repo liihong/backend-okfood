@@ -151,6 +151,8 @@ class UserMemberCardOrderOut(BaseModel):
     pay_status: str
     delivery_start_date: str | None = None
     out_trade_no: str | None = None
+    created_at: str | None = Field(default=None, description="下单时间（ISO8601，北京时间）")
+    remark: str | None = Field(default=None, description="后台/卡包备注摘要")
 
 
 class MemberCardPricesOut(BaseModel):

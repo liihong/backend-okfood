@@ -25,7 +25,7 @@ from sqlalchemy import and_, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.timeutil import today_shanghai
+from app.core.timeutil import beijing_now_naive, today_shanghai
 from app.models.delivery_region import DeliveryRegion
 from app.models.member import Member
 from app.models.member_address import MemberAddress
@@ -963,8 +963,8 @@ def cancel_sf_same_city_push(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     row.sf_callback_order_status = 31
-    row.merchant_cancel_requested_at = datetime.utcnow()
-    row.last_callback_at = datetime.utcnow()
+    row.merchant_cancel_requested_at = beijing_now_naive()
+    row.last_callback_at = beijing_now_naive()
     row.last_callback_kind = "merchant_cancel"
     db.commit()
 
@@ -1078,7 +1078,7 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
         raise ValueError("订单无收货地址，无法推顺丰")
 
     if (order.fulfillment_status or "").strip() != "pending":
-        raise ValueError("仅「待履约」订单可推送顺丰（已推单或已送达的订单请勿重复操作）")
+        raise ValueError("仅「待发货」订单可推送顺丰（已在配送中或已完成的订单请勿重复操作）")
 
     st_row = db.get(Store, int(store_id))
     if not st_row:

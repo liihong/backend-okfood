@@ -87,8 +87,9 @@ class Settings(BaseSettings):
     WECHAT_PAY_NOTIFY_URL: str = ""
     # 微信回调来源 IP 段，逗号分隔 CIDR 或单 IP；留空则不做校验（仅建议开发环境）
     WECHAT_PAY_IP_WHITELIST: str = ""
-
-    # 本地图片上传：静态资源根目录（磁盘上为 {UPLOAD_DIR}/static/uploads/images/...，URL 为 /static/uploads/images/...）
+    # 退款（secapi）商户 API 证书路径：全局兜底；「门店配置 / 租户对接」可填覆盖路径（优先级：门店 > 租户 > .env）
+    WECHAT_PAY_SSL_CERT_PATH: str = ""
+    WECHAT_PAY_SSL_KEY_PATH: str = ""
     UPLOAD_DIR: str = "data"
     MAX_UPLOAD_BYTES: int = 5 * 1024 * 1024
     # 对外访问根地址（无尾部 /），上传写入库里的 image_url 会拼成绝对地址，如 https://api.example.com/static/uploads/...

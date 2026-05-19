@@ -98,39 +98,32 @@ const handleAdminLogin = async () => {
             <div class="form-group login-form-group">
               <label>管理员账号 / Account</label>
               <div class="input-box input-box--el">
-                <svg
-                  class="input-icon"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.5"
-                >
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
                 <el-input
                   v-model="loginUsername"
                   placeholder="Admin ID"
                   clearable
                   autocomplete="username"
                   class="login-el-field"
-                />
+                >
+                  <template #prefix>
+                    <svg
+                      class="input-icon"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                    >
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                      <circle cx="12" cy="7" r="4" />
+                    </svg>
+                  </template>
+                </el-input>
               </div>
             </div>
 
             <div class="form-group login-form-group">
               <label>登录密码 / Password</label>
               <div class="input-box input-box--el">
-                <svg
-                  class="input-icon"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.5"
-                >
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
                 <el-input
                   v-model="loginPassword"
                   type="password"
@@ -138,7 +131,20 @@ const handleAdminLogin = async () => {
                   show-password
                   autocomplete="current-password"
                   class="login-el-field login-el-field--pwd"
-                />
+                >
+                  <template #prefix>
+                    <svg
+                      class="input-icon"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                    >
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                  </template>
+                </el-input>
               </div>
             </div>
 

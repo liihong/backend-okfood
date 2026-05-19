@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -18,6 +18,7 @@ from app.models.single_meal_order import SingleMealOrder
 from app.models.tenant import Tenant
 from app.models.tenant_integration_settings import TenantIntegrationSettings
 from app.schemas.admin import TenantIntegrationSettingsOut, TenantIntegrationSettingsPatchIn
+from app.services.sf_open_notify_payload import extract_shop_and_sf_order_ids
 
 
 def _s(raw: str | None) -> str:
@@ -46,15 +47,29 @@ class MergedPayConfig:
     wechat_pay_mch_id: str
     wechat_pay_api_key: str
     wechat_pay_notify_url: str
+    wechat_pay_ssl_cert_path: str = ""
+    wechat_pay_ssl_key_path: str = ""
 
 
-def get_merged_pay_config(db: Session, tenant_id: int) -> MergedPayConfig:
+def get_merged_pay_config(db: Session, tenant_id: int, store_id: int | None = None) -> MergedPayConfig:
     base = get_settings()
     row = get_tenant_integration_row(db, tenant_id)
     appid = _s(row.wx_mini_appid) if row else ""
     mch = _s(row.wechat_pay_mch_id) if row else ""
     key = _s(row.wechat_pay_api_key) if row else ""
     notify = _s(row.wechat_pay_notify_url) if row else ""
+    cert_t = _s(row.wechat_pay_ssl_cert_path) if row else ""
+    keyp_t = _s(row.wechat_pay_ssl_key_path) if row else ""
+    cert_s, keyp_s = "", ""
+    if store_id is not None:
+        from app.models.store import Store as StoreModel
+
+        st_row = db.get(StoreModel, int(store_id))
+        if st_row is not None:
+            cert_s = _s(getattr(st_row, "wechat_pay_ssl_cert_path", None))
+            keyp_s = _s(getattr(st_row, "wechat_pay_ssl_key_path", None))
+    cert_merged = cert_s or cert_t
+    keyp_merged = keyp_s or keyp_t
     if not appid:
         appid = _s(base.WX_MINI_APPID)
     if not mch:
@@ -68,6 +83,8 @@ def get_merged_pay_config(db: Session, tenant_id: int) -> MergedPayConfig:
         wechat_pay_mch_id=mch,
         wechat_pay_api_key=key,
         wechat_pay_notify_url=notify,
+        wechat_pay_ssl_cert_path=cert_merged,
+        wechat_pay_ssl_key_path=keyp_merged,
     )
 
 
@@ -138,36 +155,47 @@ def merged_sf_integration_namespace(db: Session, tenant_id: int) -> SimpleNamesp
 
 
 def resolve_sf_notify_app_key(db: Session, payload: dict[str, Any] | None) -> str:
-    base = get_settings()
-    shop_oid = ""
-    if payload and isinstance(payload, dict):
-        shop_oid = _s(
-            str(
-                payload.get("shop_order_id")
-                or payload.get("shopOrderId")
-                or payload.get("orderId")
-                or ""
-            )
-        )
-    if shop_oid:
-        from app.models.sf_same_city_push import SfSameCityPush
+    """顺丰回调验签密钥：须与 ``sf_same_city_push`` 门店所属租户配置一致。
 
+    开放平台报文常为嵌套 JSON（字段在 ``data``/``result`` 内）；仅用顶层取值会走错密钥并验签失败。
+    """
+    base = get_settings()
+    if not payload or not isinstance(payload, dict):
+        return _s(base.SF_OPEN_SECRET)
+
+    shop_s, sf_s = extract_shop_and_sf_order_ids(payload)
+    shop_oid = _s(str(shop_s or "").strip())
+    sf_id = _s(str(sf_s or "").strip())
+
+    from app.models.sf_same_city_push import SfSameCityPush
+
+    push_id = None
+    if shop_oid:
         push_id = db.scalar(
             select(SfSameCityPush.id)
             .where(SfSameCityPush.shop_order_id == shop_oid)
             .order_by(SfSameCityPush.id.desc())
             .limit(1)
         )
-        if push_id is not None:
-            prow = db.get(SfSameCityPush, int(push_id))
-            if prow and prow.store_id:
-                from app.models.store import Store
+    if push_id is None and sf_id:
+        push_id = db.scalar(
+            select(SfSameCityPush.id)
+            .where(or_(SfSameCityPush.sf_order_id == sf_id, SfSameCityPush.sf_bill_id == sf_id))
+            .order_by(SfSameCityPush.id.desc())
+            .limit(1)
+        )
 
-                st = db.get(Store, int(prow.store_id))
-                if st:
-                    row = get_tenant_integration_row(db, int(st.tenant_id))
-                    if row and _s(row.sf_open_secret):
-                        return _s(row.sf_open_secret)
+    if push_id is None:
+        return _s(base.SF_OPEN_SECRET)
+    prow = db.get(SfSameCityPush, int(push_id))
+    if prow and prow.store_id:
+        from app.models.store import Store
+
+        st = db.get(Store, int(prow.store_id))
+        if st:
+            row = get_tenant_integration_row(db, int(st.tenant_id))
+            if row and _s(row.sf_open_secret):
+                return _s(row.sf_open_secret)
     return _s(base.SF_OPEN_SECRET)
 
 
@@ -184,6 +212,8 @@ def get_tenant_integration_admin_out(db: Session, tenant_id: int) -> TenantInteg
         wechat_pay_mch_id=_s(row.wechat_pay_mch_id) or None,
         wechat_pay_api_key_set=bool(_s(row.wechat_pay_api_key)),
         wechat_pay_notify_url=_s(row.wechat_pay_notify_url) or None,
+        wechat_pay_ssl_cert_path=_s(row.wechat_pay_ssl_cert_path) or None,
+        wechat_pay_ssl_key_path=_s(row.wechat_pay_ssl_key_path) or None,
         wx_subscribe_delivery_tmpl_id=_s(row.wx_subscribe_delivery_tmpl_id) or None,
         sf_open_dev_id=row.sf_open_dev_id,
         sf_open_secret_set=bool(_s(row.sf_open_secret)),
@@ -236,6 +266,8 @@ def patch_tenant_integration_admin(
             row.wechat_pay_api_key = str(v).strip()
 
     set_opt_str("wechat_pay_notify_url", "wechat_pay_notify_url")
+    set_opt_str("wechat_pay_ssl_cert_path", "wechat_pay_ssl_cert_path")
+    set_opt_str("wechat_pay_ssl_key_path", "wechat_pay_ssl_key_path")
     set_opt_str("wx_subscribe_delivery_tmpl_id", "wx_subscribe_delivery_tmpl_id")
 
     if "sf_open_dev_id" in patch:

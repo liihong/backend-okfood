@@ -6,6 +6,7 @@ from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON,
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.core.timeutil import beijing_now_naive
 
 
 class DeliveryRegion(Base):
@@ -20,8 +21,8 @@ class DeliveryRegion(Base):
     polygon_json: Mapped[dict | list] = mapped_column(JSON)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)
 
     courier_links: Mapped[list["DeliveryRegionCourier"]] = relationship(
         "DeliveryRegionCourier",

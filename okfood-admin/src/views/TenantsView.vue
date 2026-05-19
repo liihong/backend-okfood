@@ -52,6 +52,8 @@ const integrationForm = ref({
   wechat_pay_mch_id: '',
   wechat_pay_api_key_input: '',
   wechat_pay_notify_url: '',
+  wechat_pay_ssl_cert_path: '',
+  wechat_pay_ssl_key_path: '',
   wx_subscribe_delivery_tmpl_id: '',
   sf_open_dev_id: null,
   sf_open_secret_input: '',
@@ -205,6 +207,10 @@ function resetIntegrationFormFromPayload(data) {
     wechat_pay_mch_id: data?.wechat_pay_mch_id != null ? String(data.wechat_pay_mch_id) : '',
     wechat_pay_api_key_input: '',
     wechat_pay_notify_url: data?.wechat_pay_notify_url != null ? String(data.wechat_pay_notify_url) : '',
+    wechat_pay_ssl_cert_path:
+      data?.wechat_pay_ssl_cert_path != null ? String(data.wechat_pay_ssl_cert_path) : '',
+    wechat_pay_ssl_key_path:
+      data?.wechat_pay_ssl_key_path != null ? String(data.wechat_pay_ssl_key_path) : '',
     wx_subscribe_delivery_tmpl_id:
       data?.wx_subscribe_delivery_tmpl_id != null ? String(data.wx_subscribe_delivery_tmpl_id) : '',
     sf_open_dev_id: data?.sf_open_dev_id != null ? Number(data.sf_open_dev_id) : null,
@@ -269,6 +275,8 @@ async function saveIntegration() {
   body.wx_mini_appid = t(integrationForm.value.wx_mini_appid) || null
   body.wechat_pay_mch_id = t(integrationForm.value.wechat_pay_mch_id) || null
   body.wechat_pay_notify_url = t(integrationForm.value.wechat_pay_notify_url) || null
+  body.wechat_pay_ssl_cert_path = t(integrationForm.value.wechat_pay_ssl_cert_path) || null
+  body.wechat_pay_ssl_key_path = t(integrationForm.value.wechat_pay_ssl_key_path) || null
   body.wx_subscribe_delivery_tmpl_id = t(integrationForm.value.wx_subscribe_delivery_tmpl_id) || null
   body.sf_open_shop_id = t(integrationForm.value.sf_open_shop_id) || null
   body.sf_pickup_phone = t(integrationForm.value.sf_pickup_phone) || null
@@ -756,6 +764,28 @@ onMounted(async () => {
               v-model="integrationForm.wechat_pay_notify_url"
               maxlength="512"
               placeholder="留空则用全局 WECHAT_PAY_NOTIFY_URL"
+            />
+          </el-form-item>
+          <el-form-item
+            label="退款 API 证书 cert 路径（apiclient_cert.pem）"
+            :title="'租户内各门店未单独配置时的默认路径；门店可在「门店配置」覆盖'"
+          >
+            <el-input
+              v-model="integrationForm.wechat_pay_ssl_cert_path"
+              maxlength="512"
+              placeholder="例：E:/certs/apiclient_cert.pem；留空则仅用门店或全局 .env"
+              class="mono-input"
+            />
+          </el-form-item>
+          <el-form-item
+            label="退款 API 证书 key 路径（apiclient_key.pem）"
+            :title="'租户默认 key 路径；优先级：门店 > 租户 > WECHAT_PAY_SSL_KEY_PATH'"
+          >
+            <el-input
+              v-model="integrationForm.wechat_pay_ssl_key_path"
+              maxlength="512"
+              placeholder="例：E:/certs/apiclient_key.pem"
+              class="mono-input"
             />
           </el-form-item>
 

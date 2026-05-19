@@ -7,10 +7,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import (
-    format_utc_naive_as_shanghai_hm,
+    format_beijing_naive_hm,
+    shanghai_naive_range_for_calendar_day,
+    shanghai_naive_range_for_calendar_month,
     today_shanghai,
-    utc_naive_range_for_shanghai_calendar_day,
-    utc_naive_range_for_shanghai_calendar_month,
 )
 from app.models.enums import CardOrderPayStatus
 from app.models.member_card_order import MemberCardOrder
@@ -27,26 +27,26 @@ from app.schemas.admin import (
 def _window_paid(
     db: Session,
     *,
-    start_utc: datetime | None,
-    end_utc: datetime | None,
+    start: datetime | None,
+    end: datetime | None,
     store_id: int | None = None,
 ) -> FinanceReceivedWindowOut:
-    """按库内 naive UTC 的 updated_at 落在 [start_utc, end_utc) 统计已收（两端可空表示不限制）。"""
+    """按库内北京时间 naive 的 ``updated_at`` 落在 [start, end) 统计已收（两端可空表示不限制）。"""
     card_conds = [MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value]
     if store_id is not None:
         card_conds.append(MemberCardOrder.store_id == int(store_id))
-    if start_utc is not None:
-        card_conds.append(MemberCardOrder.updated_at >= start_utc)
-    if end_utc is not None:
-        card_conds.append(MemberCardOrder.updated_at < end_utc)
+    if start is not None:
+        card_conds.append(MemberCardOrder.updated_at >= start)
+    if end is not None:
+        card_conds.append(MemberCardOrder.updated_at < end)
 
     sm_conds = [SingleMealOrder.pay_status == "已支付"]
     if store_id is not None:
         sm_conds.append(SingleMealOrder.store_id == int(store_id))
-    if start_utc is not None:
-        sm_conds.append(SingleMealOrder.updated_at >= start_utc)
-    if end_utc is not None:
-        sm_conds.append(SingleMealOrder.updated_at < end_utc)
+    if start is not None:
+        sm_conds.append(SingleMealOrder.updated_at >= start)
+    if end is not None:
+        sm_conds.append(SingleMealOrder.updated_at < end)
 
     c_cnt, c_sum = db.execute(
         select(
@@ -76,7 +76,7 @@ def _window_paid(
 def finance_today_paid_card_orders(db: Session, *, store_id: int | None = None) -> FinanceTodayPaidCardOrdersOut:
     """今日（上海日界）已缴开卡工单明细，按收款时刻先后排序。"""
     day = today_shanghai()
-    d0, d1 = utc_naive_range_for_shanghai_calendar_day(day)
+    d0, d1 = shanghai_naive_range_for_calendar_day(day)
     conds = [
         MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
         MemberCardOrder.updated_at >= d0,
@@ -97,7 +97,7 @@ def finance_today_paid_card_orders(db: Session, *, store_id: int | None = None) 
     items = [
         FinanceTodayPaidCardOrderRowOut(
             order_id=int(r.id),
-            time_hm=format_utc_naive_as_shanghai_hm(r.updated_at),
+            time_hm=format_beijing_naive_hm(r.updated_at),
             card_kind=(r.card_kind or "").strip() or "—",
             amount_yuan=Decimal(r.amount_yuan) if r.amount_yuan is not None else Decimal(0),
         )
@@ -109,19 +109,19 @@ def finance_today_paid_card_orders(db: Session, *, store_id: int | None = None) 
 def finance_received_summary(db: Session, *, store_id: int | None = None) -> FinanceReceivedSummaryOut:
     """汇总已收：累计、本月（上海自然月）、今日（上海自然日）。
 
-    时间依据订单行的 updated_at（UTC 存库）；支付成功或后台改为已缴时会更新。
-    已缴工单若之后仅改备注等也可能刷新 updated_at，属已知局限（无单独 paid_at 字段时）。
+    时间依据订单行的 ``updated_at``（北京时间 naive）；支付成功或后台改为已缴时会更新。
+    已缴工单若之后仅改备注等也可能刷新 ``updated_at``，属已知局限（无单独 paid_at 字段时）。
     """
     day = today_shanghai()
-    m0, m1 = utc_naive_range_for_shanghai_calendar_month(day.year, day.month)
-    d0, d1 = utc_naive_range_for_shanghai_calendar_day(day)
+    m0, m1 = shanghai_naive_range_for_calendar_month(day.year, day.month)
+    d0, d1 = shanghai_naive_range_for_calendar_day(day)
     ym = f"{day.year:04d}-{day.month:02d}"
 
     return FinanceReceivedSummaryOut(
         timezone_label="Asia/Shanghai",
         shanghai_today=day,
         shanghai_calendar_month=ym,
-        cumulative=_window_paid(db, start_utc=None, end_utc=None, store_id=store_id),
-        this_month=_window_paid(db, start_utc=m0, end_utc=m1, store_id=store_id),
-        today=_window_paid(db, start_utc=d0, end_utc=d1, store_id=store_id),
+        cumulative=_window_paid(db, start=None, end=None, store_id=store_id),
+        this_month=_window_paid(db, start=m0, end=m1, store_id=store_id),
+        today=_window_paid(db, start=d0, end=d1, store_id=store_id),
     )

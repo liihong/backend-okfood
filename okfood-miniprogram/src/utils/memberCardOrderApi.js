@@ -1,6 +1,22 @@
 import { request } from '@/utils/api.js'
 
 /**
+ * @param {{ page?: number, page_size?: number, list_status?: string }} [params]
+ */
+export function listMemberCardOrders(params = {}) {
+  const page = Number(params.page) > 0 ? Math.floor(Number(params.page)) : 1
+  const page_size =
+    Number(params.page_size) > 0 ? Math.min(50, Math.floor(Number(params.page_size))) : 20
+  const ls = params.list_status && params.list_status !== 'all' ? String(params.list_status).trim() : ''
+  const q = ls
+    ? `page=${page}&page_size=${page_size}&list_status=${encodeURIComponent(ls)}`
+    : `page=${page}&page_size=${page_size}`
+  return request(`/api/user/member-card-orders?${q}`, {
+    method: 'GET',
+  })
+}
+
+/**
  * @param {{ card_kind?: string, delivery_start_date?: string, membership_template_id?: number }} body
  *   - 经典周/月卡：card_kind + delivery_start_date
  *   - 自律卡包：membership_template_id

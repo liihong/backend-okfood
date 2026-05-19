@@ -97,6 +97,9 @@ from app.services.member_service import (
 )
 from app.services.single_meal_order_service import (
     admin_assign_courier_single_meal_order,
+    admin_resync_single_meal_delivered_from_sf_monitor,
+    admin_wechat_refund_single_meal_order,
+    bulk_admin_resync_single_meal_from_sf_monitor_for_order_day,
     list_admin_store_single_meal_orders_by_order_day,
 )
 from app.services.member_card_order_service import (
@@ -106,8 +109,9 @@ from app.services.member_card_order_service import (
     list_mall_template_card_orders_for_order_day,
     update_card_order,
 )
+from app.services.member_card_pay_service import admin_wechat_refund_member_card_order
 from app.services.finance_received_service import finance_received_summary, finance_today_paid_card_orders
-from app.integrations.wechat_pay_v2 import resolve_request_client_ip
+from app.integrations.wechat_pay_v2 import WeChatPayV2Error, resolve_request_client_ip
 from app.utils.response import dump_model, page_response, success
 
 router = APIRouter(prefix="/admin", tags=["管理端"])
@@ -587,7 +591,7 @@ def card_orders(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     q: str | None = None,
-    pay_status: Annotated[str | None, Query(description="未缴 | 已缴")] = None,
+    pay_status: Annotated[str | None, Query(description="未缴 | 已缴 | 已退款")] = None,
     include_history: Annotated[
         bool,
         Query(description="true=含已缴且已入账等全部历史；默认 false 仅待处理工单"),
@@ -661,7 +665,11 @@ def admin_orders_daily_single_meals(
         Query(description="下单业务日（上海日历日），默认当天"),
     ] = None,
     q: Annotated[str | None, Query(description="会员手机前缀或姓名模糊")] = None,
-    pay_status: Annotated[str | None, Query(description="支付状态，如 未支付 / 已支付")] = None,
+    pay_status: Annotated[str | None, Query(description="支付状态：未支付 / 已支付 / 已退款")] = None,
+    delivery_phase: Annotated[
+        str | None,
+        Query(description="配送阶段：awaiting=待配送（未送达）；delivered=已送达；留空=全部"),
+    ] = None,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -676,6 +684,7 @@ def admin_orders_daily_single_meals(
         order_day=day,
         q=q,
         pay_status=pay_status,
+        delivery_phase=delivery_phase,
         page=page,
         page_size=page_size,
     )
@@ -688,6 +697,35 @@ def admin_orders_daily_single_meals(
     )
 
 
+@router.post("/orders/daily/single-meals/sync-delivery-status", response_model=None)
+def admin_orders_daily_single_meals_sync_delivery_status(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    order_date: Annotated[
+        date | None,
+        Query(description="下单业务日（上海日历日），默认当天"),
+    ] = None,
+    max_orders: Annotated[int, Query(description="最多扫描单次订单条数（1～500）")] = 500,
+):
+    """
+    批量对齐：当日单次点餐中，顺丰推送表已为妥投(17)但未回写到订单的条目。
+
+    使用本库 ``sf_same_city_pushes`` 中由回调写入的状态，不向运力端主动查询；UU / 门店自配送不在范围内。
+    """
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    day = order_date or today_shanghai()
+    mo = max(1, min(500, int(max_orders or 500)))
+    out = bulk_admin_resync_single_meal_from_sf_monitor_for_order_day(
+        db,
+        store_id=store_id,
+        order_day=day,
+        max_orders=mo,
+    )
+    msg = str(out.get("summary") or "同步完成")
+    return success(data=out, msg=msg)
+
+
 @router.get("/orders/daily/mall-card-orders")
 def admin_orders_daily_mall_card_orders(
     db: SessionDep,
@@ -698,7 +736,7 @@ def admin_orders_daily_mall_card_orders(
         Query(description="下单业务日（上海日历日），默认当天"),
     ] = None,
     q: Annotated[str | None, Query(description="会员手机前缀或姓名模糊")] = None,
-    pay_status: Annotated[str | None, Query(description="未缴 | 已缴")] = None,
+    pay_status: Annotated[str | None, Query(description="未缴 | 已缴 | 已退款")] = None,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -790,6 +828,76 @@ def admin_single_meal_dispatch_store_courier(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return success(data=dump_model(row), msg="已指派配送员")
+
+
+@router.post("/orders/single-meals/{order_id}/sync-delivered-from-sf-monitor", response_model=None)
+def admin_single_meal_sync_delivered_from_sf_monitor(
+    order_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """单次零售顺丰单：若在「顺丰订单监控」中已为妥投(17)且推单入库成功，但订单状态未变为已完成时，点此幂等对齐。
+
+    需部署「嵌套 JSON 商户单号解析 + 状态递归抽取」回调修复后仍会漏记的历史单可用手动对齐；请先确认监控行上回调状态已为 17。
+    """
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        msg = admin_resync_single_meal_delivered_from_sf_monitor(
+            db,
+            order_id=int(order_id),
+            store_id=store_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=None, msg=msg)
+
+
+@router.post("/orders/single-meals/{order_id}/refund/wechat", response_model=None)
+def admin_single_meal_refund_wechat(
+    order_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """单次点餐：微信支付订单全额原路退款。证书路径优先级：门店配置 > 租户对接 > 环境变量 WECHAT_PAY_SSL_*。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        payload = admin_wechat_refund_single_meal_order(db, order_id=int(order_id), store_id=store_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except WeChatPayV2Error as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e)) from e
+    return success(
+        data=payload,
+        msg=str(payload.get("message") or "退款已受理"),
+    )
+
+
+@router.post("/orders/mall-card/{order_id}/refund/wechat", response_model=None)
+def admin_mall_card_refund_wechat(
+    order_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """商城卡包：微信已缴且未同步入账的工单可全额原路退款。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        payload = admin_wechat_refund_member_card_order(
+            db,
+            order_id=int(order_id),
+            store_id=store_id,
+            require_mall_template=True,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except WeChatPayV2Error as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e)) from e
+    return success(
+        data=payload,
+        msg=str(payload.get("message") or "退款已受理"),
+    )
 
 
 @router.post("/orders/mall-card/{order_id}/dispatch/sf-retail", response_model=None)
