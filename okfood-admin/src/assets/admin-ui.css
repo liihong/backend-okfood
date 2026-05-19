@@ -1970,6 +1970,11 @@
   color: #e11d48;
 }
 
+.member-pill--sky {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
 .member-pill--slate {
   background: #f1f5f9;
   color: #64748b;

@@ -12,6 +12,7 @@ import math
 import re
 import time
 import uuid
+from copy import copy
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -57,6 +58,9 @@ from app.schemas.admin import (
 logger = logging.getLogger(__name__)
 
 _SH = ZoneInfo("Asia/Shanghai")
+
+# 与 sf_same_city_pushes.push_kind、履约回调分支一致
+_SF_PUSH_KIND_SINGLE_MEAL_RETAIL = "single_meal_retail"
 
 
 def _sf_push_request_snapshot(
@@ -869,11 +873,13 @@ def _persist_fail(
     err_msg: str,
     *,
     store_id: int,
+    push_kind: str = "delivery_sheet",
 ) -> None:
     row = SfSameCityPush(
         store_id=int(store_id),
         delivery_date=d,
         stop_id=stop_id,
+        push_kind=(push_kind or "delivery_sheet").strip() or "delivery_sheet",
         shop_order_id=shop_order_id,
         error_code=err_code,
         error_msg=err_msg,
@@ -1052,3 +1058,199 @@ def retry_sf_same_city_push_by_id(db: Session, *, push_id: int) -> SfSameCityPus
     if not out.results:
         raise HTTPException(status_code=500, detail="重试无返回结果")
     return out.results[0]
+
+
+def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) -> SfSameCityPushItemResult:
+    """
+    订单管理：单次点餐直推顺丰 ``createorder``。
+
+    使用门店上单独配置的 ``sf_retail_push_shop_id``（及可选 shop_type），
+    与租户对接里用于智能配送大表推单的顺丰店铺编号互不干扰；dev_id/secret/取件信息仍走租户合并配置。
+    """
+    order = db.get(SingleMealOrder, int(order_id))
+    if order is None or int(order.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    if (order.pay_status or "").strip() != "已支付":
+        raise ValueError("仅已支付订单可推送顺丰")
+    if bool(order.store_pickup):
+        raise ValueError("门店自提订单无需发顺丰到家，可使用「门店自配送」指派配送员")
+    if not order.member_address_id:
+        raise ValueError("订单无收货地址，无法推顺丰")
+
+    if (order.fulfillment_status or "").strip() != "pending":
+        raise ValueError("仅「待履约」订单可推送顺丰（已推单或已送达的订单请勿重复操作）")
+
+    st_row = db.get(Store, int(store_id))
+    if not st_row:
+        raise ValueError("门店不存在")
+    retail_shop = (getattr(st_row, "sf_retail_push_shop_id", None) or "").strip()
+    if not retail_shop:
+        raise ValueError(
+            "请先在「门店设置」填写「零售推顺丰店铺ID」（与智能配送大表使用的顺丰店铺编号区分）"
+        )
+
+    tid = int(st_row.tenant_id)
+    gset = merged_sf_integration_namespace(db, tid)
+    if not gset.SF_OPEN_DEV_ID or not (gset.SF_OPEN_SECRET or "").strip():
+        raise ValueError("请先在租户对接或环境变量配置顺丰开发者 dev_id 与 secret")
+    if not (gset.SF_PICKUP_PHONE or "").strip() or not (gset.SF_PICKUP_ADDRESS or "").strip():
+        raise ValueError("请配置顺丰取件电话与取件地址（租户对接或 .env）")
+
+    gset = copy(gset)
+    gset.SF_OPEN_SHOP_ID = retail_shop
+    if getattr(st_row, "sf_retail_push_shop_type", None) is not None:
+        gset.SF_OPEN_SHOP_TYPE = int(st_row.sf_retail_push_shop_type)
+
+    addr = db.get(MemberAddress, int(order.member_address_id))
+    if not addr:
+        raise ValueError("收货地址不存在")
+
+    dish = db.get(MenuDish, int(order.dish_id))
+    dish_name = ((dish.name or "餐品").strip() if dish else None) or "餐品"
+
+    base = get_settings()
+    kg_unit = float(getattr(base, "SF_KG_PER_MEAL_UNIT", None) or 0.5)
+    weight_kg = max(0.01, kg_unit * max(1, int(order.quantity or 1)))
+
+    recv_lng = float(addr.lng) if addr.lng is not None else None
+    recv_lat = float(addr.lat) if addr.lat is not None else None
+
+    nm_map = delivery_region_name_map(
+        db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set()
+    )
+    ar_lbl = routing_area_label(addr, nm_map)
+
+    recv_phone = (addr.contact_phone or "").strip()
+    recv_name = (addr.contact_name or "").strip()
+
+    stop_id = f"retail-smo-{order.id}"
+    d = order.delivery_date
+    if d is None:
+        raise ValueError("订单缺少供餐日")
+
+    if _has_success(db, d, stop_id):
+        raise ValueError("该订单在供餐日已成功创建顺丰单，请勿重复推送（可在顺丰订单监控核对）")
+
+    row_sfc = SfSameCityRowBase(
+        stop_id=stop_id,
+        pickup_phone=(gset.SF_PICKUP_PHONE or "")[:20],
+        map_location_text=(addr.map_location_text or "").strip(),
+        door_detail=(addr.door_detail or "").strip(),
+        recv_address=(addr.map_location_text or "").strip(),
+        recv_building=(addr.door_detail or "").strip(),
+        recv_name=recv_name or "收件人",
+        recv_phone=recv_phone,
+        recv_lng=recv_lng,
+        recv_lat=recv_lat,
+        product_category=dish_name[:80],
+        weight_kg=weight_kg,
+        push_immediately=True,
+        expect_delivery_at=None,
+        remark=f"单次点餐 #{order.id} {ar_lbl}".strip()[:2000],
+        is_direct=False,
+        vehicle_type=(gset.SF_DEFAULT_VEHICLE_TYPE or "小轿车").strip(),
+        is_insured=False,
+        goods_value_yuan=None,
+        subscription_pending_units=0,
+        single_meal_count=max(1, int(order.quantity or 1)),
+    )
+
+    store_cfg = get_store_config(db, store_id=int(store_id))
+
+    class _StoreWrap:
+        __slots__ = ("store_name", "store_lng", "store_lat")
+
+        def __init__(self, name: str | None, lng: float | None, lat: float | None):
+            self.store_name = name
+            self.store_lng = lng
+            self.store_lat = lat
+
+    store = _StoreWrap(store_cfg.store_name, store_cfg.store_lng, store_cfg.store_lat)
+
+    now_ts = int(time.time())
+    soid = f"OKFSMO{order.id}{uuid.uuid4().hex[:10]}"
+    if len(soid) > 64:
+        soid = soid[:64]
+
+    snap_preview: dict[str, Any] = row_sfc.model_dump(mode="json")
+    snap_db: dict[str, Any] = snap_preview
+    httpc = SfOpenClient()
+
+    with _sf_push_serial_lock(db, store_id=int(store_id), d=d):
+        if _has_success(db, d, stop_id):
+            raise ValueError("该订单在供餐日已成功创建顺丰单，请勿重复推送")
+
+        pld: dict[str, Any] | None = None
+        try:
+            pld = _create_order_payload(
+                row_sfc,
+                shop_order_id=soid,
+                gset=gset,
+                store=store,
+                now_ts=now_ts,
+                delivery_date=d,
+            )
+            snap_db = _sf_push_request_snapshot(snap_preview, pld, gset=gset)
+            res = httpc.create_order(
+                pld,
+                dev_id=int(gset.SF_OPEN_DEV_ID),
+                app_key=(gset.SF_OPEN_SECRET or "").strip(),
+            )
+            r = res.get("result")
+            sfo, sfb = None, None
+            if isinstance(r, dict):
+                sfo, sfb = r.get("sf_order_id"), r.get("sf_bill_id")
+            row_db = SfSameCityPush(
+                store_id=int(store_id),
+                delivery_date=d,
+                stop_id=stop_id,
+                push_kind=_SF_PUSH_KIND_SINGLE_MEAL_RETAIL,
+                shop_order_id=soid,
+                sf_order_id=str(sfo) if sfo is not None else None,
+                sf_bill_id=str(sfb) if sfb is not None else None,
+                error_code=0,
+                error_msg="",
+                request_snapshot=snap_db,
+                response_json=res if isinstance(res, dict) else None,
+            )
+            order.fulfillment_status = "accepted"
+            db.add(row_db)
+            db.add(order)
+            db.commit()
+            return SfSameCityPushItemResult(
+                stop_id=stop_id,
+                ok=True,
+                message="已提交顺丰（单次零售，独立顺丰店铺）",
+                sf_order_id=str(sfo) if sfo is not None else None,
+            )
+        except SfOpenApiError as e:
+            db.rollback()
+            snap_fail = (
+                _sf_push_request_snapshot(snap_preview, pld, gset=gset)
+                if pld is not None
+                else snap_preview
+            )
+            _persist_fail(
+                db,
+                d,
+                stop_id,
+                soid,
+                snap_fail,
+                int(e.error_code) if e.error_code is not None else -1,
+                str(e)[:1000],
+                store_id=int(store_id),
+                push_kind=_SF_PUSH_KIND_SINGLE_MEAL_RETAIL,
+            )
+            raise ValueError(str(e)) from e
+        except Exception as e:
+            db.rollback()
+            snap_fail = (
+                _sf_push_request_snapshot(snap_preview, pld, gset=gset)
+                if pld is not None
+                else snap_preview
+            )
+            _persist_fail(
+                db, d, stop_id, soid, snap_fail, -2, str(e)[:1000], store_id=int(store_id),
+                push_kind=_SF_PUSH_KIND_SINGLE_MEAL_RETAIL,
+            )
+            raise ValueError(f"推单异常: {e!s}") from e

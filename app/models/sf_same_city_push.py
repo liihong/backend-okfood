@@ -20,6 +20,8 @@ class SfSameCityPush(Base):
     )
     delivery_date: Mapped[date] = mapped_column(Date, index=True)
     stop_id: Mapped[str] = mapped_column(String(64), index=True)
+    #: delivery_sheet=智能配送大表停靠点合并；single_meal_retail=订单管理单次推顺丰
+    push_kind: Mapped[str] = mapped_column(String(32), default="delivery_sheet", nullable=False)
     shop_order_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     sf_order_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     sf_bill_id: Mapped[str | None] = mapped_column(String(32), nullable=True)

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { RefreshCw, Search } from 'lucide-vue-next'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
@@ -56,10 +57,149 @@ const mallTotal = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 
+/** @type {import('vue').Ref<Array<Record<string, unknown>>>} */
+const courierOptions = ref([])
+const assignOpen = ref(false)
+/** @type {import('vue').Ref<Record<string, unknown> | null>} */
+const assignOrder = ref(null)
+const assignCourierId = ref('')
+const dispatchLoadingId = ref(0)
+
 const totalPages = computed(() => {
   const t = activeTab.value === 'single' ? singleTotal.value : mallTotal.value
   return Math.max(1, Math.ceil((t || 0) / pageSize.value))
 })
+
+function canDispatchActions(row) {
+  if (!row || row.pay_status !== '已支付') return false
+  return String(row.fulfillment_status || '').toLowerCase() === 'pending'
+}
+
+async function loadCouriers() {
+  if (!adminAccessToken.value) return
+  try {
+    const rows = await apiJson('/api/admin/couriers', {}, { auth: true })
+    courierOptions.value = Array.isArray(rows) ? rows : []
+  } catch {
+    courierOptions.value = []
+  }
+}
+
+async function onPushSfRetail(row) {
+  if (!canDispatchActions(row)) {
+    showToast('仅「待履约」且已支付订单可推送顺丰', 'error')
+    return
+  }
+  if (row.store_pickup) {
+    showToast('门店自提订单不发顺丰到家；可用「门店自配送」指派', 'error')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '将使用门店设置中的「零售推顺丰店铺ID」向顺丰创单（与智能配送大表所用顺丰店铺编号独立）。是否继续？',
+      '推送到顺丰',
+      { type: 'warning', confirmButtonText: '确定推送', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  dispatchLoadingId.value = Number(row.id)
+  try {
+    const r = await apiJson(
+      `/api/admin/orders/single-meals/${row.id}/dispatch/sf-retail`,
+      { method: 'POST' },
+      { auth: true },
+    )
+    const msg =
+      r && typeof r === 'object' && typeof r.message === 'string' ? r.message : '已提交顺丰'
+    showToast(msg, 'success')
+    await fetchSingleMeals()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '推送失败', 'error')
+  } finally {
+    dispatchLoadingId.value = 0
+  }
+}
+
+async function onPushUu(row) {
+  if (!canDispatchActions(row)) {
+    showToast('仅「待履约」且已支付订单可操作', 'error')
+    return
+  }
+  dispatchLoadingId.value = Number(row.id)
+  try {
+    await apiJson(
+      `/api/admin/orders/single-meals/${row.id}/dispatch/uu`,
+      { method: 'POST' },
+      { auth: true },
+    )
+    showToast('UU 已受理', 'success')
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    if (status === 501) {
+      ElMessage.warning(e instanceof Error ? e.message : 'UU 跑腿尚未对接')
+      return
+    }
+    showToast(e instanceof Error ? e.message : '请求失败', 'error')
+  } finally {
+    dispatchLoadingId.value = 0
+  }
+}
+
+function openAssignCourier(row) {
+  if (!canDispatchActions(row)) {
+    showToast('仅「待履约」订单可指派门店配送员', 'error')
+    return
+  }
+  assignOrder.value = row
+  assignCourierId.value = row.courier_id ? String(row.courier_id) : ''
+  assignOpen.value = true
+  void loadCouriers()
+}
+
+function handleDispatchCommand(cmd, row) {
+  if (cmd === 'sf') void onPushSfRetail(row)
+  else if (cmd === 'uu') void onPushUu(row)
+  else if (cmd === 'courier') openAssignCourier(row)
+}
+
+async function submitAssignCourier() {
+  const row = assignOrder.value
+  const cid = String(assignCourierId.value || '').trim()
+  if (!row || !cid) {
+    showToast('请选择配送员', 'error')
+    return
+  }
+  try {
+    await apiJson(
+      `/api/admin/orders/single-meals/${row.id}/dispatch/store-courier`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ courier_id: cid }),
+      },
+      { auth: true },
+    )
+    showToast('已指派配送员', 'success')
+    assignOpen.value = false
+    await fetchSingleMeals()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '指派失败', 'error')
+  }
+}
 
 function singlePayClass(s) {
   if (s === '已支付') return 'member-pill member-pill--emerald'
@@ -73,6 +213,7 @@ function mallPayClass(s) {
 
 const FULFILLMENT_STATUS_ZH = {
   pending: '待履约',
+  accepted: '已接单',
   delivered: '已履约',
 }
 
@@ -86,6 +227,7 @@ function fulfillmentLabelZh(s) {
 function fulfillmentClass(s) {
   const x = (s || '').toLowerCase()
   if (x === 'delivered') return 'member-pill member-pill--emerald'
+  if (x === 'accepted') return 'member-pill member-pill--sky'
   if (x === 'pending') return 'member-pill member-pill--amber'
   return 'member-pill member-pill--slate'
 }
@@ -185,6 +327,7 @@ watch([orderDate, singlePayFilter, mallPayFilter, pageSize, activeTab], () => {
 })
 
 onMounted(() => {
+  void loadCouriers()
   void fetchActive()
 })
 </script>
@@ -259,21 +402,21 @@ onMounted(() => {
             <el-table-column label="餐品" min-width="140" show-overflow-tooltip>
               <template #default="{ row }">{{ row.dish_title || '—' }}</template>
             </el-table-column>
-            <el-table-column label="份数" width="56" align="center">
+           <el-table-column label="份数" width="80" align="center">
               <template #default="{ row }">{{ row.quantity ?? '—' }}</template>
             </el-table-column>
-            <el-table-column label="供餐日" width="100" class-name="td-mono">
+           <el-table-column label="供餐日" width="120" class-name="td-mono">
               <template #default="{ row }">{{ row.delivery_date || '—' }}</template>
             </el-table-column>
             <el-table-column label="金额" width="72" align="right" class-name="td-mono">
               <template #default="{ row }">{{ row.amount_yuan ?? '—' }}</template>
             </el-table-column>
-            <el-table-column label="支付" width="76" class-name="co-nowrap">
+           <el-table-column label="支付" width="100" class-name="co-nowrap">
               <template #default="{ row }">
                 <span :class="singlePayClass(row.pay_status)">{{ row.pay_status || '—' }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="履约" width="88" class-name="co-nowrap">
+           <el-table-column label="履约" width="100" class-name="co-nowrap">
               <template #default="{ row }">
                 <span :class="fulfillmentClass(row.fulfillment_status)">{{
                   fulfillmentLabelZh(row.fulfillment_status)
@@ -287,6 +430,30 @@ onMounted(() => {
             </el-table-column>
             <el-table-column label="单号" width="120" class-name="td-mono" show-overflow-tooltip>
               <template #default="{ row }">{{ row.out_trade_no || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="200" fixed="right" align="center">
+              <template #default="{ row }">
+                <el-dropdown trigger="click" @command="(cmd) => handleDispatchCommand(cmd, row)">                  <el-button
+                    type="primary"
+                    size="small"
+                    :loading="dispatchLoadingId === row.id"
+                    :disabled="!canDispatchActions(row)"
+                  >
+                    配送操作
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="sf" :disabled="!canDispatchActions(row) || row.store_pickup">
+                        推送到顺丰
+                      </el-dropdown-item>
+                      <el-dropdown-item command="uu" :disabled="!canDispatchActions(row)">推送到 UU</el-dropdown-item>
+                      <el-dropdown-item command="courier" :disabled="!canDispatchActions(row)">
+                        门店自配送
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
             </el-table-column>
           </AdminTable>
         </el-tab-pane>
@@ -360,6 +527,11 @@ onMounted(() => {
                 (row.remark || '').trim() ? row.remark : '—'
               }}</template>
             </el-table-column>
+            <el-table-column label="配送" width="108" align="center" class-name="co-nowrap">
+              <template #default>
+                <span class="orders-mall-no-dispatch">卡包无配送</span>
+              </template>
+            </el-table-column>
           </AdminTable>
         </el-tab-pane>
       </el-tabs>
@@ -381,6 +553,32 @@ onMounted(() => {
         </button>
       </div>
     </div>
+
+    <el-dialog v-model="assignOpen" title="门店自配送 · 指派配送员" width="420px" destroy-on-close>
+      <template v-if="assignOrder">
+        <p class="orders-assign-hint">
+          订单 #{{ assignOrder.id }} · {{ (assignOrder.member_name || '').trim() || '—' }}
+        </p>
+        <el-select
+          v-model="assignCourierId"
+          filterable
+          placeholder="选择系统内配送员"
+          class="orders-assign-select"
+        >
+          <el-option
+            v-for="c in courierOptions"
+            :key="c.courier_id"
+            :label="`${(c.name || '').trim() || c.courier_id}（${c.courier_id}）`"
+            :value="c.courier_id"
+            :disabled="c.is_active === false"
+          />
+        </el-select>
+      </template>
+      <template #footer>
+        <el-button @click="assignOpen = false">取消</el-button>
+        <el-button type="primary" @click="submitAssignCourier">确定</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -471,5 +669,17 @@ onMounted(() => {
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.72);
   margin-right: 0.75rem;
+}
+.orders-assign-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: #334155;
+}
+.orders-assign-select {
+  width: 100%;
+}
+.orders-mall-no-dispatch {
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
 }
 </style>

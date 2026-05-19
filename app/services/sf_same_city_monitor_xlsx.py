@@ -92,6 +92,7 @@ def build_sf_push_monitor_xlsx(rows: list[dict[str, Any]]) -> bytes:
     headers = (
         "系统ID",
         "业务日",
+        "订单类别",
         "停靠点",
         "商家订单号",
         "顺丰单号",
@@ -119,6 +120,7 @@ def build_sf_push_monitor_xlsx(rows: list[dict[str, Any]]) -> bytes:
             [
                 r.get("id"),
                 r.get("delivery_date") or "",
+                (r.get("push_kind_label") or r.get("push_kind") or "") or "",
                 r.get("stop_id") or "",
                 r.get("shop_order_id") or "",
                 r.get("sf_order_id") or "",

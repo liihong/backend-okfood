@@ -38,6 +38,7 @@ from app.schemas.admin import (
     RechargeIn,
     SettingsIn,
     StoreConfigUpdateIn,
+    SingleMealAssignCourierIn,
     WeeklySlotAssignIn,
     MenuDayTotalStockIn,
     AdminDashboardSummaryApiOut,
@@ -77,6 +78,7 @@ from app.services.sf_same_city_service import (
     cancel_sf_same_city_push,
     preview_sf_same_city,
     push_sf_same_city,
+    push_single_meal_retail_to_sf,
     retry_sf_same_city_push_by_id,
 )
 from app.services.store_config_service import get_store_config, update_store_config
@@ -93,7 +95,10 @@ from app.services.member_service import (
     admin_patch_member_profile,
     admin_update_member_address,
 )
-from app.services.single_meal_order_service import list_admin_store_single_meal_orders_by_order_day
+from app.services.single_meal_order_service import (
+    admin_assign_courier_single_meal_order,
+    list_admin_store_single_meal_orders_by_order_day,
+)
 from app.services.member_card_order_service import (
     create_card_order,
     delete_card_order,
@@ -122,6 +127,22 @@ def _normalize_sf_monitor_create_status(raw: str | None) -> str | None:
         return "cancelled"
     raise HTTPException(
         status_code=400, detail="sf_create_status 仅支持 ok、fail、cancelled 或留空（全部）"
+    )
+
+
+def _normalize_sf_monitor_push_kind(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    s = raw.strip()
+    if not s or s.lower() == "all":
+        return None
+    if s == "delivery_sheet":
+        return "delivery_sheet"
+    if s == "single_meal_retail":
+        return "single_meal_retail"
+    raise HTTPException(
+        status_code=400,
+        detail="push_kind 仅支持 delivery_sheet（大表合并）、single_meal_retail（单次零售）或留空",
     )
 
 
@@ -300,6 +321,12 @@ def delivery_sf_pushes(
         str | None,
         Query(description="顺丰运单号包含（sf_order_id）"),
     ] = None,
+    push_kind: Annotated[
+        str | None,
+        Query(
+            description="订单类别：delivery_sheet=大表合并；single_meal_retail=单次零售；留空=全部",
+        ),
+    ] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ):
@@ -307,6 +334,7 @@ def delivery_sf_pushes(
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
         st = _normalize_sf_monitor_create_status(sf_create_status)
+        pk = _normalize_sf_monitor_push_kind(push_kind)
         items_raw, total = list_sf_same_city_pushes_for_monitor(
             db,
             delivery_date=delivery_date,
@@ -318,6 +346,7 @@ def delivery_sf_pushes(
             sf_create_status=st,
             sf_order_id_contains=(sf_order_id or "").strip() or None,
             member_phone_contains=(member_phone or "").strip() or None,
+            push_kind=pk,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -349,6 +378,10 @@ def delivery_sf_pushes_export_xlsx(
     ] = None,
     member_phone: Annotated[str | None, Query(description="会员手机号包含")] = None,
     sf_order_id: Annotated[str | None, Query(description="顺丰运单号包含")] = None,
+    push_kind: Annotated[
+        str | None,
+        Query(description="订单类别：delivery_sheet / single_meal_retail；留空=全部"),
+    ] = None,
     admin_username: str = Depends(admin_or_delivery_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
@@ -356,6 +389,7 @@ def delivery_sf_pushes_export_xlsx(
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
         st = _normalize_sf_monitor_create_status(sf_create_status)
+        pk = _normalize_sf_monitor_push_kind(push_kind)
         rows = list_sf_same_city_pushes_for_monitor_export(
             db,
             delivery_date=delivery_date,
@@ -365,6 +399,7 @@ def delivery_sf_pushes_export_xlsx(
             sf_create_status=st,
             sf_order_id_contains=(sf_order_id or "").strip() or None,
             member_phone_contains=(member_phone or "").strip() or None,
+            push_kind=pk,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -687,6 +722,85 @@ def admin_orders_daily_mall_card_orders(
         page=page,
         page_size=page_size,
         msg="获取成功",
+    )
+
+
+@router.post("/orders/single-meals/{order_id}/dispatch/sf-retail", response_model=None)
+def admin_single_meal_dispatch_sf_retail(
+    order_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """
+    单次点餐：使用门店「零售推顺丰店铺ID」调用顺丰创单（与智能配送大表推单所用租户 shop 独立）。
+    成功记录仍写入 ``sf_same_city_pushes``，stop_id 形如 ``retail-smo-{订单id}``，监控页可查。
+    """
+    tid, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    _ = tid
+    try:
+        r = push_single_meal_retail_to_sf(db, order_id=int(order_id), store_id=store_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=dump_model(r), msg="处理完成")
+
+
+@router.post("/orders/single-meals/{order_id}/dispatch/uu", response_model=None)
+def admin_single_meal_dispatch_uu(
+    order_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """UU 跑腿发单（预留）：门店表已可存 AppId/AppKey，开放平台发单对接后再实现。"""
+    from app.models.store import Store as StoreModel
+
+    _ = int(order_id)
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    st = db.get(StoreModel, int(store_id))
+    if st and (st.uu_open_app_id or "").strip() and (st.uu_open_app_key or "").strip():
+        raise HTTPException(
+            status_code=501,
+            detail="UU 跑腿发单接口尚未对接；AppId/密钥已保存，后续版本将在此发起配送。",
+        )
+    raise HTTPException(
+        status_code=501,
+        detail="UU 跑腿尚未对接。请先在门店设置填写 UU AppId / AppKey 预留配置；发单能力上线后可用。",
+    )
+
+
+@router.post("/orders/single-meals/{order_id}/dispatch/store-courier", response_model=None)
+def admin_single_meal_dispatch_store_courier(
+    order_id: int,
+    body: SingleMealAssignCourierIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """单次点餐：门店自配送，绑定本租户已激活的配送员（写入 single_meal_orders.courier_id）。"""
+    tid, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        row = admin_assign_courier_single_meal_order(
+            db,
+            order_id=int(order_id),
+            store_id=store_id,
+            courier_id=body.courier_id,
+            tenant_id=tid,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=dump_model(row), msg="已指派配送员")
+
+
+@router.post("/orders/mall-card/{order_id}/dispatch/sf-retail", response_model=None)
+@router.post("/orders/mall-card/{order_id}/dispatch/uu", response_model=None)
+@router.post("/orders/mall-card/{order_id}/dispatch/store-courier", response_model=None)
+def admin_mall_card_dispatch_not_supported(order_id: int):
+    """商城卡包工单无收货地址与履约配送，不支持三类配送动作。"""
+    _ = int(order_id)
+    raise HTTPException(
+        status_code=400,
+        detail="商城卡包订单无配送履约，请在「单次点餐」中使用推送到顺丰 / UU / 门店自配送。",
     )
 
 

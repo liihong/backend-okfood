@@ -35,5 +35,11 @@ class Store(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # 每日 22:00（上海）自动向顺丰推送「次日」配送业务日订单；关闭时仍走管理端手动推单
     sf_nightly_auto_push_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # 订单管理「推顺丰」(单次点餐)：createorder 使用此处 shop_id，与租户对接中的顺丰店铺（大表夜间/手动推单）可不同
+    sf_retail_push_shop_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sf_retail_push_shop_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # UU 跑腿开放平台参数（预留，尚未对接发单接口）
+    uu_open_app_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    uu_open_app_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -171,6 +171,17 @@ class StoreConfigOut(BaseModel):
         False,
         description="每日 22:00（上海）自动向顺丰推送次日业务日配送单；关闭则仅手动推单",
     )
+    sf_retail_push_shop_id: str | None = Field(
+        None,
+        max_length=64,
+        description="单次点餐/零售单推顺丰：顺丰店铺编号，与租户对接中的 shop（大表推单）独立",
+    )
+    sf_retail_push_shop_type: int | None = Field(
+        None,
+        description="零售推顺丰 shop_type；空则与租户/全局一致",
+    )
+    uu_open_app_id: str | None = Field(None, max_length=64, description="UU 跑腿 AppId（预留）")
+    uu_open_app_key_set: bool = Field(False, description="UU 跑腿 AppKey 是否已在库中填写（不回传密钥明文）")
 
 
 class StoreConfigUpdateIn(BaseModel):
@@ -222,6 +233,21 @@ class StoreConfigUpdateIn(BaseModel):
         None,
         description="顺丰夜间自动推单；不传表示不修改",
     )
+    sf_retail_push_shop_id: str | None = Field(
+        None,
+        max_length=64,
+        description="零售推顺丰 shop_id；传空字符串可清空",
+    )
+    sf_retail_push_shop_type: int | None = Field(
+        None,
+        description="零售推顺丰 shop_type；不传不修改",
+    )
+    uu_open_app_id: str | None = Field(None, max_length=64, description="UU 预留；传空字符串可清空")
+    uu_open_app_key: str | None = Field(
+        None,
+        max_length=255,
+        description="UU 预留 AppKey；不传不修改，传空字符串可清空",
+    )
 
     @model_validator(mode="after")
     def _lng_lat_pair(self) -> Self:
@@ -233,6 +259,12 @@ class StoreConfigUpdateIn(BaseModel):
         if has_lng and has_lat and (self.store_lng is None) != (self.store_lat is None):
             raise ValueError("门店经纬度须同时填写或同时清空")
         return self
+
+
+class SingleMealAssignCourierIn(BaseModel):
+    """单次点餐：门店自配送指派（系统内配送员 courier_id）。"""
+
+    courier_id: str = Field(..., min_length=1, max_length=50, description="couriers.courier_id 主键")
 
 
 class MemberAdminOut(BaseModel):
@@ -830,6 +862,11 @@ class SfSameCityPushMonitorRow(BaseModel):
     store_id: int = Field(default=1, description="门店 id，与推单行一致")
     delivery_date: str
     stop_id: str
+    push_kind: str = Field(
+        default="delivery_sheet",
+        description="delivery_sheet=大表停靠点合并；single_meal_retail=订单管理单次零售推顺丰",
+    )
+    push_kind_label: str = Field(default="", description="订单类别展示文案")
     shop_order_id: str
     sf_order_id: str | None
     sf_bill_id: str | None

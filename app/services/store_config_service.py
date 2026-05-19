@@ -89,6 +89,26 @@ def _store_out_from_row(st: Store) -> StoreConfigOut:
         member_card_week_list_price_yuan=wl,
         member_card_month_list_price_yuan=ml,
         sf_nightly_auto_push_enabled=bool(getattr(st, "sf_nightly_auto_push_enabled", False)),
+        sf_retail_push_shop_id=(
+            str(st.sf_retail_push_shop_id).strip() or None
+            if getattr(st, "sf_retail_push_shop_id", None) is not None
+            else None
+        ),
+        sf_retail_push_shop_type=(
+            int(st.sf_retail_push_shop_type)
+            if getattr(st, "sf_retail_push_shop_type", None) is not None
+            else None
+        ),
+        uu_open_app_id=(
+            str(st.uu_open_app_id).strip() or None
+            if getattr(st, "uu_open_app_id", None) is not None
+            else None
+        ),
+        uu_open_app_key_set=bool(
+            (str(getattr(st, "uu_open_app_key", None) or "").strip())
+            if getattr(st, "uu_open_app_key", None) is not None
+            else False
+        ),
     )
 
 
@@ -109,6 +129,10 @@ def get_store_config(db: Session, *, store_id: int) -> StoreConfigOut:
             member_card_week_list_price_yuan=None,
             member_card_month_list_price_yuan=None,
             sf_nightly_auto_push_enabled=False,
+            sf_retail_push_shop_id=None,
+            sf_retail_push_shop_type=None,
+            uu_open_app_id=None,
+            uu_open_app_key_set=False,
         )
     wk, mo = row.member_card_week_price_yuan, row.member_card_month_price_yuan
     wl = _decimal_or_none(row.member_card_week_list_price_yuan)
@@ -126,6 +150,10 @@ def get_store_config(db: Session, *, store_id: int) -> StoreConfigOut:
         member_card_week_list_price_yuan=wl,
         member_card_month_list_price_yuan=ml,
         sf_nightly_auto_push_enabled=False,
+        sf_retail_push_shop_id=None,
+        sf_retail_push_shop_type=None,
+        uu_open_app_id=None,
+        uu_open_app_key_set=False,
     )
 
 
@@ -218,6 +246,22 @@ def update_store_config(db: Session, store_id: int, body: StoreConfigUpdateIn) -
         st.member_card_month_list_price_yuan = body.member_card_month_list_price_yuan
     if "sf_nightly_auto_push_enabled" in fs and body.sf_nightly_auto_push_enabled is not None:
         st.sf_nightly_auto_push_enabled = bool(body.sf_nightly_auto_push_enabled)
+    if "sf_retail_push_shop_id" in fs:
+        raw = body.sf_retail_push_shop_id
+        st.sf_retail_push_shop_id = None if raw is None else (str(raw).strip() or None)
+    if "sf_retail_push_shop_type" in fs:
+        st.sf_retail_push_shop_type = body.sf_retail_push_shop_type
+    if "uu_open_app_id" in fs:
+        raw_u = body.uu_open_app_id
+        st.uu_open_app_id = None if raw_u is None else (str(raw_u).strip() or None)
+    if "uu_open_app_key" in fs:
+        raw_k = body.uu_open_app_key
+        if raw_k is None:
+            pass
+        elif str(raw_k).strip() == "":
+            st.uu_open_app_key = None
+        else:
+            st.uu_open_app_key = str(raw_k).strip()[:255]
     db.add(st)
     db.commit()
     db.refresh(st)

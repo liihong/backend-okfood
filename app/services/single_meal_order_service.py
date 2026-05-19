@@ -515,3 +515,39 @@ def mark_single_meal_delivered_sf_completion_no_commit(db: Session, order_id: in
     if bool(getattr(row, "store_pickup", False)):
         return
     row.fulfillment_status = "delivered"
+
+
+def admin_assign_courier_single_meal_order(
+    db: Session,
+    *,
+    order_id: int,
+    store_id: int,
+    courier_id: str,
+    tenant_id: int,
+) -> AdminSingleMealOrderListOut:
+    """管理端：门店自配送，将单次点餐订单绑定租户下已建档的配送员。"""
+    o = db.get(SingleMealOrder, int(order_id))
+    if o is None or int(o.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    if (o.fulfillment_status or "").strip() != "pending":
+        raise ValueError("仅「待履约」订单可指派配送员（已推顺丰请走顺丰履约）")
+    cid = (courier_id or "").strip()
+    if not cid:
+        raise ValueError("请选择配送员")
+    cou = db.get(Courier, cid)
+    if cou is None or int(cou.tenant_id) != int(tenant_id):
+        raise ValueError("配送员不存在或不属于当前租户")
+    if not cou.is_active:
+        raise ValueError("该配送员已停用")
+    o.courier_id = cid
+    db.add(o)
+    db.commit()
+    db.refresh(o)
+    m = db.get(Member, o.member_id)
+    base = _single_meal_order_row_to_out(db, o)
+    return AdminSingleMealOrderListOut(
+        **base.model_dump(),
+        member_id=int(o.member_id),
+        member_phone=(m.phone or "") if m else "",
+        member_name=(((m.name or "").strip()) if m else "") or "",
+    )

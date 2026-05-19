@@ -11,6 +11,8 @@ from sqlalchemy import String, and_, cast, func, or_, select, true as sql_true
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.models.member import Member
+from app.models.single_meal_order import SingleMealOrder
 from app.models.sf_same_city_push import SfSameCityPush
 from app.services.admin_delivery_fulfillment_service import subscription_fulfilled_try_sf_home_no_commit
 from app.services.sf_same_city_service import aggs_for_delivery_date, load_agg_for_stop_id
@@ -20,6 +22,44 @@ logger = logging.getLogger(__name__)
 
 # 顺丰开放平台配送推送 order_status：17=配送员妥投完单（与后台监控文案一致）
 SF_ORDER_STATUS_DELIVERED_TUOTOU = 17
+
+SF_PUSH_KIND_DELIVERY_SHEET = "delivery_sheet"
+SF_PUSH_KIND_SINGLE_MEAL_RETAIL = "single_meal_retail"
+
+
+def _retail_smo_order_id_from_stop(stop_id: str | None) -> int | None:
+    """零售单次推单 stop_id 形如 retail-smo-{single_meal_orders.id}。"""
+    s = (stop_id or "").strip()
+    prefix = "retail-smo-"
+    if not s.startswith(prefix):
+        return None
+    tail = s[len(prefix) :].strip()
+    try:
+        return int(tail)
+    except (TypeError, ValueError):
+        return None
+
+
+def _push_kind_label(kind: str | None) -> str:
+    k = (kind or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
+    if k == SF_PUSH_KIND_SINGLE_MEAL_RETAIL:
+        return "单次零售"
+    return "大表合并"
+
+
+def _members_from_retail_single_meal_order(db: Session, order_id: int) -> list[dict[str, Any]]:
+    row = db.get(SingleMealOrder, int(order_id))
+    if not row:
+        return []
+    m = db.get(Member, int(row.member_id)) if row.member_id else None
+    return [
+        {
+            "member_id": int(row.member_id) if row.member_id is not None else None,
+            "name": ((m.name or "").strip() if m else "") or "—",
+            "phone": ((m.phone or "").strip() if m else "") or "—",
+            "kind": "single_meal",
+        }
+    ]
 
 
 def _sf_push_monitor_cancelled_clause():
@@ -60,6 +100,7 @@ def _sf_push_monitor_where_clauses(
     sf_create_status: str | None = None,
     sf_order_id_contains: str | None = None,
     member_phone_contains: str | None = None,
+    push_kind: str | None = None,
 ) -> list[Any]:
     """
     顺丰监控列表 / 导出共用 WHERE 条件。
@@ -95,6 +136,10 @@ def _sf_push_monitor_where_clauses(
     if ph:
         clauses.append(SfSameCityPush.request_snapshot.isnot(None))
         clauses.append(cast(SfSameCityPush.request_snapshot, String).like(f"%{ph}%"))
+
+    pk = (push_kind or "").strip()
+    if pk:
+        clauses.append(SfSameCityPush.push_kind == pk)
 
     return clauses
 
@@ -186,15 +231,24 @@ def _sf_push_monitor_row_dict(
     aggs: dict[str, Any],
 ) -> dict[str, Any]:
     agg = aggs.get(str(r.stop_id)) if aggs else None
+    kind_raw = (getattr(r, "push_kind", None) or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
+    oid_retail = _retail_smo_order_id_from_stop(str(r.stop_id or ""))
+
     members = _member_rows_from_agg(db, agg) if agg is not None else []
     if not members:
         members = _fallback_members_from_snapshot(r.request_snapshot)
+    if oid_retail is not None and kind_raw == SF_PUSH_KIND_SINGLE_MEAL_RETAIL:
+        alt = _members_from_retail_single_meal_order(db, oid_retail)
+        if alt:
+            members = alt
 
     return {
         "id": int(r.id),
         "store_id": int(r.store_id) if getattr(r, "store_id", None) is not None else 1,
         "delivery_date": r.delivery_date.isoformat() if r.delivery_date else "",
         "stop_id": str(r.stop_id),
+        "push_kind": kind_raw,
+        "push_kind_label": _push_kind_label(kind_raw),
         "shop_order_id": str(r.shop_order_id),
         "sf_order_id": str(r.sf_order_id) if r.sf_order_id else None,
         "sf_bill_id": str(r.sf_bill_id) if r.sf_bill_id else None,
@@ -235,11 +289,26 @@ def _sf_push_skip_auto_fulfillment_due_to_cancel(pus: SfSameCityPush) -> bool:
 def _apply_sf_same_city_stop_fulfillment(db: Session, pus: SfSameCityPush, *, operator_tag: str) -> None:
     """
     同一停靠点的订阅扣次 + 单点餐履约标记；已由各类顺丰回调按需调用。
+
+    ``single_meal_retail``（或 stop_id 为 retail-smo-*）仅处理对应单次订单，不走大表聚合。
     """
     if int(pus.error_code or -1) != 0:
         return
     if _sf_push_skip_auto_fulfillment_due_to_cancel(pus):
         return
+    kind = (getattr(pus, "push_kind", None) or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
+    oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
+    if kind == SF_PUSH_KIND_SINGLE_MEAL_RETAIL or oid_retail is not None:
+        if oid_retail is not None:
+            mark_single_meal_delivered_sf_completion_no_commit(db, oid_retail)
+        else:
+            logger.warning(
+                "顺丰零售推单无法解析订单号 push_kind=%s stop_id=%s",
+                kind,
+                pus.stop_id,
+            )
+        return
+
     sid = int(pus.store_id) if getattr(pus, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
     agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
     if agg is None:
@@ -313,6 +382,7 @@ def list_sf_same_city_pushes_for_monitor(
     sf_create_status: str | None = None,
     sf_order_id_contains: str | None = None,
     member_phone_contains: str | None = None,
+    push_kind: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """按业务日、顺丰回调配送状态可选筛选，创建时间倒序分页。"""
     if callback_order_status_unknown and sf_callback_order_status is not None:
@@ -326,6 +396,7 @@ def list_sf_same_city_pushes_for_monitor(
         sf_create_status=sf_create_status,
         sf_order_id_contains=sf_order_id_contains,
         member_phone_contains=member_phone_contains,
+        push_kind=push_kind,
     )
     flt = and_(*wc) if wc else sql_true()
     fq = select(func.count()).select_from(SfSameCityPush).where(flt)
@@ -361,6 +432,7 @@ def list_sf_same_city_pushes_for_monitor_export(
     sf_create_status: str | None = None,
     sf_order_id_contains: str | None = None,
     member_phone_contains: str | None = None,
+    push_kind: str | None = None,
 ) -> list[dict[str, Any]]:
     """与监控列表同源筛选，不分页；用于 Excel 导出。"""
     if delivery_date is None:
@@ -377,6 +449,7 @@ def list_sf_same_city_pushes_for_monitor_export(
         sf_create_status=sf_create_status,
         sf_order_id_contains=sf_order_id_contains,
         member_phone_contains=member_phone_contains,
+        push_kind=push_kind,
     )
     flt = and_(*wc) if wc else sql_true()
     q = select(SfSameCityPush).where(flt).order_by(SfSameCityPush.id.desc())

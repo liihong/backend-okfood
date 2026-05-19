@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { Store } from 'lucide-vue-next'
 import {
   apiJson,
@@ -21,12 +21,16 @@ const form = ref({
   store_lat: '',
   /** 每日 22:00（上海）自动顺丰推送次日配送单 */
   sf_nightly_auto_push_enabled: false,
+  /** 单次点餐推顺丰：顺丰侧店铺编号，与大表推单租户 shop 区分 */
+  sf_retail_push_shop_id: '',
+  /** 1 / 2 / 空字符串表示跟随租户 */
+  sf_retail_push_shop_type: '',
+  uu_open_app_id: '',
+  uu_open_app_key_input: '',
+  uu_clear_app_key: false,
+  uu_open_app_key_set: false,
   courier_delivery_base_yuan: '',
   courier_delivery_extra_per_unit_yuan: '',
-  member_card_week_price_yuan: '',
-  member_card_month_price_yuan: '',
-  member_card_week_list_price_yuan: '',
-  member_card_month_list_price_yuan: '',
 })
 
 async function loadConfig() {
@@ -43,11 +47,15 @@ async function loadConfig() {
     const fmtMoney = (v) => (v != null && v !== '' && Number.isFinite(Number(v)) ? String(Number(v)) : '')
     form.value.courier_delivery_base_yuan = fmtMoney(d?.courier_delivery_base_yuan)
     form.value.courier_delivery_extra_per_unit_yuan = fmtMoney(d?.courier_delivery_extra_per_unit_yuan)
-    form.value.member_card_week_price_yuan = fmtMoney(d?.member_card_week_price_yuan)
-    form.value.member_card_month_price_yuan = fmtMoney(d?.member_card_month_price_yuan)
-    form.value.member_card_week_list_price_yuan = fmtMoney(d?.member_card_week_list_price_yuan)
-    form.value.member_card_month_list_price_yuan = fmtMoney(d?.member_card_month_list_price_yuan)
     form.value.sf_nightly_auto_push_enabled = d?.sf_nightly_auto_push_enabled === true
+    form.value.sf_retail_push_shop_id =
+      d?.sf_retail_push_shop_id != null ? String(d.sf_retail_push_shop_id).trim() : ''
+    form.value.sf_retail_push_shop_type =
+      d?.sf_retail_push_shop_type != null ? String(d.sf_retail_push_shop_type) : ''
+    form.value.uu_open_app_id = d?.uu_open_app_id != null ? String(d.uu_open_app_id).trim() : ''
+    form.value.uu_open_app_key_input = ''
+    form.value.uu_clear_app_key = false
+    form.value.uu_open_app_key_set = d?.uu_open_app_key_set === true
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -105,31 +113,27 @@ async function saveConfig() {
   if (base === null) return
   const extra = parseMoney(form.value.courier_delivery_extra_per_unit_yuan, '配送费每多一份加价')
   if (extra === null) return
-  const parseMoneyOptional = (raw, label) => {
-    const t = String(raw ?? '').trim()
-    if (t === '') return null
-    const n = Number(t)
-    if (!Number.isFinite(n) || n < 0) {
-      showToast(`${label}须为非负数字或留空`, 'error')
-      return undefined
-    }
-    return n
-  }
-  const weekP = parseMoney(form.value.member_card_week_price_yuan, '周卡标价')
-  if (weekP === null) return
-  const monthP = parseMoney(form.value.member_card_month_price_yuan, '月卡标价')
-  if (monthP === null) return
-  const weekList = parseMoneyOptional(form.value.member_card_week_list_price_yuan, '周卡划线价')
-  if (weekList === undefined) return
-  const monthList = parseMoneyOptional(form.value.member_card_month_list_price_yuan, '月卡划线价')
-  if (monthList === undefined) return
   payload.courier_delivery_base_yuan = base
   payload.courier_delivery_extra_per_unit_yuan = extra
-  payload.member_card_week_price_yuan = weekP
-  payload.member_card_month_price_yuan = monthP
-  payload.member_card_week_list_price_yuan = weekList
-  payload.member_card_month_list_price_yuan = monthList
   payload.sf_nightly_auto_push_enabled = form.value.sf_nightly_auto_push_enabled === true
+  payload.sf_retail_push_shop_id = form.value.sf_retail_push_shop_id.trim() || null
+  const rst = String(form.value.sf_retail_push_shop_type ?? '').trim()
+  if (rst === '') payload.sf_retail_push_shop_type = null
+  else {
+    const n = Number(rst)
+    if (!Number.isFinite(n)) {
+      showToast('零售顺丰 shop_type 须为数字或留空', 'error')
+      return
+    }
+    payload.sf_retail_push_shop_type = n
+  }
+  payload.uu_open_app_id = form.value.uu_open_app_id.trim() || null
+  if (form.value.uu_clear_app_key) {
+    payload.uu_open_app_key = ''
+  } else {
+    const uk = form.value.uu_open_app_key_input.trim()
+    if (uk) payload.uu_open_app_key = uk
+  }
 
   saving.value = true
   try {
@@ -197,6 +201,19 @@ function onMapWarn(msg) {
   showToast(typeof msg === 'string' ? msg : '地图提示', 'error')
 }
 
+const locationDialogVisible = ref(false)
+
+const locationSummaryText = computed(() => {
+  const ln = String(form.value.store_lng ?? '').trim()
+  const lt = String(form.value.store_lat ?? '').trim()
+  if (ln && lt) return `经度 ${ln}，纬度 ${lt}`
+  return ''
+})
+
+function closeLocationDialog() {
+  locationDialogVisible.value = false
+}
+
 onMounted(() => {
   void loadConfig()
 })
@@ -209,161 +226,167 @@ onMounted(() => {
       <div>
         <h2 class="sc-title">门店与全局计价</h2>
         <p class="sc-desc">
-          请优先用下方地图<strong>搜索或点选</strong>门店位置（与高德一致，自动为 GCJ-02）。保存后营业概览以门店为中心；骑手端任务按<strong>离该点直线距离</strong>由近到远排序。配送费与小程序会员卡价格保存在数据库
-          <code class="sc-code">app_settings</code>
-          ，修改后立即对骑手结费与自助开卡下单金额生效。
+          请通过「<strong>地图选点</strong>」在弹窗内用高德<strong>搜索或点选</strong>门店位置（自动为 GCJ-02）。保存后营业概览以门店为中心；骑手端任务按<strong>离该点直线距离</strong>由近到远排序。门店基础与配送相关参数保存在当前门店配置中，保存后立即对骑手结费、顺丰推单与小程序展示生效。
         </p>
       </div>
     </div>
 
     <p v-if="loading" class="sc-muted">加载中…</p>
 
-    <div v-else class="sc-card">
-      <div class="sc-field">
-        <label class="sc-label" for="sc-name">门店名称</label>
-        <el-input id="sc-name" v-model="form.store_name" class="sc-input-el" maxlength="128" clearable />
-      </div>
+    <div v-else class="sc-blocks">
+      <el-card class="sc-el-card" shadow="never">
+        <template #header>
+          <span class="sc-card-title">门店基础信息</span>
+        </template>
+        <div class="sc-field">
+          <label class="sc-label" for="sc-name">门店名称</label>
+          <el-input id="sc-name" v-model="form.store_name" class="sc-input-el" maxlength="128" clearable />
+        </div>
 
-      <div class="sc-field">
-        <span class="sc-label">门店 Logo</span>
-        <div class="sc-logo-row">
-          <div class="sc-logo-preview-wrap">
-            <img v-if="logoPreviewUrl()" :src="logoPreviewUrl()" alt="" class="sc-logo-preview" />
-            <span v-else class="sc-logo-placeholder">未设置</span>
+        <div class="sc-field sc-field--last">
+          <span class="sc-label">门店 Logo</span>
+          <div class="sc-logo-row">
+            <div class="sc-logo-preview-wrap">
+              <img v-if="logoPreviewUrl()" :src="logoPreviewUrl()" alt="" class="sc-logo-preview" />
+              <span v-else class="sc-logo-placeholder">未设置</span>
+            </div>
+            <el-upload
+              :key="logoUploadKey"
+              :show-file-list="false"
+              :auto-upload="false"
+              accept="image/*"
+              @change="onLogoUploadChange"
+            >
+              <el-button type="default" :disabled="logoUploading">{{
+                logoUploading ? '上传中…' : '上传图片'
+              }}</el-button>
+            </el-upload>
           </div>
-          <el-upload
-            :key="logoUploadKey"
-            :show-file-list="false"
-            :auto-upload="false"
-            accept="image/*"
-            @change="onLogoUploadChange"
-          >
-            <el-button type="default" :disabled="logoUploading">{{
-              logoUploading ? '上传中…' : '上传图片'
-            }}</el-button>
-          </el-upload>
+          <el-input
+            v-model="form.store_logo_url"
+            class="sc-input-el sc-input-el--mono"
+            placeholder="或直接粘贴图片 URL"
+            clearable
+          />
         </div>
-        <el-input
-          v-model="form.store_logo_url"
-          class="sc-input-el sc-input-el--mono"
-          placeholder="或直接粘贴图片 URL"
-          clearable
-        />
-      </div>
+      </el-card>
 
-      <div class="sc-field">
-        <span class="sc-label">地图选点（高德搜索 / 点击地图 / 拖动标记）</span>
-        <StoreLocationPicker
-          v-model:lng-str="form.store_lng"
-          v-model:lat-str="form.store_lat"
-          @warn="onMapWarn"
-        />
-      </div>
+      <el-card class="sc-el-card" shadow="never">
+        <template #header>
+          <span class="sc-card-title">门店位置</span>
+        </template>
+        <p class="sc-hint sc-hint--card">
+          使用高德地图搜索、点击或拖动标记选点（GCJ-02）。弹窗内可微调经纬度；保存设置仍须点击页面底部「保存」。
+        </p>
+        <div class="sc-location-bar">
+          <div class="sc-location-summary">
+            <span v-if="locationSummaryText" class="sc-coord-line">{{ locationSummaryText }}</span>
+            <span v-else class="sc-location-empty">尚未设置坐标</span>
+          </div>
+          <el-button type="primary" @click="locationDialogVisible = true"> 地图选点 </el-button>
+        </div>
+      </el-card>
 
-      <div class="sc-coord-grid">
-        <div class="sc-field">
-          <label class="sc-label" for="sc-lng">经度 lng（可微调）</label>
-          <el-input
-            id="sc-lng"
-            v-model="form.store_lng"
-            class="sc-input-el sc-input-el--mono"
-            placeholder="例：113.9268"
-            clearable
-          />
+      <el-card class="sc-el-card" shadow="never">
+        <template #header>
+          <span class="sc-card-title">配送信息管理</span>
+        </template>
+        <div class="sc-field sc-switch-row sc-switch-row--card">
+          <div class="sc-switch-text">
+            <span class="sc-label sc-label--inline">顺丰夜间自动推单</span>
+            <p class="sc-hint sc-hint--tight">
+              开启后系统于每日<strong>22:00（上海时间）</strong>自动将<strong>次日</strong>待配送订单推送至顺丰同城；关闭后不执行定时任务，请在配送管理页面<strong>手动推单</strong>。
+            </p>
+          </div>
+          <el-switch v-model="form.sf_nightly_auto_push_enabled" size="large" />
         </div>
-        <div class="sc-field">
-          <label class="sc-label" for="sc-lat">纬度 lat（可微调）</label>
-          <el-input
-            id="sc-lat"
-            v-model="form.store_lat"
-            class="sc-input-el sc-input-el--mono"
-            placeholder="例：35.303"
-            clearable
-          />
+        <el-divider class="sc-inner-divider" content-position="left">骑手配送费（元）</el-divider>
+        <p class="sc-hint sc-hint--card">确认送达时写入骑手待结算：首份基础价 +（份数 − 1）× 每多一份加价。</p>
+        <div class="sc-coord-grid">
+          <div class="sc-field sc-field--last-in-grid">
+            <label class="sc-label" for="sc-fee-base">首份基础价</label>
+            <el-input
+              id="sc-fee-base"
+              v-model="form.courier_delivery_base_yuan"
+              class="sc-input-el sc-input-el--mono"
+              placeholder="例：4"
+              clearable
+            />
+          </div>
+          <div class="sc-field sc-field--last-in-grid">
+            <label class="sc-label" for="sc-fee-extra">同地址每多一份加价</label>
+            <el-input
+              id="sc-fee-extra"
+              v-model="form.courier_delivery_extra_per_unit_yuan"
+              class="sc-input-el sc-input-el--mono"
+              placeholder="例：1"
+              clearable
+            />
+          </div>
         </div>
-      </div>
+      </el-card>
 
-      <div class="sc-field sc-switch-row">
-        <div class="sc-switch-text">
-          <span class="sc-label sc-label--inline">顺丰夜间自动推单</span>
-          <p class="sc-hint sc-hint--tight">
-            开启后系统于每日<strong>22:00（上海时间）</strong>自动将<strong>次日</strong>待配送订单推送至顺丰同城；关闭后不执行定时任务，请在配送管理页面<strong>手动推单</strong>。
-          </p>
+      <el-card class="sc-el-card" shadow="never">
+        <template #header>
+          <span class="sc-card-title">单次点餐 / 零售 · 顺丰与 UU</span>
+        </template>
+        <p class="sc-hint sc-hint--card">
+          <strong>零售推顺丰店铺ID</strong>仅用于订单管理里「推送到顺丰」；开发者 ID、密钥、取件电话/地址仍使用<strong>租户对接</strong>或 .env（与智能配送大表手动/夜间推单使用的「租户顺丰店铺编号」可填不同值，例如
+          <code class="sc-code">6284388701377</code>）。
+        </p>
+        <div class="sc-coord-grid">
+          <div class="sc-field">
+            <label class="sc-label" for="sc-sf-retail-shop">零售推顺丰店铺ID</label>
+            <el-input
+              id="sc-sf-retail-shop"
+              v-model="form.sf_retail_push_shop_id"
+              class="sc-input-el sc-input-el--mono"
+              maxlength="64"
+              clearable
+              placeholder="顺丰开放平台店铺编号，与大表推单 shop 独立"
+            />
+          </div>
+          <div class="sc-field">
+            <label class="sc-label" for="sc-sf-retail-type">shop_type（可选）</label>
+            <el-select
+              id="sc-sf-retail-type"
+              v-model="form.sf_retail_push_shop_type"
+              class="sc-input-el"
+              clearable
+              placeholder="留空则与租户/全局一致"
+              style="width: 100%"
+            >
+              <el-option label="1 · 顺丰门店编号" value="1" />
+              <el-option label="2 · 接入方自建店" value="2" />
+            </el-select>
+          </div>
         </div>
-        <el-switch v-model="form.sf_nightly_auto_push_enabled" size="large" />
-      </div>
 
-      <h3 class="sc-subtitle">骑手配送费（元）</h3>
-      <p class="sc-hint">确认送达时写入骑手待结算：首份基础价 +（份数 − 1）× 每多一份加价。</p>
-      <div class="sc-coord-grid">
-        <div class="sc-field">
-          <label class="sc-label" for="sc-fee-base">首份基础价</label>
-          <el-input
-            id="sc-fee-base"
-            v-model="form.courier_delivery_base_yuan"
-            class="sc-input-el sc-input-el--mono"
-            placeholder="例：4"
-            clearable
-          />
+        <p class="sc-hint sc-hint--tight sc-hint--spaced">
+          <strong>UU 跑腿</strong>发单接口预留字段（保存后可入库；点击订单「推 UU」将提示待对接）。
+        </p>
+        <div class="sc-coord-grid">
+          <div class="sc-field">
+            <label class="sc-label" for="sc-uu-app">UU AppId（预留）</label>
+            <el-input id="sc-uu-app" v-model="form.uu_open_app_id" maxlength="64" clearable />
+          </div>
+          <div class="sc-field">
+            <label class="sc-label" for="sc-uu-key">UU AppKey（预留）</label>
+            <el-input
+              id="sc-uu-key"
+              v-model="form.uu_open_app_key_input"
+              type="password"
+              show-password
+              maxlength="255"
+              clearable
+              :placeholder="form.uu_open_app_key_set ? '已保存，留空不改；或填写新密钥' : '可选填写'"
+            />
+          </div>
         </div>
-        <div class="sc-field">
-          <label class="sc-label" for="sc-fee-extra">同地址每多一份加价</label>
-          <el-input
-            id="sc-fee-extra"
-            v-model="form.courier_delivery_extra_per_unit_yuan"
-            class="sc-input-el sc-input-el--mono"
-            placeholder="例：1"
-            clearable
-          />
+        <div class="sc-field sc-checkbox-row sc-field--last">
+          <el-checkbox v-model="form.uu_clear_app_key">清除已保存的 UU AppKey</el-checkbox>
         </div>
-      </div>
-
-      <h3 class="sc-subtitle">小程序会员卡标价（元）</h3>
-      <p class="sc-hint">
-        会员自助开卡/续卡微信支付金额；与后台开卡工单标价独立，以此处为准。可选填写划线价（须高于对应标价）时小程序会员卡区域启用「活动价」样式。
-      </p>
-      <div class="sc-coord-grid">
-        <div class="sc-field">
-          <label class="sc-label" for="sc-card-week">周卡</label>
-          <el-input
-            id="sc-card-week"
-            v-model="form.member_card_week_price_yuan"
-            class="sc-input-el sc-input-el--mono"
-            placeholder="例：168"
-            clearable
-          />
-        </div>
-        <div class="sc-field">
-          <label class="sc-label" for="sc-card-month">月卡</label>
-          <el-input
-            id="sc-card-month"
-            v-model="form.member_card_month_price_yuan"
-            class="sc-input-el sc-input-el--mono"
-            placeholder="例：669"
-            clearable
-          />
-        </div>
-        <div class="sc-field">
-          <label class="sc-label" for="sc-card-week-list">周卡划线价（可选）</label>
-          <el-input
-            id="sc-card-week-list"
-            v-model="form.member_card_week_list_price_yuan"
-            class="sc-input-el sc-input-el--mono"
-            placeholder="高于标价时出现「活动价」样式；留空关闭"
-            clearable
-          />
-        </div>
-        <div class="sc-field">
-          <label class="sc-label" for="sc-card-month-list">月卡划线价（可选）</label>
-          <el-input
-            id="sc-card-month-list"
-            v-model="form.member_card_month_list_price_yuan"
-            class="sc-input-el sc-input-el--mono"
-            placeholder="高于标价时出现「活动价」样式；留空关闭"
-            clearable
-          />
-        </div>
-      </div>
+      </el-card>
 
       <div class="sc-actions">
         <button type="button" class="sc-btn-primary" :disabled="saving" @click="saveConfig">
@@ -371,12 +394,55 @@ onMounted(() => {
         </button>
       </div>
     </div>
+
+    <el-dialog
+      v-model="locationDialogVisible"
+      title="地图选点（高德搜索 / 点击地图 / 拖动标记）"
+      width="min(92vw, 880px)"
+      top="5vh"
+      destroy-on-close
+      class="sc-location-dialog"
+    >
+      <div v-if="locationDialogVisible" class="sc-location-dialog-body">
+        <StoreLocationPicker
+          class="sc-location-picker-dialog"
+          v-model:lng-str="form.store_lng"
+          v-model:lat-str="form.store_lat"
+          @warn="onMapWarn"
+        />
+        <div class="sc-coord-grid">
+          <div class="sc-field sc-field--tight">
+            <label class="sc-label" for="sc-lng">经度 lng（可微调）</label>
+            <el-input
+              id="sc-lng"
+              v-model="form.store_lng"
+              class="sc-input-el sc-input-el--mono"
+              placeholder="例：113.9268"
+              clearable
+            />
+          </div>
+          <div class="sc-field sc-field--tight">
+            <label class="sc-label" for="sc-lat">纬度 lat（可微调）</label>
+            <el-input
+              id="sc-lat"
+              v-model="form.store_lat"
+              class="sc-input-el sc-input-el--mono"
+              placeholder="例：35.303"
+              clearable
+            />
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="closeLocationDialog">完成</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <style scoped>
 .store-config-page {
-  max-width: 52rem;
+  max-width: min(72rem, 100%);
 }
 .sc-head {
   display: flex;
@@ -407,12 +473,6 @@ onMounted(() => {
   background: #f1f5f9;
   border-radius: 4px;
 }
-.sc-subtitle {
-  margin: 1.25rem 0 0.35rem;
-  font-size: 0.95rem;
-  font-weight: 800;
-  color: #0f172a;
-}
 .sc-hint {
   margin: 0 0 0.75rem;
   font-size: 12px;
@@ -423,14 +483,87 @@ onMounted(() => {
   color: #64748b;
   font-size: 14px;
 }
-.sc-card {
-  padding: 1.25rem 1.35rem;
-  background: #fff;
+.sc-blocks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: stretch;
+}
+.sc-el-card {
+  margin-bottom: 0;
+  border-radius: 12px;
   border: 1px solid #e2e8f0;
-  border-radius: 1rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.sc-el-card :deep(.el-card__header) {
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+.sc-card-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+.sc-el-card :deep(.el-card__body) {
+  padding: 1.15rem 1.25rem 1.25rem;
+  flex: 1;
+}
+.sc-hint--card {
+  margin-top: 0;
+}
+.sc-hint--spaced {
+  margin-top: 0.75rem;
+}
+.sc-inner-divider {
+  margin: 0.35rem 0 0.5rem;
+}
+.sc-inner-divider :deep(.el-divider__text) {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+}
+.sc-field--last-in-grid {
+  margin-bottom: 0;
+}
+.sc-location-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.sc-location-summary {
+  flex: 1;
+  min-width: 200px;
+}
+.sc-coord-line {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  color: #0f172a;
+}
+.sc-location-empty {
+  font-size: 13px;
+  color: #94a3b8;
 }
 .sc-field {
   margin-bottom: 1.1rem;
+}
+.sc-field--tight {
+  margin-bottom: 0.75rem;
+}
+.sc-field--last {
+  margin-bottom: 0;
+}
+.sc-switch-row--card {
+  border: none;
+  padding: 0;
+  margin-bottom: 0;
+}
+.sc-location-picker-dialog :deep(.slp-map) {
+  height: min(420px, 48vh);
+  min-height: 260px;
 }
 .sc-label {
   display: block;
@@ -539,8 +672,14 @@ onMounted(() => {
     grid-template-columns: 1fr;
   }
 }
+@media (max-width: 900px) {
+  .sc-blocks {
+    grid-template-columns: 1fr;
+  }
+}
 .sc-actions {
-  margin-top: 0.5rem;
+  grid-column: 1 / -1;
+  margin-top: 0.35rem;
 }
 .sc-btn-primary {
   padding: 0.55rem 1.25rem;

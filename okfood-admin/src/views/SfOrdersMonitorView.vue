@@ -35,12 +35,20 @@ const orderStatusFilter = ref('')
 const createStatusFilter = ref('')
 const memberPhoneFilter = ref('')
 const sfOrderIdFilter = ref('')
+/** 订单类别：空=全部；delivery_sheet=大表合并；single_meal_retail=单次零售 */
+const pushKindFilter = ref('')
 
 const createStatusOptions = [
   { value: '', label: '全部创单' },
   { value: 'ok', label: '创单成功（未取消）' },
   { value: 'fail', label: '创单失败' },
   { value: 'cancelled', label: '取消订单' },
+]
+
+const pushKindOptions = [
+  { value: '', label: '全部类别' },
+  { value: 'delivery_sheet', label: '大表合并' },
+  { value: 'single_meal_retail', label: '单次零售' },
 ]
 
 const pushStats = ref(null)
@@ -95,6 +103,8 @@ function appendMonitorListQuery(q) {
   if (ph) q.set('member_phone', ph)
   const oid = (sfOrderIdFilter.value || '').trim()
   if (oid) q.set('sf_order_id', oid)
+  const pk = (pushKindFilter.value || '').trim()
+  if (pk) q.set('push_kind', pk)
 }
 
 async function fetchList() {
@@ -125,6 +135,11 @@ async function fetchList() {
 function onDateChange() {
   page.value = 1
   void refreshMonitor()
+}
+
+function onPushKindChange() {
+  page.value = 1
+  void fetchList()
 }
 
 function onOrderStatusChange() {
@@ -411,6 +426,24 @@ onMounted(() => {
             />
           </label>
           <label class="sf-monitor-field">
+            <span>订单类别</span>
+            <el-select
+              v-model="pushKindFilter"
+              placeholder="全部类别"
+              :disabled="loading"
+              clearable
+              class="sf-monitor-select-narrow"
+              @change="onPushKindChange"
+            >
+              <el-option
+                v-for="opt in pushKindOptions"
+                :key="opt.value === '' ? '_pk_all' : opt.value"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </el-select>
+          </label>
+          <label class="sf-monitor-field">
             <span>创单状态</span>
             <el-select
               v-model="createStatusFilter"
@@ -490,6 +523,9 @@ onMounted(() => {
       <AdminTable variant="members" :data="items" :loading="loading" row-key="id" empty-text="暂无推单记录">
         <el-table-column type="index" :index="tableRowIndex" label="序号" width="100" align="center" />
         <el-table-column prop="delivery_date" label="业务日" width="150" />
+        <el-table-column label="订单类别" width="112" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.push_kind_label || row.push_kind || '—' }}</template>
+        </el-table-column>
         <el-table-column label="顺丰单号" min-width="120" class-name="td-mono">
           <template #default="{ row }">{{ row.sf_order_id || '—' }}</template>
         </el-table-column>
