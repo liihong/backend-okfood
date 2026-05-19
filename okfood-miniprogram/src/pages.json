@@ -84,6 +84,13 @@
           }
         },
         {
+          "path": "pages/myOrders/myOrders",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
+        },
+        {
           "path": "pages/singleOrderList/singleOrderList",
           "style": {
             "navigationStyle": "custom",

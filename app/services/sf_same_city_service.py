@@ -12,6 +12,7 @@ import math
 import re
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -19,7 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -280,6 +281,7 @@ def _agg_to_row(
     default_by_id: dict[int, MemberAddress],
     m_by_id: dict[int, Member],
     gset: Any,
+    success_member_map: dict[str, set[int]],
 ) -> SfSameCityPreviewRow:
     p_phone = (gset.SF_PICKUP_PHONE or "").strip()
     sub = sum(
@@ -354,7 +356,11 @@ def _agg_to_row(
         except (TypeError, ValueError):
             pass
 
-    pushed = _has_success(db, d, a.stop_id)
+    mids_ship = _member_ids_receiving_on_agg(db, a)
+    dup_member_elsewhere = _member_overlap_with_other_success_stops(
+        mids_ship, a.stop_id, success_member_map
+    )
+    pushed = _has_success(db, d, a.stop_id) or dup_member_elsewhere
     return SfSameCityPreviewRow(
         stop_id=a.stop_id,
         group_area=a.group_area,
@@ -397,6 +403,99 @@ def _has_success(db: Session, d: date, stop_id: str) -> bool:
         .limit(1)
     )
     return r is not None
+
+
+def _sf_push_row_cancelled_predicate() -> Any:
+    """与监控页一致：商户 cancel 或顺丰回调已为取消类终态。"""
+    return or_(
+        SfSameCityPush.merchant_cancel_requested_at.isnot(None),
+        SfSameCityPush.sf_callback_order_status.in_((2, 22)),
+    )
+
+
+def _member_ids_receiving_on_agg(db: Session, agg: _Agg) -> set[int]:
+    """
+    本会话停靠点上「实际占顺丰运力」的会员：订阅待送份数>0 + 单点餐（与履约口径一致）。
+    用于同一配送日同一会员仅能一次成功创单。
+    """
+    out: set[int] = set()
+    for x in agg.sub_lines:
+        if x.get("is_delivered"):
+            continue
+        if int(x.get("units") or 0) <= 0:
+            continue
+        out.add(int(x["member_id"]))
+    for sng in agg.singles:
+        try:
+            oid = int(sng["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        o = db.get(SingleMealOrder, oid)
+        if o is not None and o.member_id is not None:
+            out.add(int(o.member_id))
+    return out
+
+
+def _successful_sf_stop_ids(db: Session, *, store_id: int, d: date) -> list[str]:
+    rows = db.scalars(
+        select(SfSameCityPush.stop_id)
+        .where(
+            and_(
+                SfSameCityPush.store_id == int(store_id),
+                SfSameCityPush.delivery_date == d,
+                SfSameCityPush.error_code == 0,
+                ~_sf_push_row_cancelled_predicate(),
+            )
+        )
+        .distinct()
+    ).all()
+    return [str(x) for x in rows]
+
+
+def _success_stop_member_map(
+    db: Session, *, store_id: int, d: date, ags_hint: dict[str, _Agg]
+) -> dict[str, set[int]]:
+    """已成功创单的每个 stop_id → 当时停靠点上收件会员 id 集合（用于跨停靠点去重）。"""
+    m: dict[str, set[int]] = {}
+    for sid_stop in _successful_sf_stop_ids(db, store_id=store_id, d=d):
+        agg = ags_hint.get(sid_stop) or load_agg_for_stop_id(db, d, sid_stop, store_id=store_id)
+        if agg is None:
+            continue
+        m[sid_stop] = _member_ids_receiving_on_agg(db, agg)
+    return m
+
+
+def _member_overlap_with_other_success_stops(
+    mids: set[int], current_stop_id: str, success_member_map: dict[str, set[int]]
+) -> bool:
+    if not mids:
+        return False
+    for ost, omids in success_member_map.items():
+        if ost == current_stop_id:
+            continue
+        if mids & omids:
+            return True
+    return False
+
+
+@contextmanager
+def _sf_push_serial_lock(db: Session, *, store_id: int, d: date):
+    """
+    同一门店 + 配送业务日串行化推单，避免并发请求同时越过「会员未推」校验造成双单。
+    MySQL 使用 GET_LOCK；SQLite 等跳过。
+    """
+    bind = db.get_bind()
+    if getattr(bind.dialect, "name", "") != "mysql":
+        yield
+        return
+    key = f"okf_sfpush_{store_id}_{d.isoformat()}"[:64]
+    rc = db.execute(text("SELECT GET_LOCK(:k, 30)"), {"k": key}).scalar()
+    if rc != 1:
+        raise ValueError("顺丰推单排队超时，请稍后重试")
+    try:
+        yield
+    finally:
+        db.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": key})
 
 
 def aggs_for_delivery_date(db: Session, d: date, *, store_id: int | None = None) -> dict[str, _Agg]:
@@ -454,9 +553,10 @@ def preview_sf_same_city(
     m_by_id = {int(m.id): m for m in mlist}
 
     ags = _build_aggs(db, d, akey, pkey, mlist, default_by_id, store_id=sid)
+    success_member_map = _success_stop_member_map(db, store_id=sid, d=d, ags_hint=ags)
     gset = merged_sf_integration_namespace(db, tid)
     rows: list[SfSameCityPreviewRow] = [
-        _agg_to_row(db, ag, d, default_by_id, m_by_id, gset)
+        _agg_to_row(db, ag, d, default_by_id, m_by_id, gset, success_member_map)
         for ag in sorted(ags.values(), key=lambda x: (x.group_area, x.address_line))
     ]
     return SfSameCityPreviewOut(
@@ -594,124 +694,168 @@ def push_sf_same_city(db: Session, body: SfSameCityPushIn, *, store_id: int | No
     out: list[SfSameCityPushItemResult] = []
     now_ts = int(time.time())
     httpc = SfOpenClient()
-    for item in body.rows:
-        if not item.selected:
-            out.append(
-                SfSameCityPushItemResult(
-                    stop_id=item.stop_id, ok=True, message="已跳过（未勾选）", sf_order_id=None
+    with _sf_push_serial_lock(db, store_id=sid, d=d):
+        ags_hint = aggs_for_delivery_date(db, d, store_id=sid)
+        success_member_map = _success_stop_member_map(
+            db, store_id=sid, d=d, ags_hint=ags_hint
+        )
+        for item in body.rows:
+            if not item.selected:
+                out.append(
+                    SfSameCityPushItemResult(
+                        stop_id=item.stop_id, ok=True, message="已跳过（未勾选）", sf_order_id=None
+                    )
                 )
-            )
-            continue
-        if _has_success(db, d, item.stop_id):
-            out.append(
-                SfSameCityPushItemResult(
-                    stop_id=item.stop_id, ok=False, message="本停靠点本日已推单成功。", sf_order_id=None
-                )
-            )
-            continue
-        if item.is_insured and item.goods_value_yuan is None:
-            out.append(
-                SfSameCityPushItemResult(
-                    stop_id=item.stop_id, ok=False, message="保价时须填写货值(元)。", sf_order_id=None
-                )
-            )
-            continue
-        if not item.push_immediately and item.expect_delivery_at is None:
-            out.append(
-                SfSameCityPushItemResult(
-                    stop_id=item.stop_id, ok=False, message="非立即推单时须选择期望送达时间。", sf_order_id=None
-                )
-            )
-            continue
-        if not item.push_immediately and item.expect_delivery_at is not None:
-            edt = item.expect_delivery_at
-            if edt.tzinfo is None:
-                edt = edt.replace(tzinfo=_SH)
-            else:
-                edt = edt.astimezone(_SH)
-            t_today = today_shanghai()
-            if d < t_today and edt.date() < t_today:
+                continue
+            if _has_success(db, d, item.stop_id):
                 out.append(
                     SfSameCityPushItemResult(
                         stop_id=item.stop_id,
                         ok=False,
-                        message="所选业务日已早于今日（上海），期望送达日期须为今日或之后。",
+                        message="本停靠点本日已推单成功。",
                         sf_order_id=None,
                     )
                 )
                 continue
-            if edt.timestamp() < time.time():
+            agg_cur = load_agg_for_stop_id(db, d, item.stop_id, store_id=sid)
+            if agg_cur is not None:
+                mids_try = _member_ids_receiving_on_agg(db, agg_cur)
+                if _member_overlap_with_other_success_stops(
+                    mids_try, item.stop_id, success_member_map
+                ):
+                    out.append(
+                        SfSameCityPushItemResult(
+                            stop_id=item.stop_id,
+                            ok=False,
+                            message="本配送日内有会员已在其他停靠点成功推单，不能重复创单。",
+                            sf_order_id=None,
+                        )
+                    )
+                    continue
+            if item.is_insured and item.goods_value_yuan is None:
                 out.append(
                     SfSameCityPushItemResult(
                         stop_id=item.stop_id,
                         ok=False,
-                        message="期望送达须晚于当前时间（上海）；请调整预约时间或使用立即推单。",
+                        message="保价时须填写货值(元)。",
                         sf_order_id=None,
                     )
                 )
                 continue
-        soid = f"OKF{d:%Y%m%d}{item.stop_id[:12]}{uuid.uuid4().hex[:8]}"
-        if len(soid) > 64:
-            soid = soid[:64]
-        snap_preview: dict[str, Any] = item.model_dump(mode="json")
-        snap_db: dict[str, Any] = snap_preview
-        try:
-            pld = _create_order_payload(
-                item, shop_order_id=soid, gset=gset, store=store, now_ts=now_ts, delivery_date=d
-            )
-            snap_db = _sf_push_request_snapshot(snap_preview, pld, gset=gset)
-            res = httpc.create_order(
-                pld, dev_id=int(gset.SF_OPEN_DEV_ID), app_key=(gset.SF_OPEN_SECRET or "").strip()
-            )
-            r = res.get("result")
-            sfo, sfb = None, None
-            if isinstance(r, dict):
-                sfo, sfb = r.get("sf_order_id"), r.get("sf_bill_id")
-            row = SfSameCityPush(
-                store_id=sid,
-                delivery_date=d,
-                stop_id=item.stop_id,
-                shop_order_id=soid,
-                sf_order_id=str(sfo) if sfo is not None else None,
-                sf_bill_id=str(sfb) if sfb is not None else None,
-                error_code=0,
-                error_msg="",
-                request_snapshot=snap_db,
-                response_json=res if isinstance(res, dict) else None,
-            )
-            db.add(row)
-            db.commit()
-            out.append(
-                SfSameCityPushItemResult(
+            if not item.push_immediately and item.expect_delivery_at is None:
+                out.append(
+                    SfSameCityPushItemResult(
+                        stop_id=item.stop_id,
+                        ok=False,
+                        message="非立即推单时须选择期望送达时间。",
+                        sf_order_id=None,
+                    )
+                )
+                continue
+            if not item.push_immediately and item.expect_delivery_at is not None:
+                edt = item.expect_delivery_at
+                if edt.tzinfo is None:
+                    edt = edt.replace(tzinfo=_SH)
+                else:
+                    edt = edt.astimezone(_SH)
+                t_today = today_shanghai()
+                if d < t_today and edt.date() < t_today:
+                    out.append(
+                        SfSameCityPushItemResult(
+                            stop_id=item.stop_id,
+                            ok=False,
+                            message="所选业务日已早于今日（上海），期望送达日期须为今日或之后。",
+                            sf_order_id=None,
+                        )
+                    )
+                    continue
+                if edt.timestamp() < time.time():
+                    out.append(
+                        SfSameCityPushItemResult(
+                            stop_id=item.stop_id,
+                            ok=False,
+                            message="期望送达须晚于当前时间（上海）；请调整预约时间或使用立即推单。",
+                            sf_order_id=None,
+                        )
+                    )
+                    continue
+            soid = f"OKF{d:%Y%m%d}{item.stop_id[:12]}{uuid.uuid4().hex[:8]}"
+            if len(soid) > 64:
+                soid = soid[:64]
+            snap_preview: dict[str, Any] = item.model_dump(mode="json")
+            snap_db: dict[str, Any] = snap_preview
+            try:
+                pld = _create_order_payload(
+                    item,
+                    shop_order_id=soid,
+                    gset=gset,
+                    store=store,
+                    now_ts=now_ts,
+                    delivery_date=d,
+                )
+                snap_db = _sf_push_request_snapshot(snap_preview, pld, gset=gset)
+                res = httpc.create_order(
+                    pld,
+                    dev_id=int(gset.SF_OPEN_DEV_ID),
+                    app_key=(gset.SF_OPEN_SECRET or "").strip(),
+                )
+                r = res.get("result")
+                sfo, sfb = None, None
+                if isinstance(r, dict):
+                    sfo, sfb = r.get("sf_order_id"), r.get("sf_bill_id")
+                row = SfSameCityPush(
+                    store_id=sid,
+                    delivery_date=d,
                     stop_id=item.stop_id,
-                    ok=True,
-                    message="已提交顺丰",
+                    shop_order_id=soid,
                     sf_order_id=str(sfo) if sfo is not None else None,
+                    sf_bill_id=str(sfb) if sfb is not None else None,
+                    error_code=0,
+                    error_msg="",
+                    request_snapshot=snap_db,
+                    response_json=res if isinstance(res, dict) else None,
                 )
-            )
-        except SfOpenApiError as e:
-            db.rollback()
-            _persist_fail(
-                db,
-                d,
-                item.stop_id,
-                soid,
-                snap_db,
-                int(e.error_code) if e.error_code is not None else -1,
-                str(e)[:1000],
-                store_id=sid,
-            )
-            out.append(
-                SfSameCityPushItemResult(stop_id=item.stop_id, ok=False, message=str(e), sf_order_id=None)
-            )
-        except Exception as e:
-            db.rollback()
-            _persist_fail(db, d, item.stop_id, soid, snap_db, -2, str(e)[:1000], store_id=sid)
-            out.append(
-                SfSameCityPushItemResult(
-                    stop_id=item.stop_id, ok=False, message=f"推单异常: {e!s}", sf_order_id=None
+                db.add(row)
+                db.commit()
+                agg_after = load_agg_for_stop_id(db, d, item.stop_id, store_id=sid)
+                if agg_after is not None:
+                    success_member_map[item.stop_id] = _member_ids_receiving_on_agg(db, agg_after)
+                out.append(
+                    SfSameCityPushItemResult(
+                        stop_id=item.stop_id,
+                        ok=True,
+                        message="已提交顺丰",
+                        sf_order_id=str(sfo) if sfo is not None else None,
+                    )
                 )
-            )
+            except SfOpenApiError as e:
+                db.rollback()
+                _persist_fail(
+                    db,
+                    d,
+                    item.stop_id,
+                    soid,
+                    snap_db,
+                    int(e.error_code) if e.error_code is not None else -1,
+                    str(e)[:1000],
+                    store_id=sid,
+                )
+                out.append(
+                    SfSameCityPushItemResult(
+                        stop_id=item.stop_id, ok=False, message=str(e), sf_order_id=None
+                    )
+                )
+            except Exception as e:
+                db.rollback()
+                _persist_fail(db, d, item.stop_id, soid, snap_db, -2, str(e)[:1000], store_id=sid)
+                out.append(
+                    SfSameCityPushItemResult(
+                        stop_id=item.stop_id,
+                        ok=False,
+                        message=f"推单异常: {e!s}",
+                        sf_order_id=None,
+                    )
+                )
     return SfSameCityPushOut(results=out)
 
 
@@ -899,7 +1043,10 @@ def retry_sf_same_city_push_by_id(db: Session, *, push_id: int) -> SfSameCityPus
             detail="当前业务日已无此停靠点待配送数据，请在配送大表核对或改用手动推单",
         )
     if prow.already_pushed:
-        raise HTTPException(status_code=400, detail="该停靠点已有成功创单记录")
+        raise HTTPException(
+            status_code=400,
+            detail="该停靠点本日不可再推（本停靠点已成功创单，或同配送日内同一会员已在其他停靠点成功推单）。",
+        )
     body = SfSameCityPushIn(delivery_date=d, rows=[prow])
     out = push_sf_same_city(db, body, store_id=sid)
     if not out.results:

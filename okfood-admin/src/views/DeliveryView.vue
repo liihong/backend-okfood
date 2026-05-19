@@ -644,7 +644,8 @@ async function markDelivery(memberId, kind) {
 <template>
   <section class="tab-content animate-up delivery-view">
     <!-- 顶栏右侧：与 AdminLayout #delivery-header-toolbar 对齐，单列一排 -->
-    <Teleport to="#delivery-header-toolbar">
+    <!-- defer：目标在 AdminLayout 的 header(v-if) 内，从 hidePageTitle 页切入配送时须等本轮 DOM 插入后再解析 #delivery-header-toolbar -->
+    <Teleport defer to="#delivery-header-toolbar">
       <!-- Teleport 到 layout 后主卡 .delivery-view 不是祖先，须在卡片上重复定义 --dv-* 变量，否则会丢底色/主色 -->
       <div class="delivery-header-toolbar-card no-print">
         <div class="delivery-top-toolbar">

@@ -379,7 +379,12 @@ async function handlePay() {
       content: `¥${amt} · ${out.delivery_date || serviceDateYmd.value}\n${isPickup ? '自提' : '片区'}：${area}${pickupHint}`,
       showCancel: false,
       success: () => {
-        uni.navigateBack()
+        try {
+          uni.setStorageSync('okfood_open_my_orders_after_checkout', '1')
+        } catch {
+          /* ignore */
+        }
+        uni.switchTab({ url: '/pages/mine/index' })
       },
     })
   } catch (e) {

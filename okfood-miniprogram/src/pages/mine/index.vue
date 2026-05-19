@@ -143,15 +143,15 @@
           <text class="section-cap section-cap--sp">个人自律管理</text>
           <view class="menu-card">
             <view class="menu-grid">
-              <view class="menu-cell" @tap="goMemberSetup">
+              <view class="menu-cell" @tap="goMyOrders">
                 <view class="menu-ico-wrap">
                   <image
                     class="menu-ico-img"
-                    src="/static/mine-icons/crown.svg"
+                    src="/static/mine-icons/clipboard-list.svg"
                     mode="aspectFit"
                   />
                 </view>
-                <text class="menu-cap">我的会员卡</text>
+                <text class="menu-cap">我的订单</text>
               </view>
               <view class="menu-cell" @tap="goDailyMealUnits">
                 <view class="menu-ico-wrap">
@@ -187,7 +187,7 @@
                 <view class="menu-ico-wrap">
                   <image
                     class="menu-ico-img"
-                    src="/static/mine-icons/clipboard-list.svg"
+                    src="/static/mine-icons/file-text.svg"
                     mode="aspectFit"
                   />
                 </view>
@@ -909,6 +909,7 @@ onShow(() => {
   } catch {
     /* ignore */
   }
+  tryOpenOrdersFromCheckoutFlag()
   void refreshMember()
   void fetchDefaultAddressForCard()
 })
@@ -1005,6 +1006,35 @@ function goSingleOrders() {
     return
   }
   uni.navigateTo({ url: '/packageOrder/pages/singleOrderList/singleOrderList' })
+}
+
+function goMyOrders() {
+  if (!getMemberToken()) {
+    uni.showToast({ title: '请先登录', icon: 'none' })
+    return
+  }
+  uni.navigateTo({ url: '/packageOrder/pages/myOrders/myOrders' })
+}
+
+const STORAGE_OPEN_MY_ORDERS = 'okfood_open_my_orders_after_checkout'
+
+function tryOpenOrdersFromCheckoutFlag() {
+  try {
+    const v = uni.getStorageSync(STORAGE_OPEN_MY_ORDERS)
+    if (v !== '1' && v !== 1 && v !== true) return
+    uni.removeStorageSync(STORAGE_OPEN_MY_ORDERS)
+    setTimeout(() => {
+      if (!getMemberToken()) return
+      uni.navigateTo({
+        url: '/packageOrder/pages/myOrders/myOrders',
+        fail: (e) => {
+          console.error('navigateTo myOrders', e)
+        },
+      })
+    }, 80)
+  } catch {
+    /* ignore */
+  }
 }
 
 function goDailyMealUnits() {

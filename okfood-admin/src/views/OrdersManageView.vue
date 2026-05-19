@@ -71,6 +71,18 @@ function mallPayClass(s) {
   return 'member-pill member-pill--amber'
 }
 
+const FULFILLMENT_STATUS_ZH = {
+  pending: '待履约',
+  delivered: '已履约',
+}
+
+/** 单次点餐履约状态：接口为英文枚举，列表展示中文 */
+function fulfillmentLabelZh(s) {
+  if (s == null || s === '') return '—'
+  const k = String(s).trim().toLowerCase()
+  return FULFILLMENT_STATUS_ZH[k] ?? String(s).trim()
+}
+
 function fulfillmentClass(s) {
   const x = (s || '').toLowerCase()
   if (x === 'delivered') return 'member-pill member-pill--emerald'
@@ -264,7 +276,7 @@ onMounted(() => {
             <el-table-column label="履约" width="88" class-name="co-nowrap">
               <template #default="{ row }">
                 <span :class="fulfillmentClass(row.fulfillment_status)">{{
-                  row.fulfillment_status || '—'
+                  fulfillmentLabelZh(row.fulfillment_status)
                 }}</span>
               </template>
             </el-table-column>

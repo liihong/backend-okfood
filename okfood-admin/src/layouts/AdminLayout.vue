@@ -250,10 +250,12 @@ watch(sidebarCollapsedPref, (v) => {
           <h2 class="page-title">{{ pageTitle }}</h2>
           <p v-if="pageSubtitle" class="page-subtitle">{{ pageSubtitle }}</p>
         </div>
+        <!-- v-show：Teleport 目标须在 DeliveryView 卸载前保留在 DOM；v-if 会先拆掉节点触发 Vue patch 异常（emitsOptions on null） -->
         <div
-          v-if="isDeliveryPage"
+          v-show="isDeliveryPage"
           id="delivery-header-toolbar"
           class="page-header-toolbar"
+          :aria-hidden="!isDeliveryPage"
           aria-label="配送大表筛选与操作"
         />
       </header>
