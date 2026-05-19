@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { RefreshCw, MapPin, Truck, FileDown, Search } from 'lucide-vue-next'
+import { RefreshCw, MapPin, Truck, FileDown, Search, Loader2 } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
@@ -474,6 +474,9 @@ async function markSelectedStopsDelivered() {
     showToast('所选行中没有待标记的会员', 'info')
     return
   }
+  const stopCount = selectedDeliveryStops.value.length
+  const tip = `即将批量标记 ${pendingIds.length} 位会员（${stopCount} 个配送点）。人数较多时服务器需逐条处理，反馈可能较慢，请勿关闭页面直至完成。确定继续？`
+  if (!window.confirm(tip)) return
   batchMarking.value = true
   const d0 = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
   try {
@@ -1011,11 +1014,22 @@ async function markDelivery(memberId, kind) {
                 </header>
                 <div class="delivery-batch-bar">
                   <div class="delivery-batch-bar__left">
-                    <span class="delivery-batch-bar__pulse" aria-hidden="true" />
-                    <span class="delivery-batch-bar__hint">
-                      勾选配送列表，可对选中停靠点批量标记；待标记
-                      <strong>{{ batchPendingMemberCount }}</strong> 位会员
-                    </span>
+                    <div class="delivery-batch-bar__left-top">
+                      <span class="delivery-batch-bar__pulse" aria-hidden="true" />
+                      <span class="delivery-batch-bar__hint">
+                        勾选配送列表，可对选中停靠点批量标记；待标记
+                        <strong>{{ batchPendingMemberCount }}</strong> 位会员
+                      </span>
+                    </div>
+                    <div v-if="batchMarking" class="delivery-batch-bar__busy" role="status" aria-live="polite">
+                      <Loader2
+                        :size="14"
+                        stroke-width="2.25"
+                        class="delivery-batch-bar__busy-ico spin"
+                        aria-hidden="true"
+                      />
+                      <span>正在向服务器逐条提交，请稍候…</span>
+                    </div>
                   </div>
                   <div class="delivery-batch-bar__right">
                     <span class="delivery-batch-bar__count">
@@ -1033,7 +1047,20 @@ async function markDelivery(memberId, kind) {
                         "
                         @click="markSelectedStopsDelivered"
                       >
-                        {{ selectedGroup.area === '门店自提' ? '批量自提完成' : '批量标记送达' }}
+                        <Loader2
+                          v-if="batchMarking"
+                          :size="15"
+                          stroke-width="2.25"
+                          class="delivery-batch-btn-ico spin"
+                          aria-hidden="true"
+                        />
+                        <span>{{
+                          batchMarking
+                            ? '提交中…'
+                            : selectedGroup.area === '门店自提'
+                              ? '批量自提完成'
+                              : '批量标记送达'
+                        }}</span>
                       </button>
                       <button
                         type="button"
@@ -1671,9 +1698,30 @@ async function markDelivery(memberId, kind) {
 }
 .delivery-batch-bar__left {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.delivery-batch-bar__left-top {
+  display: flex;
   align-items: center;
   gap: 0.5rem;
   min-width: 0;
+}
+.delivery-batch-bar__busy {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #047857;
+  line-height: 1.2;
+}
+.delivery-batch-bar__busy-ico {
+  flex-shrink: 0;
+  color: #059669;
 }
 .delivery-batch-bar__pulse {
   width: 8px;
@@ -1719,6 +1767,13 @@ async function markDelivery(memberId, kind) {
 .delivery-batch-bar__btn {
   padding: 0.38rem 0.8rem;
   font-size: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+.delivery-batch-btn-ico {
+  flex-shrink: 0;
 }
 
 .group-card__table-scroll {
