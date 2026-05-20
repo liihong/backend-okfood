@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Iterable
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -138,6 +138,68 @@ def single_order_stock_for_dish_date(
     return SingleOrderStockInfo(
         limited=True, total_stock=cap, subscription_meals=sub, paid_single_portions=paid, remaining=rem
     )
+
+
+def single_order_stock_by_date_for_week(
+    db: Session,
+    *,
+    week_start_anchor: date,
+    dates: list[date],
+    dishes_by_date: dict[date, MenuDish],
+    weekly_slot_rows: Iterable[tuple[WeeklyMenuSlot, MenuDish]],
+    store_id: int,
+    subscription_floor_date: date | None,
+) -> dict[date, SingleOrderStockInfo]:
+    """与逐日调用 `single_order_stock_for_dish_date` 结果一致：预取订阅份数 / 已付单次，避免一周内重复查库与子查询。
+
+    `dishes_by_date` 必须与 `GET /api/menu/weekly` 的周槽+按日补全合并结果一致；
+    `weekly_slot_rows` 须为当周 `WeeklyMenuSlot` JOIN `MenuDish` 的原始行。
+
+    ``subscription_floor_date``：早于该日历日的供餐日将 ``subscription_meals`` 视为 0（不跑会员履约统计），列表页加速用；当日及之后与全量计算一致。精确库存以下单/详情接口为准。
+    """
+
+    sid = int(store_id)
+    if not dates:
+        return {}
+
+    # 早于 subscription_floor（通常为上海业务『今天』）的供餐日不再扫会员履约份数：已过日不可下单，省去最贵查询。
+    subscription_floor = subscription_floor_date
+
+    ws_by_day_dish: dict[tuple[date, int], WeeklyMenuSlot] = {}
+    for ws, od in weekly_slot_rows:
+        day = week_start_anchor + timedelta(days=int(ws.slot) - 1)
+        ws_by_day_dish[(day, int(od.id))] = ws
+
+    sub_by_date: dict[date, int] = {}
+    for d in dates:
+        if subscription_floor is not None and d < subscription_floor:
+            sub_by_date[d] = 0
+        else:
+            sub_by_date[d] = subscription_total_meals_on_date(db, d, store_id=sid)
+    dish_ids: set[int] = {int(dis.id) for dis in dishes_by_date.values() if dis is not None}
+    paid = _paid_sums_for_dates_dishes(db, dates, dish_ids, store_id=sid)
+
+    out: dict[date, SingleOrderStockInfo] = {}
+    for d in dates:
+        dish = dishes_by_date.get(d)
+        if dish is None:
+            continue
+        did = int(dish.id)
+        w = ws_by_day_dish.get((d, did))
+        sub = int(sub_by_date.get(d, 0))
+        paid_n = int(paid.get((d, did), 0))
+        if w is None or w.total_stock is None:
+            out[d] = SingleOrderStockInfo(
+                limited=False, total_stock=None, subscription_meals=sub, paid_single_portions=paid_n, remaining=None
+            )
+        else:
+            cap = int(w.total_stock or 0)
+            single_cap = max(0, cap - sub)
+            rem = max(0, single_cap - paid_n)
+            out[d] = SingleOrderStockInfo(
+                limited=True, total_stock=cap, subscription_meals=sub, paid_single_portions=paid_n, remaining=rem
+            )
+    return out
 
 
 def assert_single_order_stock_available(

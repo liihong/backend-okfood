@@ -1,5 +1,5 @@
 <template>
-  <view class="plan-card">
+  <view class="plan-card" :class="themeClass">
     <text class="plan-card__watermark">OK</text>
 
     <view class="plan-card__head">
@@ -46,6 +46,8 @@ const props = defineProps({
   statusAlert: { type: Boolean, default: false },
   footerTagline: { type: String, default: '' },
   planLabel: { type: String, default: '' },
+  /** 周卡 / 月卡 / 次卡，用于卡片配色 */
+  planKind: { type: String, default: '' },
   addressLine: { type: String, default: '' },
   dailyUnitsText: { type: String, default: '' },
   showResumeChip: { type: Boolean, default: false },
@@ -56,6 +58,13 @@ defineEmits(['resume'])
 const remainingDisplay = computed(() =>
   Math.max(0, Math.floor(Number(props.remainingMeals) || 0)),
 )
+
+const themeClass = computed(() => {
+  const p = String(props.planKind || '').trim()
+  if (p === '月卡') return 'plan-card--month'
+  if (p === '次卡') return 'plan-card--times'
+  return 'plan-card--week'
+})
 </script>
 
 <style lang="scss" scoped>
@@ -65,8 +74,37 @@ const remainingDisplay = computed(() =>
   border-radius: 28rpx;
   padding: 28rpx 28rpx 24rpx;
   margin-bottom: 28rpx;
+}
+
+.plan-card--week {
   background: linear-gradient(145deg, $ok-forest-green-dark 0%, $ok-forest-green 48%, #0a4d3a 100%);
   box-shadow: 0 20rpx 48rpx rgba(14, 90, 68, 0.38);
+}
+
+.plan-card--month {
+  background: linear-gradient(135deg, #b8860b 0%, #d97706 45%, #92400e 100%);
+  box-shadow: 0 20rpx 48rpx rgba(146, 64, 14, 0.38);
+
+  .plan-card__slant {
+    color: rgba(255, 248, 220, 0.95);
+  }
+
+  .plan-card__plan-type {
+    color: #fff;
+  }
+}
+
+.plan-card--times {
+  background: linear-gradient(135deg, #1e3a5f 0%, #1d4ed8 50%, #312e81 100%);
+  box-shadow: 0 20rpx 48rpx rgba(30, 58, 95, 0.38);
+
+  .plan-card__slant {
+    color: rgba(191, 219, 254, 0.95);
+  }
+
+  .plan-card__plan-type {
+    color: rgba(254, 240, 138, 0.95);
+  }
 }
 
 .plan-card__watermark {

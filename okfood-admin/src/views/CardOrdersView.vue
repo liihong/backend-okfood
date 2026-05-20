@@ -502,7 +502,7 @@ size="small"
         row-key="id"
         empty-text="暂无工单"
       >
-       <el-table-column label="单号" width="62" class-name="td-mono td-co-id">
+       <el-table-column label="单号" width="80" class-name="td-mono td-co-id">
           <template #default="{ row }">#{{ row.id }}</template>
         </el-table-column>
        <el-table-column label="名称" min-width="88" class-name="td-co-name">
@@ -566,7 +566,7 @@ size="small"
        <el-table-column label="入账" width="92" min-width="86" align="center" class-name="co-nowrap td-co-sync">
           <template #default="{ row }">
             <span
-class="member-pill co-sync-pill"
+class="member-pill"
               :class="row.applied_to_member ? 'member-pill--emerald' : 'member-pill--slate'"
             >
               {{ row.applied_to_member ? '已同步' : '未同步' }}
@@ -587,7 +587,7 @@ class="member-pill co-sync-pill"
             }}</span>
           </template>
         </el-table-column>
-       <el-table-column label="操作" align="right" width="112" fixed="right" class-name="td-co-actions">
+       <el-table-column label="操作" align="right" width="152" fixed="right" class-name="td-co-actions">
           <template #default="{ row }">
             <span class="co-row-actions">
               <button type="button" class="btn-sm" @click="openEditModal(row)">更新</button>
@@ -1462,25 +1462,10 @@ class="member-pill co-sync-pill"
   min-height: auto;
   padding: 0.8rem;
 }
-/* 开卡工单列表：紧凑列宽；备注/创建列加宽并允许换行展示全文 */
-.card-orders-page :deep(.card-orders-table.admin-table--members.el-table--small .el-table__header th.el-table__cell) {
-  padding: 0.32rem 0.45rem;
-  font-size: 11px;
-}
-
-.card-orders-page :deep(.card-orders-table.admin-table--members.el-table--small .el-table__body td.el-table__cell) {
-  padding: 0.22rem 0.45rem;
-}
-
-.card-orders-page :deep(.card-orders-table .cell) {
-  line-height: 1.22;
-  font-size: 12px;
-}
-
+/* 开卡工单列表：表头/行高沿用 admin-table--members；备注/创建列允许换行展示全文 */
 .co-member-name {
   display: block;
-  font-weight: 800;
-  font-size: 12px;
+  font-weight: 900;
   color: #1e293b;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1492,9 +1477,6 @@ class="member-pill co-sync-pill"
 .co-plan-tag {
   flex-shrink: 0;
   margin-left: 0;
-  padding: 1px 6px;
-  font-size: 10px;
-  line-height: 1.2;
 }
 
 .co-card-kind-empty {
@@ -1505,7 +1487,6 @@ class="member-pill co-sync-pill"
 
 .co-wxname-text {
   display: block;
-  font-size: 12px;
   color: #475569;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1530,14 +1511,7 @@ class="member-pill co-sync-pill"
 }
 
 .co-amt-num {
-  font-size: 12px;
   font-weight: 900;
-}
-
-.co-sync-pill {
-  font-size: 10px;
-  padding: 1px 6px;
-  font-weight: 800;
 }
 
 .co-remark-text {
@@ -1545,7 +1519,6 @@ class="member-pill co-sync-pill"
   white-space: normal;
   word-break: break-word;
   overflow-wrap: anywhere;
-  font-size: 12px;
   line-height: 1.35;
   color: #475569;
   max-width: 100%;
@@ -1556,15 +1529,13 @@ class="member-pill co-sync-pill"
   white-space: normal;
   word-break: break-all;
   overflow-wrap: anywhere;
-  font-size: 12px;
   line-height: 1.35;
   color: #64748b;
   max-width: 100%;
 }
 
-.card-orders-page :deep(.td-co-actions .btn-sm) {
-  padding: 0.22rem 0.42rem;
-  font-size: 11px;
+.card-orders-page .co-row-actions .btn-sm {
+  margin-left: 0;
 }
 
 .card-orders-filter-el {

@@ -322,31 +322,29 @@ def persist_sf_callback_and_sync_push(
             if parsed_callback_order_status is not None:
                 pus.sf_callback_order_status = parsed_callback_order_status
 
-    if sign_ok and route_kind == "order_complete" and matched_push is not None:
+    if sign_ok and matched_push is not None:
         try:
-            from app.services.sf_order_fulfillment_service import apply_sf_order_complete_fulfillment
-
-            apply_sf_order_complete_fulfillment(db, matched_push)
-        except Exception:
-            logger.exception(
-                "顺丰订单完成自动履约失败 shop_order_id=%s stop_id=%s",
-                getattr(matched_push, "shop_order_id", None),
-                getattr(matched_push, "stop_id", None),
+            from app.services.sf_order_fulfillment_service import (
+                apply_sf_auto_fulfillment_for_push,
+                should_run_sf_auto_fulfillment,
             )
 
-    if (
-        sign_ok
-        and route_kind == "delivery_status"
-        and matched_push is not None
-        and parsed_callback_order_status == 17
-    ):
-        try:
-            from app.services.sf_order_fulfillment_service import apply_sf_delivery_status_tuotou
-
-            apply_sf_delivery_status_tuotou(db, matched_push)
+            if should_run_sf_auto_fulfillment(route_kind=route_kind, pus=matched_push):
+                op_tag = (
+                    "sf:order_complete"
+                    if route_kind == "order_complete"
+                    else "sf:delivery_status"
+                )
+                apply_sf_auto_fulfillment_for_push(
+                    db,
+                    matched_push,
+                    operator_tag=op_tag,
+                    route_kind=route_kind,
+                )
         except Exception:
             logger.exception(
-                "顺丰配送状态(妥投)自动履约失败 shop_order_id=%s stop_id=%s",
+                "顺丰自动履约失败 route_kind=%s shop_order_id=%s stop_id=%s",
+                route_kind,
                 getattr(matched_push, "shop_order_id", None),
                 getattr(matched_push, "stop_id", None),
             )

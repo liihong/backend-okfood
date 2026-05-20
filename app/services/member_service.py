@@ -1106,13 +1106,22 @@ def _dish_to_member_card(*, menu_date: date, dish: MenuDish | None, slot: int | 
 
 
 
-def get_weekly_menu(db: Session, week_start: date | None, *, store_id: int) -> dict:
+def get_weekly_menu(
+    db: Session,
+    week_start: date | None,
+    *,
+    store_id: int,
+    as_of_date: date | None = None,
+    include_stock: bool = False,
+) -> dict:
 
     anchor = _monday_of_week(week_start) if week_start else _monday_of_week(today_shanghai())
 
     dates = [anchor + timedelta(days=i) for i in range(7)]
 
     sid = int(store_id)
+
+    as_of_eff = as_of_date if as_of_date is not None else today_shanghai()
 
     weekly_rows = db.execute(
 
@@ -1144,18 +1153,29 @@ def get_weekly_menu(db: Session, week_start: date | None, *, store_id: int) -> d
 
             by_date[sched.menu_date] = dish
 
-    from app.services.menu_day_stock_service import single_order_stock_for_dish_date
+    stocks: dict[date, object] = {}
+    if include_stock:
+        from app.services.menu_day_stock_service import single_order_stock_by_date_for_week
+
+        stocks = single_order_stock_by_date_for_week(
+            db,
+            week_start_anchor=anchor,
+            dates=dates,
+            dishes_by_date=by_date,
+            weekly_slot_rows=weekly_rows,
+            store_id=sid,
+            subscription_floor_date=as_of_eff,
+        )
 
     items: list[dict] = []
     for i, d in enumerate(dates):
         dish = by_date.get(d)
         card = _dish_to_member_card(menu_date=d, dish=dish, slot=i + 1)
-        if dish is not None:
-            stock = single_order_stock_for_dish_date(db, int(dish.id), d, store_id=sid)
-            card.update(stock.to_detail_dict())
+        if include_stock and dish is not None:
+            card.update(stocks[d].to_detail_dict())
         items.append(card)
 
-    return {"week_start": anchor.isoformat(), "items": items}
+    return {"week_start": anchor.isoformat(), "as_of": as_of_eff.isoformat(), "items": items}
 
 
 

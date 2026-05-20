@@ -21,13 +21,14 @@ function tabPageRootHeightPx(win) {
 
 /**
  * TabBar 页面布局：用可用窗口高度固定根节点与 scroll-view，避免盖住原生底部栏。
+ * @param {{ fullBleed?: boolean }} [opts] fullBleed 为 true 时不预留自定义导航栏高度（内容顶到状态栏下沿）
  * @returns {{ pageStyle: Record<string, string>, scrollStyle: Record<string, string> }}
  */
-export function getTabPageLayoutStyles() {
+export function getTabPageLayoutStyles(opts = {}) {
   const win = uni.getWindowInfo ? uni.getWindowInfo() : uni.getSystemInfoSync()
   const h = tabPageRootHeightPx(win)
   const { navBarTotal } = getNavbarLayout()
-  const scrollH = Math.max(0, h - navBarTotal)
+  const scrollH = opts.fullBleed ? h : Math.max(0, h - navBarTotal)
   if (!h) {
     return {
       pageStyle: { height: '100%', maxHeight: '100%', overflow: 'hidden' },

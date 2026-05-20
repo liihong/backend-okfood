@@ -1,4 +1,16 @@
 import { request } from '@/utils/api.js'
+import {
+  invalidateWeeklyMenuCache,
+  mondayOfWeekShanghai,
+  peekWeeklyMenuCache,
+  resolveWeeklyMenuCacheKey,
+  writeWeeklyMenuCache,
+} from '@/utils/weeklyMenuCache.js'
+
+export {
+  invalidateWeeklyMenuCache,
+  mondayOfWeekShanghai,
+} from '@/utils/weeklyMenuCache.js'
 
 const PLACEHOLDER_IMG =
   'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400'
@@ -207,18 +219,13 @@ export function isSingleOrderServiceDate(serviceDateYmd, opts) {
 }
 
 /**
- * 首页周菜单卡片是否展示「立即下单」：供餐日窗口内且对该日单次卡尚有库存（或未设限额）。
+ * 首页周菜单卡片是否展示「立即下单」：供餐日窗口内即可展示；库存/售罄在详情页与下单接口校验。
  * @param {ReturnType<typeof mapWeeklyListItem>} row
  */
 export function isMenuRowQuickOrderVisible(row, opts) {
   if (!row || typeof row !== 'object') return false
   if (!row.dishId) return false
-  if (!isSingleOrderServiceDate(row.serviceDate, opts)) return false
-  if (row.singleStockLimited === true) {
-    const r = row.singleStockRemaining
-    return r != null && Number(r) > 0
-  }
-  return true
+  return isSingleOrderServiceDate(row.serviceDate, opts)
 }
 
 /**
@@ -239,20 +246,14 @@ export function singleOrderServiceDateError(serviceDateYmd, opts) {
   return '该供餐日不可单点'
 }
 
+/** @type {Map<string, Promise<{ weekStart: string, items: ReturnType<typeof mapWeeklyListItem>[] }>>} */
+const weeklyMenuInflight = new Map()
+
 /**
- * @param {{ weekStart?: string }} [opts] 传 `week_start` 为当周任意一天（后端归一为周一）；不传为服务端「本周」
- * @returns {Promise<{ weekStart: string, items: ReturnType<typeof mapWeeklyListItem>[] }>}
+ * @param {Record<string, unknown>} data
+ * @returns {{ weekStart: string, items: ReturnType<typeof mapWeeklyListItem>[] }}
  */
-export async function fetchWeeklyMenu(opts = {}) {
-  const weekStart =
-    typeof opts.weekStart === 'string' && opts.weekStart.trim()
-      ? opts.weekStart.trim()
-      : ''
-  const data = await request('/api/menu/weekly', {
-    method: 'GET',
-    data: weekStart ? { week_start: weekStart } : {},
-    retry: 1,
-  })
+function normalizeWeeklyMenuResponse(data) {
   const items = Array.isArray(data?.items) ? data.items : []
   const withDish = items.filter((row) => {
     const id = weeklyRowDishIdRaw(row)
@@ -262,6 +263,86 @@ export async function fetchWeeklyMenu(opts = {}) {
     weekStart: data?.week_start != null ? String(data.week_start) : '',
     items: withDish.map((row, i) => mapWeeklyListItem(row, i)),
   }
+}
+
+/**
+ * @param {{ weekStart?: string }} opts
+ */
+async function fetchWeeklyMenuFromNetwork(opts = {}) {
+  const weekStart =
+    typeof opts.weekStart === 'string' && opts.weekStart.trim()
+      ? opts.weekStart.trim()
+      : ''
+  const data = await request('/api/menu/weekly', {
+    method: 'GET',
+    data: {
+      ...(weekStart ? { week_start: weekStart } : {}),
+      include_stock: false,
+    },
+    retry: 1,
+  })
+  return normalizeWeeklyMenuResponse(data)
+}
+
+/**
+ * @param {{ weekStart?: string }} [opts]
+ */
+function weeklyInflightKey(opts = {}) {
+  return resolveWeeklyMenuCacheKey(opts) || '__this__'
+}
+
+/**
+ * 后台预取某周菜单（静默，失败忽略）。
+ * @param {{ weekStart?: string }} [opts]
+ */
+export function prefetchWeeklyMenu(opts = {}) {
+  const cached = peekWeeklyMenuCache(opts)
+  if (cached && !cached.stale) return
+  const key = weeklyInflightKey(opts)
+  if (weeklyMenuInflight.has(key)) return
+  const p = fetchWeeklyMenuFromNetwork(opts)
+    .then((data) => {
+      if (data.weekStart) writeWeeklyMenuCache(data)
+      return data
+    })
+    .catch(() => null)
+    .finally(() => {
+      weeklyMenuInflight.delete(key)
+    })
+  weeklyMenuInflight.set(key, p)
+}
+
+/**
+ * @param {{ weekStart?: string, forceRefresh?: boolean, skipCache?: boolean }} [opts]
+ *   - `forceRefresh` 忽略缓存直接请求
+ *   - `skipCache` 不读不写缓存（调试用）
+ * @returns {Promise<{ weekStart: string, items: ReturnType<typeof mapWeeklyListItem>[] }>}
+ */
+export async function fetchWeeklyMenu(opts = {}) {
+  const forceRefresh = opts.forceRefresh === true
+  const skipCache = opts.skipCache === true
+
+  if (!forceRefresh && !skipCache) {
+    const cached = peekWeeklyMenuCache(opts)
+    if (cached && !cached.stale) {
+      return { weekStart: cached.weekStart, items: cached.items }
+    }
+  }
+
+  const key = weeklyInflightKey(opts)
+  let inflight = weeklyMenuInflight.get(key)
+  if (!inflight) {
+    inflight = fetchWeeklyMenuFromNetwork(opts).finally(() => {
+      weeklyMenuInflight.delete(key)
+    })
+    weeklyMenuInflight.set(key, inflight)
+  }
+
+  const data = await inflight
+  if (!skipCache && data.weekStart) {
+    writeWeeklyMenuCache(data)
+  }
+  return data
 }
 
 /** @param {Record<string, unknown>} raw */

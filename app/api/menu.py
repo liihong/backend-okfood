@@ -24,9 +24,36 @@ def weekly_menu(
         date | None,
         Query(description="该周任意一天；将归一化为当周周一。不传则按上海当前日期取本周"),
     ] = None,
+    as_of_date: Annotated[
+        date | None,
+        Query(
+            description=(
+                "业务参考日（上海日历日 YYYY-MM-DD），通常为客户端『今天』。"
+                "仅 ``include_stock=true`` 时用于加速订阅份数统计；不传则服务端取当前上海日期。"
+            )
+        ),
+    ] = None,
+    include_stock: Annotated[
+        bool,
+        Query(
+            description=(
+                "是否返回单次卡库存字段。列表页建议 false（仅查排餐与菜品，显著更快）；"
+                "精确库存请用 ``/menu/detail/{dish_id}?service_date=`` 或下单接口校验。"
+            )
+        ),
+    ] = False,
 ):
     """一周菜单（周一至周日）：每日 `date`、`dish_id`（可空）、`title`/`desc`/`pic`。详情用 `dish_id` 调 `/menu/detail/{dish_id}`。无需登录。"""
-    return success(data=get_weekly_menu(db, week_start, store_id=int(store_ctx.store_id)), msg="获取成功")
+    return success(
+        data=get_weekly_menu(
+            db,
+            week_start,
+            store_id=int(store_ctx.store_id),
+            as_of_date=as_of_date,
+            include_stock=include_stock,
+        ),
+        msg="获取成功",
+    )
 
 
 @router.get("/detail/{dish_id}")

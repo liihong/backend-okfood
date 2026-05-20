@@ -286,46 +286,185 @@ def _sf_push_skip_auto_fulfillment_due_to_cancel(pus: SfSameCityPush) -> bool:
     return n in (2, 22, 31)
 
 
-def _apply_sf_same_city_stop_fulfillment(db: Session, pus: SfSameCityPush, *, operator_tag: str) -> None:
+def _sf_push_effective_order_status(pus: SfSameCityPush) -> int | None:
+    st = pus.sf_callback_order_status
+    if st is None:
+        return None
+    try:
+        return int(st)
+    except (TypeError, ValueError):
+        return None
+
+
+def should_run_sf_auto_fulfillment(*, route_kind: str, pus: SfSameCityPush) -> bool:
+    """
+    验签通过且命中推单后是否应尝试自动履约：
+    - ``order_complete`` 回调（订单完成）
+    - 或推送记录上顺丰状态已为妥投完单 (17)
+    """
+    if int(pus.error_code or -1) != 0:
+        return False
+    if _sf_push_skip_auto_fulfillment_due_to_cancel(pus):
+        return False
+    rk = (route_kind or "").strip()
+    if rk == "order_complete":
+        return True
+    return _sf_push_effective_order_status(pus) == SF_ORDER_STATUS_DELIVERED_TUOTOU
+
+
+def _member_id_by_phone(db: Session, phone: str, *, store_id: int) -> int | None:
+    ph = (phone or "").strip()
+    if not ph or ph in ("—", "-"):
+        return None
+    row = db.scalar(
+        select(Member.id).where(
+            Member.phone == ph,
+            Member.store_id == int(store_id),
+            Member.deleted_at.is_(None),
+        )
+    )
+    return int(row) if row is not None else None
+
+
+def _ids_from_push_snapshot(snap: Any) -> tuple[list[int], list[int]]:
+    """创单快照中记录的待履约会员 / 单次订单（推单时写入；旧记录可能无此字段）。"""
+    if not isinstance(snap, dict):
+        return [], []
+    mids: list[int] = []
+    oids: list[int] = []
+    for key, out in (("fulfillment_member_ids", mids), ("fulfillment_single_meal_order_ids", oids)):
+        raw = snap.get(key)
+        if not isinstance(raw, list):
+            continue
+        for x in raw:
+            try:
+                out.append(int(x))
+            except (TypeError, ValueError):
+                pass
+    return mids, oids
+
+
+def _subscription_member_ids_for_push(db: Session, pus: SfSameCityPush, agg: Any | None) -> list[int]:
+    """订阅待扣次会员：优先停靠点聚合，其次创单快照，最后按快照收件手机匹配。"""
+    seen: set[int] = set()
+    out: list[int] = []
+
+    def add(mid: int | None) -> None:
+        if mid is None:
+            return
+        im = int(mid)
+        if im in seen:
+            return
+        seen.add(im)
+        out.append(im)
+
+    if agg is not None:
+        for sl in getattr(agg, "sub_lines", None) or []:
+            if sl.get("is_delivered"):
+                continue
+            if int(sl.get("units") or 0) <= 0:
+                continue
+            try:
+                add(int(sl["member_id"]))
+            except (KeyError, TypeError, ValueError):
+                pass
+
+    snap_mids, _ = _ids_from_push_snapshot(pus.request_snapshot)
+    for mid in snap_mids:
+        add(mid)
+
+    if out:
+        return out
+
+    snap = pus.request_snapshot
+    if isinstance(snap, dict):
+        pr = snap.get("preview_row")
+        if isinstance(pr, dict):
+            sid = int(pus.store_id) if getattr(pus, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
+            add(_member_id_by_phone(db, str(pr.get("recv_phone") or ""), store_id=sid))
+    return out
+
+
+def _single_meal_order_ids_for_push(db: Session, pus: SfSameCityPush, agg: Any | None) -> list[int]:
+    seen: set[int] = set()
+    out: list[int] = []
+
+    def add(oid: int | None) -> None:
+        if oid is None:
+            return
+        io = int(oid)
+        if io in seen:
+            return
+        seen.add(io)
+        out.append(io)
+
+    if agg is not None:
+        for sng in getattr(agg, "singles", None) or []:
+            try:
+                add(int(sng["id"]))
+            except (KeyError, TypeError, ValueError):
+                pass
+
+    _, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+    for oid in snap_oids:
+        add(oid)
+    return out
+
+
+def _apply_sf_same_city_stop_fulfillment(
+    db: Session, pus: SfSameCityPush, *, operator_tag: str
+) -> dict[str, Any]:
     """
     同一停靠点的订阅扣次 + 单点餐履约标记；已由各类顺丰回调按需调用。
 
     ``single_meal_retail``（或 stop_id 为 retail-smo-*）仅处理对应单次订单，不走大表聚合。
     """
+    result: dict[str, Any] = {
+        "subscription_applied": 0,
+        "subscription_skipped": 0,
+        "single_meal_applied": 0,
+        "single_meal_skipped": 0,
+        "warnings": [],
+    }
     if int(pus.error_code or -1) != 0:
-        return
+        result["warnings"].append("创单未成功，跳过履约")
+        return result
     if _sf_push_skip_auto_fulfillment_due_to_cancel(pus):
-        return
+        result["warnings"].append("订单已取消或取消中，跳过履约")
+        return result
     kind = (getattr(pus, "push_kind", None) or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
     oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
     if kind == SF_PUSH_KIND_SINGLE_MEAL_RETAIL or oid_retail is not None:
         if oid_retail is not None:
+            prev = db.get(SingleMealOrder, oid_retail)
+            before = str(getattr(prev, "fulfillment_status", "") or "").strip().lower() if prev else ""
             mark_single_meal_delivered_sf_completion_no_commit(db, oid_retail)
+            after_row = db.get(SingleMealOrder, oid_retail)
+            after = str(getattr(after_row, "fulfillment_status", "") or "").strip().lower() if after_row else ""
+            if after == "delivered" and before != "delivered":
+                result["single_meal_applied"] = 1
+            else:
+                result["single_meal_skipped"] = 1
         else:
-            logger.warning(
-                "顺丰零售推单无法解析订单号 push_kind=%s stop_id=%s",
-                kind,
-                pus.stop_id,
-            )
-        return
+            msg = f"顺丰零售推单无法解析订单号 push_kind={kind} stop_id={pus.stop_id}"
+            result["warnings"].append(msg)
+            logger.warning(msg)
+        return result
 
     sid = int(pus.store_id) if getattr(pus, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
     agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
     if agg is None:
+        result["warnings"].append(
+            f"未解析到停靠点聚合 stop_id={pus.stop_id} date={pus.delivery_date}，将尝试快照/收件人回退"
+        )
         logger.warning(
-            "顺丰履约未解析到停靠点 stop_id=%s date=%s store_id=%s",
+            "顺丰履约未解析到停靠点 stop_id=%s date=%s store_id=%s，尝试快照回退",
             pus.stop_id,
             pus.delivery_date,
             sid,
         )
-        return
-    for sl in agg.sub_lines:
-        if sl.get("is_delivered"):
-            continue
-        u = int(sl.get("units") or 0)
-        if u <= 0:
-            continue
-        mid = int(sl["member_id"])
+
+    for mid in _subscription_member_ids_for_push(db, pus, agg):
         try:
             subscription_fulfilled_try_sf_home_no_commit(
                 db,
@@ -334,19 +473,39 @@ def _apply_sf_same_city_stop_fulfillment(db: Session, pus: SfSameCityPush, *, op
                 operator_tag=operator_tag,
                 store_id=sid,
             )
+            result["subscription_applied"] += 1
         except HTTPException as e:
+            result["subscription_skipped"] += 1
             logger.info(
                 "顺丰自动履约跳过订阅 member_id=%s date=%s detail=%s",
                 mid,
                 pus.delivery_date,
                 getattr(e, "detail", e),
             )
-    for sng in agg.singles:
-        oid = int(sng["id"])
+
+    for oid in _single_meal_order_ids_for_push(db, pus, agg):
+        prev = db.get(SingleMealOrder, oid)
+        before = str(getattr(prev, "fulfillment_status", "") or "").strip().lower() if prev else ""
         mark_single_meal_delivered_sf_completion_no_commit(db, oid)
+        after_row = db.get(SingleMealOrder, oid)
+        after = str(getattr(after_row, "fulfillment_status", "") or "").strip().lower() if after_row else ""
+        if after == "delivered" and before != "delivered":
+            result["single_meal_applied"] += 1
+        else:
+            result["single_meal_skipped"] += 1
+
+    if (
+        result["subscription_applied"] == 0
+        and result["single_meal_applied"] == 0
+        and not result["warnings"]
+        and result["subscription_skipped"] == 0
+        and result["single_meal_skipped"] == 0
+    ):
+        result["warnings"].append("未找到待履约的订阅会员或单次订单")
+    return result
 
 
-def apply_sf_order_complete_fulfillment(db: Session, pus: SfSameCityPush) -> None:
+def apply_sf_order_complete_fulfillment(db: Session, pus: SfSameCityPush) -> dict[str, Any]:
     """
     ``route_kind=order_complete`` 且验签通过、已匹配推单记录时调用（由回调落库前写入，同一事务 commit）。
 
@@ -354,20 +513,153 @@ def apply_sf_order_complete_fulfillment(db: Session, pus: SfSameCityPush) -> Non
     - 订阅：按停靠点聚合内待送达会员逐条执行与 admin 大表「标记送达（到家）」相同扣次。
     - 单次点餐：标 ``fulfillment_status=delivered``（已付餐费，不扣次数）。
     """
-    _apply_sf_same_city_stop_fulfillment(db, pus, operator_tag="sf:order_complete")
+    out = _apply_sf_same_city_stop_fulfillment(db, pus, operator_tag="sf:order_complete")
+    logger.info(
+        "顺丰 order_complete 自动履约 push_id=%s stop_id=%s subs=%s singles=%s warnings=%s",
+        getattr(pus, "id", None),
+        pus.stop_id,
+        out.get("subscription_applied"),
+        out.get("single_meal_applied"),
+        out.get("warnings"),
+    )
+    return out
 
 
-def apply_sf_delivery_status_tuotou(db: Session, pus: SfSameCityPush) -> None:
+def apply_sf_delivery_status_tuotou(db: Session, pus: SfSameCityPush) -> dict[str, Any]:
     """
-    「配送状态变更」回调中 ``order_status=17``（妥投完单）时调用。
+    顺丰状态为妥投完单 (17) 时调用（配送状态变更或订单完成回调均可）。
 
     按推单行上的业务配送日执行扣次 / 单次标履约（与 ``order_complete`` 路径一致）。
     妥投常在深夜回调，不再限制「须等于上海当日日期」，避免静默跳过；
     重复回调由送达流水幂等处理。
     """
     if pus.delivery_date is None:
-        return
-    _apply_sf_same_city_stop_fulfillment(db, pus, operator_tag="sf:delivery_status")
+        return {"warnings": ["缺少业务配送日，跳过履约"]}
+    out = _apply_sf_same_city_stop_fulfillment(db, pus, operator_tag="sf:delivery_status")
+    logger.info(
+        "顺丰妥投(17) 自动履约 push_id=%s stop_id=%s subs=%s singles=%s warnings=%s",
+        getattr(pus, "id", None),
+        pus.stop_id,
+        out.get("subscription_applied"),
+        out.get("single_meal_applied"),
+        out.get("warnings"),
+    )
+    return out
+
+
+def apply_sf_auto_fulfillment_for_push(
+    db: Session,
+    pus: SfSameCityPush,
+    *,
+    operator_tag: str,
+    route_kind: str = "",
+) -> dict[str, Any]:
+    """回调 / 管理端补跑统一入口：按 operator_tag 执行幂等履约。"""
+    if not should_run_sf_auto_fulfillment(route_kind=route_kind, pus=pus):
+        st = _sf_push_effective_order_status(pus)
+        return {
+            "warnings": [
+                f"当前不满足自动履约条件（创单失败/已取消/非妥投）；"
+                f"route_kind={route_kind!r} sf_callback_order_status={st!r}"
+            ]
+        }
+    tag = (operator_tag or "sf:manual_retry").strip()[:50] or "sf:manual_retry"
+    return _apply_sf_same_city_stop_fulfillment(db, pus, operator_tag=tag)
+
+
+def admin_apply_sf_fulfillment_for_push_id(db: Session, *, push_id: int) -> dict[str, Any]:
+    """管理端：对单条顺丰推单记录补跑标记送达/扣次（幂等）。"""
+    pus = db.get(SfSameCityPush, int(push_id))
+    if pus is None:
+        raise ValueError("推单记录不存在")
+    if int(pus.error_code or -1) != 0:
+        raise ValueError("仅创单成功的记录可补跑履约")
+    if _sf_push_skip_auto_fulfillment_due_to_cancel(pus):
+        raise ValueError("该单已取消或取消中，不可补跑履约")
+    st = _sf_push_effective_order_status(pus)
+    if st != SF_ORDER_STATUS_DELIVERED_TUOTOU:
+        raise ValueError(
+            f"顺丰回调状态须为妥投完单(17)，当前为 {st!r}。"
+            "若监控已显示妥投但此处报错，请确认回调验签通过且状态已落库。"
+        )
+    out = apply_sf_auto_fulfillment_for_push(
+        db, pus, operator_tag="admin:sf_fulfillment_retry", route_kind="order_complete"
+    )
+    db.commit()
+    parts = [
+        f"订阅扣次 {out.get('subscription_applied', 0)} 人",
+        f"跳过 {out.get('subscription_skipped', 0)} 人",
+        f"单次标履约 {out.get('single_meal_applied', 0)} 单",
+    ]
+    warns = out.get("warnings") or []
+    if warns:
+        parts.append("提示：" + "；".join(str(w) for w in warns))
+    out["summary"] = "；".join(parts)
+    return out
+
+
+def bulk_admin_resync_subscription_fulfilled_from_sf_monitor_for_delivery_day(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    max_pushes: int = 500,
+) -> dict[str, Any]:
+    """
+    按配送业务日批量补跑：创单成功且顺丰回调已为妥投(17)的大表推单，逐停靠点幂等扣次/写 delivery_logs。
+    """
+    mx = max(1, min(500, int(max_pushes or 500)))
+    rows = list(
+        db.scalars(
+            select(SfSameCityPush)
+            .where(
+                SfSameCityPush.store_id == int(store_id),
+                SfSameCityPush.delivery_date == delivery_date,
+                SfSameCityPush.error_code == 0,
+                SfSameCityPush.sf_callback_order_status == SF_ORDER_STATUS_DELIVERED_TUOTOU,
+                ~_sf_push_monitor_cancelled_clause(),
+                or_(
+                    SfSameCityPush.push_kind.is_(None),
+                    SfSameCityPush.push_kind == "",
+                    SfSameCityPush.push_kind == SF_PUSH_KIND_DELIVERY_SHEET,
+                ),
+            )
+            .order_by(SfSameCityPush.id.asc())
+            .limit(mx)
+        ).all()
+    )
+    scanned = len(rows)
+    subs_applied = 0
+    subs_skipped = 0
+    singles_applied = 0
+    warnings: list[str] = []
+
+    for pus in rows:
+        out = apply_sf_auto_fulfillment_for_push(
+            db, pus, operator_tag="admin:sf_bulk_resync", route_kind="order_complete"
+        )
+        subs_applied += int(out.get("subscription_applied") or 0)
+        subs_skipped += int(out.get("subscription_skipped") or 0)
+        singles_applied += int(out.get("single_meal_applied") or 0)
+        for w in out.get("warnings") or []:
+            ws = str(w).strip()
+            if ws and ws not in warnings:
+                warnings.append(ws)
+        db.commit()
+
+    summary = (
+        f"扫描 {scanned} 条大表推单；订阅扣次 {subs_applied} 人次；"
+        f"跳过 {subs_skipped} 人次；单次标履约 {singles_applied} 单。"
+        "（幂等；已送达会员不会重复扣次）"
+    )
+    return {
+        "scanned": scanned,
+        "subscription_applied": subs_applied,
+        "subscription_skipped": subs_skipped,
+        "single_meal_applied": singles_applied,
+        "warnings": warnings[:20],
+        "summary": summary,
+    }
 
 
 def list_sf_same_city_pushes_for_monitor(

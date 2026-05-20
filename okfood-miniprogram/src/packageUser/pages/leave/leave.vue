@@ -16,7 +16,7 @@
         <view v-if="isOnLeaveNow" class="leave-block leave-block--active">
           <text class="leave-status-tag">请假中</text>
           <text class="leave-h3 leave-h3--compact">{{ activeLeaveTitle }}</text>
-          <text class="leave-range-line">{{ leaveLineStart }} 至 {{ leaveLineEnd }}</text>
+          <text v-if="isRangeOnlyLeave" class="leave-range-line">{{ serverLeaveStart }} 至 {{ serverLeaveEnd }}</text>
           <text class="leave-range-hint">{{ activeLeaveHint }}</text>
           <button class="btn-cancel-leave" @click="confirmCancelAllLeave">取消请假</button>
         </view>
@@ -371,30 +371,15 @@ const activeLeaveTitle = computed(() => {
   return '当前请假'
 })
 
-const leaveLineStart = computed(() => {
-  if (isRangeOnlyLeave.value) return serverLeaveStart.value
-  if (isTomorrowLeave.value) {
-    const t = tomorrowTargetYmd.value
-    if (t) return addDaysYmdShanghai(t, -1)
-    return shanghaiTodayYmd()
-  }
-  return serverLeaveStart.value
-})
-
-const leaveLineEnd = computed(() => {
-  if (isRangeOnlyLeave.value) return serverLeaveEnd.value
-  if (isTomorrowLeave.value) {
-    return tomorrowTargetYmd.value || shanghaiTomorrowYmd()
-  }
-  return serverLeaveEnd.value
-})
-
 const activeLeaveHint = computed(() => {
-  if (isRangeOnlyLeave.value) return '（与配送请假状态一致）'
-  if (isTomorrowLeave.value) {
-    return '（自提交当日起至目标日 24:00 止）'
+  if (isRangeOnlyLeave.value) {
+    const end = serverLeaveEnd.value
+    return end ? `${end}日24：00结束请假` : ''
   }
-  return '（按以上日期；与配送请假状态一致）'
+  if (isTomorrowLeave.value) {
+    return '到明日24：00结束请假'
+  }
+  return ''
 })
 
 function ymdFromApi(d) {

@@ -1,8 +1,7 @@
 <template>
   <view class="page" :style="pageStyle">
-    <OkNavbar show-brand />
     <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
-      <view class="profile-container">
+      <view class="profile-container" :style="profileContainerStyle">
         <!-- 未登录 -->
         <view v-if="!isLoggedIn" class="mine-hero mine-hero--guest">
           <view class="hero-guest-inner">
@@ -84,6 +83,7 @@
           :status-text="memberDeliveryStatus"
           :status-alert="planCardStatusAlert"
           :footer-tagline="cardFooter"
+          :plan-kind="planType"
           :plan-label="planTypeMemberLabel"
           :address-line="planCardAddressLine"
           :daily-units-text="planCardDailyUnitsText"
@@ -91,58 +91,20 @@
           @resume="goResumeDelivery"
         />
 
-        <text class="section-cap">OK 饭 · 尊享特色服务</text>
-        <view class="menu-card menu-card--vip">
-          <view class="menu-grid menu-grid--3">
-            <view class="menu-cell" @tap="onVipFeatureTap('health')">
-              <view class="menu-ico-wrap">
-                <image
-                  class="menu-ico-img"
-                  src="/static/mine-icons/activity.svg"
-                  mode="aspectFit"
-                />
-              </view>
-             <text class="menu-cap">持证营养师搭配</text>
-            </view>
-            <view class="menu-cell" @tap="onVipFeatureTap('agreement')">
-              <view class="menu-ico-wrap">
-                <image
-                  class="menu-ico-img"
-                  src="/static/mine-icons/file-text.svg"
-                  mode="aspectFit"
-                />
-              </view>
-              <text class="menu-cap">健康定制协议</text>
-            </view>
-            <view class="menu-cell" @tap="onVipFeatureTap('coupon')">
-              <view class="menu-ico-wrap">
-                <image
-                  class="menu-ico-img"
-                  src="/static/mine-icons/ticket.svg"
-                  mode="aspectFit"
-                />
-              </view>
-             <text class="menu-cap">顺丰全程跟踪</text>
-            </view>
-          </view>
-          <button
-            class="cta-purchase cta-purchase--in-card"
-            hover-class="cta-purchase--hover"
-            @tap="onPurchaseEntryTap"
-          >
-            <image
-              class="cta-purchase-ico-img"
-              src="/static/mine-icons/credit-card-light.svg"
-              mode="aspectFit"
-            />
-            <text class="cta-purchase-txt">自律卡包购买入口</text>
-          </button>
-        </view>
-
         <template v-if="isLoggedIn">
           <text class="section-cap section-cap--sp">个人自律管理</text>
           <view class="menu-card">
             <view class="menu-grid">
+              <view class="menu-cell" @tap="goMembershipCardPack">
+                <view class="menu-ico-wrap">
+                  <image
+                    class="menu-ico-img"
+                    src="/static/mine-icons/credit-card-light.svg"
+                    mode="aspectFit"
+                  />
+                </view>
+                <text class="menu-cap">会员卡包</text>
+              </view>
               <view class="menu-cell" @tap="goMyOrders">
                 <view class="menu-ico-wrap">
                   <image
@@ -193,16 +155,6 @@
                 </view>
                 <text class="menu-cap">就餐消费记录</text>
               </view>
-              <view class="menu-cell" @tap="onReminderSettingsTap">
-                <view class="menu-ico-wrap">
-                  <image
-                    class="menu-ico-img"
-                    src="/static/mine-icons/bell.svg"
-                    mode="aspectFit"
-                  />
-                </view>
-                <text class="menu-cap">消息提醒设置</text>
-              </view>
             </view>
             <view v-if="showPauseDeliveryMenuRow" class="menu-extra" @tap="onPauseDeliveryTap">
               <text class="menu-extra-txt">⏸ 暂停配送（保留剩余餐次）</text>
@@ -220,7 +172,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
-import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import MinePlanStatusCard from '@/components/MinePlanStatusCard/MinePlanStatusCard.vue'
 import {
   request,
@@ -242,6 +193,7 @@ import {
   WX_DEFAULT_NICK,
 } from '@/utils/memberProfile.js'
 import { getTabPageLayoutStyles } from '@/utils/tabPageLayout.js'
+import { getNavbarLayout } from '@/utils/navbar.js'
 import { syncCustomTabBar } from '@/utils/customTabBar.js'
 import {
   normalizeAddressList,
@@ -252,11 +204,16 @@ import {
 
 const pageStyle = ref({})
 const scrollStyle = ref({})
+const profileContainerStyle = ref({})
 
 function syncTabLayout() {
-  const { pageStyle: p, scrollStyle: s } = getTabPageLayoutStyles()
+  const { pageStyle: p, scrollStyle: s } = getTabPageLayoutStyles({ fullBleed: true })
+  const { statusBarHeight } = getNavbarLayout()
   pageStyle.value = p
   scrollStyle.value = s
+  profileContainerStyle.value = {
+    paddingTop: `${statusBarHeight + 12}px`,
+  }
 }
 
 const DEMO_MEAL_KEY = 'okfood_demo_meal_credits'
@@ -594,7 +551,7 @@ function onMineHeroTap() {
   if (needsMemberSetupPage.value) goMemberSetup()
 }
 
-function onPurchaseEntryTap() {
+function goMembershipCardPack() {
   if (!getMemberToken()) {
     uni.showToast({ title: '请先手机号登录', icon: 'none' })
     return
@@ -602,19 +559,6 @@ function onPurchaseEntryTap() {
   uni.navigateTo({
     url: '/packageUser/pages/membershipCardList/membershipCardList',
   })
-}
-
-function onReminderSettingsTap() {
-  uni.showToast({ title: '可稍后在订餐页开启配送提醒', icon: 'none' })
-}
-
-function onVipFeatureTap(key) {
-  const map = {
-    health: '指标健康管理即将开放',
-    agreement: '健康定制协议即将开放',
-    coupon: '美团 / 抖音验券即将开放',
-  }
-  uni.showToast({ title: map[key] || '即将开放', icon: 'none' })
 }
 
 function onNickInput(e) {
@@ -1332,10 +1276,6 @@ function onPauseDeliveryTap() {
   box-shadow: 0 8rpx 28rpx rgba(15, 23, 42, 0.05);
 }
 
-.menu-card--vip {
-  padding-bottom: 24rpx;
-}
-
 .menu-grid {
   display: flex;
   flex-direction: row;
@@ -1402,50 +1342,6 @@ function onPauseDeliveryTap() {
 .menu-extra-arr {
   font-size: 36rpx;
   color: #cbd5e1;
-}
-
-.cta-purchase {
-  width: 100%;
-  margin: 8rpx 0 0;
-  padding: 28rpx 24rpx;
-  background: $ok-forest-green;
-  color: #fff;
-  font-size: 30rpx;
-  font-weight: 950;
-  border-radius: 999rpx;
-  border: none;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 12rpx;
-  line-height: 1.3;
-  box-shadow: 0 16rpx 40rpx rgba(14, 90, 68, 0.35);
-}
-
-.cta-purchase--in-card {
-  margin-top: 28rpx;
-  margin-bottom: 0;
-  width: 100%;
-  box-shadow: 0 12rpx 32rpx rgba(14, 90, 68, 0.28);
-}
-
-.cta-purchase::after {
-  border: none;
-}
-
-.cta-purchase--hover {
-  opacity: 0.92;
-}
-
-.cta-purchase-ico-img {
-  width: 32rpx;
-  height: 32rpx;
-}
-
-.cta-purchase-txt {
-  color: #fff;
-  font-weight: 950;
 }
 
 /* 微信授权手机号 */

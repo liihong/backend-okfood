@@ -22,6 +22,8 @@ const loading = ref(false)
 const exporting = ref(false)
 const cancelBusyId = ref(null)
 const retryBusyId = ref(null)
+const fulfillBusyId = ref(null)
+const bulkFulfillLoading = ref(false)
 const items = ref([])
 const total = ref(0)
 const page = ref(1)
@@ -316,6 +318,17 @@ function canRetrySfRow(row) {
   return true
 }
 
+/** 创单成功且顺丰回调已为妥投(17)，可补跑标记送达/扣次 */
+function canApplyFulfillmentSfRow(row) {
+  const code = row?.error_code
+  if (code !== 0 && code !== '0') return false
+  if (row?.merchant_cancel_requested_at) return false
+  const stRaw = row?.sf_callback_order_status
+  if (stRaw === undefined || stRaw === null || stRaw === '') return false
+  const stNum = Number(stRaw)
+  return !Number.isNaN(stNum) && stNum === 17
+}
+
 async function onRetrySf(row) {
   try {
     await ElMessageBox.confirm(
@@ -390,6 +403,84 @@ async function onCancelSf(row) {
     showToast(e instanceof Error ? e.message : '取消失败', 'error')
   } finally {
     cancelBusyId.value = null
+  }
+}
+
+async function onApplyFulfillmentSf(row) {
+  try {
+    await ElMessageBox.confirm(
+      '将按该停靠点对订阅会员标记送达并扣次数（与配送大表一致）；已扣次会员不会重复扣减。',
+      '补标送达',
+      {
+        confirmButtonText: '确认',
+        cancelButtonText: '关闭',
+        type: 'info',
+        distinguishCancelAndClose: true,
+      },
+    )
+  } catch {
+    return
+  }
+  fulfillBusyId.value = row.id
+  try {
+    const res = await apiJson(
+      `/api/admin/delivery-sf/pushes/${row.id}/apply-fulfillment`,
+      { method: 'POST', body: JSON.stringify({}) },
+      { auth: true },
+    )
+    showToast((res && res.summary) || '已处理', 'success')
+    await refreshMonitor()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '补标失败', 'error')
+  } finally {
+    fulfillBusyId.value = null
+  }
+}
+
+async function onBulkSyncSubscriptionFulfillment() {
+  const d = (deliveryDate.value || '').trim()
+  if (!d) {
+    showToast('请先选择业务日', 'warning')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将扫描业务日 ${d} 下所有大表合并推单，对顺丰已妥投(17)但未扣次的订阅会员批量补标送达。`,
+      '批量补标送达',
+      {
+        confirmButtonText: '确认',
+        cancelButtonText: '关闭',
+        type: 'info',
+        distinguishCancelAndClose: true,
+      },
+    )
+  } catch {
+    return
+  }
+  bulkFulfillLoading.value = true
+  try {
+    const q = new URLSearchParams()
+    q.set('delivery_date', d)
+    const res = await apiJson(
+      `/api/admin/delivery-sf/pushes/sync-subscription-fulfillment?${q.toString()}`,
+      { method: 'POST', body: JSON.stringify({}) },
+      { auth: true },
+    )
+    showToast((res && res.summary) || '同步完成', 'success')
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '批量补标失败', 'error')
+  } finally {
+    bulkFulfillLoading.value = false
   }
 }
 
@@ -511,6 +602,15 @@ onMounted(() => {
           <el-button
             type="primary"
             plain
+            :loading="bulkFulfillLoading"
+            :disabled="loading || !(deliveryDate || '').trim()"
+            @click="onBulkSyncSubscriptionFulfillment"
+          >
+            批量补标送达
+          </el-button>
+          <el-button
+            type="primary"
+            plain
             :loading="exporting"
             :disabled="loading || !(deliveryDate || '').trim()"
             @click="exportExcel"
@@ -550,9 +650,20 @@ onMounted(() => {
         <el-table-column label="创单时间" width="168">
           <template #default="{ row }">{{ row.created_at ? row.created_at.replace('T', ' ').slice(0, 19) : '—' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <div class="sf-monitor-ops">
+              <el-button
+                v-if="canApplyFulfillmentSfRow(row)"
+                type="success"
+                plain
+                size="small"
+                :loading="fulfillBusyId === row.id"
+                :disabled="loading"
+                @click="onApplyFulfillmentSf(row)"
+              >
+                补标送达
+              </el-button>
               <el-button v-if="canRetrySfRow(row)" type="primary" plain size="small" :loading="retryBusyId === row.id"
                 :disabled="loading" @click="onRetrySf(row)">
                 重试推单
@@ -561,7 +672,10 @@ onMounted(() => {
                 :disabled="loading" @click="onCancelSf(row)">
                 取消配送
               </el-button>
-              <span v-if="!canRetrySfRow(row) && !canCancelSfRow(row)" class="sf-monitor-op-muted">—</span>
+              <span
+                v-if="!canApplyFulfillmentSfRow(row) && !canRetrySfRow(row) && !canCancelSfRow(row)"
+                class="sf-monitor-op-muted"
+              >—</span>
             </div>
           </template>
         </el-table-column>

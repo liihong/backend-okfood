@@ -68,10 +68,12 @@ def _sf_push_request_snapshot(
     pld: dict[str, Any],
     *,
     gset: Any,
+    fulfillment_member_ids: list[int] | None = None,
+    fulfillment_single_meal_order_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     """落库：预览行 + 实际发往顺丰的报文（与签名同源 canonical JSON）。"""
     canon = sf_sign_mod._canonical_json(pld)
-    return {
+    snap: dict[str, Any] = {
         "preview_row": preview_row,
         "shop_id": str(gset.SF_OPEN_SHOP_ID or "").strip(),
         "dev_id": int(gset.SF_OPEN_DEV_ID),
@@ -80,6 +82,13 @@ def _sf_push_request_snapshot(
         "sf_create_order": pld,
         "sf_canonical_json": canon,
     }
+    mids = [int(x) for x in (fulfillment_member_ids or []) if x is not None]
+    oids = [int(x) for x in (fulfillment_single_meal_order_ids or []) if x is not None]
+    if mids:
+        snap["fulfillment_member_ids"] = mids
+    if oids:
+        snap["fulfillment_single_meal_order_ids"] = oids
+    return snap
 
 
 def _sf_receive_city_name(row: SfSameCityRowBase, env_city: str) -> str:
@@ -797,7 +806,30 @@ def push_sf_same_city(db: Session, body: SfSameCityPushIn, *, store_id: int | No
                     now_ts=now_ts,
                     delivery_date=d,
                 )
-                snap_db = _sf_push_request_snapshot(snap_preview, pld, gset=gset)
+                ff_mids: list[int] = []
+                ff_oids: list[int] = []
+                if agg_cur is not None:
+                    for sl in agg_cur.sub_lines:
+                        if sl.get("is_delivered"):
+                            continue
+                        if int(sl.get("units") or 0) <= 0:
+                            continue
+                        try:
+                            ff_mids.append(int(sl["member_id"]))
+                        except (KeyError, TypeError, ValueError):
+                            pass
+                    for sng in agg_cur.singles:
+                        try:
+                            ff_oids.append(int(sng["id"]))
+                        except (KeyError, TypeError, ValueError):
+                            pass
+                snap_db = _sf_push_request_snapshot(
+                    snap_preview,
+                    pld,
+                    gset=gset,
+                    fulfillment_member_ids=ff_mids,
+                    fulfillment_single_meal_order_ids=ff_oids,
+                )
                 res = httpc.create_order(
                     pld,
                     dev_id=int(gset.SF_OPEN_DEV_ID),
@@ -1190,7 +1222,12 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
                 now_ts=now_ts,
                 delivery_date=d,
             )
-            snap_db = _sf_push_request_snapshot(snap_preview, pld, gset=gset)
+            snap_db = _sf_push_request_snapshot(
+                snap_preview,
+                pld,
+                gset=gset,
+                fulfillment_single_meal_order_ids=[int(order.id)],
+            )
             res = httpc.create_order(
                 pld,
                 dev_id=int(gset.SF_OPEN_DEV_ID),

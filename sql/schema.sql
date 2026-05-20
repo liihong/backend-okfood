@@ -298,7 +298,7 @@ CREATE TABLE IF NOT EXISTS `single_meal_orders` (
   `delivery_date` DATE NOT NULL COMMENT '供餐/配送业务日(上海)',
   `routing_area` VARCHAR(64) NOT NULL COMMENT '下单时片区快照',
   `amount_yuan` DECIMAL(12, 2) NOT NULL,
-  `pay_status` ENUM('未支付', '已支付') NOT NULL DEFAULT '未支付',
+  `pay_status` ENUM('未支付', '已支付', '已退款') NOT NULL DEFAULT '未支付',
   `pay_channel` VARCHAR(16) NULL,
   `wx_transaction_id` VARCHAR(32) NULL COMMENT '微信支付订单号',
   `fulfillment_status` VARCHAR(20) NOT NULL DEFAULT 'pending',

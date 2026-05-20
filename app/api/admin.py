@@ -70,6 +70,8 @@ from app.services.admin_service import (
     upsert_dish,
 )
 from app.services.sf_order_fulfillment_service import (
+    admin_apply_sf_fulfillment_for_push_id,
+    bulk_admin_resync_subscription_fulfilled_from_sf_monitor_for_delivery_day,
     count_sf_same_city_pushes_for_delivery_date,
     list_sf_same_city_pushes_for_monitor,
     list_sf_same_city_pushes_for_monitor_export,
@@ -455,6 +457,53 @@ def delivery_sf_cancel_push(
     return success(data=dump_model(out), msg="取消请求已提交")
 
 
+@router.post("/delivery-sf/pushes/{push_id}/apply-fulfillment", response_model=None)
+def delivery_sf_apply_fulfillment(
+    push_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
+):
+    """
+    对单条顺丰推单补跑「标记送达 + 扣次 / 单次标履约」。
+
+    须创单成功且顺丰回调状态已为妥投完单 (17)；幂等，已扣次会员不会重复扣减。
+    """
+    _ = admin_username
+    try:
+        out = admin_apply_sf_fulfillment_for_push_id(db, push_id=int(push_id))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=out, msg=str(out.get("summary") or "已处理"))
+
+
+@router.post("/delivery-sf/pushes/sync-subscription-fulfillment", response_model=None)
+def delivery_sf_sync_subscription_fulfillment(
+    db: SessionDep,
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    delivery_date: Annotated[
+        date | None,
+        Query(description="配送业务日（上海日历日），默认当天"),
+    ] = None,
+    max_pushes: Annotated[int, Query(description="最多扫描推单条数（1～500）")] = 500,
+):
+    """
+    批量补跑：指定业务日大表合并推单中，顺丰已为妥投(17)但未扣次的订阅会员。
+
+    依据本库 ``sf_same_city_pushes`` 回调落库状态，不向顺丰主动查询。
+    """
+    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    day = delivery_date or today_shanghai()
+    out = bulk_admin_resync_subscription_fulfilled_from_sf_monitor_for_delivery_day(
+        db,
+        store_id=store_id,
+        delivery_date=day,
+        max_pushes=max_pushes,
+    )
+    return success(data=out, msg=str(out.get("summary") or "同步完成"))
+
+
 @router.post("/delivery-mark")
 def delivery_mark(
     body: AdminDeliveryMarkIn,
@@ -827,7 +876,7 @@ def admin_single_meal_dispatch_store_courier(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return success(data=dump_model(row), msg="已指派配送员")
+    return success(data=dump_model(row), msg="已指派配送员，订单已进入配送中")
 
 
 @router.post("/orders/single-meals/{order_id}/sync-delivered-from-sf-monitor", response_model=None)

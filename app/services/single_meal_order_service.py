@@ -476,7 +476,7 @@ def list_courier_single_order_tasks(
         .where(
             SingleMealOrder.delivery_date == delivery_date,
             SingleMealOrder.pay_status == "已支付",
-            SingleMealOrder.fulfillment_status == "pending",
+            SingleMealOrder.fulfillment_status.in_(("pending", "accepted")),
             SingleMealOrder.courier_id == courier_id,
         )
     )
@@ -751,6 +751,7 @@ def admin_assign_courier_single_meal_order(
     if not cou.is_active:
         raise ValueError("该配送员已停用")
     o.courier_id = cid
+    o.fulfillment_status = "accepted"
     db.add(o)
     db.commit()
     db.refresh(o)

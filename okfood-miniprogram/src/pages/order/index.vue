@@ -76,7 +76,10 @@ import {
   fetchWeeklyMenu,
   formatMenuPrice,
   isMenuRowQuickOrderVisible,
+  mondayOfWeekShanghai,
+  prefetchWeeklyMenu,
 } from '@/utils/menuApi.js'
+import { peekWeeklyMenuCache } from '@/utils/weeklyMenuCache.js'
 import { getTabPageLayoutStyles } from '@/utils/tabPageLayout.js'
 import { syncCustomTabBar } from '@/utils/customTabBar.js'
 import { reLaunchIfCourierModePreferred } from '@/utils/api.js'
@@ -130,37 +133,59 @@ function selectWeekTab(tab) {
 
 async function loadWeekly() {
   const seq = ++loadWeeklySeq
-  loading.value = true
+  const isThis = activeWeekTab.value === 'this'
+
+  let requestWeekStart = ''
+  if (!isThis) {
+    const mon =
+      cachedThisWeekMonday.value ||
+      peekWeeklyMenuCache({})?.weekStart ||
+      mondayOfWeekShanghai()
+    requestWeekStart = mon ? addDaysIso(mon, 7) : ''
+  }
+
+  const cacheOpts = isThis ? {} : { weekStart: requestWeekStart }
+  const cached = peekWeeklyMenuCache(cacheOpts)
+
+  if (cached) {
+    if (seq !== loadWeeklySeq) return
+    menu.value = cached.items
+    if (cached.weekStart) {
+      if (isThis) cachedThisWeekMonday.value = cached.weekStart
+    }
+    loading.value = false
+    if (!cached.stale) {
+      if (isThis && cached.weekStart) {
+        prefetchWeeklyMenu({ weekStart: addDaysIso(cached.weekStart, 7) })
+      }
+      return
+    }
+  } else {
+    loading.value = true
+  }
+
   try {
-    if (activeWeekTab.value === 'this') {
-      const { weekStart, items } = await fetchWeeklyMenu()
-      if (seq !== loadWeeklySeq) return
-      if (weekStart) cachedThisWeekMonday.value = weekStart
-      menu.value = items
-    } else {
-      let monday = cachedThisWeekMonday.value
-      if (!monday) {
-        const tw = await fetchWeeklyMenu()
-        if (seq !== loadWeeklySeq) return
-        monday = tw.weekStart
-        if (monday) cachedThisWeekMonday.value = monday
-      }
-      const nextMonday = monday ? addDaysIso(monday, 7) : ''
-      if (!nextMonday) {
-        menu.value = []
-      } else {
-        const { items } = await fetchWeeklyMenu({ weekStart: nextMonday })
-        if (seq !== loadWeeklySeq) return
-        menu.value = items
-      }
+    const fresh = await fetchWeeklyMenu({
+      ...cacheOpts,
+      forceRefresh: !!cached?.stale,
+    })
+    if (seq !== loadWeeklySeq) return
+    if (fresh.weekStart) {
+      if (isThis) cachedThisWeekMonday.value = fresh.weekStart
+    }
+    menu.value = fresh.items
+    if (isThis && fresh.weekStart) {
+      prefetchWeeklyMenu({ weekStart: addDaysIso(fresh.weekStart, 7) })
     }
   } catch (e) {
     if (seq !== loadWeeklySeq) return
-    const msg = e?.message || '加载失败'
-    menu.value = []
-    setTimeout(() => {
-      uni.showToast({ title: msg, icon: 'none' })
-    }, 80)
+    if (!cached) {
+      const msg = e?.message || '加载失败'
+      menu.value = []
+      setTimeout(() => {
+        uni.showToast({ title: msg, icon: 'none' })
+      }, 80)
+    }
   } finally {
     if (seq === loadWeeklySeq) loading.value = false
   }
@@ -182,7 +207,6 @@ onShow(() => {
   if (reLaunchIfCourierModePreferred()) return
   syncCustomTabBar()
   syncTabLayout()
-  cachedThisWeekMonday.value = ''
   requestDeliverySubscribeOncePerDay()
   loadWeekly()
 })

@@ -118,6 +118,7 @@ import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
   fetchMenuDetail,
   formatMenuPrice,
+  invalidateWeeklyMenuCache,
   isSingleOrderServiceDate,
   singleOrderServiceDateError,
 } from '@/utils/menuApi.js'
@@ -384,6 +385,7 @@ async function handlePay() {
         } catch {
           /* ignore */
         }
+        invalidateWeeklyMenuCache()
         uni.switchTab({ url: '/pages/mine/index' })
       },
     })

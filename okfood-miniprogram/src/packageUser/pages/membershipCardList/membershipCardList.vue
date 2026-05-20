@@ -2,12 +2,7 @@
   <view class="page">
     <OkNavbar show-back title="自律膳食卡包" />
     <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
-      <view class="wrap">
-        <view class="hero">
-          <text class="hero-pill">SUBSCRIPTION CARDS</text>
-          <text class="hero-title">自律周期膳食卡包</text>
-          <text class="hero-sub">选择您的自律餐数，开启健康好状态</text>
-        </view>
+     <view class="wrap">
 
         <view v-if="loading" class="state-box">
           <text class="state-txt">加载卡包中…</text>

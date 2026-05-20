@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { RefreshCw, Search } from 'lucide-vue-next'
+import { AlertTriangle, RefreshCw, Search } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
@@ -72,7 +72,34 @@ const assignOrder = ref(null)
 const assignCourierId = ref('')
 const dispatchLoadingId = ref(0)
 const refundLoadingId = ref(0)
+const refundOpen = ref(false)
+/** @type {import('vue').Ref<{ kind: 'single' | 'mall'; row: Record<string, unknown> } | null>} */
+const refundTarget = ref(null)
 const syncDeliveryLoading = ref(false)
+
+const refundDialogMeta = computed(() => {
+  const t = refundTarget.value
+  if (!t) return null
+  const row = t.row
+  const amt = row.amount_yuan
+  const amountStr = amt != null && amt !== '' ? String(amt) : '—'
+  if (t.kind === 'single') {
+    return {
+      orderType: '单次点餐',
+      orderId: row.id,
+      amountStr,
+      sub: '全额退回支付用户微信零钱',
+      tip: '退款成功后订单状态将变为「已退款」，操作不可撤销。',
+    }
+  }
+  return {
+    orderType: '商城卡包',
+    orderId: row.id,
+    amountStr,
+    sub: '全额退回支付用户微信零钱',
+    tip: '退款成功后订单状态将变为「已退款」。若工单曾同步会员次数/配额，请先人工处理会员权益。',
+  }
+})
 
 const totalPages = computed(() => {
   const t = activeTab.value === 'single' ? singleTotal.value : mallTotal.value
@@ -192,79 +219,47 @@ function canRefundWechatMall(row) {
   return String(row.pay_channel || '').trim() === '微信'
 }
 
-async function onRefundWechatSingle(row) {
-  if (!canRefundWechatSingle(row)) {
-    showToast('仅「已支付」且微信支付的单次订单可原路退款', 'error')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      [
-        `确认对单次点餐订单 #${row.id} 发起微信原路退款？`,
-        `金额：${row.amount_yuan ?? '—'} 元（全额退回支付用户）`,
-        '',
-        '证书路径请配置在「门店配置」或租户「对接配置」；均未配置时回退服务器环境变量 WECHAT_PAY_SSL_*。',
-        '退款成功后订单状态将变为「已退款」，不可撤销。',
-      ].join('\n'),
-      '微信原路退款',
-      { type: 'warning', confirmButtonText: '确定退款', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  refundLoadingId.value = Number(row.id)
-  try {
-    const r = await apiJson(
-      `/api/admin/orders/single-meals/${row.id}/refund/wechat`,
-      { method: 'POST' },
-      { auth: true },
-    )
-    const msg =
-      r && typeof r === 'object' && typeof r.message === 'string' ? r.message : '退款已受理'
-    showToast(msg, 'success')
-    await fetchSingleMeals()
-  } catch (e) {
-    const status = e && typeof e.status === 'number' ? e.status : 0
-    if (status === 401) {
-      handleAdminLogout()
+function openRefundWechat(row, kind) {
+  if (kind === 'single') {
+    if (!canRefundWechatSingle(row)) {
+      showToast('仅「已支付」且微信支付的单次订单可原路退款', 'error')
       return
     }
-    showToast(e instanceof Error ? e.message : '退款失败', 'error')
-  } finally {
-    refundLoadingId.value = 0
-  }
-}
-
-async function onRefundWechatMall(row) {
-  if (!canRefundWechatMall(row)) {
+  } else if (!canRefundWechatMall(row)) {
     showToast('仅「已缴」、微信支付且未同步入账的卡包订单可原路退款', 'error')
     return
   }
+  refundTarget.value = { kind, row }
+  refundOpen.value = true
+}
+
+function onRefundWechatSingle(row) {
+  openRefundWechat(row, 'single')
+}
+
+function onRefundWechatMall(row) {
+  openRefundWechat(row, 'mall')
+}
+
+async function submitRefundWechat() {
+  const t = refundTarget.value
+  if (!t) return
+  const { kind, row } = t
+  const id = Number(row.id)
+  refundLoadingId.value = id
+  const path =
+    kind === 'single'
+      ? `/api/admin/orders/single-meals/${id}/refund/wechat`
+      : `/api/admin/orders/mall-card/${id}/refund/wechat`
   try {
-    await ElMessageBox.confirm(
-      [
-        `确认对商城卡包订单 #${row.id} 发起微信原路退款？`,
-        `金额：${row.amount_yuan ?? '—'} 元（全额退回支付用户）`,
-        '',
-        '若工单已同步会员次数/配额，请先人工处理会员权益后再协商退款（本按钮对已入账工单禁用）。',
-      ].join('\n'),
-      '微信原路退款',
-      { type: 'warning', confirmButtonText: '确定退款', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  refundLoadingId.value = Number(row.id)
-  try {
-    const r = await apiJson(
-      `/api/admin/orders/mall-card/${row.id}/refund/wechat`,
-      { method: 'POST' },
-      { auth: true },
-    )
+    const r = await apiJson(path, { method: 'POST' }, { auth: true })
     const msg =
       r && typeof r === 'object' && typeof r.message === 'string' ? r.message : '退款已受理'
     showToast(msg, 'success')
-    await fetchMallCardOrders()
+    refundOpen.value = false
+    refundTarget.value = null
+    if (kind === 'single') await fetchSingleMeals()
+    else await fetchMallCardOrders()
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -751,6 +746,58 @@ onMounted(() => {
       </div>
     </div>
 
+    <el-dialog
+      v-model="refundOpen"
+      width="440px"
+      class="orders-refund-dialog"
+      destroy-on-close
+      align-center
+      :close-on-click-modal="!refundLoadingId"
+      :close-on-press-escape="!refundLoadingId"
+      @closed="refundTarget = null"
+    >
+      <template #header>
+        <div class="orders-refund-header">
+          <span class="orders-refund-header-icon" aria-hidden="true">
+            <AlertTriangle :size="20" :stroke-width="2.25" />
+          </span>
+          <span class="orders-refund-header-title">微信原路退款</span>
+        </div>
+      </template>
+      <div v-if="refundDialogMeta" class="orders-refund-body">
+        <p class="orders-refund-lead">请确认以下退款信息后再提交</p>
+        <dl class="orders-refund-card">
+          <div class="orders-refund-row">
+            <dt>订单类型</dt>
+            <dd>{{ refundDialogMeta.orderType }}</dd>
+          </div>
+          <div class="orders-refund-row">
+            <dt>订单编号</dt>
+            <dd>#{{ refundDialogMeta.orderId }}</dd>
+          </div>
+          <div class="orders-refund-row orders-refund-row--amount">
+            <dt>退款金额</dt>
+            <dd>
+              <span class="orders-refund-amount">¥ {{ refundDialogMeta.amountStr }}</span>
+              <span class="orders-refund-amount-sub">{{ refundDialogMeta.sub }}</span>
+            </dd>
+          </div>
+        </dl>
+        <p class="orders-refund-tip">
+          <AlertTriangle :size="14" :stroke-width="2.25" class="orders-refund-tip-icon" aria-hidden="true" />
+          <span>{{ refundDialogMeta.tip }}</span>
+        </p>
+      </div>
+      <template #footer>
+        <div class="orders-refund-footer">
+          <el-button :disabled="!!refundLoadingId" @click="refundOpen = false">取消</el-button>
+          <el-button type="danger" :loading="!!refundLoadingId" @click="submitRefundWechat">
+            确定退款
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="assignOpen" title="门店自配送 · 指派配送员" width="420px" destroy-on-close>
       <template v-if="assignOrder">
         <p class="orders-assign-hint">
@@ -896,5 +943,120 @@ onMounted(() => {
   justify-content: center;
   gap: 0.35rem;
   max-width: 236px;
+}
+
+.orders-refund-dialog :deep(.el-dialog__header) {
+  margin-right: 0;
+  padding: 1.15rem 1.35rem 0.5rem;
+}
+.orders-refund-dialog :deep(.el-dialog__body) {
+  padding: 0.35rem 1.35rem 0.25rem;
+}
+.orders-refund-dialog :deep(.el-dialog__footer) {
+  padding: 0.75rem 1.35rem 1.15rem;
+}
+.orders-refund-header {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.orders-refund-header-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background: #fff7ed;
+  color: #ea580c;
+  flex-shrink: 0;
+}
+.orders-refund-header-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #0f172a;
+  letter-spacing: 0.01em;
+}
+.orders-refund-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.orders-refund-lead {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #64748b;
+  line-height: 1.5;
+}
+.orders-refund-card {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+.orders-refund-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.4rem 0;
+}
+.orders-refund-row + .orders-refund-row {
+  border-top: 1px solid #e2e8f0;
+}
+.orders-refund-row dt {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #64748b;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.orders-refund-row dd {
+  margin: 0;
+  text-align: right;
+  font-size: 0.875rem;
+  color: #0f172a;
+  font-weight: 500;
+}
+.orders-refund-row--amount dd {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
+}
+.orders-refund-amount {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #be123c;
+  letter-spacing: 0.02em;
+}
+.orders-refund-amount-sub {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #94a3b8;
+}
+.orders-refund-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: #92400e;
+}
+.orders-refund-tip-icon {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+  color: #d97706;
+}
+.orders-refund-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 </style>

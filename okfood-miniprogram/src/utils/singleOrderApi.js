@@ -8,7 +8,8 @@ import { parseApiDateTimeBeijing } from '@/utils/beijingDateTime.js'
  */
 export function formatSingleOrderCreatedAt(iso) {
   if (iso == null || iso === '') return '—'
-  const d = parseApiDateTimeBeijing(iso)  if (Number.isNaN(d.getTime())) {
+  const d = parseApiDateTimeBeijing(iso)
+  if (Number.isNaN(d.getTime())) {
     return String(iso).replace('T', ' ').replace(/\.\d+Z?$/, '').slice(0, 19)
   }
   const parts = new Intl.DateTimeFormat('en-CA', {

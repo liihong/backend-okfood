@@ -1,12 +1,15 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import select
 
+from app.core.config import get_settings
 from app.core.deps import SessionDep, courier_subject, issue_courier_token
 from app.core.limiter import limiter
 from app.core.timeutil import today_shanghai
 from app.schemas.common import TokenResponse
 from app.models.courier import Courier
+from app.models.store import Store
 from app.schemas.courier import ConfirmDeliveryIn, ConfirmSingleOrderIn, CourierLoginIn, CourierPhoneLoginIn, CourierSelfOut
 from app.services.courier_admin_service import regions_for_courier
 from app.services.courier_service import (
@@ -80,7 +83,18 @@ def tasks(
         rows = [m for m in rows if (m.area or "").strip() == an]
     groups = group_task_rows(rows)
 
-    sc = get_store_config(db)
+    store_id = int(get_settings().DEFAULT_STORE_ID)
+    c_row = db.get(Courier, courier_id)
+    if c_row is not None:
+        alt = db.scalar(
+            select(Store.id)
+            .where(Store.tenant_id == int(c_row.tenant_id), Store.is_active.is_(True))
+            .order_by(Store.id.asc())
+            .limit(1)
+        )
+        if alt is not None:
+            store_id = int(alt)
+    sc = get_store_config(db, store_id=store_id)
     payload = {
         "delivery_date": d.isoformat(),
         "assigned_areas": sorted(allowed_names),
