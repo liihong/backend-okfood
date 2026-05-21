@@ -76,6 +76,7 @@ const refundOpen = ref(false)
 /** @type {import('vue').Ref<{ kind: 'single' | 'mall'; row: Record<string, unknown> } | null>} */
 const refundTarget = ref(null)
 const syncDeliveryLoading = ref(false)
+const syncSfLoadingId = ref(0)
 
 const refundDialogMeta = computed(() => {
   const t = refundTarget.value
@@ -436,6 +437,37 @@ watch([orderDate, singlePayFilter, singleDeliveryFilter, mallPayFilter, pageSize
   void fetchActive()
 })
 
+function canSyncSfSingle(row) {
+  if (!row || row.pay_status !== '已支付' || row.store_pickup) return false
+  const f = String(row.fulfillment_status || '').trim().toLowerCase()
+  return f === 'pending' || f === 'accepted'
+}
+
+async function onSyncSfSingle(row) {
+  if (!adminAccessToken.value || !row?.id) return
+  syncSfLoadingId.value = Number(row.id)
+  try {
+    /** @type {Record<string, unknown>} */
+    const d = await apiJson(
+      `/api/admin/orders/single-meals/${row.id}/sync-delivered-from-sf-monitor`,
+      { method: 'POST' },
+      { auth: true },
+    )
+    const msg = typeof d?.msg === 'string' ? d.msg : '已同步'
+    showToast(msg, 'success')
+    await fetchSingleMeals()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '同步失败', 'error')
+  } finally {
+    syncSfLoadingId.value = 0
+  }
+}
+
 async function onSyncDeliveryStatus() {
   if (!adminAccessToken.value || activeTab.value !== 'single') return
   const d0 = String(orderDate.value || '').trim() || todayShanghaiStr()
@@ -591,9 +623,19 @@ onMounted(() => {
             <el-table-column label="单号" width="120" class-name="td-mono" show-overflow-tooltip>
               <template #default="{ row }">{{ row.out_trade_no || '—' }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="248" fixed="right" align="center">
+            <el-table-column label="操作" width="320" fixed="right" align="center">
               <template #default="{ row }">
                 <div class="orders-op-btns">
+                  <el-button
+                    v-if="canSyncSfSingle(row)"
+                    type="success"
+                    size="small"
+                    plain
+                    :loading="syncSfLoadingId === row.id"
+                    @click="onSyncSfSingle(row)"
+                  >
+                    同步顺丰
+                  </el-button>
                   <el-dropdown trigger="click" @command="(cmd) => handleDispatchCommand(cmd, row)">
                     <el-button
                       type="primary"

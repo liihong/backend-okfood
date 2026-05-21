@@ -321,6 +321,10 @@ def persist_sf_callback_and_sync_push(
             pus.last_callback_kind = route_kind[:64]
             if parsed_callback_order_status is not None:
                 pus.sf_callback_order_status = parsed_callback_order_status
+            elif route_kind == "cancel_by_sf":
+                pus.sf_callback_order_status = 2
+            elif route_kind == "rider_cancel":
+                pus.sf_callback_order_status = 22
 
     if sign_ok and matched_push is not None:
         try:

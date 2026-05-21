@@ -103,6 +103,7 @@ from app.services.single_meal_order_service import (
     admin_resync_single_meal_from_sf_monitor,
     admin_wechat_refund_single_meal_order,
     bulk_admin_resync_single_meal_from_sf_monitor_for_order_day,
+    diagnose_single_meal_sf_sync,
     list_admin_store_single_meal_orders_by_order_day,
 )
 from app.services.member_card_order_service import (
@@ -878,6 +879,19 @@ def admin_single_meal_dispatch_store_courier(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return success(data=dump_model(row), msg="已指派配送员，订单已进入配送中")
+
+
+@router.get("/orders/single-meals/{order_id}/sf-sync-diagnosis", response_model=None)
+def admin_single_meal_sf_sync_diagnosis(
+    order_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """排查单次零售订单为何未能与顺丰监控对齐（只读）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = diagnose_single_meal_sf_sync(db, order_id=int(order_id), store_id=store_id)
+    return success(data=out, msg=str(out.get("hint") or "诊断完成"))
 
 
 @router.post("/orders/single-meals/{order_id}/sync-delivered-from-sf-monitor", response_model=None)

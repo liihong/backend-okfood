@@ -19,6 +19,7 @@ from app.services.sf_same_city_service import aggs_for_delivery_date, load_agg_f
 from app.services.single_meal_order_service import (
     mark_single_meal_delivered_sf_completion_no_commit,
     mark_single_meal_sf_cancelled_no_commit,
+    sf_push_is_terminal_cancel,
 )
 
 logger = logging.getLogger(__name__)
@@ -318,11 +319,10 @@ def should_run_sf_auto_fulfillment(*, route_kind: str, pus: SfSameCityPush) -> b
 
 
 def should_apply_sf_cancel_sync(*, pus: SfSameCityPush) -> bool:
-    """创单成功且顺丰回调已为取消/撤单终态 (2/22) 时，回写单次点餐履约状态。"""
+    """创单成功且顺丰侧已为取消/撤单终态时，回写单次点餐履约状态。"""
     if int(pus.error_code or -1) != 0:
         return False
-    st = _sf_push_effective_order_status(pus)
-    return st is not None and st in SF_ORDER_STATUS_CANCELLED
+    return sf_push_is_terminal_cancel(pus)
 
 
 def _apply_sf_cancel_to_single_meal_orders_for_push(

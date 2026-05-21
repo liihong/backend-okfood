@@ -57,6 +57,30 @@ _RETAIL_STOP_PREFIX = "retail-smo-"
 _SF_PUSH_KIND_SINGLE_MEAL_RETAIL = "single_meal_retail"
 _SF_TERMINAL_CANCEL_STATUSES = (2, 22)
 _SF_TERMINAL_DELIVERED_STATUS = 17
+_SF_CANCEL_CALLBACK_KINDS = frozenset({"cancel_by_sf", "rider_cancel"})
+
+
+def sf_push_is_terminal_cancel(pus: SfSameCityPush) -> bool:
+    """顺丰侧已取消/撤单：看回调状态码，或最近一次回调路由为 cancel_by_sf / rider_cancel。"""
+    st = pus.sf_callback_order_status
+    if st is not None:
+        try:
+            if int(st) in _SF_TERMINAL_CANCEL_STATUSES:
+                return True
+        except (TypeError, ValueError):
+            pass
+    kind = (pus.last_callback_kind or "").strip()
+    return kind in _SF_CANCEL_CALLBACK_KINDS
+
+
+def sf_push_is_terminal_delivered(pus: SfSameCityPush) -> bool:
+    st = pus.sf_callback_order_status
+    if st is None:
+        return False
+    try:
+        return int(st) == _SF_TERMINAL_DELIVERED_STATUS
+    except (TypeError, ValueError):
+        return False
 
 
 def _retail_order_id_from_stop_id(stop_id: str | None) -> int | None:
@@ -73,11 +97,24 @@ def _latest_success_sf_push_for_retail_order(
     db: Session, *, store_id: int, order_id: int
 ) -> SfSameCityPush | None:
     """取该单次零售订单最近一次创单成功的顺丰推单（忽略后续失败重试行）。"""
+    stop_id = f"{_RETAIL_STOP_PREFIX}{int(order_id)}"
+    row = db.scalars(
+        select(SfSameCityPush)
+        .where(
+            SfSameCityPush.stop_id == stop_id,
+            SfSameCityPush.error_code == 0,
+            SfSameCityPush.store_id == int(store_id),
+        )
+        .order_by(SfSameCityPush.id.desc())
+        .limit(1)
+    ).first()
+    if row is not None:
+        return row
+    # 门店 id 不一致时仍尝试按 stop_id 找回推单（历史数据/多门店迁移）
     return db.scalars(
         select(SfSameCityPush)
         .where(
-            SfSameCityPush.store_id == int(store_id),
-            SfSameCityPush.stop_id == f"{_RETAIL_STOP_PREFIX}{int(order_id)}",
+            SfSameCityPush.stop_id == stop_id,
             SfSameCityPush.error_code == 0,
         )
         .order_by(SfSameCityPush.id.desc())
@@ -103,22 +140,20 @@ def _apply_sf_monitor_status_to_retail_order_no_commit(
 
     prev_f = str(o.fulfillment_status or "").strip().lower()
     st = pus.sf_callback_order_status
-    if st is None:
-        return "skipped_sf_status_not_terminal"
     try:
-        n = int(st)
+        n = int(st) if st is not None else None
     except (TypeError, ValueError):
-        return "skipped_sf_status_not_terminal"
+        n = None
 
     if n == 31:
         return "skipped_sf_cancel"
-    if n in _SF_TERMINAL_CANCEL_STATUSES:
+    if sf_push_is_terminal_cancel(pus):
         if prev_f == "sf_cancelled":
             return "already_sf_cancelled"
         mark_single_meal_sf_cancelled_no_commit(db, int(o.id))
         after = str(o.fulfillment_status or "").strip().lower()
         return "updated_cancel" if after == "sf_cancelled" else "skipped_sf_cancel"
-    if n == _SF_TERMINAL_DELIVERED_STATUS:
+    if sf_push_is_terminal_delivered(pus):
         if prev_f == "delivered":
             return "already_completed"
         if pus.merchant_cancel_requested_at is not None:
@@ -671,19 +706,14 @@ def admin_resync_single_meal_from_sf_monitor(
     pus = _latest_success_sf_push_for_retail_order(db, store_id=int(store_id), order_id=int(order_id))
     if pus is None:
         raise ValueError("未找到本订单已成功创单的顺丰推送记录（请确认已推顺丰单次零售）")
-    st = pus.sf_callback_order_status
-    if st is None:
-        raise ValueError("尚未写入顺丰配送状态编码（请先确认开放平台回调可达且验签通过）")
-    try:
-        n = int(st)
-    except (TypeError, ValueError):
-        raise ValueError(f"顺丰回调状态异常：{st!r}") from None
-    if n == 31:
-        raise ValueError("顺丰侧为取消中(31)，请待终态后再试")
-    if n not in (*_SF_TERMINAL_CANCEL_STATUSES, _SF_TERMINAL_DELIVERED_STATUS):
+    if pus.sf_callback_order_status is None and not (pus.last_callback_kind or "").strip():
+        raise ValueError("尚未收到顺丰配送回调（请先确认开放平台回调可达且验签通过）")
+    if not sf_push_is_terminal_cancel(pus) and not sf_push_is_terminal_delivered(pus):
+        st = pus.sf_callback_order_status
+        kind = (pus.last_callback_kind or "").strip() or "—"
         raise ValueError(
-            f"顺丰推送中当前状态编码为 {n}（仅支持妥投 17 或取消/撤单 2/22）。"
-            "请在「顺丰订单监控」核对最近一次回调。"
+            f"顺丰推送尚未处于可对齐的终态（当前状态编码 {st!r}，最近回调 {kind}）。"
+            "请在「顺丰订单监控」确认已为妥投(17)或取消/撤单。"
         )
 
     prev = str(o.fulfillment_status or "").strip().lower()
@@ -692,12 +722,16 @@ def admin_resync_single_meal_from_sf_monitor(
     db.refresh(o)
     after = str(o.fulfillment_status or "").strip().lower()
 
-    if n in _SF_TERMINAL_CANCEL_STATUSES:
+    if sf_push_is_terminal_cancel(pus):
         if after != "sf_cancelled":
-            raise ValueError("不满足标为顺丰取消条件（例如未支付、门店自提等），未修改订单状态")
+            diag = diagnose_single_meal_sf_sync(db, order_id=int(order_id), store_id=int(store_id))
+            raise ValueError(
+                "不满足标为顺丰取消条件（例如未支付、门店自提等），未修改订单状态。"
+                f" 诊断：{diag.get('hint') or diag}"
+            )
         if prev == "sf_cancelled":
             return "订单已是顺丰取消，无需重复同步"
-        return f"已与顺丰监控中的取消/撤单状态(编码 {n}) 对齐"
+        return "已与顺丰监控中的取消/撤单状态对齐（顺丰取消）"
 
     if after != "delivered":
         raise ValueError("不满足标为已完成条件（例如未支付、门店自提等），未修改订单状态")
@@ -791,24 +825,42 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_order_day(
         _bump(outcome)
         touched.add(int(o.id))
 
-    push_rows = list(
-        db.scalars(
-            select(SfSameCityPush)
-            .where(
-                SfSameCityPush.store_id == int(store_id),
-                SfSameCityPush.delivery_date == order_day,
-                SfSameCityPush.error_code == 0,
-                SfSameCityPush.sf_callback_order_status.in_(
-                    (*_SF_TERMINAL_CANCEL_STATUSES, _SF_TERMINAL_DELIVERED_STATUS)
-                ),
-                or_(
-                    SfSameCityPush.push_kind == _SF_PUSH_KIND_SINGLE_MEAL_RETAIL,
-                    SfSameCityPush.stop_id.like(f"{_RETAIL_STOP_PREFIX}%"),
-                ),
-            )
-            .order_by(SfSameCityPush.id.desc())
-        ).all()
-    )
+    delivery_days: set[date] = {order_day}
+    for o in rows:
+        if o.delivery_date is not None:
+            delivery_days.add(o.delivery_date)
+
+    seen_push_ids: set[int] = set()
+    push_rows: list[SfSameCityPush] = []
+    for dday in sorted(delivery_days):
+        batch = list(
+            db.scalars(
+                select(SfSameCityPush)
+                .where(
+                    SfSameCityPush.store_id == int(store_id),
+                    SfSameCityPush.delivery_date == dday,
+                    SfSameCityPush.error_code == 0,
+                    or_(
+                        SfSameCityPush.push_kind == _SF_PUSH_KIND_SINGLE_MEAL_RETAIL,
+                        SfSameCityPush.stop_id.like(f"{_RETAIL_STOP_PREFIX}%"),
+                    ),
+                    or_(
+                        SfSameCityPush.sf_callback_order_status.in_(
+                            (*_SF_TERMINAL_CANCEL_STATUSES, _SF_TERMINAL_DELIVERED_STATUS)
+                        ),
+                        SfSameCityPush.last_callback_kind.in_(tuple(_SF_CANCEL_CALLBACK_KINDS)),
+                    ),
+                )
+                .order_by(SfSameCityPush.id.desc())
+            ).all()
+        )
+        for pus in batch:
+            pid = int(pus.id)
+            if pid in seen_push_ids:
+                continue
+            seen_push_ids.add(pid)
+            push_rows.append(pus)
+
     for pus in push_rows:
         oid = _retail_order_id_from_stop_id(str(pus.stop_id or ""))
         if oid is None or oid in touched:
@@ -837,6 +889,68 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_order_day(
         + "。（依据本系统收到的顺丰推送落库对齐；不向运力主动查询；UU/门店自配送仍由骑手端或手工标记）"
     )
     return {"scanned": scanned, "sf_push_scanned": len(push_rows), **counts, "summary": summary}
+
+
+def diagnose_single_meal_sf_sync(
+    db: Session,
+    *,
+    order_id: int,
+    store_id: int,
+) -> dict[str, Any]:
+    """管理端排查：单次零售订单为何未能与顺丰监控对齐（只读，不改库）。"""
+    o = db.get(SingleMealOrder, int(order_id))
+    if o is None:
+        return {"ok": False, "hint": "订单不存在"}
+    pus = _latest_success_sf_push_for_retail_order(
+        db, store_id=int(store_id), order_id=int(order_id)
+    )
+    hint_parts: list[str] = [
+        f"订单#{order_id} fulfillment={o.fulfillment_status!r} pay={o.pay_status!r} store={o.store_id}",
+    ]
+    if pus is None:
+        hint_parts.append("未找到 error_code=0 的顺丰推单(retail-smo-{id})")
+        return {"ok": False, "hint": "；".join(hint_parts)}
+
+    prev_f = str(o.fulfillment_status or "").strip().lower()
+    would = "skipped_sf_status_not_terminal"
+    if str(o.pay_status or "").strip() != "已支付":
+        would = "skipped_unpaid"
+    elif bool(getattr(o, "store_pickup", False)):
+        would = "skipped_store_pickup"
+    elif sf_push_is_terminal_cancel(pus):
+        would = "already_sf_cancelled" if prev_f == "sf_cancelled" else "updated_cancel"
+    elif sf_push_is_terminal_delivered(pus):
+        if prev_f == "delivered":
+            would = "already_completed"
+        elif pus.merchant_cancel_requested_at is not None:
+            would = "skipped_merchant_cancel_marker"
+        else:
+            would = "updated"
+
+    hint_parts.extend(
+        [
+            f"推单 stop_id={pus.stop_id} push_store={pus.store_id}",
+            f"sf_status={pus.sf_callback_order_status!r}",
+            f"last_kind={pus.last_callback_kind!r}",
+            f"cancel={sf_push_is_terminal_cancel(pus)} delivered={sf_push_is_terminal_delivered(pus)}",
+            f"would_outcome={would}",
+        ]
+    )
+    if int(pus.store_id) != int(store_id):
+        hint_parts.append(f"注意：推单门店({pus.store_id})与当前管理门店({store_id})不一致")
+    return {
+        "ok": would in ("updated", "updated_cancel", "already_completed", "already_sf_cancelled"),
+        "hint": "；".join(hint_parts),
+        "would_outcome": would,
+        "push": {
+            "id": int(pus.id),
+            "stop_id": pus.stop_id,
+            "store_id": int(pus.store_id),
+            "sf_callback_order_status": pus.sf_callback_order_status,
+            "last_callback_kind": pus.last_callback_kind,
+            "delivery_date": pus.delivery_date.isoformat() if pus.delivery_date else None,
+        },
+    }
 
 
 def admin_assign_courier_single_meal_order(
