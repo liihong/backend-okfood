@@ -358,7 +358,10 @@ def _apply_sf_cancel_to_single_meal_orders_for_push(
         return result
 
     sid = int(pus.store_id) if getattr(pus, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
-    agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
+    _, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+    agg = None
+    if not snap_oids:
+        agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
     for oid in _single_meal_order_ids_for_push(db, pus, agg):
         prev = db.get(SingleMealOrder, oid)
         before = str(getattr(prev, "fulfillment_status", "") or "").strip().lower() if prev else ""
@@ -526,19 +529,24 @@ def _apply_sf_same_city_stop_fulfillment(
         return result
 
     sid = int(pus.store_id) if getattr(pus, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
-    agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
-    if agg is None:
-        result["warnings"].append(
-            f"未解析到停靠点聚合 stop_id={pus.stop_id} date={pus.delivery_date}，将尝试快照/收件人回退"
-        )
-        logger.warning(
-            "顺丰履约未解析到停靠点 stop_id=%s date=%s store_id=%s，尝试快照回退",
-            pus.stop_id,
-            pus.delivery_date,
-            sid,
-        )
+    snap_mids, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+    agg = None
+    if not snap_mids and not snap_oids:
+        agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
+        if agg is None:
+            result["warnings"].append(
+                f"未解析到停靠点聚合 stop_id={pus.stop_id} date={pus.delivery_date}，将尝试快照/收件人回退"
+            )
+            logger.warning(
+                "顺丰履约未解析到停靠点 stop_id=%s date=%s store_id=%s，尝试快照回退",
+                pus.stop_id,
+                pus.delivery_date,
+                sid,
+            )
 
     for mid in _subscription_member_ids_for_push(db, pus, agg):
+        snap_mids, _snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+        sf_trusted_mids = {int(x) for x in snap_mids} | {int(mid)}
         try:
             subscription_fulfilled_try_sf_home_no_commit(
                 db,
@@ -546,6 +554,7 @@ def _apply_sf_same_city_stop_fulfillment(
                 delivery_date=pus.delivery_date,
                 operator_tag=operator_tag,
                 store_id=sid,
+                extra_ok_member_ids=sf_trusted_mids,
             )
             result["subscription_applied"] += 1
         except HTTPException as e:

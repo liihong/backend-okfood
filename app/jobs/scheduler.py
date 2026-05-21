@@ -111,13 +111,34 @@ def job_sf_nightly_auto_push() -> None:
         db.close()
 
 
+def add_cron_jobs(sched) -> None:
+    """向任意 APScheduler 实例注册全部 cron 任务（API 内嵌或独立 worker 共用）。"""
+    sched.add_job(job_reset_leave_flags, "cron", hour=0, minute=1, id="reset_leave", replace_existing=True)
+    sched.add_job(job_low_balance_notify, "cron", hour=18, minute=0, id="low_balance", replace_existing=True)
+    sched.add_job(
+        job_sf_nightly_auto_push,
+        "cron",
+        hour=22,
+        minute=0,
+        id="sf_nightly_push",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
 def setup_scheduler() -> None:
+    if not settings.ENABLE_IN_PROCESS_SCHEDULER:
+        logger.info(
+            "进程内调度器未启用（ENABLE_IN_PROCESS_SCHEDULER=false）；"
+            "定时任务请使用独立 worker：python -m app.jobs.worker"
+        )
+        return
     if scheduler.running:
         return
-    scheduler.add_job(job_reset_leave_flags, "cron", hour=0, minute=1, id="reset_leave", replace_existing=True)
-    scheduler.add_job(job_low_balance_notify, "cron", hour=18, minute=0, id="low_balance", replace_existing=True)
-    scheduler.add_job(job_sf_nightly_auto_push, "cron", hour=22, minute=0, id="sf_nightly_push", replace_existing=True)
+    add_cron_jobs(scheduler)
     scheduler.start()
+    logger.info("进程内 APScheduler 已启动（仅建议在本地开发使用）")
 
 
 def shutdown_scheduler() -> None:

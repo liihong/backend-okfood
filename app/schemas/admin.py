@@ -287,6 +287,43 @@ class SingleMealAssignCourierIn(BaseModel):
     courier_id: str = Field(..., min_length=1, max_length=50, description="couriers.courier_id 主键")
 
 
+class SingleMealOrderIdsIn(BaseModel):
+    """单次点餐：批量操作订单 id 列表。"""
+
+    order_ids: list[int] = Field(..., min_length=1, max_length=100)
+
+
+class SingleMealBatchAssignCourierIn(BaseModel):
+    """单次点餐：批量门店自配送指派。"""
+
+    order_ids: list[int] = Field(..., min_length=1, max_length=100)
+    courier_id: str = Field(..., min_length=1, max_length=50, description="couriers.courier_id 主键")
+
+
+class SingleMealCancelIn(BaseModel):
+    """单次点餐：管理端取消订单。"""
+
+    cancel_reason: str | None = Field(None, max_length=200, description="取消原因（已推顺丰时传给顺丰）")
+    cancel_sf: bool = Field(True, description="若已推顺丰且配送未完结，是否同步请求顺丰取消")
+
+
+class SingleMealBatchCancelIn(SingleMealCancelIn):
+    """单次点餐：批量取消订单。"""
+
+    order_ids: list[int] = Field(..., min_length=1, max_length=100)
+
+
+class SingleMealBatchOperationItemResult(BaseModel):
+    order_id: int
+    ok: bool
+    message: str
+    sf_order_id: str | None = None
+
+
+class SingleMealBatchOperationOut(BaseModel):
+    results: list[SingleMealBatchOperationItemResult] = Field(default_factory=list)
+
+
 class MemberAdminOut(BaseModel):
     id: int = Field(..., description="会员主键 members.id")
     phone: str

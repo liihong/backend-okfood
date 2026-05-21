@@ -6,9 +6,18 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
+from urllib.parse import unquote
 
-_NEST_PAYLOAD_KEYS = ("data", "result", "body", "content")
+_NEST_PAYLOAD_KEYS = (
+    "data",
+    "result",
+    "body",
+    "content",
+    "post_data",
+    "postData",
+)
 
 _SHOP_ORDER_ID_KEYS = (
     "shop_order_id",
@@ -40,14 +49,86 @@ _ORDER_STATUS_KEYS = (
 )
 
 
-def payload_dict_layers(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """顺丰常见：业务字段嵌套于 data / result / body / content。"""
-    layers: list[dict[str, Any]] = [payload]
+def _parse_json_string(raw: str) -> Any | None:
+    """解析嵌套在 data/content/post_data 等字段中的 JSON 字符串。"""
+    s = (raw or "").strip()
+    if not s or s[0] not in ("{", "["):
+        return None
+    for candidate in (s, unquote(s)):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def normalize_sf_callback_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    展开嵌套 dict 与 JSON 字符串包装层，使 shop_order_id / order_status 等可在顶层读取。
+
+    顺丰部分回调为 ``application/x-www-form-urlencoded``，业务 JSON 在 ``post_data`` 字段内。
+    """
+    if not isinstance(payload, dict) or not payload:
+        return payload if isinstance(payload, dict) else {}
+
+    out: dict[str, Any] = dict(payload)
     for k in _NEST_PAYLOAD_KEYS:
-        inner = payload.get(k)
-        if isinstance(inner, dict) and inner not in layers:
-            layers.append(inner)
+        v = out.get(k)
+        if isinstance(v, dict):
+            for ik, iv in v.items():
+                if ik not in out:
+                    out[ik] = iv
+        elif isinstance(v, str):
+            parsed = _parse_json_string(v)
+            if isinstance(parsed, dict):
+                for ik, iv in parsed.items():
+                    if ik not in out:
+                        out[ik] = iv
+    return out
+
+
+def payload_dict_layers(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """顺丰常见：业务字段嵌套于 data / result / body / content / post_data。"""
+    norm = normalize_sf_callback_payload(payload)
+    layers: list[dict[str, Any]] = [norm]
+    seen: set[int] = {id(norm)}
+
+    def add_layer(obj: dict[str, Any]) -> None:
+        oid = id(obj)
+        if oid not in seen:
+            seen.add(oid)
+            layers.append(obj)
+
+    for k in _NEST_PAYLOAD_KEYS:
+        inner = norm.get(k)
+        if isinstance(inner, dict):
+            add_layer(inner)
+        elif isinstance(inner, str):
+            parsed = _parse_json_string(inner)
+            if isinstance(parsed, dict):
+                add_layer(parsed)
     return layers
+
+
+def embedded_json_wire_strings(payload: dict[str, Any] | None) -> list[str]:
+    """表单/JSON 包装层内嵌的业务 JSON 原文，作为验签待签串候选。"""
+    if not payload:
+        return []
+    out: list[str] = []
+
+    def add(s: str) -> None:
+        t = s.strip()
+        if t and t not in out:
+            out.append(t)
+
+    for k in _NEST_PAYLOAD_KEYS:
+        v = payload.get(k)
+        if isinstance(v, str):
+            add(v)
+            u = unquote(v)
+            if u != v:
+                add(u)
+    return out
 
 
 def _first_str_or_num_from_layers(layers: list[dict[str, Any]], keys: tuple[str, ...]) -> Any:
@@ -106,7 +187,8 @@ def extract_order_status_deep(payload: dict[str, Any], *, max_depth: int = 14) -
     在浅层未果时，对整棵 JSON 递归查找顺丰常用状态字段，
     解决 ``data.xxx.orderStatus`` 超出单层嵌套而无法触发妥投履约的问题。
     """
-    shallow = extract_order_status_shallow(payload)
+    norm = normalize_sf_callback_payload(payload)
+    shallow = extract_order_status_shallow(norm)
     if shallow is not None:
         return shallow
 
@@ -120,9 +202,16 @@ def extract_order_status_deep(payload: dict[str, Any], *, max_depth: int = 14) -
                     if n is not None:
                         return n
             for v in obj.values():
-                n = walk(v, depth + 1)
-                if n is not None:
-                    return n
+                if isinstance(v, str):
+                    parsed = _parse_json_string(v)
+                    if parsed is not None:
+                        n = walk(parsed, depth + 1)
+                        if n is not None:
+                            return n
+                else:
+                    n = walk(v, depth + 1)
+                    if n is not None:
+                        return n
         elif isinstance(obj, list):
             for item in obj:
                 n = walk(item, depth + 1)
@@ -130,4 +219,4 @@ def extract_order_status_deep(payload: dict[str, Any], *, max_depth: int = 14) -
                     return n
         return None
 
-    return walk(payload, 0)
+    return walk(norm, 0)

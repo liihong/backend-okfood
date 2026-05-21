@@ -39,6 +39,10 @@ from app.schemas.admin import (
     SettingsIn,
     StoreConfigUpdateIn,
     SingleMealAssignCourierIn,
+    SingleMealOrderIdsIn,
+    SingleMealBatchAssignCourierIn,
+    SingleMealCancelIn,
+    SingleMealBatchCancelIn,
     WeeklySlotAssignIn,
     MenuDayTotalStockIn,
     AdminDashboardSummaryApiOut,
@@ -99,12 +103,18 @@ from app.services.member_service import (
 )
 from app.services.single_meal_order_service import (
     admin_assign_courier_single_meal_order,
+    admin_cancel_single_meal_order,
     admin_resync_single_meal_delivered_from_sf_monitor,
     admin_resync_single_meal_from_sf_monitor,
     admin_wechat_refund_single_meal_order,
+    bulk_admin_assign_courier_single_meal_orders,
+    bulk_admin_cancel_single_meal_orders,
+    bulk_admin_mark_single_meal_orders_delivered,
     bulk_admin_resync_single_meal_from_sf_monitor_for_order_day,
+    bulk_push_single_meal_retail_to_sf,
     diagnose_single_meal_sf_sync,
     list_admin_store_single_meal_orders_by_order_day,
+    admin_mark_single_meal_order_delivered,
 )
 from app.services.member_card_order_service import (
     create_card_order,
@@ -814,6 +824,82 @@ def admin_orders_daily_mall_card_orders(
     )
 
 
+@router.post("/orders/single-meals/batch-dispatch/sf-retail", response_model=None)
+def admin_single_meal_batch_dispatch_sf_retail(
+    body: SingleMealOrderIdsIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """单次点餐：批量推送到顺丰（逐单调用 createorder，部分失败不影响其它订单）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = bulk_push_single_meal_retail_to_sf(
+        db, order_ids=[int(x) for x in body.order_ids], store_id=store_id
+    )
+    return success(data=out, msg="批量推顺丰处理完成")
+
+
+@router.post("/orders/single-meals/batch-dispatch/store-courier", response_model=None)
+def admin_single_meal_batch_dispatch_store_courier(
+    body: SingleMealBatchAssignCourierIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """单次点餐：批量门店自配送，统一指派同一配送员。"""
+    tid, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = bulk_admin_assign_courier_single_meal_orders(
+        db,
+        order_ids=[int(x) for x in body.order_ids],
+        store_id=store_id,
+        courier_id=body.courier_id,
+        tenant_id=tid,
+    )
+    return success(data=out, msg="批量指派处理完成")
+
+
+@router.post("/orders/single-meals/{order_id}/cancel", response_model=None)
+def admin_single_meal_cancel(
+    order_id: int,
+    body: SingleMealCancelIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """单次点餐：管理端取消订单（不退款）；已推顺丰时可同步请求顺丰取消。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        msg = admin_cancel_single_meal_order(
+            db,
+            order_id=int(order_id),
+            store_id=store_id,
+            cancel_reason=body.cancel_reason,
+            cancel_sf=body.cancel_sf,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=None, msg=msg)
+
+
+@router.post("/orders/single-meals/batch-cancel", response_model=None)
+def admin_single_meal_batch_cancel(
+    body: SingleMealBatchCancelIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """单次点餐：批量取消订单（不退款）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = bulk_admin_cancel_single_meal_orders(
+        db,
+        order_ids=[int(x) for x in body.order_ids],
+        store_id=store_id,
+        cancel_reason=body.cancel_reason,
+        cancel_sf=body.cancel_sf,
+    )
+    return success(data=out, msg="批量取消处理完成")
+
+
 @router.post("/orders/single-meals/{order_id}/dispatch/sf-retail", response_model=None)
 def admin_single_meal_dispatch_sf_retail(
     order_id: int,
@@ -912,6 +998,43 @@ def admin_single_meal_sync_delivered_from_sf_monitor(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return success(data=None, msg=msg)
+
+
+@router.post("/orders/single-meals/{order_id}/mark-delivered", response_model=None)
+def admin_single_meal_mark_delivered(
+    order_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """单次点餐：管理端人工标记订单已完成（不限顺丰/UU/门店自配送）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        msg = admin_mark_single_meal_order_delivered(
+            db,
+            order_id=int(order_id),
+            store_id=store_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=None, msg=msg)
+
+
+@router.post("/orders/single-meals/batch-mark-delivered", response_model=None)
+def admin_single_meal_batch_mark_delivered(
+    body: SingleMealOrderIdsIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """单次点餐：批量人工标记订单已完成。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = bulk_admin_mark_single_meal_orders_delivered(
+        db,
+        order_ids=[int(x) for x in body.order_ids],
+        store_id=store_id,
+    )
+    return success(data=out, msg="批量标记完成处理完毕")
 
 
 @router.post("/orders/single-meals/{order_id}/refund/wechat", response_model=None)

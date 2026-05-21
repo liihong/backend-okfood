@@ -157,13 +157,31 @@ def merged_sf_integration_namespace(db: Session, tenant_id: int) -> SimpleNamesp
 def resolve_sf_notify_app_key(db: Session, payload: dict[str, Any] | None) -> str:
     """顺丰回调验签密钥：须与 ``sf_same_city_push`` 门店所属租户配置一致。
 
-    开放平台报文常为嵌套 JSON（字段在 ``data``/``result`` 内）；仅用顶层取值会走错密钥并验签失败。
+    开放平台报文常为嵌套 JSON（字段在 ``data``/``result``/``post_data`` 内）；仅用顶层取值会走错密钥并验签失败。
     """
-    base = get_settings()
-    if not payload or not isinstance(payload, dict):
-        return _s(base.SF_OPEN_SECRET)
+    keys = resolve_sf_notify_app_key_candidates(db, payload)
+    return keys[0] if keys else _s(get_settings().SF_OPEN_SECRET)
 
-    shop_s, sf_s = extract_shop_and_sf_order_ids(payload)
+
+def resolve_sf_notify_app_key_candidates(db: Session, payload: dict[str, Any] | None) -> list[str]:
+    """按推单租户密钥优先、全局 .env 密钥兜底的验签密钥候选（去重保序）。"""
+    from app.services.sf_open_notify_payload import normalize_sf_callback_payload
+
+    base = get_settings()
+    global_key = _s(base.SF_OPEN_SECRET)
+    out: list[str] = []
+
+    def add(k: str) -> None:
+        kk = _s(k)
+        if kk and kk not in out:
+            out.append(kk)
+
+    if not payload or not isinstance(payload, dict):
+        add(global_key)
+        return out
+
+    norm = normalize_sf_callback_payload(payload)
+    shop_s, sf_s = extract_shop_and_sf_order_ids(norm)
     shop_oid = _s(str(shop_s or "").strip())
     sf_id = _s(str(sf_s or "").strip())
 
@@ -186,7 +204,8 @@ def resolve_sf_notify_app_key(db: Session, payload: dict[str, Any] | None) -> st
         )
 
     if push_id is None:
-        return _s(base.SF_OPEN_SECRET)
+        add(global_key)
+        return out
     prow = db.get(SfSameCityPush, int(push_id))
     if prow and prow.store_id:
         from app.models.store import Store
@@ -195,8 +214,9 @@ def resolve_sf_notify_app_key(db: Session, payload: dict[str, Any] | None) -> st
         if st:
             row = get_tenant_integration_row(db, int(st.tenant_id))
             if row and _s(row.sf_open_secret):
-                return _s(row.sf_open_secret)
-    return _s(base.SF_OPEN_SECRET)
+                add(_s(row.sf_open_secret))
+    add(global_key)
+    return out
 
 
 def get_tenant_integration_admin_out(db: Session, tenant_id: int) -> TenantIntegrationSettingsOut:

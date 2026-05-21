@@ -140,16 +140,21 @@ def subscription_fulfilled_try_sf_home_no_commit(
     delivery_date: date,
     operator_tag: str = "sf:order_complete",
     store_id: int | None = None,
+    extra_ok_member_ids: set[int] | frozenset[int] | None = None,
 ) -> None:
     """
     顺丰自动履约（到家）：与智能配送大表标记送达口径一致；
     operator 默认为 ``sf:order_complete``（订单完成）；配送状态推送妥投为 ``sf:delivery_status``；不产生独立 commit。
+
+    ``extra_ok_member_ids``：推单快照中已锁定的会员，即使当前 SQL 应送名单未命中也允许扣次（顺丰已妥投）。
     """
     d = delivery_date
     from app.core.config import get_settings
 
     sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
     ok_ids = _eligible_ids_home(db, d, store_id=sid)
+    if extra_ok_member_ids:
+        ok_ids = set(ok_ids) | {int(x) for x in extra_ok_member_ids}
     tag = (operator_tag or "sf:order_complete").strip()[:50] or "sf:order_complete"
     _subscription_fulfilled_apply(
         db,

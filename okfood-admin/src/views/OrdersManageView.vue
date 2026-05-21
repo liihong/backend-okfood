@@ -76,7 +76,18 @@ const refundOpen = ref(false)
 /** @type {import('vue').Ref<{ kind: 'single' | 'mall'; row: Record<string, unknown> } | null>} */
 const refundTarget = ref(null)
 const syncDeliveryLoading = ref(false)
-const syncSfLoadingId = ref(0)
+/** @type {import('vue').Ref<import('vue').ComponentPublicInstance | null>} */
+const singleTableRef = ref(null)
+/** @type {import('vue').Ref<Array<Record<string, unknown>>>} */
+const selectedSingleRows = ref([])
+const batchDispatchLoading = ref(false)
+const batchCancelLoading = ref(false)
+const batchMarkCompleteLoading = ref(false)
+const cancelLoadingId = ref(0)
+const markCompleteLoadingId = ref(0)
+const batchAssignMode = ref(false)
+/** @type {import('vue').Ref<Array<Record<string, unknown>>>} */
+const batchAssignOrders = ref([])
 
 const refundDialogMeta = computed(() => {
   const t = refundTarget.value
@@ -109,8 +120,55 @@ const totalPages = computed(() => {
 
 function canDispatchActions(row) {
   if (!row || row.pay_status !== '已支付') return false
-  return String(row.fulfillment_status || '').toLowerCase() === 'pending'
+  const f = String(row.fulfillment_status || '').toLowerCase()
+  if (f === 'cancelled') return false
+  return f === 'pending'
 }
+
+function canCancelOrder(row) {
+  if (!row) return false
+  const pay = String(row.pay_status || '').trim()
+  const f = String(row.fulfillment_status || '').trim().toLowerCase()
+  if (pay === '已退款' || f === 'delivered' || f === 'cancelled') return false
+  if (pay === '未支付') return f === 'pending'
+  if (pay === '已支付') return f === 'pending' || f === 'accepted' || f === 'sf_cancelled'
+  return false
+}
+
+function canMarkOrderComplete(row) {
+  if (!row || row.pay_status !== '已支付') return false
+  const f = String(row.fulfillment_status || '').trim().toLowerCase()
+  return f === 'pending' || f === 'accepted'
+}
+
+function isSingleRowSelectable(row) {
+  return canDispatchActions(row) || canCancelOrder(row) || canMarkOrderComplete(row)
+}
+
+function onSingleSelectionChange(rows) {
+  selectedSingleRows.value = Array.isArray(rows) ? rows : []
+}
+
+function clearSingleSelection() {
+  singleTableRef.value?.clearSelection?.()
+  selectedSingleRows.value = []
+}
+
+const selectedDispatchableRows = computed(() =>
+  selectedSingleRows.value.filter((row) => canDispatchActions(row) && !row.store_pickup),
+)
+
+const selectedCancellableRows = computed(() =>
+  selectedSingleRows.value.filter((row) => canCancelOrder(row)),
+)
+
+const selectedCompletableRows = computed(() =>
+  selectedSingleRows.value.filter((row) => canMarkOrderComplete(row)),
+)
+
+const batchActionBusy = computed(
+  () => batchDispatchLoading.value || batchCancelLoading.value || batchMarkCompleteLoading.value,
+)
 
 async function loadCouriers() {
   if (!adminAccessToken.value) return
@@ -197,8 +255,24 @@ function openAssignCourier(row) {
     showToast('仅「待发货」订单可指派门店配送员', 'error')
     return
   }
+  batchAssignMode.value = false
+  batchAssignOrders.value = []
   assignOrder.value = row
   assignCourierId.value = row.courier_id ? String(row.courier_id) : ''
+  assignOpen.value = true
+  void loadCouriers()
+}
+
+function openBatchAssignCourier() {
+  const rows = selectedSingleRows.value.filter((row) => canDispatchActions(row))
+  if (!rows.length) {
+    showToast('请勾选可配送的待发货订单', 'error')
+    return
+  }
+  batchAssignMode.value = true
+  batchAssignOrders.value = rows
+  assignOrder.value = null
+  assignCourierId.value = ''
   assignOpen.value = true
   void loadCouriers()
 }
@@ -274,10 +348,53 @@ async function submitRefundWechat() {
 }
 
 async function submitAssignCourier() {
-  const row = assignOrder.value
   const cid = String(assignCourierId.value || '').trim()
-  if (!row || !cid) {
+  if (!cid) {
     showToast('请选择配送员', 'error')
+    return
+  }
+  if (batchAssignMode.value) {
+    const ids = batchAssignOrders.value.map((r) => Number(r.id)).filter((id) => id > 0)
+    if (!ids.length) {
+      showToast('未选择有效订单', 'error')
+      return
+    }
+    batchDispatchLoading.value = true
+    try {
+      const data = await apiJson(
+        '/api/admin/orders/single-meals/batch-dispatch/store-courier',
+        {
+          method: 'POST',
+          body: JSON.stringify({ order_ids: ids, courier_id: cid }),
+        },
+        { auth: true },
+      )
+      const results = Array.isArray(data?.results) ? data.results : []
+      const fail = results.filter((x) => x && !x.ok)
+      if (fail.length) {
+        const msg = fail.map((f) => `#${f.order_id}: ${f.message || ''}`).join('；')
+        showToast(`部分失败：${msg}`, 'error')
+      } else {
+        showToast(`已批量指派 ${ids.length} 单`, 'success')
+      }
+      assignOpen.value = false
+      clearSingleSelection()
+      await fetchSingleMeals()
+    } catch (e) {
+      const status = e && typeof e.status === 'number' ? e.status : 0
+      if (status === 401) {
+        handleAdminLogout()
+        return
+      }
+      showToast(e instanceof Error ? e.message : '批量指派失败', 'error')
+    } finally {
+      batchDispatchLoading.value = false
+    }
+    return
+  }
+  const row = assignOrder.value
+  if (!row) {
+    showToast('请选择订单', 'error')
     return
   }
   try {
@@ -302,6 +419,219 @@ async function submitAssignCourier() {
   }
 }
 
+async function onBatchPushSfRetail() {
+  const rows = selectedDispatchableRows.value
+  if (!rows.length) {
+    showToast('请勾选可推顺丰的待发货订单（不含门店自提）', 'error')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将为 ${rows.length} 笔订单调用顺丰创单（使用门店「零售推顺丰店铺ID」）。是否继续？`,
+      '批量推送到顺丰',
+      { type: 'warning', confirmButtonText: '确定推送', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  batchDispatchLoading.value = true
+  try {
+    const ids = rows.map((r) => Number(r.id)).filter((id) => id > 0)
+    const data = await apiJson(
+      '/api/admin/orders/single-meals/batch-dispatch/sf-retail',
+      { method: 'POST', body: JSON.stringify({ order_ids: ids }) },
+      { auth: true },
+    )
+    const results = Array.isArray(data?.results) ? data.results : []
+    const okCount = results.filter((x) => x && x.ok).length
+    const fail = results.filter((x) => x && !x.ok)
+    if (fail.length) {
+      const msg = fail.map((f) => `#${f.order_id}: ${f.message || ''}`).join('；')
+      showToast(`成功 ${okCount} 笔，失败 ${fail.length} 笔：${msg}`, fail.length === ids.length ? 'error' : 'warning')
+    } else {
+      showToast(`已全部提交顺丰（${okCount} 笔）`, 'success')
+    }
+    clearSingleSelection()
+    await fetchSingleMeals()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '批量推送失败', 'error')
+  } finally {
+    batchDispatchLoading.value = false
+  }
+}
+
+async function onCancelOrder(row) {
+  if (!canCancelOrder(row)) {
+    showToast('当前订单不可取消', 'error')
+    return
+  }
+  const isPaid = row.pay_status === '已支付'
+  try {
+    await ElMessageBox.confirm(
+      isPaid
+        ? `确定取消订单 #${row.id}？已支付订单取消后不退款，若已推顺丰将同步请求取消配送。`
+        : `确定取消未支付订单 #${row.id}？`,
+      '取消订单',
+      { type: 'warning', confirmButtonText: '确定取消', cancelButtonText: '返回' },
+    )
+  } catch {
+    return
+  }
+  cancelLoadingId.value = Number(row.id)
+  try {
+    const data = await apiJson(
+      `/api/admin/orders/single-meals/${row.id}/cancel`,
+      { method: 'POST', body: JSON.stringify({ cancel_sf: true }) },
+      { auth: true },
+    )
+    const msg = typeof data?.message === 'string' ? data.message : '订单已取消'
+    showToast(msg, 'success')
+    await fetchSingleMeals()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '取消失败', 'error')
+  } finally {
+    cancelLoadingId.value = 0
+  }
+}
+
+async function onMarkOrderComplete(row) {
+  if (!canMarkOrderComplete(row)) {
+    showToast('当前订单不可标记完成', 'error')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定将订单 #${row.id} 标记为已完成？适用于顺丰、UU 跑腿或门店自配送等已实际送达/自提的场景。`,
+      '标记订单完成',
+      { type: 'info', confirmButtonText: '确定', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  markCompleteLoadingId.value = Number(row.id)
+  try {
+    const data = await apiJson(
+      `/api/admin/orders/single-meals/${row.id}/mark-delivered`,
+      { method: 'POST' },
+      { auth: true },
+    )
+    const msg = typeof data?.message === 'string' ? data.message : '已标记为已完成'
+    showToast(msg, 'success')
+    await fetchSingleMeals()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '标记失败', 'error')
+  } finally {
+    markCompleteLoadingId.value = 0
+  }
+}
+
+async function onBatchMarkComplete() {
+  const rows = selectedCompletableRows.value
+  if (!rows.length) {
+    showToast('请勾选可标记完成的已支付订单', 'error')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定将选中的 ${rows.length} 笔订单标记为已完成？`,
+      '批量标记完成',
+      { type: 'info', confirmButtonText: '确定', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  batchMarkCompleteLoading.value = true
+  try {
+    const ids = rows.map((r) => Number(r.id)).filter((id) => id > 0)
+    const data = await apiJson(
+      '/api/admin/orders/single-meals/batch-mark-delivered',
+      { method: 'POST', body: JSON.stringify({ order_ids: ids }) },
+      { auth: true },
+    )
+    const results = Array.isArray(data?.results) ? data.results : []
+    const okCount = results.filter((x) => x && x.ok).length
+    const fail = results.filter((x) => x && !x.ok)
+    if (fail.length) {
+      const msg = fail.map((f) => `#${f.order_id}: ${f.message || ''}`).join('；')
+      showToast(`成功 ${okCount} 笔，失败 ${fail.length} 笔：${msg}`, fail.length === ids.length ? 'error' : 'warning')
+    } else {
+      showToast(`已标记完成 ${okCount} 笔`, 'success')
+    }
+    clearSingleSelection()
+    await fetchSingleMeals()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '批量标记失败', 'error')
+  } finally {
+    batchMarkCompleteLoading.value = false
+  }
+}
+
+async function onBatchCancelOrders() {
+  const rows = selectedCancellableRows.value
+  if (!rows.length) {
+    showToast('请勾选可取消的订单', 'error')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定取消选中的 ${rows.length} 笔订单？已支付订单取消后不退款；已推顺丰的将尝试同步取消配送。`,
+      '批量取消订单',
+      { type: 'warning', confirmButtonText: '确定取消', cancelButtonText: '返回' },
+    )
+  } catch {
+    return
+  }
+  batchCancelLoading.value = true
+  try {
+    const ids = rows.map((r) => Number(r.id)).filter((id) => id > 0)
+    const data = await apiJson(
+      '/api/admin/orders/single-meals/batch-cancel',
+      { method: 'POST', body: JSON.stringify({ order_ids: ids, cancel_sf: true }) },
+      { auth: true },
+    )
+    const results = Array.isArray(data?.results) ? data.results : []
+    const okCount = results.filter((x) => x && x.ok).length
+    const fail = results.filter((x) => x && !x.ok)
+    if (fail.length) {
+      const msg = fail.map((f) => `#${f.order_id}: ${f.message || ''}`).join('；')
+      showToast(`成功 ${okCount} 笔，失败 ${fail.length} 笔：${msg}`, fail.length === ids.length ? 'error' : 'warning')
+    } else {
+      showToast(`已取消 ${okCount} 笔订单`, 'success')
+    }
+    clearSingleSelection()
+    await fetchSingleMeals()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '批量取消失败', 'error')
+  } finally {
+    batchCancelLoading.value = false
+  }
+}
+
 function singlePayClass(s) {
   if (s === '已支付') return 'member-pill member-pill--emerald'
   if (s === '已退款') return 'member-pill member-pill--rose'
@@ -320,6 +650,7 @@ const SINGLE_ORDER_STATUS_ZH = {
   accepted: '配送中',
   delivered: '已完成',
   sf_cancelled: '顺丰取消',
+  cancelled: '已取消',
 }
 
 /** 门店自提且未核销完成前：pending 展示为待自提 */
@@ -335,7 +666,7 @@ function singleOrderStatusLabelZh(row) {
 function singleOrderStatusClass(row) {
   const x = ((row && row.fulfillment_status) || '').toLowerCase()
   if (x === 'delivered') return 'member-pill member-pill--emerald'
-  if (x === 'sf_cancelled') return 'member-pill member-pill--rose'
+  if (x === 'sf_cancelled' || x === 'cancelled') return 'member-pill member-pill--rose'
   if (x === 'accepted') return 'member-pill member-pill--sky'
   if (x === 'pending') return 'member-pill member-pill--amber'
   return 'member-pill member-pill--slate'
@@ -434,39 +765,9 @@ watch(searchQuery, () => {
 
 watch([orderDate, singlePayFilter, singleDeliveryFilter, mallPayFilter, pageSize, activeTab], () => {
   page.value = 1
+  clearSingleSelection()
   void fetchActive()
 })
-
-function canSyncSfSingle(row) {
-  if (!row || row.pay_status !== '已支付' || row.store_pickup) return false
-  const f = String(row.fulfillment_status || '').trim().toLowerCase()
-  return f === 'pending' || f === 'accepted'
-}
-
-async function onSyncSfSingle(row) {
-  if (!adminAccessToken.value || !row?.id) return
-  syncSfLoadingId.value = Number(row.id)
-  try {
-    /** @type {Record<string, unknown>} */
-    const d = await apiJson(
-      `/api/admin/orders/single-meals/${row.id}/sync-delivered-from-sf-monitor`,
-      { method: 'POST' },
-      { auth: true },
-    )
-    const msg = typeof d?.msg === 'string' ? d.msg : '已同步'
-    showToast(msg, 'success')
-    await fetchSingleMeals()
-  } catch (e) {
-    const status = e && typeof e.status === 'number' ? e.status : 0
-    if (status === 401) {
-      handleAdminLogout()
-      return
-    }
-    showToast(e instanceof Error ? e.message : '同步失败', 'error')
-  } finally {
-    syncSfLoadingId.value = 0
-  }
-}
 
 async function onSyncDeliveryStatus() {
   if (!adminAccessToken.value || activeTab.value !== 'single') return
@@ -548,33 +849,64 @@ onMounted(() => {
       <el-tabs v-model="activeTab" class="orders-manage-tabs">
         <el-tab-pane label="单次点餐" name="single">
          <div class="orders-manage-tab-bar orders-manage-tab-bar--filters">
-            <div class="orders-filter-el">
-              <span class="orders-filter-el-label">支付</span>
-              <el-select v-model="singlePayFilter" placeholder="全部" clearable class="orders-filter-el-select">
-                <el-option label="全部" value="" />
-                <el-option label="未支付" value="未支付" />
-                <el-option label="已支付" value="已支付" />
-                <el-option label="已退款" value="已退款" />
-              </el-select>
+           <div class="orders-manage-tab-bar__filters">
+             <div class="orders-filter-el">
+                <span class="orders-filter-el-label">支付</span>
+                <el-select v-model="singlePayFilter" placeholder="全部" clearable class="orders-filter-el-select">
+                  <el-option label="全部" value="" />
+                  <el-option label="未支付" value="未支付" />
+                  <el-option label="已支付" value="已支付" />
+                  <el-option label="已退款" value="已退款" />
+                </el-select>
+              </div>
+              <div class="orders-filter-el">
+                <span class="orders-filter-el-label">配送</span>
+                <el-select v-model="singleDeliveryFilter" placeholder="全部" clearable
+                  class="orders-filter-el-select orders-filter-el-select--wide">
+                  <el-option label="全部" value="" />
+                  <el-option label="待配送" value="awaiting" />
+                  <el-option label="已配送" value="delivered" />
+                </el-select>
+              </div>
             </div>
-           <div class="orders-filter-el">
-              <span class="orders-filter-el-label">配送</span>
-              <el-select v-model="singleDeliveryFilter" placeholder="全部" clearable
-                class="orders-filter-el-select orders-filter-el-select--wide">
-                <el-option label="全部" value="" />
-                <el-option label="待配送" value="awaiting" />
-                <el-option label="已配送" value="delivered" />
-              </el-select>
+           <div class="orders-batch-bar__actions">
+              <span v-if="selectedSingleRows.length" class="orders-batch-bar__count">
+                已选 {{ selectedSingleRows.length }} 笔
+              </span>
+              <el-button type="primary" size="small" :loading="batchDispatchLoading"
+                :disabled="!selectedDispatchableRows.length || batchActionBusy" @click="onBatchPushSfRetail">
+                推送顺丰
+              </el-button>
+              <el-button type="primary" size="small" plain :loading="batchDispatchLoading"
+                :disabled="!selectedSingleRows.some((r) => canDispatchActions(r)) || batchActionBusy"
+                @click="openBatchAssignCourier">
+                门店配送
+              </el-button>
+              <el-button type="success" size="small" plain :loading="batchMarkCompleteLoading"
+                :disabled="!selectedCompletableRows.length || batchActionBusy" @click="onBatchMarkComplete">
+                批量完成
+              </el-button>
+              <el-button type="danger" size="small" plain :loading="batchCancelLoading"
+                :disabled="!selectedCancellableRows.length || batchActionBusy" @click="onBatchCancelOrders">
+                批量取消
+              </el-button>
+              <el-button size="small" :disabled="!selectedSingleRows.length || batchActionBusy"
+                @click="clearSingleSelection">
+                清空选择
+              </el-button>
             </div>
           </div>
           <AdminTable
+ref="singleTableRef"
             variant="members"
             size="small"
             :data="singleItems"
             :loading="loading && activeTab === 'single'"
             row-key="id"
             empty-text="当日暂无单次点餐订单"
+           @selection-change="onSingleSelectionChange"
           >
+           <el-table-column type="selection" width="42" :selectable="isSingleRowSelectable" />
             <el-table-column label="#" width="56" class-name="td-mono">
               <template #default="{ row }">{{ row.id }}</template>
             </el-table-column>
@@ -623,19 +955,9 @@ onMounted(() => {
             <el-table-column label="单号" width="120" class-name="td-mono" show-overflow-tooltip>
               <template #default="{ row }">{{ row.out_trade_no || '—' }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="320" fixed="right" align="center">
+           <el-table-column label="操作" width="380" fixed="right" align="center">
               <template #default="{ row }">
-                <div class="orders-op-btns">
-                  <el-button
-                    v-if="canSyncSfSingle(row)"
-                    type="success"
-                    size="small"
-                    plain
-                    :loading="syncSfLoadingId === row.id"
-                    @click="onSyncSfSingle(row)"
-                  >
-                    同步顺丰
-                  </el-button>
+               <div class="orders-op-btns">
                   <el-dropdown trigger="click" @command="(cmd) => handleDispatchCommand(cmd, row)">
                     <el-button
                       type="primary"
@@ -643,7 +965,7 @@ onMounted(() => {
                       :loading="dispatchLoadingId === row.id"
                       :disabled="!canDispatchActions(row)"
                     >
-                      配送操作
+                     配送
                     </el-button>
                     <template #dropdown>
                       <el-dropdown-menu>
@@ -658,6 +980,15 @@ onMounted(() => {
                     </template>
                   </el-dropdown>
                   <el-button
+type="success" size="small" plain :disabled="!canMarkOrderComplete(row)"
+                    :loading="markCompleteLoadingId === row.id" @click="onMarkOrderComplete(row)">
+                    完成
+                  </el-button>
+                  <el-button type="danger" size="small" plain :disabled="!canCancelOrder(row)"
+                    :loading="cancelLoadingId === row.id" @click="onCancelOrder(row)">
+                    取消
+                  </el-button>
+                  <el-button
                     type="warning"
                     size="small"
                     plain
@@ -665,7 +996,7 @@ onMounted(() => {
                     :loading="refundLoadingId === row.id"
                     @click="onRefundWechatSingle(row)"
                   >
-                    微信退款
+                   退款
                   </el-button>
                 </div>
               </template>
@@ -836,11 +1167,18 @@ onMounted(() => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="assignOpen" title="门店自配送 · 指派配送员" width="420px" destroy-on-close>
-      <template v-if="assignOrder">
+  <el-dialog v-model="assignOpen" :title="batchAssignMode ? '批量门店自配送 · 指派配送员' : '门店自配送 · 指派配送员'" width="420px"
+      destroy-on-close @closed="batchAssignMode = false; batchAssignOrders = []">
+      <template v-if="batchAssignMode">
+        <p class="orders-assign-hint">
+          已选 {{ batchAssignOrders.length }} 笔待发货订单，将统一指派给所选配送员。
+        </p>
+      </template>
+      <template v-else-if="assignOrder">
         <p class="orders-assign-hint">
           订单 #{{ assignOrder.id }} · {{ (assignOrder.member_name || '').trim() || '—' }}
         </p>
+     </template>
         <el-select
           v-model="assignCourierId"
           filterable
@@ -854,11 +1192,12 @@ onMounted(() => {
             :value="c.courier_id"
             :disabled="c.is_active === false"
           />
-        </el-select>
-      </template>
+     </el-select>
       <template #footer>
         <el-button @click="assignOpen = false">取消</el-button>
-        <el-button type="primary" @click="submitAssignCourier">确定</el-button>
+       <el-button type="primary" :loading="batchDispatchLoading" @click="submitAssignCourier">
+          {{ batchAssignMode ? '批量确定' : '确定' }}
+        </el-button>
       </template>
     </el-dialog>
   </section>
@@ -935,6 +1274,14 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
+    gap: 0.75rem 1.25rem;
+  }
+  
+  .orders-manage-tab-bar__filters {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
   gap: 0.75rem 1.25rem;
 }
 
@@ -980,7 +1327,23 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  max-width: 236px;
+  max-width: 320px;
+  }
+  
+  .orders-batch-bar__count {
+    font-size: 0.8125rem;
+    color: rgba(255, 255, 255, 0.62);
+    white-space: nowrap;
+    margin-right: 0.15rem;
+  }
+  
+  .orders-batch-bar__actions {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.4rem;
+    margin-left: auto;
 }
 
 .orders-refund-dialog :deep(.el-dialog__header) {

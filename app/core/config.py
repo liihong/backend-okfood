@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     APP_NAME: str = "okfood-api"
     DEBUG: bool = False
 
+    # 进程内 APScheduler：生产环境应 false，由独立 worker（python -m app.jobs.worker）跑定时任务
+    ENABLE_IN_PROCESS_SCHEDULER: bool = False
+    # 批量推顺丰 createorder 并发数（独立 HTTP，落库仍串行；1=完全顺序）
+    SF_PUSH_HTTP_CONCURRENCY: int = Field(default=12, ge=1, le=32)
+
     MYSQL_HOST: str = "127.0.0.1"
     MYSQL_PORT: int = 3306
     MYSQL_USER: str = "root"

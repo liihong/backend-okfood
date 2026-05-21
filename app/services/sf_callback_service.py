@@ -21,8 +21,13 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models.sf_same_city_callback import SfSameCityCallback
 from app.models.sf_same_city_push import SfSameCityPush
-from app.services.sf_open_notify_payload import extract_order_status_deep, extract_shop_and_sf_order_ids
-from app.services.tenant_integration_service import resolve_sf_notify_app_key
+from app.services.sf_open_notify_payload import (
+    embedded_json_wire_strings,
+    extract_order_status_deep,
+    extract_shop_and_sf_order_ids,
+    normalize_sf_callback_payload,
+)
+from app.services.tenant_integration_service import resolve_sf_notify_app_key_candidates
 from app.services.sf_open.sign import _canonical_json, generate_open_sign, normalize_payload_for_sf_sign
 
 logger = logging.getLogger(__name__)
@@ -234,12 +239,15 @@ def verify_sf_callback_signature(
     sign_query: str | None,
     dev_ids: list[int],
     app_key: str,
+    payload: dict[str, Any] | None = None,
 ) -> bool:
     """用多种待签串、多种 ``dev_id``、规范化后的 sign 尝试验签。"""
     if not sign_query or not raw_body.strip() or not dev_ids:
         return False
     body_cands = _dedupe_wire_strings(
-        _json_body_string_candidates(raw_body) + _form_sign_string_variants(raw_body)
+        _json_body_string_candidates(raw_body)
+        + _form_sign_string_variants(raw_body)
+        + embedded_json_wire_strings(payload if isinstance(payload, dict) else None)
     )
     json_cands: list[str] = []
     try:
@@ -315,6 +323,13 @@ def persist_sf_callback_and_sync_push(
             pus = db.scalar(select(SfSameCityPush).where(SfSameCityPush.sf_order_id == sf_order_id))
         if pus is None and sf_order_id:
             pus = db.scalar(select(SfSameCityPush).where(SfSameCityPush.sf_bill_id == sf_order_id))
+        if pus is None and (shop_order_id or sf_order_id):
+            logger.warning(
+                "顺丰回调验签通过但未匹配推单记录 shop_order_id=%s sf_order_id=%s route_kind=%s",
+                shop_order_id,
+                sf_order_id,
+                route_kind,
+            )
         if pus is not None:
             matched_push = pus
             pus.last_callback_at = beijing_now_naive()
@@ -396,7 +411,11 @@ def process_sf_notify(
     else:
         verify_err = "empty body"
 
-    app_key = resolve_sf_notify_app_key(db, payload).strip()
+    if payload is not None:
+        payload = normalize_sf_callback_payload(payload)
+
+    app_keys = resolve_sf_notify_app_key_candidates(db, payload)
+    app_key = app_keys[0] if app_keys else ""
 
     dev_ids_try = _dev_ids_for_verify(settings_dev, payload)
     eff_sign = _effective_sign_query(sign_query, payload)
@@ -405,7 +424,7 @@ def process_sf_notify(
         sign_ok = verify_err is None and (payload is not None or raw_body.strip() == "{}")
     elif verify_err:
         sign_ok = False
-    elif not app_key:
+    elif not app_keys:
         verify_err = verify_err or "missing SF_OPEN_SECRET"
         sign_ok = False
     elif not eff_sign:
@@ -415,7 +434,14 @@ def process_sf_notify(
         verify_err = "missing dev_id(SF_OPEN_DEV_ID 或与报文 dev_id)"
         sign_ok = False
     else:
-        sign_ok = verify_sf_callback_signature(raw_body, eff_sign, dev_ids_try, app_key)
+        sign_ok = False
+        for candidate_key in app_keys:
+            if verify_sf_callback_signature(
+                raw_body, eff_sign, dev_ids_try, candidate_key, payload=payload
+            ):
+                sign_ok = True
+                app_key = candidate_key
+                break
         if not sign_ok:
             verify_err = verify_err or "sign mismatch"
 
@@ -424,7 +450,7 @@ def process_sf_notify(
     grid = _hint_verify_grid(raw_body or "", payload)
     logger.info(
         "顺丰回调 trace http_tag=%s route_kind=%s path=%s query_keys=%s client=%s xff=%s content_type=%s "
-        "skip_verify=%s sign_ok=%s err=%s settings_dev=%s dev_ids_try=%s has_secret=%s "
+        "skip_verify=%s sign_ok=%s err=%s settings_dev=%s dev_ids_try=%s app_keys_tried=%s "
         "%s sign=%s body_hints=%s raw_preview=%s shop_order_id=%s sf_order_id=%s payload_keys=%s",
         http_log_tag or "-",
         route_kind,
@@ -438,7 +464,7 @@ def process_sf_notify(
         verify_err or "-",
         settings_dev,
         dev_ids_try,
-        bool(app_key),
+        len(app_keys),
         grid,
         _sign_debug_preview(eff_sign or sign_query),
         _body_debug_hints(raw_body or ""),

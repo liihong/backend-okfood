@@ -1,0 +1,22 @@
+# 独立定时任务 worker（与 okfine-api 分离）
+# 安装: sudo cp deploy/okfine-scheduler.service.example /etc/systemd/system/okfine-scheduler.service
+#       sudo systemctl daemon-reload && sudo systemctl enable --now okfine-scheduler
+
+[Unit]
+Description=Okfood scheduler worker (APScheduler)
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/okfood/backend
+Environment="PATH=/var/www/okfood/backend/.venv/bin"
+EnvironmentFile=-/var/www/okfood/backend/.env
+ExecStart=/var/www/okfood/backend/.venv/bin/python -m app.jobs.worker
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

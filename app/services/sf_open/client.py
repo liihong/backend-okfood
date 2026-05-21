@@ -38,6 +38,23 @@ class SfOpenClient:
         s = get_settings()
         self._base = (base_url or s.SF_API_BASE).rstrip("/")
         self._timeout = timeout_sec
+        self._client: httpx.Client | None = None
+
+    def _http(self) -> httpx.Client:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.Client(timeout=self._timeout)
+        return self._client
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def __enter__(self) -> SfOpenClient:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
 
     def create_order(
         self,
@@ -56,15 +73,15 @@ class SfOpenClient:
         json_str = sign_mod._canonical_json(post_body)
         sig = generate_open_sign(json_str, int(dev_id), app_key)
         soid = post_body.get("shop_order_id")
-        logger.info(
-            "SF createorder POST body (canonical JSON, equals sign source): shop_order_id=%s %s",
+        logger.info("SF createorder POST shop_order_id=%s bytes=%s", soid, len(json_str))
+        logger.debug(
+            "SF createorder canonical JSON (sign source): shop_order_id=%s %s",
             soid,
             json_str,
         )
         url = f"{self._base}{self.CREATE_ORDER_PATH}?sign={quote(sig, safe='')}"
         headers = {"Content-Type": "application/json; charset=utf-8"}
-        with httpx.Client(timeout=self._timeout) as client:
-            resp = client.post(url, content=json_str.encode("utf-8"), headers=headers)
+        resp = self._http().post(url, content=json_str.encode("utf-8"), headers=headers)
         text = resp.text
         if resp.status_code != 200:
             raise SfOpenApiError(f"顺丰 HTTP {resp.status_code}", error_code=resp.status_code)
@@ -102,15 +119,19 @@ class SfOpenClient:
         sig = generate_open_sign(json_str, int(dev_id), app_key)
         oid = post_body.get("order_id")
         logger.info(
-            "SF cancelorder POST body (canonical JSON): order_id=%s order_type=%s %s",
+            "SF cancelorder POST order_id=%s order_type=%s bytes=%s",
             oid,
             post_body.get("order_type"),
+            len(json_str),
+        )
+        logger.debug(
+            "SF cancelorder canonical JSON: order_id=%s %s",
+            oid,
             json_str,
         )
         url = f"{self._base}{self.CANCEL_ORDER_PATH}?sign={quote(sig, safe='')}"
         headers = {"Content-Type": "application/json; charset=utf-8"}
-        with httpx.Client(timeout=self._timeout) as client:
-            resp = client.post(url, content=json_str.encode("utf-8"), headers=headers)
+        resp = self._http().post(url, content=json_str.encode("utf-8"), headers=headers)
         text = resp.text
         if resp.status_code != 200:
             raise SfOpenApiError(f"顺丰 HTTP {resp.status_code}", error_code=resp.status_code)

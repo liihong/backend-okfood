@@ -36,7 +36,7 @@ class SingleMealOrderOut(BaseModel):
     pay_channel: str | None = None
     fulfillment_status: str = Field(
         ...,
-        description="配送侧订单状态（英文枚举）：pending 待发货/待自提、accepted 配送中、delivered 已完成、sf_cancelled 顺丰取消",
+        description="配送侧订单状态（英文枚举）：pending 待发货/待自提、accepted 配送中、delivered 已完成、sf_cancelled 顺丰取消、cancelled 已取消",
     )
     courier_id: str | None = None
     address_summary: str

@@ -19,6 +19,7 @@ set -euo pipefail
 
 BACKEND_ROOT="${BACKEND_ROOT:-/var/www/okfood/backend}"
 SERVICE_NAME="${SERVICE_NAME:-okfine-api}"
+SCHEDULER_SERVICE="${SCHEDULER_SERVICE:-okfine-scheduler}"
 VENV_PATH="${VENV_PATH:-${BACKEND_ROOT}/.venv}"
 
 systemctl_wrap() {
@@ -55,6 +56,14 @@ echo ">>> pip install -r requirements.txt"
 echo ">>> systemctl restart ${SERVICE_NAME}"
 systemctl_wrap systemctl restart "${SERVICE_NAME}"
 systemctl_wrap systemctl --no-pager -l status "${SERVICE_NAME}" || true
+
+if systemctl_wrap systemctl cat "${SCHEDULER_SERVICE}" >/dev/null 2>&1; then
+  echo ">>> systemctl restart ${SCHEDULER_SERVICE}"
+  systemctl_wrap systemctl restart "${SCHEDULER_SERVICE}"
+  systemctl_wrap systemctl --no-pager -l status "${SCHEDULER_SERVICE}" || true
+else
+  echo "提示: 未安装 ${SCHEDULER_SERVICE}.service，跳过 scheduler 重启（见 deploy/okfine-scheduler.service.example）"
+fi
 
 if [[ "${BUILD_ADMIN:-0}" == "1" ]]; then
   ADMIN_DIR="${BACKEND_ROOT}/okfood-admin"

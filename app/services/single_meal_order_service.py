@@ -1027,3 +1027,200 @@ def admin_wechat_refund_single_meal_order(db: Session, *, order_id: int, store_i
     db.add(o)
     db.commit()
     return {"message": "微信退款已受理，资金将按支付渠道原路退回用户", "out_refund_no": out_refund_no}
+
+
+def _can_admin_cancel_single_meal_order(o: SingleMealOrder) -> tuple[bool, str]:
+    pay = (o.pay_status or "").strip()
+    f = str(o.fulfillment_status or "").strip().lower()
+    if pay == "已退款":
+        return False, "已退款订单不可取消"
+    if f == "delivered":
+        return False, "已完成订单不可取消"
+    if f == "cancelled":
+        return False, "订单已是取消状态"
+    if pay == "未支付":
+        if f == "pending":
+            return True, ""
+        return False, f"当前状态不可取消（{f}）"
+    if pay == "已支付" and f in ("pending", "accepted", "sf_cancelled"):
+        return True, ""
+    return False, f"当前状态不可取消（支付={pay}，履约={f or '—'}）"
+
+
+def _try_cancel_sf_for_retail_order(
+    db: Session,
+    *,
+    store_id: int,
+    order_id: int,
+    cancel_reason: str | None,
+) -> str | None:
+    """若存在可取消的顺丰推单则调用 cancelorder；无推单或已终态时返回 None。"""
+    from app.services.sf_same_city_service import cancel_sf_same_city_push
+
+    pus = _latest_success_sf_push_for_retail_order(db, store_id=int(store_id), order_id=int(order_id))
+    if pus is None:
+        return None
+    st = pus.sf_callback_order_status
+    if st is not None and int(st) in (2, 17, 22, 31):
+        return None
+    if pus.merchant_cancel_requested_at is not None:
+        return None
+    cancel_sf_same_city_push(db, push_id=int(pus.id), cancel_reason=cancel_reason)
+    return "已向顺丰发起取消"
+
+
+def admin_cancel_single_meal_order(
+    db: Session,
+    *,
+    order_id: int,
+    store_id: int,
+    cancel_reason: str | None = None,
+    cancel_sf: bool = True,
+) -> str:
+    """管理端取消单次点餐订单（不退款）；已推顺丰时可同步请求顺丰取消。"""
+    o = db.get(SingleMealOrder, int(order_id))
+    if o is None or int(o.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    ok, err = _can_admin_cancel_single_meal_order(o)
+    if not ok:
+        raise ValueError(err)
+
+    sf_msg: str | None = None
+    f = str(o.fulfillment_status or "").strip().lower()
+    if cancel_sf and f == "accepted" and not bool(getattr(o, "store_pickup", False)):
+        try:
+            sf_msg = _try_cancel_sf_for_retail_order(
+                db,
+                store_id=int(store_id),
+                order_id=int(order_id),
+                cancel_reason=cancel_reason,
+            )
+        except HTTPException as e:
+            detail = e.detail if isinstance(e.detail, str) else str(e.detail)
+            raise ValueError(f"顺丰取消失败：{detail}") from e
+
+    o.fulfillment_status = "cancelled"
+    o.courier_id = None
+    db.add(o)
+    db.commit()
+    if sf_msg:
+        return f"订单已取消（{sf_msg}）"
+    return "订单已取消"
+
+
+def bulk_admin_cancel_single_meal_orders(
+    db: Session,
+    *,
+    order_ids: list[int],
+    store_id: int,
+    cancel_reason: str | None = None,
+    cancel_sf: bool = True,
+) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    for oid in order_ids:
+        try:
+            msg = admin_cancel_single_meal_order(
+                db,
+                order_id=int(oid),
+                store_id=int(store_id),
+                cancel_reason=cancel_reason,
+                cancel_sf=cancel_sf,
+            )
+            results.append({"order_id": int(oid), "ok": True, "message": msg})
+        except ValueError as e:
+            results.append({"order_id": int(oid), "ok": False, "message": str(e)})
+    return {"results": results}
+
+
+def bulk_push_single_meal_retail_to_sf(
+    db: Session,
+    *,
+    order_ids: list[int],
+    store_id: int,
+) -> dict[str, Any]:
+    from app.services.sf_same_city_service import push_single_meal_retail_to_sf
+
+    results: list[dict[str, Any]] = []
+    for oid in order_ids:
+        try:
+            r = push_single_meal_retail_to_sf(db, order_id=int(oid), store_id=int(store_id))
+            results.append(
+                {
+                    "order_id": int(oid),
+                    "ok": True,
+                    "message": r.message or "已提交顺丰",
+                    "sf_order_id": r.sf_order_id,
+                }
+            )
+        except ValueError as e:
+            results.append({"order_id": int(oid), "ok": False, "message": str(e)})
+    return {"results": results}
+
+
+def bulk_admin_assign_courier_single_meal_orders(
+    db: Session,
+    *,
+    order_ids: list[int],
+    store_id: int,
+    courier_id: str,
+    tenant_id: int,
+) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    for oid in order_ids:
+        try:
+            admin_assign_courier_single_meal_order(
+                db,
+                order_id=int(oid),
+                store_id=int(store_id),
+                courier_id=courier_id,
+                tenant_id=int(tenant_id),
+            )
+            results.append({"order_id": int(oid), "ok": True, "message": "已指派配送员"})
+        except ValueError as e:
+            results.append({"order_id": int(oid), "ok": False, "message": str(e)})
+    return {"results": results}
+
+
+def admin_mark_single_meal_order_delivered(
+    db: Session,
+    *,
+    order_id: int,
+    store_id: int,
+) -> str:
+    """管理端：人工标记单次点餐订单已完成（适用于顺丰/UU/门店自配送等任意履约方式）。"""
+    o = db.get(SingleMealOrder, int(order_id))
+    if o is None or int(o.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    if (o.pay_status or "").strip() != "已支付":
+        raise ValueError("仅已支付订单可标记完成")
+    f = str(o.fulfillment_status or "").strip().lower()
+    if f == "delivered":
+        return "订单已是已完成"
+    if f in ("cancelled", "sf_cancelled"):
+        raise ValueError("已取消订单不可标记完成")
+    if f not in ("pending", "accepted"):
+        raise ValueError(f"当前状态不可标记完成（{f or '—'}）")
+    o.fulfillment_status = "delivered"
+    db.add(o)
+    db.commit()
+    return "已标记为已完成"
+
+
+def bulk_admin_mark_single_meal_orders_delivered(
+    db: Session,
+    *,
+    order_ids: list[int],
+    store_id: int,
+) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    for oid in order_ids:
+        try:
+            msg = admin_mark_single_meal_order_delivered(
+                db,
+                order_id=int(oid),
+                store_id=int(store_id),
+            )
+            results.append({"order_id": int(oid), "ok": True, "message": msg})
+        except ValueError as e:
+            results.append({"order_id": int(oid), "ok": False, "message": str(e)})
+    return {"results": results}
