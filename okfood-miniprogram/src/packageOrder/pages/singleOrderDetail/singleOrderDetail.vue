@@ -114,6 +114,7 @@ const fulfillLabel = computed(() => {
   if (!o) return '—'
   const f = String(o.fulfillment_status || '')
   if (f === 'delivered') return '已完成'
+  if (f === 'sf_cancelled') return '顺丰取消'
   if (f === 'pending') return '进行中'
   return f || '—'
 })

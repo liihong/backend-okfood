@@ -326,10 +326,14 @@ def persist_sf_callback_and_sync_push(
         try:
             from app.services.sf_order_fulfillment_service import (
                 apply_sf_auto_fulfillment_for_push,
+                apply_sf_cancel_to_single_meal_orders_for_push,
+                should_apply_sf_cancel_sync,
                 should_run_sf_auto_fulfillment,
             )
 
-            if should_run_sf_auto_fulfillment(route_kind=route_kind, pus=matched_push):
+            if should_apply_sf_cancel_sync(pus=matched_push):
+                apply_sf_cancel_to_single_meal_orders_for_push(db, matched_push)
+            elif should_run_sf_auto_fulfillment(route_kind=route_kind, pus=matched_push):
                 op_tag = (
                     "sf:order_complete"
                     if route_kind == "order_complete"

@@ -318,6 +318,7 @@ const SINGLE_ORDER_STATUS_ZH = {
   pending: '待发货',
   accepted: '配送中',
   delivered: '已完成',
+  sf_cancelled: '顺丰取消',
 }
 
 /** 门店自提且未核销完成前：pending 展示为待自提 */
@@ -333,6 +334,7 @@ function singleOrderStatusLabelZh(row) {
 function singleOrderStatusClass(row) {
   const x = ((row && row.fulfillment_status) || '').toLowerCase()
   if (x === 'delivered') return 'member-pill member-pill--emerald'
+  if (x === 'sf_cancelled') return 'member-pill member-pill--rose'
   if (x === 'accepted') return 'member-pill member-pill--sky'
   if (x === 'pending') return 'member-pill member-pill--amber'
   return 'member-pill member-pill--slate'
@@ -439,13 +441,7 @@ async function onSyncDeliveryStatus() {
   const d0 = String(orderDate.value || '').trim() || todayShanghaiStr()
   try {
     await ElMessageBox.confirm(
-      [
-        `将扫描「单次点餐」中下单日为 ${d0} 的订单（至多 500 条，从新到旧），`,
-        `对「已支付、配送到家、尚未已完成」的单据：若顺丰推送表中回调状态已为妥投（编码 17），则将订单对齐为「已完成」。`,
-        '',
-        `仅依据本系统已收到的顺丰回调落库，不会主动向顺丰/UU 查询运力；`,
-        `门店自提、未推顺丰或由门店骑手配送的单据不会因本操作变更为已完成。`,
-      ].join('\n'),
+      `将 ${d0} 单次点餐中，顺丰监控已为「妥投」或「取消/撤单」但未回写系统的订单，同步为「已完成」或「顺丰取消」。是否继续？`,
       '同步订单状态',
       { type: 'info', confirmButtonText: '开始同步', cancelButtonText: '取消' },
     )

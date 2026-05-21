@@ -100,6 +100,7 @@ from app.services.member_service import (
 from app.services.single_meal_order_service import (
     admin_assign_courier_single_meal_order,
     admin_resync_single_meal_delivered_from_sf_monitor,
+    admin_resync_single_meal_from_sf_monitor,
     admin_wechat_refund_single_meal_order,
     bulk_admin_resync_single_meal_from_sf_monitor_for_order_day,
     list_admin_store_single_meal_orders_by_order_day,
@@ -758,7 +759,7 @@ def admin_orders_daily_single_meals_sync_delivery_status(
     max_orders: Annotated[int, Query(description="最多扫描单次订单条数（1～500）")] = 500,
 ):
     """
-    批量对齐：当日单次点餐中，顺丰推送表已为妥投(17)但未回写到订单的条目。
+    批量对齐：当日单次点餐中，顺丰推送表已为妥投(17)或取消/撤单(2/22)但未回写到订单的条目。
 
     使用本库 ``sf_same_city_pushes`` 中由回调写入的状态，不向运力端主动查询；UU / 门店自配送不在范围内。
     """
@@ -886,13 +887,10 @@ def admin_single_meal_sync_delivered_from_sf_monitor(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """单次零售顺丰单：若在「顺丰订单监控」中已为妥投(17)且推单入库成功，但订单状态未变为已完成时，点此幂等对齐。
-
-    需部署「嵌套 JSON 商户单号解析 + 状态递归抽取」回调修复后仍会漏记的历史单可用手动对齐；请先确认监控行上回调状态已为 17。
-    """
+    """单次零售顺丰单：按「顺丰订单监控」终态幂等对齐订单（妥投→已完成；取消/撤单→顺丰取消）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
-        msg = admin_resync_single_meal_delivered_from_sf_monitor(
+        msg = admin_resync_single_meal_from_sf_monitor(
             db,
             order_id=int(order_id),
             store_id=store_id,

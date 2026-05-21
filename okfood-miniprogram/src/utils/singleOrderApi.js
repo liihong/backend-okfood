@@ -43,6 +43,9 @@ export function singleOrderStatusMeta(o) {
   if (fulfill === 'delivered') {
     return { line1: '已送达', line2: '配送已完成', tone: 'ok' }
   }
+  if (fulfill === 'sf_cancelled') {
+    return { line1: '顺丰取消', line2: '配送已取消，如有疑问请联系客服', tone: 'warn' }
+  }
   return { line1: '待送达', line2: '骑手配餐配送中', tone: 'info' }
 }
 

@@ -16,12 +16,17 @@ from app.models.single_meal_order import SingleMealOrder
 from app.models.sf_same_city_push import SfSameCityPush
 from app.services.admin_delivery_fulfillment_service import subscription_fulfilled_try_sf_home_no_commit
 from app.services.sf_same_city_service import aggs_for_delivery_date, load_agg_for_stop_id
-from app.services.single_meal_order_service import mark_single_meal_delivered_sf_completion_no_commit
+from app.services.single_meal_order_service import (
+    mark_single_meal_delivered_sf_completion_no_commit,
+    mark_single_meal_sf_cancelled_no_commit,
+)
 
 logger = logging.getLogger(__name__)
 
 # 顺丰开放平台配送推送 order_status：17=配送员妥投完单（与后台监控文案一致）
 SF_ORDER_STATUS_DELIVERED_TUOTOU = 17
+# 2=订单取消、22=配送员撤单（与监控「取消订单」口径一致）
+SF_ORDER_STATUS_CANCELLED = (2, 22)
 
 SF_PUSH_KIND_DELIVERY_SHEET = "delivery_sheet"
 SF_PUSH_KIND_SINGLE_MEAL_RETAIL = "single_meal_retail"
@@ -310,6 +315,75 @@ def should_run_sf_auto_fulfillment(*, route_kind: str, pus: SfSameCityPush) -> b
     if rk == "order_complete":
         return True
     return _sf_push_effective_order_status(pus) == SF_ORDER_STATUS_DELIVERED_TUOTOU
+
+
+def should_apply_sf_cancel_sync(*, pus: SfSameCityPush) -> bool:
+    """创单成功且顺丰回调已为取消/撤单终态 (2/22) 时，回写单次点餐履约状态。"""
+    if int(pus.error_code or -1) != 0:
+        return False
+    st = _sf_push_effective_order_status(pus)
+    return st is not None and st in SF_ORDER_STATUS_CANCELLED
+
+
+def _apply_sf_cancel_to_single_meal_orders_for_push(
+    db: Session, pus: SfSameCityPush
+) -> dict[str, Any]:
+    """单次零售或大表合并中的单次点餐：顺丰取消/撤单时标 ``sf_cancelled``。"""
+    result: dict[str, Any] = {"single_meal_applied": 0, "single_meal_skipped": 0, "warnings": []}
+    if int(pus.error_code or -1) != 0:
+        result["warnings"].append("创单未成功，跳过取消同步")
+        return result
+    if not should_apply_sf_cancel_sync(pus=pus):
+        st = _sf_push_effective_order_status(pus)
+        result["warnings"].append(f"当前不满足顺丰取消同步条件 sf_callback_order_status={st!r}")
+        return result
+
+    kind = (getattr(pus, "push_kind", None) or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
+    oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
+    if kind == SF_PUSH_KIND_SINGLE_MEAL_RETAIL or oid_retail is not None:
+        if oid_retail is not None:
+            prev = db.get(SingleMealOrder, oid_retail)
+            before = str(getattr(prev, "fulfillment_status", "") or "").strip().lower() if prev else ""
+            mark_single_meal_sf_cancelled_no_commit(db, oid_retail)
+            after_row = db.get(SingleMealOrder, oid_retail)
+            after = str(getattr(after_row, "fulfillment_status", "") or "").strip().lower() if after_row else ""
+            if after == "sf_cancelled" and before != "sf_cancelled":
+                result["single_meal_applied"] = 1
+            else:
+                result["single_meal_skipped"] = 1
+        else:
+            msg = f"顺丰零售推单无法解析订单号 push_kind={kind} stop_id={pus.stop_id}"
+            result["warnings"].append(msg)
+            logger.warning(msg)
+        return result
+
+    sid = int(pus.store_id) if getattr(pus, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
+    agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
+    for oid in _single_meal_order_ids_for_push(db, pus, agg):
+        prev = db.get(SingleMealOrder, oid)
+        before = str(getattr(prev, "fulfillment_status", "") or "").strip().lower() if prev else ""
+        mark_single_meal_sf_cancelled_no_commit(db, oid)
+        after_row = db.get(SingleMealOrder, oid)
+        after = str(getattr(after_row, "fulfillment_status", "") or "").strip().lower() if after_row else ""
+        if after == "sf_cancelled" and before != "sf_cancelled":
+            result["single_meal_applied"] += 1
+        else:
+            result["single_meal_skipped"] += 1
+    return result
+
+
+def apply_sf_cancel_to_single_meal_orders_for_push(db: Session, pus: SfSameCityPush) -> dict[str, Any]:
+    """``cancel_by_sf`` / ``rider_cancel`` 等回调写入取消终态后调用（同一事务 commit 前）。"""
+    out = _apply_sf_cancel_to_single_meal_orders_for_push(db, pus)
+    logger.info(
+        "顺丰取消同步单次点餐 push_id=%s stop_id=%s applied=%s skipped=%s warnings=%s",
+        getattr(pus, "id", None),
+        pus.stop_id,
+        out.get("single_meal_applied"),
+        out.get("single_meal_skipped"),
+        out.get("warnings"),
+    )
+    return out
 
 
 def _member_id_by_phone(db: Session, phone: str, *, store_id: int) -> int | None:
