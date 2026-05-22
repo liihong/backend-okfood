@@ -472,7 +472,29 @@ def get_member_single_meal_order(db: Session, member_id: int, order_id: int) -> 
     row = db.get(SingleMealOrder, order_id)
     if not row or int(row.member_id) != int(member_id):
         raise HTTPException(status_code=404, detail="订单不存在")
-    return _single_meal_order_row_to_out(db, row)
+    out = _single_meal_order_row_to_out(db, row)
+    from app.services.store_config_service import get_store_config
+
+    cfg = get_store_config(db, store_id=int(row.store_id))
+    phone = (cfg.store_contact_phone or "").strip() or None
+    return out.model_copy(update={"store_contact_phone": phone})
+
+
+def member_cancel_single_meal_order(db: Session, *, member_id: int, order_id: int) -> str:
+    """会员端取消本人单次点餐订单（规则同管理端；已支付不退款）。"""
+    row = db.get(SingleMealOrder, order_id)
+    if not row or int(row.member_id) != int(member_id):
+        raise HTTPException(status_code=404, detail="订单不存在")
+    try:
+        return admin_cancel_single_meal_order(
+            db,
+            order_id=int(order_id),
+            store_id=int(row.store_id),
+            cancel_reason="用户取消订单",
+            cancel_sf=True,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, client_ip: str) -> dict[str, str]:

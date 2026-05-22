@@ -957,7 +957,7 @@ function goMyOrders() {
     uni.showToast({ title: '请先登录', icon: 'none' })
     return
   }
-  uni.navigateTo({ url: '/packageOrder/pages/myOrders/myOrders' })
+  uni.switchTab({ url: '/pages/orders/index' })
 }
 
 const STORAGE_OPEN_MY_ORDERS = 'okfood_open_my_orders_after_checkout'
@@ -969,10 +969,10 @@ function tryOpenOrdersFromCheckoutFlag() {
     uni.removeStorageSync(STORAGE_OPEN_MY_ORDERS)
     setTimeout(() => {
       if (!getMemberToken()) return
-      uni.navigateTo({
-        url: '/packageOrder/pages/myOrders/myOrders',
+      uni.switchTab({
+        url: '/pages/orders/index',
         fail: (e) => {
-          console.error('navigateTo myOrders', e)
+          console.error('switchTab orders', e)
         },
       })
     }, 80)

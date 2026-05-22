@@ -6,6 +6,12 @@ const MEMBER_LIST = [
     selectedIconPath: '/static/caidan-sel.png',
   },
   {
+    pagePath: '/pages/orders/index',
+    text: '订单',
+    iconPath: '/static/order-nor.png',
+    selectedIconPath: '/static/order-sel.png',
+  },
+  {
     pagePath: '/pages/mine/index',
     text: '我的',
     iconPath: '/static/mine-nor.png',

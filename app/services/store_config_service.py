@@ -82,6 +82,12 @@ def _store_out_from_row(st: Store) -> StoreConfigOut:
         store_logo_url=st.store_logo_url,
         store_lng=float(st.store_lng) if st.store_lng is not None else None,
         store_lat=float(st.store_lat) if st.store_lat is not None else None,
+        store_contact_phone=(
+            str(st.store_contact_phone).strip() or None
+            if getattr(st, "store_contact_phone", None) is not None
+            and str(st.store_contact_phone or "").strip()
+            else None
+        ),
         courier_delivery_base_yuan=Decimal(st.courier_delivery_base_yuan),
         courier_delivery_extra_per_unit_yuan=Decimal(st.courier_delivery_extra_per_unit_yuan),
         member_card_week_price_yuan=s.MEMBER_CARD_WEEK_PRICE_YUAN if wk is None else Decimal(wk),
@@ -245,6 +251,9 @@ def update_store_config(db: Session, store_id: int, body: StoreConfigUpdateIn) -
         st.store_lng = body.store_lng
     if "store_lat" in fs:
         st.store_lat = body.store_lat
+    if "store_contact_phone" in fs:
+        raw_phone = body.store_contact_phone
+        st.store_contact_phone = None if raw_phone is None else (str(raw_phone).strip() or None)
     if "courier_delivery_base_yuan" in fs and body.courier_delivery_base_yuan is not None:
         st.courier_delivery_base_yuan = body.courier_delivery_base_yuan
     if (

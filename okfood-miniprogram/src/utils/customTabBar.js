@@ -13,6 +13,12 @@ const TAB_BAR_MEMBER_LIST = [
     selectedIconPath: '/static/caidan-sel.png',
   },
   {
+    pagePath: '/pages/orders/index',
+    text: '订单',
+    iconPath: '/static/order-nor.png',
+    selectedIconPath: '/static/order-sel.png',
+  },
+  {
     pagePath: '/pages/mine/index',
     text: '我的',
     iconPath: '/static/mine-nor.png',
@@ -77,7 +83,9 @@ export function syncCustomTabBar() {
     selected = route.includes('profile') ? 1 : 0
   } else {
     role = 'member'
-    selected = route.includes('mine') ? 1 : 0
+    if (route.includes('orders')) selected = 1
+    else if (route.includes('mine')) selected = 2
+    else selected = 0
   }
   const list = role === 'rider' ? TAB_BAR_RIDER_LIST : TAB_BAR_MEMBER_LIST
   applyCustomTabBarPatch(cur.getTabBar(), { selected, role, list })

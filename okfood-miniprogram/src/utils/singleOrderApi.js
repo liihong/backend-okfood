@@ -30,10 +30,27 @@ export function formatSingleOrderCreatedAt(iso) {
  * @param {Record<string, unknown>} o
  * @returns {{ line1: string, line2: string, tone: 'warn' | 'ok' | 'info' }}
  */
+/**
+ * @param {Record<string, unknown>} o
+ * @returns {boolean}
+ */
+export function canCancelSingleMealOrder(o) {
+  if (!o || typeof o !== 'object') return false
+  const pay = String(o.pay_status || '').trim()
+  const f = String(o.fulfillment_status || '').trim().toLowerCase()
+  if (pay === '已退款' || f === 'delivered' || f === 'cancelled') return false
+  if (pay === '未支付') return f === 'pending'
+  if (pay === '已支付') return f === 'pending' || f === 'accepted' || f === 'sf_cancelled'
+  return false
+}
+
 export function singleOrderStatusMeta(o) {
   const pay = String(o.pay_status || '')
   const fulfill = String(o.fulfillment_status || '')
   const pickup = !!o.store_pickup
+  if (fulfill === 'cancelled') {
+    return { line1: '已取消', line2: pay === '已支付' ? '订单已取消，款项未自动退款' : '订单已关闭', tone: 'warn' }
+  }
   if (pay === '未支付') {
     return { line1: '待支付', line2: '请尽快完成支付', tone: 'warn' }
   }
@@ -98,6 +115,16 @@ export function createSingleMealOrder(body) {
  */
 export function fetchWechatJsapiPayParams(orderId) {
   return request(`/api/user/single-orders/${orderId}/pay/wechat-jsapi`, {
+    method: 'POST',
+    data: {},
+  })
+}
+
+/**
+ * @param {number} orderId
+ */
+export function cancelSingleMealOrder(orderId) {
+  return request(`/api/user/single-orders/${orderId}/cancel`, {
     method: 'POST',
     data: {},
   })

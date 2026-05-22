@@ -40,6 +40,10 @@ class SingleMealOrderOut(BaseModel):
     )
     courier_id: str | None = None
     address_summary: str
+    store_contact_phone: str | None = Field(
+        None,
+        description="商家联系电话（来自门店配置）；小程序「联系商家」拨打",
+    )
     created_at: datetime | None = Field(None, description="下单时间（北京时间，无时区列）")
 
 

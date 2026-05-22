@@ -125,6 +125,11 @@ class StoreConfigOut(BaseModel):
     store_logo_url: str | None = Field(None, max_length=512)
     store_lng: float | None = Field(None, description="GCJ-02 经度")
     store_lat: float | None = Field(None, description="GCJ-02 纬度")
+    store_contact_phone: str | None = Field(
+        None,
+        max_length=20,
+        description="商家联系电话；小程序订单详情「联系商家」直接拨打",
+    )
     courier_delivery_base_yuan: Decimal = Field(
         ...,
         ge=0,
@@ -201,6 +206,11 @@ class StoreConfigUpdateIn(BaseModel):
     store_logo_url: str | None = Field(None, max_length=512)
     store_lng: float | None = Field(None, ge=-180, le=180)
     store_lat: float | None = Field(None, ge=-90, le=90)
+    store_contact_phone: str | None = Field(
+        None,
+        max_length=20,
+        description="商家联系电话；传空字符串可清空",
+    )
     courier_delivery_base_yuan: Decimal | None = Field(
         None,
         ge=0,

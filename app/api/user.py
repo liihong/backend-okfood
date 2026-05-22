@@ -98,6 +98,7 @@ from app.services.single_meal_order_service import (
     create_single_meal_order,
     get_member_single_meal_order,
     list_member_single_meal_orders,
+    member_cancel_single_meal_order,
     prepare_wechat_jsapi_for_order,
 )
 
@@ -480,6 +481,21 @@ def read_single_order_me(
     """单次点餐订单详情（仅本人）。"""
     out = get_member_single_meal_order(db, member_id, order_id)
     return success(data=dump_model(out), msg="获取成功")
+
+
+@router.post("/single-orders/{order_id}/cancel")
+@limiter.limit("30/minute")
+def cancel_single_order_me(
+    request: Request,
+    order_id: int,
+    db: SessionDep,
+    member_id: MemberIdScoped,
+):
+    """会员取消本人单次点餐订单；已支付不退款，配送中订单会尝试同步取消顺丰。"""
+    _ = request
+    msg = member_cancel_single_meal_order(db, member_id=member_id, order_id=order_id)
+    out = get_member_single_meal_order(db, member_id, order_id)
+    return success(data=dump_model(out), msg=msg)
 
 
 @router.post("/single-orders")

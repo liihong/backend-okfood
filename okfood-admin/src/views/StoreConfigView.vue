@@ -16,6 +16,7 @@ const saving = ref(false)
 const logoUploading = ref(false)
 const form = ref({
   store_name: '',
+  store_contact_phone: '',
   store_logo_url: '',
   store_lng: '',
   store_lat: '',
@@ -41,6 +42,8 @@ async function loadConfig() {
   try {
     const d = await apiJson('/api/admin/store-config', {}, { auth: true })
     form.value.store_name = d?.store_name != null ? String(d.store_name) : ''
+    form.value.store_contact_phone =
+      d?.store_contact_phone != null ? String(d.store_contact_phone).trim() : ''
     form.value.store_logo_url = d?.store_logo_url != null ? String(d.store_logo_url) : ''
     form.value.store_lng =
       d?.store_lng != null && Number.isFinite(Number(d.store_lng)) ? String(d.store_lng) : ''
@@ -80,6 +83,7 @@ async function saveConfig() {
   const payload = {}
   const name = form.value.store_name.trim()
   payload.store_name = name || null
+  payload.store_contact_phone = form.value.store_contact_phone.trim() || null
   const logo = form.value.store_logo_url.trim()
   payload.store_logo_url = logo || null
 
@@ -249,6 +253,19 @@ onMounted(() => {
         <div class="sc-field">
           <label class="sc-label" for="sc-name">门店名称</label>
           <el-input id="sc-name" v-model="form.store_name" class="sc-input-el" maxlength="128" clearable />
+        </div>
+
+        <div class="sc-field">
+          <label class="sc-label" for="sc-contact-phone">商家电话</label>
+          <el-input
+            id="sc-contact-phone"
+            v-model="form.store_contact_phone"
+            class="sc-input-el"
+            maxlength="20"
+            clearable
+            placeholder="小程序订单详情「联系商家」将直接拨打此号码"
+          />
+          <p class="sc-hint sc-hint--tight">供餐咨询、取消订单等；留空则小程序不展示拨打能力。</p>
         </div>
 
         <div class="sc-field sc-field--last">

@@ -82,6 +82,21 @@
         >
           {{ paying ? '支付中…' : '继续支付' }}
         </button>
+
+        <view v-if="showOrderActions" :class="['action-row', { 'action-row--solo': !canCancel }]">
+          <button
+            v-if="canCancel"
+            class="btn-action btn-action--ghost"
+            :disabled="cancelling"
+            hover-class="none"
+            @tap="onCancelOrder"
+          >
+            {{ cancelling ? '取消中…' : '取消订单' }}
+          </button>
+          <button class="btn-action btn-action--primary" hover-class="none" @tap="onContactMerchant">
+            联系商家
+          </button>
+        </view>
         <view class="tail" />
       </view>
     </scroll-view>
@@ -93,6 +108,8 @@ import { ref, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
+  canCancelSingleMealOrder,
+  cancelSingleMealOrder,
   fetchWechatJsapiPayParams,
   formatSingleOrderCreatedAt,
   getSingleMealOrder,
@@ -106,8 +123,13 @@ const order = ref(null)
 const loading = ref(true)
 const loadError = ref('')
 const paying = ref(false)
+const cancelling = ref(false)
 
 const status = computed(() => (order.value ? singleOrderStatusMeta(order.value) : { line1: '', line2: '', tone: 'info' }))
+
+const canCancel = computed(() => (order.value ? canCancelSingleMealOrder(order.value) : false))
+
+const showOrderActions = computed(() => !!order.value)
 
 const fulfillLabel = computed(() => {
   const o = order.value
@@ -150,6 +172,58 @@ async function loadDetail() {
     loadError.value = e instanceof Error ? e.message : '加载失败'
   } finally {
     loading.value = false
+  }
+}
+
+function onContactMerchant() {
+  const raw = order.value?.store_contact_phone
+  const phone = raw != null ? String(raw).replace(/\s/g, '').trim() : ''
+  if (!phone) {
+    uni.showToast({ title: '暂未配置商家电话', icon: 'none' })
+    return
+  }
+  uni.makePhoneCall({
+    phoneNumber: phone,
+    fail: () => {
+      uni.showToast({ title: '无法拨打电话', icon: 'none' })
+    },
+  })
+}
+
+function onCancelOrder() {
+  if (!order.value || cancelling.value || !canCancel.value) return
+  const paid = order.value.pay_status === '已支付'
+  const content = paid
+    ? '确定取消该订单？已支付金额不会自动退款，如有疑问请联系商家。'
+    : '确定取消该订单？'
+  uni.showModal({
+    title: '取消订单',
+    content,
+    confirmText: '确定取消',
+    confirmColor: '#b91c1c',
+    success: (res) => {
+      if (res.confirm) void doCancelOrder()
+    },
+  })
+}
+
+async function doCancelOrder() {
+  if (!order.value || cancelling.value) return
+  cancelling.value = true
+  uni.showLoading({ title: '处理中…', mask: true })
+  try {
+    const data = await cancelSingleMealOrder(order.value.id)
+    order.value = data && typeof data === 'object' ? data : order.value
+    uni.showToast({ title: '订单已取消', icon: 'success' })
+    await loadDetail()
+  } catch (e) {
+    uni.showToast({
+      title: e instanceof Error ? e.message : '取消失败',
+      icon: 'none',
+    })
+  } finally {
+    cancelling.value = false
+    uni.hideLoading()
   }
 }
 
@@ -341,6 +415,48 @@ async function continuePay() {
 
 .btn-pay::after {
   border: none;
+}
+
+.action-row {
+  display: flex;
+  gap: 20rpx;
+  margin-top: 24rpx;
+}
+
+.action-row--solo .btn-action {
+  flex: none;
+  width: 100%;
+}
+
+.btn-action {
+  flex: 1;
+  margin: 0;
+  padding: 32rpx 24rpx;
+  border-radius: 60rpx;
+  font-weight: 950;
+  font-size: 30rpx;
+  line-height: 1.35;
+  border: none;
+}
+
+.btn-action::after {
+  border: none;
+}
+
+.btn-action--ghost {
+  background: #fff;
+  color: #b91c1c;
+  border: 2rpx solid rgba(185, 28, 28, 0.35);
+}
+
+.btn-action--primary {
+  background: $ok-forest-green;
+  color: #fff;
+  box-shadow: 0 16rpx 40rpx rgba(4, 120, 87, 0.25);
+}
+
+.btn-action[disabled] {
+  opacity: 0.55;
 }
 
 .tail {

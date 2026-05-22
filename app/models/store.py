@@ -23,6 +23,7 @@ class Store(Base):
     store_logo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     store_lng: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
     store_lat: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
+    store_contact_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     leave_deadline_time: Mapped[time] = mapped_column(Time, nullable=False)
     courier_delivery_base_yuan: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("4.00"))
     courier_delivery_extra_per_unit_yuan: Mapped[Decimal] = mapped_column(
