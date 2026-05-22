@@ -700,6 +700,35 @@
   max-width: 42rem;
 }
 
+/**
+ * hidePageTitle 自带顶栏页：与「今日营业概览」DeliveryRegionsOverviewPanel 边距、标题行一致
+ * （左右仅 main-body 的 padding，不额外 max-width 居中收窄）
+ */
+.page-content-shell {
+  margin: 0;
+  padding: 0 0 2rem;
+  background: transparent;
+  min-width: 0;
+  width: 100%;
+}
+
+.page-content-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  width: 100%;
+}
+
+.page-content-title-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .members-header-stats {
   font-size: 0.9375rem;
   font-weight: 500;
