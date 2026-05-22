@@ -47,7 +47,7 @@ npm run build:mp-weixin
 | `src/pages.json` | 页面路由、分包、`tabBar` |
 | `src/manifest.json` | 应用名称、版本、各端 AppID 等 |
 
-底部 **Tab**：「菜单」与「我的」。
+底部 **Tab**（会员）：「菜单」「订单」「我的」。Tab 图标放在项目根目录 **`static/`**（如 `order-nor.png` / `order-sel.png`），建议 **81×81 像素**、单张 **&lt; 40KB**；`pages.json` 与 `src/utils/customTabBar.js` 中路径需一致。
 
 ## 配置说明
 
