@@ -421,6 +421,43 @@ def _ids_from_push_snapshot(snap: Any) -> tuple[list[int], list[int]]:
     return mids, oids
 
 
+def member_has_active_sf_push_on_delivery_date(
+    db: Session,
+    *,
+    member_id: int,
+    store_id: int,
+    delivery_date: date,
+) -> bool:
+    """会员在指定业务日是否命中未取消的顺丰大表推单（以创单快照 fulfillment_member_ids 为准）。"""
+    from app.services.sf_same_city_service import (
+        _sf_push_row_cancelled_predicate,
+        load_agg_for_stop_id,
+    )
+
+    mid = int(member_id)
+    sid = int(store_id)
+    flt = and_(
+        SfSameCityPush.store_id == sid,
+        SfSameCityPush.delivery_date == delivery_date,
+        SfSameCityPush.error_code == 0,
+        ~_sf_push_row_cancelled_predicate(),
+        or_(
+            SfSameCityPush.push_kind.is_(None),
+            SfSameCityPush.push_kind == "",
+            SfSameCityPush.push_kind == "delivery_sheet",
+        ),
+    )
+    rows = db.scalars(select(SfSameCityPush).where(flt)).all()
+    for pus in rows:
+        snap_mids, _ = _ids_from_push_snapshot(pus.request_snapshot)
+        if mid in snap_mids:
+            return True
+        agg = load_agg_for_stop_id(db, delivery_date, pus.stop_id, store_id=sid)
+        if mid in _subscription_member_ids_for_push(db, pus, agg):
+            return True
+    return False
+
+
 def _subscription_member_ids_for_push(db: Session, pus: SfSameCityPush, agg: Any | None) -> list[int]:
     """订阅待扣次会员：优先停靠点聚合，其次创单快照，最后按快照收件手机匹配。"""
     seen: set[int] = set()

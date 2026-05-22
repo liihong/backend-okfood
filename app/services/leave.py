@@ -1,5 +1,9 @@
 from datetime import date, time
 
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from app.models.enums import LeaveType
 from app.models.member import Member
 
 
@@ -28,3 +32,27 @@ def is_leave_deadline_passed(now_time, deadline) -> bool:
     """当前时间是否已超过「当日请假截止」时刻（仅比较 time，口径为北京时间）。"""
     d = deadline if deadline is not None else time(21, 0, 0)
     return now_time > d
+
+
+def guard_member_self_cancel_leave(db: Session, member: Member, typ: LeaveType) -> None:
+    """会员自助取消请假：若取消会改变「当日已向顺丰推单」业务日的缺席状态，则须联系客服。"""
+    from app.core.timeutil import today_shanghai
+    from app.services.sf_order_fulfillment_service import member_has_active_sf_push_on_delivery_date
+
+    if typ != LeaveType.CANCEL:
+        return
+
+    biz_today = today_shanghai()
+    if not is_absent_on_delivery_date(member, biz_today, today=biz_today):
+        return
+
+    if member_has_active_sf_push_on_delivery_date(
+        db,
+        member_id=int(member.id),
+        store_id=int(member.store_id),
+        delivery_date=biz_today,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="当日配送已向顺丰推单，无法自助取消请假，请联系客服处理",
+        )

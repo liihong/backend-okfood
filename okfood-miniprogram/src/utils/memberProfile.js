@@ -1,4 +1,4 @@
-import { minMemberDeliveryStartYmd } from '@/utils/menuApi.js'
+import { minMemberDeliveryStartYmd } from '@/utils/memberDeliveryDate.js'
 
 /** 与后端 `STUB_MEMBER_NAME` 一致 */
 export const MEMBER_STUB_NAME = '待完善'

@@ -262,6 +262,9 @@ async function submitEditMember() {
                     />
                     <span class="mem-affix-suf-el">份</span>
                   </div>
+                  <p class="mem-hint-soft">
+                    修改后<strong>次日配送日</strong>起生效，当日备餐/顺丰推单份数不变；若须调整当日配送请协调顺丰或厨房。
+                  </p>
                 </div>
                 <div class="mem-field">
                   <label class="mem-lab">套餐类型</label>

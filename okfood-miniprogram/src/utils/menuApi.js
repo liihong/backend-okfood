@@ -189,15 +189,7 @@ export function isShanghaiPastDailyCutoff(
   }
 }
 
-/**
- * 会员起送业务日可选的最小 YYYY-MM-DD（上海）：
- * 未过当日 10:00 最早为今天；10:00 及之后最早为明天。不可选早于该最小日。
- */
-export function minMemberDeliveryStartYmd(now = new Date()) {
-  const today = ymdTodayShanghai(now)
-  const delta = isShanghaiPastDailyCutoff(now) ? 1 : 0
-  return addDaysIso(today, delta)
-}
+export { minMemberDeliveryStartYmd } from '@/utils/memberDeliveryDate.js'
 
 /**
  * 单点供餐日是否允许发起下单（与后端 `single_meal_order_service.create_single_meal_order` 一致）：

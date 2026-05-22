@@ -52,7 +52,7 @@ export async function ensureMemberPhoneFromStoredToken() {
 }
 
 /** 微信授权登录后：写入 token；有手机号时写 memberPhone（展示用，档案以 GET /api/user/me 为准） */
-export function applyWxLoginResponse(data) {
+function persistMemberTokenFromLoginResponse(data) {
   if (!data || typeof data !== 'object') {
     throw new Error('登录响应异常')
   }
@@ -66,6 +66,10 @@ export function applyWxLoginResponse(data) {
   if (phone) {
     uni.setStorageSync('memberPhone', phone)
   }
+}
+
+export function applyWxLoginResponse(data) {
+  persistMemberTokenFromLoginResponse(data)
 }
 
 export function hasWxPhoneAuthDetail(detail) {
@@ -91,15 +95,15 @@ export async function syncWxMiniOpenidFromLogin() {
 }
 
 export async function wxMiniMemberLogin(phoneAuthDetail) {
-  const loginRes = await new Promise((resolve, reject) => {
+  const wxLoginRes = await new Promise((resolve, reject) => {
     uni.login({ provider: 'weixin', success: resolve, fail: reject })
   })
-  const jsCode = loginRes.code
-  if (!jsCode) {
+  const wxJsCode = wxLoginRes.code
+  if (!wxJsCode) {
     throw new Error('未取得微信登录 code')
   }
 
-  const body = { js_code: jsCode }
+  const body = { js_code: wxJsCode }
   if (typeof phoneAuthDetail === 'string' && phoneAuthDetail) {
     body.phone_code = phoneAuthDetail
   } else if (phoneAuthDetail?.code) {
@@ -116,22 +120,37 @@ export async function wxMiniMemberLogin(phoneAuthDetail) {
 
 /**
  * 登录并落库 token、手机号；若已写入 memberPhone，立即 GET /api/user/me 拉会员档案。
+ * 注意：局部变量勿用短名，避免生产构建压缩后与 applyWxLoginResponse 混淆导致「r is not a function」。
  */
 export async function wxMiniMemberLoginAndStore(phoneAuth) {
-  const data = await wxMiniMemberLogin(phoneAuth)
-  applyWxLoginResponse(data)
+  const loginPayload = await wxMiniMemberLogin(phoneAuth)
+  // 内联落库，避免生产包内 r(t) 与 try 内 const r 压缩重名
+  if (!loginPayload || typeof loginPayload !== 'object') {
+    throw new Error('登录响应异常')
+  }
+  const accessToken =
+    loginPayload.access_token || loginPayload.accessToken || loginPayload.token
+  if (!accessToken) {
+    throw new Error('未返回 token')
+  }
+  uni.setStorageSync('okfood_member_token', accessToken)
+  const loginPhone = pickPhoneFromLoginData(loginPayload)
+  if (loginPhone) {
+    uni.setStorageSync('memberPhone', loginPhone)
+  }
   try {
-    const profile = await request('/api/user/me', { method: 'GET' })
-    const p = profile?.phone != null ? String(profile.phone).replace(/\D/g, '') : ''
-    if (/^1[3-9]\d{9}$/.test(p)) {
-      uni.setStorageSync('memberPhone', p)
+    const memberProfile = await request('/api/user/me', { method: 'GET' })
+    const phoneDigits =
+      memberProfile?.phone != null ? String(memberProfile.phone).replace(/\D/g, '') : ''
+    if (/^1[3-9]\d{9}$/.test(phoneDigits)) {
+      uni.setStorageSync('memberPhone', phoneDigits)
     }
-    if (profile?.id != null) {
-      uni.setStorageSync('memberId', String(profile.id))
+    if (memberProfile?.id != null) {
+      uni.setStorageSync('memberId', String(memberProfile.id))
     }
-    return { login: data, profile }
+    return { login: loginPayload, profile: memberProfile }
   } catch (e) {
     if (isUserMeNotFoundError(e)) clearMemberSession()
-    return { login: data, profile: null }
+    return { login: loginPayload, profile: null }
   }
 }

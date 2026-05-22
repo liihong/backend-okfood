@@ -58,8 +58,10 @@ function applyCustomTabBarPatch(tabBar, patch) {
       console.warn('[syncCustomTabBar] setData', e)
     }
   }
-  if (typeof wx !== 'undefined' && typeof wx.nextTick === 'function') {
-    wx.nextTick(run)
+  // 生产包勿走 vendor 代理的 wx，避免 nextTick 异常
+  const wxGlobal = typeof globalThis !== 'undefined' ? globalThis.wx : undefined
+  if (wxGlobal && typeof wxGlobal.nextTick === 'function') {
+    wxGlobal.nextTick(run)
   } else {
     setTimeout(run, 0)
   }

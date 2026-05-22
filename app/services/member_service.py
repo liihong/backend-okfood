@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 
 from app.core.timeutil import (
+    min_leave_start_shanghai,
     min_member_delivery_start_shanghai,
     now_shanghai,
     today_shanghai,
@@ -39,7 +40,7 @@ from app.schemas.user import Location, MemberOut, RegisterIn
 
 from app.services import amap
 
-from app.services.leave import is_leave_deadline_passed
+from app.services.leave import guard_member_self_cancel_leave, is_leave_deadline_passed
 
 from app.services.member_address_service import (
     admin_apply_manual_delivery_region,
@@ -664,7 +665,8 @@ def patch_member_profile(
             member_id=member_id,
             operation_type=OP_UPDATE_DAILY_UNITS,
             summary=(
-                f"修改每日送达份数 {prev_snapshot['daily_meal_units']}→{new_snapshot['daily_meal_units']}"
+                f"修改每日送达份数 {prev_snapshot['daily_meal_units']}→"
+                f"{new_snapshot['daily_meal_units']}（次日生效）"
             ),
             before={"daily_meal_units": prev_snapshot["daily_meal_units"]},
             after={"daily_meal_units": new_snapshot["daily_meal_units"]},
@@ -788,6 +790,9 @@ def leave_request(
         "leave_range_end": m.leave_range_end.isoformat() if m.leave_range_end else None,
     }
 
+    if typ == LeaveType.CANCEL and not skip_leave_deadline:
+        guard_member_self_cancel_leave(db, m, typ)
+
     if typ == LeaveType.CANCEL:
 
         m.is_leaved_tomorrow = False
@@ -833,6 +838,11 @@ def leave_request(
         if end < start:
 
             raise HTTPException(status_code=400, detail="结束日期不能早于开始日期")
+
+        if not skip_leave_deadline:
+            min_day = min_leave_start_shanghai(now)
+            if start < min_day or end < min_day:
+                raise HTTPException(status_code=400, detail="区间请假须从明天起选日期")
 
         m.leave_range_start = start
 

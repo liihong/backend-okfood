@@ -7,6 +7,9 @@
           每个配送日需送达的份数；骑手确认送达时按该份数从剩余次数中扣减。此处仅可通过加减调整，范围为
           1～10 份。
         </text>
+        <view class="notice notice--info">
+          <text class="notice-txt">修改次日配送日起生效，当日已推顺丰的份数不变。</text>
+        </view>
 
         <view v-if="serverUnitsRaw > 10" class="notice">
           <text class="notice-txt">
@@ -170,6 +173,15 @@ onShow(() => {
   border-radius: 20rpx;
   padding: 24rpx 28rpx;
   margin-bottom: 28rpx;
+}
+
+.notice--info {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.notice--info .notice-txt {
+  color: #1e40af;
 }
 
 .notice-txt {

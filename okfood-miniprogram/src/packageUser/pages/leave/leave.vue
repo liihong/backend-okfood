@@ -468,7 +468,8 @@ async function onLeaveRefresherRefresh() {
 function confirmCancelAllLeave() {
   uni.showModal({
     title: '取消请假',
-    content: '将清除当前区间请假及「明天请假」标记，确定取消？',
+    content:
+      '将清除当前区间请假及「明天请假」标记，确定取消？\n若当日配送已向顺丰推单，将无法自助取消，请联系客服。',
     success: async (res) => {
       if (!res.confirm) return
       if (leaveActionBusy.value) return

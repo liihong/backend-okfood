@@ -34,6 +34,13 @@ def min_member_delivery_start_shanghai(now: datetime | None = None) -> date:
     return t
 
 
+def min_leave_start_shanghai(now: datetime | None = None) -> date:
+    """会员自助请假允许的最早业务日（上海）：跨日后不可请「当日」假，最早为明天。"""
+    n = now if now is not None else now_shanghai()
+    t = n.date()
+    return t.fromordinal(t.toordinal() + 1)
+
+
 def shanghai_naive_range_for_calendar_day(d: date) -> tuple[datetime, datetime]:
     """上海自然日 [d 00:00, 次日 00:00)（左闭右开），墙钟与 Asia/Shanghai 一致。
 
