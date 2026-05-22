@@ -110,7 +110,7 @@ const router = createRouter({
           path: 'finance',
           name: 'finance',
           component: FinanceView,
-          meta: { title: '财务中心', ownerAdminOnly: true },
+          meta: { title: '财务中心', ownerAdminOnly: true, hidePageTitle: true },
         },
         {
           path: 'menu',
@@ -122,7 +122,7 @@ const router = createRouter({
           path: 'weekly-menu',
           name: 'weekly-menu',
           component: WeeklyMenuView,
-          meta: { title: '本周菜单', fullAdminOnly: true },
+          meta: { title: '本周菜单', fullAdminOnly: true, hidePageTitle: true },
         },
         {
           path: 'store-config',
@@ -140,13 +140,13 @@ const router = createRouter({
           path: 'system/membership-templates',
           name: 'system-membership-templates',
           component: MembershipTemplatesView,
-          meta: { title: '会员卡管理', ownerAdminOnly: true },
+          meta: { title: '会员卡管理', ownerAdminOnly: true, hidePageTitle: true },
         },
         {
           path: 'system/retail-catalog',
           name: 'system-retail-catalog',
           component: RetailCatalogView,
-          meta: { title: '普通商品管理', ownerAdminOnly: true },
+          meta: { title: '普通商品管理', ownerAdminOnly: true, hidePageTitle: true },
         },
       ],
     },

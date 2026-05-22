@@ -1042,7 +1042,7 @@ onMounted(() => {
             <span class="dro-map-toolbar-title">实时地理分布 (LIVE)</span>
           </div>
           <label class="dro-map-pickup-toggle">
-            <el-checkbox v-model="showSelfPickupPoints" class="dro-map-pickup-cb">自提显示</el-checkbox>
+            <el-checkbox v-model="showSelfPickupPoints">自提显示</el-checkbox>
           </label>
         </div>
         <div class="dro-map-body">
@@ -2421,6 +2421,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .dro-map-toolbar-live-dot {
@@ -2437,6 +2439,10 @@ onMounted(() => {
   color: #334155;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dro-map-pickup-toggle {
@@ -2445,6 +2451,7 @@ onMounted(() => {
   gap: 0.5rem;
   cursor: pointer;
   user-select: none;
+  flex-shrink: 0;
 }
 
 .dro-map-pickup-label {
@@ -2455,10 +2462,23 @@ onMounted(() => {
   letter-spacing: 0.05em;
 }
 
-.dro-map-pickup-cb {
-  width: 14px;
-  height: 14px;
-  accent-color: #10b981;
+/**
+ * 切勿给 el-checkbox 根节点写死宽高：会把整块控件压成极小区域，文案「自提显示」被裁切。
+ * 勾选态颜色通过内部元素覆盖。
+ */
+.dro-map-pickup-toggle :deep(.el-checkbox__label) {
+  font-size: 13px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.dro-map-pickup-toggle :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
+  background-color: #10b981;
+  border-color: #10b981;
+}
+
+.dro-map-pickup-toggle :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
+  color: #0f766e;
 }
 
 .dro-map-body {
