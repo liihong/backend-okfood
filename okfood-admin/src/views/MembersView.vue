@@ -519,6 +519,7 @@ const deliveryRecordTarget = ref(null)
 const deliveryRecordLoading = ref(false)
 const deliveryRecordDates = ref([])
 const deliveryRecordTotal = ref(0)
+const deliveryRecordTotalMeals = ref(0)
 const deliveryRecordTruncated = ref(false)
 
 function formatDeliveryBizYmdLabel(ymd) {
@@ -543,6 +544,7 @@ async function openMemberDeliveryRecords(u) {
   deliveryRecordTarget.value = u
   deliveryRecordDates.value = []
   deliveryRecordTotal.value = 0
+  deliveryRecordTotalMeals.value = 0
   deliveryRecordTruncated.value = false
   showDeliveryRecordModal.value = true
   deliveryRecordLoading.value = true
@@ -550,9 +552,16 @@ async function openMemberDeliveryRecords(u) {
     const data = await apiJson(`/api/admin/users/${Number(u.id)}/delivered-dates`, {}, { auth: true })
     const items = Array.isArray(data?.items) ? data.items : []
     deliveryRecordDates.value = items
-      .map((row) => (row && row.delivery_date != null ? String(row.delivery_date).slice(0, 10) : ''))
+      .map((row) => {
+        if (!row || row.delivery_date == null) return null
+        const ymd = String(row.delivery_date).slice(0, 10)
+        if (!ymd) return null
+        const mealUnits = Math.max(1, Number(row.meal_units) || 1)
+        return { delivery_date: ymd, meal_units: mealUnits }
+      })
       .filter(Boolean)
     deliveryRecordTotal.value = Number(data?.total) || deliveryRecordDates.value.length
+    deliveryRecordTotalMeals.value = Number(data?.total_meal_units) || 0
     deliveryRecordTruncated.value = Boolean(data?.truncated)
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
@@ -574,6 +583,7 @@ watch(showDeliveryRecordModal, (v) => {
     deliveryRecordTarget.value = null
     deliveryRecordDates.value = []
     deliveryRecordTotal.value = 0
+    deliveryRecordTotalMeals.value = 0
     deliveryRecordTruncated.value = false
   }
 })
@@ -1066,6 +1076,12 @@ onMounted(async () => {
             <h3>消费记录</h3>
             <p>已送达配送日</p>
           </div>
+          <div
+            v-if="!deliveryRecordLoading"
+            class="delivery-records-header-stat"
+          >
+            截至当前已消费 <strong>{{ deliveryRecordTotalMeals }}</strong> 份餐
+          </div>
           <el-button text circle class="close-btn" @click="showDeliveryRecordModal = false">
             <X :size="20" />
           </el-button>
@@ -1084,12 +1100,13 @@ onMounted(async () => {
               <span v-if="deliveryRecordTruncated" class="delivery-records-truncated">（仅显示最近部分，可联系技术导出全量）</span>
             </p>
             <ul v-if="deliveryRecordDates.length" class="delivery-records-list">
-              <li v-for="(ymd, idx) in deliveryRecordDates" :key="`${ymd}-${idx}`">
+              <li v-for="(row, idx) in deliveryRecordDates" :key="`${row.delivery_date}-${idx}`">
                 <span class="delivery-records-idx">{{ idx + 1 }}</span>
                 <span class="delivery-records-line">
-                  {{ formatDeliveryBizYmdLabel(ymd) }}
-                  <span class="delivery-records-ymd-muted">（{{ ymd }}）</span>
+                  {{ formatDeliveryBizYmdLabel(row.delivery_date) }}
+                  <span class="delivery-records-ymd-muted">（{{ row.delivery_date }}）</span>
                 </span>
+                <span class="delivery-records-units">{{ row.meal_units }} 份</span>
               </li>
             </ul>
             <p v-else class="delivery-records-empty">暂无记录。未产生「确认送达」或无套餐扣次时为空。</p>

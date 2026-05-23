@@ -34,10 +34,37 @@ def is_leave_deadline_passed(now_time, deadline) -> bool:
     return now_time > d
 
 
-def guard_member_self_cancel_leave(db: Session, member: Member, typ: LeaveType) -> None:
-    """会员自助取消请假：若取消会改变「当日已向顺丰推单」业务日的缺席状态，则须联系客服。"""
+SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG = (
+    "当日配送已向顺丰推单，如需修改请联系客服"
+)
+
+
+def guard_member_self_service_during_sf_fulfillment(
+    db: Session,
+    member: Member,
+    *,
+    delivery_date: date | None = None,
+) -> None:
+    """
+    顺丰推单后、当日订阅尚未标记送达：禁止小程序自助改地址/份数等。
+    管理端调用须自行跳过（勿传入本 guard）。
+    """
     from app.core.timeutil import today_shanghai
-    from app.services.sf_order_fulfillment_service import member_has_active_sf_push_on_delivery_date
+    from app.services.sf_order_fulfillment_service import member_sf_self_service_locked_on_delivery_date
+
+    d = delivery_date if delivery_date is not None else today_shanghai()
+    if member_sf_self_service_locked_on_delivery_date(
+        db,
+        member_id=int(member.id),
+        store_id=int(member.store_id),
+        delivery_date=d,
+    ):
+        raise HTTPException(status_code=400, detail=SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG)
+
+
+def guard_member_self_cancel_leave(db: Session, member: Member, typ: LeaveType) -> None:
+    """会员自助取消请假：若取消会改变「当日已向顺丰推单且尚未送达」业务日的缺席状态，则须联系客服。"""
+    from app.core.timeutil import today_shanghai
 
     if typ != LeaveType.CANCEL:
         return
@@ -46,13 +73,10 @@ def guard_member_self_cancel_leave(db: Session, member: Member, typ: LeaveType) 
     if not is_absent_on_delivery_date(member, biz_today, today=biz_today):
         return
 
-    if member_has_active_sf_push_on_delivery_date(
-        db,
-        member_id=int(member.id),
-        store_id=int(member.store_id),
-        delivery_date=biz_today,
-    ):
+    try:
+        guard_member_self_service_during_sf_fulfillment(db, member, delivery_date=biz_today)
+    except HTTPException:
         raise HTTPException(
             status_code=400,
             detail="当日配送已向顺丰推单，无法自助取消请假，请联系客服处理",
-        )
+        ) from None

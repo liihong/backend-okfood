@@ -1188,11 +1188,12 @@ def admin_member_delivered_dates(
     m = db.get(Member, member_id)
     if not m or m.deleted_at is not None:
         raise HTTPException(status_code=404, detail="会员不存在")
-    items, total, truncated = list_member_delivered_dates_admin(db, member_id)
+    items, total, total_meal_units, truncated = list_member_delivered_dates_admin(db, member_id)
     return success(
         data={
             "items": [dump_model(x) for x in items],
             "total": total,
+            "total_meal_units": total_meal_units,
             "truncated": truncated,
         },
         msg="获取成功",

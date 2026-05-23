@@ -11,6 +11,8 @@ from sqlalchemy import String, and_, cast, func, or_, select, true as sql_true
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.models.delivery_log import DeliveryLog
+from app.models.enums import DeliveryStatus
 from app.models.member import Member
 from app.models.single_meal_order import SingleMealOrder
 from app.models.sf_same_city_push import SfSameCityPush
@@ -420,6 +422,51 @@ def _ids_from_push_snapshot(snap: Any) -> tuple[list[int], list[int]]:
             except (TypeError, ValueError):
                 pass
     return mids, oids
+
+
+def member_subscription_delivered_on_delivery_date(
+    db: Session,
+    *,
+    member_id: int,
+    delivery_date: date,
+) -> bool:
+    """订阅会员在指定配送业务日是否已在 delivery_logs 标记送达（与骑手/顺丰自动履约同源）。"""
+    row = db.scalar(
+        select(DeliveryLog.id)
+        .where(
+            DeliveryLog.member_id == int(member_id),
+            DeliveryLog.delivery_date == delivery_date,
+            DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+        )
+        .limit(1)
+    )
+    return row is not None
+
+
+def member_sf_self_service_locked_on_delivery_date(
+    db: Session,
+    *,
+    member_id: int,
+    store_id: int,
+    delivery_date: date,
+) -> bool:
+    """
+    当日顺丰大表推单已创单且尚未标记送达：锁定小程序自助改地址/份数等。
+
+    窗口为「推单成功 → 订阅日标记送达」；取消/撤单的推单不计入。
+    """
+    if not member_has_active_sf_push_on_delivery_date(
+        db,
+        member_id=int(member_id),
+        store_id=int(store_id),
+        delivery_date=delivery_date,
+    ):
+        return False
+    if member_subscription_delivered_on_delivery_date(
+        db, member_id=int(member_id), delivery_date=delivery_date
+    ):
+        return False
+    return True
 
 
 def member_has_active_sf_push_on_delivery_date(

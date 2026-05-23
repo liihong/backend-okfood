@@ -15,13 +15,16 @@
         </view>
         <template v-else>
          <view v-if="total > 0" class="summary-card">
-            <text class="summary-title">累计扣次</text>
-            <text class="summary-num">{{ total }} 个配送日</text>
-            <text class="summary-hint">下列为每次扣次对应的配送日期</text>
+            <text class="summary-title">累计消费</text>
+            <text class="summary-num">{{ totalMealUnits }} 份餐</text>
+            <text class="summary-hint">共 {{ total }} 个配送日 · 下列为每次扣次对应的配送日期与份数</text>
           </view>
          <view v-for="(row, idx) in items" :key="row.delivery_date + '-' + idx" class="record-row">
-            <text class="record-label">配送日</text>
-            <text class="record-date">{{ row.delivery_date || '—' }}</text>
+            <view class="record-main">
+              <text class="record-label">配送日</text>
+              <text class="record-date">{{ row.delivery_date || '—' }}</text>
+            </view>
+            <text class="record-units">{{ row.meal_units || 1 }} 份</text>
           </view>
         </template>
         <view v-if="loadingMore" class="state-text state-text--small">加载更多…</view>
@@ -43,6 +46,7 @@ import { listDeliveryDeductions } from '@/utils/deliveryDeductionApi.js'
 
 const items = ref([])
 const total = ref(0)
+const totalMealUnits = ref(0)
 const page = ref(1)
 const pageSize = 20
 const loading = ref(true)
@@ -57,6 +61,7 @@ async function fetchPage(reset) {
   if (!token) {
     items.value = []
     total.value = 0
+    totalMealUnits.value = 0
     loading.value = false
     loadingMore.value = false
     uni.showModal({
@@ -83,6 +88,7 @@ async function fetchPage(reset) {
     const list = Array.isArray(data?.items) ? data.items : []
     const t = typeof data?.total === 'number' ? data.total : list.length
     total.value = t
+    totalMealUnits.value = typeof data?.total_meal_units === 'number' ? data.total_meal_units : 0
     if (reset) {
       items.value = list
     } else {
@@ -185,6 +191,14 @@ onShow(() => {
     box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.04);
 }
 
+.record-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  min-width: 0;
+  flex: 1;
+}
+
 .record-label {
   font-size: 28rpx;
   font-weight: 800;
@@ -195,6 +209,14 @@ onShow(() => {
   font-size: 30rpx;
   font-weight: 900;
   color: #333;
+  font-variant-numeric: tabular-nums;
+}
+
+.record-units {
+  flex-shrink: 0;
+  font-size: 28rpx;
+  font-weight: 900;
+  color: $ok-forest-green;
   font-variant-numeric: tabular-nums;
 }
 

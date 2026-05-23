@@ -438,12 +438,17 @@ def list_delivery_deductions_me(
     page_size: int = 20,
 ):
     """套餐配送：已确认送达并扣减剩余餐次的业务日列表（按配送日倒序）。"""
-    items, total = list_member_delivery_deductions(db, member_id, page=page, page_size=page_size)
-    return page_response(
-        items=[dump_model(x) for x in items],
-        total=total,
-        page=page,
-        page_size=page_size,
+    items, total, total_meal_units = list_member_delivery_deductions(
+        db, member_id, page=page, page_size=page_size
+    )
+    return success(
+        data={
+            "items": [dump_model(x) for x in items],
+            "total": total,
+            "total_meal_units": total_meal_units,
+            "page": page,
+            "page_size": page_size,
+        },
         msg="获取成功",
     )
 

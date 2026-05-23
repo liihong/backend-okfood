@@ -9,6 +9,7 @@ from app.models.member_address import MemberAddress
 from app.schemas.member_address import MemberAddressCreateIn, MemberAddressOut, MemberAddressUpdateIn
 from app.schemas.user import Location
 from app.services import amap
+from app.services.leave import guard_member_self_service_during_sf_fulfillment
 from app.services.member_operation_log_service import (
     OP_ADDRESS_CREATE,
     OP_ADDRESS_DELETE,
@@ -451,6 +452,8 @@ def list_addresses(db: Session, member_id: int) -> list[MemberAddressOut]:
 def create_address(db: Session, member_id: int, body: MemberAddressCreateIn, *, ip_address: str | None = None) -> MemberAddressOut:
     _ensure_member_exists(db, member_id)
     mem = db.get(Member, member_id)
+    if mem:
+        guard_member_self_service_during_sf_fulfillment(db, mem)
     tid = int(mem.tenant_id) if mem and mem.tenant_id is not None else None
     count = (
         db.scalar(select(func.count()).select_from(MemberAddress).where(MemberAddress.member_id == member_id)) or 0
@@ -536,6 +539,8 @@ def update_address(
     if not row or row.member_id != member_id:
         raise HTTPException(status_code=404, detail="地址不存在")
     mem = db.get(Member, member_id)
+    if mem and source == "miniprogram":
+        guard_member_self_service_during_sf_fulfillment(db, mem)
     tid = int(mem.tenant_id) if mem and mem.tenant_id is not None else None
 
     # 采集变更前快照，供操作日志 before/after 对比
@@ -649,6 +654,9 @@ def delete_address(db: Session, member_id: int, address_id: int, *, ip_address: 
     row = db.get(MemberAddress, address_id)
     if not row or row.member_id != member_id:
         raise HTTPException(status_code=404, detail="地址不存在")
+    mem = db.get(Member, member_id)
+    if mem:
+        guard_member_self_service_during_sf_fulfillment(db, mem)
     was_default = bool(row.is_default)
     before = {
         "address_id": int(row.id),

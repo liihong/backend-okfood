@@ -2518,6 +2518,30 @@
   min-width: 0;
   flex: 1;
 }
+.delivery-records-units {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: #0e5a44;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.delivery-records-header-stat {
+  margin-left: auto;
+  margin-right: 0.75rem;
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.92;
+  white-space: nowrap;
+  text-align: right;
+  line-height: 1.35;
+}
+.delivery-records-header-stat strong {
+  font-size: 18px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  margin: 0 2px;
+}
 .delivery-records-list li:last-child {
   border-bottom: none;
 }

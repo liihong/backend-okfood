@@ -51,6 +51,7 @@ class DeliveryDeductionOut(BaseModel):
     """套餐订阅：某日确认送达后按该业务日扣减剩余餐次。"""
 
     delivery_date: date = Field(..., description="配送业务日（上海）")
+    meal_units: int = Field(1, ge=1, description="当日确认送达扣减份数")
 
 
 class RegisterIn(BaseModel):

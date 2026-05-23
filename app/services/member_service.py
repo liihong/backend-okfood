@@ -40,7 +40,11 @@ from app.schemas.user import Location, MemberOut, RegisterIn
 
 from app.services import amap
 
-from app.services.leave import guard_member_self_cancel_leave, is_leave_deadline_passed
+from app.services.leave import (
+    guard_member_self_cancel_leave,
+    guard_member_self_service_during_sf_fulfillment,
+    is_leave_deadline_passed,
+)
 
 from app.services.member_address_service import (
     admin_apply_manual_delivery_region,
@@ -508,6 +512,9 @@ def patch_member_profile(
     if not m or m.deleted_at is not None:
 
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    if set_daily_meal_units and daily_meal_units is not None:
+        guard_member_self_service_during_sf_fulfillment(db, m)
 
     # 采集变更前关键字段，供操作日志 before/after 对比
     prev_snapshot = {
