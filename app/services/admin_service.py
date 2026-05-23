@@ -5,7 +5,7 @@ import uuid
 from fastapi import HTTPException
 from sqlalchemy import and_, case, delete, exists, func, literal, or_, select, true
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session, aliased, load_only
 
 from app.core.delivery_calendar import is_subscription_delivery_day
 from app.core.security import verify_password
@@ -85,6 +85,23 @@ def _member_on_leave_today(m: Member, today: date) -> bool:
     return False
 
 
+def _member_archive_scope():
+    """会员档案库：仅周卡/月卡；仅登录浏览、纯次卡视为普通用户不在库内展示。"""
+    return Member.plan_type.in_((PlanType.WEEK.value, PlanType.MONTH.value))
+
+
+def _member_card_expired_scope():
+    """周/月卡次数用尽：balance=0 且曾有起送日、累计总次数或仍标记为活跃。"""
+    return and_(
+        Member.balance == 0,
+        or_(
+            Member.delivery_start_date.isnot(None),
+            func.coalesce(Member.meal_quota_total, 0) > 0,
+            Member.is_active.is_(True),
+        ),
+    )
+
+
 def _apply_member_list_filters(
     stmt,
     *,
@@ -98,7 +115,7 @@ def _apply_member_list_filters(
     on_leave_only: bool = False,
     store_id: int | None = None,
 ):
-    stmt = stmt.where(Member.deleted_at.is_(None))
+    stmt = stmt.where(Member.deleted_at.is_(None)).where(_member_archive_scope())
     if store_id is not None:
         stmt = stmt.where(Member.store_id == int(store_id))
     if q_phone:
@@ -131,13 +148,17 @@ def _apply_member_list_filters(
     if validity == "active":
         stmt = stmt.where(Member.balance > 0)
     elif validity == "expired":
-        stmt = stmt.where(Member.balance == 0)
+        stmt = stmt.where(_member_card_expired_scope())
     if plan_type:
         stmt = stmt.where(Member.plan_type == plan_type)
     if inactive_only:
-        # 与前台「未开卡」一致：排除「暂停配送」(delivery_deferred)
+        # 与前台「未开卡」一致：排除暂停配送与次数已用尽的已过期档案
         stmt = stmt.where(
-            and_(Member.is_active.is_(False), Member.delivery_deferred.is_(False)),
+            and_(
+                Member.is_active.is_(False),
+                Member.delivery_deferred.is_(False),
+                ~_member_card_expired_scope(),
+            ),
         )
     if delivery_deferred_only:
         stmt = stmt.where(
@@ -195,12 +216,13 @@ def admin_login_user(db: Session, username: str, password: str) -> AdminUser:
 
 
 def member_list_overview_counts(db: Session, *, store_id: int | None = None) -> MemberListStatsOut:
-    """全库会员数：与列表 `validity=active|expired` 口径一致（仅按 balance，不受搜索/片区筛选影响）。"""
+    """周/月卡档案户数：与列表 `_member_archive_scope` + `validity=active|expired` 口径一致。"""
+    expired_scope = _member_card_expired_scope()
     base = select(
         func.count().label("total"),
         func.coalesce(func.sum(case((Member.balance > 0, 1), else_=0)), 0).label("active"),
-        func.coalesce(func.sum(case((Member.balance == 0, 1), else_=0)), 0).label("expired"),
-    ).select_from(Member).where(Member.deleted_at.is_(None))
+        func.coalesce(func.sum(case((expired_scope, 1), else_=0)), 0).label("expired"),
+    ).select_from(Member).where(Member.deleted_at.is_(None)).where(_member_archive_scope())
     if store_id is not None:
         base = base.where(Member.store_id == int(store_id))
     row = db.execute(base).one()
@@ -347,9 +369,13 @@ def apply_member_recharge_delta(
         m = db.execute(select(Member).where(Member.phone == body.phone, Member.deleted_at.is_(None))).scalar_one_or_none()
         if not m:
             raise HTTPException(status_code=404, detail="用户不存在")
+    balance_before = int(m.balance)
     m.balance += body.amount
     if m.balance < 0:
         raise HTTPException(status_code=400, detail="次数不足，无法扣减到负数")
+    from app.services.member_renew_subscribe_service import reset_renew_remind_on_recharge
+
+    reset_renew_remind_on_recharge(m, balance_before=balance_before, balance_after=int(m.balance))
     if body.plan_type is not None:
         m.plan_type = body.plan_type.value
     # 周卡/月卡正向入账：剩余次数与累计总次数同步增加（续卡叠加）
@@ -404,6 +430,34 @@ def admin_delete_member(db: Session, member_id: int) -> dict[str, str]:
     }
 
 
+def _dish_admin_out_from_row(
+    row: MenuDish,
+    *,
+    include_sop: bool = True,
+    lite: bool = False,
+) -> DishAdminOut:
+    return DishAdminOut(
+        id=row.id,
+        name=row.name,
+        description=None if lite else row.description,
+        image_url=None if lite else row.image_url,
+        is_enabled=row.is_enabled,
+        category_id=row.category_id,
+        single_order_price_yuan=_dish_price_yuan_str(row.single_order_price_yuan),
+        spice_level=_dish_spice_level_out(row.spice_level),
+        internal_view_sop=row.internal_view_sop if include_sop else None,
+        created_at=row.created_at.isoformat() if row.created_at else "",
+    )
+
+
+def get_dish_admin(db: Session, dish_id: int, *, store_id: int) -> DishAdminOut:
+    sid = int(store_id)
+    row = db.get(MenuDish, dish_id)
+    if not row or int(row.store_id) != sid:
+        raise HTTPException(status_code=404, detail="菜品不存在")
+    return _dish_admin_out_from_row(row, include_sop=True)
+
+
 def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminOut:
     sid = int(store_id)
     if body.category_id is not None:
@@ -439,43 +493,41 @@ def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminO
         db.add(row)
     db.commit()
     db.refresh(row)
-    return DishAdminOut(
-        id=row.id,
-        name=row.name,
-        description=row.description,
-        image_url=row.image_url,
-        is_enabled=row.is_enabled,
-        category_id=row.category_id,
-        single_order_price_yuan=_dish_price_yuan_str(row.single_order_price_yuan),
-        spice_level=_dish_spice_level_out(row.spice_level),
-        internal_view_sop=row.internal_view_sop,
-        created_at=row.created_at.isoformat() if row.created_at else "",
-    )
+    return _dish_admin_out_from_row(row, include_sop=True)
 
 
-def list_dishes_admin(db: Session, *, enabled_only: bool, q: str | None = None, store_id: int) -> list[DishAdminOut]:
+def list_dishes_admin(
+    db: Session,
+    *,
+    enabled_only: bool,
+    q: str | None = None,
+    store_id: int,
+    lite: bool = False,
+) -> list[DishAdminOut]:
     sid = int(store_id)
-    stmt = select(MenuDish).where(MenuDish.store_id == sid).order_by(MenuDish.id.desc())
+    load_cols = [
+        MenuDish.id,
+        MenuDish.name,
+        MenuDish.is_enabled,
+        MenuDish.category_id,
+        MenuDish.single_order_price_yuan,
+        MenuDish.spice_level,
+        MenuDish.created_at,
+    ]
+    if not lite:
+        load_cols.extend([MenuDish.description, MenuDish.image_url])
+    stmt = (
+        select(MenuDish)
+        .options(load_only(*load_cols))
+        .where(MenuDish.store_id == sid)
+        .order_by(MenuDish.id.desc())
+    )
     if enabled_only:
         stmt = stmt.where(MenuDish.is_enabled.is_(True))
     if q and q.strip():
         stmt = stmt.where(MenuDish.name.contains(q.strip()))
     rows = db.scalars(stmt).all()
-    return [
-        DishAdminOut(
-            id=r.id,
-            name=r.name,
-            description=r.description,
-            image_url=r.image_url,
-            is_enabled=r.is_enabled,
-            category_id=r.category_id,
-            single_order_price_yuan=_dish_price_yuan_str(r.single_order_price_yuan),
-            spice_level=_dish_spice_level_out(r.spice_level),
-            internal_view_sop=r.internal_view_sop,
-            created_at=r.created_at.isoformat() if r.created_at else "",
-        )
-        for r in rows
-    ]
+    return [_dish_admin_out_from_row(r, include_sop=False, lite=lite) for r in rows]
 
 
 def delete_dish(db: Session, dish_id: int, *, store_id: int) -> None:
@@ -554,17 +606,8 @@ def create_category_admin(db: Session, body: CategoryCreateIn, *, store_id: int)
     )
 
 
-def _weekly_slots_payload(db: Session, anchor: date, store_id: int) -> list[dict]:
-    sid = int(store_id)
-    rows = db.execute(
-        select(WeeklyMenuSlot, MenuDish)
-        .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
-        .where(WeeklyMenuSlot.week_start == anchor, WeeklyMenuSlot.store_id == sid)
-        .order_by(WeeklyMenuSlot.slot)
-    ).all()
-    from app.services.menu_day_stock_service import weekly_slot_stock_extras
-
-    raw: list[dict] = [
+def _weekly_slots_raw(rows: list) -> list[dict]:
+    return [
         {
             "slot": w.slot,
             "dish_id": d.id,
@@ -576,7 +619,66 @@ def _weekly_slots_payload(db: Session, anchor: date, store_id: int) -> list[dict
         }
         for w, d in rows
     ]
-    return weekly_slot_stock_extras(db, anchor, raw, store_id=sid)
+
+
+def _weekly_slots_payload(db: Session, anchor: date, store_id: int) -> list[dict]:
+    sid = int(store_id)
+    rows = db.execute(
+        select(WeeklyMenuSlot, MenuDish)
+        .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
+        .where(WeeklyMenuSlot.week_start == anchor, WeeklyMenuSlot.store_id == sid)
+        .order_by(WeeklyMenuSlot.slot)
+    ).all()
+    from app.services.menu_day_stock_service import weekly_slot_stock_extras
+
+    return weekly_slot_stock_extras(db, anchor, _weekly_slots_raw(rows), store_id=sid)
+
+
+def _weekly_dual_preview(db: Session, this_a: date, next_a: date, *, store_id: int) -> dict[str, list[dict]]:
+    """本周+下周槽位：仅本周算应配送/单次余；下周只返回槽位与总份配置。"""
+    sid = int(store_id)
+    anchors = [this_a, next_a]
+    this_dates = [this_a + timedelta(days=i) for i in range(7)]
+    from app.services.menu_day_stock_service import (
+        _paid_sums_for_dates_dishes,
+        resolve_dishes_for_dates_batch,
+        subscription_total_meals_by_dates,
+        weekly_slot_stock_extras,
+    )
+
+    sub_by_date = subscription_total_meals_by_dates(db, this_dates, store_id=sid)
+    scheduled_by_date = resolve_dishes_for_dates_batch(db, this_dates, store_id=sid)
+    rows = db.execute(
+        select(WeeklyMenuSlot, MenuDish)
+        .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
+        .where(WeeklyMenuSlot.store_id == sid, WeeklyMenuSlot.week_start.in_(anchors))
+        .order_by(WeeklyMenuSlot.week_start, WeeklyMenuSlot.slot)
+    ).all()
+    by_anchor: dict[date, list] = {this_a: [], next_a: []}
+    this_dish_ids: set[int] = set()
+    for w, d in rows:
+        by_anchor.setdefault(w.week_start, []).append((w, d))
+        if w.week_start == this_a:
+            this_dish_ids.add(int(d.id))
+    paid = _paid_sums_for_dates_dishes(db, this_dates, this_dish_ids, store_id=sid)
+    return {
+        "this_week": weekly_slot_stock_extras(
+            db,
+            this_a,
+            _weekly_slots_raw(by_anchor.get(this_a, [])),
+            store_id=sid,
+            sub_by_date=sub_by_date,
+            scheduled_by_date=scheduled_by_date,
+            paid=paid,
+        ),
+        "next_week": weekly_slot_stock_extras(
+            db,
+            next_a,
+            _weekly_slots_raw(by_anchor.get(next_a, [])),
+            store_id=sid,
+            skip_subscription_stats=True,
+        ),
+    }
 
 
 def admin_weekly_menu_preview(db: Session, week_start: date | None, *, store_id: int) -> dict:
@@ -590,11 +692,11 @@ def admin_weekly_menu_preview(db: Session, week_start: date | None, *, store_id:
             "week_start": anchor.isoformat(),
             "slots": _weekly_slots_payload(db, anchor, store_id),
         }
+    dual = _weekly_dual_preview(db, this_a, next_a, store_id=store_id)
     return {
         "this_week_start": this_a.isoformat(),
         "next_week_start": next_a.isoformat(),
-        "this_week": _weekly_slots_payload(db, this_a, store_id),
-        "next_week": _weekly_slots_payload(db, next_a, store_id),
+        **dual,
     }
 
 

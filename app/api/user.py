@@ -51,6 +51,7 @@ from app.schemas.user import (
     UserMemberCardOrderOut,
     WxMiniJsCodeIn,
     WxMiniLoginIn,
+    RenewRemindSubscribeGrantOut,
 )
 
 from app.services.member_delivery_deduction_service import list_member_delivery_deductions
@@ -103,6 +104,8 @@ from app.services.single_meal_order_service import (
 )
 
 from app.services.store_config_service import get_member_card_prices_extended
+
+from app.services.member_renew_subscribe_service import grant_renew_remind_quota
 
 from app.integrations.wechat_pay_v2 import resolve_request_client_ip
 
@@ -740,7 +743,21 @@ def patch_profile(request: Request, body: ProfilePatchIn, db: SessionDep, member
     return success(data=dump_model(member), msg="资料已更新")
 
 
-
+@router.post("/me/subscribe/renew-remind/grant")
+def grant_renew_remind_subscribe_quota(db: SessionDep, member_id: MemberIdScoped):
+    """
+    完善资料页用户同意「续费提醒」订阅消息后调用，额度 +1。
+    若当前剩余次数已 <= 低余额阈值，则尝试立即下发一条（成功则额度 -1）。
+    """
+    member = db.get(Member, int(member_id))
+    if not member or member.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    quota = grant_renew_remind_quota(db, member)
+    db.commit()
+    return success(
+        data=RenewRemindSubscribeGrantOut(wx_renew_remind_quota=quota).model_dump(),
+        msg="续费提醒授权已记录",
+    )
 
 
 @router.post("/me/avatar")

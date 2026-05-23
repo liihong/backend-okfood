@@ -116,11 +116,11 @@ import { ref, computed } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
+  canSubmitSingleOrder,
   fetchMenuDetail,
   formatMenuPrice,
   invalidateWeeklyMenuCache,
-  isSingleOrderServiceDate,
-  singleOrderServiceDateError,
+  singleOrderBlockReason,
 } from '@/utils/menuApi.js'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { getMemberToken, request } from '@/utils/api.js'
@@ -168,13 +168,8 @@ const totalPriceText = computed(() => {
 })
 
 const canPay = computed(() => {
-  if (!dish.value || !serviceDateYmd.value) return false
-  if (!isSingleOrderServiceDate(serviceDateYmd.value)) return false
+  if (!canSubmitSingleOrder(dish.value, serviceDateYmd.value)) return false
   if (unitPrice.value == null) return false
-  if (dish.value.singleStockLimited) {
-    const n = dish.value.singleStockRemaining
-    if (n == null || n <= 0) return false
-  }
   const q = Math.max(1, Math.min(qtyMaxEffective.value, quantity.value))
   if (q < 1) return false
   if (fulfillMode.value === 'delivery') {
@@ -246,9 +241,10 @@ onLoad((options) => {
     loadError.value = '缺少供餐日期'
     return
   }
-  if (!isSingleOrderServiceDate(serviceDateYmd.value)) {
+  const block = singleOrderBlockReason(null, serviceDateYmd.value)
+  if (block) {
     loading.value = false
-    loadError.value = singleOrderServiceDateError(serviceDateYmd.value)
+    loadError.value = block
     return
   }
   loadPage()
@@ -284,12 +280,14 @@ async function loadPage() {
     ])
     if (!d) throw new Error('暂无餐品数据')
     dish.value = d
+    const stockBlock = singleOrderBlockReason(d, serviceDateYmd.value)
+    if (stockBlock) {
+      loadError.value = stockBlock
+    }
     const cap = d.singleStockLimited
       ? Math.max(0, Math.min(QTY_MAX, d.singleStockRemaining != null ? Math.floor(Number(d.singleStockRemaining)) : 0))
       : QTY_MAX
-    if (cap < 1) {
-      loadError.value = '该日单次卡名额已售罄'
-    } else if (quantity.value > cap) {
+    if (quantity.value > cap) {
       quantity.value = cap
     }
     const list = sortAddressesDefaultFirst(normalizeAddressList(raw))
@@ -782,14 +780,20 @@ async function handlePay() {
 
 .btn-pay {
   width: 100%;
-  padding: 44rpx;
+  padding: 24rpx 32rpx;
   background: $ok-forest-green;
   color: #fff;
   border: none;
-  border-radius: 48rpx;
-  font-size: 34rpx;
-  font-weight: 950;
-  box-shadow: 0 30rpx 60rpx rgba(14, 90, 68, 0.2);
+  border-radius: 40rpx;
+  font-size: 28rpx;
+  font-weight: 900;
+  line-height: 1.35;
+  margin-top: 16rpx;
+  box-shadow: 0 16rpx 32rpx rgba(14, 90, 68, 0.18);
+}
+
+.btn-pay::after {
+  border: none;
 }
 
 .btn-pay--disabled {

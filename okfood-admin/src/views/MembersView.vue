@@ -326,6 +326,7 @@ const goMembersNext = () => {
 const memberStatusClass = (status) => {
   if (status === '请假中') return 'member-pill member-pill--rose'
   if (status === '待续费') return 'member-pill member-pill--amber'
+  if (status === '已过期') return 'member-pill member-pill--slate'
   if (status === '未开卡') return 'member-pill member-pill--slate'
   if (status === '暂停配送') return 'member-pill member-pill--slate'
   return 'member-pill member-pill--emerald'

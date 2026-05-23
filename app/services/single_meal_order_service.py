@@ -4,7 +4,7 @@ from typing import Any
 
 import logging
 import secrets
-from datetime import date, time, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -12,7 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.courier_delivery_fee import courier_delivery_fee_yuan_for_meal_units
-from app.core.timeutil import now_shanghai, shanghai_naive_range_for_calendar_day, today_shanghai
+from app.core.timeutil import shanghai_naive_range_for_calendar_day
 from app.integrations.wechat_pay_v2 import (
     WeChatPayV2Error,
     WechatPayNotifyParsed,
@@ -58,6 +58,22 @@ _SF_PUSH_KIND_SINGLE_MEAL_RETAIL = "single_meal_retail"
 _SF_TERMINAL_CANCEL_STATUSES = (2, 22)
 _SF_TERMINAL_DELIVERED_STATUS = 17
 _SF_CANCEL_CALLBACK_KINDS = frozenset({"cancel_by_sf", "rider_cancel"})
+
+
+def single_meal_fulfillment_allows_dispatch(fs: str | None) -> bool:
+    """管理端可发起配送（顺丰/UU/门店自配送）：待发货，或顺丰侧已取消待重推。"""
+    return str(fs or "").strip().lower() in ("pending", "sf_cancelled")
+
+
+def sf_push_create_succeeded(pus: SfSameCityPush) -> bool:
+    """创单 ``error_code == 0`` 为成功；``0`` 为合法值，不可用 ``or`` 默认值。"""
+    ec = getattr(pus, "error_code", None)
+    if ec is None:
+        return False
+    try:
+        return int(ec) == 0
+    except (TypeError, ValueError):
+        return False
 
 
 def sf_push_is_terminal_cancel(pus: SfSameCityPush) -> bool:
@@ -135,7 +151,7 @@ def _apply_sf_monitor_status_to_retail_order_no_commit(
         return "skipped_unpaid"
     if bool(getattr(o, "store_pickup", False)):
         return "skipped_store_pickup"
-    if int(pus.error_code or -1) != 0:
+    if not sf_push_create_succeeded(pus):
         return "skipped_sf_not_success_push"
 
     prev_f = str(o.fulfillment_status or "").strip().lower()
@@ -270,13 +286,6 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
         db, int(dish.id), body.delivery_date, qty, store_id=int(mem.store_id)
     )
 
-    # 单点：上海时间当日 10:00 起不可再下「当日供餐」单（与小程序规则一致，不分会员套餐）
-    if body.delivery_date == today_shanghai() and now_shanghai().time() >= time(10, 0, 0):
-        raise HTTPException(
-            status_code=400,
-            detail="每日 10:00 后仅可下次日及之后的单点单",
-        )
-
     unit = dish.single_order_price_yuan
     if unit is None:
         raise HTTPException(status_code=400, detail="该餐品暂未开放单点")
@@ -377,7 +386,9 @@ def list_admin_store_single_meal_orders_by_order_day(
         SingleMealOrder.created_at < end_bj,
     ]
     ps = (pay_status or "").strip()
-    if ps:
+    if ps == "已取消":
+        filters.append(SingleMealOrder.fulfillment_status == "cancelled")
+    elif ps:
         filters.append(SingleMealOrder.pay_status == ps)
     dp = (delivery_phase or "").strip().lower()
     if dp == "awaiting":
@@ -987,8 +998,11 @@ def admin_assign_courier_single_meal_order(
     o = db.get(SingleMealOrder, int(order_id))
     if o is None or int(o.store_id) != int(store_id):
         raise ValueError("订单不存在或不属于当前门店")
-    if (o.fulfillment_status or "").strip() != "pending":
+    fs = str(o.fulfillment_status or "").strip().lower()
+    if fs == "accepted":
         raise ValueError("仅「待发货」订单可指派门店配送员（已进入「配送中」请走运力侧完成送达）")
+    if not single_meal_fulfillment_allows_dispatch(o.fulfillment_status):
+        raise ValueError("仅「待发货」或「顺丰取消」订单可指派门店配送员")
     cid = (courier_id or "").strip()
     if not cid:
         raise ValueError("请选择配送员")

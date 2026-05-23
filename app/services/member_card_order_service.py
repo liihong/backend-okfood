@@ -223,6 +223,9 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
         m.is_active = True
         m.delivery_start_date = order.delivery_start_date
         m.delivery_deferred = False
+    elif int(m.balance) > 0 and m.delivery_start_date is not None and not m.delivery_deferred:
+        # 续卡未改起送日：次数恢复后重新激活
+        m.is_active = True
     order.applied_to_member = True
 
 

@@ -55,6 +55,7 @@ const integrationForm = ref({
   wechat_pay_ssl_cert_path: '',
   wechat_pay_ssl_key_path: '',
   wx_subscribe_delivery_tmpl_id: '',
+  wx_subscribe_renew_tmpl_id: '',
   sf_open_dev_id: null,
   sf_open_secret_input: '',
   sf_open_shop_id: '',
@@ -213,6 +214,8 @@ function resetIntegrationFormFromPayload(data) {
       data?.wechat_pay_ssl_key_path != null ? String(data.wechat_pay_ssl_key_path) : '',
     wx_subscribe_delivery_tmpl_id:
       data?.wx_subscribe_delivery_tmpl_id != null ? String(data.wx_subscribe_delivery_tmpl_id) : '',
+    wx_subscribe_renew_tmpl_id:
+      data?.wx_subscribe_renew_tmpl_id != null ? String(data.wx_subscribe_renew_tmpl_id) : '',
     sf_open_dev_id: data?.sf_open_dev_id != null ? Number(data.sf_open_dev_id) : null,
     sf_open_secret_input: '',
     sf_open_shop_id: data?.sf_open_shop_id != null ? String(data.sf_open_shop_id) : '',
@@ -278,6 +281,7 @@ async function saveIntegration() {
   body.wechat_pay_ssl_cert_path = t(integrationForm.value.wechat_pay_ssl_cert_path) || null
   body.wechat_pay_ssl_key_path = t(integrationForm.value.wechat_pay_ssl_key_path) || null
   body.wx_subscribe_delivery_tmpl_id = t(integrationForm.value.wx_subscribe_delivery_tmpl_id) || null
+  body.wx_subscribe_renew_tmpl_id = t(integrationForm.value.wx_subscribe_renew_tmpl_id) || null
   body.sf_open_shop_id = t(integrationForm.value.sf_open_shop_id) || null
   body.sf_pickup_phone = t(integrationForm.value.sf_pickup_phone) || null
   body.sf_pickup_address = t(integrationForm.value.sf_pickup_address) || null
@@ -661,7 +665,7 @@ onMounted(async () => {
         <el-table-column prop="id" label="门店ID" width="88" />
         <el-table-column prop="name" label="名称" min-width="120" />
         <el-table-column prop="leave_deadline_time" label="请假截止" width="100" />
-        <el-table-column label="夜间顺丰推单" min-width="120">
+        <el-table-column label="顺丰自动推单" min-width="120">
           <template #default="{ row }">
             <el-switch
               :model-value="row.sf_nightly_auto_push_enabled === true"
@@ -694,10 +698,10 @@ onMounted(async () => {
         <el-form-item label="启用">
           <el-switch v-model="storeForm.is_active" />
         </el-form-item>
-        <el-form-item label="夜间顺丰自动推单">
+        <el-form-item label="顺丰自动推单">
           <div class="store-nightly-wrap">
             <el-switch v-model="storeForm.sf_nightly_auto_push_enabled" />
-            <span class="store-nightly-hint">每日 22:00（上海）自动推送<strong>次日</strong>待配送订单；关闭后仅能在配送大表手动推单</span>
+            <span class="store-nightly-hint">每日 07:00（上海）自动推送<strong>当日</strong>待配送订单；关闭后仅能在配送大表手动推单</span>
           </div>
         </el-form-item>
       </el-form>
@@ -795,6 +799,13 @@ onMounted(async () => {
               v-model="integrationForm.wx_subscribe_delivery_tmpl_id"
               maxlength="128"
               placeholder="可选；留空则用全局或代码默认"
+            />
+          </el-form-item>
+          <el-form-item label="续费提醒模板 ID">
+            <el-input
+              v-model="integrationForm.wx_subscribe_renew_tmpl_id"
+              maxlength="128"
+              placeholder="完善资料页授权后低余额触达；留空则用全局 .env"
             />
           </el-form-item>
 

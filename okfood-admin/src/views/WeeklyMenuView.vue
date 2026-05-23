@@ -128,7 +128,7 @@ function deliverDisplay(row) {
 async function fetchDishes() {
   if (!adminAccessToken.value) return
   try {
-    const data = await apiJson('/api/admin/dishes', {}, { auth: true })
+    const data = await apiJson('/api/admin/dishes?lite=1', {}, { auth: true })
     dishes.value = Array.isArray(data) ? data : []
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0

@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     WX_MINI_SUBSCRIBE_PAGE: str = "pages/order/index"
     # formal | developer | trial
     WX_MINI_SUBSCRIBE_MINIPROGRAM_STATE: str = "formal"
+    # 完善资料页授权后：扣次剩余 <= LOW_BALANCE_THRESHOLD 时下发续费提醒（留空则不下发）
+    WX_MINI_SUBSCRIBE_RENEW_TMPL_ID: str = ""
+    # 顺序对应：券名称、到期时间、张数、可用范围、温馨提示（模板 33721）
+    WX_MINI_SUBSCRIBE_RENEW_DATA_KEYS: str = "thing1,time2,number3,thing4,thing5"
+    WX_MINI_SUBSCRIBE_RENEW_PAGE: str = "packageUser/pages/membershipCardList/membershipCardList"
 
     # 小程序周卡/月卡标价（元）：以 app_settings 为准；此处为库无行时的兜底（后台「门店配置」可改库内值）
     MEMBER_CARD_WEEK_PRICE_YUAN: Decimal = Field(default=Decimal("168.00"), ge=Decimal("0"))

@@ -289,3 +289,86 @@ def try_notify_member_delivery_confirmed(
         )
     except Exception:
         logger.exception("送达订阅消息异常 member openid 前缀=%s", oid[:6] if len(oid) > 6 else oid)
+
+
+def _resolve_renew_subscribe_template_id(db: "Session | None", tenant_id: int | None) -> str:
+    from app.services.tenant_integration_service import get_tenant_integration_row
+
+    template_id = (settings.WX_MINI_SUBSCRIBE_RENEW_TMPL_ID or "").strip()
+    if db is not None and tenant_id is not None:
+        row = get_tenant_integration_row(db, int(tenant_id))
+        if row and (row.wx_subscribe_renew_tmpl_id or "").strip():
+            template_id = (row.wx_subscribe_renew_tmpl_id or "").strip()
+    return template_id
+
+
+def try_notify_member_renew_remind(
+    openid: str,
+    *,
+    balance: int,
+    db: "Session | None" = None,
+    tenant_id: int | None = None,
+) -> bool:
+    """低余额续费提醒；未配置模板或未配置小程序时静默跳过。成功返回 True。"""
+    template_id = _resolve_renew_subscribe_template_id(db, tenant_id)
+    oid = (openid or "").strip()
+    if not template_id or not oid:
+        return False
+    if db is not None and tenant_id is not None:
+        if not wx_mini_configured_for_tenant(db, int(tenant_id)):
+            return False
+    elif not wx_mini_configured():
+        return False
+
+    keys_raw = (settings.WX_MINI_SUBSCRIBE_RENEW_DATA_KEYS or "thing1,time2,number3,thing4,thing5").strip()
+    keys = [k.strip() for k in keys_raw.split(",") if k.strip()]
+    if not keys:
+        keys = ["thing1", "time2", "number3", "thing4", "thing5"]
+
+    bal = max(0, int(balance))
+    now = now_shanghai()
+    time_str = now.strftime("%Y年%m月%d日 %H:%M")
+    tip = f"您的自律餐仅剩{bal}次，请及时续卡"
+    vals = [
+        "OK饭自律餐会员",  # thing1 券名称
+        time_str,  # time2 到期/提醒时间
+        str(bal),  # number3 剩余次数
+        "OK饭小程序续卡页",  # thing4 可用范围
+        tip,  # thing5 温馨提示
+    ]
+    wrap: dict[str, dict[str, str]] = {}
+    for i, k in enumerate(keys):
+        raw = vals[i] if i < len(vals) else tip
+        kl = k.lower()
+        if kl.startswith("time"):
+            max_len = 32
+        elif kl.startswith("number") or kl.startswith("amount"):
+            max_len = 32
+        else:
+            max_len = 20
+        wrap[k] = {"value": _truncate_subscribe_value(raw, max_chars=max_len)}
+
+    page = (settings.WX_MINI_SUBSCRIBE_RENEW_PAGE or "packageUser/pages/membershipCardList/membershipCardList").strip()
+    page = page or "packageUser/pages/membershipCardList/membershipCardList"
+    state = (settings.WX_MINI_SUBSCRIBE_MINIPROGRAM_STATE or "formal").strip() or "formal"
+    try:
+        send_subscribe_message(
+            oid,
+            template_id,
+            page=page,
+            data=wrap,
+            miniprogram_state=state,
+            db=db,
+            tenant_id=tenant_id,
+        )
+        return True
+    except WeChatMiniError as e:
+        logger.warning(
+            "续费提醒订阅消息未送达: openid=%s… err=%s",
+            oid[:6] if len(oid) > 6 else oid,
+            e,
+        )
+        return False
+    except Exception:
+        logger.exception("续费提醒订阅消息异常 member openid 前缀=%s", oid[:6] if len(oid) > 6 else oid)
+        return False

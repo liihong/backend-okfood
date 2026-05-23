@@ -69,7 +69,8 @@ def job_reset_leave_flags() -> None:
 
 def job_low_balance_notify() -> None:
     """
-    每日 18:00：低余额扫描。微信模板未接入前仅记录日志，并写入去重字段避免重复提醒。
+    每日 18:00：低余额扫描（兜底）。
+    主路径为扣次后 try_send_renew_remind_after_balance_change；此处仅记录仍有额度但未触达的用户。
     """
     db = SessionLocal()
     try:
@@ -79,17 +80,18 @@ def job_low_balance_notify() -> None:
             Member.deleted_at.is_(None),
             Member.is_active.is_(True),
             Member.balance <= threshold,
+            Member.wx_renew_remind_quota > 0,
         )
         rows = db.scalars(stmt).all()
         for m in rows:
             if m.last_low_balance_notify_date == today:
                 continue
             logger.info(
-                "低余额提醒占位: phone=%s balance=%s (可在此接入微信模板)",
+                "低余额兜底扫描: phone=%s balance=%s quota=%s（主路径为扣次触达）",
                 m.phone[:3] + "****" + m.phone[-4:] if len(m.phone) >= 7 else "***",
                 m.balance,
+                m.wx_renew_remind_quota,
             )
-            m.last_low_balance_notify_date = today
         db.commit()
     except Exception:
         logger.exception("低余额扫描任务失败")
@@ -100,7 +102,7 @@ def job_low_balance_notify() -> None:
 
 def job_sf_nightly_auto_push() -> None:
     """
-    每日 22:00（上海）：对启用「夜间顺丰自动推单」的门店，自动推送次日业务日待配送停靠点至顺丰。
+    每日 07:00（上海）：对启用「顺丰自动推单」的门店，自动推送当日业务日待配送停靠点至顺丰。
     """
     from app.services.sf_same_city_service import run_sf_nightly_auto_push_for_all_stores
 
@@ -118,7 +120,7 @@ def add_cron_jobs(sched) -> None:
     sched.add_job(
         job_sf_nightly_auto_push,
         "cron",
-        hour=22,
+        hour=7,
         minute=0,
         id="sf_nightly_push",
         replace_existing=True,

@@ -66,6 +66,7 @@ from app.services.admin_service import (
     create_category_admin,
     dashboard_meal_summary,
     delete_dish,
+    get_dish_admin,
     list_categories_admin,
     list_dishes_admin,
     list_members_paged,
@@ -543,7 +544,7 @@ def users_stats(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """会员档案库顶栏：总会员数、生效中、已过期（与列表 validity 口径一致）。"""
+    """会员档案库顶栏：周/月卡总户数、生效中、已过期（与列表口径一致；不含仅登录/次卡）。"""
     response.headers["Cache-Control"] = "no-store"
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     out = member_list_overview_counts(db, store_id=store_id)
@@ -560,7 +561,7 @@ def users(
     page_size: int = 20,
     validity: Annotated[
         str | None,
-        Query(description="不传或空=全部；active=剩余次数>0；expired=剩余次数=0"),
+        Query(description="不传或空=全部；active=剩余次数>0；expired=次数用尽（balance=0 且曾有起送日/累计总次数）"),
     ] = None,
     plan_type: Annotated[
         str | None,
@@ -726,7 +727,10 @@ def admin_orders_daily_single_meals(
         Query(description="下单业务日（上海日历日），默认当天"),
     ] = None,
     q: Annotated[str | None, Query(description="会员手机前缀或姓名模糊")] = None,
-    pay_status: Annotated[str | None, Query(description="支付状态：未支付 / 已支付 / 已退款")] = None,
+    pay_status: Annotated[
+        str | None,
+        Query(description="支付/取消筛选：未支付 / 已支付 / 已退款 / 已取消（履约 cancelled）"),
+    ] = None,
     delivery_phase: Annotated[
         str | None,
         Query(description="配送阶段：awaiting=待配送（未送达）；delivered=已送达；留空=全部"),
@@ -1259,11 +1263,28 @@ def dishes(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     enabled_only: bool = False,
     q: Annotated[str | None, Query(description="按名称模糊筛选")] = None,
+    lite: Annotated[
+        bool,
+        Query(description="精简列表：不返回 description/image_url/internal_view_sop，下拉选菜等场景更快"),
+    ] = False,
 ):
     """菜品库列表，排期时可从中选 `dish_id`。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    items = list_dishes_admin(db, enabled_only=enabled_only, q=q, store_id=store_id)
-    return success(data=[dump_model(i) for i in items], msg="获取成功")
+    items = list_dishes_admin(db, enabled_only=enabled_only, q=q, store_id=store_id, lite=lite)
+    return success(data=[i.model_dump(mode="json") for i in items], msg="获取成功")
+
+
+@router.get("/dish/{dish_id}")
+def dish_detail(
+    dish_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """单条菜品详情（含 internal_view_sop）；编辑表单用。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = get_dish_admin(db, dish_id, store_id=store_id)
+    return success(data=out.model_dump(mode="json"), msg="获取成功")
 
 
 @router.post("/dish")

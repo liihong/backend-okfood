@@ -421,6 +421,20 @@ def _has_success(db: Session, d: date, stop_id: str, *, store_id: int | None = N
     return r is not None
 
 
+def _has_active_success_push(db: Session, d: date, stop_id: str, *, store_id: int | None = None) -> bool:
+    """已成功创单且顺丰侧尚未取消/撤单（仍占用运力，不可再推）。"""
+    clauses = [
+        SfSameCityPush.delivery_date == d,
+        SfSameCityPush.stop_id == stop_id,
+        SfSameCityPush.error_code == 0,
+        ~_sf_push_row_cancelled_predicate(),
+    ]
+    if store_id is not None:
+        clauses.append(SfSameCityPush.store_id == int(store_id))
+    r = db.scalar(select(SfSameCityPush.id).where(and_(*clauses)).limit(1))
+    return r is not None
+
+
 def _successful_push_stop_ids_set(db: Session, *, store_id: int, d: date) -> set[str]:
     """本门店·业务日已成功创单的停靠点（含已取消单，与 ``_has_success`` 口径一致）。"""
     rows = db.scalars(
@@ -512,7 +526,7 @@ def _member_overlap_with_other_success_stops(
 
 @contextmanager
 def _sf_nightly_auto_push_global_lock(db: Session):
-    """多进程/多实例部署时仅一个实例执行 22:00 夜间推单；SQLite 等跳过。"""
+    """多进程/多实例部署时仅一个实例执行 07:00 自动推单；SQLite 等跳过。"""
     bind = db.get_bind()
     if getattr(bind.dialect, "name", "") != "mysql":
         yield True
@@ -583,7 +597,7 @@ def _build_sf_same_city_preview_bundle(
     area: str | None = None,
     phone: str | None = None,
 ) -> tuple[list[SfSameCityPreviewRow], dict[str, _Agg], bool]:
-    """单次构建停靠点聚合 + 预览行（预览页与夜间自动推单共用）。"""
+    """单次构建停靠点聚合 + 预览行（预览页与定时自动推单共用）。"""
     st = db.get(Store, int(store_id))
     if not st or not st.is_active:
         raise HTTPException(status_code=404, detail="门店不存在或已停用")
@@ -1218,9 +1232,9 @@ def cancel_sf_same_city_push(
     return {"message": "顺丰已受理取消", "sf_response": None}
 
 
-def auto_push_sf_next_business_day_for_store(db: Session, *, store_id: int) -> SfSameCityPushOut | None:
+def auto_push_sf_today_business_day_for_store(db: Session, *, store_id: int) -> SfSameCityPushOut | None:
     """
-    夜间定时任务：向顺丰推送「次日」上海业务日、当前仍待推的停靠点（与手动推单同一套预览/合并逻辑）。
+    早间定时任务：向顺丰推送「当日」上海业务日、当前仍待推的停靠点（与手动推单同一套预览/合并逻辑）。
     门店须启用 ``sf_nightly_auto_push_enabled`` 且处于营业状态。
     """
     st = db.get(Store, int(store_id))
@@ -1228,26 +1242,26 @@ def auto_push_sf_next_business_day_for_store(db: Session, *, store_id: int) -> S
         return None
     if not bool(getattr(st, "sf_nightly_auto_push_enabled", False)):
         return None
-    d = today_shanghai() + timedelta(days=1)
+    d = today_shanghai()
     rows, ags, sf_configured = _build_sf_same_city_preview_bundle(
         db, delivery_date=d, store_id=int(store_id)
     )
     if not sf_configured:
-        logger.info("顺丰夜间自动推单跳过（未配置顺丰） store_id=%s", store_id)
+        logger.info("顺丰自动推单跳过（未配置顺丰） store_id=%s", store_id)
         return None
     pending = [r for r in rows if r.selected and not r.already_pushed]
     if not pending:
-        logger.info("顺丰夜间自动推单跳过（无待推停靠点） store_id=%s date=%s", store_id, d)
+        logger.info("顺丰自动推单跳过（无待推停靠点） store_id=%s date=%s", store_id, d)
         return None
     body = SfSameCityPushIn(delivery_date=d, rows=pending)
     return push_sf_same_city(db, body, store_id=int(store_id), ags_hint=ags)
 
 
 def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
-    """启用夜间推单的全部门店依次执行 ``auto_push_sf_next_business_day_for_store``。"""
+    """启用自动推单的全部门店依次执行 ``auto_push_sf_today_business_day_for_store``。"""
     with _sf_nightly_auto_push_global_lock(db) as acquired:
         if not acquired:
-            logger.warning("顺丰夜间自动推单跳过：另一实例正在执行")
+            logger.warning("顺丰自动推单跳过：另一实例正在执行")
             return
         ids = list(
             db.scalars(
@@ -1260,17 +1274,17 @@ def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
         for sid in ids:
             sid_int = int(sid)
             try:
-                auto_push_sf_next_business_day_for_store(db, store_id=sid_int)
+                auto_push_sf_today_business_day_for_store(db, store_id=sid_int)
             except HTTPException as e:
                 logger.warning(
-                    "顺丰夜间自动推单跳过 store_id=%s detail=%s",
+                    "顺丰自动推单跳过 store_id=%s detail=%s",
                     sid_int,
                     e.detail,
                 )
             except ValueError as e:
-                logger.warning("顺丰夜间自动推单跳过 store_id=%s err=%s", sid_int, e)
+                logger.warning("顺丰自动推单跳过 store_id=%s err=%s", sid_int, e)
             except Exception:
-                logger.exception("顺丰夜间自动推单失败 store_id=%s", sid_int)
+                logger.exception("顺丰自动推单失败 store_id=%s", sid_int)
 
 
 def retry_sf_same_city_push_by_id(db: Session, *, push_id: int) -> SfSameCityPushItemResult:
@@ -1318,6 +1332,8 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
     使用门店上单独配置的 ``sf_retail_push_shop_id``（及可选 shop_type），
     与租户对接里用于智能配送大表推单的顺丰店铺编号互不干扰；dev_id/secret/取件信息仍走租户合并配置。
     """
+    from app.services.single_meal_order_service import single_meal_fulfillment_allows_dispatch
+
     order = db.get(SingleMealOrder, int(order_id))
     if order is None or int(order.store_id) != int(store_id):
         raise ValueError("订单不存在或不属于当前门店")
@@ -1328,8 +1344,9 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
     if not order.member_address_id:
         raise ValueError("订单无收货地址，无法推顺丰")
 
-    if (order.fulfillment_status or "").strip() != "pending":
-        raise ValueError("仅「待发货」订单可推送顺丰（已在配送中或已完成的订单请勿重复操作）")
+    fs = str(order.fulfillment_status or "").strip().lower()
+    if not single_meal_fulfillment_allows_dispatch(order.fulfillment_status):
+        raise ValueError("仅「待发货」或「顺丰取消」订单可推送顺丰（配送中或已完成的订单请勿重复操作）")
 
     st_row = db.get(Store, int(store_id))
     if not st_row:
@@ -1379,8 +1396,8 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
     if d is None:
         raise ValueError("订单缺少供餐日")
 
-    if _has_success(db, d, stop_id):
-        raise ValueError("该订单在供餐日已成功创建顺丰单，请勿重复推送（可在顺丰订单监控核对）")
+    if _has_active_success_push(db, d, stop_id):
+        raise ValueError("该订单在供餐日仍有进行中的顺丰单，请勿重复推送（可在顺丰订单监控核对；若已取消请稍候同步后再推）")
 
     row_sfc = SfSameCityRowBase(
         stop_id=stop_id,
@@ -1428,8 +1445,10 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
 
     with SfOpenClient() as httpc:
         with _sf_push_serial_lock(db, store_id=int(store_id), d=d):
-            if _has_success(db, d, stop_id, store_id=int(store_id)):
-                raise ValueError("该订单在供餐日已成功创建顺丰单，请勿重复推送")
+            if _has_active_success_push(db, d, stop_id, store_id=int(store_id)):
+                raise ValueError(
+                    "该订单在供餐日仍有进行中的顺丰单，请勿重复推送（若顺丰侧已取消请稍候状态同步后再推）"
+                )
 
             pld: dict[str, Any] | None = None
             try:
@@ -1473,10 +1492,15 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
                 db.add(row_db)
                 db.add(order)
                 db.commit()
+                msg = (
+                    "已重新提交顺丰（单次零售，独立顺丰店铺）"
+                    if fs == "sf_cancelled"
+                    else "已提交顺丰（单次零售，独立顺丰店铺）"
+                )
                 return SfSameCityPushItemResult(
                     stop_id=stop_id,
                     ok=True,
-                    message="已提交顺丰（单次零售，独立顺丰店铺）",
+                    message=msg,
                     sf_order_id=str(sfo) if sfo is not None else None,
                 )
             except SfOpenApiError as e:

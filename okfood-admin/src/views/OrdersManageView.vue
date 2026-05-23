@@ -52,10 +52,33 @@ function formatOrderCreatedAtMdHm(iso) {
 const activeTab = ref('single')
 const orderDate = ref(todayShanghaiStr())
 const searchQuery = ref('')
-const singlePayFilter = ref('')
+/** 单次点餐 / 商城卡包：支付状态 Tab，默认全部 */
+const singlePayFilter = ref('all')
 /** 单次点餐：配送维度筛选，对应接口 delivery_phase */
 const singleDeliveryFilter = ref('')
-const mallPayFilter = ref('')
+const mallPayFilter = ref('all')
+
+const SINGLE_PAY_TABS = [
+  { label: '全部', value: 'all' },
+  { label: '已支付', value: '已支付' },
+  { label: '未支付', value: '未支付' },
+  { label: '已取消', value: '已取消' },
+]
+
+const MALL_PAY_TABS = [
+  { label: '全部', value: 'all' },
+  { label: '已支付', value: '已支付' },
+  { label: '未支付', value: '未支付' },
+  { label: '已取消', value: '已取消' },
+]
+
+function mallPayFilterApiValue(tabValue) {
+  const v = String(tabValue ?? '').trim()
+  if (v === '已支付') return '已缴'
+  if (v === '未支付') return '未缴'
+  if (v === '已取消') return '已退款'
+  return v
+}
 const loading = ref(false)
 const singleItems = ref([])
 const singleTotal = ref(0)
@@ -122,7 +145,11 @@ function canDispatchActions(row) {
   if (!row || row.pay_status !== '已支付') return false
   const f = String(row.fulfillment_status || '').toLowerCase()
   if (f === 'cancelled') return false
-  return f === 'pending'
+  return f === 'pending' || f === 'sf_cancelled'
+}
+
+function isSfCancelledRedispatch(row) {
+  return String(row?.fulfillment_status || '').trim().toLowerCase() === 'sf_cancelled'
 }
 
 function canCancelOrder(row) {
@@ -182,17 +209,20 @@ async function loadCouriers() {
 
 async function onPushSfRetail(row) {
   if (!canDispatchActions(row)) {
-    showToast('仅「待发货」且已支付订单可推送顺丰', 'error')
+    showToast('仅「待发货」或「顺丰取消」且已支付订单可推送顺丰', 'error')
     return
   }
   if (row.store_pickup) {
     showToast('门店自提订单不发顺丰到家；可用「门店自配送」指派', 'error')
     return
   }
+  const isRetry = isSfCancelledRedispatch(row)
   try {
     await ElMessageBox.confirm(
-      '将使用门店设置中的「零售推顺丰店铺ID」向顺丰创单（与智能配送大表所用顺丰店铺编号独立）。是否继续？',
-      '推送到顺丰',
+      isRetry
+        ? '该订单此前顺丰侧已取消，将重新向顺丰创单。是否继续？'
+        : '将使用门店设置中的「零售推顺丰店铺ID」向顺丰创单（与智能配送大表所用顺丰店铺编号独立）。是否继续？',
+      isRetry ? '重新推送到顺丰' : '推送到顺丰',
       { type: 'warning', confirmButtonText: '确定推送', cancelButtonText: '取消' },
     )
   } catch {
@@ -223,7 +253,7 @@ async function onPushSfRetail(row) {
 
 async function onPushUu(row) {
   if (!canDispatchActions(row)) {
-    showToast('仅「待发货」且已支付订单可操作', 'error')
+    showToast('仅「待发货」或「顺丰取消」且已支付订单可操作', 'error')
     return
   }
   dispatchLoadingId.value = Number(row.id)
@@ -252,7 +282,7 @@ async function onPushUu(row) {
 
 function openAssignCourier(row) {
   if (!canDispatchActions(row)) {
-    showToast('仅「待发货」订单可指派门店配送员', 'error')
+    showToast('仅「待发货」或「顺丰取消」订单可指派门店配送员', 'error')
     return
   }
   batchAssignMode.value = false
@@ -266,7 +296,7 @@ function openAssignCourier(row) {
 function openBatchAssignCourier() {
   const rows = selectedSingleRows.value.filter((row) => canDispatchActions(row))
   if (!rows.length) {
-    showToast('请勾选可配送的待发货订单', 'error')
+    showToast('请勾选可配送的订单（待发货或顺丰已取消）', 'error')
     return
   }
   batchAssignMode.value = true
@@ -422,7 +452,7 @@ async function submitAssignCourier() {
 async function onBatchPushSfRetail() {
   const rows = selectedDispatchableRows.value
   if (!rows.length) {
-    showToast('请勾选可推顺丰的待发货订单（不含门店自提）', 'error')
+    showToast('请勾选可推顺丰的订单（待发货或顺丰已取消，不含门店自提）', 'error')
     return
   }
   try {
@@ -685,7 +715,7 @@ async function fetchSingleMeals() {
     const sq = searchQuery.value.trim()
     if (sq) q.set('q', sq)
     const pf = String(singlePayFilter.value ?? '').trim()
-    if (pf === '未支付' || pf === '已支付' || pf === '已退款') q.set('pay_status', pf)
+    if (pf === '未支付' || pf === '已支付' || pf === '已取消') q.set('pay_status', pf)
     const ds = String(singleDeliveryFilter.value ?? '').trim()
     if (ds === 'awaiting' || ds === 'delivered') q.set('delivery_phase', ds)
     const data = await apiJson(`/api/admin/orders/daily/single-meals?${q.toString()}`, {}, { auth: true })
@@ -717,7 +747,7 @@ async function fetchMallCardOrders() {
     if (d) q.set('order_date', d)
     const sq = searchQuery.value.trim()
     if (sq) q.set('q', sq)
-    const pf = String(mallPayFilter.value ?? '').trim()
+    const pf = mallPayFilterApiValue(mallPayFilter.value)
     if (pf === '未缴' || pf === '已缴' || pf === '已退款') q.set('pay_status', pf)
     const data = await apiJson(`/api/admin/orders/daily/mall-card-orders?${q.toString()}`, {}, { auth: true })
     mallItems.value = Array.isArray(data.items) ? data.items : []
@@ -849,27 +879,27 @@ onMounted(() => {
       <el-tabs v-model="activeTab" class="orders-manage-tabs">
         <el-tab-pane label="单次点餐" name="single">
          <div class="orders-manage-tab-bar orders-manage-tab-bar--filters">
-           <div class="orders-manage-tab-bar__filters">
-             <div class="orders-filter-el">
-                <span class="orders-filter-el-label">支付</span>
-                <el-select v-model="singlePayFilter" placeholder="全部" clearable class="orders-filter-el-select">
-                  <el-option label="全部" value="" />
-                  <el-option label="未支付" value="未支付" />
-                  <el-option label="已支付" value="已支付" />
-                  <el-option label="已退款" value="已退款" />
-                </el-select>
+           <el-tabs v-model="singlePayFilter" class="orders-pay-tabs">
+             <el-tab-pane
+               v-for="tab in SINGLE_PAY_TABS"
+               :key="tab.value"
+               :label="tab.label"
+               :name="tab.value"
+             />
+           </el-tabs>
+           <div class="orders-manage-tab-bar__row">
+             <div class="orders-manage-tab-bar__filters">
+                <div class="orders-filter-el">
+                  <span class="orders-filter-el-label">配送</span>
+                  <el-select v-model="singleDeliveryFilter" placeholder="全部" clearable
+                    class="orders-filter-el-select orders-filter-el-select--wide">
+                    <el-option label="全部" value="" />
+                    <el-option label="待配送" value="awaiting" />
+                    <el-option label="已配送" value="delivered" />
+                  </el-select>
+                </div>
               </div>
-              <div class="orders-filter-el">
-                <span class="orders-filter-el-label">配送</span>
-                <el-select v-model="singleDeliveryFilter" placeholder="全部" clearable
-                  class="orders-filter-el-select orders-filter-el-select--wide">
-                  <el-option label="全部" value="" />
-                  <el-option label="待配送" value="awaiting" />
-                  <el-option label="已配送" value="delivered" />
-                </el-select>
-              </div>
-            </div>
-           <div class="orders-batch-bar__actions">
+             <div class="orders-batch-bar__actions">
               <span v-if="selectedSingleRows.length" class="orders-batch-bar__count">
                 已选 {{ selectedSingleRows.length }} 笔
               </span>
@@ -895,6 +925,7 @@ onMounted(() => {
                 清空选择
               </el-button>
             </div>
+           </div>
           </div>
           <AdminTable
 ref="singleTableRef"
@@ -942,7 +973,7 @@ ref="singleTableRef"
                 <span :class="singlePayClass(row.pay_status)">{{ row.pay_status || '—' }}</span>
               </template>
             </el-table-column>
-           <el-table-column label="订单状态" width="100" class-name="co-nowrap">
+           <el-table-column label="订单状态" width="120" class-name="co-nowrap">
               <template #default="{ row }">
                <span :class="singleOrderStatusClass(row)">{{ singleOrderStatusLabelZh(row) }}</span>
               </template>
@@ -965,7 +996,7 @@ ref="singleTableRef"
                       :loading="dispatchLoadingId === row.id"
                       :disabled="!canDispatchActions(row)"
                     >
-                     配送
+                     {{ isSfCancelledRedispatch(row) ? '重新配送' : '配送' }}
                     </el-button>
                     <template #dropdown>
                       <el-dropdown-menu>
@@ -1006,15 +1037,14 @@ type="success" size="small" plain :disabled="!canMarkOrderComplete(row)"
 
         <el-tab-pane label="商城卡包" name="mall">
           <div class="orders-manage-tab-bar">
-            <div class="orders-filter-el">
-              <span class="orders-filter-el-label">缴费</span>
-              <el-select v-model="mallPayFilter" placeholder="全部" clearable class="orders-filter-el-select">
-                <el-option label="全部" value="" />
-                <el-option label="未缴" value="未缴" />
-                <el-option label="已缴" value="已缴" />
-                <el-option label="已退款" value="已退款" />
-              </el-select>
-            </div>
+            <el-tabs v-model="mallPayFilter" class="orders-pay-tabs">
+              <el-tab-pane
+                v-for="tab in MALL_PAY_TABS"
+                :key="tab.value"
+                :label="tab.label"
+                :name="tab.value"
+              />
+            </el-tabs>
           </div>
           <AdminTable
             variant="members"
@@ -1272,13 +1302,48 @@ type="success" size="small" plain :disabled="!canMarkOrderComplete(row)"
 }
 .orders-manage-tab-bar--filters {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.65rem;
+}
+.orders-pay-tabs {
+  width: 100%;
+}
+.orders-pay-tabs :deep(.el-tabs__header) {
+  margin: 0;
+}
+.orders-pay-tabs :deep(.el-tabs__nav-wrap::after) {
+  height: 1px;
+  background-color: #e2e8f0;
+}
+.orders-pay-tabs :deep(.el-tabs__item) {
+  height: 36px;
+  line-height: 36px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  padding: 0 16px;
+}
+.orders-pay-tabs :deep(.el-tabs__item.is-active) {
+  color: #0e5a44;
+}
+.orders-pay-tabs :deep(.el-tabs__active-bar) {
+  background-color: #0e5a44;
+}
+.orders-manage-tab-bar--filters .orders-manage-tab-bar__row {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-    gap: 0.75rem 1.25rem;
-  }
-  
-  .orders-manage-tab-bar__filters {
+  gap: 0.75rem 1.25rem;
+}
+.orders-manage-tab-bar--filters .orders-manage-tab-bar__filters {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+}
+.orders-manage-tab-bar__filters {
     display: inline-flex;
     flex-wrap: wrap;
     align-items: center;

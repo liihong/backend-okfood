@@ -155,87 +155,61 @@ export function addDaysIso(isoDate, days) {
   return `${y}-${m}-${day}`
 }
 
-/** 单点：上海时间该时刻起不可再下「当日供餐」单（与后端 `time(10,0,0)` 一致，含 10:00:00 起算） */
-export const SINGLE_ORDER_CUTOFF_HOUR = 10
-
-/**
- * 上海时区是否已过单点业务「当日」截单点（与后端 `time(10,0,0)` 一致）
- * @param {Date} [now]
- * @param {number} [cutoffHour] 默认 10
- */
-export function isShanghaiPastDailyCutoff(
-  now = new Date(),
-  cutoffHour = SINGLE_ORDER_CUTOFF_HOUR,
-) {
-  const h0 = Math.floor(Number(cutoffHour)) || 0
-  try {
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Asia/Shanghai',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    }).formatToParts(now)
-    const h = parseInt(parts.find((p) => p.type === 'hour')?.value || '0', 10) || 0
-    const min = parseInt(parts.find((p) => p.type === 'minute')?.value || '0', 10) || 0
-    const sec = parseInt(parts.find((p) => p.type === 'second')?.value || '0', 10) || 0
-    if (h > h0) return true
-    if (h < h0) return false
-    // 与后端 `time >= time(10, 0, 0)` 一致：10:00:00 起算截单后规则
-    return true
-  } catch {
-    const d = new Date(now)
-    return d.getHours() > h0 || d.getHours() === h0
-  }
-}
-
 export { minMemberDeliveryStartYmd } from '@/utils/memberDeliveryDate.js'
 
 /**
- * 单点供餐日是否允许发起下单（与后端 `single_meal_order_service.create_single_meal_order` 一致）：
- * - 早于上海「今天」的供餐日：不可
- * - 等于上海「今天」且已过 10:00：不可再下「当日」单
- * - 明日、下周一等任意未来日期：允许进入下单流程（是否排餐、库存等由接口校验）
+ * 单点供餐日是否有效：上海「今天」及未来可下单，过去日期不可。
  * @param {string} [serviceDateYmd] YYYY-MM-DD
- * @param {{ now?: Date }} [opts] 可传 `now` 便于测试
+ * @param {{ now?: Date }} [opts]
  */
 export function isSingleOrderServiceDate(serviceDateYmd, opts) {
   if (!serviceDateYmd || typeof serviceDateYmd !== 'string') return false
   const t = serviceDateYmd.trim()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return false
   const now = opts && opts.now != null ? opts.now : new Date()
-  const today = ymdTodayShanghai(now)
-  if (t < today) return false
-  if (t === today && isShanghaiPastDailyCutoff(now)) return false
-  return true
+  return t >= ymdTodayShanghai(now)
 }
 
 /**
- * 首页周菜单卡片是否展示「立即下单」：供餐日窗口内即可展示；库存/售罄在详情页与下单接口校验。
- * @param {ReturnType<typeof mapWeeklyListItem>} row
+ * 当日单点库存是否可售（不限量视为可售）。
+ * @param {{ singleStockLimited?: boolean, singleStockRemaining?: number | null } | null | undefined} menuItem
  */
-export function isMenuRowQuickOrderVisible(row, opts) {
-  if (!row || typeof row !== 'object') return false
-  if (!row.dishId) return false
-  return isSingleOrderServiceDate(row.serviceDate, opts)
+export function isSingleOrderStockAvailable(menuItem) {
+  if (!menuItem || typeof menuItem !== 'object') return false
+  if (!menuItem.singleStockLimited) return true
+  const n = menuItem.singleStockRemaining
+  return n != null && Number(n) > 0
 }
 
 /**
- * @param {string} serviceDateYmd
+ * 是否可发起单点（供餐日 + 库存，列表/详情/确认页唯一入口）。
+ * @param {{ dishId?: string, singleStockLimited?: boolean, singleStockRemaining?: number | null } | null | undefined} menuItem
+ * @param {string} [serviceDateYmd]
+ * @param {{ now?: Date }} [opts]
+ */
+export function canSubmitSingleOrder(menuItem, serviceDateYmd, opts) {
+  if (!menuItem || typeof menuItem !== 'object') return false
+  if ('dishId' in menuItem && !String(menuItem.dishId || '').trim()) return false
+  if (!isSingleOrderServiceDate(serviceDateYmd, opts)) return false
+  return isSingleOrderStockAvailable(menuItem)
+}
+
+/**
+ * @param {{ singleStockLimited?: boolean, singleStockRemaining?: number | null } | null | undefined} menuItem
+ * @param {string} [serviceDateYmd]
  * @param {{ now?: Date }} [opts]
  * @returns {string} 空串表示可下单
  */
-export function singleOrderServiceDateError(serviceDateYmd, opts) {
-  if (isSingleOrderServiceDate(serviceDateYmd, opts)) return ''
-  const t = String(serviceDateYmd || '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return '供餐日期无效'
-  const now = opts && opts.now != null ? opts.now : new Date()
-  const today = ymdTodayShanghai(now)
-  if (t < today) return '不可选择过去的供餐日'
-  if (t === today && isShanghaiPastDailyCutoff(now)) {
-    return '每日 10:00 后仅可下次日及之后的单点单'
+export function singleOrderBlockReason(menuItem, serviceDateYmd, opts) {
+  if (!isSingleOrderServiceDate(serviceDateYmd, opts)) {
+    const t = String(serviceDateYmd || '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return '供餐日期无效'
+    return '不可选择过去的供餐日'
   }
-  return '该供餐日不可单点'
+  if (!menuItem) return ''
+  if ('dishId' in menuItem && !String(menuItem.dishId || '').trim()) return '该餐品不可单点'
+  if (!isSingleOrderStockAvailable(menuItem)) return '当日单次卡已无库存'
+  return ''
 }
 
 /** @type {Map<string, Promise<{ weekStart: string, items: ReturnType<typeof mapWeeklyListItem>[] }>>} */

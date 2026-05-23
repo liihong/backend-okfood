@@ -500,7 +500,7 @@ onMounted(() => {
           <strong>业务日 {{ pushStats.delivery_date }}</strong>：共 {{ pushStats.total }} 单 · 成功
           {{ pushStats.success }} · 失败 {{ pushStats.failed }} · 取消
           {{ pushStats.cancelled != null ? pushStats.cancelled : 0 }}
-          <span class="sf-monitor-stats-sub">（按配送业务日统计，与下方列表「业务日」一致；夜间推送记在该配送日）</span>
+          <span class="sf-monitor-stats-sub">（按配送业务日统计，与下方列表「业务日」一致；定时推送记在该配送日）</span>
         </p>
         <div class="sf-monitor-filters">
           <label class="sf-monitor-field">

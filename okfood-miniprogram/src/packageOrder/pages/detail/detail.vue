@@ -33,7 +33,7 @@
               <text class="p-hint">包月订阅更优惠 👌</text>
               <view v-if="showDayStockBlock" class="day-stock-line">
                 <block v-if="dish.singleStockLimited">
-                  <template v-if="singleDayStockSoldOut">
+                  <template v-if="!isSingleOrderStockAvailable(dish)">
                     <text class="day-stock-soldout">售罄</text>
                   </template>
                   <template v-else>
@@ -51,7 +51,7 @@
             <text class="ingredient-list">{{ dish.ingredients || '—' }}</text>
           </view>
           <button
-            v-if="canSubmitSingleOrder"
+            v-if="showOrderButton"
             class="btn-order-confirm"
             @click="handleBuy"
           >确认订单信息</button>
@@ -67,10 +67,11 @@ import { ref, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
+  canSubmitSingleOrder,
   fetchMenuDetail,
   formatMenuPrice,
-  isSingleOrderServiceDate,
-  singleOrderServiceDateError,
+  isSingleOrderStockAvailable,
+  singleOrderBlockReason,
 } from '@/utils/menuApi.js'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { getMemberToken } from '@/utils/api.js'
@@ -81,21 +82,9 @@ const loadError = ref('')
 /** 供餐日 YYYY-MM-DD，来自周菜单跳转 */
 const serviceDateYmd = ref('')
 
-/** 已设单日总上限且单次卡配额已用尽（或与后端对齐时 remaining 不可售） */
-const singleDayStockSoldOut = computed(() => {
-  const d = dish.value
-  if (!d || !d.singleStockLimited) return false
-  const n = d.singleStockRemaining
-  return n == null || Number(n) <= 0
-})
-
-const canSubmitSingleOrder = computed(() => {
-  if (!isSingleOrderServiceDate(serviceDateYmd.value)) return false
-  const d = dish.value
-  if (!d) return false
-  if (singleDayStockSoldOut.value) return false
-  return true
-})
+const showOrderButton = computed(() =>
+  canSubmitSingleOrder(dish.value, serviceDateYmd.value),
+)
 
 /** 有供餐日时在价格卡右侧展示「当日剩余 / 售罄 / 当日单点不限量」 */
 const showDayStockBlock = computed(() => !!(serviceDateYmd.value && dish.value))
@@ -168,13 +157,9 @@ function onImgErr() {
 
 function handleBuy() {
   if (!dish.value) return
-  if (singleDayStockSoldOut.value) {
-    uni.showToast({ title: '当日单次卡已无库存', icon: 'none' })
-    return
-  }
-  if (!canSubmitSingleOrder.value) {
-    const msg = singleOrderServiceDateError(serviceDateYmd.value)
-    uni.showToast({ title: msg, icon: 'none' })
+  const block = singleOrderBlockReason(dish.value, serviceDateYmd.value)
+  if (block) {
+    uni.showToast({ title: block, icon: 'none' })
     return
   }
   const p = formatMenuPrice(dish.value.price)
@@ -417,14 +402,19 @@ function handleBuy() {
 
 .btn-order-confirm {
   width: 100%;
-  padding: 44rpx;
+  padding: 24rpx 32rpx;
   background: $ok-forest-green;
   color: #fff;
   border: none;
-  border-radius: 48rpx;
-  font-size: 34rpx;
-  font-weight: 950;
-  margin-top: 80rpx;
-  box-shadow: 0 30rpx 60rpx rgba(14, 90, 68, 0.2);
+  border-radius: 40rpx;
+  font-size: 28rpx;
+  font-weight: 900;
+  line-height: 1.35;
+  margin-top: 48rpx;
+  box-shadow: 0 16rpx 32rpx rgba(14, 90, 68, 0.18);
+}
+
+.btn-order-confirm::after {
+  border: none;
 }
 </style>

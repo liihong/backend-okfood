@@ -56,7 +56,7 @@
               </view>
               <text class="dish-ingredients">配料：{{ m.ingredients }}</text>
               <button
-                v-if="isMenuRowQuickOrderVisible(m)"
+                v-if="canSubmitSingleOrder(m, m.serviceDate)"
                 class="btn-quick-buy"
                 @click.stop="goDetail(m)">立即下单</button>
             </view>
@@ -75,7 +75,7 @@ import {
   addDaysIso,
   fetchWeeklyMenu,
   formatMenuPrice,
-  isMenuRowQuickOrderVisible,
+  canSubmitSingleOrder,
   mondayOfWeekShanghai,
   prefetchWeeklyMenu,
 } from '@/utils/menuApi.js'

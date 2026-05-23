@@ -182,3 +182,7 @@ class MembershipCardTemplateMemberOut(BaseModel):
     intro_short: str | None = Field(None, description="商品简介")
     purchase_notice: str | None = Field(None, description="购买须知")
     sort_order: int = 0
+
+
+class RenewRemindSubscribeGrantOut(BaseModel):
+    wx_renew_remind_quota: int = Field(..., ge=0, description="续费提醒订阅消息剩余可发送次数")

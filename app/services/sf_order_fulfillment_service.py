@@ -19,6 +19,7 @@ from app.services.sf_same_city_service import aggs_for_delivery_date, load_agg_f
 from app.services.single_meal_order_service import (
     mark_single_meal_delivered_sf_completion_no_commit,
     mark_single_meal_sf_cancelled_no_commit,
+    sf_push_create_succeeded,
     sf_push_is_terminal_cancel,
 )
 
@@ -308,7 +309,7 @@ def should_run_sf_auto_fulfillment(*, route_kind: str, pus: SfSameCityPush) -> b
     - ``order_complete`` 回调（订单完成）
     - 或推送记录上顺丰状态已为妥投完单 (17)
     """
-    if int(pus.error_code or -1) != 0:
+    if not sf_push_create_succeeded(pus):
         return False
     if _sf_push_skip_auto_fulfillment_due_to_cancel(pus):
         return False
@@ -320,7 +321,7 @@ def should_run_sf_auto_fulfillment(*, route_kind: str, pus: SfSameCityPush) -> b
 
 def should_apply_sf_cancel_sync(*, pus: SfSameCityPush) -> bool:
     """创单成功且顺丰侧已为取消/撤单终态时，回写单次点餐履约状态。"""
-    if int(pus.error_code or -1) != 0:
+    if not sf_push_create_succeeded(pus):
         return False
     return sf_push_is_terminal_cancel(pus)
 
@@ -330,7 +331,7 @@ def _apply_sf_cancel_to_single_meal_orders_for_push(
 ) -> dict[str, Any]:
     """单次零售或大表合并中的单次点餐：顺丰取消/撤单时标 ``sf_cancelled``。"""
     result: dict[str, Any] = {"single_meal_applied": 0, "single_meal_skipped": 0, "warnings": []}
-    if int(pus.error_code or -1) != 0:
+    if not sf_push_create_succeeded(pus):
         result["warnings"].append("创单未成功，跳过取消同步")
         return result
     if not should_apply_sf_cancel_sync(pus=pus):
@@ -540,7 +541,7 @@ def _apply_sf_same_city_stop_fulfillment(
         "single_meal_skipped": 0,
         "warnings": [],
     }
-    if int(pus.error_code or -1) != 0:
+    if not sf_push_create_succeeded(pus):
         result["warnings"].append("创单未成功，跳过履约")
         return result
     if _sf_push_skip_auto_fulfillment_due_to_cancel(pus):
@@ -692,7 +693,7 @@ def admin_apply_sf_fulfillment_for_push_id(db: Session, *, push_id: int) -> dict
     pus = db.get(SfSameCityPush, int(push_id))
     if pus is None:
         raise ValueError("推单记录不存在")
-    if int(pus.error_code or -1) != 0:
+    if not sf_push_create_succeeded(pus):
         raise ValueError("仅创单成功的记录可补跑履约")
     if _sf_push_skip_auto_fulfillment_due_to_cancel(pus):
         raise ValueError("该单已取消或取消中，不可补跑履约")

@@ -1,4 +1,4 @@
-"""独立定时任务进程：与 uvicorn API 分离，避免 22:00 推单占满 API  worker。
+"""独立定时任务进程：与 uvicorn API 分离，避免 07:00 推单占满 API worker。
 
 启动::
 

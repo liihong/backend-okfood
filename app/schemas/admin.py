@@ -174,7 +174,7 @@ class StoreConfigOut(BaseModel):
     )
     sf_nightly_auto_push_enabled: bool = Field(
         False,
-        description="每日 22:00（上海）自动向顺丰推送次日业务日配送单；关闭则仅手动推单",
+        description="每日 07:00（上海）自动向顺丰推送当日业务日配送单；关闭则仅手动推单",
     )
     sf_retail_push_shop_id: str | None = Field(
         None,
@@ -251,7 +251,7 @@ class StoreConfigUpdateIn(BaseModel):
     )
     sf_nightly_auto_push_enabled: bool | None = Field(
         None,
-        description="顺丰夜间自动推单；不传表示不修改",
+        description="顺丰自动推单；不传表示不修改",
     )
     sf_retail_push_shop_id: str | None = Field(
         None,
@@ -389,11 +389,11 @@ class MemberAdminOut(BaseModel):
 
 
 class MemberListStatsOut(BaseModel):
-    """会员档案库顶栏统计：与列表 validity 筛选一致（剩余次数 balance>0 为生效中，=0 为已过期）。"""
+    """会员档案库顶栏统计：仅周/月卡；与列表 validity 筛选一致（balance>0 生效中，=0 已过期）。"""
 
-    total: int = Field(..., ge=0, description="会员总户数")
+    total: int = Field(..., ge=0, description="周/月卡档案总户数")
     active: int = Field(..., ge=0, description="生效中：balance>0")
-    expired: int = Field(..., ge=0, description="已过期：balance=0")
+    expired: int = Field(..., ge=0, description="已过期：balance=0 且曾有起送日/累计总次数")
 
 
 class AdminAddressIn(BaseModel):
@@ -1053,7 +1053,7 @@ class PlatformStoreOut(BaseModel):
     leave_deadline_time: str = Field("", description="HH:MM:SS")
     sf_nightly_auto_push_enabled: bool = Field(
         False,
-        description="是否启用每日 22:00 自动顺丰推单（次日业务日）",
+        description="是否启用每日 07:00 自动顺丰推单（当日业务日）",
     )
     created_at: str
 
@@ -1068,7 +1068,7 @@ class PlatformStoreCreateIn(BaseModel):
     is_active: bool = True
     sf_nightly_auto_push_enabled: bool = Field(
         False,
-        description="启用后系统于每日 22:00（上海）自动推送次日待配送订单至顺丰",
+        description="启用后系统于每日 07:00（上海）自动推送当日待配送订单至顺丰",
     )
 
 
@@ -1111,6 +1111,7 @@ class TenantIntegrationSettingsOut(BaseModel):
         None, description="微信退款 apiclient_key.pem 路径；空则回退门店或全局 .env"
     )
     wx_subscribe_delivery_tmpl_id: str | None = None
+    wx_subscribe_renew_tmpl_id: str | None = None
     sf_open_dev_id: int | None = None
     sf_open_secret_set: bool = False
     sf_open_shop_id: str | None = None
@@ -1131,6 +1132,7 @@ class TenantIntegrationSettingsPatchIn(BaseModel):
     wechat_pay_ssl_cert_path: str | None = Field(None, max_length=512, description="退款证书 cert 路径；空串清除租户默认")
     wechat_pay_ssl_key_path: str | None = Field(None, max_length=512, description="退款证书 key 路径；空串清除租户默认")
     wx_subscribe_delivery_tmpl_id: str | None = Field(None, max_length=128)
+    wx_subscribe_renew_tmpl_id: str | None = Field(None, max_length=128)
     sf_open_dev_id: int | None = Field(None, ge=0)
     sf_open_secret: str | None = Field(None, max_length=255)
     sf_open_shop_id: str | None = Field(None, max_length=64)

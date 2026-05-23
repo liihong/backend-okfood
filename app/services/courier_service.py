@@ -168,6 +168,67 @@ def eligible_members_for_delivery(
     return members, defaults
 
 
+def _member_subscription_eligibility_where(
+    delivery_date: date,
+    *,
+    tenant_id: int | None = None,
+    store_id: int | None = None,
+) -> list:
+    """与 eligible_members_for_delivery / store_pickup 相同的会员资格条件（不含地址/片区）。"""
+    today = today_shanghai()
+    tomorrow = date.fromordinal(today.toordinal() + 1)
+    in_leave_range = and_(
+        Member.leave_range_start.is_not(None),
+        Member.leave_range_end.is_not(None),
+        Member.leave_range_start <= delivery_date,
+        Member.leave_range_end >= delivery_date,
+    )
+    target_hit = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date == delivery_date,
+    )
+    legacy_tomorrow = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date.is_(None),
+        literal(delivery_date) == literal(tomorrow),
+    )
+    tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
+    absent = or_(in_leave_range, tomorrow_leave_hit)
+    started = or_(
+        Member.delivery_start_date.is_(None),
+        Member.delivery_start_date <= delivery_date,
+    )
+    units_sql = sql_effective_daily_meal_units_column()
+    return [
+        Member.deleted_at.is_(None),
+        Member.is_active.is_(True),
+        Member.balance >= units_sql,
+        not_(absent),
+        started,
+        _member_not_skip_subscription_saturday(delivery_date),
+        _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
+    ]
+
+
+def sum_subscription_meals_on_date(
+    db: Session,
+    *,
+    delivery_date: date,
+    tenant_id: int | None = None,
+    store_id: int | None = None,
+) -> int:
+    """当日应配送的会员份数合计（到家+自提）；SQL SUM，不加载会员行与地址。"""
+    if not is_subscription_delivery_day(delivery_date):
+        return 0
+    units_sql = sql_effective_daily_meal_units_column()
+    q = select(func.coalesce(func.sum(units_sql), 0)).where(
+        *_member_subscription_eligibility_where(
+            delivery_date, tenant_id=tenant_id, store_id=store_id
+        )
+    )
+    return int(db.scalar(q) or 0)
+
+
 def count_members_first_scheduled_delivery_day(
     db: Session,
     *,
@@ -625,6 +686,9 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
         log.courier_id = courier_id
 
     member.balance -= deduct
+    balance_before = int(member.balance) + int(deduct)
+    if member.balance <= 0:
+        member.is_active = False
     db.add(
         BalanceLog(
             member_id=member_id,
@@ -634,6 +698,9 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
             detail=None,
         )
     )
+    from app.services.member_renew_subscribe_service import try_send_renew_remind_after_balance_change
+
+    try_send_renew_remind_after_balance_change(db, member, balance_before=balance_before)
     fee_yuan = courier_delivery_fee_yuan_for_meal_units(db, deduct, store_id=int(member.store_id))
     courier_row = db.execute(select(Courier).where(Courier.courier_id == courier_id).with_for_update()).scalar_one_or_none()
     if not courier_row:

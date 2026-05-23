@@ -97,6 +97,7 @@ import {
   sortAddressesDefaultFirst,
   isAddressItemDefault,
 } from '@/utils/addressApi.js'
+import { requestRenewRemindSubscribeAndGrant } from '@/utils/renewSubscribeMsg.js'
 
 /** 与 uni.scss $ok-forest-green 一致 */
 const payRadioColor = '#0e5a44'
@@ -338,6 +339,7 @@ async function onSubmit() {
         store_pickup: deliveryMode.value === 'pickup',
       },
     })
+    await requestRenewRemindSubscribeAndGrant()
     uni.showToast({
       title: resumeOnlyMode.value ? '已恢复配送' : '已保存',
       icon: 'success',

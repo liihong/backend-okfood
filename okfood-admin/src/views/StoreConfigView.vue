@@ -20,7 +20,7 @@ const form = ref({
   store_logo_url: '',
   store_lng: '',
   store_lat: '',
-  /** 每日 22:00（上海）自动顺丰推送次日配送单 */
+  /** 每日 07:00（上海）自动顺丰推送当日配送单 */
   sf_nightly_auto_push_enabled: false,
   /** 单次点餐推顺丰：顺丰侧店铺编号，与大表推单租户 shop 区分 */
   sf_retail_push_shop_id: '',
@@ -318,9 +318,9 @@ onMounted(() => {
         </template>
         <div class="sc-field sc-switch-row sc-switch-row--card">
           <div class="sc-switch-text">
-            <span class="sc-label sc-label--inline">顺丰夜间自动推单</span>
+            <span class="sc-label sc-label--inline">顺丰自动推单</span>
             <p class="sc-hint sc-hint--tight">
-              开启后系统于每日<strong>22:00（上海时间）</strong>自动将<strong>次日</strong>待配送订单推送至顺丰同城；关闭后不执行定时任务，请在配送管理页面<strong>手动推单</strong>。
+              开启后系统于每日<strong>07:00（上海时间）</strong>自动将<strong>当日</strong>待配送订单推送至顺丰同城；关闭后不执行定时任务，请在配送管理页面<strong>手动推单</strong>。
             </p>
           </div>
           <el-switch v-model="form.sf_nightly_auto_push_enabled" size="large" />

@@ -235,6 +235,7 @@ def get_tenant_integration_admin_out(db: Session, tenant_id: int) -> TenantInteg
         wechat_pay_ssl_cert_path=_s(row.wechat_pay_ssl_cert_path) or None,
         wechat_pay_ssl_key_path=_s(row.wechat_pay_ssl_key_path) or None,
         wx_subscribe_delivery_tmpl_id=_s(row.wx_subscribe_delivery_tmpl_id) or None,
+        wx_subscribe_renew_tmpl_id=_s(row.wx_subscribe_renew_tmpl_id) or None,
         sf_open_dev_id=row.sf_open_dev_id,
         sf_open_secret_set=bool(_s(row.sf_open_secret)),
         sf_open_shop_id=_s(row.sf_open_shop_id) or None,
@@ -289,6 +290,7 @@ def patch_tenant_integration_admin(
     set_opt_str("wechat_pay_ssl_cert_path", "wechat_pay_ssl_cert_path")
     set_opt_str("wechat_pay_ssl_key_path", "wechat_pay_ssl_key_path")
     set_opt_str("wx_subscribe_delivery_tmpl_id", "wx_subscribe_delivery_tmpl_id")
+    set_opt_str("wx_subscribe_renew_tmpl_id", "wx_subscribe_renew_tmpl_id")
 
     if "sf_open_dev_id" in patch:
         v = patch["sf_open_dev_id"]

@@ -390,6 +390,17 @@ function buildLeaveListFields(raw) {
   }
 }
 
+/** 周/月卡次数用尽：balance=0 且曾有起送日或累计总次数（与后台 inactive_only 口径一致） */
+export function memberCardExpired(raw, balance = null) {
+  if (!raw || typeof raw !== 'object') return false
+  const bal = balance != null ? Number(balance) || 0 : Number(raw.balance) || 0
+  if (bal > 0) return false
+  const ds = raw.delivery_start_date
+  if (ds != null && String(ds).trim()) return true
+  const mqt = Number(raw.meal_quota_total)
+  return Number.isFinite(mqt) && mqt > 0
+}
+
 /** GET /api/admin/users 单条映射为表格行 */
 export function mapAdminUserToRow(raw, idx) {
   if (!raw || typeof raw !== 'object') {
@@ -430,11 +441,17 @@ export function mapAdminUserToRow(raw, idx) {
   const tomorrowLeave = raw.is_leaved_tomorrow === true
 
   let status = '活跃中'
-  if (!active) {
-    if (deferred) status = '暂停配送'
-    else status = '未开卡'
-  }   else if (onLeaveToday) status = '请假中'
-  else if (balance <= 2) status = '待续费'
+  if (deferred) {
+    status = '暂停配送'
+  } else if (active && onLeaveToday) {
+    status = '请假中'
+  } else if (memberCardExpired(raw, balance) || (active && balance === 0)) {
+    status = '已过期'
+  } else if (!active) {
+    status = '未开卡'
+  } else if (balance <= 2) {
+    status = '待续费'
+  }
 
   const plan = raw.plan_type || '次卡'
   const totalQuota = planDefaultTotal(plan)

@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS `members` (
   `leave_range_start` DATE NULL,
   `leave_range_end` DATE NULL,
   `last_low_balance_notify_date` DATE NULL COMMENT '最近一次低余额提醒的业务日(上海)，用于去重',
+  `wx_renew_remind_quota` INT NOT NULL DEFAULT 0 COMMENT '续费提醒订阅额度（每次授权+1，成功下发-1）',
   `delivery_start_date` DATE NULL COMMENT '起送业务日(上海)：非空则仅当配送日>=该日才参与配送',
   `delivery_deferred` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '暂不配送：无起送日意向且保持未开卡',
   `store_pickup` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '门店自提：不参与按地址配送与骑手任务，单独归组备餐',

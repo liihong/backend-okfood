@@ -25,6 +25,7 @@ class TenantIntegrationSettings(Base):
     wechat_pay_ssl_cert_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     wechat_pay_ssl_key_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     wx_subscribe_delivery_tmpl_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    wx_subscribe_renew_tmpl_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     sf_open_dev_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sf_open_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)

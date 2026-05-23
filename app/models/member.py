@@ -45,6 +45,8 @@ class Member(Base):
     leave_range_start: Mapped[date | None] = mapped_column(Date, nullable=True)
     leave_range_end: Mapped[date | None] = mapped_column(Date, nullable=True)
     last_low_balance_notify_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # 续费提醒订阅消息：用户在完善资料页授权后 +1，扣次触达低余额阈值并成功下发后 -1
+    wx_renew_remind_quota: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     delivery_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     delivery_deferred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     store_pickup: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

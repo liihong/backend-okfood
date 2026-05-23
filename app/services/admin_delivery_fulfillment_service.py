@@ -91,6 +91,9 @@ def _subscription_fulfilled_apply(
         log.courier_id = None
 
     member.balance -= deduct
+    balance_before = int(member.balance) + int(deduct)
+    if member.balance <= 0:
+        member.is_active = False
     db.add(
         BalanceLog(
             member_id=member_id,
@@ -100,6 +103,9 @@ def _subscription_fulfilled_apply(
             detail=None,
         )
     )
+    from app.services.member_renew_subscribe_service import try_send_renew_remind_after_balance_change
+
+    try_send_renew_remind_after_balance_change(db, member, balance_before=balance_before)
 
 
 def admin_mark_subscription_fulfilled(

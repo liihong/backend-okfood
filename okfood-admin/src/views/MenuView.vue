@@ -120,7 +120,7 @@ const openDishEditorAdd = () => {
   showDishModal.value = true
 }
 
-const openDishEditorEdit = (row) => {
+const openDishEditorEdit = async (row) => {
   isEditingDish.value = true
   dishForm.id = row.id
   dishForm.name = row.name || ''
@@ -133,8 +133,32 @@ const openDishEditorEdit = (row) => {
   dishForm.is_enabled = row.is_enabled !== false
   dishForm.category_id = row.category_id != null ? String(row.category_id) : ''
   dishForm.spice_level = row.spice_level != null ? String(row.spice_level).trim().toLowerCase() : ''
-  dishForm.internal_view_sop = row.internal_view_sop != null ? String(row.internal_view_sop) : ''
+  dishForm.internal_view_sop = ''
   showDishModal.value = true
+  if (!adminAccessToken.value || row.id == null) return
+  try {
+    const detail = await apiJson(`/api/admin/dish/${row.id}`, {}, { auth: true })
+    if (detail && typeof detail === 'object') {
+      dishForm.description = detail.description || dishForm.description
+      dishForm.image_url = detail.image_url || dishForm.image_url
+      dishForm.internal_view_sop =
+        detail.internal_view_sop != null ? String(detail.internal_view_sop) : ''
+      if (detail.spice_level != null) {
+        dishForm.spice_level = String(detail.spice_level).trim().toLowerCase()
+      }
+      if (detail.single_order_price_yuan != null && String(detail.single_order_price_yuan).trim() !== '') {
+        dishForm.single_order_price_yuan = String(detail.single_order_price_yuan).trim()
+      }
+    }
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '加载菜品详情失败', 'error')
+  }
 }
 
 const closeDishModal = () => {
