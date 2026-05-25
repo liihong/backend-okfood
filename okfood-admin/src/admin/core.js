@@ -430,6 +430,7 @@ export function mapAdminUserToRow(raw, idx) {
       leave_badge: '',
       leave_detail: '',
       status: '未开卡',
+      membership_refunded_at: null,
       store_pickup: false,
       skip_subscription_saturday: false,
     }
@@ -439,9 +440,15 @@ export function mapAdminUserToRow(raw, idx) {
   const deferred = raw.delivery_deferred === true
   const onLeaveToday = raw.is_on_leave_today === true
   const tomorrowLeave = raw.is_leaved_tomorrow === true
+  const membershipRefundedAt =
+    raw.membership_refunded_at != null && String(raw.membership_refunded_at).trim()
+      ? String(raw.membership_refunded_at).trim()
+      : null
 
   let status = '活跃中'
-  if (deferred) {
+  if (membershipRefundedAt) {
+    status = '已退款'
+  } else if (deferred) {
     status = '暂停配送'
   } else if (active && onLeaveToday) {
     status = '请假中'
@@ -503,6 +510,7 @@ export function mapAdminUserToRow(raw, idx) {
     leave_badge: leaveList.leave_badge,
     leave_detail: leaveList.leave_detail,
     status,
+    membership_refunded_at: membershipRefundedAt,
     store_pickup: raw.store_pickup === true,
     skip_subscription_saturday: raw.skip_subscription_saturday === true,
   }

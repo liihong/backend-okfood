@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'RetailCatalogView' })
 import { ref, computed, onMounted } from 'vue'
 import { Info, LayoutGrid, List, Plus, X } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout, dishImageDisplayUrl } from '../admin/core.js'

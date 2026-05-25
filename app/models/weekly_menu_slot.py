@@ -21,7 +21,7 @@ class WeeklyMenuSlot(Base):
     slot: Mapped[int] = mapped_column(Integer, nullable=False)
     dish_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("menu_dish.id", onupdate="CASCADE"), nullable=False)
     total_stock: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, default=None, comment="日总份(含订阅与单次)；NULL=不限制单次卡"
+        Integer, nullable=True, default=None, comment="日总份(含订阅与单次)；NULL=未配置(单次卡不可售)"
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

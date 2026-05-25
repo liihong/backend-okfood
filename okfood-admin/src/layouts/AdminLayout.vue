@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Users,
   Truck,
@@ -14,16 +14,73 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Settings,
+  X,
+  Bell,
 } from 'lucide-vue-next'
-import { handleAdminLogout, adminKind, hydrateTokenFromStorage } from '../admin/core.js'
+import {
+  handleAdminLogout,
+  adminKind,
+  adminAccessToken,
+  hydrateTokenFromStorage,
+} from '../admin/core.js'
+import { useAdminTabsStore } from '../stores/adminTabs.js'
+import { ADMIN_TABS_MAX_CACHE } from '../constants/adminTabComponents.js'
+import { useAdminSystemNotifications } from '../composables/useAdminSystemNotifications.js'
+import { useToast } from '../composables/useToast.js'
 
 const SIDEBAR_COLLAPSED_KEY = 'okfood-admin-sidebar-collapsed'
 
 const route = useRoute()
+const router = useRouter()
+const tabsStore = useAdminTabsStore()
+const { showToast } = useToast()
+const {
+  unreadItems,
+  unacknowledgedCount,
+  hasUnread,
+  loading: notificationsLoading,
+  acknowledgingId,
+  acknowledgeNotification,
+  subscribeLayoutPolling,
+  unsubscribeLayoutPolling,
+  fetchNotifications,
+} = useAdminSystemNotifications()
+
+const notificationPopoverVisible = ref(false)
 
 const isDeliveryOnly = computed(() => adminKind.value === 'delivery')
 const isSupportOnly = computed(() => adminKind.value === 'support')
 const isSystemOnly = computed(() => adminKind.value === 'system')
+
+/** 店主/配送账号展示系统消息铃铛 */
+const showSystemNotifications = computed(
+  () => !isSystemOnly.value && !isSupportOnly.value,
+)
+
+const notificationBadgeText = computed(() => {
+  const n = Number(unacknowledgedCount.value) || 0
+  if (n <= 0) return ''
+  return n > 9 ? '9+' : String(n)
+})
+
+async function onAcknowledgeNotification(item) {
+  const ok = await acknowledgeNotification(item?.id)
+  if (ok) {
+    showToast('已确认系统消息', 'success')
+    if (unreadItems.value.length === 0) {
+      notificationPopoverVisible.value = false
+    }
+  } else {
+    showToast('确认失败，请稍后重试', 'error')
+  }
+}
+
+function goSfMonitor(item) {
+  const d = String(item?.business_date || '').trim()
+  notificationPopoverVisible.value = false
+  const query = d ? { delivery_date: d } : {}
+  router.push({ path: '/delivery-sf-orders', query })
+}
 
 /** 与模板绑定：明确布尔，避免 Element Plus 菜单缓存旧结构 */
 const showFullAdminMenus = computed(() => !isDeliveryOnly.value && !isSystemOnly.value)
@@ -93,6 +150,9 @@ function toggleSidebar() {
 
 onMounted(() => {
   hydrateTokenFromStorage()
+  if (showSystemNotifications.value) {
+    subscribeLayoutPolling()
+  }
   sidebarMediaQuery = window.matchMedia('(max-width: 900px)')
   syncNarrowScreen()
   sidebarMediaQuery.addEventListener('change', syncNarrowScreen)
@@ -107,6 +167,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   sidebarMediaQuery?.removeEventListener('change', syncNarrowScreen)
+  unsubscribeLayoutPolling()
 })
 
 watch(sidebarCollapsedPref, (v) => {
@@ -116,6 +177,40 @@ watch(sidebarCollapsedPref, (v) => {
     /* 同上 */
   }
 })
+
+watch(
+  () => route.fullPath,
+  () => {
+    tabsStore.openFromRoute(route)
+  },
+  { immediate: true },
+)
+
+watch(
+  () => adminAccessToken.value,
+  (token) => {
+    if (!String(token || '').trim()) {
+      tabsStore.reset()
+      notificationPopoverVisible.value = false
+    } else if (showSystemNotifications.value) {
+      fetchNotifications({ silent: true })
+    }
+  },
+)
+
+const openedTabs = computed(() => tabsStore.tabs)
+const activeTabName = computed(() =>
+  typeof route.name === 'string' ? route.name : '',
+)
+const keepAliveInclude = computed(() => tabsStore.cachedComponentNames)
+
+function onTabClick(tab) {
+  tabsStore.activateTab(tab.path, router)
+}
+
+function onTabClose(tab) {
+  tabsStore.closeTab(tab.name, router)
+}
 </script>
 
 <template>
@@ -241,10 +336,81 @@ watch(sidebarCollapsedPref, (v) => {
     </aside>
 
     <main class="main-body">
+      <div v-if="showSystemNotifications" class="admin-notifications-bar">
+        <el-popover
+          v-model:visible="notificationPopoverVisible"
+          placement="bottom-end"
+          :width="360"
+          trigger="click"
+          popper-class="admin-system-notifications-popover"
+        >
+          <template #reference>
+            <button
+              type="button"
+              class="admin-notifications-bell"
+              :class="{ 'admin-notifications-bell--active': hasUnread }"
+              aria-label="系统消息"
+            >
+              <Bell :size="20" stroke-width="2" />
+              <span
+                v-if="hasUnread"
+                class="admin-notifications-badge"
+                aria-hidden="true"
+              >{{ notificationBadgeText }}</span>
+            </button>
+          </template>
+
+          <div class="admin-system-notifications-panel">
+            <div class="admin-system-notifications-panel__head">
+              <strong>系统消息</strong>
+              <span v-if="hasUnread" class="admin-system-notifications-panel__count">
+                {{ unacknowledgedCount }} 条待确认
+              </span>
+            </div>
+
+            <div v-if="notificationsLoading && unreadItems.length === 0" class="admin-system-notifications-empty">
+              加载中…
+            </div>
+            <div v-else-if="unreadItems.length === 0" class="admin-system-notifications-empty">
+              暂无待确认消息
+            </div>
+            <ul v-else class="admin-system-notifications-list">
+              <li
+                v-for="item in unreadItems"
+                :key="item.id"
+                class="admin-system-notifications-item"
+              >
+                <p class="admin-system-notifications-item__title">{{ item.title }}</p>
+                <p class="admin-system-notifications-item__message">{{ item.message }}</p>
+                <div class="admin-system-notifications-item__actions">
+                  <el-button
+                    v-if="item.kind === 'sf_nightly_push' && !item.skip_reason"
+                    size="small"
+                    text
+                    type="primary"
+                    @click="goSfMonitor(item)"
+                  >
+                    查看详情
+                  </el-button>
+                  <el-button
+                    size="small"
+                    type="primary"
+                    :loading="acknowledgingId === item.id"
+                    @click="onAcknowledgeNotification(item)"
+                  >
+                    确认
+                  </el-button>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </el-popover>
+      </div>
+
       <header
         v-if="!hidePageTitle"
         class="top-header top-header--page-title-only"
-        :class="{ 'top-header--delivery-toolbar': isDeliveryPage }"
+        :class="{ 'top-header--delivery-toolbar': isDeliveryPage, 'top-header--with-bell': showSystemNotifications }"
       >
         <div class="page-heading">
           <h2 class="page-title">{{ pageTitle }}</h2>
@@ -260,7 +426,42 @@ watch(sidebarCollapsedPref, (v) => {
         />
       </header>
 
-      <router-view />
+      <nav
+        v-if="openedTabs.length"
+        class="admin-page-tabs"
+        aria-label="已打开页面"
+      >
+        <div class="admin-page-tabs__scroll custom-scrollbar">
+          <div
+            v-for="tab in openedTabs"
+            :key="tab.name"
+            role="tab"
+            tabindex="0"
+            class="admin-page-tab"
+            :class="{ 'admin-page-tab--active': activeTabName === tab.name }"
+            :aria-selected="activeTabName === tab.name"
+            @click="onTabClick(tab)"
+            @keydown.enter="onTabClick(tab)"
+          >
+            <span class="admin-page-tab__label">{{ tab.title }}</span>
+            <button
+              v-if="openedTabs.length > 1"
+              type="button"
+              class="admin-page-tab__close"
+              aria-label="关闭"
+              @click.stop="onTabClose(tab)"
+            >
+              <X :size="14" stroke-width="2" />
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      <router-view v-slot="{ Component, route: viewRoute }">
+        <keep-alive :include="keepAliveInclude" :max="ADMIN_TABS_MAX_CACHE">
+          <component :is="Component" :key="viewRoute.name" />
+        </keep-alive>
+      </router-view>
     </main>
   </div>
 </template>

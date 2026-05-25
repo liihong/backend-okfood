@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'CouriersView' })
 import { ref, reactive, onMounted } from 'vue'
 import { Plus, Phone, X } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'

@@ -93,7 +93,7 @@
               点击「去支付」将调起微信支付。支付成功后，系统会按配送片区派单给骑手。
             </template>
             <template v-else>
-              门店自提：支付成功后订单即完成，请按供餐日到店取餐（无需骑手配送）。
+              门店自提：支付成功后为待取货状态，请按供餐日到店取餐；取走后由门店确认完成（无需骑手配送）。
             </template>
           </text>
         </view>
@@ -149,9 +149,9 @@ const quantity = ref(1)
 const QTY_MAX = 50
 
 const qtyMaxEffective = computed(() => {
-  if (!dish.value || !dish.value.singleStockLimited) return QTY_MAX
+  if (!dish.value || !dish.value.singleStockLimited) return 0
   const r = dish.value.singleStockRemaining
-  if (r == null || !Number.isFinite(Number(r))) return QTY_MAX
+  if (r == null || !Number.isFinite(Number(r))) return 0
   return Math.max(0, Math.min(QTY_MAX, Math.floor(Number(r))))
 })
 
@@ -286,7 +286,7 @@ async function loadPage() {
     }
     const cap = d.singleStockLimited
       ? Math.max(0, Math.min(QTY_MAX, d.singleStockRemaining != null ? Math.floor(Number(d.singleStockRemaining)) : 0))
-      : QTY_MAX
+      : 0
     if (quantity.value > cap) {
       quantity.value = cap
     }

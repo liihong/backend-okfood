@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'OrdersManageView' })
 import { ref, computed, watch, onMounted } from 'vue'
 import { AlertTriangle, RefreshCw, Search } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -58,6 +59,8 @@ const singlePayFilter = ref('all')
 const singleDeliveryFilter = ref('')
 const mallPayFilter = ref('all')
 
+const dateFilterLabel = computed(() => (activeTab.value === 'single' ? '供餐日' : '下单日'))
+
 const SINGLE_PAY_TABS = [
   { label: '全部', value: 'all' },
   { label: '已支付', value: '已支付' },
@@ -111,6 +114,17 @@ const markCompleteLoadingId = ref(0)
 const batchAssignMode = ref(false)
 /** @type {import('vue').Ref<Array<Record<string, unknown>>>} */
 const batchAssignOrders = ref([])
+const editOpen = ref(false)
+/** @type {import('vue').Ref<Record<string, unknown> | null>} */
+const editOrder = ref(null)
+const editSaving = ref(false)
+const editAddrLoading = ref(false)
+/** @type {import('vue').Ref<Array<Record<string, unknown>>>} */
+const editMemberAddresses = ref([])
+const editForm = ref({
+  store_pickup: false,
+  member_address_id: null,
+})
 
 const refundDialogMeta = computed(() => {
   const t = refundTarget.value
@@ -166,6 +180,90 @@ function canMarkOrderComplete(row) {
   if (!row || row.pay_status !== '已支付') return false
   const f = String(row.fulfillment_status || '').trim().toLowerCase()
   return f === 'pending' || f === 'accepted'
+}
+
+function canModifyOrder(row) {
+  if (!row) return false
+  const pay = String(row.pay_status || '').trim()
+  const f = String(row.fulfillment_status || '').trim().toLowerCase()
+  if (pay === '已退款' || f === 'cancelled' || f === 'accepted') return false
+  return f === 'pending' || f === 'sf_cancelled' || f === 'delivered'
+}
+
+function formatMemberAddressOption(a) {
+  if (!a) return '—'
+  const area = (a.area || '').trim()
+  const full = (a.full_address || '').trim()
+  const name = (a.contact_name || '').trim()
+  const parts = [area, full].filter(Boolean)
+  const line = parts.join(' ') || '—'
+  return name ? `${name} · ${line}` : line
+}
+
+async function loadMemberAddressesForEdit(memberId) {
+  editMemberAddresses.value = []
+  if (!memberId) return
+  editAddrLoading.value = true
+  try {
+    const list = await apiJson(`/api/admin/users/${Number(memberId)}/addresses`, {}, { auth: true })
+    editMemberAddresses.value = Array.isArray(list) ? list : []
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '加载会员地址失败', 'error')
+  } finally {
+    editAddrLoading.value = false
+  }
+}
+
+function openEditOrder(row) {
+  if (!canModifyOrder(row)) {
+    showToast('当前订单不可修改（配送中、已取消或已退款）', 'error')
+    return
+  }
+  editOrder.value = row
+  editForm.value = {
+    store_pickup: !!row.store_pickup,
+    member_address_id: row.member_address_id ? Number(row.member_address_id) : null,
+  }
+  editOpen.value = true
+  void loadMemberAddressesForEdit(row.member_id)
+}
+
+async function submitEditOrder() {
+  const row = editOrder.value
+  if (!row) return
+  const pickup = !!editForm.value.store_pickup
+  const addrId = editForm.value.member_address_id
+  if (!pickup && (!addrId || Number(addrId) <= 0)) {
+    showToast('配送到家须选择收货地址', 'error')
+    return
+  }
+  editSaving.value = true
+  try {
+    const body = { store_pickup: pickup }
+    if (!pickup) body.member_address_id = Number(addrId)
+    await apiJson(
+      `/api/admin/orders/single-meals/${row.id}`,
+      { method: 'PATCH', body: JSON.stringify(body) },
+      { auth: true },
+    )
+    showToast('订单已更新', 'success')
+    editOpen.value = false
+    await fetchSingleMeals()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '保存失败', 'error')
+  } finally {
+    editSaving.value = false
+  }
 }
 
 function isSingleRowSelectable(row) {
@@ -711,7 +809,7 @@ async function fetchSingleMeals() {
       page_size: String(pageSize.value),
     })
     const d = (orderDate.value || '').trim()
-    if (d) q.set('order_date', d)
+    if (d) q.set('delivery_date', d)
     const sq = searchQuery.value.trim()
     if (sq) q.set('q', sq)
     const pf = String(singlePayFilter.value ?? '').trim()
@@ -804,7 +902,7 @@ async function onSyncDeliveryStatus() {
   const d0 = String(orderDate.value || '').trim() || todayShanghaiStr()
   try {
     await ElMessageBox.confirm(
-      `将 ${d0} 单次点餐中，顺丰监控已为「妥投」或「取消/撤单」但未回写系统的订单，同步为「已完成」或「顺丰取消」。是否继续？`,
+      `将 ${d0} 供餐日单次点餐中，顺丰监控已为「妥投」或「取消/撤单」但未回写系统的订单，同步为「已完成」或「顺丰取消」。是否继续？`,
       '同步订单状态',
       { type: 'info', confirmButtonText: '开始同步', cancelButtonText: '取消' },
     )
@@ -814,7 +912,7 @@ async function onSyncDeliveryStatus() {
   syncDeliveryLoading.value = true
   try {
     const q = new URLSearchParams()
-    q.set('order_date', d0)
+    q.set('delivery_date', d0)
     q.set('max_orders', '500')
     /** @type {Record<string, unknown>} */
     const d = await apiJson(
@@ -848,7 +946,7 @@ onMounted(() => {
     <div class="table-container">
       <div class="table-header table-header--members table-header--couriers-row orders-manage-toolbar">
         <label class="orders-manage-date">
-          <span class="orders-manage-date-label">下单日</span>
+          <span class="orders-manage-date-label">{{ dateFilterLabel }}</span>
           <el-date-picker
             v-model="orderDate"
             type="date"
@@ -934,7 +1032,7 @@ ref="singleTableRef"
             :data="singleItems"
             :loading="loading && activeTab === 'single'"
             row-key="id"
-            empty-text="当日暂无单次点餐订单"
+            empty-text="该供餐日暂无单次点餐订单"
            @selection-change="onSingleSelectionChange"
           >
            <el-table-column type="selection" width="42" :selectable="isSingleRowSelectable" />
@@ -986,9 +1084,18 @@ ref="singleTableRef"
             <el-table-column label="单号" width="120" class-name="td-mono" show-overflow-tooltip>
               <template #default="{ row }">{{ row.out_trade_no || '—' }}</template>
             </el-table-column>
-           <el-table-column label="操作" width="380" fixed="right" align="center">
+           <el-table-column label="操作" width="440" fixed="right" align="center">
               <template #default="{ row }">
                <div class="orders-op-btns">
+                  <el-button
+                    type="primary"
+                    size="small"
+                    plain
+                    :disabled="!canModifyOrder(row)"
+                    @click="openEditOrder(row)"
+                  >
+                    修改
+                  </el-button>
                   <el-dropdown trigger="click" @command="(cmd) => handleDispatchCommand(cmd, row)">
                     <el-button
                       type="primary"
@@ -1230,6 +1337,56 @@ type="success" size="small" plain :disabled="!canMarkOrderComplete(row)"
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="editOpen"
+      title="修改订单 · 配送/自提"
+      width="480px"
+      destroy-on-close
+      align-center
+      :close-on-click-modal="!editSaving"
+      :close-on-press-escape="!editSaving"
+      @closed="editOrder = null; editMemberAddresses = []"
+    >
+      <template v-if="editOrder">
+        <p class="orders-edit-hint">
+          订单 #{{ editOrder.id }} · {{ (editOrder.member_name || '').trim() || '—' }}
+          {{ (editOrder.member_phone || '').trim() }}
+        </p>
+        <div class="orders-edit-field">
+          <span class="orders-edit-label">履约方式</span>
+          <el-radio-group v-model="editForm.store_pickup">
+            <el-radio :value="false">配送到家</el-radio>
+            <el-radio :value="true">门店自提</el-radio>
+          </el-radio-group>
+        </div>
+        <div v-if="!editForm.store_pickup" class="orders-edit-field">
+          <span class="orders-edit-label">收货地址</span>
+          <el-select
+            v-model="editForm.member_address_id"
+            filterable
+            placeholder="选择会员配送地址"
+            class="orders-edit-select"
+            :loading="editAddrLoading"
+          >
+            <el-option
+              v-for="a in editMemberAddresses"
+              :key="a.id"
+              :label="formatMemberAddressOption(a)"
+              :value="Number(a.id)"
+            />
+          </el-select>
+          <p v-if="!editAddrLoading && !editMemberAddresses.length" class="orders-edit-tip">
+            该会员暂无配送地址，请先在会员档案中维护地址。
+          </p>
+        </div>
+        <p v-else class="orders-edit-tip orders-edit-tip--muted">门店自提无需填写配送地址。</p>
+      </template>
+      <template #footer>
+        <el-button :disabled="editSaving" @click="editOpen = false">取消</el-button>
+        <el-button type="primary" :loading="editSaving" @click="submitEditOrder">保存</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -1381,6 +1538,34 @@ type="success" size="small" plain :disabled="!canMarkOrderComplete(row)"
 }
 .orders-assign-select {
   width: 100%;
+}
+.orders-edit-hint {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  color: #334155;
+}
+.orders-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.orders-edit-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #64748b;
+}
+.orders-edit-select {
+  width: 100%;
+}
+.orders-edit-tip {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: #b45309;
+}
+.orders-edit-tip--muted {
+  color: #64748b;
 }
 .orders-mall-no-dispatch {
   font-size: 12px;

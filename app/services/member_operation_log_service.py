@@ -1,4 +1,4 @@
-"""会员自助操作审计日志服务：暂停/恢复配送、修改配送份数、修改地址等关键操作留痕。
+"""会员操作审计日志服务：小程序自助与后台档案修改等关键操作留痕。
 
 本模块只负责把操作记录写入 `member_operation_logs`，不做业务校验；
 调用方在业务处理前后采集 before/after 字典后交由 ``record_member_operation`` 落库。
@@ -28,6 +28,14 @@ OP_LEAVE_TOMORROW = "leave_tomorrow"           # 明天请假
 OP_LEAVE_RANGE = "leave_range"                  # 区间请假
 OP_LEAVE_CLEAR_TOMORROW = "leave_clear_tomorrow"  # 仅取消明天请假
 OP_LEAVE_CANCEL = "leave_cancel"                # 取消全部请假标记
+OP_MEMBERSHIP_REFUND = "membership_refund"      # 退卡退款（管理端）
+OP_ADMIN_UPDATE_NAME = "admin_update_name"                    # 后台修改姓名
+OP_ADMIN_UPDATE_REMARKS = "admin_update_remarks"              # 后台修改备注
+OP_ADMIN_UPDATE_ADDRESS = "admin_update_address"              # 后台修改默认配送地址
+OP_ADMIN_UPDATE_BALANCE = "admin_update_balance"              # 后台修改剩余次数
+OP_ADMIN_UPDATE_PLAN_TYPE = "admin_update_plan_type"          # 后台修改套餐类型
+OP_ADMIN_UPDATE_DELIVERY_REGION = "admin_update_delivery_region"  # 后台修改配送片区
+OP_ADMIN_UPDATE_SKIP_SATURDAY = "admin_update_skip_saturday"  # 后台修改固定周六不履约
 
 _OPERATION_LABELS: dict[str, str] = {
     OP_PAUSE_DELIVERY: "暂停配送",
@@ -43,6 +51,14 @@ _OPERATION_LABELS: dict[str, str] = {
     OP_LEAVE_RANGE: "区间请假",
     OP_LEAVE_CLEAR_TOMORROW: "取消明天请假",
     OP_LEAVE_CANCEL: "取消请假",
+    OP_MEMBERSHIP_REFUND: "退卡退款",
+    OP_ADMIN_UPDATE_NAME: "后台修改姓名",
+    OP_ADMIN_UPDATE_REMARKS: "后台修改备注",
+    OP_ADMIN_UPDATE_ADDRESS: "后台修改配送地址",
+    OP_ADMIN_UPDATE_BALANCE: "后台修改剩余次数",
+    OP_ADMIN_UPDATE_PLAN_TYPE: "后台修改套餐类型",
+    OP_ADMIN_UPDATE_DELIVERY_REGION: "后台修改配送片区",
+    OP_ADMIN_UPDATE_SKIP_SATURDAY: "后台修改周六不履约",
 }
 
 

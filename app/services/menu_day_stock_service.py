@@ -138,7 +138,7 @@ def weekly_slot_row_for_dish_date(
 
 @dataclass(frozen=True)
 class SingleOrderStockInfo:
-    """周槽 total_stock 为 NULL 时不限制单次卡份数；纯按日排期无周槽时也不限制。"""
+    """周槽 total_stock 为 NULL 或纯按日排期无周槽时，单次卡剩余为 0（不可售）。"""
 
     limited: bool
     total_stock: int | None
@@ -170,7 +170,7 @@ def single_order_stock_for_dish_date(
     paid = paid_single_portions_sum(db, dish_id, menu_date, store_id=sid)
     if w is None or w.total_stock is None:
         return SingleOrderStockInfo(
-            limited=False, total_stock=None, subscription_meals=sub, paid_single_portions=paid, remaining=None
+            limited=True, total_stock=None, subscription_meals=sub, paid_single_portions=paid, remaining=0
         )
     cap = int(w.total_stock or 0)
     single_cap = max(0, cap - sub)
@@ -229,7 +229,7 @@ def single_order_stock_by_date_for_week(
         paid_n = int(paid.get((d, did), 0))
         if w is None or w.total_stock is None:
             out[d] = SingleOrderStockInfo(
-                limited=False, total_stock=None, subscription_meals=sub, paid_single_portions=paid_n, remaining=None
+                limited=True, total_stock=None, subscription_meals=sub, paid_single_portions=paid_n, remaining=0
             )
         else:
             cap = int(w.total_stock or 0)
@@ -245,19 +245,20 @@ def assert_single_order_stock_available(
     db: Session, dish_id: int, menu_date: date, quantity: int, *, store_id: int
 ) -> None:
     info = single_order_stock_for_dish_date(db, dish_id, menu_date, store_id=int(store_id))
-    if not info.limited or info.remaining is None:
-        return
-    if quantity > int(info.remaining):
+    rem = 0 if info.remaining is None else int(info.remaining)
+    if rem <= 0:
+        raise HTTPException(status_code=400, detail="该日单次卡已无库存，请改日再试")
+    if quantity > rem:
         raise HTTPException(
             status_code=400,
-            detail=f"该日单次卡剩余{info.remaining}份，请减少份数或改日再试",
+            detail=f"该日单次卡剩余{rem}份，请减少份数或改日再试",
         )
 
 
 def set_weekly_slot_total_stock(
     db: Session, week_start: date, slot: int, total_stock: int | None, *, store_id: int
 ) -> None:
-    """更新周槽日总份；NULL=不限制。槽位须已有菜品行。"""
+    """更新周槽日总份；NULL=未配置（单次卡不可售）。槽位须已有菜品行。"""
     if slot < 1 or slot > 7:
         raise HTTPException(status_code=400, detail="slot 须在 1～7 之间")
     sid = int(store_id)
@@ -364,7 +365,7 @@ def weekly_slot_stock_extras(
         cap_raw = s.get("total_stock")
         if cap_raw is None:
             base["total_stock"] = None
-            base["single_stock_remaining"] = None
+            base["single_stock_remaining"] = 0
         else:
             cap = int(cap_raw)
             base["total_stock"] = cap

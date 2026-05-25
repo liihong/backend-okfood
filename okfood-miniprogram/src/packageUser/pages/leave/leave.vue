@@ -13,7 +13,13 @@
         <view v-if="leaveRefreshing" class="leave-sync-hint">
           <text class="leave-sync-hint__text">正在同步最新状态…</text>
         </view>
-        <view v-if="isOnLeaveNow" class="leave-block leave-block--active">
+        <view v-if="sfSelfServiceLocked" class="leave-block leave-block--deadline">
+          <text class="leave-h3">配送进行中</text>
+          <text class="leave-deadline-copy">
+            当日配送已向顺丰推单，配送全部完成前无法自助修改请假，如需调整请联系客服 👌
+          </text>
+        </view>
+        <view v-if="isOnLeaveNow && !sfSelfServiceLocked" class="leave-block leave-block--active">
           <text class="leave-status-tag">请假中</text>
           <text class="leave-h3 leave-h3--compact">{{ activeLeaveTitle }}</text>
           <text v-if="isRangeOnlyLeave" class="leave-range-line">{{ serverLeaveStart }} 至 {{ serverLeaveEnd }}</text>
@@ -21,7 +27,7 @@
           <button class="btn-cancel-leave" @click="confirmCancelAllLeave">取消请假</button>
         </view>
         <view
-          v-if="!isOnLeaveNow && !isLeavePastDeadline"
+          v-if="!isOnLeaveNow && !isLeavePastDeadline && !sfSelfServiceLocked"
           class="leave-block"
         >
           <text class="leave-h3">明天有事 · 快速请假</text>
@@ -35,7 +41,7 @@
           <text class="leave-tip">* 每日 {{ formatDeadlineHint(leaveDeadlineTime) }} 前操作，餐次顺延 👌</text>
         </view>
         <view
-          v-if="!isOnLeaveNow && !isLeavePastDeadline"
+          v-if="!isOnLeaveNow && !isLeavePastDeadline && !sfSelfServiceLocked"
           class="leave-block"
         >
           <text class="leave-h3">多天请假 (出差/旅游等)</text>
@@ -53,7 +59,7 @@
           </view>
         </view>
         <view
-          v-if="!isOnLeaveNow && isLeavePastDeadline"
+          v-if="!isOnLeaveNow && isLeavePastDeadline && !sfSelfServiceLocked"
           class="leave-block leave-block--deadline"
         >
           <text class="leave-h3">今日已截止</text>
@@ -119,6 +125,7 @@ const leaveActionBusy = ref(false)
 const refresherTriggered = ref(false)
 /** 与后台 app_settings.leave_deadline_time 一致，默认 21:00:00 */
 const leaveDeadlineTime = ref('21:00:00')
+const sfSelfServiceLocked = ref(false)
 
 /**
  * 请假页专用：拉取 /api/user/me。
@@ -420,6 +427,7 @@ async function syncLeaveFromServer(opts = {}) {
     if (me?.leave_deadline_time) {
       leaveDeadlineTime.value = String(me.leave_deadline_time).trim()
     }
+    sfSelfServiceLocked.value = Boolean(me?.sf_self_service_locked)
     isTomorrowLeave.value = Boolean(me?.is_leaved_tomorrow)
     tomorrowTargetYmd.value = ymdFromApi(me?.tomorrow_leave_target_date)
     const lr = me?.leave_range

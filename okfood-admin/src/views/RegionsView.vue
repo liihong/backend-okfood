@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'RegionsView' })
 import DeliveryRegionsPanel from '../components/DeliveryRegionsPanel.vue'
 import { adminApiAuthenticated } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'

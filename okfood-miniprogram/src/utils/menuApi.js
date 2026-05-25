@@ -171,12 +171,12 @@ export function isSingleOrderServiceDate(serviceDateYmd, opts) {
 }
 
 /**
- * 当日单点库存是否可售（不限量视为可售）。
+ * 当日单点库存是否可售（未配置日总份视为不可售）。
  * @param {{ singleStockLimited?: boolean, singleStockRemaining?: number | null } | null | undefined} menuItem
  */
 export function isSingleOrderStockAvailable(menuItem) {
   if (!menuItem || typeof menuItem !== 'object') return false
-  if (!menuItem.singleStockLimited) return true
+  if (!menuItem.singleStockLimited) return false
   const n = menuItem.singleStockRemaining
   return n != null && Number(n) > 0
 }

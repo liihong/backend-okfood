@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+from dataclasses import dataclass
 from app.core.timeutil import beijing_now_naive
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlencode
@@ -34,6 +35,37 @@ logger = logging.getLogger(__name__)
 
 # INFO 中单条正文预览长度（便于对齐顺丰侧 JSON；不含密钥）
 _SF_CB_RAW_PREVIEW_CHARS = 600
+
+
+@dataclass(frozen=True)
+class SfCallbackPersistResult:
+    """回调落库结果 + 待异步执行的扣次/取消任务。"""
+
+    callback_row: SfSameCityCallback
+    side_effect: "SfCallbackSideEffectJob | None" = None
+
+
+def run_sf_callback_side_effect_job(job: "SfCallbackSideEffectJob") -> None:
+    """BackgroundTasks 入口：独立 Session 异步履约，不阻塞顺丰 HTTP 回调。"""
+    from app.db.session import SessionLocal
+    from app.services.sf_order_fulfillment_service import (
+        SfCallbackSideEffectJob,
+        run_sf_push_side_effect_for_callback,
+    )
+
+    db = SessionLocal()
+    try:
+        run_sf_push_side_effect_for_callback(db, job)
+    except Exception:
+        logger.exception(
+            "顺丰回调异步履约失败 push_id=%s action=%s route_kind=%s",
+            getattr(job, "push_id", None),
+            getattr(job, "action", None),
+            getattr(job, "route_kind", None),
+        )
+        db.rollback()
+    finally:
+        db.close()
 
 
 def _sign_debug_preview(sign: str | None) -> str:
@@ -293,8 +325,8 @@ def persist_sf_callback_and_sync_push(
     sign_ok: bool,
     payload: dict[str, Any] | None,
     verify_error: str | None,
-) -> SfSameCityCallback:
-    """写入回调日志；验签通过且命中推单记录时刷新最近顺丰字段。"""
+) -> SfCallbackPersistResult:
+    """写入回调日志并刷新推单状态；扣次/取消同步在落库 commit 后由异步任务执行。"""
     shop_order_id = None
     sf_order_id = None
     parsed_callback_order_status: int | None = None
@@ -341,40 +373,33 @@ def persist_sf_callback_and_sync_push(
             elif route_kind == "rider_cancel":
                 pus.sf_callback_order_status = 22
 
+    side_effect = None
     if sign_ok and matched_push is not None:
-        try:
-            from app.services.sf_order_fulfillment_service import (
-                apply_sf_auto_fulfillment_for_push,
-                apply_sf_cancel_to_single_meal_orders_for_push,
-                should_apply_sf_cancel_sync,
-                should_run_sf_auto_fulfillment,
-            )
+        from app.services.sf_order_fulfillment_service import (
+            SfCallbackSideEffectJob,
+            should_apply_sf_cancel_sync,
+            should_run_sf_auto_fulfillment,
+        )
 
-            if should_apply_sf_cancel_sync(pus=matched_push):
-                apply_sf_cancel_to_single_meal_orders_for_push(db, matched_push)
-            elif should_run_sf_auto_fulfillment(route_kind=route_kind, pus=matched_push):
-                op_tag = (
-                    "sf:order_complete"
-                    if route_kind == "order_complete"
-                    else "sf:delivery_status"
-                )
-                apply_sf_auto_fulfillment_for_push(
-                    db,
-                    matched_push,
-                    operator_tag=op_tag,
-                    route_kind=route_kind,
-                )
-        except Exception:
-            logger.exception(
-                "顺丰自动履约失败 route_kind=%s shop_order_id=%s stop_id=%s",
-                route_kind,
-                getattr(matched_push, "shop_order_id", None),
-                getattr(matched_push, "stop_id", None),
+        if should_apply_sf_cancel_sync(pus=matched_push):
+            side_effect = SfCallbackSideEffectJob(
+                push_id=int(matched_push.id),
+                route_kind=route_kind,
+                operator_tag="sf:cancel_sync",
+                action="cancel_sync",
+            )
+        elif should_run_sf_auto_fulfillment(route_kind=route_kind, pus=matched_push):
+            op_tag = "sf:order_complete" if route_kind == "order_complete" else "sf:delivery_status"
+            side_effect = SfCallbackSideEffectJob(
+                push_id=int(matched_push.id),
+                route_kind=route_kind,
+                operator_tag=op_tag,
+                action="fulfillment",
             )
 
     db.commit()
     db.refresh(row)
-    return row
+    return SfCallbackPersistResult(callback_row=row, side_effect=side_effect)
 
 
 def process_sf_notify(
@@ -389,7 +414,7 @@ def process_sf_notify(
     forwarded_for: str | None = None,
     query_param_keys: str | None = None,
     http_log_tag: str | None = None,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, "SfCallbackSideEffectJob | None"]:
     """配送类订单回调：验签、落库；输出一条可调式 INFO trace（不包含密钥）。"""
     settings = get_settings()
     skip = bool(settings.SF_CALLBACK_SKIP_SIGN_VERIFY)
@@ -474,8 +499,9 @@ def process_sf_notify(
         keys_csv or "-",
     )
 
+    side_effect = None
     try:
-        persist_sf_callback_and_sync_push(
+        persisted = persist_sf_callback_and_sync_push(
             db,
             route_kind=route_kind,
             raw_body=raw_body or "",
@@ -483,12 +509,13 @@ def process_sf_notify(
             payload=payload,
             verify_error=verify_err,
         )
+        side_effect = persisted.side_effect
     except Exception:
         logger.exception("顺丰回调落库失败 route_kind=%s", route_kind)
         db.rollback()
         raise
 
-    return sign_ok, verify_err
+    return sign_ok, verify_err, side_effect
 
 
 def persist_oauth_style_callback(

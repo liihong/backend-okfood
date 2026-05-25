@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'CardOrdersView' })
 import { ref, computed, watch, onMounted } from 'vue'
 import { CreditCard, MapPin, Plus, Search, UserRound, X, Zap } from 'lucide-vue-next'
 import {

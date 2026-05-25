@@ -41,7 +41,7 @@ from app.schemas.user import Location, MemberOut, RegisterIn
 from app.services import amap
 
 from app.services.leave import (
-    guard_member_self_cancel_leave,
+    guard_member_self_leave_during_sf_fulfillment,
     guard_member_self_service_during_sf_fulfillment,
     is_leave_deadline_passed,
 )
@@ -57,6 +57,13 @@ from app.services.member_address_service import (
 )
 
 from app.services.member_operation_log_service import (
+    OP_ADMIN_UPDATE_ADDRESS,
+    OP_ADMIN_UPDATE_BALANCE,
+    OP_ADMIN_UPDATE_DELIVERY_REGION,
+    OP_ADMIN_UPDATE_NAME,
+    OP_ADMIN_UPDATE_PLAN_TYPE,
+    OP_ADMIN_UPDATE_REMARKS,
+    OP_ADMIN_UPDATE_SKIP_SATURDAY,
     OP_LEAVE_CANCEL,
     OP_LEAVE_CLEAR_TOMORROW,
     OP_LEAVE_RANGE,
@@ -242,10 +249,20 @@ def _to_member_out(
 
         lr = {"start": m.leave_range_start, "end": m.leave_range_end}
 
+    from app.core.timeutil import today_shanghai
+    from app.services.leave import guard_member_self_service_during_sf_fulfillment
+    from app.services.sf_order_fulfillment_service import member_sf_self_service_locked_on_delivery_date
     from app.services.store_config_service import get_leave_deadline_time_for_store
 
     ldt = get_leave_deadline_time_for_store(db, int(m.store_id))
     leave_deadline_str = ldt.isoformat() if ldt is not None else "21:00:00"
+    biz_today = today_shanghai()
+    sf_self_service_locked = member_sf_self_service_locked_on_delivery_date(
+        db,
+        member_id=int(m.id),
+        store_id=int(m.store_id),
+        delivery_date=biz_today,
+    )
 
     plan_out: PlanType | None = None
 
@@ -304,6 +321,8 @@ def _to_member_out(
         leave_range=lr,
 
         leave_deadline_time=leave_deadline_str,
+
+        sf_self_service_locked=sf_self_service_locked,
 
         created_at=m.created_at.isoformat() if m.created_at else "",
 
@@ -797,8 +816,8 @@ def leave_request(
         "leave_range_end": m.leave_range_end.isoformat() if m.leave_range_end else None,
     }
 
-    if typ == LeaveType.CANCEL and not skip_leave_deadline:
-        guard_member_self_cancel_leave(db, m, typ)
+    if source == "miniprogram":
+        guard_member_self_leave_during_sf_fulfillment(db, m)
 
     if typ == LeaveType.CANCEL:
 
@@ -1245,15 +1264,28 @@ def get_menu_detail_by_dish_id(
 
 
 
-def admin_update_member_address(db: Session, phone: str, address: str, *, operator: str, store_id: int) -> MemberOut:
-
-    _ = operator
+def admin_update_member_address(
+    db: Session,
+    phone: str,
+    address: str,
+    *,
+    operator: str,
+    store_id: int,
+    ip_address: str | None = None,
+) -> MemberOut:
 
     m = _member_by_phone(db, phone, int(store_id))
 
     if not m:
 
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    addr_before = get_default_address(db, m.id)
+    prev_address = (
+        full_address_line(addr_before.map_location_text, addr_before.door_detail)
+        if addr_before
+        else None
+    )
 
     admin_set_default_address_plain_line(
 
@@ -1268,6 +1300,25 @@ def admin_update_member_address(db: Session, phone: str, address: str, *, operat
         contact_phone=m.phone,
 
     )
+
+    addr_after = get_default_address(db, m.id)
+    new_address = (
+        full_address_line(addr_after.map_location_text, addr_after.door_detail)
+        if addr_after
+        else None
+    )
+    if prev_address != new_address:
+        record_member_operation(
+            db,
+            member_id=m.id,
+            operation_type=OP_ADMIN_UPDATE_ADDRESS,
+            summary="修改默认配送地址",
+            before={"address": prev_address},
+            after={"address": new_address},
+            ip_address=ip_address,
+            source="admin",
+            operator=(f"admin:{(operator or '').strip()}" if (operator or "").strip() else "admin")[:100],
+        )
 
     db.commit()
 
@@ -1329,9 +1380,11 @@ def admin_patch_member_profile(
 
     set_remarks: bool = False,
 
+    ip_address: str | None = None,
+
 ) -> MemberOut:
 
-    _ = operator
+    admin_op = (f"admin:{(operator or '').strip()}" if (operator or "").strip() else "admin")[:100]
 
     if (
 
@@ -1370,6 +1423,30 @@ def admin_patch_member_profile(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     mid = m.id
+
+    addr_before = get_default_address(db, mid)
+    prev_snapshot = {
+        "name": m.name,
+        "remarks": m.remarks,
+        "address": (
+            full_address_line(addr_before.map_location_text, addr_before.door_detail)
+            if addr_before
+            else None
+        ),
+        "delivery_region_id": (
+            int(addr_before.delivery_region_id)
+            if addr_before and addr_before.delivery_region_id is not None
+            else None
+        ),
+        "daily_meal_units": int(m.daily_meal_units or 1),
+        "plan_type": m.plan_type,
+        "balance": int(m.balance),
+        "delivery_start_date": m.delivery_start_date.isoformat() if m.delivery_start_date else None,
+        "store_pickup": bool(m.store_pickup),
+        "skip_subscription_saturday": bool(m.skip_subscription_saturday),
+        "delivery_deferred": bool(m.delivery_deferred),
+        "is_active": bool(m.is_active),
+    }
 
     if name is not None:
 
@@ -1551,6 +1628,160 @@ def admin_patch_member_profile(
 
     if plan_type is not None:
         m.plan_type = plan_type.value
+
+    addr_after = get_default_address(db, mid)
+    new_snapshot = {
+        "name": m.name,
+        "remarks": m.remarks,
+        "address": (
+            full_address_line(addr_after.map_location_text, addr_after.door_detail)
+            if addr_after
+            else None
+        ),
+        "delivery_region_id": (
+            int(addr_after.delivery_region_id)
+            if addr_after and addr_after.delivery_region_id is not None
+            else None
+        ),
+        "daily_meal_units": int(m.daily_meal_units or 1),
+        "plan_type": m.plan_type,
+        "balance": int(m.balance),
+        "delivery_start_date": m.delivery_start_date.isoformat() if m.delivery_start_date else None,
+        "store_pickup": bool(m.store_pickup),
+        "skip_subscription_saturday": bool(m.skip_subscription_saturday),
+        "delivery_deferred": bool(m.delivery_deferred),
+        "is_active": bool(m.is_active),
+    }
+
+    def _admin_log(op_type: str, summary: str, *, before: dict | None = None, after: dict | None = None) -> None:
+        record_member_operation(
+            db,
+            member_id=mid,
+            operation_type=op_type,
+            summary=summary,
+            before=before,
+            after=after,
+            ip_address=ip_address,
+            source="admin",
+            operator=admin_op,
+        )
+
+    if name is not None and prev_snapshot["name"] != new_snapshot["name"]:
+        _admin_log(
+            OP_ADMIN_UPDATE_NAME,
+            f"修改姓名 {prev_snapshot['name'] or '-'}→{new_snapshot['name'] or '-'}",
+            before={"name": prev_snapshot["name"]},
+            after={"name": new_snapshot["name"]},
+        )
+    if set_remarks and prev_snapshot["remarks"] != new_snapshot["remarks"]:
+        _admin_log(
+            OP_ADMIN_UPDATE_REMARKS,
+            f"修改备注",
+            before={"remarks": prev_snapshot["remarks"]},
+            after={"remarks": new_snapshot["remarks"]},
+        )
+    if address is not None and prev_snapshot["address"] != new_snapshot["address"]:
+        _admin_log(
+            OP_ADMIN_UPDATE_ADDRESS,
+            f"修改默认配送地址",
+            before={"address": prev_snapshot["address"]},
+            after={"address": new_snapshot["address"]},
+        )
+    if (
+        (use_auto_area or set_delivery_region_id)
+        and prev_snapshot["delivery_region_id"] != new_snapshot["delivery_region_id"]
+    ):
+        prev_rid = prev_snapshot["delivery_region_id"]
+        new_rid = new_snapshot["delivery_region_id"]
+        _admin_log(
+            OP_ADMIN_UPDATE_DELIVERY_REGION,
+            f"修改配送片区 {prev_rid if prev_rid is not None else '-'}→{new_rid if new_rid is not None else '-'}",
+            before={"delivery_region_id": prev_rid},
+            after={"delivery_region_id": new_rid},
+        )
+    if set_balance and prev_snapshot["balance"] != new_snapshot["balance"]:
+        _admin_log(
+            OP_ADMIN_UPDATE_BALANCE,
+            f"修改剩余次数 {prev_snapshot['balance']}→{new_snapshot['balance']}",
+            before={"balance": prev_snapshot["balance"]},
+            after={"balance": new_snapshot["balance"]},
+        )
+    if plan_type is not None and prev_snapshot["plan_type"] != new_snapshot["plan_type"]:
+        _admin_log(
+            OP_ADMIN_UPDATE_PLAN_TYPE,
+            f"修改套餐类型 {prev_snapshot['plan_type'] or '-'}→{new_snapshot['plan_type'] or '-'}",
+            before={"plan_type": prev_snapshot["plan_type"]},
+            after={"plan_type": new_snapshot["plan_type"]},
+        )
+    if (
+        daily_meal_units is not None
+        and prev_snapshot["daily_meal_units"] != new_snapshot["daily_meal_units"]
+    ):
+        _admin_log(
+            OP_UPDATE_DAILY_UNITS,
+            (
+                f"修改每日送达份数 {prev_snapshot['daily_meal_units']}→"
+                f"{new_snapshot['daily_meal_units']}"
+            ),
+            before={"daily_meal_units": prev_snapshot["daily_meal_units"]},
+            after={"daily_meal_units": new_snapshot["daily_meal_units"]},
+        )
+    if (
+        set_delivery_deferred
+        and prev_snapshot["delivery_deferred"] != new_snapshot["delivery_deferred"]
+    ):
+        _admin_log(
+            OP_PAUSE_DELIVERY if new_snapshot["delivery_deferred"] else OP_RESUME_DELIVERY,
+            "暂停配送" if new_snapshot["delivery_deferred"] else "取消暂停配送",
+            before={"delivery_deferred": prev_snapshot["delivery_deferred"]},
+            after={
+                "delivery_deferred": new_snapshot["delivery_deferred"],
+                "delivery_start_date": new_snapshot["delivery_start_date"],
+                "store_pickup": new_snapshot["store_pickup"],
+            },
+        )
+    if set_store_pickup and prev_snapshot["store_pickup"] != new_snapshot["store_pickup"]:
+        _admin_log(
+            OP_UPDATE_STORE_PICKUP,
+            "改为门店自提" if new_snapshot["store_pickup"] else "改为配送到家",
+            before={"store_pickup": prev_snapshot["store_pickup"]},
+            after={"store_pickup": new_snapshot["store_pickup"]},
+        )
+    if (
+        set_delivery_start_date
+        and not (
+            set_delivery_deferred
+            and prev_snapshot["delivery_deferred"] != new_snapshot["delivery_deferred"]
+        )
+        and prev_snapshot["delivery_start_date"] != new_snapshot["delivery_start_date"]
+    ):
+        prev_ds = prev_snapshot["delivery_start_date"] or "-"
+        new_ds = new_snapshot["delivery_start_date"] or "-"
+        op_type = (
+            OP_RESUME_DELIVERY
+            if prev_snapshot["delivery_deferred"] and not new_snapshot["delivery_deferred"]
+            else OP_UPDATE_DELIVERY_START
+        )
+        _admin_log(
+            op_type,
+            f"修改起送日 {prev_ds}→{new_ds}",
+            before={"delivery_start_date": prev_snapshot["delivery_start_date"]},
+            after={"delivery_start_date": new_snapshot["delivery_start_date"]},
+        )
+    if (
+        set_skip_subscription_saturday
+        and prev_snapshot["skip_subscription_saturday"] != new_snapshot["skip_subscription_saturday"]
+    ):
+        _admin_log(
+            OP_ADMIN_UPDATE_SKIP_SATURDAY,
+            (
+                "开启固定周六不履约"
+                if new_snapshot["skip_subscription_saturday"]
+                else "关闭固定周六不履约"
+            ),
+            before={"skip_subscription_saturday": prev_snapshot["skip_subscription_saturday"]},
+            after={"skip_subscription_saturday": new_snapshot["skip_subscription_saturday"]},
+        )
 
     try:
         db.commit()

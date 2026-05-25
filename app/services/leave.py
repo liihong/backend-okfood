@@ -3,7 +3,6 @@ from datetime import date, time
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.enums import LeaveType
 from app.models.member import Member
 
 
@@ -35,7 +34,10 @@ def is_leave_deadline_passed(now_time, deadline) -> bool:
 
 
 SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG = (
-    "当日配送已向顺丰推单，如需修改请联系客服"
+    "当日配送已向顺丰推单，配送全部完成前无法自助修改，请联系客服"
+)
+SF_SELF_SERVICE_LOCK_LEAVE_MSG = (
+    "当日配送已向顺丰推单，配送全部完成前无法自助修改请假，请联系客服处理"
 )
 
 
@@ -46,7 +48,7 @@ def guard_member_self_service_during_sf_fulfillment(
     delivery_date: date | None = None,
 ) -> None:
     """
-    顺丰推单后、当日订阅尚未标记送达：禁止小程序自助改地址/份数等。
+    顺丰推单后、当日门店尚未全部标记送达：禁止小程序自助改地址/份数等。
     管理端调用须自行跳过（勿传入本 guard）。
     """
     from app.core.timeutil import today_shanghai
@@ -62,21 +64,9 @@ def guard_member_self_service_during_sf_fulfillment(
         raise HTTPException(status_code=400, detail=SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG)
 
 
-def guard_member_self_cancel_leave(db: Session, member: Member, typ: LeaveType) -> None:
-    """会员自助取消请假：若取消会改变「当日已向顺丰推单且尚未送达」业务日的缺席状态，则须联系客服。"""
-    from app.core.timeutil import today_shanghai
-
-    if typ != LeaveType.CANCEL:
-        return
-
-    biz_today = today_shanghai()
-    if not is_absent_on_delivery_date(member, biz_today, today=biz_today):
-        return
-
+def guard_member_self_leave_during_sf_fulfillment(db: Session, member: Member) -> None:
+    """顺丰推单后、当日门店尚未全部标记送达：禁止小程序自助请假相关操作。"""
     try:
-        guard_member_self_service_during_sf_fulfillment(db, member, delivery_date=biz_today)
+        guard_member_self_service_during_sf_fulfillment(db, member)
     except HTTPException:
-        raise HTTPException(
-            status_code=400,
-            detail="当日配送已向顺丰推单，无法自助取消请假，请联系客服处理",
-        ) from None
+        raise HTTPException(status_code=400, detail=SF_SELF_SERVICE_LOCK_LEAVE_MSG) from None

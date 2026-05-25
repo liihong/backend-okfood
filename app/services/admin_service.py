@@ -29,6 +29,7 @@ from app.utils.sql_like import escape_like_fragment
 from app.schemas.admin import (
     CategoryAdminOut,
     CategoryCreateIn,
+    DashboardDayPrepMetricsOut,
     DashboardMealSummaryOut,
     DishAdminOut,
     DishUpsertIn,
@@ -45,7 +46,9 @@ from app.services.courier_service import (
     count_members_first_scheduled_delivery_day,
 )
 from app.services.delivery_sheet_service import (
+    DeliverySheetDayMetrics,
     _store_membership_counts,
+    delivery_sheet_metrics_for_date,
     meal_units_totals_for_delivery_dates,
 )
 from app.services.member_address_service import (
@@ -90,10 +93,16 @@ def _member_archive_scope():
     return Member.plan_type.in_((PlanType.WEEK.value, PlanType.MONTH.value))
 
 
+def _member_refunded_scope():
+    """已办理退卡退款。"""
+    return Member.membership_refunded_at.isnot(None)
+
+
 def _member_card_expired_scope():
-    """周/月卡次数用尽：balance=0 且曾有起送日、累计总次数或仍标记为活跃。"""
+    """周/月卡次数用尽：balance=0 且曾有起送日、累计总次数或仍标记为活跃；不含已退款。"""
     return and_(
         Member.balance == 0,
+        Member.membership_refunded_at.is_(None),
         or_(
             Member.delivery_start_date.isnot(None),
             func.coalesce(Member.meal_quota_total, 0) > 0,
@@ -149,6 +158,8 @@ def _apply_member_list_filters(
         stmt = stmt.where(Member.balance > 0)
     elif validity == "expired":
         stmt = stmt.where(_member_card_expired_scope())
+    elif validity == "refunded":
+        stmt = stmt.where(_member_refunded_scope())
     if plan_type:
         stmt = stmt.where(Member.plan_type == plan_type)
     if inactive_only:
@@ -216,20 +227,27 @@ def admin_login_user(db: Session, username: str, password: str) -> AdminUser:
 
 
 def member_list_overview_counts(db: Session, *, store_id: int | None = None) -> MemberListStatsOut:
-    """周/月卡档案户数：与列表 `_member_archive_scope` + `validity=active|expired` 口径一致。"""
+    """周/月卡档案户数：与列表 `_member_archive_scope` + validity 筛选口径一致。"""
     expired_scope = _member_card_expired_scope()
+    refunded_scope = _member_refunded_scope()
     base = select(
         func.count().label("total"),
         func.coalesce(func.sum(case((Member.balance > 0, 1), else_=0)), 0).label("active"),
         func.coalesce(func.sum(case((expired_scope, 1), else_=0)), 0).label("expired"),
+        func.coalesce(func.sum(case((refunded_scope, 1), else_=0)), 0).label("refunded"),
     ).select_from(Member).where(Member.deleted_at.is_(None)).where(_member_archive_scope())
     if store_id is not None:
         base = base.where(Member.store_id == int(store_id))
     row = db.execute(base).one()
+    total = int(row.total or 0)
+    refunded = int(row.refunded or 0)
+    rate = (Decimal(refunded) * Decimal("100") / Decimal(total)).quantize(Decimal("0.01")) if total > 0 else Decimal("0")
     return MemberListStatsOut(
-        total=int(row.total or 0),
+        total=total,
         active=int(row.active or 0),
         expired=int(row.expired or 0),
+        refunded=refunded,
+        refund_rate_percent=rate,
     )
 
 
@@ -342,6 +360,9 @@ def list_members_paged(
                 leave_range_start=m.leave_range_start,
                 leave_range_end=m.leave_range_end,
                 is_on_leave_today=_member_on_leave_today(m, biz_today),
+                membership_refunded_at=(
+                    m.membership_refunded_at.isoformat() if m.membership_refunded_at else None
+                ),
                 created_at=m.created_at.isoformat() if m.created_at else "",
             )
         )
@@ -812,6 +833,17 @@ def count_leave_members_for_delivery_day(db: Session, d: date, *, store_id: int 
     )
 
 
+def _dashboard_day_prep_metrics_out(m: DeliverySheetDayMetrics) -> DashboardDayPrepMetricsOut:
+    return DashboardDayPrepMetricsOut(
+        home_pending_meal_total=int(m.home_pending_meal_total),
+        home_delivered_meal_total=int(m.home_delivered_meal_total),
+        pickup_meal_total=int(m.pickup_meal_total),
+        pickup_pending_meal_total=int(m.pickup_pending_meal_total),
+        pickup_delivered_meal_total=int(m.pickup_delivered_meal_total),
+        home_stop_count=int(m.home_stop_count),
+    )
+
+
 def _dashboard_meals_week_over_week_caption(*, meals: int, baseline_meals: int) -> str:
     """备餐份数相对「上周同日」baseline 的差值文案。"""
     delta = int(meals) - int(baseline_meals)
@@ -864,6 +896,12 @@ def dashboard_meal_summary(
             tomorrow_wow_cap = _dashboard_meals_week_over_week_caption(
                 meals=np_snap, baseline_meals=baseline_meals_day_after_week
             )
+            today_metrics = _dashboard_day_prep_metrics_out(
+                delivery_sheet_metrics_for_date(db, delivery_date=anchor, store_id=sid)
+            )
+            tomorrow_metrics = _dashboard_day_prep_metrics_out(
+                delivery_sheet_metrics_for_date(db, delivery_date=day_after, store_id=sid)
+            )
             return DashboardMealSummaryOut(
                 shanghai_today=cal_today,
                 business_anchor_date=anchor,
@@ -876,6 +914,8 @@ def dashboard_meal_summary(
                 tomorrow_first_meal_new_members=t_first,
                 today_meals_week_over_week_caption=today_wow_cap,
                 tomorrow_meals_week_over_week_caption=tomorrow_wow_cap,
+                today_prep_metrics=today_metrics,
+                tomorrow_prep_metrics=tomorrow_metrics,
                 from_snapshot=True,
                 snapshot_recorded_at=row.recorded_at,
             )
@@ -896,6 +936,12 @@ def dashboard_meal_summary(
     t_first = count_members_first_scheduled_delivery_day(db, delivery_date=day_after, store_id=sid)
     today_wow_cap = _dashboard_meals_week_over_week_caption(meals=tp, baseline_meals=baseline_meals_anchor_week)
     tomorrow_wow_cap = _dashboard_meals_week_over_week_caption(meals=np, baseline_meals=baseline_meals_day_after_week)
+    today_metrics = _dashboard_day_prep_metrics_out(
+        delivery_sheet_metrics_for_date(db, delivery_date=anchor, store_id=sid)
+    )
+    tomorrow_metrics = _dashboard_day_prep_metrics_out(
+        delivery_sheet_metrics_for_date(db, delivery_date=day_after, store_id=sid)
+    )
 
     out = DashboardMealSummaryOut(
         shanghai_today=cal_today,
@@ -909,6 +955,8 @@ def dashboard_meal_summary(
         tomorrow_first_meal_new_members=t_first,
         today_meals_week_over_week_caption=today_wow_cap,
         tomorrow_meals_week_over_week_caption=tomorrow_wow_cap,
+        today_prep_metrics=today_metrics,
+        tomorrow_prep_metrics=tomorrow_metrics,
         from_snapshot=False,
         snapshot_recorded_at=None,
     )
@@ -955,6 +1003,8 @@ def dashboard_meal_summary(
             tomorrow_first_meal_new_members=out.tomorrow_first_meal_new_members,
             today_meals_week_over_week_caption=out.today_meals_week_over_week_caption,
             tomorrow_meals_week_over_week_caption=out.tomorrow_meals_week_over_week_caption,
+            today_prep_metrics=out.today_prep_metrics,
+            tomorrow_prep_metrics=out.tomorrow_prep_metrics,
             from_snapshot=False,
             snapshot_recorded_at=row.recorded_at,
         )

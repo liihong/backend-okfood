@@ -1,4 +1,5 @@
 import { createApp } from 'vue'
+import { createPinia } from 'pinia'
 import 'element-plus/dist/index.css'
 import './style.css'
 import './assets/admin-ui.css'
@@ -8,6 +9,7 @@ import router from './router'
 import { escClose } from './directives/escClose.js'
 
 const app = createApp(App)
+app.use(createPinia())
 app.use(router)
 app.directive('esc-close', escClose)
 app.mount('#app')

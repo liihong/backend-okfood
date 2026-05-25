@@ -43,6 +43,7 @@ from app.schemas.admin import (
     SingleMealBatchAssignCourierIn,
     SingleMealCancelIn,
     SingleMealBatchCancelIn,
+    SingleMealPatchIn,
     WeeklySlotAssignIn,
     MenuDayTotalStockIn,
     AdminDashboardSummaryApiOut,
@@ -54,6 +55,9 @@ from app.schemas.admin import (
     SfSameCityPushStatsOut,
     SfSameCityCancelIn,
     SfSameCityCancelOut,
+    AdminSystemNotificationListOut,
+    AdminSystemNotificationOut,
+    MemberMembershipRefundConfirmIn,
 )
 from app.schemas.common import AdminLoginTokenOut
 from app.services.admin_service import (
@@ -111,11 +115,12 @@ from app.services.single_meal_order_service import (
     bulk_admin_assign_courier_single_meal_orders,
     bulk_admin_cancel_single_meal_orders,
     bulk_admin_mark_single_meal_orders_delivered,
-    bulk_admin_resync_single_meal_from_sf_monitor_for_order_day,
+    bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day,
     bulk_push_single_meal_retail_to_sf,
     diagnose_single_meal_sf_sync,
-    list_admin_store_single_meal_orders_by_order_day,
+    list_admin_store_single_meal_orders_by_delivery_day,
     admin_mark_single_meal_order_delivered,
+    admin_update_single_meal_order,
 )
 from app.services.member_card_order_service import (
     create_card_order,
@@ -126,6 +131,16 @@ from app.services.member_card_order_service import (
 )
 from app.services.member_card_pay_service import admin_wechat_refund_member_card_order
 from app.services.finance_received_service import finance_received_summary, finance_today_paid_card_orders
+from app.services.member_membership_refund_service import (
+    member_membership_refund_confirm,
+    member_membership_refund_preview,
+)
+from app.services.admin_system_notification_service import (
+    acknowledge_admin_system_notification,
+    admin_system_notification_to_dict,
+    count_unacknowledged_admin_system_notifications,
+    list_admin_system_notifications,
+)
 from app.integrations.wechat_pay_v2 import WeChatPayV2Error, resolve_request_client_ip
 from app.utils.response import dump_model, page_response, success
 
@@ -312,6 +327,49 @@ def delivery_sf_push_stats(
     )
     out = SfSameCityPushStatsOut(delivery_date=delivery_date.isoformat(), **raw)
     return success(data=dump_model(out), msg="获取成功")
+
+
+@router.get("/system-notifications", response_model=None)
+def admin_system_notifications_list(
+    db: SessionDep,
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    unacknowledged_only: Annotated[
+        bool,
+        Query(description="为真时仅返回未确认消息"),
+    ] = False,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    """管理端系统消息列表（如顺丰自动推单每日摘要）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    rows = list_admin_system_notifications(
+        db,
+        store_id=store_id,
+        unacknowledged_only=unacknowledged_only,
+        limit=limit,
+    )
+    unack = count_unacknowledged_admin_system_notifications(db, store_id=store_id)
+    items = [AdminSystemNotificationOut(**admin_system_notification_to_dict(r)) for r in rows]
+    out = AdminSystemNotificationListOut(items=items, unacknowledged_count=unack)
+    return success(data=dump_model(out), msg="获取成功")
+
+
+@router.post("/system-notifications/{notification_id}/acknowledge", response_model=None)
+def admin_system_notification_acknowledge(
+    notification_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """管理员确认系统消息，确认后不再展示未读角标。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    row = acknowledge_admin_system_notification(
+        db,
+        notification_id=int(notification_id),
+        store_id=store_id,
+        admin_username=admin_username,
+    )
+    return success(data=AdminSystemNotificationOut(**admin_system_notification_to_dict(row)), msg="已确认")
 
 
 @router.get("/delivery-sf/pushes", response_model=None)
@@ -561,7 +619,7 @@ def users(
     page_size: int = 20,
     validity: Annotated[
         str | None,
-        Query(description="不传或空=全部；active=剩余次数>0；expired=次数用尽（balance=0 且曾有起送日/累计总次数）"),
+        Query(description="不传或空=全部；active=剩余次数>0；expired=次数用尽；refunded=已退卡退款"),
     ] = None,
     plan_type: Annotated[
         str | None,
@@ -592,7 +650,7 @@ def users(
     response.headers["Cache-Control"] = "no-store"
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     v = (validity or "").strip().lower()
-    if v not in ("", "active", "expired"):
+    if v not in ("", "active", "expired", "refunded"):
         v = ""
     pt = (plan_type or "").strip()
     if pt not in ("", PlanType.WEEK.value, PlanType.MONTH.value):
@@ -722,9 +780,9 @@ def admin_orders_daily_single_meals(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
-    order_date: Annotated[
+    delivery_date: Annotated[
         date | None,
-        Query(description="下单业务日（上海日历日），默认当天"),
+        Query(description="供餐日（上海日历日），默认当天"),
     ] = None,
     q: Annotated[str | None, Query(description="会员手机前缀或姓名模糊")] = None,
     pay_status: Annotated[
@@ -738,15 +796,15 @@ def admin_orders_daily_single_meals(
     page: int = 1,
     page_size: int = 20,
 ):
-    """订单管理：当日单次点餐订单（按 created_at 落在上海自然日）。"""
+    """订单管理：当日单次点餐订单（按供餐日 delivery_date）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    day = order_date or today_shanghai()
+    day = delivery_date or today_shanghai()
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
-    items, total = list_admin_store_single_meal_orders_by_order_day(
+    items, total = list_admin_store_single_meal_orders_by_delivery_day(
         db,
         store_id=store_id,
-        order_day=day,
+        delivery_day=day,
         q=q,
         pay_status=pay_status,
         delivery_phase=delivery_phase,
@@ -767,24 +825,24 @@ def admin_orders_daily_single_meals_sync_delivery_status(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
-    order_date: Annotated[
+    delivery_date: Annotated[
         date | None,
-        Query(description="下单业务日（上海日历日），默认当天"),
+        Query(description="供餐日（上海日历日），默认当天"),
     ] = None,
     max_orders: Annotated[int, Query(description="最多扫描单次订单条数（1～500）")] = 500,
 ):
     """
-    批量对齐：当日单次点餐中，顺丰推送表已为妥投(17)或取消/撤单(2/22)但未回写到订单的条目。
+    批量对齐：供餐日单次点餐中，顺丰推送表已为妥投(17)或取消/撤单(2/22)但未回写到订单的条目。
 
     使用本库 ``sf_same_city_pushes`` 中由回调写入的状态，不向运力端主动查询；UU / 门店自配送不在范围内。
     """
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    day = order_date or today_shanghai()
+    day = delivery_date or today_shanghai()
     mo = max(1, min(500, int(max_orders or 500)))
-    out = bulk_admin_resync_single_meal_from_sf_monitor_for_order_day(
+    out = bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
         db,
         store_id=store_id,
-        order_day=day,
+        delivery_day=day,
         max_orders=mo,
     )
     msg = str(out.get("summary") or "同步完成")
@@ -1041,6 +1099,30 @@ def admin_single_meal_batch_mark_delivered(
     return success(data=out, msg="批量标记完成处理完毕")
 
 
+@router.patch("/orders/single-meals/{order_id}")
+def admin_single_meal_patch(
+    order_id: int,
+    body: SingleMealPatchIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """单次点餐：修改配送方式（配送/自提）与收货地址。"""
+    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        out = admin_update_single_meal_order(
+            db,
+            order_id=int(order_id),
+            store_id=int(store_id),
+            store_pickup=bool(body.store_pickup),
+            member_address_id=body.member_address_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=dump_model(out), msg="订单已更新")
+
+
 @router.post("/orders/single-meals/{order_id}/refund/wechat", response_model=None)
 def admin_single_meal_refund_wechat(
     order_id: int,
@@ -1102,12 +1184,15 @@ def admin_mall_card_dispatch_not_supported(order_id: int):
 
 @router.post("/member/profile")
 def member_profile_patch(
+    request: Request,
     body: AdminMemberPatchIn,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    xf = request.headers.get("x-forwarded-for")
+    ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
     fs = body.model_fields_set
     member = admin_patch_member_profile(
         db,
@@ -1133,6 +1218,7 @@ def member_profile_patch(
         set_delivery_deferred="delivery_deferred" in fs,
         delivery_deferred=body.delivery_deferred,
         set_remarks="remarks" in fs,
+        ip_address=ip,
     )
     return success(data=dump_model(member), msg="会员信息已更新")
 
@@ -1236,7 +1322,7 @@ def admin_member_operation_logs(
     page_size: int = 20,
     operation_type: str | None = None,
 ):
-    """会员档案：查看该会员自助操作日志（暂停/恢复配送、修改份数、地址增删改等）。"""
+    """会员档案：查看该会员操作日志（小程序自助与后台档案修改；含操作人与摘要）。"""
     _ = admin_username
     m = db.get(Member, member_id)
     if not m or m.deleted_at is not None:
@@ -1255,6 +1341,44 @@ def admin_member_operation_logs(
         page_size=page_size,
         msg="获取成功",
     )
+
+
+@router.get("/users/{member_id}/membership-refund-preview")
+def admin_member_membership_refund_preview(
+    member_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """会员档案：退卡退款预览（已消费次数、可退次数、应退金额）。"""
+    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    preview = member_membership_refund_preview(db, member_id=int(member_id), store_id=store_id)
+    return success(data=dump_model(preview), msg="获取成功")
+
+
+@router.post("/users/{member_id}/membership-refund")
+def admin_member_membership_refund_confirm(
+    request: Request,
+    member_id: int,
+    body: MemberMembershipRefundConfirmIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """会员档案：确认退卡退款；清零剩余次数并写入财务扣减记录。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    xf = request.headers.get("x-forwarded-for")
+    ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
+    preview = member_membership_refund_confirm(
+        db,
+        member_id=int(member_id),
+        store_id=store_id,
+        body=body,
+        operator=f"admin:{admin_username}"[:100],
+        ip_address=ip,
+    )
+    return success(data=dump_model(preview), msg="退卡退款已确认，请按应退金额线下/原路退款给用户")
 
 
 @router.get("/dishes")
@@ -1381,7 +1505,7 @@ def menu_day_total_stock(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """设置该周某一天对应菜品的日总份数；用于单次卡可售=总份数−当日应配送−已付单次。"""
+    """设置该周某一天对应菜品的日总份数；未配置则单次卡不可售；已配置时单次可售=总份数−当日应配送−已付单次。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     set_weekly_slot_menu_total_stock(db, body, store_id=store_id)
     return success(msg="日总库存已保存")
@@ -1426,6 +1550,7 @@ def admin_store_config_put(
 
 @router.post("/member/address")
 def member_address(
+    request: Request,
     body: AdminAddressIn,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
@@ -1433,7 +1558,14 @@ def member_address(
 ):
     """修改会员地址并触发高德地理编码（失败则清空坐标）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    xf = request.headers.get("x-forwarded-for")
+    ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
     member = admin_update_member_address(
-        db, body.phone, body.address, operator=admin_username, store_id=store_id
+        db,
+        body.phone,
+        body.address,
+        operator=admin_username,
+        store_id=store_id,
+        ip_address=ip,
     )
     return success(data=dump_model(member), msg="地址已更新")

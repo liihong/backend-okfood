@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'DeliveryView' })
 import { ref, computed, watch, onMounted } from 'vue'
 import { RefreshCw, MapPin, Truck, FileDown, Search, Loader2 } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'

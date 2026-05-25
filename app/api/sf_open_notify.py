@@ -8,11 +8,15 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.core.deps import SessionDep
-from app.services.sf_callback_service import persist_oauth_style_callback, process_sf_notify
+from app.services.sf_callback_service import (
+    persist_oauth_style_callback,
+    process_sf_notify,
+    run_sf_callback_side_effect_job,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +26,6 @@ router_sf_oauth = APIRouter(prefix="/sf/oauth", tags=["顺丰同城授权回调"
 
 def _sf_json_ok() -> JSONResponse:
     return JSONResponse(content={"error_code": 0, "error_msg": "success"})
-
-
-def _sf_json_err(msg: str, code: int = 500) -> JSONResponse:
-    """顺丰侧通常以 HTTP 200 + body 内 error_code 表示业务失败，避免平台无限重试。"""
-    return JSONResponse(status_code=200, content={"error_code": code, "error_msg": msg})
 
 
 async def _read_body_async(request: Request) -> str:
@@ -53,6 +52,7 @@ def _pick_sign(request: Request, query_sign: str | None) -> str | None:
 async def _dispatch_sf_notify(
     request: Request,
     db: SessionDep,
+    background_tasks: BackgroundTasks,
     route_kind: str,
     *,
     log_tag: str,
@@ -68,7 +68,7 @@ async def _dispatch_sf_notify(
         or request.headers.get("X-Real-IP")
     )
     ct = request.headers.get("content-type") or request.headers.get("Content-Type") or "-"
-    ok, err = process_sf_notify(
+    ok, err, side_effect = process_sf_notify(
         db=db,
         route_kind=route_kind,
         raw_body=raw,
@@ -80,16 +80,17 @@ async def _dispatch_sf_notify(
         query_param_keys=q_keys,
         http_log_tag=log_tag,
     )
+    if side_effect is not None:
+        background_tasks.add_task(run_sf_callback_side_effect_job, side_effect)
     if not ok:
         logger.warning(
-            "顺丰回调接口返回业务失败(蜂巢常读响应体): tag=%s err=%s query_keys=%s len_body=%s sign_present=%s",
+            "顺丰回调验签/解析未通过(仍返回 success 防重试风暴): tag=%s err=%s query_keys=%s len_body=%s sign_present=%s",
             log_tag,
             err,
             q_keys or "-",
             len(raw),
             bool(eff_sign),
         )
-        return _sf_json_err(err or "reject", 500)
     return _sf_json_ok()
 
 
@@ -97,11 +98,17 @@ async def _dispatch_sf_notify(
 async def sf_callback_delivery_status(
     request: Request,
     db: SessionDep,
+    background_tasks: BackgroundTasks,
     sign: Annotated[str | None, Query()] = None,
 ):
     """配送状态更改。"""
     return await _dispatch_sf_notify(
-        request, db, "delivery_status", log_tag="delivery-status", sign=sign
+        request,
+        db,
+        background_tasks,
+        "delivery_status",
+        log_tag="delivery-status",
+        sign=sign,
     )
 
 
@@ -109,11 +116,17 @@ async def sf_callback_delivery_status(
 async def sf_callback_order_completed(
     request: Request,
     db: SessionDep,
+    background_tasks: BackgroundTasks,
     sign: Annotated[str | None, Query()] = None,
 ):
     """订单完成（控制台路径为 order-completed）。"""
     return await _dispatch_sf_notify(
-        request, db, "order_complete", log_tag="order-completed", sign=sign
+        request,
+        db,
+        background_tasks,
+        "order_complete",
+        log_tag="order-completed",
+        sign=sign,
     )
 
 
@@ -121,10 +134,16 @@ async def sf_callback_order_completed(
 async def sf_callback_cancel_by_sf(
     request: Request,
     db: SessionDep,
+    background_tasks: BackgroundTasks,
     sign: Annotated[str | None, Query()] = None,
 ):
     return await _dispatch_sf_notify(
-        request, db, "cancel_by_sf", log_tag="cancel-by-sf", sign=sign
+        request,
+        db,
+        background_tasks,
+        "cancel_by_sf",
+        log_tag="cancel-by-sf",
+        sign=sign,
     )
 
 
@@ -132,10 +151,16 @@ async def sf_callback_cancel_by_sf(
 async def sf_callback_delivery_exception(
     request: Request,
     db: SessionDep,
+    background_tasks: BackgroundTasks,
     sign: Annotated[str | None, Query()] = None,
 ):
     return await _dispatch_sf_notify(
-        request, db, "delivery_exception", log_tag="delivery-exception", sign=sign
+        request,
+        db,
+        background_tasks,
+        "delivery_exception",
+        log_tag="delivery-exception",
+        sign=sign,
     )
 
 
@@ -143,10 +168,16 @@ async def sf_callback_delivery_exception(
 async def sf_callback_rider_cancel(
     request: Request,
     db: SessionDep,
+    background_tasks: BackgroundTasks,
     sign: Annotated[str | None, Query()] = None,
 ):
     return await _dispatch_sf_notify(
-        request, db, "rider_cancel", log_tag="rider-cancel", sign=sign
+        request,
+        db,
+        background_tasks,
+        "rider_cancel",
+        log_tag="rider-cancel",
+        sign=sign,
     )
 
 
@@ -154,9 +185,12 @@ async def sf_callback_rider_cancel(
 async def sf_callback_auto_shop(
     request: Request,
     db: SessionDep,
+    background_tasks: BackgroundTasks,
     sign: Annotated[str | None, Query()] = None,
 ):
-    return await _dispatch_sf_notify(request, db, "auto_shop", log_tag="auto-shop", sign=sign)
+    return await _dispatch_sf_notify(
+        request, db, background_tasks, "auto_shop", log_tag="auto-shop", sign=sign
+    )
 
 
 @router_sf_oauth.get("/callback")

@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'TenantsView' })
 import { ref, onMounted, computed } from 'vue'
 import { Building2, Plug } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'

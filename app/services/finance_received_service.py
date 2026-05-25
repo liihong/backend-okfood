@@ -14,6 +14,7 @@ from app.core.timeutil import (
 )
 from app.models.enums import CardOrderPayStatus
 from app.models.member_card_order import MemberCardOrder
+from app.models.member_membership_refund import MemberMembershipRefund
 from app.models.single_meal_order import SingleMealOrder
 from app.schemas.admin import (
     FinanceReceivedBucketOut,
@@ -61,15 +62,43 @@ def _window_paid(
         ).where(*sm_conds)
     ).one()
 
+    refund_conds = []
+    if store_id is not None:
+        refund_conds.append(MemberMembershipRefund.store_id == int(store_id))
+    if start is not None:
+        refund_conds.append(MemberMembershipRefund.created_at >= start)
+    if end is not None:
+        refund_conds.append(MemberMembershipRefund.created_at < end)
+    if refund_conds:
+        r_cnt, r_sum = db.execute(
+            select(
+                func.count(MemberMembershipRefund.id),
+                func.coalesce(func.sum(MemberMembershipRefund.refund_amount_yuan), 0),
+            ).where(*refund_conds)
+        ).one()
+    else:
+        r_cnt, r_sum = db.execute(
+            select(
+                func.count(MemberMembershipRefund.id),
+                func.coalesce(func.sum(MemberMembershipRefund.refund_amount_yuan), 0),
+            )
+        ).one()
+
     c_amt = Decimal(str(c_sum))
     s_amt = Decimal(str(s_sum))
+    r_amt = Decimal(str(r_sum)).quantize(Decimal("0.01"))
     c_n = int(c_cnt or 0)
     s_n = int(s_cnt or 0)
+    r_n = int(r_cnt or 0)
+    gross = c_amt + s_amt
+    net = (gross - r_amt).quantize(Decimal("0.01"))
     return FinanceReceivedWindowOut(
-        total_amount_yuan=c_amt + s_amt,
+        total_amount_yuan=gross,
         total_count=c_n + s_n,
         card_orders=FinanceReceivedBucketOut(count=c_n, amount_yuan=c_amt),
         single_meal_orders=FinanceReceivedBucketOut(count=s_n, amount_yuan=s_amt),
+        membership_refunds=FinanceReceivedBucketOut(count=r_n, amount_yuan=r_amt),
+        net_total_amount_yuan=net,
     )
 
 

@@ -3,6 +3,9 @@
     <OkNavbar show-back title="我的配送地址 👌" />
     <scroll-view scroll-y class="scroll" :show-scrollbar="false">
       <view class="list-inner">
+        <view v-if="sfSelfServiceLocked" class="addr-lock-banner">
+          <text class="addr-lock-banner__txt">当日配送已向顺丰推单，配送全部完成前无法修改地址，如需调整请联系客服。</text>
+        </view>
         <view v-if="loading" class="state-text">加载中…</view>
         <view v-else-if="!list.length" class="state-text state-text--muted">暂无收货地址，点击下方添加</view>
         <view
@@ -34,7 +37,15 @@
       </view>
     </scroll-view>
     <view class="footer">
-      <button class="btn-add-address" hover-class="none" @tap.stop="goAdd">+ 添加新地址</button>
+      <button
+        class="btn-add-address"
+        :class="{ 'btn-add-address--disabled': sfSelfServiceLocked }"
+        hover-class="none"
+        :disabled="sfSelfServiceLocked"
+        @tap.stop="goAdd"
+      >
+        + 添加新地址
+      </button>
     </view>
   </view>
 </template>
@@ -53,6 +64,7 @@ import {
 
 const list = ref([])
 const loading = ref(true)
+const sfSelfServiceLocked = ref(false)
 /** 避免 onShow 重叠或返回列表时旧请求先结束，连续改状态/提示触发基础库 timeout */
 let fetchListSeq = 0
 
@@ -62,15 +74,18 @@ async function fetchList() {
   if (!token) {
     list.value = []
     loading.value = false
+    sfSelfServiceLocked.value = false
     return
   }
   loading.value = true
   try {
-    const data = await request('/api/user/me/addresses', {
-      method: 'GET',
-    })
+    const [data, me] = await Promise.all([
+      request('/api/user/me/addresses', { method: 'GET' }),
+      request('/api/user/me', { method: 'GET' }).catch(() => null),
+    ])
     if (seq !== fetchListSeq) return
     list.value = sortAddressesDefaultFirst(normalizeAddressList(data))
+    sfSelfServiceLocked.value = Boolean(me?.sf_self_service_locked)
   } catch {
     if (seq !== fetchListSeq) return
     list.value = []
@@ -84,6 +99,10 @@ onShow(() => {
 })
 
 function goEdit(item, index) {
+  if (sfSelfServiceLocked.value) {
+    uni.showToast({ title: '配送进行中，暂无法修改地址', icon: 'none' })
+    return
+  }
   const id = addressListRow(item, index).id
   if (!id) {
     uni.showToast({ title: '地址缺少编号', icon: 'none' })
@@ -96,6 +115,10 @@ function goEdit(item, index) {
 
 /** 点击条目设为默认：PATCH is_default，成功后列表重排默认在第一 */
 async function setAsDefault(item, index) {
+  if (sfSelfServiceLocked.value) {
+    uni.showToast({ title: '配送进行中，暂无法修改地址', icon: 'none' })
+    return
+  }
   const row = addressListRow(item, index)
   if (!row.id) {
     uni.showToast({ title: '地址缺少编号', icon: 'none' })
@@ -131,11 +154,19 @@ async function setAsDefault(item, index) {
 }
 
 function goAdd() {
+  if (sfSelfServiceLocked.value) {
+    uni.showToast({ title: '配送进行中，暂无法修改地址', icon: 'none' })
+    return
+  }
   uni.navigateTo({ url: '/packageUser/pages/address/address' })
 }
 
 /** 先弹窗确认，再请求 DELETE /api/user/me/addresses/{address_id} */
 function confirmDelete(item, index) {
+  if (sfSelfServiceLocked.value) {
+    uni.showToast({ title: '配送进行中，暂无法修改地址', icon: 'none' })
+    return
+  }
   const row = addressListRow(item, index)
   if (!row.id) {
     uni.showToast({ title: '地址缺少编号', icon: 'none' })
@@ -199,6 +230,21 @@ async function deleteAddress(addressId) {
 
 .list-inner {
   padding: 24rpx 48rpx 0;
+}
+
+.addr-lock-banner {
+  background: #fffbeb;
+  border: 1rpx solid #fde68a;
+  border-radius: 20rpx;
+  padding: 24rpx 28rpx;
+  margin-bottom: 24rpx;
+}
+
+.addr-lock-banner__txt {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #92400e;
+  line-height: 1.45;
 }
 
 .state-text {
@@ -365,5 +411,9 @@ async function deleteAddress(addressId) {
 
 .btn-add-address::after {
   border: none;
+}
+
+.btn-add-address--disabled {
+  opacity: 0.45;
 }
 </style>

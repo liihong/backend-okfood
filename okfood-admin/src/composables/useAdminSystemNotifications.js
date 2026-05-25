@@ -1,0 +1,102 @@
+import { ref, computed } from 'vue'
+import { apiJson, adminAccessToken } from '../admin/core.js'
+
+const notifications = ref([])
+const unacknowledgedCount = ref(0)
+const loading = ref(false)
+const acknowledgingId = ref(null)
+
+let pollTimer = null
+let subscriberCount = 0
+
+export function useAdminSystemNotifications() {
+  const hasUnread = computed(() => unacknowledgedCount.value > 0)
+  const unreadItems = computed(() =>
+    notifications.value.filter((n) => !n.acknowledged_at),
+  )
+
+  async function fetchNotifications({ silent = false } = {}) {
+    if (!String(adminAccessToken.value || '').trim()) {
+      notifications.value = []
+      unacknowledgedCount.value = 0
+      return
+    }
+    if (!silent) loading.value = true
+    try {
+      const data = await apiJson(
+        '/api/admin/system-notifications?unacknowledged_only=false&limit=10',
+        {},
+        { auth: true },
+      )
+      notifications.value = Array.isArray(data?.items) ? data.items : []
+      unacknowledgedCount.value = Number(data?.unacknowledged_count) || 0
+    } catch {
+      if (!silent) {
+        notifications.value = []
+        unacknowledgedCount.value = 0
+      }
+    } finally {
+      if (!silent) loading.value = false
+    }
+  }
+
+  async function acknowledgeNotification(id) {
+    const nid = Number(id)
+    if (!Number.isFinite(nid) || nid <= 0) return false
+    acknowledgingId.value = nid
+    try {
+      await apiJson(
+        `/api/admin/system-notifications/${nid}/acknowledge`,
+        { method: 'POST' },
+        { auth: true },
+      )
+      await fetchNotifications({ silent: true })
+      return true
+    } catch {
+      return false
+    } finally {
+      acknowledgingId.value = null
+    }
+  }
+
+  function startPolling(intervalMs = 5 * 60 * 1000) {
+    if (pollTimer != null) return
+    pollTimer = window.setInterval(() => {
+      fetchNotifications({ silent: true })
+    }, intervalMs)
+  }
+
+  function stopPolling() {
+    if (pollTimer == null) return
+    window.clearInterval(pollTimer)
+    pollTimer = null
+  }
+
+  function subscribeLayoutPolling() {
+    subscriberCount += 1
+    if (subscriberCount === 1) {
+      fetchNotifications()
+      startPolling()
+    }
+  }
+
+  function unsubscribeLayoutPolling() {
+    subscriberCount = Math.max(0, subscriberCount - 1)
+    if (subscriberCount === 0) {
+      stopPolling()
+    }
+  }
+
+  return {
+    notifications,
+    unacknowledgedCount,
+    hasUnread,
+    unreadItems,
+    loading,
+    acknowledgingId,
+    fetchNotifications,
+    acknowledgeNotification,
+    subscribeLayoutPolling,
+    unsubscribeLayoutPolling,
+  }
+}

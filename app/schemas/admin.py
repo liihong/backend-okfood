@@ -101,11 +101,11 @@ class WeeklySlotAssignIn(BaseModel):
 
 
 class MenuDayTotalStockIn(BaseModel):
-    """某日槽位在 menu_date 上的总份数；不传 total_stock 或传 null 表示不限制（删除库存行）。"""
+    """某日槽位在 menu_date 上的总份数；不传 total_stock 或传 null 表示未配置（单次卡不可售）。"""
 
     week_start: date = Field(..., description="该周任意一天，服务端归一为周一")
     slot: int = Field(..., ge=1, le=7, description="1=周一 … 7=周日")
-    total_stock: int | None = Field(default=None, description="当日该菜总可供应份数；null=取消上限")
+    total_stock: int | None = Field(default=None, description="当日该菜总可供应份数；null=未配置(不可售)")
 
 
 class MenuScheduleAssignIn(BaseModel):
@@ -310,6 +310,23 @@ class SingleMealBatchAssignCourierIn(BaseModel):
     courier_id: str = Field(..., min_length=1, max_length=50, description="couriers.courier_id 主键")
 
 
+class SingleMealPatchIn(BaseModel):
+    """单次点餐：管理端修改配送方式与收货地址。"""
+
+    store_pickup: bool = Field(..., description="true=门店自提；false=配送到家")
+    member_address_id: int | None = Field(
+        None,
+        ge=1,
+        description="配送到家时必填：会员已保存的配送地址 id；门店自提勿传",
+    )
+
+    @model_validator(mode="after")
+    def _address_when_delivery(self) -> "SingleMealPatchIn":
+        if not self.store_pickup and self.member_address_id is None:
+            raise ValueError("配送到家须选择配送地址")
+        return self
+
+
 class SingleMealCancelIn(BaseModel):
     """单次点餐：管理端取消订单。"""
 
@@ -385,15 +402,27 @@ class MemberAdminOut(BaseModel):
     leave_range_start: date | None = None
     leave_range_end: date | None = None
     is_on_leave_today: bool = Field(False, description="区间请假是否覆盖上海当前业务日")
+    membership_refunded_at: str | None = Field(
+        None,
+        description="退卡退款确认时刻（ISO）；非空则档案状态为已退款",
+    )
     created_at: str
 
 
 class MemberListStatsOut(BaseModel):
-    """会员档案库顶栏统计：仅周/月卡；与列表 validity 筛选一致（balance>0 生效中，=0 已过期）。"""
+    """会员档案库顶栏统计：仅周/月卡；与列表 validity 筛选一致。"""
 
     total: int = Field(..., ge=0, description="周/月卡档案总户数")
     active: int = Field(..., ge=0, description="生效中：balance>0")
-    expired: int = Field(..., ge=0, description="已过期：balance=0 且曾有起送日/累计总次数")
+    expired: int = Field(..., ge=0, description="已过期：次数用尽且未退卡")
+    refunded: int = Field(..., ge=0, description="已退款：membership_refunded_at 非空")
+    refund_rate_percent: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=6,
+        decimal_places=2,
+        description="退款率 = 已退款 / 总户数 × 100",
+    )
 
 
 class AdminAddressIn(BaseModel):
@@ -484,6 +513,17 @@ class AdminMemberPatchIn(BaseModel):
         return v
 
 
+class DashboardDayPrepMetricsOut(BaseModel):
+    """单日备餐拆分：与配送大表根级汇总及到家停靠点计数同源，不含完整 groups。"""
+
+    home_pending_meal_total: int = Field(0, ge=0, description="到家待送达份数")
+    home_delivered_meal_total: int = Field(0, ge=0, description="到家已送达份数")
+    pickup_meal_total: int = Field(0, ge=0, description="门店自提总份数")
+    pickup_pending_meal_total: int = Field(0, ge=0, description="自提待履约份数")
+    pickup_delivered_meal_total: int = Field(0, ge=0, description="自提已履约份数")
+    home_stop_count: int = Field(0, ge=0, description="到家配送点数量（不含门店自提）")
+
+
 class DashboardMealSummaryOut(BaseModel):
     """营业概览：备餐份数与智能配送大表一致；过去业务日可读快照（首读落库后不变）。"""
 
@@ -536,6 +576,14 @@ class DashboardMealSummaryOut(BaseModel):
         ...,
         description="「明日」(锚定日次日) 备餐份数周同比文案，如「较上周+12份」「较上周持平」",
     )
+    today_prep_metrics: DashboardDayPrepMetricsOut = Field(
+        ...,
+        description="锚定日备餐拆分/履约/到家配送点数（与大表同源，无需再拉 delivery-sheet）",
+    )
+    tomorrow_prep_metrics: DashboardDayPrepMetricsOut = Field(
+        ...,
+        description="锚定日次日备餐拆分/履约/到家配送点数",
+    )
     from_snapshot: bool = Field(False, description="过去日：是否直接读取 admin_dashboard_biz_day_snapshots")
     snapshot_recorded_at: datetime | None = Field(
         None, description="归档写入时间；当日实时计算时通常为空（过去日首算写入后同次响应亦可为空）"
@@ -563,13 +611,59 @@ class FinanceReceivedBucketOut(BaseModel):
     )
 
 
-class FinanceReceivedWindowOut(BaseModel):
-    """某一统计窗口内：开卡工单已缴 + 单次点餐已支付。"""
+class MemberMembershipRefundConsumptionRowOut(BaseModel):
+    """退卡预览：单日消费按菜单单价扣款明细。"""
 
-    total_amount_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2)
+    delivery_date: date = Field(..., description="配送业务日")
+    meal_units: int = Field(..., ge=1, description="该日消费份数")
+    dish_name: str | None = Field(None, description="当日菜单菜品")
+    unit_price_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="当日菜单单价")
+    line_total_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="该日扣款小计")
+
+
+class MemberMembershipRefundPreviewOut(BaseModel):
+    """会员退卡退款预览：实收 − 各消费日菜单单价扣款。"""
+
+    member_id: int = Field(..., ge=1)
+    member_name: str | None = None
+    member_phone: str | None = None
+    plan_type: str | None = None
+    meals_consumed: int = Field(..., ge=0, description="已消费份数（配送扣次）")
+    meals_remaining: int = Field(..., ge=0, description="可退剩余次数")
+    meal_quota_total: int = Field(..., ge=0, description="累计总次数")
+    paid_total_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="已入账开卡实收合计")
+    consumed_value_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="已消费扣款（按各日菜单单价）")
+    consumption_items: list[MemberMembershipRefundConsumptionRowOut] = Field(
+        default_factory=list,
+        description="按消费日列出的菜单扣款明细",
+    )
+    refund_amount_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="应退金额 = 实收 − 已消费扣款")
+
+
+class MemberMembershipRefundConfirmIn(BaseModel):
+    """确认退卡退款：金额须与预览一致。"""
+
+    confirm_refund_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="确认应退金额（元）")
+    remark: str | None = Field(None, max_length=500, description="退卡备注（线下退款说明等）")
+
+
+class FinanceReceivedWindowOut(BaseModel):
+    """某一统计窗口内：开卡工单已缴 + 单次点餐已支付 − 会员退卡退款。"""
+
+    total_amount_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="已收毛额")
     total_count: int = Field(..., ge=0, description="已收笔数合计")
     card_orders: FinanceReceivedBucketOut = Field(..., description="开卡工单 pay_status=已缴")
     single_meal_orders: FinanceReceivedBucketOut = Field(..., description="单次点餐 pay_status=已支付")
+    membership_refunds: FinanceReceivedBucketOut = Field(
+        ...,
+        description="会员退卡退款（按退卡确认时刻 created_at 落入窗口）",
+    )
+    net_total_amount_yuan: Decimal = Field(
+        ...,
+        max_digits=14,
+        decimal_places=2,
+        description="净收入 = 已收毛额 − 会员退卡退款",
+    )
 
 
 class FinanceReceivedSummaryOut(BaseModel):
@@ -1093,6 +1187,29 @@ class SfSameCityPushStatsOut(BaseModel):
     success: int
     failed: int
     cancelled: int = Field(0, description="取消订单：商户发起取消或顺丰回调为取消/撤单(2/22)")
+
+
+class AdminSystemNotificationOut(BaseModel):
+    """管理端系统消息（如顺丰自动推单每日摘要）。"""
+
+    id: int
+    store_id: int
+    kind: str
+    business_date: str
+    title: str
+    message: str
+    total: int = 0
+    success: int = 0
+    failed: int = 0
+    skip_reason: str | None = None
+    acknowledged_at: str | None = None
+    acknowledged_by: str | None = None
+    created_at: str | None = None
+
+
+class AdminSystemNotificationListOut(BaseModel):
+    items: list[AdminSystemNotificationOut] = Field(default_factory=list)
+    unacknowledged_count: int = 0
 
 
 class TenantIntegrationSettingsOut(BaseModel):

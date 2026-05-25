@@ -3,6 +3,9 @@
     <OkNavbar show-back :title="navbarTitle" />
     <scroll-view scroll-y class="scroll" :show-scrollbar="false">
       <view class="page-address">
+        <view v-if="sfSelfServiceLocked" class="addr-lock-banner">
+          <text class="addr-lock-banner__txt">当日配送已向顺丰推单，配送全部完成前无法修改地址，如需调整请联系客服。</text>
+        </view>
         <view class="form-box">
           <view class="form-field">
             <view class="field-label-row">
@@ -83,14 +86,14 @@ placeholder="备注"
       </view>
     </scroll-view>
     <view class="footer">
-      <button class="btn-save-addr" hover-class="none" @tap="save">保存配送信息</button>
+      <button class="btn-save-addr" :disabled="sfSelfServiceLocked" hover-class="none" @tap="save">保存配送信息</button>
     </view>
   </view>
 </template>
 
 <script setup>
 import { computed, reactive, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { request, getMemberToken } from '@/utils/api.js'
 import { normalizeAddressList, addressLineFromStructured } from '@/utils/addressApi.js'
@@ -112,6 +115,7 @@ const coords = ref(null)
 
 /** 当前编辑的地址 id；无则 POST 新增，有则 PATCH */
 const addressId = ref('')
+const sfSelfServiceLocked = ref(false)
 
 const displayPhone = computed(() => {
   const d = String(form.phone || '').replace(/\D/g, '')
@@ -368,6 +372,23 @@ function buildAddressBody() {
   }
 }
 
+onShow(() => {
+  void loadSfLockStatus()
+})
+
+async function loadSfLockStatus() {
+  if (!getMemberToken()) {
+    sfSelfServiceLocked.value = false
+    return
+  }
+  try {
+    const me = await request('/api/user/me', { method: 'GET' })
+    sfSelfServiceLocked.value = Boolean(me?.sf_self_service_locked)
+  } catch {
+    sfSelfServiceLocked.value = false
+  }
+}
+
 onLoad((options) => {
   const tRaw = options && options.title != null ? String(options.title).trim() : ''
   if (tRaw && tRaw !== 'undefined') {
@@ -393,6 +414,10 @@ onLoad((options) => {
 })
 
 async function save() {
+  if (sfSelfServiceLocked.value) {
+    uni.showToast({ title: '配送进行中，暂无法修改地址', icon: 'none' })
+    return
+  }
   if (!form.name?.trim()) {
     uni.showToast({ title: '请填写联系人姓名', icon: 'none' })
     return
@@ -482,6 +507,21 @@ async function save() {
 
 .page-address {
   padding: 48rpx 40rpx 0;
+}
+
+.addr-lock-banner {
+  background: #fffbeb;
+  border: 1rpx solid #fde68a;
+  border-radius: 20rpx;
+  padding: 24rpx 28rpx;
+  margin-bottom: 28rpx;
+}
+
+.addr-lock-banner__txt {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #92400e;
+  line-height: 1.45;
 }
 
 .scroll-tail {
@@ -675,5 +715,9 @@ async function save() {
 
 .btn-save-addr::after {
   border: none;
+}
+
+.btn-save-addr[disabled] {
+  opacity: 0.45;
 }
 </style>

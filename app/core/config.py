@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     MYSQL_PASSWORD: str = ""
     MYSQL_DATABASE: str = "meal_delivery"
     MYSQL_CHARSET: str = "utf8mb4"
+    # SQLAlchemy 连接池（每 uvicorn worker 独立一份；总连接数 ≈ workers × (POOL_SIZE + MAX_OVERFLOW)）
+    DB_POOL_SIZE: int = Field(default=10, ge=1, le=100)
+    DB_MAX_OVERFLOW: int = Field(default=20, ge=0, le=200)
+    DB_POOL_TIMEOUT: int = Field(default=30, ge=1, le=300)
 
     # 多门店：未传 X-Store-Id 时小程序/公开接口默认落在该门店（与迁移回填 id=1 对齐）
     DEFAULT_TENANT_ID: int = 1

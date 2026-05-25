@@ -42,7 +42,7 @@
                     <text class="day-stock-unit">份</text>
                   </template>
                 </block>
-                <text v-else class="day-stock-unlimited">当日单点不限量</text>
+                <text v-else class="day-stock-soldout">售罄</text>
               </view>
             </view>
           </view>
@@ -86,7 +86,7 @@ const showOrderButton = computed(() =>
   canSubmitSingleOrder(dish.value, serviceDateYmd.value),
 )
 
-/** 有供餐日时在价格卡右侧展示「当日剩余 / 售罄 / 当日单点不限量」 */
+/** 有供餐日时在价格卡右侧展示「当日剩余 / 售罄」 */
 const showDayStockBlock = computed(() => !!(serviceDateYmd.value && dish.value))
 
 /** scroll-view 必须用确定 px高度，微信里 flex+calc 易导致子节点不渲染 */

@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'SfOrdersMonitorView' })
 import { ref, computed, onMounted } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { RefreshCw } from 'lucide-vue-next'

@@ -84,7 +84,7 @@ const router = createRouter({
           component: OrdersManageView,
           meta: {
             title: '订单管理',
-            pageSubtitle: '按下单日查看单次点餐与商城卡包工单；零售 SKU 订单待业务接入后展示',
+            pageSubtitle: '单次点餐按供餐日、商城卡包按下单日查看工单；零售 SKU 订单待业务接入后展示',
             fullAdminOnly: true,
           },
         },

@@ -37,8 +37,11 @@ def _subscription_fulfilled_apply(
     operator_tag: str,
     kind: str,
     ok_ids: set[int],
-) -> None:
-    """与 ``admin_mark_subscription_fulfilled`` 相同业务规则；不落库事务（由调用方 commit）。"""
+) -> tuple[Member, int] | None:
+    """与 ``admin_mark_subscription_fulfilled`` 相同业务规则；不落库事务（由调用方 commit）。
+
+    返回 ``(member, balance_before)`` 表示本次实际扣次，供 commit 后异步发续费提醒；已送达幂等跳过则返回 None。
+    """
     if kind not in ("home", "pickup"):
         raise HTTPException(status_code=400, detail="类型无效")
     d = delivery_date
@@ -75,7 +78,7 @@ def _subscription_fulfilled_apply(
     ).scalar_one_or_none()
 
     if log and log.status == DeliveryStatus.DELIVERED.value:
-        return
+        return None
     if log and log.status == DeliveryStatus.LEAVE.value:
         raise HTTPException(status_code=400, detail="该日记录为请假状态")
 
@@ -103,9 +106,7 @@ def _subscription_fulfilled_apply(
             detail=None,
         )
     )
-    from app.services.member_renew_subscribe_service import try_send_renew_remind_after_balance_change
-
-    try_send_renew_remind_after_balance_change(db, member, balance_before=balance_before)
+    return member, balance_before
 
 
 def admin_mark_subscription_fulfilled(
@@ -128,7 +129,7 @@ def admin_mark_subscription_fulfilled(
         ok_ids = _eligible_ids_pickup(db, d, store_id=int(store_id))
     op = (admin_username or "admin").strip()[:44]
     op_tag = f"admin:{op}"[:50]
-    _subscription_fulfilled_apply(
+    renew = _subscription_fulfilled_apply(
         db,
         member_id=member_id,
         delivery_date=d,
@@ -137,6 +138,10 @@ def admin_mark_subscription_fulfilled(
         ok_ids=ok_ids,
     )
     db.commit()
+    if renew is not None:
+        from app.services.member_renew_subscribe_service import try_send_renew_remind_after_balance_change
+
+        try_send_renew_remind_after_balance_change(db, renew[0], balance_before=renew[1])
 
 
 def subscription_fulfilled_try_sf_home_no_commit(
@@ -147,7 +152,8 @@ def subscription_fulfilled_try_sf_home_no_commit(
     operator_tag: str = "sf:order_complete",
     store_id: int | None = None,
     extra_ok_member_ids: set[int] | frozenset[int] | None = None,
-) -> None:
+    ok_ids: set[int] | None = None,
+) -> tuple[Member, int] | None:
     """
     顺丰自动履约（到家）：与智能配送大表标记送达口径一致；
     operator 默认为 ``sf:order_complete``（订单完成）；配送状态推送妥投为 ``sf:delivery_status``；不产生独立 commit。
@@ -158,15 +164,15 @@ def subscription_fulfilled_try_sf_home_no_commit(
     from app.core.config import get_settings
 
     sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
-    ok_ids = _eligible_ids_home(db, d, store_id=sid)
+    effective_ok_ids = ok_ids if ok_ids is not None else _eligible_ids_home(db, d, store_id=sid)
     if extra_ok_member_ids:
-        ok_ids = set(ok_ids) | {int(x) for x in extra_ok_member_ids}
+        effective_ok_ids = set(effective_ok_ids) | {int(x) for x in extra_ok_member_ids}
     tag = (operator_tag or "sf:order_complete").strip()[:50] or "sf:order_complete"
-    _subscription_fulfilled_apply(
+    return _subscription_fulfilled_apply(
         db,
         member_id=member_id,
         delivery_date=d,
         operator_tag=tag,
         kind="home",
-        ok_ids=ok_ids,
+        ok_ids=effective_ok_ids,
     )

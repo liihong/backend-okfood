@@ -43,6 +43,11 @@ def _delivery_meal_units_by_date(db: Session, member_id: int) -> dict[date, int]
     return out
 
 
+def delivery_meal_units_by_date(db: Session, member_id: int) -> dict[date, int]:
+    """会员各配送业务日已消费份数（供退卡按日菜单单价扣款）。"""
+    return _delivery_meal_units_by_date(db, member_id)
+
+
 def total_member_delivery_meal_units_consumed(db: Session, member_id: int) -> int:
     """累计已消费份数：配送扣次 balance_logs 绝对值之和。"""
     mid = int(member_id)

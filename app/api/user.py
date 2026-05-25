@@ -464,7 +464,7 @@ def list_single_orders_me(
     page_size: int = 20,
     list_status: Annotated[
         str | None,
-        Query(description="订单分组：all | pending_pay | pending_delivery | completed"),
+        Query(description="订单分组：all | pending_pay | pending_delivery（待送达/待取货）| completed"),
     ] = None,
 ):
     """当前会员的单次点餐订单列表（按下单时间倒序）。"""

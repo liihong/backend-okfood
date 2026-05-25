@@ -1,5 +1,7 @@
 <script setup>
+defineOptions({ name: 'MembersView' })
 import { ref, watch, computed, onMounted, nextTick } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import {
   Search,
   Phone,
@@ -12,6 +14,7 @@ import {
   Receipt,
   ChevronDown,
   History,
+  Banknote,
 } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import {
@@ -45,7 +48,7 @@ const membersStatusSegment = ref('')
 const regionFilterOptions = ref([])
 
 /** 顶栏全库统计（不受当前搜索/筛选影响） */
-const membersStats = ref({ total: null, active: null, expired: null })
+const membersStats = ref({ total: null, active: null, expired: null, refunded: null, refund_rate_percent: null })
 const membersStatsLoading = ref(true)
 
 const membersTotalPages = computed(() =>
@@ -59,6 +62,7 @@ function memberRowKey(row) {
 
 function validityQuery() {
   if (membersValidityTab.value === 'expired') return 'expired'
+  if (membersValidityTab.value === 'refunded') return 'refunded'
   if (membersValidityTab.value === 'active') return 'active'
   return ''
 }
@@ -103,14 +107,16 @@ async function fetchMemberStats() {
       total: Number(data?.total) || 0,
       active: Number(data?.active) || 0,
       expired: Number(data?.expired) || 0,
+      refunded: Number(data?.refunded) || 0,
+      refund_rate_percent: data?.refund_rate_percent ?? null,
     }
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
-      membersStats.value = { total: null, active: null, expired: null }
+      membersStats.value = { total: null, active: null, expired: null, refunded: null, refund_rate_percent: null }
       return
     }
-    membersStats.value = { total: null, active: null, expired: null }
+    membersStats.value = { total: null, active: null, expired: null, refunded: null, refund_rate_percent: null }
   } finally {
     membersStatsLoading.value = false
   }
@@ -122,10 +128,15 @@ const membersExporting = ref(false)
 async function deleteMemberRow(u) {
   if (!u?.id) return
   const label = `${u.name || '—'} · ${u.phone || ''}`
-  const ok = window.confirm(
-    `确定删除该会员？\n${label}\n\n若有余额流水、配送记录、单次点餐或开卡工单，将仅做逻辑删除并保留数据；若四项均无记录则物理删除档案与地址。`,
-  )
-  if (!ok) return
+  try {
+    await ElMessageBox.confirm(
+      `${label}\n\n若有余额流水、配送记录、单次点餐或开卡工单，将仅做逻辑删除并保留数据；若四项均无记录则物理删除档案与地址。`,
+      '确定删除该会员？',
+      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
   memberDeletingId.value = u.id
   try {
     const data = await apiJson(`/api/admin/users/${Number(u.id)}`, { method: 'DELETE' }, { auth: true })
@@ -157,6 +168,10 @@ function onMembersActionDropdown(command, row) {
   }
   if (command === 'operation_logs') {
     void openMemberOperationLogs(row)
+    return
+  }
+  if (command === 'refund') {
+    void openMemberRefund(row)
     return
   }
   if (command === 'delete') {
@@ -324,6 +339,7 @@ const goMembersNext = () => {
 }
 
 const memberStatusClass = (status) => {
+  if (status === '已退款') return 'member-pill member-pill--rose'
   if (status === '请假中') return 'member-pill member-pill--rose'
   if (status === '待续费') return 'member-pill member-pill--amber'
   if (status === '已过期') return 'member-pill member-pill--slate'
@@ -629,6 +645,14 @@ function operationLogSourceLabel(src) {
   return src ? String(src) : '—'
 }
 
+function operationLogOperatorLabel(op) {
+  const s = String(op || '').trim()
+  if (!s) return '—'
+  if (s.startsWith('admin:')) return s.slice(6) || '后台'
+  if (s.startsWith('member:')) return '会员本人'
+  return s
+}
+
 async function fetchMemberOperationLogsPage() {
   if (!operationLogTarget.value?.id) return
   operationLogLoading.value = true
@@ -689,6 +713,115 @@ watch(showOperationLogModal, (v) => {
   }
 })
 
+/** --- 退卡退款：按消费日菜单单价扣款后退还余款 --- */
+const showRefundModal = ref(false)
+const refundTarget = ref(null)
+const refundPreview = ref(null)
+const refundPreviewLoading = ref(false)
+const refundSubmitting = ref(false)
+const refundRemark = ref('')
+
+function fmtRefundYuan(v) {
+  if (v === null || v === undefined) return '—'
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '—'
+  return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function canMemberRefund(row) {
+  if (row?.membership_refunded_at) return false
+  return Number(row?.balance) > 0
+}
+
+async function openMemberRefund(u) {
+  if (!u?.id || !canMemberRefund(u)) {
+    showToast('该会员剩余次数为 0，无法退卡', 'error')
+    return
+  }
+  refundTarget.value = u
+  refundPreview.value = null
+  refundRemark.value = ''
+  showRefundModal.value = true
+  refundPreviewLoading.value = true
+  try {
+    const data = await apiJson(`/api/admin/users/${Number(u.id)}/membership-refund-preview`, {}, { auth: true })
+    refundPreview.value = data && typeof data === 'object' ? data : null
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '无法计算退款', 'error')
+    showRefundModal.value = false
+    refundTarget.value = null
+  } finally {
+    refundPreviewLoading.value = false
+  }
+}
+
+async function submitMemberRefund() {
+  const u = refundTarget.value
+  const p = refundPreview.value
+  if (!u?.id || !p) return
+  const amt = Number(p.refund_amount_yuan)
+  if (!Number.isFinite(amt) || amt < 0) {
+    showToast('退款金额无效，请刷新后重试', 'error')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `${u.name || '—'} · ${u.phone || ''}\n\n已消费 ${p.meals_consumed} 次，退剩余 ${p.meals_remaining} 次\n应退 ¥ ${fmtRefundYuan(amt)}`,
+      '确认退卡退款',
+      {
+        type: 'warning',
+        confirmButtonText: '确认退卡',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+      },
+    )
+  } catch {
+    return
+  }
+  refundSubmitting.value = true
+  try {
+    await apiJson(
+      `/api/admin/users/${Number(u.id)}/membership-refund`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          confirm_refund_yuan: String(p.refund_amount_yuan),
+          remark: refundRemark.value.trim() || null,
+        }),
+      },
+      { auth: true },
+    )
+    showRefundModal.value = false
+    showToast('退卡退款已确认，请按应退金额退款给用户', 'success')
+    await fetchMembers()
+    await fetchMemberStats()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '退卡失败', 'error')
+  } finally {
+    refundSubmitting.value = false
+  }
+}
+
+watch(showRefundModal, (v) => {
+  if (!v) {
+    refundTarget.value = null
+    refundPreview.value = null
+    refundRemark.value = ''
+  }
+})
+
 async function onMemberAddressesSaved() {
   await fetchMembers()
 }
@@ -704,6 +837,23 @@ onMounted(async () => {
   <section class="tab-content animate-up">
     <div class="table-container">
       <div class="table-header table-header--members">
+        <div v-if="adminAccessToken" class="members-overview-stats" aria-label="会员档案统计">
+          <span class="members-overview-stat">
+            总户数 <strong>{{ membersStatsLoading ? '…' : membersStats.total ?? '—' }}</strong>
+          </span>
+          <span class="members-overview-stat">
+            生效中 <strong>{{ membersStatsLoading ? '…' : membersStats.active ?? '—' }}</strong>
+          </span>
+          <span class="members-overview-stat">
+            已过期 <strong>{{ membersStatsLoading ? '…' : membersStats.expired ?? '—' }}</strong>
+          </span>
+          <span class="members-overview-stat members-overview-stat--refund">
+            已退款 <strong>{{ membersStatsLoading ? '…' : membersStats.refunded ?? '—' }}</strong>
+            <template v-if="!membersStatsLoading && membersStats.refund_rate_percent != null">
+              · 退款率 {{ Number(membersStats.refund_rate_percent).toFixed(2) }}%
+            </template>
+          </span>
+        </div>
 
         <div class="members-query-row">
           <div class="search-box search-box--members-inline">
@@ -750,6 +900,15 @@ onMounted(async () => {
                 @click="membersValidityTab = 'expired'"
               >
                 已过期
+              </el-button>
+              <el-button
+                role="tab"
+                class="members-validity-tab"
+                :class="{ 'members-validity-tab--active': membersValidityTab === 'refunded' }"
+                :aria-selected="membersValidityTab === 'refunded'"
+                @click="membersValidityTab = 'refunded'"
+              >
+                已退款
               </el-button>
             </div>
             <div class="members-extra-filters" aria-label="套餐、片区与状态筛选">
@@ -962,8 +1121,20 @@ onMounted(async () => {
                       </span>
                     </el-dropdown-item>
                     <el-dropdown-item
-                      command="delete"
+                      command="refund"
+                      :disabled="!canMemberRefund(u)"
                       divided
+                    >
+                      <span
+                        class="members-dropdown-item-inner"
+                        title="按已消费/剩余次数计算应退金额，确认后写入财务扣减"
+                      >
+                        <Banknote :size="14" aria-hidden="true" />
+                        退卡退款
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      command="delete"
                       :disabled="memberDeletingId === u.id"
                       class="members-dd-item-delete"
                     >
@@ -1136,7 +1307,7 @@ onMounted(async () => {
             {{ operationLogTarget.name || '—' }} · {{ operationLogTarget.phone || '' }}
           </p>
           <p class="modal-hint operation-logs-caption">
-            记录该会员通过小程序或后台产生的关键操作（暂停配送、修改份数、地址与请假等），含时间与摘要。
+            记录该会员通过小程序或后台产生的关键操作（暂停配送、修改份数、地址与请假、档案修改等），含时间、摘要与操作人，便于后期追责。
           </p>
           <div v-if="operationLogLoading" class="delivery-records-loading">加载中…</div>
           <template v-else>
@@ -1154,6 +1325,7 @@ onMounted(async () => {
                     <th scope="col">操作</th>
                     <th scope="col">摘要</th>
                     <th scope="col">来源</th>
+                    <th scope="col">操作人</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1166,6 +1338,7 @@ onMounted(async () => {
                     <td class="operation-logs-td-src">
                       <span class="operation-logs-src">{{ operationLogSourceLabel(row.source) }}</span>
                     </td>
+                    <td class="operation-logs-td-operator">{{ operationLogOperatorLabel(row.operator) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -1194,6 +1367,96 @@ onMounted(async () => {
       </div>
     </div>
 
+    <div
+      v-if="showRefundModal"
+      class="modal-overlay"
+      v-esc-close="() => !refundSubmitting && (showRefundModal = false)"
+      @click.self="!refundSubmitting && (showRefundModal = false)"
+    >
+      <div class="modal-card modal-card--refund">
+        <div class="modal-header">
+          <div class="header-info">
+            <h3>退卡退款</h3>
+            <p>按消费日菜单单价扣款后退还余款</p>
+          </div>
+          <el-button text circle class="close-btn" :disabled="refundSubmitting" @click="showRefundModal = false">
+            <X :size="20" />
+          </el-button>
+        </div>
+        <form class="modal-form" @submit.prevent="submitMemberRefund">
+          <p v-if="refundTarget" class="modal-hint modal-hint--tight">
+            {{ refundTarget.name || '—' }} · {{ refundTarget.phone || '' }}
+            <span v-if="refundTarget.plan"> · {{ refundTarget.plan }}</span>
+          </p>
+          <div v-if="refundPreviewLoading" class="delivery-records-loading">计算中…</div>
+          <template v-else-if="refundPreview">
+            <dl class="members-refund-summary">
+              <div class="members-refund-row">
+                <dt>已消费</dt>
+                <dd>{{ refundPreview.meals_consumed }} 次</dd>
+              </div>
+              <div class="members-refund-row">
+                <dt>可退剩余</dt>
+                <dd>{{ refundPreview.meals_remaining }} 次</dd>
+              </div>
+              <div class="members-refund-row">
+                <dt>累计总次数</dt>
+                <dd>{{ refundPreview.meal_quota_total }} 次</dd>
+              </div>
+              <div class="members-refund-row">
+                <dt>开卡实收合计</dt>
+                <dd>¥ {{ fmtRefundYuan(refundPreview.paid_total_yuan) }}</dd>
+              </div>
+              <div class="members-refund-row">
+                <dt>已消费扣款</dt>
+                <dd>− ¥ {{ fmtRefundYuan(refundPreview.consumed_value_yuan) }}</dd>
+              </div>
+              <div class="members-refund-row members-refund-row--amount">
+                <dt>应退金额</dt>
+                <dd class="members-refund-amount">¥ {{ fmtRefundYuan(refundPreview.refund_amount_yuan) }}</dd>
+              </div>
+            </dl>
+            <ul
+              v-if="Array.isArray(refundPreview.consumption_items) && refundPreview.consumption_items.length"
+              class="members-refund-consumption-list"
+            >
+              <li
+                v-for="(row, idx) in refundPreview.consumption_items"
+                :key="`${row.delivery_date}-${idx}`"
+              >
+                <span class="members-refund-consumption-date">{{ row.delivery_date }}</span>
+                <span class="members-refund-consumption-dish">{{ row.dish_name || '—' }}</span>
+                <span class="members-refund-consumption-amt">
+                  {{ row.meal_units }} 份 × ¥ {{ fmtRefundYuan(row.unit_price_yuan) }}
+                  = ¥ {{ fmtRefundYuan(row.line_total_yuan) }}
+                </span>
+              </li>
+            </ul>
+            <p class="modal-hint members-refund-tip">
+              确认后将清零该会员剩余次数、暂停配送，并写入财务扣减。请在线下或微信侧按应退金额退款给用户。
+            </p>
+            <div class="form-group">
+              <label for="members-refund-remark">备注（选填）</label>
+              <el-input
+                id="members-refund-remark"
+                v-model="refundRemark"
+                type="textarea"
+                :rows="2"
+                maxlength="500"
+                show-word-limit
+                placeholder="如：微信转账已退、现场现金退等"
+                :disabled="refundSubmitting"
+              />
+            </div>
+            <div class="modal-actions">
+              <el-button :disabled="refundSubmitting" @click="showRefundModal = false">取消</el-button>
+              <el-button type="danger" native-type="submit" :loading="refundSubmitting">确认退卡</el-button>
+            </div>
+          </template>
+        </form>
+      </div>
+    </div>
+
   </section>
 </template>
 
@@ -1201,6 +1464,25 @@ onMounted(async () => {
 .members-search-el-input {
   flex: 1;
   min-width: 0;
+}
+.members-overview-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--el-fill-color-light, #f5f7fa);
+  font-size: 13px;
+  color: var(--el-text-color-secondary, #909399);
+}
+.members-overview-stat strong {
+  margin-left: 4px;
+  color: var(--el-text-color-primary, #303133);
+  font-weight: 700;
+}
+.members-overview-stat--refund strong {
+  color: var(--el-color-danger, #f56c6c);
 }
 .members-region-select-el {
   width: 118px;
@@ -1213,5 +1495,73 @@ onMounted(async () => {
 }
 .leave-range-picker {
   width: 100%;
+}
+.members-refund-summary {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--el-fill-color-light, #f5f7fa);
+}
+.members-refund-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 13px;
+}
+.members-refund-row + .members-refund-row {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+.members-refund-row dt {
+  margin: 0;
+  color: var(--el-text-color-secondary, #909399);
+}
+.members-refund-row dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+.members-refund-row--amount dd.members-refund-amount {
+  color: var(--el-color-danger, #f56c6c);
+  font-size: 18px;
+}
+.members-refund-tip {
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+.members-refund-consumption-list {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.members-refund-consumption-list li {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  font-size: 12px;
+  background: #fff;
+}
+.members-refund-consumption-list li + li {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+.members-refund-consumption-date {
+  color: var(--el-text-color-secondary, #909399);
+}
+.members-refund-consumption-dish {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.members-refund-consumption-amt {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.modal-card--refund {
+  max-width: 440px;
 }
 </style>

@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'MenuView' })
 import { ref, reactive, computed, onMounted } from 'vue'
 import { Search, Camera, Trash2, X } from 'lucide-vue-next'
 import {

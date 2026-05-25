@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'MembershipTemplatesView' })
 import { ref, computed, onMounted } from 'vue'
 import { Camera, Info, Plus, X } from 'lucide-vue-next'
 

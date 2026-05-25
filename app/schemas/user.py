@@ -42,6 +42,10 @@ class MemberOut(BaseModel):
         "21:00:00",
         description="当日请假截止时刻（HH:MM:SS，与 app_settings 一致；上海日期上的 time）",
     )
+    sf_self_service_locked: bool = Field(
+        False,
+        description="当日门店顺丰推单后、全部送达前：小程序自助改地址/份数/请假等冻结",
+    )
     created_at: str
 
     model_config = {"from_attributes": True}

@@ -55,7 +55,13 @@ export function singleOrderStatusMeta(o) {
     return { line1: '待支付', line2: '请尽快完成支付', tone: 'warn' }
   }
   if (pickup) {
-    return { line1: '门店自提 · 已完成', line2: '请按供餐日到店取餐', tone: 'ok' }
+    if (fulfill === 'delivered') {
+      return { line1: '门店自提 · 已完成', line2: '感谢您的光临', tone: 'ok' }
+    }
+    if (fulfill === 'sf_cancelled') {
+      return { line1: '顺丰取消', line2: '如有疑问请联系客服', tone: 'warn' }
+    }
+    return { line1: '待取货', line2: '请按供餐日到店自提', tone: 'info' }
   }
   if (fulfill === 'delivered') {
     return { line1: '已送达', line2: '配送已完成', tone: 'ok' }

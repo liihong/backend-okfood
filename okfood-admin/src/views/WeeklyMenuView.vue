@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'WeeklyMenuView' })
 import { computed, onMounted, ref } from 'vue'
 import { CornerDownRight, Info, Save, X } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
@@ -101,17 +102,18 @@ function setTotalStockDraft(row, val) {
 /** 单次余展示文案 */
 function remainingDisplay(row) {
   if (!row.dish_id) return '—'
-  if (totalStockFieldValue(row) === '') return '—'
+  if (totalStockFieldValue(row) === '') return '0'
   const rem = row.single_stock_remaining
-  if (rem == null || rem === '') return '—'
+  if (rem == null || rem === '') return '0'
   return String(rem)
 }
 
-/** 单次余徽章样式：不限 / 有余 / 售罄 */
+/** 单次余徽章样式：未配置 / 有余 / 售罄 */
 function remainingBadgeClass(row) {
-  if (!row.dish_id || totalStockFieldValue(row) === '') return 'wmenu-remain--none'
+  if (!row.dish_id) return 'wmenu-remain--none'
+  if (totalStockFieldValue(row) === '') return 'wmenu-remain--warn'
   const rem = row.single_stock_remaining
-  if (rem == null || rem === '') return 'wmenu-remain--none'
+  if (rem == null || rem === '') return 'wmenu-remain--warn'
   const n = Number(rem)
   if (!Number.isFinite(n)) return 'wmenu-remain--none'
   if (n <= 0) return 'wmenu-remain--warn'
@@ -353,7 +355,7 @@ onMounted(() => {
       <div class="wmenu-alert-content">
         <Info :size="18" stroke-width="2.5" aria-hidden="true" />
         <span>
-          维护每周一至周日的固定槽位菜品（可与按日排期重复安排同一道菜）。日总份数：留空为不限制；设置后，单次可售
+          维护每周一至周日的固定槽位菜品（可与按日排期重复安排同一道菜）。日总份数：留空则单次卡不可售；填写后，单次可售
           = 总份数 − 当日会员应配送份数 − 已付单次。同一自然日、同一道菜的日总份数在槽位上维护。
         </span>
       </div>

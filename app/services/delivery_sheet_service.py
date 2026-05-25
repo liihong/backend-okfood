@@ -10,13 +10,12 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
 
 from fastapi import HTTPException
 from sqlalchemy import and_, case, func, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from app.constants import UNASSIGNED_DELIVERY_AREA
 from app.core.config import get_settings
@@ -30,12 +29,13 @@ from app.models.member_address import MemberAddress
 from app.models.store import Store
 from app.schemas.admin import DeliverySheetGroupOut, DeliverySheetMemberOut, DeliverySheetOut, DeliverySheetStopOut
 from app.services.courier_service import (
+    _member_subscription_eligibility_where,
     eligible_members_for_delivery,
     eligible_members_for_store_pickup,
     extra_delivered_ineligible_subscribers,
 )
 from app.services.member_address_service import delivery_region_name_map, full_address_line, routing_area_label
-from app.services.member_service import effective_daily_meal_units
+from app.services.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
 
 
 def _normalize_address_key(s: str) -> str:
@@ -122,6 +122,236 @@ def _filter_members_by_phone_hint(members: list[Member], phone_hint: str) -> lis
     return out
 
 
+@dataclass(frozen=True)
+class HomeDeliveryStopForAgg:
+    """顺丰停靠点聚合用：与 ``build_delivery_sheet`` 到家分组同源，不含完整 Pydantic 树。"""
+
+    area: str
+    address_line: str
+    members: tuple[tuple[Member, bool], ...]  # (member, is_delivered)
+
+
+def home_delivery_stops_for_aggs(
+    db: Session,
+    *,
+    delivery_date: date,
+    store_id: int,
+    members: list[Member],
+    default_by_id: dict[int, MemberAddress | None],
+    area: str | None = None,
+    phone: str | None = None,
+) -> list[HomeDeliveryStopForAgg]:
+    """
+    构建到家停靠点列表，供顺丰 ``_build_aggs`` 使用。
+    复用调用方已加载的 eligible 会员，仅补 ``extra_delivered_ineligible`` 与分桶逻辑，避免重复 ``build_delivery_sheet``。
+    """
+    sid = int(store_id)
+    d = delivery_date
+    region_filter_id: int | None = None
+    if area and (a := area.strip()):
+        st = db.get(Store, sid)
+        if st is None:
+            return []
+        rid = db.scalar(
+            select(DeliveryRegion.id).where(
+                DeliveryRegion.name == a,
+                DeliveryRegion.tenant_id == int(st.tenant_id),
+            )
+        )
+        if rid is None:
+            return []
+        region_filter_id = int(rid)
+
+    sheet_members = list(members)
+    sheet_defaults = dict(default_by_id)
+    pu_members, _pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d, store_id=sid)
+    ex_h, ex_dh, _ex_pu, _ex_pud = extra_delivered_ineligible_subscribers(
+        db,
+        delivery_date=d,
+        already_home={int(m.id) for m in sheet_members},
+        already_pickup={int(m.id) for m in pu_members},
+        delivery_region_id=region_filter_id,
+        store_id=sid,
+    )
+    for m in ex_h:
+        sheet_members.append(m)
+        sheet_defaults[m.id] = ex_dh.get(int(m.id))
+
+    ph = (phone or "").strip()
+    if ph:
+        sheet_members = _filter_members_by_phone_hint(sheet_members, ph)
+
+    if not sheet_members:
+        return []
+
+    delivered_set = _member_ids_delivered_on_date(db, d, [m.id for m in sheet_members])
+    region_ids: set[int] = set()
+    for m in sheet_members:
+        addr = sheet_defaults.get(m.id)
+        if addr and addr.delivery_region_id is not None:
+            region_ids.add(int(addr.delivery_region_id))
+    id_to_name = delivery_region_name_map(db, region_ids)
+
+    buckets: dict[str, dict[tuple[str, str], list[Member]]] = defaultdict(lambda: defaultdict(list))
+    for m in sheet_members:
+        addr = sheet_defaults.get(m.id)
+        routing_area = routing_area_label(addr, id_to_name)
+        resolved = _resolve_delivery_line(addr, id_to_name)
+        key = (_normalize_address_key(resolved.area), _normalize_address_key(resolved.detail))
+        buckets[routing_area][key].append(m)
+
+    out: list[HomeDeliveryStopForAgg] = []
+    for area_name in sorted(buckets.keys()):
+        stop_map = buckets[area_name]
+        for ms in stop_map.values():
+            ms_sorted = sorted(ms, key=lambda x: (x.id in delivered_set, (x.phone or "")))
+            first = ms_sorted[0]
+            resolved = _resolve_delivery_line(sheet_defaults.get(first.id), id_to_name)
+            member_pairs = tuple((mem, mem.id in delivered_set) for mem in ms_sorted)
+            out.append(
+                HomeDeliveryStopForAgg(
+                    area=area_name,
+                    address_line=resolved.address_line,
+                    members=member_pairs,
+                )
+            )
+    return out
+
+
+@dataclass(frozen=True)
+class DeliverySheetDayMetrics:
+    """与 ``build_delivery_sheet`` 根级汇总及到家停靠点计数同源，不含完整 groups 树。"""
+
+    home_pending_meal_total: int
+    home_delivered_meal_total: int
+    pickup_meal_total: int
+    pickup_pending_meal_total: int
+    pickup_delivered_meal_total: int
+    home_stop_count: int
+
+    @property
+    def meal_total(self) -> int:
+        return (
+            int(self.home_pending_meal_total)
+            + int(self.home_delivered_meal_total)
+            + int(self.pickup_meal_total)
+        )
+
+
+def delivery_sheet_metrics_for_date(
+    db: Session,
+    *,
+    delivery_date: date,
+    store_id: int,
+) -> DeliverySheetDayMetrics:
+    """营业概览用：备餐拆分 / 履约进度 / 到家配送点数，避免拉整张大表 JSON。"""
+    empty = DeliverySheetDayMetrics(0, 0, 0, 0, 0, 0)
+    if not is_subscription_delivery_day(delivery_date):
+        return empty
+
+    sid = int(store_id)
+    d = delivery_date
+    members, default_by_id = eligible_members_for_delivery(
+        db, delivery_date=d, delivery_region_id=None, store_id=sid
+    )
+    mlist = list(members)
+    stops = home_delivery_stops_for_aggs(
+        db,
+        delivery_date=d,
+        store_id=sid,
+        members=mlist,
+        default_by_id=default_by_id,
+    )
+    home_pending = 0
+    home_delivered = 0
+    for st in stops:
+        for mem, is_del in st.members:
+            u = int(effective_daily_meal_units(mem))
+            if is_del:
+                home_delivered += u
+            else:
+                home_pending += u
+
+    pu_members, _pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d, store_id=sid)
+    _ex_h, _ex_dh, ex_pu, _ex_pud = extra_delivered_ineligible_subscribers(
+        db,
+        delivery_date=d,
+        already_home={int(m.id) for m in mlist},
+        already_pickup={int(m.id) for m in pu_members},
+        delivery_region_id=None,
+        store_id=sid,
+    )
+    all_pu = list(pu_members) + list(ex_pu)
+    pu_mids = [int(m.id) for m in all_pu]
+    delivered_set = _member_ids_delivered_on_date(db, d, pu_mids) if pu_mids else set()
+    pu_delivered = sum(int(effective_daily_meal_units(m)) for m in all_pu if int(m.id) in delivered_set)
+    pu_pending = sum(int(effective_daily_meal_units(m)) for m in all_pu if int(m.id) not in delivered_set)
+
+    return DeliverySheetDayMetrics(
+        home_pending_meal_total=home_pending,
+        home_delivered_meal_total=home_delivered,
+        pickup_meal_total=pu_delivered + pu_pending,
+        pickup_pending_meal_total=pu_pending,
+        pickup_delivered_meal_total=pu_delivered,
+        home_stop_count=len(stops),
+    )
+
+
+def _sum_meal_units_home_eligible_on_date(db: Session, *, delivery_date: date, store_id: int) -> int:
+    units_sql = sql_effective_daily_meal_units_column()
+    q = select(func.coalesce(func.sum(units_sql), 0)).where(
+        *_member_subscription_eligibility_where(delivery_date, store_id=int(store_id)),
+        Member.store_pickup.is_(False),
+    )
+    return int(db.scalar(q) or 0)
+
+
+def _sum_meal_units_pickup_eligible_on_date(db: Session, *, delivery_date: date, store_id: int) -> int:
+    units_sql = sql_effective_daily_meal_units_column()
+    q = select(func.coalesce(func.sum(units_sql), 0)).where(
+        *_member_subscription_eligibility_where(delivery_date, store_id=int(store_id)),
+        Member.store_pickup.is_(True),
+    )
+    return int(db.scalar(q) or 0)
+
+
+def _sum_meal_units_extra_delivered_on_date(db: Session, *, delivery_date: date, store_id: int) -> int:
+    """扣次后不再应送、但当日 delivery_logs 已 DELIVERED 的会员份数（到家+自提）。"""
+    sid = int(store_id)
+    units_sql = sql_effective_daily_meal_units_column()
+    home_elig = select(Member.id).where(
+        *_member_subscription_eligibility_where(delivery_date, store_id=sid),
+        Member.store_pickup.is_(False),
+    )
+    pu_elig = select(Member.id).where(
+        *_member_subscription_eligibility_where(delivery_date, store_id=sid),
+        Member.store_pickup.is_(True),
+    )
+    delivered = (
+        select(DeliveryLog.member_id)
+        .join(Member, Member.id == DeliveryLog.member_id)
+        .where(
+            DeliveryLog.delivery_date == delivery_date,
+            DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+            Member.store_id == sid,
+            Member.deleted_at.is_(None),
+        )
+        .distinct()
+    )
+    q = (
+        select(func.coalesce(func.sum(units_sql), 0))
+        .select_from(Member)
+        .where(
+            Member.store_id == sid,
+            Member.deleted_at.is_(None),
+            Member.id.in_(delivered),
+            Member.id.notin_(home_elig),
+            Member.id.notin_(pu_elig),
+        )
+    )
+    return int(db.scalar(q) or 0)
+
+
 def _member_ids_delivered_on_date(db: Session, delivery_date: date, member_ids: list[int]) -> set[int]:
     """查询当日已在 ``delivery_logs`` 标记为送达的会员 id（与 ``courier_service.list_today_tasks`` 同一条件）。"""
     if not member_ids:
@@ -175,34 +405,17 @@ def total_meal_units_for_delivery_sheet(
 ) -> int:
     """与 ``build_delivery_sheet`` 各分组 ``meal_total`` 之和一致（到家+自提，含已送后不再应送仍并入大表者）。
 
-    不构建停靠点分组与 Pydantic 结构，仅复用同源会员名单做一次份数聚合，供仪表盘等大表同源统计。
+    SQL SUM 聚合，不加载会员行与停靠点结构，供仪表盘等对日份数统计。
     """
     if not is_subscription_delivery_day(delivery_date):
         return 0
     cfg = get_settings()
     sid = int(store_id) if store_id is not None else int(cfg.DEFAULT_STORE_ID)
-    members, _default_home = eligible_members_for_delivery(
-        db, delivery_date=delivery_date, delivery_region_id=None, store_id=sid
+    return (
+        _sum_meal_units_home_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
+        + _sum_meal_units_pickup_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
+        + _sum_meal_units_extra_delivered_on_date(db, delivery_date=delivery_date, store_id=sid)
     )
-    pu_members, _pu_defaults = eligible_members_for_store_pickup(db, delivery_date=delivery_date, store_id=sid)
-    already_home = {int(m.id) for m in members}
-    already_pickup = {int(m.id) for m in pu_members}
-    ex_h, _ex_dh, ex_pu, _ex_pud = extra_delivered_ineligible_subscribers(
-        db,
-        delivery_date=delivery_date,
-        already_home=already_home,
-        already_pickup=already_pickup,
-        delivery_region_id=None,
-        store_id=sid,
-    )
-    members.extend(ex_h)
-    pu_members.extend(ex_pu)
-    total = 0
-    for m in members:
-        total += effective_daily_meal_units(m)
-    for m in pu_members:
-        total += effective_daily_meal_units(m)
-    return int(total)
 
 
 def meal_units_totals_for_delivery_dates(
@@ -211,10 +424,7 @@ def meal_units_totals_for_delivery_dates(
     dates: Iterable[date],
     store_id: int | None = None,
 ) -> dict[date, int]:
-    """与 ``total_meal_units_for_delivery_sheet`` 同源的对日映射；可多日一次拉齐。
-
-    非 SQLite 且多日均为订阅配送日时，独占会话并行查库以降低 dashboard 等场景的串行延迟。
-    """
+    """与 ``total_meal_units_for_delivery_sheet`` 同源的对日映射；单会话 SQL SUM 串行计算。"""
     cfg = get_settings()
     sid = int(store_id) if store_id is not None else int(cfg.DEFAULT_STORE_ID)
 
@@ -226,40 +436,8 @@ def meal_units_totals_for_delivery_dates(
             uniq.append(d)
 
     out: dict[date, int] = {}
-    todo: list[date] = []
     for d in uniq:
-        if not is_subscription_delivery_day(d):
-            out[d] = 0
-        else:
-            todo.append(d)
-
-    if not todo:
-        return out
-
-    bind = db.get_bind()
-    use_threads = bind.dialect.name != "sqlite" and len(todo) > 1
-    if not use_threads:
-        for d in todo:
-            out[d] = total_meal_units_for_delivery_sheet(db, delivery_date=d, store_id=sid)
-        return out
-
-    mk = sessionmaker(bind=bind, autoflush=False, autocommit=False, expire_on_commit=False)
-
-    def _compute_one(delivery_d: date) -> tuple[date, int]:
-        sess = mk()
-        try:
-            val = total_meal_units_for_delivery_sheet(sess, delivery_date=delivery_d, store_id=sid)
-            return delivery_d, val
-        finally:
-            sess.close()
-
-    max_workers = min(4, len(todo))
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(_compute_one, d) for d in todo]
-        for fut in as_completed(futures):
-            d_key, val = fut.result()
-            out[d_key] = val
-
+        out[d] = total_meal_units_for_delivery_sheet(db, delivery_date=d, store_id=sid)
     return out
 
 

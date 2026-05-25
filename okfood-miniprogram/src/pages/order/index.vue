@@ -55,10 +55,6 @@
                 <text v-else class="price-val price-val--pending">待公布</text>
               </view>
               <text class="dish-ingredients">配料：{{ m.ingredients }}</text>
-              <button
-                v-if="canSubmitSingleOrder(m, m.serviceDate)"
-                class="btn-quick-buy"
-                @click.stop="goDetail(m)">立即下单</button>
             </view>
           </view>
         </view>
@@ -75,7 +71,6 @@ import {
   addDaysIso,
   fetchWeeklyMenu,
   formatMenuPrice,
-  canSubmitSingleOrder,
   mondayOfWeekShanghai,
   prefetchWeeklyMenu,
 } from '@/utils/menuApi.js'
@@ -438,18 +433,6 @@ function onImgErr(item) {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-}
-
-.btn-quick-buy {
-  width: 100%;
-  padding: 20rpx;
-  background: $ok-forest-green;
-  color: #fff;
-  border: none;
-  border-radius: 24rpx;
-  font-size: 22rpx;
-  font-weight: 900;
-  margin-top: auto;
 }
 
 </style>

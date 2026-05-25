@@ -28,36 +28,36 @@ const dashboardStatsLoading = ref(false)
 const summaryAnchorDate = ref('')
 /** @type {import('vue').Ref<Record<string, unknown> | null>} */
 const summaryMeta = ref(null)
-/** 与智能配送大表同源拆分（/api/admin/delivery-sheet），锚定日与营业概览一致
- * @type {import('vue').Ref<{ total: number, delivery: number, pickup: number } | null>}
- */
-const sheetPrepBreakdown = ref(null)
-/** 锚定日「次日」大表拆分（明日需备餐的配送/自提）
- * @type {import('vue').Ref<{ total: number, delivery: number, pickup: number } | null>}
- */
-const tomorrowPrepBreakdown = ref(null)
 
-/** 锚定日 delivery-sheet 响应中的地图会员库五字段（与 GET delivery-sheet?delivery_date=锚定日 一致） */
-/** @type {import('vue').Ref<{
- *   total_members: number,
- *   active_weekly_members: number,
- *   expired_weekly_members: number,
- *   active_monthly_members: number,
- *   expired_monthly_members: number,
- * } | null>} */
-const sheetMapMemberLibrary = ref(null)
+const todayPrepMetrics = computed(() => {
+  const m = summaryMeta.value?.today_prep_metrics
+  return m && typeof m === 'object' ? m : null
+})
+const tomorrowPrepMetrics = computed(() => {
+  const m = summaryMeta.value?.tomorrow_prep_metrics
+  return m && typeof m === 'object' ? m : null
+})
 
-/** 锚定日/次日 delivery-sheet 履约份量（用于进度条，与接口 groups 同源） */
-/** @type {import('vue').Ref<{ delivered: number, pending: number, total: number } | null>} */
-const sheetTodayFulfillment = ref(null)
-/** @type {import('vue').Ref<{ delivered: number, pending: number, total: number } | null>} */
-const sheetTomorrowFulfillment = ref(null)
+/** @param {Record<string, unknown> | null} m */
+function prepMetricsBreakdown(m) {
+  if (!m) return null
+  const hp = Number(m.home_pending_meal_total) || 0
+  const hd = Number(m.home_delivered_meal_total) || 0
+  const pu = Number(m.pickup_meal_total) || 0
+  return { total: hp + hd + pu, delivery: hp + hd, pickup: pu }
+}
 
-/** 大表到家片区配送点合计（各 group.stop_count 之和，不含「门店自提」）；与智能配送页「x 点」同源 */
-/** @type {import('vue').Ref<number | null>} */
-const sheetTodayHomeStopCount = ref(null)
-/** @type {import('vue').Ref<number | null>} */
-const sheetTomorrowHomeStopCount = ref(null)
+/** @param {Record<string, unknown> | null} m */
+function prepMetricsFulfillment(m) {
+  if (!m) return null
+  const hd = Number(m.home_delivered_meal_total) || 0
+  const hp = Number(m.home_pending_meal_total) || 0
+  const pd = Number(m.pickup_delivered_meal_total) || 0
+  const pp = Number(m.pickup_pending_meal_total) || 0
+  const delivered = hd + pd
+  const pending = hp + pp
+  return { delivered, pending, total: delivered + pending }
+}
 
 const summaryIsLiveToday = computed(() => {
   const m = summaryMeta.value
@@ -243,115 +243,9 @@ function addOneDayIso(iso) {
   ).padStart(2, '0')}`
 }
 
-/** 解析 delivery-sheet 汇总为总份数 / 配送 / 自提 */
-function parseDeliverySheetBreakdown(sh) {
-  if (!sh || typeof sh !== 'object') return null
-  const hp = Number(sh.home_pending_meal_total) || 0
-  const hd = Number(sh.home_delivered_meal_total) || 0
-  const pu = Number(sh.pickup_meal_total) || 0
-  return { total: hp + hd + pu, delivery: hp + hd, pickup: pu }
-}
-
-/**
- * 到家配送点数量：各片区 group.stop_count 之和（排除门店自提分组）
- * @param {unknown} sh
- * @returns {number | null}
- */
-function parseHomeDeliveryStopCount(sh) {
-  if (!sh || typeof sh !== 'object') return null
-  const groups = Array.isArray(sh.groups) ? sh.groups : []
-  let n = 0
-  for (const g of groups) {
-    if (String(g.area || '') === '门店自提') continue
-    n += Math.max(0, Math.trunc(Number(g.stop_count) || 0))
-  }
-  return n
-}
-
-/** 从大表响应解析：到家已送达+待送 + 自提已送+待送 = 与备餐总份一致 */
-function parseSheetFulfillment(sh) {
-  if (!sh || typeof sh !== 'object') return null
-  const hd = Number(sh.home_delivered_meal_total) || 0
-  const hp = Number(sh.home_pending_meal_total) || 0
-  let pd = 0
-  let pp = 0
-  const groups = Array.isArray(sh.groups) ? sh.groups : []
-  for (const g of groups) {
-    if (String(g.area || '') === '门店自提') {
-      pd = Number(g.delivered_meal_total) || 0
-      pp = Number(g.pending_meal_total) || 0
-      break
-    }
-  }
-  const delivered = hd + pd
-  const pending = hp + pp
-  const total = delivered + pending
-  return { delivered, pending, total }
-}
-
-/** 从 delivery-sheet 根对象解析地图会员库（新后端字段；缺失则 null） */
-function parseSheetMapLibrary(sh) {
-  if (!sh || typeof sh !== 'object') return null
-  if (!Object.prototype.hasOwnProperty.call(sh, 'total_members')) return null
-  return {
-    total_members: Number(sh.total_members) || 0,
-    active_weekly_members: Number(sh.active_weekly_members) || 0,
-    expired_weekly_members: Number(sh.expired_weekly_members) || 0,
-    active_monthly_members: Number(sh.active_monthly_members) || 0,
-    expired_monthly_members: Number(sh.expired_monthly_members) || 0,
-  }
-}
-
-/** 拉取配送大表汇总行，与 DeliveryView 顶部「后厨需出 / 待送达 / 自提」同一口径 */
-async function fetchSheetPrepBreakdowns(anchorIso) {
-  sheetPrepBreakdown.value = null
-  tomorrowPrepBreakdown.value = null
-  sheetMapMemberLibrary.value = null
-  sheetTodayFulfillment.value = null
-  sheetTomorrowFulfillment.value = null
-  sheetTodayHomeStopCount.value = null
-  sheetTomorrowHomeStopCount.value = null
-  if (!adminAccessToken.value || !anchorIso) return
-  const day = String(anchorIso).trim().slice(0, 10)
-  const nextDay = addOneDayIso(day)
-  if (!nextDay) return
-  try {
-    const qs1 = new URLSearchParams()
-    qs1.set('delivery_date', day)
-    const qs2 = new URLSearchParams()
-    qs2.set('delivery_date', nextDay)
-    const [shToday, shTomorrow] = await Promise.all([
-      apiJson(`/api/admin/delivery-sheet?${qs1.toString()}`, {}, { auth: true }),
-      apiJson(`/api/admin/delivery-sheet?${qs2.toString()}`, {}, { auth: true }),
-    ])
-    sheetPrepBreakdown.value = parseDeliverySheetBreakdown(shToday)
-    tomorrowPrepBreakdown.value = parseDeliverySheetBreakdown(shTomorrow)
-    sheetMapMemberLibrary.value = parseSheetMapLibrary(shToday)
-    sheetTodayFulfillment.value = parseSheetFulfillment(shToday)
-    sheetTomorrowFulfillment.value = parseSheetFulfillment(shTomorrow)
-    sheetTodayHomeStopCount.value = parseHomeDeliveryStopCount(shToday)
-    sheetTomorrowHomeStopCount.value = parseHomeDeliveryStopCount(shTomorrow)
-  } catch {
-    sheetPrepBreakdown.value = null
-    tomorrowPrepBreakdown.value = null
-    sheetMapMemberLibrary.value = null
-    sheetTodayFulfillment.value = null
-    sheetTomorrowFulfillment.value = null
-    sheetTodayHomeStopCount.value = null
-    sheetTomorrowHomeStopCount.value = null
-  }
-}
-
 async function fetchDashboardSummary() {
   if (!adminAccessToken.value) return
   dashboardStatsLoading.value = true
-  sheetPrepBreakdown.value = null
-  tomorrowPrepBreakdown.value = null
-  sheetMapMemberLibrary.value = null
-  sheetTodayFulfillment.value = null
-  sheetTomorrowFulfillment.value = null
-  sheetTodayHomeStopCount.value = null
-  sheetTomorrowHomeStopCount.value = null
   try {
     const q = summaryAnchorDate.value.trim()
     const qs = q ? `?business_date=${encodeURIComponent(q)}` : ''
@@ -360,9 +254,6 @@ async function fetchDashboardSummary() {
     if (d && typeof d.business_anchor_date === 'string') {
       summaryAnchorDate.value = d.business_anchor_date
     }
-    await fetchSheetPrepBreakdowns(
-      d && typeof d.business_anchor_date === 'string' ? d.business_anchor_date : '',
-    )
     const tl = Number(d?.today_leave_members) || 0
     const tp = Number(d?.today_meals_to_prepare) || 0
     const nl = Number(d?.tomorrow_leave_members) || 0
@@ -384,13 +275,6 @@ async function fetchDashboardSummary() {
     }
     dashboardStats.value = []
     summaryMeta.value = null
-    sheetPrepBreakdown.value = null
-    tomorrowPrepBreakdown.value = null
-    sheetMapMemberLibrary.value = null
-    sheetTodayFulfillment.value = null
-    sheetTomorrowFulfillment.value = null
-    sheetTodayHomeStopCount.value = null
-    sheetTomorrowHomeStopCount.value = null
     showToast(e instanceof Error ? e.message : '加载营业概览失败', 'error')
   } finally {
     dashboardStatsLoading.value = false
@@ -475,39 +359,52 @@ const summarySlice = computed(() => ({
 
 const expireCount = computed(() => Number(dashboardStats.value[4]?.value) || 0)
 
-/** 备餐卡片「总数」：优先大表停靠点合计（与智能配送页一致），否则回落营业概览 */
+/** 备餐卡片「总数」：优先 dashboard-summary 拆分，否则回落营业概览 */
 const cardPrepTotal = computed(() => {
-  if (sheetPrepBreakdown.value != null) return sheetPrepBreakdown.value.total
+  const b = prepMetricsBreakdown(todayPrepMetrics.value)
+  if (b != null) return b.total
   return Number(dashboardStats.value[2]?.value) || 0
 })
 
-/** 配送=到家待送达+已送达；自提=门店自提分组。优先大表接口，与图1 红框一致 */
+/** 配送=到家待送达+已送达；自提=门店自提分组 */
 const todayMealsDelivery = computed(() => {
-  if (sheetPrepBreakdown.value != null) return sheetPrepBreakdown.value.delivery
-  const v = summaryMeta.value?.today_meals_delivery
-  if (v == null) return null
-  return Number(v) || 0
+  const b = prepMetricsBreakdown(todayPrepMetrics.value)
+  if (b != null) return b.delivery
+  return null
 })
 const todayMealsPickup = computed(() => {
-  if (sheetPrepBreakdown.value != null) return sheetPrepBreakdown.value.pickup
-  const v = summaryMeta.value?.today_meals_pickup
-  if (v == null) return null
-  return Number(v) || 0
+  const b = prepMetricsBreakdown(todayPrepMetrics.value)
+  if (b != null) return b.pickup
+  return null
 })
 
-/** 明日备餐：总份优先大表次日合计，否则营业概览 tomorrow_meals_to_prepare */
+/** 明日备餐：总份优先 dashboard-summary 拆分，否则营业概览 tomorrow_meals_to_prepare */
 const cardTomorrowPrepTotal = computed(() => {
-  if (tomorrowPrepBreakdown.value != null) return tomorrowPrepBreakdown.value.total
+  const b = prepMetricsBreakdown(tomorrowPrepMetrics.value)
+  if (b != null) return b.total
   return Number(dashboardStats.value[3]?.value) || 0
 })
 
 const tomorrowPrepDelivery = computed(() => {
-  if (tomorrowPrepBreakdown.value != null) return tomorrowPrepBreakdown.value.delivery
+  const b = prepMetricsBreakdown(tomorrowPrepMetrics.value)
+  if (b != null) return b.delivery
   return null
 })
 const tomorrowPrepPickup = computed(() => {
-  if (tomorrowPrepBreakdown.value != null) return tomorrowPrepBreakdown.value.pickup
+  const b = prepMetricsBreakdown(tomorrowPrepMetrics.value)
+  if (b != null) return b.pickup
   return null
+})
+
+const todayHomeStopCount = computed(() => {
+  const m = todayPrepMetrics.value
+  if (!m || m.home_stop_count == null) return null
+  return Math.max(0, Math.trunc(Number(m.home_stop_count) || 0))
+})
+const tomorrowHomeStopCount = computed(() => {
+  const m = tomorrowPrepMetrics.value
+  if (!m || m.home_stop_count == null) return null
+  return Math.max(0, Math.trunc(Number(m.home_stop_count) || 0))
 })
 
 /** 概览接口是否包含地图会员库五字段（旧后端兼容） */
@@ -518,34 +415,24 @@ const mapLibFromApi = computed(
 )
 
 const mapLibActiveWeekly = computed(() => {
-  const s = sheetMapMemberLibrary.value
-  if (s) return s.active_weekly_members
   if (mapLibFromApi.value) return Number(summaryMeta.value.active_weekly_members) || 0
   return mapEligiblePlanCounts.value.week
 })
 
 const mapLibExpiredWeekly = computed(() => {
-  const s = sheetMapMemberLibrary.value
-  if (s) return s.expired_weekly_members
   return mapLibFromApi.value ? Number(summaryMeta.value.expired_weekly_members) || 0 : 0
 })
 
 const mapLibActiveMonthly = computed(() => {
-  const s = sheetMapMemberLibrary.value
-  if (s) return s.active_monthly_members
   if (mapLibFromApi.value) return Number(summaryMeta.value.active_monthly_members) || 0
   return mapEligiblePlanCounts.value.month
 })
 
 const mapLibExpiredMonthly = computed(() => {
-  const s = sheetMapMemberLibrary.value
-  if (s) return s.expired_monthly_members
   return mapLibFromApi.value ? Number(summaryMeta.value.expired_monthly_members) || 0 : 0
 })
 
 const mapLibTotal = computed(() => {
-  const s = sheetMapMemberLibrary.value
-  if (s) return s.total_members
   if (mapLibFromApi.value) return Number(summaryMeta.value.total_members) || 0
   return mapEligiblePlanCounts.value.week + mapEligiblePlanCounts.value.month
 })
@@ -572,9 +459,9 @@ const mapLibBarSegments = computed(() => {
   return raw.map((s) => ({ ...s, width: (s.n / t) * 100 }))
 })
 
-/** 今日：大表已送达 / 待履约（绿/灰），数据来自锚定日 delivery-sheet */
+/** 今日：已送达 / 待履约（绿/灰），数据来自 dashboard-summary.today_prep_metrics */
 const todayDeliveryFulfillBar = computed(() => {
-  const f = sheetTodayFulfillment.value
+  const f = prepMetricsFulfillment(todayPrepMetrics.value)
   if (!f || f.total <= 0) return { done: 0, pending: 0 }
   return {
     done: (f.delivered / f.total) * 100,
@@ -583,7 +470,7 @@ const todayDeliveryFulfillBar = computed(() => {
 })
 
 const todayFulfillAria = computed(() => {
-  const f = sheetTodayFulfillment.value
+  const f = prepMetricsFulfillment(todayPrepMetrics.value)
   if (!f || f.total <= 0) return '配送履约：暂无备餐份数'
   return `配送履约：已送达 ${f.delivered} 份，待履约 ${f.pending} 份，合计 ${f.total} 份`
 })
@@ -618,13 +505,13 @@ const storePinLegendCount = computed(() =>
 const prepTotalAnimated = useAnimatedInteger(() => cardPrepTotal.value, { duration: 840 })
 const todayDeliveryAnimated = useAnimatedInteger(() => todayMealsDelivery.value, { duration: 700 })
 const todayPickupAnimated = useAnimatedInteger(() => todayMealsPickup.value, { duration: 700 })
-const todayHomeStopCountAnimated = useAnimatedInteger(() => sheetTodayHomeStopCount.value, {
+const todayHomeStopCountAnimated = useAnimatedInteger(() => todayHomeStopCount.value, {
   duration: 640,
 })
 const tomorrowTotalAnimated = useAnimatedInteger(() => cardTomorrowPrepTotal.value, { duration: 840 })
 const tomorrowDeliveryAnimated = useAnimatedInteger(() => tomorrowPrepDelivery.value, { duration: 700 })
 const tomorrowPickupAnimated = useAnimatedInteger(() => tomorrowPrepPickup.value, { duration: 700 })
-const tomorrowHomeStopCountAnimated = useAnimatedInteger(() => sheetTomorrowHomeStopCount.value, {
+const tomorrowHomeStopCountAnimated = useAnimatedInteger(() => tomorrowHomeStopCount.value, {
   duration: 640,
 })
 const todayLeaveAnimated = useAnimatedInteger(() => summarySlice.value.todayLeave, { duration: 620 })
@@ -740,12 +627,12 @@ onMounted(() => {
                 class="dro-dash-kpi__side-stop-line"
                 role="status"
                 :aria-label="
-                  sheetTodayHomeStopCount == null
+                  todayHomeStopCount == null
                     ? '配送点数量未加载'
-                    : `${sheetTodayHomeStopCount} 个到家配送点`
+                    : `${todayHomeStopCount} 个到家配送点`
                 "
               >
-                <template v-if="sheetTodayHomeStopCount != null">
+                <template v-if="todayHomeStopCount != null">
                   <span class="dro-dash-kpi__side-stop-n dro-dash-kpi__side-n--emerald">{{
                     todayHomeStopCountAnimated
                   }}</span>
@@ -857,12 +744,12 @@ onMounted(() => {
                 class="dro-dash-kpi__side-stop-line"
                 role="status"
                 :aria-label="
-                  sheetTomorrowHomeStopCount == null
+                  tomorrowHomeStopCount == null
                     ? '配送点数量未加载'
-                    : `${sheetTomorrowHomeStopCount} 个到家配送点`
+                    : `${tomorrowHomeStopCount} 个到家配送点`
                 "
               >
-                <template v-if="sheetTomorrowHomeStopCount != null">
+                <template v-if="tomorrowHomeStopCount != null">
                   <span class="dro-dash-kpi__side-stop-n dro-dash-kpi__side-n--blue">{{
                     tomorrowHomeStopCountAnimated
                   }}</span>

@@ -361,29 +361,27 @@ def _single_meal_order_row_to_out(
     )
 
 
-def list_admin_store_single_meal_orders_by_order_day(
+def list_admin_store_single_meal_orders_by_delivery_day(
     db: Session,
     *,
     store_id: int,
-    order_day: date,
+    delivery_day: date,
     q: str | None = None,
     pay_status: str | None = None,
     delivery_phase: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[AdminSingleMealOrderListOut], int]:
-    """管理端：按上海自然日筛选「下单时间」落在当日的单次点餐订单（created_at 存北京时间 naive）。
+    """管理端：按供餐日筛选单次点餐订单（``delivery_date``）。
 
     ``delivery_phase``：``awaiting``=待配送（履约未完成，含 pending/accepted）；``delivered``=已配送（delivered）。
     """
-    start_bj, end_bj = shanghai_naive_range_for_calendar_day(order_day)
     page = max(1, page)
     page_size = min(100, max(1, page_size))
     join_on = Member.id == SingleMealOrder.member_id
     filters = [
         SingleMealOrder.store_id == int(store_id),
-        SingleMealOrder.created_at >= start_bj,
-        SingleMealOrder.created_at < end_bj,
+        SingleMealOrder.delivery_date == delivery_day,
     ]
     ps = (pay_status or "").strip()
     if ps == "已取消":
@@ -444,7 +442,7 @@ def list_member_single_meal_orders(
     page_size: int = 20,
     list_status: str | None = None,
 ) -> tuple[list[SingleMealOrderOut], int]:
-    """会员端列表。``list_status``：``all``（默认）、``pending_pay`` 待支付、``pending_delivery`` 待送达（配送且未妥投）、``completed`` 已完成（自提或已送达）。"""
+    """会员端列表。``list_status``：``all``（默认）、``pending_pay`` 待支付、``pending_delivery`` 待送达/待取货（已支付且未妥投/未自提）、``completed`` 已完成（已送达或已自提）。"""
     page = max(1, page)
     page_size = min(50, max(1, page_size))
     ls = (list_status or "all").strip().lower()
@@ -453,16 +451,10 @@ def list_member_single_meal_orders(
         filters.append(SingleMealOrder.pay_status == "未支付")
     elif ls == "pending_delivery":
         filters.append(SingleMealOrder.pay_status == "已支付")
-        filters.append(SingleMealOrder.store_pickup.is_(False))
         filters.append(SingleMealOrder.fulfillment_status.in_(("pending", "accepted")))
     elif ls == "completed":
         filters.append(SingleMealOrder.pay_status == "已支付")
-        filters.append(
-            or_(
-                SingleMealOrder.store_pickup.is_(True),
-                SingleMealOrder.fulfillment_status == "delivered",
-            )
-        )
+        filters.append(SingleMealOrder.fulfillment_status == "delivered")
     elif ls != "all":
         ls = "all"
 
@@ -585,7 +577,7 @@ def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     order.wx_transaction_id = tid or order.wx_transaction_id
     if bool(getattr(order, "store_pickup", False)):
         order.courier_id = None
-        order.fulfillment_status = "delivered"
+        # 门店自提：支付后仍为 pending，待管理员在后台标记取货完成
     else:
         pay_addr = db.get(MemberAddress, order.member_address_id)
         order.courier_id = primary_courier_for_region_id(
@@ -785,29 +777,27 @@ def admin_resync_single_meal_delivered_from_sf_monitor(
     return admin_resync_single_meal_from_sf_monitor(db, order_id=order_id, store_id=store_id)
 
 
-def bulk_admin_resync_single_meal_from_sf_monitor_for_order_day(
+def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
     db: Session,
     *,
     store_id: int,
-    order_day: date,
+    delivery_day: date,
     max_orders: int = 500,
 ) -> dict[str, Any]:
     """
     单日·单门店单次点餐：对齐顺丰监控终态到 ``single_meal_orders``。
 
     两路扫描（幂等）：
-    1. 按「下单日」筛订单，关联最近一次创单成功的推单；
-    2. 按「供餐/业务日 = order_day」扫顺丰零售推单，反向更新仍滞后的订单。
+    1. 按「供餐日」筛订单，关联最近一次创单成功的推单；
+    2. 按「供餐/业务日 = delivery_day」扫顺丰零售推单，反向更新仍滞后的订单。
     """
     mx = max(1, min(500, int(max_orders or 500)))
-    start_bj, end_bj = shanghai_naive_range_for_calendar_day(order_day)
     rows = list(
         db.scalars(
             select(SingleMealOrder)
             .where(
                 SingleMealOrder.store_id == int(store_id),
-                SingleMealOrder.created_at >= start_bj,
-                SingleMealOrder.created_at < end_bj,
+                SingleMealOrder.delivery_date == delivery_day,
             )
             .order_by(SingleMealOrder.id.desc())
             .limit(mx)
@@ -858,7 +848,7 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_order_day(
         _bump(outcome)
         touched.add(int(o.id))
 
-    delivery_days: set[date] = {order_day}
+    delivery_days: set[date] = {delivery_day}
     for o in rows:
         if o.delivery_date is not None:
             delivery_days.add(o.delivery_date)
@@ -909,7 +899,7 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_order_day(
         touched.add(oid)
 
     parts = [
-        f"扫描下单日订单 {scanned} 条",
+        f"扫描供餐日订单 {scanned} 条",
         f"新对齐妥投 {counts['updated']} 条",
         f"新对齐顺丰取消 {counts['updated_cancel']} 条",
         f"已是已完成 {counts['already_completed']}",
@@ -1260,3 +1250,64 @@ def bulk_admin_mark_single_meal_orders_delivered(
         except ValueError as e:
             results.append({"order_id": int(oid), "ok": False, "message": str(e)})
     return {"results": results}
+
+
+def _can_admin_update_single_meal_fulfillment(o: SingleMealOrder) -> tuple[bool, str]:
+    pay = (o.pay_status or "").strip()
+    f = str(o.fulfillment_status or "").strip().lower()
+    if pay == "已退款":
+        return False, "已退款订单不可修改"
+    if f == "cancelled":
+        return False, "已取消订单不可修改"
+    if f == "accepted":
+        return False, "配送中订单不可修改，请先取消配送或标记完成"
+    if f in ("pending", "sf_cancelled", "delivered"):
+        return True, ""
+    return False, f"当前状态不可修改（履约={f or '—'}）"
+
+
+def admin_update_single_meal_order(
+    db: Session,
+    *,
+    order_id: int,
+    store_id: int,
+    store_pickup: bool,
+    member_address_id: int | None,
+) -> AdminSingleMealOrderListOut:
+    """管理端修改单次点餐订单的配送方式与收货地址。"""
+    o = db.get(SingleMealOrder, int(order_id))
+    if o is None or int(o.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    ok, err = _can_admin_update_single_meal_fulfillment(o)
+    if not ok:
+        raise ValueError(err)
+
+    addr_id: int | None
+    area: str
+    if store_pickup:
+        addr_id = None
+        area = "门店自提"
+    else:
+        addr = db.get(MemberAddress, int(member_address_id or 0))
+        if not addr or int(addr.member_id) != int(o.member_id):
+            raise ValueError("配送地址不存在或不属于该会员")
+        nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
+        area = routing_area_label(addr, nm)
+        addr_id = int(addr.id)
+
+    o.store_pickup = bool(store_pickup)
+    o.member_address_id = addr_id
+    o.routing_area = area
+    if store_pickup:
+        o.courier_id = None
+    db.add(o)
+    db.commit()
+    db.refresh(o)
+    m = db.get(Member, o.member_id)
+    base = _single_meal_order_row_to_out(db, o)
+    return AdminSingleMealOrderListOut(
+        **base.model_dump(),
+        member_id=int(o.member_id),
+        member_phone=(m.phone or "") if m else "",
+        member_name=(((m.name or "").strip()) if m else "") or "",
+    )

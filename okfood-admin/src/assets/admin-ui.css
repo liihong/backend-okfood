@@ -611,6 +611,129 @@
   margin-left: 235px;
   padding: 1rem 1rem;
   transition: margin-left 0.22s ease;
+  position: relative;
+}
+
+.admin-notifications-bar {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 40;
+}
+
+.admin-notifications-bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  transition: color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-notifications-bell:hover {
+  color: #0f172a;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.admin-notifications-bell--active {
+  color: #b45309;
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
+.admin-notifications-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 0 0 2px #ffffff;
+}
+
+.admin-system-notifications-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.admin-system-notifications-panel__head strong {
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.admin-system-notifications-panel__count {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.admin-system-notifications-empty {
+  padding: 1rem 0;
+  text-align: center;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.admin-system-notifications-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.admin-system-notifications-item {
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.admin-system-notifications-item__title {
+  margin: 0 0 0.35rem;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.admin-system-notifications-item__message {
+  margin: 0 0 0.65rem;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.admin-system-notifications-item__actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.top-header--with-bell {
+  padding-right: 3.25rem;
 }
 
 .admin-layout.admin-layout--sidebar-collapsed .main-body {
@@ -2641,6 +2764,11 @@
 .operation-logs-td-src {
   white-space: nowrap;
 }
+.operation-logs-td-operator {
+  white-space: nowrap;
+  font-size: 13px;
+  color: #475569;
+}
 .operation-logs-src {
   display: inline-block;
   padding: 0.12rem 0.45rem;
@@ -3091,4 +3219,76 @@
   .form-row {
     grid-template-columns: 1fr;
   }
+}
+
+/* 主区横向 Tab（KeepAlive 多页切换） */
+.admin-page-tabs {
+  margin: 0 0 1rem;
+  min-width: 0;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+.admin-page-tabs__scroll {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding-bottom: 0.1rem;
+}
+
+.admin-page-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  max-width: 12rem;
+  padding: 0.35rem 0.55rem 0.35rem 0.75rem;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(15, 23, 42, 0.72);
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.admin-page-tab:hover {
+  border-color: rgba(15, 23, 42, 0.18);
+  color: rgba(15, 23, 42, 0.92);
+}
+
+.admin-page-tab--active {
+  border-color: rgba(234, 179, 8, 0.55);
+  background: rgba(254, 249, 195, 0.65);
+  color: rgba(15, 23, 42, 0.95);
+  font-weight: 600;
+}
+
+.admin-page-tab__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-page-tab__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(15, 23, 42, 0.45);
+  cursor: pointer;
+}
+
+.admin-page-tab__close:hover {
+  background: rgba(15, 23, 42, 0.08);
+  color: rgba(15, 23, 42, 0.85);
 }

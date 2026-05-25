@@ -54,3 +54,4 @@ class Member(Base):
     skip_subscription_saturday: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    membership_refunded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)

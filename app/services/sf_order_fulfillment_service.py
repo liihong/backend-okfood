@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import String, and_, cast, func, or_, select, true as sql_true
+from sqlalchemy import String, and_, cast, func, or_, select, text, true as sql_true
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -34,6 +35,81 @@ SF_ORDER_STATUS_CANCELLED = (2, 22)
 
 SF_PUSH_KIND_DELIVERY_SHEET = "delivery_sheet"
 SF_PUSH_KIND_SINGLE_MEAL_RETAIL = "single_meal_retail"
+
+
+@dataclass(frozen=True)
+class SfCallbackSideEffectJob:
+    """顺丰回调落库后异步执行的扣次/取消同步任务（独立 DB Session）。"""
+
+    push_id: int
+    route_kind: str
+    operator_tag: str
+    action: str  # fulfillment | cancel_sync
+
+
+def _flush_renew_reminds(db: Session, pending: list[tuple[Member, int]]) -> None:
+    """扣次 commit 后再调微信，避免事务内 HTTP 占连接与行锁。"""
+    if not pending:
+        return
+    from app.services.member_renew_subscribe_service import try_send_renew_remind_after_balance_change
+
+    for member, balance_before in pending:
+        try:
+            try_send_renew_remind_after_balance_change(db, member, balance_before=balance_before)
+        except Exception:
+            logger.exception("续费提醒下发失败 member_id=%s", getattr(member, "id", None))
+
+
+def _sf_fulfillment_try_lock(db: Session, push_id: int) -> bool:
+    bind = db.get_bind()
+    if getattr(bind.dialect, "name", "") != "mysql":
+        return True
+    key = f"okf_sfff_{int(push_id)}"[:64]
+    rc = db.execute(text("SELECT GET_LOCK(:k, 5)"), {"k": key}).scalar()
+    return rc == 1
+
+
+def _sf_fulfillment_release_lock(db: Session, push_id: int) -> None:
+    bind = db.get_bind()
+    if getattr(bind.dialect, "name", "") != "mysql":
+        return
+    key = f"okf_sfff_{int(push_id)}"[:64]
+    db.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": key})
+
+
+def sf_push_fulfilled_quick_check(db: Session, pus: SfSameCityPush) -> bool:
+    """
+    轻量判断推单是否已履约完毕：优先读推单快照，避免重复回调重建整张大表。
+    返回 True 表示无需再跑扣次/标履约。
+    """
+    if not sf_push_create_succeeded(pus):
+        return True
+    if _sf_push_skip_auto_fulfillment_due_to_cancel(pus):
+        return True
+
+    kind = (getattr(pus, "push_kind", None) or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
+    oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
+    if kind == SF_PUSH_KIND_SINGLE_MEAL_RETAIL or oid_retail is not None:
+        oid = oid_retail
+        if oid is None:
+            return False
+        o = db.get(SingleMealOrder, oid)
+        return o is not None and str(getattr(o, "fulfillment_status", "") or "").strip().lower() == "delivered"
+
+    snap_mids, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+    if snap_mids or snap_oids:
+        for mid in snap_mids:
+            if not member_subscription_delivered_on_delivery_date(
+                db, member_id=int(mid), delivery_date=pus.delivery_date
+            ):
+                return False
+        for oid in snap_oids:
+            o = db.get(SingleMealOrder, oid)
+            if o is None or str(getattr(o, "fulfillment_status", "") or "").strip().lower() != "delivered":
+                return False
+        return True
+
+    return sf_same_city_push_fully_fulfilled(db, pus)
 
 
 def _retail_smo_order_id_from_stop(stop_id: str | None) -> int | None:
@@ -443,6 +519,101 @@ def member_subscription_delivered_on_delivery_date(
     return row is not None
 
 
+def _active_sf_push_base_filter(*, store_id: int, delivery_date: date):
+    from app.services.sf_same_city_service import _sf_push_row_cancelled_predicate
+
+    return and_(
+        SfSameCityPush.store_id == int(store_id),
+        SfSameCityPush.delivery_date == delivery_date,
+        SfSameCityPush.error_code == 0,
+        ~_sf_push_row_cancelled_predicate(),
+    )
+
+
+def store_has_active_sf_push_on_delivery_date(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+) -> bool:
+    """门店在指定业务日是否存在未取消的顺丰创单成功记录。"""
+    row = db.scalar(
+        select(SfSameCityPush.id)
+        .where(_active_sf_push_base_filter(store_id=int(store_id), delivery_date=delivery_date))
+        .limit(1)
+    )
+    return row is not None
+
+
+def sf_same_city_push_fully_fulfilled(db: Session, pus: SfSameCityPush) -> bool:
+    """单条顺丰推单是否已履约完毕（订阅送达 + 单次订单完成）。"""
+    if not sf_push_create_succeeded(pus):
+        return True
+    if _sf_push_skip_auto_fulfillment_due_to_cancel(pus):
+        return True
+
+    kind = (getattr(pus, "push_kind", None) or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
+    oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
+    if kind == SF_PUSH_KIND_SINGLE_MEAL_RETAIL or oid_retail is not None:
+        oid = oid_retail
+        if oid is None:
+            return False
+        o = db.get(SingleMealOrder, oid)
+        return o is not None and str(getattr(o, "fulfillment_status", "") or "").strip().lower() == "delivered"
+
+    sid = int(pus.store_id) if getattr(pus, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
+    snap_mids, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+    agg = None
+    if not snap_mids and not snap_oids:
+        agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
+
+    mids = _subscription_member_ids_for_push(db, pus, agg)
+    oids = _single_meal_order_ids_for_push(db, pus, agg)
+    if not mids and not oids:
+        return True
+
+    for mid in mids:
+        if not member_subscription_delivered_on_delivery_date(
+            db, member_id=int(mid), delivery_date=pus.delivery_date
+        ):
+            return False
+    for oid in oids:
+        o = db.get(SingleMealOrder, oid)
+        if o is None or str(getattr(o, "fulfillment_status", "") or "").strip().lower() != "delivered":
+            return False
+    return True
+
+
+def store_all_sf_pushes_fulfilled_on_delivery_date(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+) -> bool:
+    """门店当日全部有效顺丰推单均已标记送达/履约完成。"""
+    return not store_has_unfulfilled_sf_push_on_delivery_date(
+        db, store_id=int(store_id), delivery_date=delivery_date
+    )
+
+
+def store_has_unfulfilled_sf_push_on_delivery_date(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+) -> bool:
+    """是否存在未履约完毕的有效顺丰推单（单次查询，遇首条未履约即返回）。"""
+    rows = db.scalars(
+        select(SfSameCityPush).where(
+            _active_sf_push_base_filter(store_id=int(store_id), delivery_date=delivery_date)
+        )
+    ).all()
+    for pus in rows:
+        if not sf_same_city_push_fully_fulfilled(db, pus):
+            return True
+    return False
+
+
 def member_sf_self_service_locked_on_delivery_date(
     db: Session,
     *,
@@ -451,22 +622,15 @@ def member_sf_self_service_locked_on_delivery_date(
     delivery_date: date,
 ) -> bool:
     """
-    当日顺丰大表推单已创单且尚未标记送达：锁定小程序自助改地址/份数等。
+    当日门店已向顺丰推单且尚未全部标记送达：锁定小程序自助改地址/份数/请假等。
 
-    窗口为「推单成功 → 订阅日标记送达」；取消/撤单的推单不计入。
+    窗口为「门店推单成功 → 当日全部推单履约完成」；取消/撤单的推单不计入。
+    member_id 保留以兼容现有调用签名，锁定按门店+业务日判定。
     """
-    if not member_has_active_sf_push_on_delivery_date(
-        db,
-        member_id=int(member_id),
-        store_id=int(store_id),
-        delivery_date=delivery_date,
-    ):
-        return False
-    if member_subscription_delivered_on_delivery_date(
-        db, member_id=int(member_id), delivery_date=delivery_date
-    ):
-        return False
-    return True
+    _ = member_id
+    return store_has_unfulfilled_sf_push_on_delivery_date(
+        db, store_id=int(store_id), delivery_date=delivery_date
+    )
 
 
 def member_has_active_sf_push_on_delivery_date(
@@ -574,7 +738,12 @@ def _single_meal_order_ids_for_push(db: Session, pus: SfSameCityPush, agg: Any |
 
 
 def _apply_sf_same_city_stop_fulfillment(
-    db: Session, pus: SfSameCityPush, *, operator_tag: str
+    db: Session,
+    pus: SfSameCityPush,
+    *,
+    operator_tag: str,
+    ok_ids_home: set[int] | None = None,
+    renew_pending: list[tuple[Member, int]] | None = None,
 ) -> dict[str, Any]:
     """
     同一停靠点的订阅扣次 + 单点餐履约标记；已由各类顺丰回调按需调用。
@@ -615,10 +784,18 @@ def _apply_sf_same_city_stop_fulfillment(
 
     sid = int(pus.store_id) if getattr(pus, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
     snap_mids, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+    home_ok_ids = ok_ids_home
+    if home_ok_ids is None:
+        from app.services.admin_delivery_fulfillment_service import _eligible_ids_home
+
+        home_ok_ids = _eligible_ids_home(db, pus.delivery_date, store_id=sid)
+    if snap_mids:
+        home_ok_ids = set(home_ok_ids) | {int(x) for x in snap_mids}
+
     agg = None
-    if not snap_mids and not snap_oids:
+    if not snap_mids or not snap_oids:
         agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
-        if agg is None:
+        if agg is None and not snap_mids and not snap_oids:
             result["warnings"].append(
                 f"未解析到停靠点聚合 stop_id={pus.stop_id} date={pus.delivery_date}，将尝试快照/收件人回退"
             )
@@ -630,17 +807,19 @@ def _apply_sf_same_city_stop_fulfillment(
             )
 
     for mid in _subscription_member_ids_for_push(db, pus, agg):
-        snap_mids, _snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
         sf_trusted_mids = {int(x) for x in snap_mids} | {int(mid)}
+        member_ok_ids = set(home_ok_ids) | sf_trusted_mids
         try:
-            subscription_fulfilled_try_sf_home_no_commit(
+            renew = subscription_fulfilled_try_sf_home_no_commit(
                 db,
                 member_id=mid,
                 delivery_date=pus.delivery_date,
                 operator_tag=operator_tag,
                 store_id=sid,
-                extra_ok_member_ids=sf_trusted_mids,
+                ok_ids=member_ok_ids,
             )
+            if renew is not None and renew_pending is not None:
+                renew_pending.append(renew)
             result["subscription_applied"] += 1
         except HTTPException as e:
             result["subscription_skipped"] += 1
@@ -721,6 +900,7 @@ def apply_sf_auto_fulfillment_for_push(
     *,
     operator_tag: str,
     route_kind: str = "",
+    renew_pending: list[tuple[Member, int]] | None = None,
 ) -> dict[str, Any]:
     """回调 / 管理端补跑统一入口：按 operator_tag 执行幂等履约。"""
     if not should_run_sf_auto_fulfillment(route_kind=route_kind, pus=pus):
@@ -731,8 +911,72 @@ def apply_sf_auto_fulfillment_for_push(
                 f"route_kind={route_kind!r} sf_callback_order_status={st!r}"
             ]
         }
+    if sf_push_fulfilled_quick_check(db, pus):
+        return {"skipped": "already_fulfilled", "warnings": []}
     tag = (operator_tag or "sf:manual_retry").strip()[:50] or "sf:manual_retry"
-    return _apply_sf_same_city_stop_fulfillment(db, pus, operator_tag=tag)
+    return _apply_sf_same_city_stop_fulfillment(
+        db, pus, operator_tag=tag, renew_pending=renew_pending
+    )
+
+
+def run_sf_push_side_effect_for_callback(db: Session, job: SfCallbackSideEffectJob) -> dict[str, Any]:
+    """
+    顺丰回调异步任务：扣次/取消同步 + commit；续费提醒在 commit 后发送。
+    同一 push_id 使用 MySQL advisory lock，避免 order_complete 与 status=17 并发双扣。
+    """
+    pus = db.get(SfSameCityPush, int(job.push_id))
+    if pus is None:
+        return {"warnings": ["推单记录不存在"]}
+
+    locked = _sf_fulfillment_try_lock(db, int(job.push_id))
+    if not locked:
+        logger.info("顺丰异步履约跳过（同 push 正在处理） push_id=%s", job.push_id)
+        return {"skipped": "lock_busy"}
+
+    renew_pending: list[tuple[Member, int]] = []
+    try:
+        if job.action == "cancel_sync":
+            out = _apply_sf_cancel_to_single_meal_orders_for_push(db, pus)
+            db.commit()
+            logger.info(
+                "顺丰异步取消同步 push_id=%s applied=%s skipped=%s",
+                job.push_id,
+                out.get("single_meal_applied"),
+                out.get("single_meal_skipped"),
+            )
+            return out
+
+        if job.action != "fulfillment":
+            return {"warnings": [f"未知 action={job.action!r}"]}
+
+        if sf_push_fulfilled_quick_check(db, pus):
+            logger.info("顺丰异步履约跳过（已履约） push_id=%s route_kind=%s", job.push_id, job.route_kind)
+            return {"skipped": "already_fulfilled"}
+
+        out = apply_sf_auto_fulfillment_for_push(
+            db,
+            pus,
+            operator_tag=job.operator_tag,
+            route_kind=job.route_kind,
+            renew_pending=renew_pending,
+        )
+        db.commit()
+        _flush_renew_reminds(db, renew_pending)
+        logger.info(
+            "顺丰异步履约完成 push_id=%s route_kind=%s subs=%s singles=%s warnings=%s",
+            job.push_id,
+            job.route_kind,
+            out.get("subscription_applied"),
+            out.get("single_meal_applied"),
+            out.get("warnings"),
+        )
+        return out
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if locked:
+            _sf_fulfillment_release_lock(db, int(job.push_id))
 
 
 def admin_apply_sf_fulfillment_for_push_id(db: Session, *, push_id: int) -> dict[str, Any]:
@@ -750,10 +994,16 @@ def admin_apply_sf_fulfillment_for_push_id(db: Session, *, push_id: int) -> dict
             f"顺丰回调状态须为妥投完单(17)，当前为 {st!r}。"
             "若监控已显示妥投但此处报错，请确认回调验签通过且状态已落库。"
         )
+    renew_pending: list[tuple[Member, int]] = []
     out = apply_sf_auto_fulfillment_for_push(
-        db, pus, operator_tag="admin:sf_fulfillment_retry", route_kind="order_complete"
+        db,
+        pus,
+        operator_tag="admin:sf_fulfillment_retry",
+        route_kind="order_complete",
+        renew_pending=renew_pending,
     )
     db.commit()
+    _flush_renew_reminds(db, renew_pending)
     parts = [
         f"订阅扣次 {out.get('subscription_applied', 0)} 人",
         f"跳过 {out.get('subscription_skipped', 0)} 人",
@@ -803,8 +1053,13 @@ def bulk_admin_resync_subscription_fulfilled_from_sf_monitor_for_delivery_day(
     warnings: list[str] = []
 
     for pus in rows:
+        renew_pending: list[tuple[Member, int]] = []
         out = apply_sf_auto_fulfillment_for_push(
-            db, pus, operator_tag="admin:sf_bulk_resync", route_kind="order_complete"
+            db,
+            pus,
+            operator_tag="admin:sf_bulk_resync",
+            route_kind="order_complete",
+            renew_pending=renew_pending,
         )
         subs_applied += int(out.get("subscription_applied") or 0)
         subs_skipped += int(out.get("subscription_skipped") or 0)
@@ -814,6 +1069,7 @@ def bulk_admin_resync_subscription_fulfilled_from_sf_monitor_for_delivery_day(
             if ws and ws not in warnings:
                 warnings.append(ws)
         db.commit()
+        _flush_renew_reminds(db, renew_pending)
 
     summary = (
         f"扫描 {scanned} 条大表推单；订阅扣次 {subs_applied} 人次；"

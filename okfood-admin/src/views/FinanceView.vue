@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'FinanceView' })
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Calendar, CalendarDays, CreditCard, DollarSign } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
@@ -63,23 +64,32 @@ function buildKpi(w) {
   if (!w) {
     return {
       totalText: '—',
+      grossText: '—',
+      netText: '—',
       count: 0,
       cardCount: 0,
       cardAmt: '—',
       smCount: 0,
       smAmt: '—',
+      refundCount: 0,
+      refundAmt: '—',
       cardPct: 100,
       mealPct: 0,
     }
   }
   const { cardPct, mealPct } = ratioPct(w)
+  const netRaw = w.net_total_amount_yuan ?? w.total_amount_yuan
   return {
-    totalText: fmtYuan(w.total_amount_yuan),
+    totalText: fmtYuan(netRaw),
+    grossText: fmtYuan(w.total_amount_yuan),
+    netText: fmtYuan(netRaw),
     count: w.total_count ?? 0,
     cardCount: w.card_orders?.count ?? 0,
     cardAmt: fmtYuan(w.card_orders?.amount_yuan),
     smCount: w.single_meal_orders?.count ?? 0,
     smAmt: fmtYuan(w.single_meal_orders?.amount_yuan),
+    refundCount: w.membership_refunds?.count ?? 0,
+    refundAmt: fmtYuan(w.membership_refunds?.amount_yuan),
     cardPct,
     mealPct,
   }
@@ -150,14 +160,17 @@ onUnmounted(() => {
     <section class="finance-stats-grid" aria-label="收入概览">
       <article class="finance-stat-card finance-stat-card--primary">
         <div class="finance-stat-header">
-          <span class="finance-stat-title">今日收入 / TODAY</span>
+          <span class="finance-stat-title">今日净收入 / TODAY</span>
           <span class="finance-interval-badge finance-interval-badge--light">
-            {{ loading ? '…' : `${todayKpi.count} 笔已确定` }}
+            {{ loading ? '…' : `${todayKpi.count} 笔已收` }}
           </span>
         </div>
         <div class="finance-stat-body">
           <p class="finance-stat-value finance-stat-value--light">
             ¥ {{ loading ? '…' : todayKpi.totalText }}
+          </p>
+          <p v-if="!loading && todayKpi.refundCount > 0" class="finance-stat-sub finance-stat-sub--on-primary">
+            已收 ¥ {{ todayKpi.grossText }} · 退卡 −¥ {{ todayKpi.refundAmt }}
           </p>
           <div class="finance-ratio-wrap">
             <div class="finance-ratio-bar finance-ratio-bar--on-primary">
@@ -183,19 +196,30 @@ onUnmounted(() => {
               {{ todayKpi.smCount }} 笔 · ¥ {{ todayKpi.smAmt }}
             </span>
           </div>
+          <div v-if="todayKpi.refundCount > 0" class="finance-breakdown-row">
+            <span class="finance-breakdown-label">
+              <i class="finance-breakdown-dot finance-breakdown-dot--refund" />会员退卡
+            </span>
+            <span class="finance-breakdown-value finance-breakdown-value--light">
+              {{ todayKpi.refundCount }} 笔 · −¥ {{ todayKpi.refundAmt }}
+            </span>
+          </div>
         </div>
         <Calendar class="finance-stat-watermark finance-stat-watermark--light" :size="48" aria-hidden="true" />
       </article>
 
       <article class="finance-stat-card">
         <div class="finance-stat-header">
-          <span class="finance-stat-title finance-stat-title--muted">本月收入 / MONTH </span>
+          <span class="finance-stat-title finance-stat-title--muted">本月净收入 / MONTH </span>
           <span class="finance-interval-badge">
-            {{ loading ? '…' : `${monthKpi.count} 笔已确定` }}
+            {{ loading ? '…' : `${monthKpi.count} 笔已收` }}
           </span>
         </div>
         <div class="finance-stat-body">
           <p class="finance-stat-value">¥ {{ loading ? '…' : monthKpi.totalText }}</p>
+          <p v-if="!loading && monthKpi.refundCount > 0" class="finance-stat-sub">
+            已收 ¥ {{ monthKpi.grossText }} · 退卡 −¥ {{ monthKpi.refundAmt }}
+          </p>
           <div class="finance-ratio-wrap">
             <div class="finance-ratio-bar">
               <div class="finance-ratio-seg finance-ratio-seg--card-green" :style="{ width: monthKpi.cardPct + '%' }" />
@@ -220,19 +244,30 @@ onUnmounted(() => {
               {{ monthKpi.smCount }} 笔 · ¥ {{ monthKpi.smAmt }}
             </span>
           </div>
+          <div v-if="monthKpi.refundCount > 0" class="finance-breakdown-row">
+            <span class="finance-breakdown-label finance-breakdown-label--muted">
+              <i class="finance-breakdown-dot finance-breakdown-dot--refund" />会员退卡
+            </span>
+            <span class="finance-breakdown-value">
+              {{ monthKpi.refundCount }} 笔 · −¥ {{ monthKpi.refundAmt }}
+            </span>
+          </div>
         </div>
         <CalendarDays class="finance-stat-watermark" :size="48" aria-hidden="true" />
       </article>
 
       <article class="finance-stat-card">
         <div class="finance-stat-header">
-          <span class="finance-stat-title finance-stat-title--muted">累计已收 / ALL TIME</span>
+          <span class="finance-stat-title finance-stat-title--muted">累计净收 / ALL TIME</span>
           <span class="finance-interval-badge">
-            {{ loading ? '…' : `${cumulativeKpi.count} 笔已确定` }}
+            {{ loading ? '…' : `${cumulativeKpi.count} 笔已收` }}
           </span>
         </div>
         <div class="finance-stat-body">
           <p class="finance-stat-value">¥ {{ loading ? '…' : cumulativeKpi.totalText }}</p>
+          <p v-if="!loading && cumulativeKpi.refundCount > 0" class="finance-stat-sub">
+            已收 ¥ {{ cumulativeKpi.grossText }} · 退卡 −¥ {{ cumulativeKpi.refundAmt }}
+          </p>
           <div class="finance-ratio-wrap">
             <div class="finance-ratio-bar">
               <div
@@ -258,6 +293,14 @@ onUnmounted(() => {
             </span>
             <span class="finance-breakdown-value">
               {{ cumulativeKpi.smCount }} 笔 · ¥ {{ cumulativeKpi.smAmt }}
+            </span>
+          </div>
+          <div v-if="cumulativeKpi.refundCount > 0" class="finance-breakdown-row">
+            <span class="finance-breakdown-label finance-breakdown-label--muted">
+              <i class="finance-breakdown-dot finance-breakdown-dot--refund" />会员退卡
+            </span>
+            <span class="finance-breakdown-value">
+              {{ cumulativeKpi.refundCount }} 笔 · −¥ {{ cumulativeKpi.refundAmt }}
             </span>
           </div>
         </div>
@@ -521,6 +564,21 @@ onUnmounted(() => {
 
 .finance-breakdown-dot--meal {
   background-color: var(--finance-meal);
+}
+
+.finance-breakdown-dot--refund {
+  background-color: #f97316;
+}
+
+.finance-stat-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.finance-stat-sub--on-primary {
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .finance-breakdown-value {

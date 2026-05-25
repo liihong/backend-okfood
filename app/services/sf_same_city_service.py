@@ -39,7 +39,7 @@ from app.services.delivery_sheet_service import (
     _filter_members_by_phone_hint,
     _member_line_remarks,
     _resolve_delivery_line,
-    build_delivery_sheet,
+    home_delivery_stops_for_aggs,
 )
 from app.services.member_address_service import delivery_region_name_map, full_address_line, routing_area_label
 from app.services.member_service import effective_daily_meal_units
@@ -217,38 +217,40 @@ def _build_aggs(
     store_id: int,
 ) -> dict[str, _Agg]:
     """大表所有到家停靠点 + 单次餐合并。"""
-    sheet = build_delivery_sheet(
-        db, delivery_date=d, area=area_key, phone=phone_key, store_id=int(store_id)
-    )
     aggs: dict[str, _Agg] = {}
     m_by_id = {int(m.id): m for m in members}
 
-    for g in sheet.groups:
-        if g.area == "门店自提":
+    for st in home_delivery_stops_for_aggs(
+        db,
+        delivery_date=d,
+        store_id=int(store_id),
+        members=members,
+        default_by_id=default_by_id,
+        area=area_key,
+        phone=phone_key,
+    ):
+        line_full = (st.address_line or "").strip()
+        if not line_full:
             continue
-        for st in g.stops:
-            line_full = (st.address_line or "").strip()
-            if not line_full:
-                continue
-            line = _address_line_without_sheet_area(st.area, line_full)
-            sk = _stop_key(d, g.area, line_full)
-            a = _Agg(stop_id=sk, group_area=g.area, address_line=line, sub_lines=[])
-            for m in st.members:
-                u = 0
-                is_del = bool(m.is_delivered)
-                if not is_del and m.member_id in m_by_id:
-                    u = int(effective_daily_meal_units(m_by_id[m.member_id]))
-                a.sub_lines.append(
-                    {
-                        "member_id": m.member_id,
-                        "name": m.name,
-                        "phone": m.phone,
-                        "units": u,
-                        "is_delivered": is_del,
-                        "remarks": m.remarks,
-                    }
-                )
-            aggs[sk] = a
+        line = _address_line_without_sheet_area(st.area, line_full)
+        sk = _stop_key(d, st.area, line_full)
+        a = _Agg(stop_id=sk, group_area=st.area, address_line=line, sub_lines=[])
+        for mem, is_del in st.members:
+            u = 0
+            if not is_del and mem.id in m_by_id:
+                u = int(effective_daily_meal_units(m_by_id[mem.id]))
+            addr = default_by_id.get(mem.id)
+            a.sub_lines.append(
+                {
+                    "member_id": int(mem.id),
+                    "name": mem.name,
+                    "phone": mem.phone,
+                    "units": u,
+                    "is_delivered": is_del,
+                    "remarks": _member_line_remarks(mem, addr),
+                }
+            )
+        aggs[sk] = a
 
     for o, mem, aaddr, dsh in _single_order_rows(db, d):
         nm = delivery_region_name_map(
@@ -1232,33 +1234,55 @@ def cancel_sf_same_city_push(
     return {"message": "顺丰已受理取消", "sf_response": None}
 
 
-def auto_push_sf_today_business_day_for_store(db: Session, *, store_id: int) -> SfSameCityPushOut | None:
+@dataclass
+class SfNightlyAutoPushStoreResult:
+    """早间自动推单单店结果，供系统消息摘要。"""
+
+    total: int = 0
+    success: int = 0
+    failed: int = 0
+    skip_reason: str | None = None
+    push_out: SfSameCityPushOut | None = None
+
+
+def auto_push_sf_today_business_day_for_store(
+    db: Session, *, store_id: int
+) -> SfNightlyAutoPushStoreResult:
     """
     早间定时任务：向顺丰推送「当日」上海业务日、当前仍待推的停靠点（与手动推单同一套预览/合并逻辑）。
     门店须启用 ``sf_nightly_auto_push_enabled`` 且处于营业状态。
     """
     st = db.get(Store, int(store_id))
     if st is None or not st.is_active:
-        return None
+        return SfNightlyAutoPushStoreResult(skip_reason="门店未营业")
     if not bool(getattr(st, "sf_nightly_auto_push_enabled", False)):
-        return None
+        return SfNightlyAutoPushStoreResult(skip_reason="未启用自动推单")
     d = today_shanghai()
     rows, ags, sf_configured = _build_sf_same_city_preview_bundle(
         db, delivery_date=d, store_id=int(store_id)
     )
     if not sf_configured:
         logger.info("顺丰自动推单跳过（未配置顺丰） store_id=%s", store_id)
-        return None
+        return SfNightlyAutoPushStoreResult(skip_reason="未配置顺丰")
     pending = [r for r in rows if r.selected and not r.already_pushed]
     if not pending:
         logger.info("顺丰自动推单跳过（无待推停靠点） store_id=%s date=%s", store_id, d)
-        return None
+        return SfNightlyAutoPushStoreResult(skip_reason="无待推停靠点")
     body = SfSameCityPushIn(delivery_date=d, rows=pending)
-    return push_sf_same_city(db, body, store_id=int(store_id), ags_hint=ags)
+    out = push_sf_same_city(db, body, store_id=int(store_id), ags_hint=ags)
+    total = len(out.results)
+    success = sum(1 for r in out.results if r.ok)
+    failed = total - success
+    return SfNightlyAutoPushStoreResult(
+        total=total, success=success, failed=failed, push_out=out
+    )
 
 
 def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
-    """启用自动推单的全部门店依次执行 ``auto_push_sf_today_business_day_for_store``。"""
+    """启用自动推单的全部门店依次执行 ``auto_push_sf_today_business_day_for_store`` 并写入系统消息。"""
+    from app.services.admin_system_notification_service import upsert_sf_nightly_push_notification
+
+    business_date = today_shanghai()
     with _sf_nightly_auto_push_global_lock(db) as acquired:
         if not acquired:
             logger.warning("顺丰自动推单跳过：另一实例正在执行")
@@ -1273,18 +1297,44 @@ def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
         )
         for sid in ids:
             sid_int = int(sid)
+            total = success = failed = 0
+            skip_reason: str | None = None
             try:
-                auto_push_sf_today_business_day_for_store(db, store_id=sid_int)
+                result = auto_push_sf_today_business_day_for_store(db, store_id=sid_int)
+                total = result.total
+                success = result.success
+                failed = result.failed
+                skip_reason = result.skip_reason
             except HTTPException as e:
+                skip_reason = str(e.detail)
                 logger.warning(
                     "顺丰自动推单跳过 store_id=%s detail=%s",
                     sid_int,
                     e.detail,
                 )
             except ValueError as e:
+                skip_reason = str(e)
                 logger.warning("顺丰自动推单跳过 store_id=%s err=%s", sid_int, e)
             except Exception:
+                skip_reason = "推单过程异常"
                 logger.exception("顺丰自动推单失败 store_id=%s", sid_int)
+            try:
+                upsert_sf_nightly_push_notification(
+                    db,
+                    store_id=sid_int,
+                    business_date=business_date,
+                    total=total,
+                    success=success,
+                    failed=failed,
+                    skip_reason=skip_reason,
+                )
+            except Exception:
+                logger.exception("写入顺丰自动推单系统消息失败 store_id=%s", sid_int)
+        try:
+            db.commit()
+        except Exception:
+            logger.exception("顺丰自动推单任务提交失败")
+            db.rollback()
 
 
 def retry_sf_same_city_push_by_id(db: Session, *, push_id: int) -> SfSameCityPushItemResult:

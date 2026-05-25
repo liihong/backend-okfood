@@ -1,4 +1,5 @@
 <script setup>
+defineOptions({ name: 'StoreConfigView' })
 import { ref, onMounted, computed } from 'vue'
 import { Store } from 'lucide-vue-next'
 import {

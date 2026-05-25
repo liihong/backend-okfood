@@ -8,7 +8,7 @@ from app.db.base import Base
 
 
 class MemberOperationLog(Base):
-    """会员自助操作审计日志：暂停/恢复配送、修改配送份数、修改配送地址等。"""
+    """会员操作审计日志：小程序自助与后台档案修改（暂停/恢复配送、修改份数、地址、请假等）。"""
 
     __tablename__ = "member_operation_logs"
 
