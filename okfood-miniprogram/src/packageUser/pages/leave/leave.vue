@@ -79,6 +79,8 @@
           <text class="range-pick-bar__btn range-pick-bar__btn--ok" @click="confirmRangeDatePick">确定</text>
         </view>
         <picker-view
+          v-if="rangePickReady"
+          :key="rangePickSession"
           class="range-pick-view"
           :value="pvValue"
           indicator-style="height: 72rpx"
@@ -100,11 +102,12 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { request, clearMemberSession, isUserMeNotFoundError } from '@/utils/api.js'
+import { ymdTodayShanghai, addDaysIso } from '@/utils/memberDeliveryDate.js'
 
 const isTomorrowLeave = ref(false)
 const rangeStart = ref('')
@@ -143,46 +146,17 @@ const yearOpts = ref([])
 const monthOpts = ref([])
 const dayOpts = ref([])
 const pvValue = ref([0, 0, 0])
-
-function shanghaiTodayYmd() {
-  try {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Shanghai',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(new Date())
-    const y = parts.find((p) => p.type === 'year')?.value
-    const m = parts.find((p) => p.type === 'month')?.value
-    const d = parts.find((p) => p.type === 'day')?.value
-    if (y && m && d) return `${y}-${m}-${d}`
-  } catch {
-    /* ignore */
-  }
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-}
+/** 安卓 picker-view 须等列数据就绪后再挂载，否则 column 高度为 0 */
+const rangePickReady = ref(false)
+const rangePickSession = ref(0)
 
 function shanghaiTomorrowYmd() {
-  return addDaysYmdShanghai(shanghaiTodayYmd(), 1)
+  return addDaysIso(ymdTodayShanghai(), 1)
 }
 
-/** 在「上海日」上增减天数，返回 en-CA yyyy-mm-dd */
-function addDaysYmdShanghai(ymd, deltaDays) {
-  if (!ymd) return ''
-  const t = new Date(`${ymd}T12:00:00+08:00`)
-  const t2 = new Date(t.getTime() + deltaDays * 24 * 60 * 60 * 1000)
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(t2)
-  const y = parts.find((p) => p.type === 'year')?.value
-  const m = parts.find((p) => p.type === 'month')?.value
-  const d = parts.find((p) => p.type === 'day')?.value
-  if (y && m && d) return `${y}-${m}-${d}`
-  return ymd
+function isValidYmd(ymd) {
+  const { y, m, d } = ymdParts(ymd)
+  return y >= 2000 && m >= 1 && m <= 12 && d >= 1 && d <= 31
 }
 
 function ymdParts(ymd) {
@@ -250,20 +224,38 @@ function applyPickerState(lo, hi, ymdIn) {
 
 function openRangeDatePick(kind) {
   const loGlobal = rangePickerMinYmd.value
-  const hiGlobal = addDaysYmdShanghai(loGlobal, RANGE_PICK_DAYS_MAX)
+  const hiGlobal = addDaysIso(loGlobal, RANGE_PICK_DAYS_MAX)
   const lo = kind === 'end' ? rangeEndPickerMinYmd.value : loGlobal
   const hi = hiGlobal
+  if (!isValidYmd(lo) || !isValidYmd(hi) || lo > hi) {
+    uni.showToast({ title: '日期加载失败，请重试', icon: 'none' })
+    return
+  }
   rangePickLo.value = lo
   rangePickHi.value = hi
-  rangePickKind.value = kind
   const raw = kind === 'start' ? rangeStart.value : rangeEnd.value
   const cur = raw && raw >= lo && raw <= hi ? raw : lo
   applyPickerState(lo, hi, cur)
+  if (!yearOpts.value.length || !monthOpts.value.length || !dayOpts.value.length) {
+    uni.showToast({ title: '日期加载失败，请重试', icon: 'none' })
+    return
+  }
+  rangePickReady.value = false
   rangePickKind.value = kind
+  rangePickSession.value += 1
+  nextTick(() => {
+    if (rangePickKind.value !== kind) return
+    rangePickReady.value = true
+    nextTick(() => {
+      if (rangePickKind.value !== kind) return
+      applyPickerState(lo, hi, cur)
+    })
+  })
 }
 
 function closeRangeDatePick() {
   rangePickKind.value = null
+  rangePickReady.value = false
 }
 
 function onRangePickerViewChange(e) {
@@ -819,6 +811,7 @@ async function submitRange() {
 }
 
 .range-pick-cell {
+  height: 72rpx;
   line-height: 72rpx;
   text-align: center;
   font-size: 32rpx;

@@ -52,10 +52,8 @@ const isDeliveryOnly = computed(() => adminKind.value === 'delivery')
 const isSupportOnly = computed(() => adminKind.value === 'support')
 const isSystemOnly = computed(() => adminKind.value === 'system')
 
-/** 店主/配送账号展示系统消息铃铛 */
-const showSystemNotifications = computed(
-  () => !isSystemOnly.value && !isSupportOnly.value,
-)
+/** 店主、配送、客服账号展示系统消息铃铛（平台管理员除外） */
+const showSystemNotifications = computed(() => !isSystemOnly.value)
 
 const notificationBadgeText = computed(() => {
   const n = Number(unacknowledgedCount.value) || 0
