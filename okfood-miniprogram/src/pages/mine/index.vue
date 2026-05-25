@@ -173,7 +173,7 @@
           </view>
         </template>
 
-      <text class="page-version">版本 2.0.0 · 火源文化技术支持</text>
+      <text class="page-version">版本 2.1.0 · 火源文化技术支持</text>
       </view>
     </scroll-view>
 

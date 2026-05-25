@@ -1,9 +1,11 @@
 <script>
 import { ensureMemberPhoneFromStoredToken } from '@/utils/wxMemberLogin.js'
+import { enforceWxMiniUpdate } from '@/utils/wxMiniUpdate.js'
 import { reLaunchIfCourierModePreferred } from '@/utils/api.js'
 
 export default {
   onLaunch: function () {
+    enforceWxMiniUpdate()
     void ensureMemberPhoneFromStoredToken()
     reLaunchIfCourierModePreferred()
     console.log('App Launch')
