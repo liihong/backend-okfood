@@ -48,7 +48,7 @@ def guard_member_self_service_during_sf_fulfillment(
     delivery_date: date | None = None,
 ) -> None:
     """
-    顺丰推单后、当日门店尚未全部标记送达：禁止小程序自助改地址/份数等。
+    当前会员当日命中顺丰推单且其配送尚未完成：禁止小程序自助改地址/份数等。
     管理端调用须自行跳过（勿传入本 guard）。
     """
     from app.core.timeutil import today_shanghai
@@ -65,7 +65,7 @@ def guard_member_self_service_during_sf_fulfillment(
 
 
 def guard_member_self_leave_during_sf_fulfillment(db: Session, member: Member) -> None:
-    """顺丰推单后、当日门店尚未全部标记送达：禁止小程序自助请假相关操作。"""
+    """当前会员当日顺丰推单配送未完成：禁止小程序自助请假相关操作。"""
     try:
         guard_member_self_service_during_sf_fulfillment(db, member)
     except HTTPException:

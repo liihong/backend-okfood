@@ -62,12 +62,22 @@
                 <text class="hero-stat-label">累计就餐/次</text>
               </view>
             </view>
-            <text
-              class="hero-nick"
-              :class="{ 'hero-nick--action': needsMemberSetupPage }"
+            <view
+              class="hero-nick-wrap"
+              :class="{ 'hero-nick-wrap--action': needsMemberSetupPage }"
+              @tap.stop="onNickWrapTap"
             >
-              {{ needsMemberSetupPage ? setupRowTitle : displayNick }}
-            </text>
+              <text
+                class="hero-nick"
+                :class="{
+                  'hero-nick--action': needsMemberSetupPage,
+                  'hero-nick--editable': !needsMemberSetupPage,
+                }"
+              >
+                {{ needsMemberSetupPage ? setupRowTitle : displayNick }}
+              </text>
+              <text v-if="!needsMemberSetupPage" class="hero-nick-edit">✎</text>
+            </view>
             <view class="hero-phone-row" @tap.stop>
               <text class="hero-phone">{{ maskedPhone }}</text>
               <view class="hero-gear" @tap.stop="goMemberSetup">
@@ -166,11 +176,35 @@
       <text class="page-version">版本 2.0.0 · 火源文化技术支持</text>
       </view>
     </scroll-view>
+
+    <!-- 微信昵称编辑弹层 -->
+    <view v-if="showNickEditor" class="nick-mask" @tap="closeNickEditor">
+      <view class="nick-sheet" @tap.stop>
+        <text class="nick-sheet-title">设置昵称</text>
+        <text class="nick-sheet-hint">点击输入框，键盘可一键填入微信昵称</text>
+        <input
+          class="nick-sheet-input"
+          type="nickname"
+          :value="wxNickDraft"
+          :focus="nickInputFocus"
+          placeholder="请输入或选用微信昵称"
+          placeholder-class="nick-sheet-ph"
+          maxlength="32"
+          confirm-type="done"
+          @input="onNickInput"
+          @confirm="confirmNickEdit"
+        />
+        <view class="nick-sheet-actions">
+          <button class="nick-sheet-btn nick-sheet-btn--ghost" @tap="closeNickEditor">取消</button>
+          <button class="nick-sheet-btn nick-sheet-btn--primary" @tap="confirmNickEdit">保存</button>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import MinePlanStatusCard from '@/components/MinePlanStatusCard/MinePlanStatusCard.vue'
 import {
@@ -188,7 +222,6 @@ import {
   shouldOpenMemberSetup,
   shouldPromptMemberCardPay,
   isDeliveryPausedWithBalance,
-  isPlaceholderWxProfile,
   MEMBER_STUB_NAME,
   WX_DEFAULT_NICK,
 } from '@/utils/memberProfile.js'
@@ -224,6 +257,8 @@ const memberPhone = ref('')
 const wxProfile = ref(null)
 /** 昵称输入（type=nickname 可走微信键盘同步） */
 const wxNickDraft = ref('')
+const showNickEditor = ref(false)
+const nickInputFocus = ref(false)
 const serverBalance = ref(0)
 /** 与 GET /api/user/me.meal_quota_total 一致，用于估算累计已消耗订餐次数 */
 const mealQuotaTotal = ref(0)
@@ -565,20 +600,59 @@ function onNickInput(e) {
   wxNickDraft.value = e.detail?.value ?? ''
 }
 
-function onNicknameBlurConfirm() {
+function closeNickEditor() {
+  showNickEditor.value = false
+  nickInputFocus.value = false
+}
+
+function onNickWrapTap() {
+  if (needsMemberSetupPage.value) {
+    goMemberSetup()
+    return
+  }
+  openNickEditor()
+}
+
+function openNickEditor() {
+  if (!isLoggedIn.value) return
+  syncNickDraftFromProfile()
+  const draft = String(wxNickDraft.value || '').trim()
+  const phoneLike = /^\d{7,}$/.test(draft)
+  if (!draft || draft === WX_DEFAULT_NICK || draft === MEMBER_STUB_NAME || phoneLike) {
+    wxNickDraft.value = ''
+  }
+  showNickEditor.value = true
+  nickInputFocus.value = false
+  nextTick(() => {
+    nickInputFocus.value = true
+  })
+}
+
+async function confirmNickEdit() {
   const nick = String(wxNickDraft.value || '').trim()
-  if (!nick || nick === WX_DEFAULT_NICK) return
+  if (!nick || nick === WX_DEFAULT_NICK) {
+    uni.showToast({ title: '请填写或选用微信昵称', icon: 'none' })
+    return
+  }
   const prev = wxProfile.value || { nickName: '', avatarUrl: '' }
   const p = { ...prev, nickName: nick }
   wxProfile.value = p
   persistWxProfile(p)
   const syncPayload = { wechat_name: nick }
   if (p.avatarUrl?.trim()) syncPayload.avatar_url = p.avatarUrl.trim()
-  void pushWechatProfileToServer(syncPayload)
-  if (!p.avatarUrl?.trim()) {
-    uni.showToast({ title: '请点头像选择照片', icon: 'none' })
-  } else if (!isPlaceholderWxProfile(p)) {
-    uni.showToast({ title: '已保存', icon: 'success' })
+  closeNickEditor()
+  try {
+    await pushWechatProfileToServer(syncPayload, { showErrorToast: true })
+    if (memberProfileRaw.value && typeof memberProfileRaw.value === 'object') {
+      memberProfileRaw.value = { ...memberProfileRaw.value, wechat_name: nick }
+    }
+    if (!p.avatarUrl?.trim()) {
+      uni.showToast({ title: '昵称已更新，可点头像上传照片', icon: 'none', duration: 2400 })
+    } else {
+      uni.showToast({ title: '昵称已更新', icon: 'success' })
+    }
+  } catch {
+    /* pushWechatProfileToServer 已 toast */
   }
 }
 
@@ -1206,17 +1280,131 @@ function onPauseDeliveryTap() {
   color: #fff;
 }
 
+.hero-nick-wrap {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  margin-bottom: 12rpx;
+  padding: 4rpx 12rpx;
+}
+
+.hero-nick-wrap--action {
+  opacity: 0.98;
+}
+
 .hero-nick {
   display: block;
   text-align: center;
   font-size: 40rpx;
   font-weight: 950;
   color: #0f172a;
-  margin-bottom: 12rpx;
+}
+
+.hero-nick--editable {
+  color: #0f172a;
 }
 
 .hero-nick--action {
   color: $ok-forest-green;
+}
+
+.hero-nick-edit {
+  font-size: 26rpx;
+  color: $ok-slate-400;
+  line-height: 1;
+}
+
+.nick-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48rpx;
+  box-sizing: border-box;
+}
+
+.nick-sheet {
+  width: 100%;
+  max-width: 620rpx;
+  background: #fff;
+  border-radius: 28rpx;
+  padding: 40rpx 36rpx 32rpx;
+  box-shadow: 0 24rpx 64rpx rgba(15, 23, 42, 0.18);
+}
+
+.nick-sheet-title {
+  display: block;
+  text-align: center;
+  font-size: 34rpx;
+  font-weight: 900;
+  color: #0f172a;
+  margin-bottom: 12rpx;
+}
+
+.nick-sheet-hint {
+  display: block;
+  text-align: center;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: $ok-slate-500;
+  margin-bottom: 28rpx;
+  line-height: 1.45;
+}
+
+.nick-sheet-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 88rpx;
+  padding: 0 28rpx;
+  border-radius: 20rpx;
+  background: $ok-slate-50;
+  border: 2rpx solid $ok-slate-100;
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 32rpx;
+}
+
+.nick-sheet-ph {
+  color: $ok-slate-400;
+  font-weight: 600;
+}
+
+.nick-sheet-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 20rpx;
+}
+
+.nick-sheet-btn {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  height: 84rpx;
+  line-height: 84rpx;
+  border-radius: 999rpx;
+  font-size: 30rpx;
+  font-weight: 800;
+  border: none;
+}
+
+.nick-sheet-btn::after {
+  border: none;
+}
+
+.nick-sheet-btn--ghost {
+  background: $ok-slate-100;
+  color: $ok-slate-600;
+}
+
+.nick-sheet-btn--primary {
+  background: $ok-forest-green;
+  color: #fff;
 }
 
 .hero-phone-row {

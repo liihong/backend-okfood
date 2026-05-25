@@ -77,7 +77,12 @@ def _sf_fulfillment_release_lock(db: Session, push_id: int) -> None:
     db.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": key})
 
 
-def sf_push_fulfilled_quick_check(db: Session, pus: SfSameCityPush) -> bool:
+def sf_push_fulfilled_quick_check(
+    db: Session,
+    pus: SfSameCityPush,
+    *,
+    ags_hint: dict | None = None,
+) -> bool:
     """
     轻量判断推单是否已履约完毕：优先读推单快照，避免重复回调重建整张大表。
     返回 True 表示无需再跑扣次/标履约。
@@ -109,7 +114,7 @@ def sf_push_fulfilled_quick_check(db: Session, pus: SfSameCityPush) -> bool:
                 return False
         return True
 
-    return sf_same_city_push_fully_fulfilled(db, pus)
+    return sf_same_city_push_fully_fulfilled(db, pus, ags_hint=ags_hint)
 
 
 def _retail_smo_order_id_from_stop(stop_id: str | None) -> int | None:
@@ -545,7 +550,12 @@ def store_has_active_sf_push_on_delivery_date(
     return row is not None
 
 
-def sf_same_city_push_fully_fulfilled(db: Session, pus: SfSameCityPush) -> bool:
+def sf_same_city_push_fully_fulfilled(
+    db: Session,
+    pus: SfSameCityPush,
+    *,
+    ags_hint: dict | None = None,
+) -> bool:
     """单条顺丰推单是否已履约完毕（订阅送达 + 单次订单完成）。"""
     if not sf_push_create_succeeded(pus):
         return True
@@ -565,7 +575,9 @@ def sf_same_city_push_fully_fulfilled(db: Session, pus: SfSameCityPush) -> bool:
     snap_mids, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
     agg = None
     if not snap_mids and not snap_oids:
-        agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
+        agg = load_agg_for_stop_id(
+            db, pus.delivery_date, pus.stop_id, store_id=sid, ags_hint=ags_hint
+        )
 
     mids = _subscription_member_ids_for_push(db, pus, agg)
     oids = _single_meal_order_ids_for_push(db, pus, agg)
@@ -602,16 +614,159 @@ def store_has_unfulfilled_sf_push_on_delivery_date(
     store_id: int,
     delivery_date: date,
 ) -> bool:
-    """是否存在未履约完毕的有效顺丰推单（单次查询，遇首条未履约即返回）。"""
+    """是否存在未履约完毕的有效顺丰推单（遇首条未履约即返回，避免重复重建配送大表）。"""
     rows = db.scalars(
         select(SfSameCityPush).where(
             _active_sf_push_base_filter(store_id=int(store_id), delivery_date=delivery_date)
         )
     ).all()
+    if not rows:
+        return False
+
+    if all(_sf_push_effective_order_status(pus) == SF_ORDER_STATUS_DELIVERED_TUOTOU for pus in rows):
+        return False
+
+    ags_hint: dict | None = None
     for pus in rows:
-        if not sf_same_city_push_fully_fulfilled(db, pus):
+        st = _sf_push_effective_order_status(pus)
+        if st == SF_ORDER_STATUS_DELIVERED_TUOTOU:
+            continue
+        if st is not None:
+            return True
+        snap_mids, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+        if snap_mids or snap_oids:
+            if not sf_push_fulfilled_quick_check(db, pus):
+                return True
+            continue
+        if ags_hint is None:
+            ags_hint = aggs_for_delivery_date(db, delivery_date, store_id=int(store_id))
+        if not sf_same_city_push_fully_fulfilled(db, pus, ags_hint=ags_hint):
             return True
     return False
+
+
+def _snapshot_member_id_like_clauses(member_id: int) -> list[Any]:
+    """在 request_snapshot JSON 文本中精确匹配 fulfillment_member_ids 数组元素。"""
+    mid = str(int(member_id))
+    snap = cast(SfSameCityPush.request_snapshot, String)
+    return [
+        snap.like(f'%"fulfillment_member_ids": [{mid}]%'),
+        snap.like(f'%"fulfillment_member_ids": [{mid},%'),
+        snap.like(f'%"fulfillment_member_ids": [%, {mid}]%'),
+        snap.like(f'%"fulfillment_member_ids": [%, {mid},%'),
+    ]
+
+
+def _member_on_sf_push(
+    db: Session,
+    pus: SfSameCityPush,
+    *,
+    member_id: int,
+    member_phone: str | None = None,
+) -> bool:
+    """推单快照/停靠点是否包含指定会员（订阅、单次零售或旧版手机号快照）。"""
+    mid = int(member_id)
+    snap_mids, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+    if mid in snap_mids:
+        return True
+
+    oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
+    if oid_retail is not None:
+        o = db.get(SingleMealOrder, oid_retail)
+        return o is not None and int(o.member_id) == mid
+
+    for oid in snap_oids:
+        o = db.get(SingleMealOrder, oid)
+        if o is not None and int(o.member_id) == mid:
+            return True
+
+    ph = (member_phone or "").strip()
+    if not ph:
+        return False
+    snap = pus.request_snapshot
+    if not isinstance(snap, dict):
+        return False
+    pr = snap.get("preview_row")
+    if not isinstance(pr, dict):
+        return False
+    return str(pr.get("recv_phone") or "").strip() == ph
+
+
+def _member_active_sf_pushes_on_delivery_date(
+    db: Session,
+    *,
+    member_id: int,
+    store_id: int,
+    delivery_date: date,
+) -> list[SfSameCityPush]:
+    """仅返回与指定会员相关的当日有效顺丰推单（不重建配送大表）。"""
+    mid = int(member_id)
+    sid = int(store_id)
+    member = db.get(Member, mid)
+    phone = (member.phone or "").strip() if member else ""
+
+    base = _active_sf_push_base_filter(store_id=sid, delivery_date=delivery_date)
+    or_parts: list[Any] = list(_snapshot_member_id_like_clauses(mid))
+
+    order_ids = db.scalars(
+        select(SingleMealOrder.id).where(
+            SingleMealOrder.member_id == mid,
+            SingleMealOrder.delivery_date == delivery_date,
+        )
+    ).all()
+    if order_ids:
+        or_parts.append(
+            SfSameCityPush.stop_id.in_(f"retail-smo-{int(oid)}" for oid in order_ids)
+        )
+
+    if phone:
+        or_parts.append(cast(SfSameCityPush.request_snapshot, String).like(f"%{phone}%"))
+
+    rows = db.scalars(select(SfSameCityPush).where(and_(base, or_(*or_parts)))).all()
+    seen: set[int] = set()
+    out: list[SfSameCityPush] = []
+    for pus in rows:
+        pid = int(pus.id)
+        if pid in seen:
+            continue
+        if not _member_on_sf_push(db, pus, member_id=mid, member_phone=phone):
+            continue
+        seen.add(pid)
+        out.append(pus)
+    return out
+
+
+def _member_sf_push_fulfilled_for_lock(db: Session, pus: SfSameCityPush, *, member_id: int) -> bool:
+    """当前会员在该推单上是否已视为配送完成（顺丰妥投或内部已标送达）。"""
+    if not sf_push_create_succeeded(pus):
+        return True
+    if _sf_push_skip_auto_fulfillment_due_to_cancel(pus):
+        return True
+    if _sf_push_effective_order_status(pus) == SF_ORDER_STATUS_DELIVERED_TUOTOU:
+        return True
+
+    mid = int(member_id)
+    snap_mids, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+    if mid in snap_mids:
+        return member_subscription_delivered_on_delivery_date(
+            db, member_id=mid, delivery_date=pus.delivery_date
+        )
+
+    oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
+    if oid_retail is not None:
+        o = db.get(SingleMealOrder, oid_retail)
+        if o is None or int(o.member_id) != mid:
+            return True
+        return str(getattr(o, "fulfillment_status", "") or "").strip().lower() == "delivered"
+
+    for oid in snap_oids:
+        o = db.get(SingleMealOrder, oid)
+        if o is not None and int(o.member_id) == mid:
+            return str(getattr(o, "fulfillment_status", "") or "").strip().lower() == "delivered"
+
+    return member_subscription_delivered_on_delivery_date(
+        db, member_id=mid, delivery_date=pus.delivery_date
+    )
 
 
 def member_sf_self_service_locked_on_delivery_date(
@@ -622,15 +777,22 @@ def member_sf_self_service_locked_on_delivery_date(
     delivery_date: date,
 ) -> bool:
     """
-    当日门店已向顺丰推单且尚未全部标记送达：锁定小程序自助改地址/份数/请假等。
+    当前会员当日命中顺丰推单且其配送尚未完成：锁定小程序自助改地址/份数/请假等。
 
-    窗口为「门店推单成功 → 当日全部推单履约完成」；取消/撤单的推单不计入。
-    member_id 保留以兼容现有调用签名，锁定按门店+业务日判定。
+    仅查与该会员相关的推单；门店其他会员的推单/履约状态不影响本会员。
     """
-    _ = member_id
-    return store_has_unfulfilled_sf_push_on_delivery_date(
-        db, store_id=int(store_id), delivery_date=delivery_date
+    pushes = _member_active_sf_pushes_on_delivery_date(
+        db,
+        member_id=int(member_id),
+        store_id=int(store_id),
+        delivery_date=delivery_date,
     )
+    if not pushes:
+        return False
+    for pus in pushes:
+        if not _member_sf_push_fulfilled_for_lock(db, pus, member_id=int(member_id)):
+            return True
+    return False
 
 
 def member_has_active_sf_push_on_delivery_date(
@@ -640,34 +802,15 @@ def member_has_active_sf_push_on_delivery_date(
     store_id: int,
     delivery_date: date,
 ) -> bool:
-    """会员在指定业务日是否命中未取消的顺丰大表推单（以创单快照 fulfillment_member_ids 为准）。"""
-    from app.services.sf_same_city_service import (
-        _sf_push_row_cancelled_predicate,
-        load_agg_for_stop_id,
+    """会员在指定业务日是否命中未取消的顺丰推单。"""
+    return bool(
+        _member_active_sf_pushes_on_delivery_date(
+            db,
+            member_id=int(member_id),
+            store_id=int(store_id),
+            delivery_date=delivery_date,
+        )
     )
-
-    mid = int(member_id)
-    sid = int(store_id)
-    flt = and_(
-        SfSameCityPush.store_id == sid,
-        SfSameCityPush.delivery_date == delivery_date,
-        SfSameCityPush.error_code == 0,
-        ~_sf_push_row_cancelled_predicate(),
-        or_(
-            SfSameCityPush.push_kind.is_(None),
-            SfSameCityPush.push_kind == "",
-            SfSameCityPush.push_kind == "delivery_sheet",
-        ),
-    )
-    rows = db.scalars(select(SfSameCityPush).where(flt)).all()
-    for pus in rows:
-        snap_mids, _ = _ids_from_push_snapshot(pus.request_snapshot)
-        if mid in snap_mids:
-            return True
-        agg = load_agg_for_stop_id(db, delivery_date, pus.stop_id, store_id=sid)
-        if mid in _subscription_member_ids_for_push(db, pus, agg):
-            return True
-    return False
 
 
 def _subscription_member_ids_for_push(db: Session, pus: SfSameCityPush, agg: Any | None) -> list[int]:
