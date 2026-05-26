@@ -119,6 +119,7 @@ from app.services.single_meal_order_service import (
     bulk_push_single_meal_retail_to_sf,
     diagnose_single_meal_sf_sync,
     list_admin_store_single_meal_orders_by_delivery_day,
+    summarize_admin_store_single_meal_orders_by_delivery_day,
     admin_mark_single_meal_order_delivered,
     admin_update_single_meal_order,
 )
@@ -819,12 +820,20 @@ def admin_orders_daily_single_meals(
         page=page,
         page_size=page_size,
     )
+    bucket_summary = summarize_admin_store_single_meal_orders_by_delivery_day(
+        db,
+        store_id=store_id,
+        delivery_day=day,
+        q=q,
+        delivery_phase=delivery_phase,
+    )
     return page_response(
         items=[dump_model(i) for i in items],
         total=total,
         page=page,
         page_size=page_size,
         msg="获取成功",
+        summary=bucket_summary,
     )
 
 

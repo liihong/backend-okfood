@@ -352,12 +352,17 @@ const tomorrowSingleRetailTotalCount = computed(
   () => Number(summaryMeta.value?.tomorrow_single_retail_total_quantity) || 0,
 )
 
-/** 顶卡主数字「总出餐量」= 配送餐（到家待送+已送达）+ 单次零售份数（不含自提；与右侧「自提」行并列展示） */
+/** 顶卡主数字「总出餐量」= 配送份数 + 单次零售 + 门店自提（与公式、右侧分项一致） */
 const cardPrepTotal = computed(() => {
   const b = prepMetricsBreakdown(todayPrepMetrics.value)
   const retail = todaySingleRetailTotalCount.value
-  if (b != null) return Math.max(0, Math.trunc(b.delivery) + Math.trunc(retail))
-  // 无拆分字段时无法分离配送餐，退化为概览「今日备餐」旧值（未含零售）
+  if (b != null) {
+    return Math.max(
+      0,
+      Math.trunc(b.delivery) + Math.trunc(retail) + Math.trunc(b.pickup),
+    )
+  }
+  // 无 prep_metrics 时退化为「今日需准备」合计（无法再拆公式三项）
   return Number(dashboardStats.value[2]?.value) || 0
 })
 
@@ -373,19 +378,27 @@ const todayMealsPickup = computed(() => {
   return null
 })
 
-/** 主数字旁公式展示用：配送餐份数 / 单次零售份数字符串 */
+/** 主数字旁公式：配送份数 / 单次零售 / 自提份数（无拆分为 —） */
 const todayTotalOutFormulaDelivery = computed(() =>
   todayMealsDelivery.value == null ? '—' : String(Math.trunc(Number(todayMealsDelivery.value))),
 )
 const todayTotalOutFormulaRetail = computed(() =>
   String(Math.trunc(todaySingleRetailTotalCount.value)),
 )
+const todayTotalOutFormulaPickup = computed(() =>
+  todayMealsPickup.value == null ? '—' : String(Math.trunc(Number(todayMealsPickup.value))),
+)
 
-/** 明日顶卡主数字「总出餐量」= 明日配送餐 + 明日单次零售（不含自提） */
+/** 明日顶卡「总出餐量」= 明日配送份数 + 明日单次零售 + 明日门店自提 */
 const cardTomorrowPrepTotal = computed(() => {
   const b = prepMetricsBreakdown(tomorrowPrepMetrics.value)
   const retail = tomorrowSingleRetailTotalCount.value
-  if (b != null) return Math.max(0, Math.trunc(b.delivery) + Math.trunc(retail))
+  if (b != null) {
+    return Math.max(
+      0,
+      Math.trunc(b.delivery) + Math.trunc(retail) + Math.trunc(b.pickup),
+    )
+  }
   return Number(dashboardStats.value[3]?.value) || 0
 })
 
@@ -405,6 +418,9 @@ const tomorrowTotalOutFormulaDelivery = computed(() =>
 )
 const tomorrowTotalOutFormulaRetail = computed(() =>
   String(Math.trunc(tomorrowSingleRetailTotalCount.value)),
+)
+const tomorrowTotalOutFormulaPickup = computed(() =>
+  tomorrowPrepPickup.value == null ? '—' : String(Math.trunc(Number(tomorrowPrepPickup.value))),
 )
 
 const todayHomeStopCount = computed(() => {
@@ -609,6 +625,10 @@ onMounted(() => {
                 <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--retail"
                   >单次零售 {{ todayTotalOutFormulaRetail }}</span
                 >
+                <span class="dro-dash-kpi__hero-formula-plus"> + </span>
+                <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--pickup"
+                  >自提{{ todayTotalOutFormulaPickup }}</span
+                >
               </span>
             </div>
             <div class="dro-dash-kpi__side">
@@ -742,6 +762,10 @@ onMounted(() => {
                 <span class="dro-dash-kpi__hero-formula-plus"> + </span>
                 <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--retail"
                   >单次零售 {{ tomorrowTotalOutFormulaRetail }}</span
+                >
+                <span class="dro-dash-kpi__hero-formula-plus"> + </span>
+                <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--pickup"
+                  >自提{{ tomorrowTotalOutFormulaPickup }}</span
                 >
               </span>
             </div>
@@ -1133,6 +1157,12 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
+/** 今日/明日与地图卡区分：前两卡头部保留相同最小高度，避免标题折行后主数字与公式起始位置高低不一 */
+.dro-dash-kpi:not(.dro-dash-kpi--maplib) > .dro-dash-kpi__head {
+  min-height: 3.35rem;
+  align-items: flex-start;
+}
+
 .dro-dash-kpi__tags {
   display: flex;
   flex-wrap: wrap;
@@ -1198,7 +1228,7 @@ onMounted(() => {
 
 .dro-dash-kpi__main {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 0;
@@ -1411,7 +1441,7 @@ onMounted(() => {
   min-width: 0;
 }
 
-/** 今日/明日顶卡：总值后同一行展示「总出餐量 = 配送份数 + 单次零售」拆解（窄屏可换行） */
+/** 今日/明日顶卡：总值后同一行展示「总出餐量 = 配送份数 + 单次零售 + 自提」拆解（窄屏可换行） */
 .dro-dash-kpi__hero--total-out {
   flex-direction: row;
   align-items: baseline;
@@ -1453,6 +1483,12 @@ onMounted(() => {
 
 .dro-dash-kpi__hero-formula-part--retail {
   color: #1d4ed8;
+}
+
+.dro-dash-kpi__hero-formula-part--pickup {
+  color: #dc2626;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
 }
 
 .dro-dash-kpi__hero--compact {

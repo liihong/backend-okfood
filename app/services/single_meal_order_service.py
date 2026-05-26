@@ -468,6 +468,78 @@ def _single_meal_order_row_to_out(
     )
 
 
+def _admin_store_single_meal_scope_filters_for_delivery_day(
+    *,
+    store_id: int,
+    delivery_day: date,
+    q: str | None,
+    delivery_phase: str | None,
+) -> list:
+    """单次点餐：供餐日列表/统计的公共范围（不含支付 Tab 对应条件）。
+
+    ``delivery_phase``：``awaiting``=待配送（pending/accepted）；``delivered``=已送达；留空=不按阶段过滤。
+    """
+    filters: list = [
+        SingleMealOrder.store_id == int(store_id),
+        SingleMealOrder.delivery_date == delivery_day,
+    ]
+    dp = (delivery_phase or "").strip().lower()
+    if dp == "awaiting":
+        filters.append(
+            SingleMealOrder.fulfillment_status.in_(("pending", "accepted")),
+        )
+    elif dp == "delivered":
+        filters.append(SingleMealOrder.fulfillment_status == "delivered")
+    if q and q.strip():
+        esc = escape_like_fragment(q.strip())
+        filters.append(
+            or_(
+                Member.phone.like(f"{esc}%", escape="\\"),
+                Member.name.like(f"%{esc}%", escape="\\"),
+            )
+        )
+    return filters
+
+
+def summarize_admin_store_single_meal_orders_by_delivery_day(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_day: date,
+    q: str | None = None,
+    delivery_phase: str | None = None,
+) -> dict[str, int]:
+    """订单管理：统计当前范围下各状态笔数（与供餐日、搜索、配送维度一致，不含支付 Tab）。
+
+    - ``pending_ship``：已支付且履约 pending（含待发货与待自提口径，与列表「订单状态」pending 一致）。
+    """
+    join_on = Member.id == SingleMealOrder.member_id
+    base = _admin_store_single_meal_scope_filters_for_delivery_day(
+        store_id=store_id,
+        delivery_day=delivery_day,
+        q=q,
+        delivery_phase=delivery_phase,
+    )
+
+    def _count(extra: list) -> int:
+        stmt = select(func.count()).select_from(SingleMealOrder).join(Member, join_on)
+        for f in base + extra:
+            stmt = stmt.where(f)
+        return int(db.scalar(stmt) or 0)
+
+    return {
+        "paid": _count([SingleMealOrder.pay_status == "已支付"]),
+        "unpaid": _count([SingleMealOrder.pay_status == "未支付"]),
+        "cancelled": _count([SingleMealOrder.fulfillment_status == "cancelled"]),
+        "pending_ship": _count(
+            [
+                SingleMealOrder.pay_status == "已支付",
+                SingleMealOrder.fulfillment_status == "pending",
+            ]
+        ),
+    }
+
+
 def list_admin_store_single_meal_orders_by_delivery_day(
     db: Session,
     *,
@@ -486,30 +558,19 @@ def list_admin_store_single_meal_orders_by_delivery_day(
     page = max(1, page)
     page_size = min(100, max(1, page_size))
     join_on = Member.id == SingleMealOrder.member_id
-    filters = [
-        SingleMealOrder.store_id == int(store_id),
-        SingleMealOrder.delivery_date == delivery_day,
-    ]
+    filters = list(
+        _admin_store_single_meal_scope_filters_for_delivery_day(
+            store_id=store_id,
+            delivery_day=delivery_day,
+            q=q,
+            delivery_phase=delivery_phase,
+        )
+    )
     ps = (pay_status or "").strip()
     if ps == "已取消":
         filters.append(SingleMealOrder.fulfillment_status == "cancelled")
     elif ps:
         filters.append(SingleMealOrder.pay_status == ps)
-    dp = (delivery_phase or "").strip().lower()
-    if dp == "awaiting":
-        filters.append(
-            SingleMealOrder.fulfillment_status.in_(("pending", "accepted")),
-        )
-    elif dp == "delivered":
-        filters.append(SingleMealOrder.fulfillment_status == "delivered")
-    if q and q.strip():
-        esc = escape_like_fragment(q.strip())
-        filters.append(
-            or_(
-                Member.phone.like(f"{esc}%", escape="\\"),
-                Member.name.like(f"%{esc}%", escape="\\"),
-            )
-        )
 
     count_stmt = select(func.count()).select_from(SingleMealOrder).join(Member, join_on)
     for f in filters:

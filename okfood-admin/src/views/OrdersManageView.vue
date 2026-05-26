@@ -103,6 +103,9 @@ function mallPayFilterApiValue(tabValue) {
 const loading = ref(false)
 const singleItems = ref([])
 const singleTotal = ref(0)
+/** 单次点餐列表接口返回：与供餐日/搜索/配送筛选一致的全量桶计数（不按支付 Tab 过滤） */
+/** @type {import('vue').Ref<null | { paid: number; unpaid: number; cancelled: number; pending_ship: number }>} */
+const singleOrderBucketSummary = ref(null)
 const mallItems = ref([])
 const mallTotal = ref(0)
 const page = ref(1)
@@ -988,6 +991,17 @@ async function fetchSingleMeals() {
     const data = await apiJson(`/api/admin/orders/daily/single-meals?${q.toString()}`, {}, { auth: true })
     singleItems.value = Array.isArray(data.items) ? data.items : []
     singleTotal.value = Number(data.total) || 0
+    const sm = data && typeof data === 'object' ? data.summary : null
+    if (sm && typeof sm === 'object') {
+      singleOrderBucketSummary.value = {
+        paid: Number(sm.paid) || 0,
+        unpaid: Number(sm.unpaid) || 0,
+        cancelled: Number(sm.cancelled) || 0,
+        pending_ship: Number(sm.pending_ship) || 0,
+      }
+    } else {
+      singleOrderBucketSummary.value = null
+    }
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -997,6 +1011,7 @@ async function fetchSingleMeals() {
     showToast(e instanceof Error ? e.message : '加载单次订单失败', 'error')
     singleItems.value = []
     singleTotal.value = 0
+    singleOrderBucketSummary.value = null
   } finally {
     loading.value = false
   }
@@ -1191,11 +1206,41 @@ onMounted(() => {
                 @click="clearSingleSelection">
                 清空选择
               </el-button>
-            </div>
+             </div>
            </div>
           </div>
+          <p
+            v-if="singleOrderBucketSummary"
+            class="orders-manage-stats-line"
+            role="status"
+            aria-live="polite"
+          >
+            <span class="orders-manage-stats-line__label">汇总</span>
+            已支付
+            <strong class="orders-manage-stats-line__num orders-manage-stats-line__num--paid">{{
+              singleOrderBucketSummary.paid
+            }}</strong>
+            <span class="orders-manage-stats-line__sep">·</span>
+            待发货
+            <strong class="orders-manage-stats-line__num orders-manage-stats-line__num--pending">{{
+              singleOrderBucketSummary.pending_ship
+            }}</strong>
+            <span class="orders-manage-stats-line__sep">·</span>
+            未支付
+            <strong class="orders-manage-stats-line__num orders-manage-stats-line__num--unpaid">{{
+              singleOrderBucketSummary.unpaid
+            }}</strong>
+            <span class="orders-manage-stats-line__sep">·</span>
+            已取消
+            <strong class="orders-manage-stats-line__num orders-manage-stats-line__num--cancelled">{{
+              singleOrderBucketSummary.cancelled
+            }}</strong>
+            <span class="orders-manage-stats-line__hint"
+              >（与供餐日、搜索、配送筛选一致；不含支付 Tab；待发货含门店自提「待自提」）</span
+            >
+          </p>
           <AdminTable
-ref="singleTableRef"
+            ref="singleTableRef"
             variant="members"
             size="small"
             :data="singleItems"
@@ -1727,6 +1772,47 @@ ref="singleTableRef"
 }
 .orders-manage-tab-bar {
   margin-bottom: 0.65rem;
+}
+.orders-manage-stats-line {
+  margin: 0 0 0.65rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted, #64748b);
+  background: rgba(248, 250, 252, 0.95);
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.orders-manage-stats-line__label {
+  font-weight: 700;
+  color: var(--admin-text-strong, #0f172a);
+  margin-right: 0.4rem;
+}
+.orders-manage-stats-line__hint {
+  margin-left: 0.35rem;
+  font-size: 12px;
+  opacity: 0.88;
+}
+.orders-manage-stats-line__sep {
+  margin: 0 0.35rem;
+  opacity: 0.7;
+}
+.orders-manage-stats-line__num {
+  margin-left: 0.15rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.orders-manage-stats-line__num--paid {
+  color: #059669;
+}
+.orders-manage-stats-line__num--pending {
+  color: #ca8a04;
+}
+.orders-manage-stats-line__num--unpaid {
+  color: #ea580c;
+}
+.orders-manage-stats-line__num--cancelled {
+  color: #be123c;
 }
 .orders-manage-tab-bar--filters {
   display: flex;

@@ -254,14 +254,12 @@ const sheetFulfillmentProgressPct = computed(() => {
   return Math.min(100, Math.round((sheetDeliveredMealCount.value / t) * 100))
 })
 
-/** 备单量卡片：数值缓动滚动（切换业务日/刷新时过渡） */
-const displayKitchenMealTotal = useAnimatedInteger(() => sheetKitchenMealTotal.value, { duration: 820 })
-const displayStopCount = useAnimatedInteger(() => flatStops.value.length, { duration: 820 })
 const displayHomeMealTotal = useAnimatedInteger(() => sheetHomeMealTotal.value, { duration: 820 })
 const displayPickupMealTotal = useAnimatedInteger(
   () => Number(sheetToday.value.pickup_meal_total) || 0,
   { duration: 820 },
 )
+const displayStopCount = useAnimatedInteger(() => flatStops.value.length, { duration: 820 })
 
 /** 当前所选业务日是否为上海「今天」（用于「今日实时」徽标） */
 const deliveryQueryIsTodayShanghai = computed(
@@ -777,35 +775,32 @@ async function markDelivery(memberId, kind) {
               >今日实时</span>
             </div>
             <div class="delivery-stats-panel__body">
-              <div class="delivery-stats-panel__primary">
-                <div class="delivery-stats-panel__big">
-                  <span class="delivery-stats-panel__num delivery-stats-panel__num--primary">{{
-                    displayKitchenMealTotal
+              <ul class="delivery-stats-lines" role="list">
+                <li class="delivery-stats-lines__row">
+                  <span class="delivery-stats-lines__label">配送单</span>
+                  <span class="delivery-stats-lines__colon">：</span>
+                  <span class="delivery-stats-lines__num delivery-stats-lines__num--home">{{
+                    displayHomeMealTotal
                   }}</span>
-                  <span class="delivery-stats-panel__unit">份已确定</span>
-                </div>
-                <p class="delivery-stats-panel__hint">
-                  共
-                  <strong class="delivery-stats-panel__stat delivery-stats-panel__stat--stops">{{
+                  <span class="delivery-stats-lines__suffix">份</span>
+                </li>
+                <li class="delivery-stats-lines__row">
+                  <span class="delivery-stats-lines__label">自提单</span>
+                  <span class="delivery-stats-lines__colon">：</span>
+                  <span class="delivery-stats-lines__num delivery-stats-lines__num--pickup">{{
+                    displayPickupMealTotal
+                  }}</span>
+                  <span class="delivery-stats-lines__suffix">份</span>
+                </li>
+                <li class="delivery-stats-lines__row">
+                  <span class="delivery-stats-lines__label">配送点</span>
+                  <span class="delivery-stats-lines__colon">：</span>
+                  <span class="delivery-stats-lines__num delivery-stats-lines__num--stores">{{
                     displayStopCount
-                  }}</strong>
-                  个配送网点
-                </p>
-              </div>
-              <div class="delivery-stats-panel__split">
-                <div class="delivery-stats-panel__row">
-                  配送单
-                  <span class="delivery-stats-panel__stat delivery-stats-panel__stat--home">
-                    {{ displayHomeMealTotal }} 份
-                  </span>
-                </div>
-                <div class="delivery-stats-panel__row delivery-stats-panel__row--muted">
-                  自提单
-                  <span class="delivery-stats-panel__stat delivery-stats-panel__stat--pickup">
-                    {{ displayPickupMealTotal }} 份
-                  </span>
-                </div>
-              </div>
+                  }}</span>
+                  <span class="delivery-stats-lines__suffix">个</span>
+                </li>
+              </ul>
             </div>
             <div
               class="delivery-stats-progress"
@@ -1518,76 +1513,63 @@ async function markDelivery(memberId, kind) {
   border: 1px solid #d1fae5;
 }
 .delivery-stats-panel__body {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1rem 1.5rem;
-  flex-wrap: wrap;
+  display: block;
+  padding: 0.15rem 0 0;
 }
-.delivery-stats-panel__big {
-  display: flex;
-  align-items: baseline;
-  gap: 0.3rem;
-}
-.delivery-stats-panel__num {
-  font-size: 2.2rem;
-  font-weight: 900;
-  letter-spacing: -0.03em;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-.delivery-stats-panel__num--primary {
-  color: var(--dv-green);
-}
-.delivery-stats-panel__unit {
-  font-size: 0.8125rem;
-  font-weight: 700;
-  color: #64748b;
-}
-.delivery-stats-panel__hint {
-  margin: 0.35rem 0 0;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  color: #64748b;
-}
-.delivery-stats-panel__stat {
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  margin-left: 0.25rem;
-}
-.delivery-stats-panel__stat--stops {
-  color: #4338ca;
-  margin-left: 0.2rem;
-  margin-right: 0.15rem;
-  font-size: 1.05em;
-}
-.delivery-stats-panel__stat--home {
-  color: #0369a1;
-  margin-left: 0.35rem;
-}
-.delivery-stats-panel__stat--pickup {
-  color: #b45309;
-  margin-left: 0.35rem;
-}
-.delivery-stats-panel__split {
-  text-align: right;
-  font-size: 0.875rem;
-  font-weight: 700;
-  padding-left: 1.2rem;
-  border-left: 1px solid var(--dv-line);
-  flex-shrink: 0;
+
+.delivery-stats-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.45rem;
 }
-.delivery-stats-panel__row {
-  color: #64748b;
+
+.delivery-stats-lines__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  line-height: 1.35;
 }
-.delivery-stats-panel__row + .delivery-stats-panel__row {
-  margin-top: 0;
+
+.delivery-stats-lines__label {
+  color: #475569;
+  font-weight: 800;
+  min-width: 3.25rem;
 }
-.delivery-stats-panel__row--muted {
+
+.delivery-stats-lines__colon {
   color: #94a3b8;
+  font-weight: 700;
+  margin-right: 0.15rem;
+}
+
+.delivery-stats-lines__num {
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.0625rem;
+}
+
+.delivery-stats-lines__num--home {
+  color: #0369a1;
+}
+
+.delivery-stats-lines__num--pickup {
+  color: #b45309;
+}
+
+.delivery-stats-lines__num--stores {
+  color: #4338ca;
+}
+
+.delivery-stats-lines__suffix {
+  margin-left: 0.15rem;
+  font-size: 0.875rem;
+  font-weight: 750;
+  color: #64748b;
 }
 
 .delivery-stats-progress {
