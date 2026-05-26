@@ -285,11 +285,7 @@ onMounted(reloadAll)
 <template>
   <div class="retail-page tab-content animate-up page-content-shell">
     <!-- 页眉 -->
-    <header class="retail-header">
-      <div class="page-heading">
-        <h2 class="page-title">普通商品管理</h2>
-        <p class="page-subtitle">Ordinary Product Configuration Panel</p>
-      </div>
+    <header class="retail-header retail-header--actions-only">
       <div class="retail-store-selector">
         <label for="retail-store-id">门店 ID</label>
         <el-input-number
@@ -663,6 +659,10 @@ onMounted(reloadAll)
   border-radius: 28px;
   border: 1px solid var(--retail-border);
   box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.05);
+}
+
+.retail-header--actions-only {
+  justify-content: flex-end;
 }
 
 .retail-store-selector {

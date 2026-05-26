@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { apiJson, adminAccessToken } from '../admin/core.js'
 import { assignAreaForCoords, UNASSIGNED_AREA_LABEL } from '../utils/regionAssignment.js'
+import { REGION_FILL_PALETTE } from '../constants/deliveryRegionMapPalette.js'
 
 /** 图钉：当日已送达 / 默认（未送达或其它） */
 const MARKER_DELIVERED = '#22c55e'
@@ -8,22 +9,6 @@ const MARKER_DEFAULT = '#eab308'
 /** 与营业概览卡片色一致：今日请假 / 明日请假 */
 const MARKER_LEAVE_TODAY = '#e11d48'
 const MARKER_LEAVE_TOMORROW = '#ea580c'
-
-const REGION_FILL_PALETTE = [
-  '#0e5a44',
-  '#2563eb',
-  '#d97706',
-  '#7c3aed',
-  '#db2777',
-  '#0d9488',
-  '#b45309',
-  '#4f46e5',
-  '#be185d',
-  '#047857',
-  '#1d4ed8',
-  '#c2410c',
-  '#6d28d9',
-]
 
 export function useDeliveryRegionMapOverview() {
   const loading = ref(false)

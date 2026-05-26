@@ -281,21 +281,6 @@ onMounted(() => {
 
 <template>
   <section class="tab-content animate-up menu-section">
-    <details class="dish-internal-sop-banner">
-      <summary class="dish-internal-sop-summary">菜品库 · 内部查看 SOP（点击展开）</summary>
-      <div class="dish-internal-sop-content">
-        <ol class="dish-internal-sop-list">
-          <li>新建或编辑菜品时，核对名称与「配料 / 描述」与实际出餐一致。</li>
-          <li>
-            凡含辣椒、辣酱、泡椒等刺激性辣味，须在「辣度」中标注；仅有轻微辣感（如少量黑胡椒、豆瓣）请选择「微微辣」，便于会员预判。
-          </li>
-          <li>展示图与单点价格变更后，在周菜单与详情页抽查会员端展示。</li>
-          <li>
-            「内部操作说明」仅后台可见，可记录备餐衔接、话术或备注；请勿将会员需要知道的过敏原等信息只写在此处。
-          </li>
-        </ol>
-      </div>
-    </details>
     <div class="dish-toolbar">
       <div class="dish-toolbar-search">
         <Search :size="18" />

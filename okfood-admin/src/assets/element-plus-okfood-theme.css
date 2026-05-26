@@ -71,27 +71,44 @@
   --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
 }
 
-/* --- 侧栏 el-menu：与 admin-ui 深绿侧栏、强调色 #facc15 一致 --- */
+/* --- 侧栏 el-menu：与参考稿 sidebar-menu（#093f30 / primary-green-light 高亮）一致 --- */
 .admin-layout .sidebar .sidebar-menu.el-menu {
   flex: 1;
   width: 100%;
   min-width: 0;
+  min-height: 0;
   border-right: none;
   background: transparent !important;
-  padding: 0;
-  --el-menu-hover-bg-color: rgba(255, 255, 255, 0.12);
+  padding: 18px 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* Firefox 窄滚动条 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  --el-menu-hover-bg-color: #146c53;
   --el-menu-hover-text-color: #ffffff;
+  --el-menu-active-color: #ffffff;
+}
+
+.admin-layout .sidebar .sidebar-menu.el-menu::-webkit-scrollbar {
+  width: 4px;
+}
+
+.admin-layout .sidebar .sidebar-menu.el-menu::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
 }
 
 .admin-layout .sidebar .sidebar-menu .el-menu-item,
 .admin-layout .sidebar .sidebar-menu .el-sub-menu__title {
-  border-radius: 1.25rem;
-  margin-bottom: 0.5rem;
-  height: auto !important;
-  line-height: 1.25 !important;
-  padding: 0.85rem 1.1rem !important;
+  border-radius: 12px;
+  margin-bottom: 10px;
   font-weight: 700;
-  font-size: 0.875rem;
+  font-size: 17px;
+  color: rgba(255, 255, 255, 0.75) !important;
+  transition:
+    background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .admin-layout .sidebar .sidebar-menu .el-menu-item .menu-item-inner,
@@ -99,33 +116,59 @@
   /* inline-flex + div：避免被 el-menu--collapse 的 >span 规则整块隐藏（Lucide 图标在 span 内会一起消失） */
   display: inline-flex;
   align-items: center;
-  gap: 0.85rem;
+  gap: 1rem;
   width: 100%;
   box-sizing: border-box;
 }
 
 .admin-layout .sidebar .sidebar-menu .el-menu-item.is-active {
-  background: rgba(255, 255, 255, 0.15) !important;
-  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.1);
+  background-color: #146c53 !important;
+  color: #ffffff !important;
+  box-shadow: none;
 }
 
 .admin-layout .sidebar .sidebar-menu .el-menu-item.is-active .menu-item-inner {
-  transform: translateX(4px);
+  transform: none;
+}
+
+.admin-layout .sidebar .sidebar-menu .el-sub-menu__title .el-sub-menu__icon-arrow {
+  font-size: 13px;
+  opacity: 0.7;
+  transition: transform 0.3s ease;
+}
+
+.admin-layout .sidebar .sidebar-menu .el-sub-menu.is-opened > .el-sub-menu__title .el-sub-menu__icon-arrow {
+  transform: rotateZ(180deg);
 }
 
 .admin-layout .sidebar .sidebar-menu .el-sub-menu .el-menu {
   background: transparent !important;
+  padding-left: 8px;
+  padding-bottom: 6px;
+  margin-top: 10px !important;
 }
 
 .admin-layout .sidebar .sidebar-menu .el-sub-menu .el-menu-item {
-  padding-left: 2.5rem !important;
-  min-height: 2.75rem;
-  margin-bottom: 0.35rem;
-  opacity: 0.92;
+  border-radius: 10px;
+  padding: 11px 16px 11px 16px !important;
+  padding-left: 42px !important;
+  margin-bottom: 8px;
+  min-height: 0 !important;
+  font-size: 15px !important;
+  font-weight: 700;
+  height: auto !important;
+  line-height: 1.35 !important;
+  color: rgba(255, 255, 255, 0.55) !important;
+}
+
+.admin-layout .sidebar .sidebar-menu .el-sub-menu .el-menu-item:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  color: #ffffff !important;
 }
 
 .admin-layout .sidebar .sidebar-menu .el-sub-menu .el-menu-item.is-active {
-  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
 }
 
 .admin-layout .sidebar .sidebar-menu .el-icon {

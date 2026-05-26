@@ -1,7 +1,7 @@
 <script setup>
 defineOptions({ name: 'TenantsView' })
 import { ref, onMounted, computed } from 'vue'
-import { Building2, Plug } from 'lucide-vue-next'
+import { Plug } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
@@ -579,14 +579,7 @@ onMounted(async () => {
 
 <template>
   <div class="tenants-page">
-    <div class="page-head">
-      <div class="page-head-title">
-        <Building2 :size="22" stroke-width="2" class="page-head-icon" />
-        <div>
-          <h2>租户管理</h2>
-          <p class="page-head-sub">全库规模一览；维护租户、对接配置、门店与店主后台账号</p>
-        </div>
-      </div>
+    <div class="page-head page-head--actions-only">
       <el-button type="primary" @click="openCreateTenant">新建租户</el-button>
     </div>
 
@@ -702,7 +695,7 @@ onMounted(async () => {
         <el-form-item label="顺丰自动推单">
           <div class="store-nightly-wrap">
             <el-switch v-model="storeForm.sf_nightly_auto_push_enabled" />
-            <span class="store-nightly-hint">每日 07:00（上海）自动推送<strong>当日</strong>智能配送大表（订阅合并）订单；单次零售请在订单管理手动推单。关闭后仅能在配送大表手动推单</span>
+            <span class="store-nightly-hint">每日 08:50（上海）自动推送<strong>当日</strong>智能配送大表（订阅合并）订单；单次零售请在订单管理手动推单。关闭后仅能在配送大表手动推单</span>
           </div>
         </el-form-item>
       </el-form>
@@ -936,26 +929,11 @@ onMounted(async () => {
   gap: 16px;
   margin-bottom: 18px;
 }
-.page-head-title {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
+.page-head--actions-only {
+  justify-content: flex-end;
+  align-items: center;
 }
-.page-head-title h2 {
-  margin: 0;
-  font-size: 1.35rem;
-  font-weight: 600;
-}
-.page-head-sub {
-  margin: 6px 0 0;
-  font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.55);
-}
-.page-head-icon {
-  margin-top: 4px;
-  color: #facc15;
-  flex-shrink: 0;
-}
+
 .table-card {
   background: rgba(15, 23, 42, 0.55);
   border: 1px solid rgba(148, 163, 184, 0.15);

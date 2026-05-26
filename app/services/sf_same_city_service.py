@@ -527,7 +527,7 @@ def _member_overlap_with_other_success_stops(
 
 @contextmanager
 def _sf_nightly_auto_push_global_lock(db: Session):
-    """多进程/多实例部署时仅一个实例执行 07:00 自动推单；SQLite 等跳过。"""
+    """多进程/多实例部署时仅一个实例执行 08:50 自动推单；SQLite 等跳过。"""
     bind = db.get_bind()
     if getattr(bind.dialect, "name", "") != "mysql":
         yield True
@@ -1368,7 +1368,7 @@ def cancel_sf_same_city_push(
 
 @dataclass
 class SfNightlyAutoPushStoreResult:
-    """早间自动推单单店结果，供系统消息摘要。"""
+    """每日 08:50 自动推单单店结果，供系统消息摘要。"""
 
     total: int = 0
     success: int = 0
@@ -1381,7 +1381,7 @@ def auto_push_sf_today_business_day_for_store(
     db: Session, *, store_id: int
 ) -> SfNightlyAutoPushStoreResult:
     """
-    早间定时任务：向顺丰推送「当日」上海业务日、当前仍待推的配送大表停靠点（与手动推单同一套预览/合并逻辑）。
+    定时任务（上海 08:50）：向顺丰推送「当日」上海业务日、当前仍待推的配送大表停靠点（与手动推单同一套预览/合并逻辑）。
     仅推送大表合并（订阅）订单；单次零售不在此任务内，须订单管理手动推单。
     门店须启用 ``sf_nightly_auto_push_enabled`` 且处于营业状态。
     """

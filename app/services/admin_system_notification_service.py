@@ -30,7 +30,7 @@ def upsert_sf_nightly_push_notification(
     failed: int,
     skip_reason: str | None = None,
 ) -> AdminSystemNotification:
-    """顺丰 07:00 自动推单结束后写入/更新当日门店摘要（同店同日仅一条）。"""
+    """顺丰 08:50 自动推单结束后写入/更新当日门店摘要（同店同日仅一条）。"""
     kind = KIND_SF_NIGHTLY_PUSH
     title = f"顺丰自动推单 · {business_date.isoformat()}"
     message = _sf_nightly_push_message(

@@ -87,7 +87,7 @@ def ensure_miniprogram_offline_claim_order(
     if delivery_start_date < min_member_delivery_start_shanghai():
         raise HTTPException(
             status_code=400,
-            detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早今天，10:00 及之后最早明天）",
+            detail="起送日期须不早于今日（上海业务日）",
         )
     m = db.get(Member, member_id)
     if not m or m.deleted_at is not None:
@@ -411,7 +411,7 @@ def create_card_order(
         if body.delivery_start_date < min_member_delivery_start_shanghai():
             raise HTTPException(
                 status_code=400,
-                detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早今天，10:00 及之后最早明天）",
+                detail="起送日期须不早于今日（上海业务日）",
             )
     if body.delivery_address is not None:
         da = body.delivery_address
@@ -517,7 +517,7 @@ def update_card_order(
         if ds is not None and ds < min_member_delivery_start_shanghai():
             raise HTTPException(
                 status_code=400,
-                detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早今天，10:00 及之后最早明天）",
+                detail="起送日期须不早于今日（上海业务日）",
             )
         order.delivery_start_date = ds
         if order.applied_to_member:

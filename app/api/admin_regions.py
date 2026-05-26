@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.deps import (
     SessionDep,
@@ -9,7 +9,13 @@ from app.core.deps import (
     require_admin_tenant_id,
     require_admin_tenant_store,
 )
-from app.schemas.delivery_region import DeliveryRegionCreateIn, DeliveryRegionUpdateIn
+from app.core.limiter import limiter
+from app.schemas.delivery_region import (
+    DeliveryRegionConsultIn,
+    DeliveryRegionCreateIn,
+    DeliveryRegionUpdateIn,
+)
+from app.services.delivery_region_consult_service import consult_delivery_region
 from app.services.delivery_region_map_overview_service import delivery_region_map_overview
 from app.services.delivery_region_service import (
     create_delivery_region,
@@ -90,3 +96,20 @@ def delivery_regions_delete(
     tenant_id = require_admin_tenant_id(db, admin_username=admin_username)
     delete_delivery_region(db, region_id, tenant_id=tenant_id)
     return success(msg="已删除")
+
+
+@router.post("/delivery-region/consult")
+@limiter.limit("60/minute")
+def delivery_region_consult(
+    request: Request,
+    body: DeliveryRegionConsultIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，用于门店锚点到咨询点的直线距离；默认 1")] = 1,
+):
+    """客服/后台：核验地址或坐标是否在**启用配送片区**内（与承运方无关）；关键词依赖服务端高德地理编码。"""
+    _ = request
+    tenant_id = require_admin_tenant_id(db, admin_username=admin_username)
+    _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    payload = consult_delivery_region(db, tenant_id=int(tenant_id), store_id=int(sid), body=body)
+    return success(data=dump_model(payload), msg="校验完成")

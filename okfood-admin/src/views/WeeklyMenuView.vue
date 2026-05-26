@@ -1,15 +1,44 @@
 <script setup>
 defineOptions({ name: 'WeeklyMenuView' })
 import { computed, onMounted, ref } from 'vue'
-import { CornerDownRight, Info, Save, X } from 'lucide-vue-next'
+import { CornerDownRight, Info, X } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
 const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
+/** 上海日历日 YYYY-MM-DD（与配送/财务业务日一致） */
+function ymdInShanghai(date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const map = Object.fromEntries(parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]))
+  return `${map.year}-${map.month}-${map.day}`
+}
+
+function todayShanghaiYmd() {
+  return ymdInShanghai(new Date())
+}
+
+/** week_start 当周周一 + (slot-1) 天 → 该槽位日历日 */
+function slotCalendarYmd(row) {
+  const raw = String(row.weekStart || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!raw) return todayShanghaiYmd()
+  const base = new Date(`${raw[1]}-${raw[2]}-${raw[3]}T12:00:00+08:00`)
+  const ms = base.getTime() + (Number(row.slot) - 1) * 86400000
+  return ymdInShanghai(new Date(ms))
+}
+
+/** 早于今日（上海）的行不可改菜品、日总份（仍可查看） */
+function isSlotRowPast(row) {
+  return slotCalendarYmd(row) < todayShanghaiYmd()
+}
+
 const loading = ref(false)
 const savingSlot = ref(null)
-const savingAll = ref(false)
 const cloning = ref(false)
 const preview = ref(null)
 const dishes = ref([])
@@ -188,6 +217,10 @@ async function loadPreview() {
  * @param {{ silent?: boolean }} [opts]
  */
 async function onDishChange(row, dishId, opts = {}) {
+  if (isSlotRowPast(row)) {
+    if (!opts.silent) showToast('历史日期不可修改菜品', 'info')
+    return
+  }
   const key = `${row.weekStart}-${row.slot}`
   savingSlot.value = key
   try {
@@ -238,6 +271,7 @@ function buildTotalStockBody(row, opts = {}) {
  * @param {{ silent?: boolean, stockOverride?: string | null }} [opts]
  */
 async function onTotalStockCommit(row, opts = {}) {
+  if (isSlotRowPast(row)) return
   if (!row.dish_id) {
     if (!opts.silent) showToast('请先选择菜品', 'error')
     return
@@ -264,27 +298,6 @@ async function onTotalStockCommit(row, opts = {}) {
     throw e
   } finally {
     savingSlot.value = null
-  }
-}
-
-/** 提交所有周面板中未保存的日总份草稿 */
-async function saveAllPending() {
-  if (!preview.value) return
-  savingAll.value = true
-  try {
-    const rows = [...thisWeekRows.value, ...nextWeekRows.value]
-    for (const row of rows) {
-      const k = totalStockKey(row)
-      if (row.dish_id && Object.prototype.hasOwnProperty.call(totalStockDraft.value, k)) {
-        await onTotalStockCommit(row, { silent: true })
-      }
-    }
-    await loadPreview()
-    showToast('菜单修改已保存', 'success')
-  } catch {
-    /* onTotalStockCommit 已提示 */
-  } finally {
-    savingAll.value = false
   }
 }
 
@@ -341,7 +354,7 @@ async function cloneThisWeekToNext() {
 function isRowBusy(row) {
   const k1 = `${row.weekStart}-${row.slot}`
   const k2 = `${row.weekStart}-stock-${row.slot}`
-  return savingSlot.value === k1 || savingSlot.value === k2 || savingAll.value || cloning.value
+  return savingSlot.value === k1 || savingSlot.value === k2 || cloning.value
 }
 
 onMounted(() => {
@@ -352,30 +365,14 @@ onMounted(() => {
 
 <template>
   <div class="wmenu-page tab-content animate-up page-content-shell" v-loading="loading">
-    <!-- 页眉 -->
-    <header class="wmenu-header">
-      <div class="page-heading">
-        <h2 class="page-title">本周菜单</h2>
-        <p class="page-subtitle">Menu Scheduler Console</p>
-      </div>
-      <button
-        type="button"
-        class="wmenu-btn-save-all"
-        :disabled="loading || savingAll || !preview"
-        @click="saveAllPending"
-      >
-        <Save :size="16" stroke-width="2.5" aria-hidden="true" />
-        {{ savingAll ? '保存中…' : '确认保存更改' }}
-      </button>
-    </header>
-
-    <!-- 提示横条 -->
+    <!-- 提示横条：固定不随表格滚动 -->
     <div v-show="bannerVisible" class="wmenu-alert">
       <div class="wmenu-alert-content">
         <Info :size="18" stroke-width="2.5" aria-hidden="true" />
         <span>
           维护每周一至周日的固定槽位菜品（可与按日排期重复安排同一道菜）。日总份数：留空则单次卡不可售；填写后，单次可售
           = 总份数 − 应配送（订阅）− 单次零售（已支付）。「单次零售」列单独统计当日已付单次点餐份数，便于核对、避免漏单混淆。
+          <strong>早于今日（上海时区）的日期已锁定，仅可查看。</strong>
         </span>
       </div>
       <button type="button" class="wmenu-alert-close" aria-label="关闭提示" @click="bannerVisible = false">
@@ -383,7 +380,8 @@ onMounted(() => {
       </button>
     </div>
 
-    <div v-if="preview" class="wmenu-schedule-grid">
+    <div v-if="preview" class="wmenu-schedule-scroll">
+      <div class="wmenu-schedule-grid">
       <!-- 本周 -->
       <div class="wmenu-week-card">
         <div class="wmenu-week-card-header">
@@ -406,9 +404,19 @@ onMounted(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, idx) in thisWeekRows" :key="`this-${row.slot}`">
+              <tr
+                v-for="row in thisWeekRows"
+                :key="`this-${row.slot}`"
+                :class="{ 'wmenu-row--past': isSlotRowPast(row) }"
+              >
                 <td>
-                  <span class="wmenu-day-label" :class="{ 'wmenu-day-label--alt': idx % 2 === 1 }">
+                  <span
+                    class="wmenu-day-label"
+                    :class="[
+                      `wmenu-day-tone--${row.slot}`,
+                      { 'wmenu-day-label--past': isSlotRowPast(row) },
+                    ]"
+                  >
                     {{ row.weekday }}
                   </span>
                 </td>
@@ -432,7 +440,7 @@ onMounted(() => {
                     class="wmenu-total-input"
                     placeholder="留空=不限"
                     :value="totalStockFieldValue(row)"
-                    :disabled="isRowBusy(row)"
+                    :disabled="isRowBusy(row) || isSlotRowPast(row)"
                     @input="(e) => setTotalStockDraft(row, (e.target).value)"
                     @blur="() => onTotalStockCommit(row)"
                   />
@@ -459,7 +467,7 @@ onMounted(() => {
                     placeholder="选择菜品"
                     class="wmenu-dish-select"
                     :loading="savingSlot === `${row.weekStart}-${row.slot}`"
-                    :disabled="isRowBusy(row)"
+                    :disabled="isRowBusy(row) || isSlotRowPast(row)"
                     @update:model-value="(v) => onDishChange(row, v)"
                   >
                     <el-option
@@ -510,9 +518,19 @@ onMounted(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, idx) in nextWeekRows" :key="`next-${row.slot}`">
+              <tr
+                v-for="row in nextWeekRows"
+                :key="`next-${row.slot}`"
+                :class="{ 'wmenu-row--past': isSlotRowPast(row) }"
+              >
                 <td>
-                  <span class="wmenu-day-label" :class="{ 'wmenu-day-label--alt': idx % 2 === 1 }">
+                  <span
+                    class="wmenu-day-label"
+                    :class="[
+                      `wmenu-day-tone--${row.slot}`,
+                      { 'wmenu-day-label--past': isSlotRowPast(row) },
+                    ]"
+                  >
                     {{ row.weekday }}
                   </span>
                 </td>
@@ -536,7 +554,7 @@ onMounted(() => {
                     class="wmenu-total-input"
                     placeholder="留空=不限"
                     :value="totalStockFieldValue(row)"
-                    :disabled="isRowBusy(row)"
+                    :disabled="isRowBusy(row) || isSlotRowPast(row)"
                     @input="(e) => setTotalStockDraft(row, (e.target).value)"
                     @blur="() => onTotalStockCommit(row)"
                   />
@@ -563,7 +581,7 @@ onMounted(() => {
                     placeholder="选择菜品"
                     class="wmenu-dish-select"
                     :loading="savingSlot === `${row.weekStart}-${row.slot}`"
-                    :disabled="isRowBusy(row)"
+                    :disabled="isRowBusy(row) || isSlotRowPast(row)"
                     @update:model-value="(v) => onDishChange(row, v)"
                   >
                     <el-option
@@ -580,11 +598,29 @@ onMounted(() => {
           </table>
         </div>
       </div>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.wmenu-page.page-content-shell {
+  /* 抵消 main-body 水平 padding，双表尽量沾满内容区宽度 */
+  margin-left: -1rem;
+  margin-right: -1rem;
+  width: calc(100% + 2rem);
+  box-sizing: border-box;
+  padding-bottom: 0.75rem;
+}
+
+@media (max-width: 900px) {
+  .wmenu-page.page-content-shell {
+    margin-left: 0;
+    margin-right: 0;
+    width: 100%;
+  }
+}
+
 .wmenu-page {
   --wmenu-primary: #0d5c46;
   --wmenu-primary-hover: #0a4635;
@@ -597,49 +633,11 @@ onMounted(() => {
   --wmenu-danger-text: #ef4444;
   --wmenu-blue: #3b82f6;
   --wmenu-blue-bg: #eff6ff;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 24px;
-}
-
-.wmenu-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  padding: 24px 32px;
-  background: #fff;
-  border-radius: 28px;
-  border: 1px solid var(--wmenu-border);
-  box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.05);
-}
-
-.wmenu-btn-save-all {
-  background: var(--wmenu-primary);
-  color: #fff;
-  border: none;
-  padding: 12px 28px;
-  border-radius: 16px;
-  font-size: 13px;
-  font-weight: 800;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 8px 16px -4px rgba(13, 92, 70, 0.25);
-  transition: all 0.3s ease;
-}
-
-.wmenu-btn-save-all:hover:not(:disabled) {
-  background: var(--wmenu-primary-hover);
-  transform: translateY(-1px);
-}
-
-.wmenu-btn-save-all:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-  transform: none;
+  gap: 16px;
 }
 
 .wmenu-alert {
@@ -681,6 +679,16 @@ onMounted(() => {
 
 .wmenu-alert-close:hover {
   opacity: 1;
+}
+
+/* 本周/下周整块：仅占满剩余视口的滚动区（提示横条不参与滚动） */
+.wmenu-schedule-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 4px;
 }
 
 .wmenu-schedule-grid {

@@ -262,11 +262,7 @@ onMounted(fetchList)
 
 <template>
   <div class="mcard-page tab-content animate-up page-content-shell">
-    <div class="page-content-title-row">
-      <div class="page-heading">
-        <h2 class="page-title">会员卡管理</h2>
-        <p class="page-subtitle">Card Template Management Panel</p>
-      </div>
+    <div class="page-content-title-row page-content-title-row--actions-only">
       <div class="page-content-title-actions">
         <div class="mcard-store-selector">
           <label for="mcard-store-id">门店 ID</label>

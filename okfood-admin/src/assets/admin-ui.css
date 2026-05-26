@@ -423,16 +423,18 @@
 }
 
 .sidebar {
-  width: 235px;
-  background-color: #064e3b;
-  color: white;
-  padding: 2.5rem 1.5rem;
+  /* 参考超级后台稿：brand-sidebar-bg + 单列导航 */
+  width: 250px;
+  background-color: #093f30;
+  color: #ffffff;
+  padding: 0;
   display: flex;
   flex-direction: column;
   position: fixed;
   height: 100vh;
   z-index: 100;
-  box-shadow: 10px 0 30px rgba(0, 0, 0, 0.1);
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
   transition:
     width 0.22s ease,
     padding 0.22s ease;
@@ -441,15 +443,18 @@
 /* 桌面下窄侧栏：与 el-menu collapse 宽度对齐，仅显示图标（约 64px） */
 .sidebar.sidebar--collapsed {
   width: 64px;
-  padding: 1.65rem 0.2rem;
+  padding: 1rem 0.35rem;
 }
 
 .logo-area {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  margin-bottom: 4rem;
-  padding: 0 0.5rem;
+  gap: 12px;
+  flex-shrink: 0;
+  margin-bottom: 0;
+  padding: 24px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background-color: rgba(0, 0, 0, 0.1);
 }
 
 .sidebar.sidebar--collapsed .logo-area {
@@ -460,10 +465,10 @@
 }
 
 .sidebar.sidebar--collapsed .logo-box {
-  width: 2.25rem;
-  height: 2.25rem;
-  font-size: 1.2rem;
-  border-radius: 0.75rem;
+  width: 40px;
+  height: 40px;
+  font-size: 15px;
+  border-radius: 11px;
 }
 
 .sidebar-collapse-toggle {
@@ -494,33 +499,39 @@
 }
 
 .logo-box {
-  width: 3rem;
-  height: 3rem;
-  background: white;
-  border-radius: 1rem;
+  width: 40px;
+  height: 40px;
+  background-color: #ffffff;
+  border-radius: 11px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.75rem;
-  transform: rotate(6deg);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
-  color: #0e5a44;
+  font-weight: 900;
+  font-size: 18px;
+  font-style: italic;
+  line-height: 1;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  color: #0d5c46;
+  flex-shrink: 0;
 }
 
 .logo-text h1 {
-  font-size: 1.25rem;
-  font-weight: 900;
-  font-style: italic;
-  letter-spacing: -1px;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
   margin: 0;
+  font-style: normal;
   color: inherit;
 }
 
 .logo-text span {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
-  opacity: 0.4;
-  letter-spacing: 2px;
+  opacity: 0.6;
+  letter-spacing: 0.08em;
+  display: block;
+  margin-top: 1px;
 }
 
 .nav-list {
@@ -608,17 +619,21 @@
   flex: 1;
   /* 允许在 admin-layout 横向 flex 下收缩，避免子内容把主区宽度撑破出现「横向不断增长」 */
   min-width: 0;
-  margin-left: 235px;
+  margin-left: 250px;
   padding: 1rem 1rem;
   transition: margin-left 0.22s ease;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
-.admin-notifications-bar {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  z-index: 40;
+/* 顶栏 / 附属工具条之下的主视区：flex-basis 0 更易吃满纵向剩余空间（避免仅随内容长高） */
+.main-body__router-host {
+  flex: 1 1 0%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .admin-notifications-bell {
@@ -725,19 +740,216 @@
   color: #334155;
 }
 
-.admin-system-notifications-item__actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.top-header--with-bell {
-  padding-right: 3.25rem;
-}
-
 .admin-layout.admin-layout--sidebar-collapsed .main-body {
   margin-left: 64px;
+}
+
+/* 顶栏：标签行 + 右侧铃铛（参考稿 top-tab-scroller / tab-tag-item） */
+.admin-top-tab-bar {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0.75rem;
+  min-height: 56px;
+  margin: -1rem -1rem 1rem;
+  padding: 0 clamp(1rem, 2.4vw, 1.5rem);
+  flex-shrink: 0;
+  background: #ffffff;
+  border-bottom: 1px solid #eaedf1;
+  box-sizing: border-box;
+}
+
+.admin-top-tab-bar__trailing {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  justify-content: center;
+  gap: 0.65rem;
+}
+
+/* 全局顶栏电子钟（上海时区）：铃铛与用户菜单之间 */
+.admin-header-live-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
+  font-style: normal;
+  line-height: 1.15;
+  padding: 0 4px;
+}
+
+.admin-header-live-clock__hm {
+  font-size: clamp(15px, 1.25vw, 18px);
+  font-weight: 800;
+  color: #0d5c46;
+}
+
+.admin-header-live-clock__date {
+  margin-top: 3px;
+  font-size: clamp(12px, 1vw, 14px);
+  font-weight: 700;
+  color: #475569;
+}
+
+/* 顶栏：当前登录用户（JWT sub 优先） */
+.admin-user-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 12rem;
+  padding: 0.28rem 0.65rem 0.28rem 0.28rem;
+  margin: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  cursor: pointer;
+  font: inherit;
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.admin-user-menu-trigger:hover {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+}
+.admin-user-menu-trigger:focus-visible {
+  box-shadow: 0 0 0 2px rgba(13, 92, 70, 0.25);
+  border-color: #0d5c46;
+}
+
+.admin-user-avatar {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0d5c46 0%, #059669 100%);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-user-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.admin-top-tab-bar .admin-page-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border-bottom: none;
+  display: flex;
+  align-items: center;
+}
+
+.admin-top-tab-bar .admin-page-tabs__scroll--top-bar {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: clamp(10px, 1.8vw, 16px);
+  padding: 4px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  /* 横向滚动时需可见细滚动条，避免用户不知道可滑动 */
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 transparent;
+}
+.admin-top-tab-bar .admin-page-tabs__scroll--top-bar::-webkit-scrollbar {
+  height: 6px;
+}
+.admin-top-tab-bar .admin-page-tabs__scroll--top-bar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgb(148 163 184 / 0.75);
+}
+
+.admin-top-tab-bar .admin-page-tab {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 16rem;
+  padding: 8px 18px;
+  gap: 10px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.25;
+  border: 1px solid #b8c5d6;
+  /* 非激活态：背景与文字对比加重，便于扫读 */
+  background: linear-gradient(180deg, #d1dce8 0%, #c5d4e3 100%);
+  color: #1e293b;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    0 1px 2px rgb(15 23 42 / 0.06);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.admin-top-tab-bar .admin-page-tab:hover {
+  background: linear-gradient(180deg, #c3d2e4 0%, #b7cadb 100%);
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+
+.admin-top-tab-bar .admin-page-tab--active {
+  background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%);
+  color: #064e3b;
+  border-color: #0d5c46;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.75),
+    0 4px 12px rgb(13 92 70 / 0.12);
+  font-weight: 900;
+}
+
+.admin-top-tab-bar .admin-page-tab__icon {
+  flex-shrink: 0;
+  color: currentColor;
+  opacity: 0.92;
+}
+
+.admin-top-tab-bar .admin-page-tab__close {
+  opacity: 0.65;
+}
+.admin-top-tab-bar .admin-page-tab__close:hover {
+  opacity: 1;
+}
+
+/* 配送大表：Teleport 工具条挂载点（接替原 header 内 #delivery-header-toolbar） */
+.admin-delivery-toolbar-host {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 .top-header {
@@ -850,6 +1062,12 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
+}
+
+/* 已取消顶栏大字标题后：仅保留右侧操作区 */
+.page-content-title-row--actions-only {
+  justify-content: flex-end;
+  align-items: center;
 }
 
 .members-header-stats {
@@ -1098,6 +1316,60 @@
   overflow: hidden;
 }
 
+/* 会员档案：占满主视区纵向剩余高度，表体在 el-table 内滚动 */
+.members-view-fill {
+  flex: 1 1 0%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.table-container.table-container--members-fill {
+  flex: 1 1 0%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.table-container.table-container--members-fill > .table-header {
+  flex-shrink: 0;
+}
+
+.members-table-host {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.table-container.table-container--members-fill > .members-pagination {
+  flex-shrink: 0;
+}
+
+/* 开卡工单：与会员档案同款纵向铺满，表体在表格内滚动，分页条始终在卡片底部靠右 */
+.card-orders-view-fill {
+  flex: 1 1 0%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.table-container.table-container--card-orders-fill {
+  flex: 1 1 0%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.table-container.table-container--card-orders-fill > .table-header {
+  flex-shrink: 0;
+}
+
+.table-container.table-container--card-orders-fill > .members-pagination {
+  flex-shrink: 0;
+}
+
 .table-container-finance {
   margin-top: 2rem;
 }
@@ -1110,23 +1382,93 @@
 .table-header--members {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
   border-bottom: 1px solid #e2e8f0;
 }
 
-/* 会员档案：搜索 + 筛选同一行；极窄屏可横向滑动 */
-.members-query-row {
+/* 会员档案顶栏单行：左侧「搜索 + 筛选（可横向滑）」，右侧「统计 + 导出」 */
+.members-toolbar-row {
   display: flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem 0.65rem;
+  gap: 10px 12px;
   width: 100%;
+}
+
+.members-toolbar-primary {
+  display: flex;
+  align-items: center;
+  gap: 8px 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.members-toolbar-filters-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   padding-bottom: 2px;
+}
+
+.members-toolbar-trailing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  flex: 0 1 auto;
+  margin-left: auto;
+}
+
+.members-toolbar-row .members-toolbar-primary .search-box.search-box--members-inline {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 9rem;
+  max-width: min(17.5rem, 100%);
+}
+
+.members-toolbar-filters-scroll .members-filter-toolbar {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 0.45rem 0.55rem;
+  width: max-content;
+  max-width: none;
+}
+
+.members-export-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  align-self: center;
+}
+
+.members-toolbar-filters-scroll .members-region-select {
+  min-width: 5.75rem;
+  max-width: 9.5rem;
+  padding: 0.4rem 0.65rem;
+  font-size: 12px;
+}
+
+.members-toolbar-filters-scroll .members-filter-label {
+  font-size: 12px;
+}
+
+.members-toolbar-filters-scroll .members-validity-tab {
+  padding: 0.45rem 0.85rem;
+  font-size: 12px;
+}
+
+.members-toolbar-filters-scroll .members-validity-tabs {
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+}
+
+.members-toolbar-filters-scroll .members-extra-filters {
+  flex-wrap: nowrap;
+  gap: 0.35rem 0.45rem;
 }
 
 .search-box.search-box--members-inline {
@@ -1142,44 +1484,6 @@
   padding: 0.6rem 0;
   font-size: 13px;
   font-weight: 600;
-}
-
-.members-query-row .members-filter-toolbar {
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
-  gap: 0.45rem 0.55rem;
-}
-
-.members-export-actions {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  align-self: center;
-}
-.members-query-row .members-region-select {
-  min-width: 5.75rem;
-  max-width: 9.5rem;
-  padding: 0.4rem 0.65rem;
-  font-size: 12px;
-}
-
-.members-query-row .members-filter-label {
-  font-size: 12px;
-}
-
-.members-query-row .members-validity-tab {
-  padding: 0.45rem 0.85rem;
-  font-size: 12px;
-}
-
-.members-query-row .members-validity-tabs {
-  flex-wrap: nowrap;
-  gap: 0.35rem;
-}
-
-.members-query-row .members-extra-filters {
-  flex-wrap: nowrap;
-  gap: 0.35rem 0.45rem;
 }
 
 .members-recharge-hint {
@@ -1392,6 +1696,22 @@
 }
 .admin-table--members.el-table .el-table__body tr:hover > td.el-table__cell {
   background: #fafafa;
+}
+
+/* 会员档案主表：max-height 后仅表体区域纵向滚动，表头固定 */
+.members-el-table-body-scroll.el-table .el-table__body-wrapper {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.2) transparent;
+}
+
+.members-el-table-body-scroll.el-table .el-table__body-wrapper::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.members-el-table-body-scroll.el-table .el-table__body-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 999px;
 }
 
 /* 会员档案表：紧凑行高（配合 size="small"），避免日期/操作折行撑高 */
@@ -1873,6 +2193,11 @@
   margin-left: 0.5rem;
 }
 
+.btn-sm:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .btn-sm.secondary {
   background: #1e293b;
 }
@@ -2173,6 +2498,11 @@
   background: #fafafa;
 }
 
+/* 分页行用 gap 控制间距，避免 .btn-sm 默认 margin-left 与 flex 叠加错位 */
+.members-pagination .btn-sm {
+  margin-left: 0;
+}
+
 .members-page-meta {
   font-size: 12px;
   font-weight: 700;
@@ -2185,45 +2515,6 @@
 
 .menu-section {
   width: 100%;
-}
-
-.dish-internal-sop-banner {
-  margin-bottom: 1.25rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 1rem;
-  background: #f8fafc;
-  padding: 0.75rem 1rem;
-}
-
-.dish-internal-sop-summary {
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 800;
-  color: #475569;
-  list-style: none;
-}
-
-.dish-internal-sop-summary::-webkit-details-marker {
-  display: none;
-}
-
-.dish-internal-sop-content {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid #e2e8f0;
-}
-
-.dish-internal-sop-list {
-  margin: 0;
-  padding-left: 1.25rem;
-  font-size: 12px;
-  line-height: 1.55;
-  color: #64748b;
-  font-weight: 600;
-}
-
-.dish-internal-sop-list li {
-  margin-bottom: 0.35rem;
 }
 
 .dish-toolbar {
@@ -2264,13 +2555,13 @@
 
 .menu-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 2rem;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 1.15rem;
 }
 
 .menu-card {
   background: white;
-  border-radius: 2.5rem;
+  border-radius: 1.25rem;
   border: 1px solid #f1f5f9;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
   overflow: hidden;
@@ -2281,12 +2572,12 @@
 }
 
 .menu-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.05);
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.045);
 }
 
 .menu-card-img {
-  height: 200px;
+  height: 140px;
   background: #f1f5f9;
   position: relative;
   overflow: hidden;
@@ -2300,26 +2591,26 @@
 
 .menu-date-tag {
   position: absolute;
-  top: 1rem;
-  left: 1rem;
+  top: 0.55rem;
+  left: 0.55rem;
   background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(8px);
   color: white;
-  padding: 4px 12px;
+  padding: 3px 8px;
   border-radius: 99px;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 900;
 }
 
 .menu-sync-badge {
   position: absolute;
-  top: 1rem;
-  right: 1rem;
+  top: 0.55rem;
+  right: 0.55rem;
   background: #facc15;
   color: #0e5a44;
-  padding: 4px 12px;
+  padding: 3px 8px;
   border-radius: 99px;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 900;
 }
 .menu-sync-badge--off {
@@ -2329,42 +2620,43 @@
 
 .menu-card-meta {
   margin: 0;
-  padding: 0.75rem 1.5rem 0;
-  font-size: 12px;
+  padding: 0.5rem 0.95rem 0;
+  font-size: 10px;
   font-weight: 900;
   color: #0e5a44;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
 }
 
 .menu-card-body {
-  padding: 1.5rem;
+  padding: 0.85rem 0.95rem 1rem;
   flex: 1;
   display: flex;
   flex-direction: column;
 }
 
 .menu-dish-title {
-  font-size: 1.125rem;
+  font-size: 0.95rem;
   font-weight: 950;
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.35rem;
   color: #1e293b;
+  line-height: 1.3;
 }
 
 .menu-dish-desc {
-  font-size: 12px;
+  font-size: 11px;
   color: #94a3b8;
   font-style: italic;
-  line-height: 1.5;
-  margin: 0 0 0.5rem;
+  line-height: 1.45;
+  margin: 0 0 0.4rem;
   flex: 1;
 }
 
 .menu-dish-price {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 750;
   color: #0f766e;
-  margin: 0 0 1.25rem;
+  margin: 0 0 0.65rem;
 }
 
 .menu-card-actions {
@@ -2381,14 +2673,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
+  gap: 0.3rem;
   flex: 1;
-  padding: 0.75rem;
-  border-radius: 0.75rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.55rem;
   background: #fff1f2;
   color: #e11d48;
   font-weight: 900;
-  font-size: 11px;
+  font-size: 10px;
   border: none;
   cursor: pointer;
   font-family: inherit;
@@ -2414,12 +2706,12 @@
 
 .menu-btn-ghost {
   flex: 1;
-  padding: 0.75rem;
-  border-radius: 0.75rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.55rem;
   background: #f8fafc;
   color: #475569;
   font-weight: 900;
-  font-size: 11px;
+  font-size: 10px;
   border: none;
   cursor: pointer;
   font-family: inherit;
@@ -2449,18 +2741,19 @@
 }
 
 .menu-add-card {
-  border: 3px dashed #e2e8f0;
+  border: 2px dashed #e2e8f0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 350px;
+  min-height: 280px;
   color: #cbd5e1;
   font-weight: 900;
-  gap: 1rem;
+  gap: 0.65rem;
   cursor: pointer;
   font-family: inherit;
   background: #fafafa;
+  border-radius: 1.25rem;
 }
 
 .menu-add-card:hover {
@@ -2470,13 +2763,13 @@
 }
 
 .menu-add-plus {
-  font-size: 3rem;
+  font-size: 2.25rem;
   line-height: 1;
   font-weight: 300;
 }
 
 .menu-add-label {
-  font-size: 0.875rem;
+  font-size: 0.8rem;
 }
 
 .modal-overlay {
@@ -3221,52 +3514,7 @@
   }
 }
 
-/* 主区横向 Tab（KeepAlive 多页切换） */
-.admin-page-tabs {
-  margin: 0 0 1rem;
-  min-width: 0;
-  padding-bottom: 0.7rem;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
-}
-
-.admin-page-tabs__scroll {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 0.35rem;
-  overflow-x: auto;
-  padding-bottom: 0.1rem;
-}
-
-.admin-page-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex: 0 0 auto;
-  max-width: 12rem;
-  padding: 0.35rem 0.55rem 0.35rem 0.75rem;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  color: rgba(15, 23, 42, 0.72);
-  font-size: 0.8125rem;
-  line-height: 1.2;
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-
-.admin-page-tab:hover {
-  border-color: rgba(15, 23, 42, 0.18);
-  color: rgba(15, 23, 42, 0.92);
-}
-
-.admin-page-tab--active {
-  border-color: rgba(234, 179, 8, 0.55);
-  background: rgba(254, 249, 195, 0.65);
-  color: rgba(15, 23, 42, 0.95);
-  font-weight: 600;
-}
-
+/* Tab 正文：标签溢出省略（顶栏共用） */
 .admin-page-tab__label {
   overflow: hidden;
   text-overflow: ellipsis;

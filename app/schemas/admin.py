@@ -174,7 +174,7 @@ class StoreConfigOut(BaseModel):
     )
     sf_nightly_auto_push_enabled: bool = Field(
         False,
-        description="每日 07:00（上海）自动向顺丰推送当日业务日配送大表（订阅合并）订单；单次零售须手动推单",
+        description="每日 08:50（上海）自动向顺丰推送当日业务日配送大表（订阅合并）订单；单次零售须手动推单",
     )
     sf_retail_push_shop_id: str | None = Field(
         None,
@@ -543,6 +543,11 @@ class DashboardMealSummaryOut(BaseModel):
         ...,
         ge=0,
         description="锚定日已支付单次零售订单份数合计（sum(single_meal_orders.quantity)）",
+    )
+    tomorrow_single_retail_total_quantity: int = Field(
+        ...,
+        ge=0,
+        description="锚定日次日（明日）已支付单次零售订单份数合计，口径与 today_single_retail_total_quantity 一致",
     )
     total_members: int = Field(
         ...,
@@ -1153,7 +1158,7 @@ class PlatformStoreOut(BaseModel):
     leave_deadline_time: str = Field("", description="HH:MM:SS")
     sf_nightly_auto_push_enabled: bool = Field(
         False,
-        description="是否启用每日 07:00 自动顺丰推单（当日业务日配送大表；单次零售手动）",
+        description="是否启用每日 08:50 自动顺丰推单（当日业务日配送大表；单次零售手动）",
     )
     created_at: str
 
@@ -1168,7 +1173,7 @@ class PlatformStoreCreateIn(BaseModel):
     is_active: bool = True
     sf_nightly_auto_push_enabled: bool = Field(
         False,
-        description="启用后系统于每日 07:00（上海）自动推送当日配送大表订单至顺丰；单次零售请在订单管理手动推单",
+        description="启用后系统于每日 08:50（上海）自动推送当日配送大表订单至顺丰；单次零售请在订单管理手动推单",
     )
 
 

@@ -29,7 +29,12 @@ export function registerAdminRouter(r) {
   adminRouter = r
 }
 
-function peekJwtRole(token) {
+/**
+ * 解析管理端 JWT payload（仅客户端展示用，勿用于安全决策）。
+ * @param {string | undefined | null} token
+ * @returns {object | null} 含 role、sub；失败为 null
+ */
+function peekJwtPayload(token) {
   const t = String(token || '').trim()
   if (!t) return null
   try {
@@ -39,10 +44,29 @@ function peekJwtRole(token) {
     const padLen = (4 - (b64.length % 4)) % 4
     const padded = b64 + '='.repeat(padLen)
     const json = JSON.parse(atob(padded))
-    return typeof json.role === 'string' ? json.role : null
+    const role = typeof json.role === 'string' ? json.role : null
+    const subRaw = typeof json.sub === 'string' ? json.sub.trim() : ''
+    return { role, sub: subRaw }
   } catch {
     return null
   }
+}
+
+/** @param {string | undefined | null} token */
+function peekJwtRole(token) {
+  const p = peekJwtPayload(token)
+  return p && p.role != null ? p.role : null
+}
+
+/**
+ * 管理端 JWT 的 subject（与后端 issue_admin_token 的 username 一致），用于顶栏展示登录名。
+ * @param {string | undefined | null} token
+ * @returns {string}
+ */
+export function peekAdminJwtUsername(token) {
+  const p = peekJwtPayload(token)
+  const s = (p && p.sub ? String(p.sub) : '').trim()
+  return s
 }
 
 function persistAdminKind(kind) {

@@ -28,8 +28,18 @@ let mouseTool = null
 let mapPolygon = null
 /** 多边形折点拖拽编辑（高德 AMap.PolygonEditor） */
 let polygonEditor = null
+/** 地图容器尺寸变化时调用 resize，避免区域拉高后画布仍偏小 */
+let mapResizeObserver = null
 
-const editingId = ref(null)
+function disposeMapResizeObserver() {
+  if (!mapResizeObserver) return
+  try {
+    mapResizeObserver.disconnect()
+  } catch {
+    /* ignore */
+  }
+  mapResizeObserver = null
+}
 const formName = ref('')
 const formCode = ref('')
 const formPriority = ref(0)
@@ -130,6 +140,7 @@ async function initMap() {
   }
   try {
     await loadAmapScript()
+    disposeMapResizeObserver()
     if (map) {
       closePolygonEditor()
       if (mapPolygon) {
@@ -150,6 +161,25 @@ async function initMap() {
       mapStyle: 'amap://styles/normal',
     })
     centerMapToUserOrXinxiang()
+
+    await nextTick()
+    requestAnimationFrame(() => {
+      try {
+        map?.resize?.()
+      } catch {
+        /* ignore */
+      }
+    })
+    if (typeof ResizeObserver !== 'undefined' && mapEl.value) {
+      mapResizeObserver = new ResizeObserver(() => {
+        try {
+          map?.resize?.()
+        } catch {
+          /* ignore */
+        }
+      })
+      mapResizeObserver.observe(mapEl.value)
+    }
   } catch (e) {
     map = null
     const msg = e instanceof Error ? e.message : '地图加载失败'
@@ -492,6 +522,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposeMapResizeObserver()
   closePolygonEditor()
   if (mouseTool) mouseTool.close()
   if (map) {
@@ -620,6 +651,11 @@ onUnmounted(() => {
 <style scoped>
 .regions-panel {
   width: 100%;
+  min-width: 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .regions-hint {
   font-size: 13px;
@@ -638,13 +674,19 @@ onUnmounted(() => {
 .regions-layout {
   display: grid;
   grid-template-columns: minmax(280px, 340px) 1fr;
+  /* 单行双列时拉高整行，地图与侧栏同高并吃满主视区 */
+  grid-template-rows: 1fr;
   gap: 1.25rem;
-  min-height: calc(100vh - 11rem);
   align-items: stretch;
+  flex: 1;
+  min-height: 0;
 }
 @media (max-width: 900px) {
   .regions-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    flex: 1;
+    min-height: 0;
   }
 }
 .regions-side {
@@ -654,7 +696,7 @@ onUnmounted(() => {
   border: 1px solid #e2e8f0;
   border-radius: 1.25rem;
   padding: 1rem;
-  max-height: min(85vh, calc(100vh - 8rem));
+  max-height: none;
   overflow: auto;
   min-height: 0;
 }
@@ -722,7 +764,8 @@ onUnmounted(() => {
 .regions-main {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 11rem);
+  flex: 1;
+  min-height: 0;
   min-width: 0;
   position: relative;
 }
@@ -787,11 +830,16 @@ onUnmounted(() => {
 .regions-map {
   flex: 1;
   width: 100%;
-  min-height: 480px;
-  height: calc(100vh - 12rem);
+  /* min-height:0 才能在本列 flex 里占满剩余高度；小屏下限见下方 media */
+  min-height: 0;
   border-radius: 1.25rem;
   border: 1px solid #e2e8f0;
   background: #f1f5f9;
+}
+@media (max-width: 900px) {
+  .regions-map {
+    min-height: 320px;
+  }
 }
 .regions-inline-form {
   flex-shrink: 0;

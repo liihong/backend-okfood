@@ -123,13 +123,14 @@ python -m app.jobs.worker
 |------|--------------|------|
 | 请假标记重置 | 每日 00:01 | 清理过期「明日请假」与长期请假区间 |
 | 低余额扫描 | 每日 18:00 | 兜底扫描（主路径为扣次后订阅消息） |
-| 顺丰自动推单 | 每日 07:00 | 对已启用自动推单的门店推送当日配送大表 |
+| 顺丰自动推单 | 每日 08:50 | 对已启用自动推单的门店推送当日配送大表 |
 
 ### 5. 验证
 
 - 健康检查：`GET /health`（无需 `/api` 前缀）
 - 在线文档：`/docs`（Swagger）、`/redoc`
 - 冒烟测试：`pytest`（无需真实 MySQL）
+- 配送资质核验：`scripts/curl_delivery_region_consult.sh`（`POST /api/admin/delivery-region/consult`）
 
 ---
 

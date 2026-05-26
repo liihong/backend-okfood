@@ -60,7 +60,7 @@
                 deliveryMode === 'pickup' ? '开始自提日期' : '开始配送日期'
               }}</text>
               <text class="sec-sub">
-                以上海业务日历为准；10:00 前可选当日为起点，否则从次日起选。
+                以上海业务日历为准；最早可选「今天」为起点。
               </text>
               <picker mode="date" :value="pickerDeliveryYmd" :start="minDeliveryYmd" @change="onDeliveryPick">
                 <view class="date-picker-row">

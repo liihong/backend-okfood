@@ -26,12 +26,13 @@ def tomorrow_shanghai() -> date:
 
 
 def min_member_delivery_start_shanghai(now: datetime | None = None) -> date:
-    """会员起送业务日允许选择的最早日期（上海）：当日 10:00 前最早为今天，10:00 及之后最早为明天。"""
+    """会员起送业务日允许选择的最早日期（上海）：与当前上海日历对齐，即最早为「今天」。
+
+    说明：曾与「当日 10:00 起最早只能次日」的运营截点绑定；现改为全天可选当日，
+    便于后台开卡后与顺丰等平台人工补单对齐；备货与派送仍由各业务日规则与履约侧兜底。
+    """
     n = now if now is not None else now_shanghai()
-    t = n.date()
-    if n.time() >= time(10, 0, 0):
-        return t.fromordinal(t.toordinal() + 1)
-    return t
+    return n.date()
 
 
 def min_leave_start_shanghai(now: datetime | None = None) -> date:

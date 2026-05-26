@@ -1,6 +1,6 @@
 <script setup>
 defineOptions({ name: 'CardOrdersView' })
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { CreditCard, MapPin, Plus, Search, UserRound, X, Zap } from 'lucide-vue-next'
 import {
   apiJson,
@@ -14,8 +14,25 @@ import MemberDeliveryMapPicker from '../components/MemberDeliveryMapPicker.vue'
 const list = ref([])
 const loading = ref(false)
 const page = ref(1)
-const pageSize = ref(20)
+/** 每页条数；与接口 page_size 一致；表体在 el-table 内滚动，分页条固定在卡片底部右侧（当前 15 条/页） */
+const pageSize = ref(15)
 const total = ref(0)
+
+/** 包裹 el-table，用于测量可用高度（px） */
+const cardOrdersTableHostRef = ref(null)
+/** 表格总高度（含表头）；表体在内部滚动 */
+const cardOrdersTableScrollHeight = ref(400)
+/** @type {ResizeObserver | null} */
+let cardOrdersTableResizeObserver = null
+
+function updateCardOrdersTableHeight() {
+  const el = cardOrdersTableHostRef.value
+  if (!el) return
+  const h = Math.floor(el.getBoundingClientRect().height)
+  if (h >= 160) {
+    cardOrdersTableScrollHeight.value = h
+  }
+}
 const searchQuery = ref('')
 const payFilter = ref('')
 /** 默认 true：进入页面即查全部历史；取消勾选则仅待处理（未缴或已缴未入账） */
@@ -463,12 +480,26 @@ async function submitEdit() {
 
 onMounted(() => {
   void fetchList()
+  void nextTick(() => {
+    updateCardOrdersTableHeight()
+    cardOrdersTableResizeObserver = new ResizeObserver(() => {
+      updateCardOrdersTableHeight()
+    })
+    if (cardOrdersTableHostRef.value) {
+      cardOrdersTableResizeObserver.observe(cardOrdersTableHostRef.value)
+    }
+  })
+})
+
+onUnmounted(() => {
+  cardOrdersTableResizeObserver?.disconnect()
+  cardOrdersTableResizeObserver = null
 })
 </script>
 
 <template>
- <section class="tab-content animate-up card-orders-page">
-    <div class="table-container">
+ <section class="tab-content animate-up card-orders-page card-orders-view-fill">
+    <div class="table-container table-container--card-orders-fill">
       <div class="table-header table-header--members table-header--couriers-row">
         <div class="search-box search-box--flex">
           <Search :size="18" />
@@ -494,15 +525,17 @@ onMounted(() => {
         </div>
       </div>
 
-      <AdminTable
-class="card-orders-table"
-        variant="members"
-size="small"
-        :data="list"
-        :loading="loading"
-        row-key="id"
-        empty-text="暂无工单"
-      >
+      <div ref="cardOrdersTableHostRef" class="members-table-host">
+        <AdminTable
+          class="card-orders-table"
+          variant="members"
+          size="small"
+          :data="list"
+          :loading="loading"
+          row-key="id"
+          empty-text="暂无工单"
+          :height="cardOrdersTableScrollHeight"
+        >
        <el-table-column label="单号" width="80" class-name="td-mono td-co-id">
           <template #default="{ row }">#{{ row.id }}</template>
         </el-table-column>
@@ -557,7 +590,13 @@ size="small"
             <span :class="payStatusClass(row.pay_status)">{{ row.pay_status }}</span>
           </template>
         </el-table-column>
-       <el-table-column label="实收" align="right" width="60" class-name="co-amt">
+       <el-table-column
+          label="实收"
+          align="right"
+          width="88"
+          min-width="80"
+          class-name="td-mono co-nowrap td-co-amt-col"
+        >
           <template #default="{ row }">
            <span class="font-black co-amt-num">
               {{ formatAmountYuanInteger(row.amount_yuan) }}
@@ -603,7 +642,8 @@ class="member-pill"
             </span>
           </template>
         </el-table-column>
-      </AdminTable>
+        </AdminTable>
+      </div>
       <div v-if="adminAccessToken" class="members-pagination">
         <button type="button" class="btn-sm" :disabled="page <= 1" @click="goPrev">上一页</button>
         <span class="members-page-meta">第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 条</span>
@@ -1506,13 +1546,16 @@ class="member-pill"
 .card-orders-page :deep(.td-co-sync .cell),
 .card-orders-page :deep(.td-co-phone-col .cell),
 .card-orders-page :deep(.td-co-card-kind .cell),
-.card-orders-page :deep(.td-co-pay-status .cell) {
+.card-orders-page :deep(.td-co-pay-status .cell),
+.card-orders-page :deep(.td-co-amt-col .cell) {
   overflow: visible;
   text-overflow: clip;
 }
 
 .co-amt-num {
   font-weight: 900;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .co-remark-text {

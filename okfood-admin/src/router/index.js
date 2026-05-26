@@ -23,6 +23,7 @@ const SfOrdersMonitorView = () => import('../views/SfOrdersMonitorView.vue')
 const TenantsView = () => import('../views/TenantsView.vue')
 const MembershipTemplatesView = () => import('../views/MembershipTemplatesView.vue')
 const RetailCatalogView = () => import('../views/RetailCatalogView.vue')
+const DeliveryRangeCheckView = () => import('../views/DeliveryRangeCheckView.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -99,6 +100,15 @@ const router = createRouter({
           },
         },
         { path: 'regions', name: 'regions', component: RegionsView, meta: { title: '配送区域管理' } },
+        {
+          path: 'delivery-range-check',
+          name: 'delivery-range-check',
+          component: DeliveryRangeCheckView,
+          meta: {
+            title: '配送资质检验',
+            pageSubtitle: '依据配送区域多边形判断是否在服务范围内（不含第三方承运口径）',
+          },
+        },
         { path: 'couriers', name: 'couriers', component: CouriersView, meta: { title: '配送员管理' } },
         {
           path: 'delivery-sf-orders',

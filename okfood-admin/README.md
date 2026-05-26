@@ -18,7 +18,8 @@
 
 - **营业概览**：指标卡片占位，待对接统计接口后赋值  
 - **会员档案**：`GET /api/admin/users` 分页与检索  
-- **配送大表**：占位列表，待对接订单/线路聚合接口  
+- **智能配送大表**：`/delivery`、`GET /api/admin/delivery-sheet` 等  
+- **配送资质检验**：`/delivery-range-check`，`POST /api/admin/delivery-region/consult`（片区多边形 + 可选高德关键词/地图选点）  
 - **配送区域**：`GET/POST/PATCH/DELETE /api/admin/delivery-regions`，地图需配置高德 `VITE_AMAP_KEY`（及建议的 `VITE_AMAP_SECURITY_CODE`）  
 - **配送员管理**：`/api/admin/couriers` 等  
 - **财务中心**：金额与流水占位，待对接财务接口  

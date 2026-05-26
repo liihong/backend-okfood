@@ -616,7 +616,7 @@ def patch_member_profile(
 
                 raise HTTPException(
                     status_code=400,
-                    detail="起送日期须不早于允许的最小业务日（上海；当日 10:00 前最早今天，10:00 及之后最早明天）",
+                    detail="起送日期须不早于今日（上海业务日）",
                 )
 
             m.delivery_start_date = delivery_start_date

@@ -1,7 +1,6 @@
 <script setup>
 defineOptions({ name: 'StoreConfigView' })
 import { ref, onMounted, computed } from 'vue'
-import { Store } from 'lucide-vue-next'
 import {
   apiJson,
   apiForm,
@@ -21,7 +20,7 @@ const form = ref({
   store_logo_url: '',
   store_lng: '',
   store_lat: '',
-  /** 每日 07:00（上海）自动顺丰推送当日配送单 */
+  /** 每日 08:50（上海）自动顺丰推送当日配送单 */
   sf_nightly_auto_push_enabled: false,
   /** 单次点餐推顺丰：顺丰侧店铺编号，与大表推单租户 shop 区分 */
   sf_retail_push_shop_id: '',
@@ -234,15 +233,9 @@ onMounted(() => {
 
 <template>
   <section class="tab-content animate-up store-config-page">
-    <div class="sc-head">
-      <Store :size="22" class="sc-head-icon" aria-hidden="true" />
-      <div>
-        <h2 class="sc-title">门店与全局计价</h2>
-        <p class="sc-desc">
-          请通过「<strong>地图选点</strong>」在弹窗内用高德<strong>搜索或点选</strong>门店位置（自动为 GCJ-02）。保存后营业概览以门店为中心；骑手端任务按<strong>离该点直线距离</strong>由近到远排序。门店基础与配送相关参数保存在当前门店配置中，保存后立即对骑手结费、顺丰推单与小程序展示生效。
-        </p>
-      </div>
-    </div>
+    <p class="sc-intro">
+      请通过「<strong>地图选点</strong>」在弹窗内用高德<strong>搜索或点选</strong>门店位置（自动为 GCJ-02）。保存后营业概览以门店为中心；骑手端任务按<strong>离该点直线距离</strong>由近到远排序。门店基础与配送相关参数保存在当前门店配置中，保存后立即对骑手结费、顺丰推单与小程序展示生效。
+    </p>
 
     <p v-if="loading" class="sc-muted">加载中…</p>
 
@@ -321,7 +314,7 @@ onMounted(() => {
           <div class="sc-switch-text">
             <span class="sc-label sc-label--inline">顺丰自动推单</span>
             <p class="sc-hint sc-hint--tight">
-              开启后系统于每日<strong>07:00（上海时间）</strong>自动将<strong>当日</strong>智能配送大表（订阅合并）订单推送至顺丰同城；<strong>单次零售订单</strong>请在订单管理页面手动推单。关闭后不执行定时任务，请在配送大表<strong>手动推单</strong>。
+              开启后系统于每日<strong>08:50（上海时间）</strong>自动将<strong>当日</strong>智能配送大表（订阅合并）订单推送至顺丰同城；<strong>单次零售订单</strong>请在订单管理页面手动推单。关闭后不执行定时任务，请在配送大表<strong>手动推单</strong>。
             </p>
           </div>
           <el-switch v-model="form.sf_nightly_auto_push_enabled" size="large" />
@@ -505,27 +498,10 @@ onMounted(() => {
 .store-config-page {
   max-width: min(72rem, 100%);
 }
-.sc-head {
-  display: flex;
-  gap: 0.75rem;
-  align-items: flex-start;
-  margin-bottom: 1.25rem;
-}
-.sc-head-icon {
-  color: #0e5a44;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-.sc-title {
-  margin: 0;
-  font-size: 1.15rem;
-  font-weight: 800;
-  color: #0f172a;
-}
-.sc-desc {
-  margin: 0.35rem 0 0;
+.sc-intro {
+  margin: 0 0 1.25rem;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: #64748b;
 }
 .sc-code {

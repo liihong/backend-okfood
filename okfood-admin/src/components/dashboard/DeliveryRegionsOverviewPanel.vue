@@ -1,7 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
-import { RefreshCw, Sun, Users, TrendingUp } from 'lucide-vue-next'
+import { Sun, Users, TrendingUp } from 'lucide-vue-next'
 import { useDeliveryRegionMapOverview } from '../../composables/useDeliveryRegionMapOverview.js'
 import DeliveryOverviewMap from './DeliveryOverviewMap.vue'
 import { UNASSIGNED_AREA_LABEL } from '../../utils/regionAssignment.js'
@@ -9,19 +8,7 @@ import { apiJson, adminAccessToken, adminKind, handleAdminLogout } from '../../a
 import { showToast } from '../../composables/useToast.js'
 import { useAnimatedInteger } from '../../composables/useAnimatedInteger.js'
 
-const route = useRoute()
-
-/** 与路由 meta 一致：本页自带顶栏（hidePageTitle），主标题与详情描述与智能配送大表同级样式 */
-const pageTitleText = computed(() =>
-  route.meta.title != null && String(route.meta.title).trim() !== ''
-    ? String(route.meta.title).trim()
-    : '今日营业概览',
-)
-const pageSubtitleText = computed(() => {
-  const s = route.meta.pageSubtitle
-  return s != null && String(s).trim() !== '' ? String(s).trim() : ''
-})
-
+/** 营业概览顶卡数字条（请假/备餐/到期）；与 dashboard-summary / 归档接口回填 */
 const dashboardStats = ref([])
 const dashboardStatsLoading = ref(false)
 /** @type {import('vue').Ref<string>} */
@@ -307,10 +294,6 @@ const showOwnerAdminMenus = computed(() => {
   return k !== 'delivery' && k !== 'support' && k !== 'system'
 })
 
-function onSummaryDateChange() {
-  void fetchDashboardSummary()
-}
-
 const showDeliveryMetrics = computed(() => {
   if (error.value) return false
   if (loading.value && !regionsSorted.value.length) return false
@@ -364,14 +347,21 @@ const todaySingleRetailTotalCount = computed(
   () => Number(summaryMeta.value?.today_single_retail_total_quantity) || 0,
 )
 
-/** 备餐卡片「总数」：优先 dashboard-summary 拆分，否则回落营业概览 */
+/** 明日单次零售：锚定日次日已支付单次零售份数（dashboard-summary.tomorrow_single_retail_total_quantity） */
+const tomorrowSingleRetailTotalCount = computed(
+  () => Number(summaryMeta.value?.tomorrow_single_retail_total_quantity) || 0,
+)
+
+/** 顶卡主数字「总出餐量」= 配送餐（到家待送+已送达）+ 单次零售份数（不含自提；与右侧「自提」行并列展示） */
 const cardPrepTotal = computed(() => {
   const b = prepMetricsBreakdown(todayPrepMetrics.value)
-  if (b != null) return b.total
+  const retail = todaySingleRetailTotalCount.value
+  if (b != null) return Math.max(0, Math.trunc(b.delivery) + Math.trunc(retail))
+  // 无拆分字段时无法分离配送餐，退化为概览「今日备餐」旧值（未含零售）
   return Number(dashboardStats.value[2]?.value) || 0
 })
 
-/** 配送=到家待送达+已送达；自提=门店自提分组 */
+/** 配送餐=到家待送达+已送达；自提=门店自提分组 */
 const todayMealsDelivery = computed(() => {
   const b = prepMetricsBreakdown(todayPrepMetrics.value)
   if (b != null) return b.delivery
@@ -383,10 +373,19 @@ const todayMealsPickup = computed(() => {
   return null
 })
 
-/** 明日备餐：总份优先 dashboard-summary 拆分，否则营业概览 tomorrow_meals_to_prepare */
+/** 主数字旁公式展示用：配送餐份数 / 单次零售份数字符串 */
+const todayTotalOutFormulaDelivery = computed(() =>
+  todayMealsDelivery.value == null ? '—' : String(Math.trunc(Number(todayMealsDelivery.value))),
+)
+const todayTotalOutFormulaRetail = computed(() =>
+  String(Math.trunc(todaySingleRetailTotalCount.value)),
+)
+
+/** 明日顶卡主数字「总出餐量」= 明日配送餐 + 明日单次零售（不含自提） */
 const cardTomorrowPrepTotal = computed(() => {
   const b = prepMetricsBreakdown(tomorrowPrepMetrics.value)
-  if (b != null) return b.total
+  const retail = tomorrowSingleRetailTotalCount.value
+  if (b != null) return Math.max(0, Math.trunc(b.delivery) + Math.trunc(retail))
   return Number(dashboardStats.value[3]?.value) || 0
 })
 
@@ -400,6 +399,13 @@ const tomorrowPrepPickup = computed(() => {
   if (b != null) return b.pickup
   return null
 })
+
+const tomorrowTotalOutFormulaDelivery = computed(() =>
+  tomorrowPrepDelivery.value == null ? '—' : String(Math.trunc(Number(tomorrowPrepDelivery.value))),
+)
+const tomorrowTotalOutFormulaRetail = computed(() =>
+  String(Math.trunc(tomorrowSingleRetailTotalCount.value)),
+)
 
 const todayHomeStopCount = computed(() => {
   const m = todayPrepMetrics.value
@@ -476,11 +482,11 @@ const todayDeliveryFulfillBar = computed(() => {
 
 const todayFulfillAria = computed(() => {
   const f = prepMetricsFulfillment(todayPrepMetrics.value)
-  if (!f || f.total <= 0) return '配送履约：暂无备餐份数'
-  return `配送履约：已送达 ${f.delivered} 份，待履约 ${f.pending} 份，合计 ${f.total} 份`
+  if (!f || f.total <= 0) return '配送餐履约：暂无备餐份数'
+  return `配送餐履约：已送达 ${f.delivered} 份，待履约 ${f.pending} 份，合计 ${f.total} 份`
 })
 
-/** 明日：配送到家 vs 自提占比（蓝/琥珀），与参考稿中间留白结构对称 */
+/** 明日：配送餐 vs 自提占比（蓝/琥珀），与参考稿中间留白结构对称 */
 const tomorrowPrepSplitBar = computed(() => {
   const d = tomorrowPrepDelivery.value
   const p = tomorrowPrepPickup.value
@@ -499,7 +505,7 @@ const tomorrowSplitAria = computed(() => {
   const d = tomorrowPrepDelivery.value
   const p = tomorrowPrepPickup.value
   if (d == null || p == null) return '明日配餐结构：暂无数据'
-  return `明日配餐结构：配送到家 ${d} 份，门店自提 ${p} 份`
+  return `明日配餐结构：配送餐 ${d} 份，门店自提 ${p} 份`
 })
 
 const storePinLegendCount = computed(() =>
@@ -525,6 +531,10 @@ const expireCountAnimated = useAnimatedInteger(() => expireCount.value, { durati
 const todaySingleRetailTotalAnimated = useAnimatedInteger(() => todaySingleRetailTotalCount.value, {
   duration: 620,
 })
+const tomorrowSingleRetailTotalAnimated = useAnimatedInteger(
+  () => tomorrowSingleRetailTotalCount.value,
+  { duration: 620 },
+)
 const tomorrowFirstMealNewAnimated = useAnimatedInteger(() => tomorrowFirstMealNewCount.value, {
   duration: 620,
 })
@@ -547,12 +557,6 @@ const mapPointsForDisplay = computed(() => {
   return pts.filter((p) => p.store_pickup === true || p.store_pickup === 1)
 })
 
-const refreshBusy = computed(() => dashboardStatsLoading.value || loading.value)
-
-async function onRefreshAll() {
-  await Promise.all([fetchDashboardSummary(), load()])
-}
-
 onMounted(() => {
   void load()
   void fetchDashboardSummary()
@@ -561,38 +565,6 @@ onMounted(() => {
 
 <template>
   <section class="dro-page dro-page--modern">
-    <div class="dro-dash-title-row">
-      <div class="page-heading">
-        <h2 class="page-title">{{ pageTitleText }}</h2>
-        <p v-if="pageSubtitleText" class="page-subtitle">{{ pageSubtitleText }}</p>
-      </div>
-      <div class="dro-dash-title-actions">
-        <button
-          type="button"
-          class="dro-btn-refresh"
-          :disabled="refreshBusy"
-          @click="onRefreshAll"
-        >
-          <RefreshCw :size="15" class="dro-btn-refresh-ico" :class="{ 'dro-btn-refresh-ico--spin': refreshBusy }" />
-          数据刷新
-        </button>
-        <label class="dro-date-inline">
-          <span class="dro-sr-only">营业概览锚定日</span>
-          <el-date-picker
-            v-model="summaryAnchorDate"
-            type="date"
-            value-format="YYYY-MM-DD"
-            class="dro-date-inline-picker"
-            :disabled="dashboardStatsLoading"
-            aria-describedby="dro-summary-anchor-hint"
-            @change="onSummaryDateChange"
-          />
-        </label>
-      </div>
-    </div>
-    <span id="dro-summary-anchor-hint" class="dro-sr-only"
-      >切换日期将重拉营业概览；地图送达状态仍为服务端当日口径。</span
-    >
 
     <p v-if="summaryMeta?.from_snapshot" class="dro-snapshot-hint">
       已显示归档数据（与智能配送大表口径对齐的首读留存）。
@@ -626,9 +598,18 @@ onMounted(() => {
         </div>
         <div class="dro-dash-kpi__mid">
           <div class="dro-dash-kpi__main">
-            <div class="dro-dash-kpi__hero">
+            <div class="dro-dash-kpi__hero dro-dash-kpi__hero--total-out">
               <span class="dro-dash-kpi__hero-num">{{ prepTotalAnimated }}</span>
-              <span class="dro-dash-kpi__hero-suffix">份需备</span>
+              <span class="dro-dash-kpi__hero-formula" role="note">
+                <span class="dro-dash-kpi__hero-formula-eq">总出餐量 = </span>
+                <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--delivery"
+                  >配送份数 {{ todayTotalOutFormulaDelivery }}</span
+                >
+                <span class="dro-dash-kpi__hero-formula-plus"> + </span>
+                <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--retail"
+                  >单次零售 {{ todayTotalOutFormulaRetail }}</span
+                >
+              </span>
             </div>
             <div class="dro-dash-kpi__side">
               <div
@@ -652,7 +633,7 @@ onMounted(() => {
                 <span class="dro-dash-kpi__side-n dro-dash-kpi__side-n--emerald">{{
                   todayMealsDelivery === null ? '—' : todayDeliveryAnimated
                 }}</span>
-                <span class="dro-dash-kpi__side-txt">配送</span>
+                <span class="dro-dash-kpi__side-txt">配送餐</span>
               </div>
               <div class="dro-dash-kpi__side-row">
                 <span class="dro-dash-kpi__side-n dro-dash-kpi__side-n--ink">{{
@@ -684,11 +665,11 @@ onMounted(() => {
             <span class="dro-dash-chip__v">{{ expireCountAnimated }} <small>人</small></span>
           </div>
           <div
-            class="dro-dash-chip dro-dash-chip--emerald"
+            class="dro-dash-chip dro-dash-chip--blue"
             role="status"
-            :aria-label="`今日单次零售 ${todaySingleRetailTotalCount} 份`"
+            :aria-label="`单次零售 ${todaySingleRetailTotalCount} 份`"
           >
-            <span class="dro-dash-chip__k">今日单次零售</span>
+            <span class="dro-dash-chip__k">单次零售</span>
             <span class="dro-dash-chip__v">{{ todaySingleRetailTotalAnimated }} <small>份</small></span>
           </div>
           <div
@@ -751,9 +732,18 @@ onMounted(() => {
         </div>
         <div class="dro-dash-kpi__mid">
           <div class="dro-dash-kpi__main">
-            <div class="dro-dash-kpi__hero">
+            <div class="dro-dash-kpi__hero dro-dash-kpi__hero--total-out">
               <span class="dro-dash-kpi__hero-num">{{ tomorrowTotalAnimated }}</span>
-              <span class="dro-dash-kpi__hero-suffix">份预计</span>
+              <span class="dro-dash-kpi__hero-formula" role="note">
+                <span class="dro-dash-kpi__hero-formula-eq">总出餐量 = </span>
+                <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--delivery"
+                  >配送份数 {{ tomorrowTotalOutFormulaDelivery }}</span
+                >
+                <span class="dro-dash-kpi__hero-formula-plus"> + </span>
+                <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--retail"
+                  >单次零售 {{ tomorrowTotalOutFormulaRetail }}</span
+                >
+              </span>
             </div>
             <div class="dro-dash-kpi__side">
               <div
@@ -777,7 +767,7 @@ onMounted(() => {
                 <span class="dro-dash-kpi__side-n dro-dash-kpi__side-n--blue">{{
                   tomorrowPrepDelivery === null ? '—' : tomorrowDeliveryAnimated
                 }}</span>
-                <span class="dro-dash-kpi__side-txt">配送</span>
+                <span class="dro-dash-kpi__side-txt">配送餐</span>
               </div>
               <div class="dro-dash-kpi__side-row">
                 <span class="dro-dash-kpi__side-n dro-dash-kpi__side-n--ink">{{
@@ -810,6 +800,14 @@ onMounted(() => {
           >
             <span class="dro-dash-chip__k">明日首餐新客</span>
             <span class="dro-dash-chip__v">{{ tomorrowFirstMealNewAnimated }} <small>人</small></span>
+          </div>
+          <div
+            class="dro-dash-chip dro-dash-chip--blue"
+            role="status"
+            :aria-label="`单次零售 ${tomorrowSingleRetailTotalCount} 份`"
+          >
+            <span class="dro-dash-chip__k">单次零售</span>
+            <span class="dro-dash-chip__v">{{ tomorrowSingleRetailTotalAnimated }} <small>份</small></span>
           </div>
           <div
             class="dro-dash-yoy-chip dro-dash-yoy-chip--tomorrow"
@@ -1048,92 +1046,6 @@ onMounted(() => {
     sans-serif;
 }
 
-.dro-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.dro-dash-title-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.dro-dash-title-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.dro-btn-refresh {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 1rem;
-  font-size: 13px;
-  font-weight: 800;
-  color: #334155;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.75rem;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-}
-
-.dro-btn-refresh:hover:not(:disabled) {
-  border-color: #10b981;
-}
-
-.dro-btn-refresh:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-
-.dro-btn-refresh-ico--spin {
-  animation: dro-spin 0.8s linear infinite;
-}
-
-@keyframes dro-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.dro-date-inline-picker {
-  width: auto;
-  min-width: 170px;
-}
-
-.dro-date-inline-picker :deep(.el-input__wrapper) {
-  padding: 0.45rem 0.85rem;
-  border-radius: 0.75rem;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-}
-
-.dro-date-inline-picker :deep(.el-input__inner) {
-  font-size: 13px;
-  font-weight: 800;
-  color: #334155;
-  font-family: inherit;
-}
-
-.dro-date-inline-picker :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
-}
 
 .dro-snapshot-hint {
   font-size: 13px;
@@ -1388,24 +1300,37 @@ onMounted(() => {
   color: #0d9488;
 }
 
-/* 明日：浅蓝底边（与明日预测卡、rose 系区分） */
+/* 明日卡片「同比上周」：与今日同比条同为翠绿系，便于对齐阅读 */
 .dro-dash-yoy-chip--tomorrow {
-  background: rgba(239, 246, 255, 0.96);
-  border-color: rgba(59, 130, 246, 0.32);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset;
+  background: rgba(236, 253, 245, 0.94);
+  border-color: rgba(16, 185, 129, 0.38);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
 }
 
 .dro-dash-yoy-chip--tomorrow .dro-dash-yoy-chip__prefix {
-  color: #64748b;
+  color: #059669;
 }
 
 .dro-dash-yoy-chip--tomorrow .dro-dash-yoy-chip__date {
-  color: #475569;
+  color: #047857;
 }
 
 .dro-dash-yoy-chip--tomorrow .dro-dash-yoy-chip__week {
-  color: #0f172a;
+  color: #065f46;
 }
+
+.dro-dash-yoy-chip--tomorrow .dro-dash-yoy-chip__val--up {
+  color: #047857;
+}
+
+.dro-dash-yoy-chip--tomorrow .dro-dash-yoy-chip__val--flat {
+  color: #059669;
+}
+
+.dro-dash-yoy-chip--tomorrow .dro-dash-yoy-chip__val--muted {
+  color: #0d9488;
+}
+
 .dro-dash-yoy-chip__left {
   min-width: 0;
   flex: 1;
@@ -1433,7 +1358,7 @@ onMounted(() => {
 }
 
 .dro-dash-yoy-chip--tomorrow .dro-dash-yoy-chip__val--caption {
-  color: #1e40af;
+  color: #047857;
 }
 
 .dro-dash-yoy-chip__prefix {
@@ -1478,16 +1403,56 @@ onMounted(() => {
   font-size: 12px;
 }
 
-.dro-dash-yoy-chip--tomorrow .dro-dash-yoy-chip__val--up {
-  color: #1d4ed8;
-}
-
 .dro-dash-kpi__hero {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 0.15rem 0.35rem;
   min-width: 0;
+}
+
+/** 今日/明日顶卡：总值后同一行展示「总出餐量 = 配送份数 + 单次零售」拆解（窄屏可换行） */
+.dro-dash-kpi__hero--total-out {
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+}
+
+.dro-dash-kpi__hero-formula {
+  display: inline;
+  margin: 0;
+  font-size: clamp(13px, 1.5vw, 15px);
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+  color: #475569;
+  max-width: none;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dro-dash-kpi__hero-formula-eq {
+  color: #64748b;
+  font-weight: 800;
+}
+
+.dro-dash-kpi__hero-formula-plus {
+  color: #94a3b8;
+  font-weight: 800;
+}
+
+.dro-dash-kpi__hero-formula-part {
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.dro-dash-kpi__hero-formula-part--delivery {
+  color: #047857;
+}
+
+.dro-dash-kpi__hero-formula-part--retail {
+  color: #1d4ed8;
 }
 
 .dro-dash-kpi__hero--compact {
@@ -1674,6 +1639,17 @@ onMounted(() => {
 
 .dro-dash-chip--emerald .dro-dash-chip__v {
   color: #047857;
+}
+
+/** 今日单次零售：与「明日预测」蓝系 pill 对齐，便于与日区绿色区分 */
+.dro-dash-chip--blue {
+  background: rgba(239, 246, 255, 0.92);
+  border-color: rgba(191, 219, 254, 0.75);
+  color: #1d4ed8;
+}
+
+.dro-dash-chip--blue .dro-dash-chip__v {
+  color: #2563eb;
 }
 
 .dro-dash-chip--slate {
@@ -2020,7 +1996,7 @@ onMounted(() => {
 }
 
 /**
- * 与备餐卡黄框「配送…自提…」行一致：14px / 700 / #475569；数字强调 #047857（同 dro-stat-card-prep-split-num）
+ * 与备餐卡黄框「配送餐…自提…」行一致：14px / 700 / #475569；数字强调 #047857（同 dro-stat-card-prep-split-num）
  */
 .dro-stat-card--leave .dro-stat-card-k,
 .dro-stat-card--meal .dro-stat-card-k,

@@ -4,6 +4,9 @@
  * @returns {Array<[number, number]>}
  */
 export function pathRingFromPolygonJson(json) {
+  if (json && typeof json === 'object' && json.type === 'Feature' && json.geometry) {
+    return pathRingFromPolygonJson(json.geometry)
+  }
   if (Array.isArray(json)) {
     return json.map((p) => [Number(p[0]), Number(p[1])])
   }

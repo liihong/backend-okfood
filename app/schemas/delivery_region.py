@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.user import Location
 from app.services.region_geo import extract_outer_ring
 
 
@@ -97,3 +98,34 @@ class DeliveryRegionMapOverviewOut(BaseModel):
     regions: list[DeliveryRegionOut]
     members: list[MapOverviewMemberMarkerOut]
     store: StoreMapAnchorOut | None = None
+
+
+class DeliveryRegionConsultIn(BaseModel):
+    """管理端配送资质核验：坐标优先；仅有地址时服务端高德地理编码。"""
+
+    address_keyword: str | None = Field(
+        None,
+        max_length=500,
+        description="地址/小区关键字，交由服务端高德地理编码为 GCJ-02",
+    )
+    location: Location | None = Field(None, description="地图选点 GCJ-02；若提供则优先于关键词判定片区")
+
+    @model_validator(mode="after")
+    def _need_keyword_or_coords(self):
+        kw = (self.address_keyword or "").strip()
+        if self.location is None and not kw:
+            raise ValueError("请提供地图坐标或地址关键词")
+        return self
+
+
+class DeliveryRegionConsultOut(BaseModel):
+    coords_resolved: bool = Field(..., description="是否已得到有效 GCJ-02 坐标")
+    lng: float | None = None
+    lat: float | None = None
+    geocode_failed: bool = Field(False, description="仅用关键词且无地理编码结果时为 true")
+    in_region: bool = Field(..., description="是否在启用配送片区内（多边形命中）")
+    delivery_region_id: int | None = None
+    region_name: str | None = None
+    distance_to_store_km: float | None = Field(None, description="与门店锚点球面直线距离（公里）；门店未配坐标时为 null")
+    query_label: str | None = Field(None, description="检索关键词回显")
+    message: str | None = Field(None, description="无法判定时的人性化说明（如编码失败）")

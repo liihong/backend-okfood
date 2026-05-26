@@ -1,8 +1,9 @@
 <script setup>
 defineOptions({ name: 'OrdersManageView' })
 import { ref, computed, watch, onMounted } from 'vue'
-import { AlertTriangle, RefreshCw, Search } from 'lucide-vue-next'
+import { AlertTriangle, ChevronDown, RefreshCw, Search } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import MemberDeliveryMapPicker from '../components/MemberDeliveryMapPicker.vue'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import { parseApiDateTimeBeijing } from '../utils/beijingDateTime.js'
@@ -48,6 +49,23 @@ function formatOrderCreatedAtMdHm(iso) {
   const x = s.replace('T', ' ')
   const m = x.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
   return m ? `${m[2]}-${m[3]} ${m[4]}:${m[5]}` : x.slice(0, 16)
+}
+
+/**
+ * 列表「配送/自提」列：仅展示详细地址；后端 address_summary 常为「片区名 + 空格 + 地图/门牌」，
+ * 与 routing_area 重复前缀时去掉片区，避免与智能配送大表里「片区单独列」的阅读习惯冲突。
+ * @param {Record<string, unknown>} row
+ */
+function singleOrderDeliveryAddressTextOnly(row) {
+  if (!row || row.store_pickup) return '门店自提'
+  const ra = String(row.routing_area ?? '').trim()
+  const sum = String(row.address_summary ?? '').trim()
+  if (!sum || sum === '—') return '—'
+  if (ra && (sum === ra || sum.startsWith(`${ra} `))) {
+    const rest = sum.slice(ra.length).trim()
+    return rest || '—'
+  }
+  return sum
 }
 
 const activeTab = ref('single')
@@ -121,6 +139,11 @@ const editSaving = ref(false)
 const editAddrLoading = ref(false)
 /** @type {import('vue').Ref<Array<Record<string, unknown>>>} */
 const editMemberAddresses = ref([])
+/** 当前编辑的会员地址明细（与「地址管理」弹窗字段一致，绑定地图选点） */
+/** @type {import('vue').Ref<null | Record<string, unknown>>} */
+const editAddrDraft = ref(null)
+/** 保存地址时是否同时设为该会员默认配送地址 */
+const editAddrAlsoDefault = ref(false)
 const editForm = ref({
   store_pickup: false,
   member_address_id: null,
@@ -219,18 +242,91 @@ async function loadMemberAddressesForEdit(memberId) {
   }
 }
 
+/** 从列表行填充「修改订单」右侧地址表单（与 MemberAddressesModal.pickAddrEdit 一致） */
+function pickEditAddressDraft(a) {
+  if (!a || a.id == null) {
+    editAddrDraft.value = null
+    return
+  }
+  const lng = a.location?.lng
+  const lat = a.location?.lat
+  editAddrDraft.value = {
+    id: Number(a.id),
+    contact_name: a.contact_name || '',
+    contact_phone: a.contact_phone || '',
+    map_location_text: a.map_location_text || '',
+    door_detail: a.door_detail || '',
+    remarks: a.remarks || '',
+    lngStr: lng != null && lng !== '' ? String(lng) : '',
+    latStr: lat != null && lat !== '' ? String(lat) : '',
+  }
+}
+
+/** 下拉变更或地址列表加载完成后，与当前选中的 member_address_id 同步表单 */
+function syncEditAddrDraftFromSelection() {
+  if (!editOpen.value || editForm.value.store_pickup) {
+    editAddrDraft.value = null
+    return
+  }
+  const id = editForm.value.member_address_id
+  const list = editMemberAddresses.value
+  if (!id || !Array.isArray(list) || !list.length) {
+    editAddrDraft.value = null
+    return
+  }
+  const a = list.find((x) => Number(x.id) === Number(id))
+  if (!a) {
+    editAddrDraft.value = null
+    return
+  }
+  pickEditAddressDraft(a)
+}
+
+const editHeadCoordDisplay = computed(() => {
+  const ed = editAddrDraft.value
+  if (!ed) return '—'
+  const a = String(ed.lngStr ?? '').trim()
+  const b = String(ed.latStr ?? '').trim()
+  if (a && b) return `${a}, ${b}`
+  return '未选点'
+})
+
+function onEditAddrMapWarn(msg) {
+  const s = typeof msg === 'string' && msg.trim() ? msg.trim() : '地图提示'
+  showToast(s, 'error')
+}
+
+watch(
+  () => editForm.value.member_address_id,
+  () => {
+    if (editOpen.value && !editForm.value.store_pickup) syncEditAddrDraftFromSelection()
+  },
+)
+
+watch(
+  () => editForm.value.store_pickup,
+  (pickup) => {
+    if (pickup) editAddrDraft.value = null
+    else if (editOpen.value) syncEditAddrDraftFromSelection()
+  },
+)
+
 function openEditOrder(row) {
   if (!canModifyOrder(row)) {
     showToast('当前订单不可修改（配送中、已取消或已退款）', 'error')
     return
   }
   editOrder.value = row
+  editAddrDraft.value = null
+  editAddrAlsoDefault.value = false
   editForm.value = {
     store_pickup: !!row.store_pickup,
     member_address_id: row.member_address_id ? Number(row.member_address_id) : null,
   }
   editOpen.value = true
-  void loadMemberAddressesForEdit(row.member_id)
+  void loadMemberAddressesForEdit(row.member_id).then(() => {
+    syncEditAddrDraftFromSelection()
+  })
 }
 
 async function submitEditOrder() {
@@ -242,8 +338,55 @@ async function submitEditOrder() {
     showToast('配送到家须选择收货地址', 'error')
     return
   }
+  const mid = Number(row.member_id)
+  if (!pickup) {
+    const ed = editAddrDraft.value
+    if (!ed || Number(ed.id) !== Number(addrId)) {
+      showToast('地址明细未加载或与所选地址不一致，请稍候或重新打开', 'error')
+      return
+    }
+    const cn = String(ed.contact_name ?? '').trim()
+    const cp = String(ed.contact_phone ?? '').trim()
+    const mt = String(ed.map_location_text ?? '').trim()
+    if (!cn) {
+      showToast('请填写收件人', 'error')
+      return
+    }
+    if (cp.length < 5) {
+      showToast('请填写有效联系电话（至少 5 位）', 'error')
+      return
+    }
+    if (!mt) {
+      showToast('请通过地图搜索/选点填写收货位置主文案，或直接在主文案里填写', 'error')
+      return
+    }
+  }
+
   editSaving.value = true
   try {
+    if (!pickup) {
+      const ed = editAddrDraft.value
+      const patchBody = {
+        contact_name: String(ed.contact_name ?? '').trim(),
+        contact_phone: String(ed.contact_phone ?? '').trim(),
+        map_location_text: String(ed.map_location_text ?? '').trim(),
+        door_detail: String(ed.door_detail ?? '').trim() || null,
+        remarks: String(ed.remarks ?? '').trim() || null,
+      }
+      if (editAddrAlsoDefault.value) {
+        patchBody.is_default = true
+      }
+      const lng = Number(String(ed.lngStr ?? '').trim())
+      const lat = Number(String(ed.latStr ?? '').trim())
+      if (Number.isFinite(lng) && Number.isFinite(lat)) {
+        patchBody.location = { lng, lat }
+      }
+      await apiJson(`/api/admin/users/${mid}/addresses/${Number(addrId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patchBody),
+      }, { auth: true })
+    }
+
     const body = { store_pickup: pickup }
     if (!pickup) body.member_address_id = Number(addrId)
     await apiJson(
@@ -251,7 +394,7 @@ async function submitEditOrder() {
       { method: 'PATCH', body: JSON.stringify(body) },
       { auth: true },
     )
-    showToast('订单已更新', 'success')
+    showToast('订单与收货信息已保存', 'success')
     editOpen.value = false
     await fetchSingleMeals()
   } catch (e) {
@@ -405,10 +548,36 @@ function openBatchAssignCourier() {
   void loadCouriers()
 }
 
-function handleDispatchCommand(cmd, row) {
-  if (cmd === 'sf') void onPushSfRetail(row)
+/** 单行：配送相关请求中的 loading（下拉「更多」按钮统一展示） */
+function singleRowActionLoading(row) {
+  const id = Number(row?.id)
+  if (!Number.isFinite(id)) return false
+  return (
+    dispatchLoadingId.value === id ||
+    markCompleteLoadingId.value === id ||
+    cancelLoadingId.value === id ||
+    refundLoadingId.value === id
+  )
+}
+
+/**
+ * 单次点餐 · 更多菜单：将小屏上过宽的操作区收拢为单列下拉
+ * @param {Record<string, unknown>} row
+ * @param {string} cmd
+ */
+function onSingleRowMoreCommand(row, cmd) {
+  if (cmd === 'modify') openEditOrder(row)
+  else if (cmd === 'sf') void onPushSfRetail(row)
   else if (cmd === 'uu') void onPushUu(row)
   else if (cmd === 'courier') openAssignCourier(row)
+  else if (cmd === 'complete') void onMarkOrderComplete(row)
+  else if (cmd === 'cancel') void onCancelOrder(row)
+  else if (cmd === 'refund') onRefundWechatSingle(row)
+}
+
+/** 商城卡包 · 更多（与单次点餐交互一致） */
+function onMallRowMoreCommand(row, cmd) {
+  if (cmd === 'refund') onRefundWechatMall(row)
 }
 
 function canRefundWechatSingle(row) {
@@ -1076,67 +1245,68 @@ ref="singleTableRef"
                <span :class="singleOrderStatusClass(row)">{{ singleOrderStatusLabelZh(row) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="配送/自提" min-width="160" show-overflow-tooltip>
+            <el-table-column
+              label="配送/自提"
+              header-align="left"
+              align="left"
+              min-width="480"
+              :show-overflow-tooltip="false"
+              class-name="orders-single-addr-col"
+            >
               <template #default="{ row }">
-                {{ row.store_pickup ? '门店自提' : (row.address_summary || '—') }}
+                <div class="orders-addr-text">
+                  <template v-if="row.store_pickup">门店自提</template>
+                  <template v-else>{{ singleOrderDeliveryAddressTextOnly(row) }}</template>
+                </div>
               </template>
             </el-table-column>
             <el-table-column label="单号" width="120" class-name="td-mono" show-overflow-tooltip>
               <template #default="{ row }">{{ row.out_trade_no || '—' }}</template>
             </el-table-column>
-           <el-table-column label="操作" width="440" fixed="right" align="center">
+            <el-table-column label="操作" width="92" fixed="right" align="center" class-name="orders-col-more">
               <template #default="{ row }">
-               <div class="orders-op-btns">
+                <el-dropdown trigger="click" @command="(cmd) => onSingleRowMoreCommand(row, cmd)">
                   <el-button
                     type="primary"
                     size="small"
                     plain
-                    :disabled="!canModifyOrder(row)"
-                    @click="openEditOrder(row)"
+                    class="orders-more-trigger"
+                    :loading="singleRowActionLoading(row)"
+                    aria-label="更多操作"
                   >
-                    修改
+                    更多
+                    <ChevronDown :size="14" class="orders-more-chevron" aria-hidden="true" stroke-width="2.25" />
                   </el-button>
-                  <el-dropdown trigger="click" @command="(cmd) => handleDispatchCommand(cmd, row)">
-                    <el-button
-                      type="primary"
-                      size="small"
-                      :loading="dispatchLoadingId === row.id"
-                      :disabled="!canDispatchActions(row)"
-                    >
-                     {{ isSfCancelledRedispatch(row) ? '重新配送' : '配送' }}
-                    </el-button>
-                    <template #dropdown>
-                      <el-dropdown-menu>
-                        <el-dropdown-item command="sf" :disabled="!canDispatchActions(row) || row.store_pickup">
-                          推送到顺丰
-                        </el-dropdown-item>
-                        <el-dropdown-item command="uu" :disabled="!canDispatchActions(row)">推送到 UU</el-dropdown-item>
-                        <el-dropdown-item command="courier" :disabled="!canDispatchActions(row)">
-                          门店自配送
-                        </el-dropdown-item>
-                      </el-dropdown-menu>
-                    </template>
-                  </el-dropdown>
-                  <el-button
-type="success" size="small" plain :disabled="!canMarkOrderComplete(row)"
-                    :loading="markCompleteLoadingId === row.id" @click="onMarkOrderComplete(row)">
-                    完成
-                  </el-button>
-                  <el-button type="danger" size="small" plain :disabled="!canCancelOrder(row)"
-                    :loading="cancelLoadingId === row.id" @click="onCancelOrder(row)">
-                    取消
-                  </el-button>
-                  <el-button
-                    type="warning"
-                    size="small"
-                    plain
-                    :disabled="!canRefundWechatSingle(row)"
-                    :loading="refundLoadingId === row.id"
-                    @click="onRefundWechatSingle(row)"
-                  >
-                   退款
-                  </el-button>
-                </div>
+                  <template #dropdown>
+                    <el-dropdown-menu class="orders-more-menu">
+                      <el-dropdown-item command="modify" :disabled="!canModifyOrder(row)">
+                        修改
+                      </el-dropdown-item>
+                      <el-dropdown-item
+                        command="sf"
+                        divided
+                        :disabled="!canDispatchActions(row) || row.store_pickup"
+                      >
+                        {{ isSfCancelledRedispatch(row) ? '重新推送到顺丰' : '推送到顺丰' }}
+                      </el-dropdown-item>
+                      <el-dropdown-item command="uu" :disabled="!canDispatchActions(row)">
+                        推送到 UU
+                      </el-dropdown-item>
+                      <el-dropdown-item command="courier" :disabled="!canDispatchActions(row)">
+                        门店自配送
+                      </el-dropdown-item>
+                      <el-dropdown-item command="complete" divided :disabled="!canMarkOrderComplete(row)">
+                        完成
+                      </el-dropdown-item>
+                      <el-dropdown-item command="cancel" :disabled="!canCancelOrder(row)">
+                        取消
+                      </el-dropdown-item>
+                      <el-dropdown-item command="refund" divided :disabled="!canRefundWechatSingle(row)">
+                        退款
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
               </template>
             </el-table-column>
           </AdminTable>
@@ -1211,18 +1381,28 @@ type="success" size="small" plain :disabled="!canMarkOrderComplete(row)"
                 (row.remark || '').trim() ? row.remark : '—'
               }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="116" fixed="right" align="center">
+            <el-table-column label="操作" width="92" fixed="right" align="center" class-name="orders-col-more">
               <template #default="{ row }">
-                <el-button
-                  type="warning"
-                  size="small"
-                  plain
-                  :disabled="!canRefundWechatMall(row)"
-                  :loading="refundLoadingId === row.id"
-                  @click="onRefundWechatMall(row)"
-                >
-                  微信退款
-                </el-button>
+                <el-dropdown trigger="click" @command="(cmd) => onMallRowMoreCommand(row, cmd)">
+                  <el-button
+                    type="primary"
+                    size="small"
+                    plain
+                    class="orders-more-trigger"
+                    :loading="refundLoadingId === row.id"
+                    aria-label="更多操作"
+                  >
+                    更多
+                    <ChevronDown :size="14" class="orders-more-chevron" aria-hidden="true" stroke-width="2.25" />
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu class="orders-more-menu">
+                      <el-dropdown-item command="refund" :disabled="!canRefundWechatMall(row)">
+                        微信退款
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
               </template>
             </el-table-column>
             <el-table-column label="配送" width="108" align="center" class-name="co-nowrap">
@@ -1340,13 +1520,14 @@ type="success" size="small" plain :disabled="!canMarkOrderComplete(row)"
 
     <el-dialog
       v-model="editOpen"
-      title="修改订单 · 配送/自提"
-      width="480px"
+      title="修改订单 · 配送/自提与收货地址"
+      width="920px"
+      class="orders-edit-order-dialog"
       destroy-on-close
       align-center
       :close-on-click-modal="!editSaving"
       :close-on-press-escape="!editSaving"
-      @closed="editOrder = null; editMemberAddresses = []"
+      @closed="editOrder = null; editMemberAddresses = []; editAddrDraft = null; editAddrAlsoDefault = false"
     >
       <template v-if="editOrder">
         <p class="orders-edit-hint">
@@ -1365,7 +1546,7 @@ type="success" size="small" plain :disabled="!canMarkOrderComplete(row)"
           <el-select
             v-model="editForm.member_address_id"
             filterable
-            placeholder="选择会员配送地址"
+            placeholder="选择会员配送地址（可切换该会员名下其它地址）"
             class="orders-edit-select"
             :loading="editAddrLoading"
           >
@@ -1377,10 +1558,100 @@ type="success" size="small" plain :disabled="!canMarkOrderComplete(row)"
             />
           </el-select>
           <p v-if="!editAddrLoading && !editMemberAddresses.length" class="orders-edit-tip">
-            该会员暂无配送地址，请先在会员档案中维护地址。
+            该会员暂无配送地址，请先在会员档案「地址」中新建后再来绑定订单。
           </p>
         </div>
-        <p v-else class="orders-edit-tip orders-edit-tip--muted">门店自提无需填写配送地址。</p>
+
+        <template v-if="!editForm.store_pickup && editAddrDraft">
+          <div class="orders-edit-addr-sep" />
+          <p class="orders-edit-subhint">
+            以下与「会员档案 · 地址管理」一致：可修正收件人、电话、地图选点与门牌；
+            <strong>保存时先写入会员地址</strong>（全店订单凡引用本条地址一并更新），再更新本订单绑定与配送摘要。
+          </p>
+          <div class="orders-edit-first-row">
+            <el-space wrap :size="8" alignment="center">
+              <span class="orders-edit-k">会员</span>
+              <el-text truncated class="orders-edit-inline-name">{{ (editOrder.member_name || '—').trim() }}</el-text>
+              <el-text type="info" truncated>{{ (editOrder.member_phone || '').trim() }}</el-text>
+              <el-divider direction="vertical" />
+              <span class="orders-edit-k">经纬度 GCJ-02</span>
+              <el-tag size="small" type="info" effect="plain">{{ editHeadCoordDisplay }}</el-tag>
+            </el-space>
+          </div>
+          <el-form label-position="top" size="small" class="orders-edit-addr-form">
+            <el-row :gutter="12">
+              <el-col :xs="24" :sm="12">
+                <el-form-item label="收件人">
+                  <el-input
+                    v-model="editAddrDraft.contact_name"
+                    maxlength="100"
+                    clearable
+                    placeholder="收件人姓名"
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :xs="24" :sm="12">
+                <el-form-item label="联系电话">
+                  <el-input v-model="editAddrDraft.contact_phone" maxlength="20" clearable placeholder="手机号" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-form-item label="地图选点（GCJ-02）">
+              <div class="orders-edit-map-wrap">
+                <MemberDeliveryMapPicker
+                  :key="'orders-edit-ma-' + editAddrDraft.id"
+                  v-model:lng-str="editAddrDraft.lngStr"
+                  v-model:lat-str="editAddrDraft.latStr"
+                  v-model:map-location-text="editAddrDraft.map_location_text"
+                  :search-input-id="'orders-edit-amap-' + editAddrDraft.id"
+                  @warn="onEditAddrMapWarn"
+                />
+              </div>
+            </el-form-item>
+            <el-row :gutter="12">
+              <el-col :xs="24" :sm="14">
+                <el-form-item label="收货位置主文案（map_location_text）">
+                  <el-input
+                    v-model="editAddrDraft.map_location_text"
+                    type="textarea"
+                    readonly
+                    :autosize="{ minRows: 2, maxRows: 4 }"
+                    maxlength="500"
+                    show-word-limit
+                    placeholder="地图选点后自动填入，可与门牌拼成完整地址"
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :xs="24" :sm="10">
+                <el-form-item label="门牌（楼栋 / 单元 / 室号）">
+                  <el-input
+                    v-model="editAddrDraft.door_detail"
+                    type="textarea"
+                    :autosize="{ minRows: 2, maxRows: 3 }"
+                    maxlength="500"
+                    placeholder="例如：3 号楼 1202"
+                  />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-form-item label="地址备注">
+              <el-input
+                v-model="editAddrDraft.remarks"
+                type="textarea"
+                :autosize="{ minRows: 1, maxRows: 3 }"
+                maxlength="500"
+                placeholder="忌口等，可留空"
+              />
+            </el-form-item>
+            <el-form-item>
+              <el-checkbox v-model="editAddrAlsoDefault">同时将本条设为该会员默认配送地址</el-checkbox>
+            </el-form-item>
+          </el-form>
+        </template>
+
+        <p v-else-if="editForm.store_pickup" class="orders-edit-tip orders-edit-tip--muted">
+          门店自提无需维护收货地址。
+        </p>
       </template>
       <template #footer>
         <el-button :disabled="editSaving" @click="editOpen = false">取消</el-button>
@@ -1567,33 +1838,102 @@ type="success" size="small" plain :disabled="!canMarkOrderComplete(row)"
 .orders-edit-tip--muted {
   color: #64748b;
 }
+.orders-edit-subhint {
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: #64748b;
+}
+.orders-edit-addr-sep {
+  margin: 0.85rem 0 0.65rem;
+  border-top: 1px dashed #e2e8f0;
+}
+.orders-edit-first-row {
+  margin-bottom: 0.65rem;
+}
+.orders-edit-k {
+  font-size: 12px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+.orders-edit-inline-name {
+  max-width: 140px;
+  font-weight: 600;
+}
+.orders-edit-map-wrap {
+  width: 100%;
+  min-height: 244px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+.orders-edit-order-dialog :deep(.el-dialog__body) {
+  padding-top: 0.5rem;
+  max-height: min(78vh, 720px);
+  overflow-y: auto;
+}
+
 .orders-mall-no-dispatch {
   font-size: 12px;
   color: var(--text-muted, #94a3b8);
 }
-.orders-op-btns {
+/* 订单列表：配送地址列完整展示（覆盖 Element Plus 表格 .cell 默认单行省略） */
+.orders-manage-page :deep(.admin-table--members.el-table td.orders-single-addr-col.el-table__cell) {
+  vertical-align: top;
+}
+.orders-manage-page :deep(.admin-table--members.el-table td.orders-single-addr-col .cell) {
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  line-height: 1.5;
+  text-align: left;
+  hyphens: auto;
+}
+.orders-addr-text {
+  font-size: 12px;
+  color: #334155;
+  display: block;
+  width: 100%;
+  white-space: normal;
+  overflow: visible;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.orders-more-chevron {
+  display: inline-block;
+  vertical-align: -0.125em;
+  margin-left: 0.15rem;
+  opacity: 0.85;
+}
+.orders-more-trigger {
+  padding-left: 0.55rem;
+  padding-right: 0.45rem;
+}
+.orders-manage-page :deep(.orders-more-menu.el-dropdown-menu) {
+  min-width: 9.5rem;
+}
+.orders-manage-page :deep(td.orders-col-more .cell) {
+  overflow: visible;
+}
+
+.orders-batch-bar__count {
+  font-size: 0.8125rem;
+  color: rgba(255, 255, 255, 0.62);
+  white-space: nowrap;
+  margin-right: 0.15rem;
+}
+
+.orders-batch-bar__actions {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  max-width: 320px;
-  }
-  
-  .orders-batch-bar__count {
-    font-size: 0.8125rem;
-    color: rgba(255, 255, 255, 0.62);
-    white-space: nowrap;
-    margin-right: 0.15rem;
-  }
-  
-  .orders-batch-bar__actions {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0.4rem;
-    margin-left: auto;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  margin-left: auto;
 }
 
 .orders-refund-dialog :deep(.el-dialog__header) {

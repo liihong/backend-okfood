@@ -23,6 +23,19 @@ function todayShanghaiStr() {
   return ymdInTimeZone(new Date(), 'Asia/Shanghai')
 }
 
+/**
+ * 将上海日历日 YYYY-MM-DD 前移或后移若干整日（午间 +08:00 锚点，减少日界线歧义）
+ * @param {string} ymdStr
+ * @param {number} deltaDays 负数为前一天
+ */
+function shiftShanghaiCalendarYmd(ymdStr, deltaDays) {
+  const raw = String(ymdStr || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!raw) return todayShanghaiStr()
+  const base = new Date(`${raw[1]}-${raw[2]}-${raw[3]}T12:00:00+08:00`)
+  const ms = base.getTime() + Number(deltaDays) * 86400000
+  return ymdInTimeZone(new Date(ms), 'Asia/Shanghai')
+}
+
 /** 业务日已过时，期望送达默认用「今日」起算，避免仍落在历史日期 */
 function effectiveSfExpectDefaultYmd(deliveryYmd) {
   const yRaw = (deliveryYmd || '').trim() || todayShanghaiStr()
@@ -344,6 +357,16 @@ async function fetchSheet() {
   }
 }
 
+/** 顶栏：快捷增减配送业务日并重新拉取大表 */
+function shiftDeliveryBizDayBy(delta) {
+  const cur =
+    deliveryDateQuery.value != null && String(deliveryDateQuery.value).trim() !== ''
+      ? String(deliveryDateQuery.value).trim()
+      : todayShanghaiStr()
+  deliveryDateQuery.value = shiftShanghaiCalendarYmd(cur, delta)
+  void fetchSheet()
+}
+
 /** 与后端配送大表一致：address_line 为「片区 + 空格 + 详细」；导出 Excel 时配送地址列仅保留详细段（片区另列「地址片区」）。自提整行保留原样。 */
 function addressLineForExcelExport(st) {
   if (st.groupArea === '门店自提') {
@@ -644,24 +667,43 @@ async function markDelivery(memberId, kind) {
 
 <template>
   <section class="tab-content animate-up delivery-view">
-    <!-- 顶栏右侧：与 AdminLayout #delivery-header-toolbar 对齐，单列一排 -->
-    <!-- defer：目标在 AdminLayout 的 header(v-if) 内，从 hidePageTitle 页切入配送时须等本轮 DOM 插入后再解析 #delivery-header-toolbar -->
+    <!-- defer：Teleport 目标在 AdminLayout #delivery-header-toolbar，须等 layout 挂载后再解析 -->
     <Teleport defer to="#delivery-header-toolbar">
       <!-- Teleport 到 layout 后主卡 .delivery-view 不是祖先，须在卡片上重复定义 --dv-* 变量，否则会丢底色/主色 -->
       <div class="delivery-header-toolbar-card no-print">
         <div class="delivery-top-toolbar">
         <label class="delivery-field delivery-field--toolbar">
           <span class="delivery-field-label">配送业务日</span>
-          <el-date-picker
-            v-model="deliveryDateQuery"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="选择日期"
-            :disabled="loading"
-            :clearable="true"
-            class="delivery-el-date delivery-el-date--toolbar"
-            @change="fetchSheet"
-          />
+          <div class="delivery-biz-day-row">
+            <el-date-picker
+              v-model="deliveryDateQuery"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="选择日期"
+              :disabled="loading"
+              :clearable="true"
+              class="delivery-el-date delivery-el-date--toolbar"
+              @change="fetchSheet"
+            />
+            <div class="delivery-biz-day-nav" role="group" aria-label="切换配送业务日">
+              <button
+                type="button"
+                class="delivery-btn delivery-btn--outline delivery-btn--day-step"
+                :disabled="loading"
+                @click="shiftDeliveryBizDayBy(-1)"
+              >
+                上一天
+              </button>
+              <button
+                type="button"
+                class="delivery-btn delivery-btn--outline delivery-btn--day-step"
+                :disabled="loading"
+                @click="shiftDeliveryBizDayBy(1)"
+              >
+                下一天
+              </button>
+            </div>
+          </div>
         </label>
         <label class="delivery-field delivery-field--toolbar delivery-field--toolbar-grow">
           <span class="delivery-field-label">客户搜索</span>
@@ -1205,7 +1247,8 @@ async function markDelivery(memberId, kind) {
   --dv-green-hover: #133e33;
   --dv-line: rgba(226, 232, 240, 0.65);
   box-sizing: border-box;
-  width: max-content;
+  /* 与主内容区同宽、左对齐；避免 max-content 导致整块缩在右侧 */
+  width: 100%;
   max-width: 100%;
   padding: 0.55rem 0.75rem;
   background: #fff;
@@ -1274,13 +1317,15 @@ async function markDelivery(memberId, kind) {
   padding: 1.1rem 1.35rem;
 }
 
-/* 顶栏工具条：标签与控件同一行基线对齐，客户搜索与「查询」并排 */
+/* 顶栏工具条：从左向右排满一行，窄屏允许换行仍顶左 */
 .delivery-top-toolbar {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-start;
   gap: 0.5rem 0.75rem;
+  width: 100%;
   min-width: 0;
 }
 .delivery-top-toolbar .delivery-btn {
@@ -1302,14 +1347,38 @@ async function markDelivery(memberId, kind) {
   max-width: 40rem;
 }
 
+/* 顶栏文案与「上一天 / 下一天」同字号、同字重，避免小号全大写字距显得不一致 */
 .delivery-field-label {
   flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: normal;
+  text-transform: none;
   color: #64748b;
 }
+
+/* 业务日：日期框与上/下一天并排 */
+.delivery-biz-day-row {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.delivery-biz-day-nav {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+.delivery-btn--day-step {
+  padding: 0.42rem 0.55rem;
+  font-size: 0.6875rem;
+  border-radius: 0.6rem;
+}
+
 .delivery-field--toolbar :deep(.delivery-el-date--toolbar) {
   width: 10.25rem;
   max-width: 100%;
@@ -2015,7 +2084,8 @@ async function markDelivery(memberId, kind) {
 /* 全局打印：隐藏侧栏与顶栏 */
 @media print {
   .admin-layout .sidebar,
-  .admin-layout .top-header,
+  .admin-top-tab-bar,
+  .admin-delivery-toolbar-host,
   .admin-layout .modal-overlay {
     display: none !important;
   }

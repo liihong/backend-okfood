@@ -1,6 +1,6 @@
 <script setup>
 defineOptions({ name: 'FinanceView' })
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Calendar, CalendarDays, CreditCard, DollarSign } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
@@ -10,31 +10,8 @@ const loading = ref(false)
 const summary = ref(null)
 /** @type {import('vue').Ref<Array<{ order_id: number; time_hm: string; card_kind: string; amount_yuan: string | number }>>} */
 const todayPaidCardItems = ref([])
-
-/** 顶栏电子钟（上海时区） */
-const liveClockHm = ref('00:00:00')
-const liveClockDate = ref('')
-let clockTimer = null
-
-function tickLiveClock() {
-  const now = new Date()
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Shanghai',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(now)
-  const h = parts.find((p) => p.type === 'hour')?.value ?? '00'
-  const m = parts.find((p) => p.type === 'minute')?.value ?? '00'
-  const s = parts.find((p) => p.type === 'second')?.value ?? '00'
-  liveClockHm.value = `${h}:${m}:${s}`
-
-  const y = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric' }).format(now)
-  const mo = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric' }).format(now)
-  const da = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', day: 'numeric' }).format(now)
-  liveClockDate.value = `${y}年${mo}月${da}日`
-}
+/** 明细列表对应的上海日历日 YYYY-MM-DD（与接口 today-paid-card-orders.shanghai_today 一致） */
+const financeCardOrdersDateYmd = ref('')
 
 function fmtYuan(raw) {
   if (raw === null || raw === undefined) return '—'
@@ -95,10 +72,26 @@ function buildKpi(w) {
   }
 }
 
-const todayLabel = computed(() => {
-  const t = summary.value?.shanghai_today
-  return t ? String(t) : ''
-})
+/** 明细行：上海年月日 + 时刻（接口 time_hm 为 HH:MM） */
+function formatFinanceCardOrderDateTime(row) {
+  const hm = (row.time_hm ?? '').trim()
+  const day = financeCardOrdersDateYmd.value.trim()
+  if (day && hm) return `${day} ${hm}`
+  if (day) return day
+  if (hm) return hm
+  return '—'
+}
+
+/** 规范化接口根级 shanghai_today 为 YYYY-MM-DD 字符串 */
+function setFinanceCardOrdersDateFromPack(cardPack) {
+  const raw = cardPack?.shanghai_today
+  if (raw == null || raw === '') {
+    financeCardOrdersDateYmd.value = ''
+    return
+  }
+  const s = typeof raw === 'string' ? raw : String(raw)
+  financeCardOrdersDateYmd.value = s.length >= 10 ? s.slice(0, 10) : s
+}
 
 const todayKpi = computed(() => buildKpi(summary.value?.today))
 const monthKpi = computed(() => buildKpi(summary.value?.this_month))
@@ -124,38 +117,24 @@ async function loadSummary() {
     ])
     summary.value = sum || null
     todayPaidCardItems.value = Array.isArray(cardPack?.items) ? cardPack.items : []
+    setFinanceCardOrdersDateFromPack(cardPack)
   } catch (e) {
     showToast(e?.message || '加载失败', 'error')
     summary.value = null
     todayPaidCardItems.value = []
+    financeCardOrdersDateYmd.value = ''
   } finally {
     loading.value = false
   }
 }
 
 onMounted(() => {
-  tickLiveClock()
-  clockTimer = window.setInterval(tickLiveClock, 1000)
   loadSummary()
-})
-
-onUnmounted(() => {
-  if (clockTimer != null) window.clearInterval(clockTimer)
 })
 </script>
 
 <template>
   <section class="finance-page tab-content animate-up page-content-shell">
-    <div class="page-content-title-row">
-      <div class="page-heading">
-        <h2 class="page-title">财务中心</h2>
-      </div>
-      <div class="finance-live-clock" aria-live="polite">
-        <span class="finance-live-clock__hm">{{ liveClockHm }}</span>
-        <span class="finance-live-clock__date">{{ liveClockDate }}</span>
-      </div>
-    </div>
-
     <!-- 三张复合 KPI 卡片：今日 / 本月 / 累计 -->
     <section class="finance-stats-grid" aria-label="收入概览">
       <article class="finance-stat-card finance-stat-card--primary">
@@ -308,25 +287,20 @@ onUnmounted(() => {
       </article>
     </section>
 
-    <!-- 今日开卡收款明细 -->
+    <!-- 今日开卡收款明细：表头固定在标题下方，仅明细行区域滚动 -->
     <section class="finance-detail-section">
       <div class="finance-detail-head">
         <h3 class="finance-detail-title">
           <CreditCard :size="18" aria-hidden="true" />
           今日开卡收款明细
-          <span v-if="todayLabel" class="finance-detail-title__date">({{ todayLabel }})</span>
         </h3>
-        <p class="finance-detail-sub">
-          已缴工单按上海时间列出；时刻与卡型对应单笔收入。口径与上方「今日收入」中的开卡统计一致（工单
-          <strong class="finance-detail-sub__em">updated_at</strong> 落入当日）。
-        </p>
       </div>
 
       <p v-if="loading && !todayPaidCardItems.length" class="finance-detail-empty">载入中…</p>
       <p v-else-if="!todayPaidCardItems.length" class="finance-detail-empty">今日暂无已缴开卡记录</p>
 
       <div v-else class="finance-detail-table-wrap">
-        <table class="finance-detail-table">
+        <table class="finance-detail-table finance-detail-table--body-scroll">
           <thead>
             <tr>
               <th class="finance-detail-th finance-detail-th--time">时间</th>
@@ -336,7 +310,7 @@ onUnmounted(() => {
           </thead>
           <tbody>
             <tr v-for="row in todayPaidCardItems" :key="row.order_id">
-              <td>{{ row.time_hm || '—' }}</td>
+              <td class="finance-detail-datetime">{{ formatFinanceCardOrderDateTime(row) }}</td>
               <td>
                 <span v-if="row.card_kind" :class="cardKindPillClass(row.card_kind)">{{ row.card_kind }}</span>
                 <span v-else class="finance-detail-muted">—</span>
@@ -351,6 +325,15 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.finance-page.page-content-shell {
+  /* 抵消 main-body 左右 padding，报表区尽量沾满主内容宽度 */
+  margin-left: -1rem;
+  margin-right: -1rem;
+  width: calc(100% + 2rem);
+  box-sizing: border-box;
+  padding-bottom: 0.75rem;
+}
+
 .finance-page {
   --finance-primary: #0d5c46;
   --finance-meal: #3b82f6;
@@ -361,32 +344,33 @@ onUnmounted(() => {
   gap: 24px;
 }
 
-.finance-live-clock {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-style: normal;
-}
-
-.finance-live-clock__hm {
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--finance-primary);
-}
-
-.finance-live-clock__date {
-  margin-top: 2px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--finance-muted);
-}
-
-/* 三张 KPI 复合卡片 */
+/* 三张 KPI 复合卡片；左右留白与主内容区内边距对齐（抵消父级负 margin 拉满后的贴边感） */
 .finance-stats-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 24px;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  box-sizing: border-box;
+}
+
+@media (max-width: 900px) {
+  .finance-page.page-content-shell {
+    margin-left: 0;
+    margin-right: 0;
+    width: 100%;
+  }
+
+  /* 小屏已无负边距拉满时，不必再向内缩一档，否则会与 main-body padding 双重留白 */
+  .finance-stats-grid {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .finance-detail-section {
+    margin-left: 0;
+    margin-right: 0;
+  }
 }
 
 @media (max-width: 1024px) {
@@ -606,17 +590,20 @@ onUnmounted(() => {
   opacity: 0.12;
 }
 
-/* 明细区 */
+/* 今日开卡收款明细：整卡与顶部 KPI 同色带左右对齐（抵消 page 负 margin 贴边） */
 .finance-detail-section {
   background: #fff;
   border-radius: 32px;
   border: 1px solid var(--finance-border);
   padding: 32px;
   box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.05);
+  margin-left: 1rem;
+  margin-right: 1rem;
+  box-sizing: border-box;
 }
 
 .finance-detail-head {
-  margin-bottom: 24px;
+  margin-bottom: 0.75rem;
 }
 
 .finance-detail-title {
@@ -627,26 +614,6 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   color: #0f172a;
-}
-
-.finance-detail-title__date {
-  font-weight: 500;
-  color: var(--finance-muted);
-  margin-left: 2px;
-}
-
-.finance-detail-sub {
-  margin: 6px 0 0;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--finance-muted);
-  line-height: 1.55;
-  max-width: 52rem;
-}
-
-.finance-detail-sub__em {
-  color: var(--finance-primary);
-  font-weight: 800;
 }
 
 .finance-detail-empty {
@@ -660,6 +627,9 @@ onUnmounted(() => {
 
 .finance-detail-table-wrap {
   overflow-x: auto;
+  border: 1px solid var(--finance-border);
+  border-radius: 16px;
+  background: #fff;
 }
 
 .finance-detail-table {
@@ -668,26 +638,56 @@ onUnmounted(() => {
   text-align: left;
 }
 
+/**
+ * 仅 tbody 区域纵向滚动，表头不随列表滚动（display:block 分块表格常见写法）
+ */
+.finance-detail-table--body-scroll thead,
+.finance-detail-table--body-scroll tbody tr {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.finance-detail-table--body-scroll tbody {
+  display: block;
+  max-height: min(54vh, 520px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.finance-detail-table--body-scroll thead {
+  box-shadow: 0 1px 0 var(--finance-border);
+}
+
 .finance-detail-th {
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 800;
-  color: var(--finance-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 16px;
+  color: #334155;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--finance-border);
+  background: #fafafa;
+  vertical-align: bottom;
+}
+
+.finance-detail-table--body-scroll thead .finance-detail-th {
+  border-bottom: none;
 }
 
 .finance-detail-th--time {
-  width: 25%;
+  width: 38%;
+  text-align: left;
 }
 
 .finance-detail-th--kind {
-  width: 35%;
+  width: 32%;
+  text-align: left;
 }
 
 .finance-detail-th--amt {
-  width: 40%;
+  width: 30%;
   text-align: right;
 }
 
@@ -697,6 +697,27 @@ onUnmounted(() => {
   font-weight: 600;
   border-bottom: 1px solid var(--finance-border);
   color: #0f172a;
+}
+
+.finance-detail-table td:first-child {
+  text-align: left;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-detail-datetime {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: nowrap;
+}
+
+.finance-detail-table td:nth-child(2) {
+  /* 与表头「卡型」同一左缘；胶囊左对齐不占满整格居中 */
+  text-align: left;
+  vertical-align: middle;
+}
+
+.finance-detail-table td:nth-child(2) .finance-detail-muted {
+  display: inline-block;
 }
 
 .finance-detail-amt {
@@ -714,10 +735,10 @@ onUnmounted(() => {
 .finance-pill {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  padding: 4px 10px;
+  justify-content: flex-start;
+  padding: 6px 12px;
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
 

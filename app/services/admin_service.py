@@ -921,6 +921,9 @@ def dashboard_meal_summary(
             today_single_retail = count_paid_single_retail_portions_for_delivery_day(
                 db, anchor, store_id=sid
             )
+            tomorrow_single_retail = count_paid_single_retail_portions_for_delivery_day(
+                db, day_after, store_id=sid
+            )
             return DashboardMealSummaryOut(
                 shanghai_today=cal_today,
                 business_anchor_date=anchor,
@@ -930,6 +933,7 @@ def dashboard_meal_summary(
                 tomorrow_meals_to_prepare=np_snap,
                 today_expire_one_unit_members=int(row.today_expire_one_unit_members),
                 today_single_retail_total_quantity=today_single_retail,
+                tomorrow_single_retail_total_quantity=tomorrow_single_retail,
                 **mem_kw,
                 tomorrow_first_meal_new_members=t_first,
                 today_meals_week_over_week_caption=today_wow_cap,
@@ -963,6 +967,9 @@ def dashboard_meal_summary(
         delivery_sheet_metrics_for_date(db, delivery_date=day_after, store_id=sid)
     )
     today_single_retail = count_paid_single_retail_portions_for_delivery_day(db, anchor, store_id=sid)
+    tomorrow_single_retail = count_paid_single_retail_portions_for_delivery_day(
+        db, day_after, store_id=sid
+    )
 
     out = DashboardMealSummaryOut(
         shanghai_today=cal_today,
@@ -973,6 +980,7 @@ def dashboard_meal_summary(
         tomorrow_meals_to_prepare=np,
         today_expire_one_unit_members=te,
         today_single_retail_total_quantity=today_single_retail,
+        tomorrow_single_retail_total_quantity=tomorrow_single_retail,
         **mem_kw,
         tomorrow_first_meal_new_members=t_first,
         today_meals_week_over_week_caption=today_wow_cap,
@@ -1018,6 +1026,7 @@ def dashboard_meal_summary(
             tomorrow_meals_to_prepare=out.tomorrow_meals_to_prepare,
             today_expire_one_unit_members=out.today_expire_one_unit_members,
             today_single_retail_total_quantity=out.today_single_retail_total_quantity,
+            tomorrow_single_retail_total_quantity=out.tomorrow_single_retail_total_quantity,
             total_members=out.total_members,
             active_weekly_members=out.active_weekly_members,
             expired_weekly_members=out.expired_weekly_members,

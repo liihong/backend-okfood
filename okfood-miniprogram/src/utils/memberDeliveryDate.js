@@ -29,29 +29,7 @@ export function addDaysIso(isoDate, days) {
   return `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, '0')}-${String(anchor.getDate()).padStart(2, '0')}`
 }
 
-function isShanghaiPastDailyCutoff(now = new Date(), hour = 10) {
-  const h0 = Math.floor(Number(hour)) || 10
-  try {
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Asia/Shanghai',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    }).formatToParts(now)
-    const h = parseInt(parts.find((p) => p.type === 'hour')?.value || '0', 10) || 0
-    if (h > h0) return true
-    if (h < h0) return false
-    return true
-  } catch {
-    const d = new Date(now)
-    return d.getHours() > h0 || d.getHours() === h0
-  }
-}
-
-/** 会员起送业务日可选的最小 YYYY-MM-DD（上海） */
+/** 会员起送业务日可选的最小 YYYY-MM-DD（上海）：即为「当天」，与后端 `min_member_delivery_start_shanghai` 对齐。 */
 export function minMemberDeliveryStartYmd(now = new Date()) {
-  const today = ymdTodayShanghai(now)
-  const delta = isShanghaiPastDailyCutoff(now) ? 1 : 0
-  return addDaysIso(today, delta)
+  return ymdTodayShanghai(now)
 }
