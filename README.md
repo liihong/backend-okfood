@@ -183,9 +183,11 @@ npm run dev:mp-weixin
 
 ## 生产部署
 
+- **登录服务器后如何操作**：[deploy/README.md](deploy/README.md)
 - **分步流程与验收**：[docs/生产部署与域名说明.md](docs/生产部署与域名说明.md)
 - **增量更新脚本**：[deploy/update-production.sh](deploy/update-production.sh)
 - **Nginx 示例**：[deploy/nginx-ok.sourcefire.cn.example.conf](deploy/nginx-ok.sourcefire.cn.example.conf)
+- **API systemd 示例**：[deploy/okfine-api.service.example](deploy/okfine-api.service.example)
 - **Scheduler systemd 示例**：[deploy/okfine-scheduler.service.example](deploy/okfine-scheduler.service.example)
 
 推荐架构：

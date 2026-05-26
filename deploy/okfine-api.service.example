@@ -1,0 +1,23 @@
+# FastAPI API 服务（Uvicorn，本机 8001）
+# 安装:
+#   sudo cp deploy/okfine-api.service.example /etc/systemd/system/okfine-api.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now okfine-api
+
+[Unit]
+Description=Okfood FastAPI (Uvicorn)
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/okfood/backend
+Environment="PATH=/var/www/okfood/backend/.venv/bin"
+EnvironmentFile=-/var/www/okfood/backend/.env
+ExecStart=/var/www/okfood/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
