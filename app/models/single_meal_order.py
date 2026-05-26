@@ -45,5 +45,12 @@ class SingleMealOrder(Base):
     courier_id: Mapped[str | None] = mapped_column(
         String(50), ForeignKey("couriers.courier_id", onupdate="CASCADE"), nullable=True, index=True
     )
+    sf_same_city_push_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("sf_same_city_pushes.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    sf_order_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

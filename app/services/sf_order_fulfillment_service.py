@@ -8,7 +8,7 @@ from datetime import date
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import String, and_, cast, func, or_, select, text, true as sql_true
+from sqlalchemy import String, and_, case, cast, func, or_, select, text, true as sql_true
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -128,6 +128,18 @@ def _retail_smo_order_id_from_stop(stop_id: str | None) -> int | None:
         return int(tail)
     except (TypeError, ValueError):
         return None
+
+
+def _single_meal_order_bound_to_push(db: Session, order_id: int, pus: SfSameCityPush) -> bool:
+    """订单已绑定 push 时，回调/同步须 push.id 一致（防同址多单串单）。"""
+    o = db.get(SingleMealOrder, int(order_id))
+    if o is None:
+        return False
+    if o.sf_same_city_push_id is None:
+        return True
+    if pus.id is None:
+        return False
+    return int(o.sf_same_city_push_id) == int(pus.id)
 
 
 def _push_kind_label(kind: str | None) -> str:
@@ -426,6 +438,12 @@ def _apply_sf_cancel_to_single_meal_orders_for_push(
     oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
     if kind == SF_PUSH_KIND_SINGLE_MEAL_RETAIL or oid_retail is not None:
         if oid_retail is not None:
+            if not _single_meal_order_bound_to_push(db, oid_retail, pus):
+                result["single_meal_skipped"] = 1
+                result["warnings"].append(
+                    f"单次订单#{oid_retail}绑定的推单与当前 push#{pus.id} 不一致，跳过取消同步"
+                )
+                return result
             prev = db.get(SingleMealOrder, oid_retail)
             before = str(getattr(prev, "fulfillment_status", "") or "").strip().lower() if prev else ""
             mark_single_meal_sf_cancelled_no_commit(db, oid_retail)
@@ -444,9 +462,16 @@ def _apply_sf_cancel_to_single_meal_orders_for_push(
     sid = int(pus.store_id) if getattr(pus, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
     _, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
     agg = None
-    if not snap_oids:
+    if (
+        "fulfillment_member_ids" not in (pus.request_snapshot or {})
+        and "fulfillment_single_meal_order_ids" not in (pus.request_snapshot or {})
+        and not snap_oids
+    ):
         agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
     for oid in _single_meal_order_ids_for_push(db, pus, agg):
+        if not _single_meal_order_bound_to_push(db, oid, pus):
+            result["single_meal_skipped"] += 1
+            continue
         prev = db.get(SingleMealOrder, oid)
         before = str(getattr(prev, "fulfillment_status", "") or "").strip().lower() if prev else ""
         mark_single_meal_sf_cancelled_no_commit(db, oid)
@@ -814,7 +839,12 @@ def member_has_active_sf_push_on_delivery_date(
 
 
 def _subscription_member_ids_for_push(db: Session, pus: SfSameCityPush, agg: Any | None) -> list[int]:
-    """订阅待扣次会员：优先停靠点聚合，其次创单快照，最后按快照收件手机匹配。"""
+    """订阅待扣次会员：以创单快照 ``fulfillment_member_ids`` 为准，禁止用推单后重建的大表扩名单。"""
+    snap = pus.request_snapshot
+    if isinstance(snap, dict) and "fulfillment_member_ids" in snap:
+        mids, _ = _ids_from_push_snapshot(snap)
+        return mids
+
     seen: set[int] = set()
     out: list[int] = []
 
@@ -838,14 +868,13 @@ def _subscription_member_ids_for_push(db: Session, pus: SfSameCityPush, agg: Any
             except (KeyError, TypeError, ValueError):
                 pass
 
-    snap_mids, _ = _ids_from_push_snapshot(pus.request_snapshot)
+    snap_mids, _ = _ids_from_push_snapshot(snap)
     for mid in snap_mids:
         add(mid)
 
     if out:
         return out
 
-    snap = pus.request_snapshot
     if isinstance(snap, dict):
         pr = snap.get("preview_row")
         if isinstance(pr, dict):
@@ -854,7 +883,34 @@ def _subscription_member_ids_for_push(db: Session, pus: SfSameCityPush, agg: Any
     return out
 
 
+def _preview_single_meal_count_from_push_snapshot(snap: Any) -> int | None:
+    """推单快照 preview_row 中的单次份数；无 preview 时返回 None（旧数据）。"""
+    if not isinstance(snap, dict):
+        return None
+    pr = snap.get("preview_row")
+    if not isinstance(pr, dict):
+        return None
+    try:
+        return int(pr.get("single_meal_count") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _single_meal_order_ids_for_push(db: Session, pus: SfSameCityPush, agg: Any | None) -> list[int]:
+    """
+    本推单应履约的单次订单 id。
+
+    仅以创单快照为准；推单后新下的单次卡不得因「重建大表聚合」被误标送达。
+    """
+    snap = pus.request_snapshot
+    if isinstance(snap, dict) and "fulfillment_single_meal_order_ids" in snap:
+        _, oids = _ids_from_push_snapshot(snap)
+        return oids
+
+    preview_sq = _preview_single_meal_count_from_push_snapshot(snap)
+    if preview_sq is not None and preview_sq <= 0:
+        return []
+
     seen: set[int] = set()
     out: list[int] = []
 
@@ -867,14 +923,20 @@ def _single_meal_order_ids_for_push(db: Session, pus: SfSameCityPush, agg: Any |
         seen.add(io)
         out.append(io)
 
+    push_ts = getattr(pus, "created_at", None)
     if agg is not None:
         for sng in getattr(agg, "singles", None) or []:
             try:
-                add(int(sng["id"]))
+                oid = int(sng["id"])
             except (KeyError, TypeError, ValueError):
-                pass
+                continue
+            if push_ts is not None:
+                row = db.get(SingleMealOrder, oid)
+                if row is not None and row.created_at is not None and row.created_at > push_ts:
+                    continue
+            add(oid)
 
-    _, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+    _, snap_oids = _ids_from_push_snapshot(snap)
     for oid in snap_oids:
         add(oid)
     return out
@@ -910,6 +972,12 @@ def _apply_sf_same_city_stop_fulfillment(
     oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
     if kind == SF_PUSH_KIND_SINGLE_MEAL_RETAIL or oid_retail is not None:
         if oid_retail is not None:
+            if not _single_meal_order_bound_to_push(db, oid_retail, pus):
+                result["single_meal_skipped"] = 1
+                result["warnings"].append(
+                    f"单次订单#{oid_retail}绑定的推单与当前 push#{pus.id} 不一致，跳过标履约"
+                )
+                return result
             prev = db.get(SingleMealOrder, oid_retail)
             before = str(getattr(prev, "fulfillment_status", "") or "").strip().lower() if prev else ""
             mark_single_meal_delivered_sf_completion_no_commit(db, oid_retail)
@@ -936,9 +1004,9 @@ def _apply_sf_same_city_stop_fulfillment(
         home_ok_ids = set(home_ok_ids) | {int(x) for x in snap_mids}
 
     agg = None
-    if not snap_mids or not snap_oids:
+    if not snap_mids and not snap_oids:
         agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
-        if agg is None and not snap_mids and not snap_oids:
+        if agg is None:
             result["warnings"].append(
                 f"未解析到停靠点聚合 stop_id={pus.stop_id} date={pus.delivery_date}，将尝试快照/收件人回退"
             )
@@ -974,6 +1042,9 @@ def _apply_sf_same_city_stop_fulfillment(
             )
 
     for oid in _single_meal_order_ids_for_push(db, pus, agg):
+        if not _single_meal_order_bound_to_push(db, oid, pus):
+            result["single_meal_skipped"] += 1
+            continue
         prev = db.get(SingleMealOrder, oid)
         before = str(getattr(prev, "fulfillment_status", "") or "").strip().lower() if prev else ""
         mark_single_meal_delivered_sf_completion_no_commit(db, oid)
@@ -1329,12 +1400,19 @@ def list_sf_same_city_pushes_for_monitor_export(
     return [_sf_push_monitor_row_dict(db, r, _aggs_for_row(r)) for r in rows]
 
 
+def _sf_push_monitor_normalized_kind_expr():
+    return case(
+        (SfSameCityPush.push_kind == SF_PUSH_KIND_SINGLE_MEAL_RETAIL, SF_PUSH_KIND_SINGLE_MEAL_RETAIL),
+        else_=SF_PUSH_KIND_DELIVERY_SHEET,
+    )
+
+
 def count_sf_same_city_pushes_for_delivery_date(
     db: Session,
     *,
     store_id: int | None,
     delivery_date: date,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """按推送记录上的配送业务日 ``delivery_date`` 统计创单成功 / 失败 / 取消（与列表筛选口径一致）。"""
     conds = [SfSameCityPush.delivery_date == delivery_date]
     if store_id is not None:
@@ -1342,28 +1420,52 @@ def count_sf_same_city_pushes_for_delivery_date(
 
     flt = and_(*conds)
     cancelled_flt = _sf_push_monitor_cancelled_clause()
-    total = int(db.scalar(select(func.count()).select_from(SfSameCityPush).where(flt)) or 0)
-    cancelled = int(
-        db.scalar(select(func.count()).select_from(SfSameCityPush).where(flt, cancelled_flt)) or 0
+    success_case = case(
+        (and_(SfSameCityPush.error_code == 0, ~cancelled_flt), 1),
+        else_=0,
     )
-    success = int(
-        db.scalar(
-            select(func.count()).select_from(SfSameCityPush).where(
-                flt,
-                SfSameCityPush.error_code == 0,
-                ~cancelled_flt,
-            )
+    failed_case = case(
+        (or_(SfSameCityPush.error_code.is_(None), SfSameCityPush.error_code != 0), 1),
+        else_=0,
+    )
+    cancelled_case = case((cancelled_flt, 1), else_=0)
+    kind_expr = _sf_push_monitor_normalized_kind_expr()
+
+    rows = db.execute(
+        select(
+            kind_expr.label("push_kind"),
+            func.count().label("total"),
+            func.sum(success_case).label("success"),
+            func.sum(failed_case).label("failed"),
+            func.sum(cancelled_case).label("cancelled"),
         )
-        or 0
-    )
-    failed = int(
-        db.scalar(
-            select(func.count()).select_from(SfSameCityPush).where(
-                flt,
-                or_(SfSameCityPush.error_code.is_(None), SfSameCityPush.error_code != 0),
-            )
-        )
-        or 0
-    )
-    return {"total": total, "success": success, "failed": failed, "cancelled": cancelled}
+        .select_from(SfSameCityPush)
+        .where(flt)
+        .group_by(kind_expr)
+    ).all()
+
+    empty_stats = {"total": 0, "success": 0, "failed": 0, "cancelled": 0}
+    by_kind: dict[str, dict[str, int]] = {
+        SF_PUSH_KIND_DELIVERY_SHEET: dict(empty_stats),
+        SF_PUSH_KIND_SINGLE_MEAL_RETAIL: dict(empty_stats),
+    }
+    for row in rows:
+        k = row.push_kind or SF_PUSH_KIND_DELIVERY_SHEET
+        by_kind[k] = {
+            "total": int(row.total or 0),
+            "success": int(row.success or 0),
+            "failed": int(row.failed or 0),
+            "cancelled": int(row.cancelled or 0),
+        }
+
+    overall = dict(empty_stats)
+    for stats in by_kind.values():
+        for key in overall:
+            overall[key] += stats[key]
+
+    return {
+        **overall,
+        "delivery_sheet": by_kind[SF_PUSH_KIND_DELIVERY_SHEET],
+        "single_meal_retail": by_kind[SF_PUSH_KIND_SINGLE_MEAL_RETAIL],
+    }
 

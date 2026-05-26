@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint, event, inspect
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -53,5 +53,15 @@ class Member(Base):
     # 固定周六不参与订阅履约（当周六十 global 仍为履约日时）；默认关闭
     skip_subscription_saturday: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     membership_refunded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+
+@event.listens_for(Member, "before_update")
+def _member_set_updated_at(_mapper, _connection, target: Member) -> None:
+    changed = {attr.key for attr in inspect(target).attrs if attr.history.has_changes()}
+    # 微信登录 / 同步 openid 不刷新档案最近操作时间
+    if changed <= {"wx_mini_openid"}:
+        return
+    target.updated_at = beijing_now_naive()

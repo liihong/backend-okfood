@@ -320,12 +320,20 @@ def delivery_sf_push_stats(
     admin_username: str = Depends(admin_or_delivery_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """按配送业务日统计：推单记录总数 / 创单成功（未取消）/ 创单失败 / 取消订单。"""
+    """按配送业务日统计：推单记录总数 / 创单成功（未取消）/ 创单失败 / 取消订单；并按大表合并、单次零售拆分。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     raw = count_sf_same_city_pushes_for_delivery_date(
         db, store_id=store_id, delivery_date=delivery_date
     )
-    out = SfSameCityPushStatsOut(delivery_date=delivery_date.isoformat(), **raw)
+    out = SfSameCityPushStatsOut(
+        delivery_date=delivery_date.isoformat(),
+        total=raw["total"],
+        success=raw["success"],
+        failed=raw["failed"],
+        cancelled=raw["cancelled"],
+        delivery_sheet=raw["delivery_sheet"],
+        single_meal_retail=raw["single_meal_retail"],
+    )
     return success(data=dump_model(out), msg="获取成功")
 
 
@@ -502,7 +510,7 @@ def delivery_sf_retry_push(
     db: SessionDep,
     admin_username: str = Depends(admin_or_delivery_staff_subject),
 ):
-    """创单失败记录：按当前配送大表数据对该停靠点重试推单（已成功创单不可重试）。"""
+    """创单失败记录：按当前配送大表数据对该停靠点重试推单（更新原记录；已成功创单不可重试）。"""
     _ = admin_username
     try:
         r = retry_sf_same_city_push_by_id(db, push_id=push_id)
@@ -602,7 +610,7 @@ def users_stats(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """会员档案库顶栏：周/月卡总户数、生效中、已过期（与列表口径一致；不含仅登录/次卡）。"""
+    """会员档案库顶栏：周/月卡总户数、生效中、已过期（与列表口径一致；不含次卡/仅登录用户）。"""
     response.headers["Cache-Control"] = "no-store"
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     out = member_list_overview_counts(db, store_id=store_id)

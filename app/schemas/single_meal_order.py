@@ -39,6 +39,10 @@ class SingleMealOrderOut(BaseModel):
         description="配送侧订单状态（英文枚举）：pending 待发货/待自提、accepted 配送中、delivered 已完成、sf_cancelled 顺丰取消、cancelled 已取消",
     )
     courier_id: str | None = None
+    sf_same_city_push_id: int | None = Field(
+        None, description="关联 sf_same_city_pushes.id（创单成功后写入）"
+    )
+    sf_order_id: str | None = Field(None, description="顺丰运单号（与推单表同步冗余）")
     address_summary: str
     store_contact_phone: str | None = Field(
         None,

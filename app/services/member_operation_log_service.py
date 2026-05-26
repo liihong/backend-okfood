@@ -13,6 +13,8 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.models.member_operation_log import MemberOperationLog
+from app.models.member import Member
+from app.core.timeutil import beijing_now_naive
 
 # 操作类型枚举（与 models/member_operation_log.operation_type 对应）
 OP_PAUSE_DELIVERY = "pause_delivery"             # 暂停配送
@@ -100,6 +102,9 @@ def record_member_operation(
         operator=(operator or f"member:{member_id}")[:100],
     )
     db.add(row)
+    m = db.get(Member, int(member_id))
+    if m is not None:
+        m.updated_at = beijing_now_naive()
 
 
 def list_member_operations(

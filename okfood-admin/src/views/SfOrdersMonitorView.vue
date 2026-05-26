@@ -498,10 +498,10 @@ onMounted(() => {
           顺丰侧「订单完成」回调或配送状态中<strong>妥投完单 (17)</strong>通过后，系统将按停靠点对订阅会员<strong>标记送达并扣次数</strong>（与配送大表「标记送达」一致）；单点餐仅更新履约状态。
         </p>
         <p v-if="pushStats" class="sf-monitor-stats">
-          <strong>业务日 {{ pushStats.delivery_date }}</strong>：共 {{ pushStats.total }} 单 · 成功
-          {{ pushStats.success }} · 失败 {{ pushStats.failed }} · 取消
-          {{ pushStats.cancelled != null ? pushStats.cancelled : 0 }}
-          <span class="sf-monitor-stats-sub">（按配送业务日统计，与下方列表「业务日」一致；定时推送记在该配送日）</span>
+          <strong>业务日 {{ pushStats.delivery_date }}</strong>：共 {{ pushStats.total }} 单（大表合并
+          {{ pushStats.delivery_sheet?.total ?? 0 }} · 单次零售
+          {{ pushStats.single_meal_retail?.total ?? 0 }}）· 成功 {{ pushStats.success }} · 失败
+          {{ pushStats.failed }} · 取消 {{ pushStats.cancelled != null ? pushStats.cancelled : 0 }}
         </p>
         <div class="sf-monitor-filters">
           <label class="sf-monitor-field">

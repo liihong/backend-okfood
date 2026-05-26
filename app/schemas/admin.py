@@ -174,7 +174,7 @@ class StoreConfigOut(BaseModel):
     )
     sf_nightly_auto_push_enabled: bool = Field(
         False,
-        description="每日 07:00（上海）自动向顺丰推送当日业务日配送单；关闭则仅手动推单",
+        description="每日 07:00（上海）自动向顺丰推送当日业务日配送大表（订阅合并）订单；单次零售须手动推单",
     )
     sf_retail_push_shop_id: str | None = Field(
         None,
@@ -407,10 +407,11 @@ class MemberAdminOut(BaseModel):
         description="退卡退款确认时刻（ISO）；非空则档案状态为已退款",
     )
     created_at: str
+    updated_at: str = Field("", description="档案最近更新时间（ISO，上海墙钟）")
 
 
 class MemberListStatsOut(BaseModel):
-    """会员档案库顶栏统计：仅周/月卡；与列表 validity 筛选一致。"""
+    """会员档案库顶栏统计：与列表 validity 筛选一致。"""
 
     total: int = Field(..., ge=0, description="周/月卡档案总户数")
     active: int = Field(..., ge=0, description="生效中：balance>0")
@@ -537,6 +538,11 @@ class DashboardMealSummaryOut(BaseModel):
         ...,
         ge=0,
         description="锚定日应履约（到家+自提口径）且剩余次数恰为 1 次（balance 等于每配送日份数）的会员数",
+    )
+    today_single_retail_total_quantity: int = Field(
+        ...,
+        ge=0,
+        description="锚定日已支付单次零售订单份数合计（sum(single_meal_orders.quantity)）",
     )
     total_members: int = Field(
         ...,
@@ -1147,7 +1153,7 @@ class PlatformStoreOut(BaseModel):
     leave_deadline_time: str = Field("", description="HH:MM:SS")
     sf_nightly_auto_push_enabled: bool = Field(
         False,
-        description="是否启用每日 07:00 自动顺丰推单（当日业务日）",
+        description="是否启用每日 07:00 自动顺丰推单（当日业务日配送大表；单次零售手动）",
     )
     created_at: str
 
@@ -1162,7 +1168,7 @@ class PlatformStoreCreateIn(BaseModel):
     is_active: bool = True
     sf_nightly_auto_push_enabled: bool = Field(
         False,
-        description="启用后系统于每日 07:00（上海）自动推送当日待配送订单至顺丰",
+        description="启用后系统于每日 07:00（上海）自动推送当日配送大表订单至顺丰；单次零售请在订单管理手动推单",
     )
 
 
@@ -1179,6 +1185,15 @@ class PlatformStorePatchIn(BaseModel):
     sf_nightly_auto_push_enabled: bool | None = None
 
 
+class SfSameCityPushStatsBreakdownOut(BaseModel):
+    """按订单类别拆分的推单统计。"""
+
+    total: int = 0
+    success: int = 0
+    failed: int = 0
+    cancelled: int = Field(0, description="取消订单：商户发起取消或顺丰回调为取消/撤单(2/22)")
+
+
 class SfSameCityPushStatsOut(BaseModel):
     """按配送业务日（与 ``sf_same_city_pushes.delivery_date`` 一致）统计推单条数。"""
 
@@ -1187,6 +1202,14 @@ class SfSameCityPushStatsOut(BaseModel):
     success: int
     failed: int
     cancelled: int = Field(0, description="取消订单：商户发起取消或顺丰回调为取消/撤单(2/22)")
+    delivery_sheet: SfSameCityPushStatsBreakdownOut = Field(
+        default_factory=SfSameCityPushStatsBreakdownOut,
+        description="大表合并（delivery_sheet）",
+    )
+    single_meal_retail: SfSameCityPushStatsBreakdownOut = Field(
+        default_factory=SfSameCityPushStatsBreakdownOut,
+        description="单次零售（single_meal_retail）",
+    )
 
 
 class AdminSystemNotificationOut(BaseModel):

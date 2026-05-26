@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS `members` (
   `store_pickup` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '门店自提：不参与按地址配送与骑手任务，单独归组备餐',
   `skip_subscription_saturday` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '固定周六不参与订阅履约（全局日历仍为履约日时生效）',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '档案最近更新时间（业务操作触发）',
   `deleted_at` DATETIME NULL DEFAULT NULL COMMENT '逻辑删除时间；空表示正常',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_members_phone` (`phone`),
@@ -60,6 +61,7 @@ CREATE TABLE IF NOT EXISTS `members` (
   KEY `idx_members_balance_created` (`balance`, `created_at`),
   KEY `idx_members_leave_range` (`leave_range_start`, `leave_range_end`),
   KEY `idx_members_deleted_at` (`deleted_at`),
+  KEY `idx_members_store_updated_at` (`store_id`, `updated_at`),
   CONSTRAINT `chk_members_balance_nonneg` CHECK (`balance` >= 0),
   CONSTRAINT `chk_members_daily_meal_units` CHECK (`daily_meal_units` >= 1 AND `daily_meal_units` <= 50)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员';

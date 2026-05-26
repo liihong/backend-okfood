@@ -89,7 +89,7 @@ def _member_on_leave_today(m: Member, today: date) -> bool:
 
 
 def _member_archive_scope():
-    """会员档案库：仅周卡/月卡；仅登录浏览、纯次卡视为普通用户不在库内展示。"""
+    """会员档案库：仅周卡/月卡；次卡及未标注套餐不在库内展示。"""
     return Member.plan_type.in_((PlanType.WEEK.value, PlanType.MONTH.value))
 
 
@@ -227,7 +227,7 @@ def admin_login_user(db: Session, username: str, password: str) -> AdminUser:
 
 
 def member_list_overview_counts(db: Session, *, store_id: int | None = None) -> MemberListStatsOut:
-    """周/月卡档案户数：与列表 `_member_archive_scope` + validity 筛选口径一致。"""
+    """档案库户数：与列表 `_member_archive_scope` + validity 筛选口径一致。"""
     expired_scope = _member_card_expired_scope()
     refunded_scope = _member_refunded_scope()
     base = select(
@@ -295,7 +295,7 @@ def list_members_paged(
         store_id=store_id,
     )
     page_sq = (
-        page_sq.order_by(Member.created_at.desc())
+        page_sq.order_by(func.coalesce(Member.updated_at, Member.created_at).desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .subquery("page")
@@ -364,6 +364,7 @@ def list_members_paged(
                     m.membership_refunded_at.isoformat() if m.membership_refunded_at else None
                 ),
                 created_at=m.created_at.isoformat() if m.created_at else "",
+                updated_at=m.updated_at.isoformat() if m.updated_at else "",
             )
         )
     return out, total
@@ -833,6 +834,21 @@ def count_leave_members_for_delivery_day(db: Session, d: date, *, store_id: int 
     )
 
 
+def count_paid_single_retail_portions_for_delivery_day(
+    db: Session, delivery_date: date, *, store_id: int
+) -> int:
+    """锚定业务日已支付单次零售份数合计（与周菜单「单次零售」列同源）。"""
+    sid = int(store_id)
+    v = db.scalar(
+        select(func.coalesce(func.sum(SingleMealOrder.quantity), 0)).where(
+            SingleMealOrder.delivery_date == delivery_date,
+            SingleMealOrder.pay_status == "已支付",
+            SingleMealOrder.store_id == sid,
+        )
+    )
+    return int(v or 0)
+
+
 def _dashboard_day_prep_metrics_out(m: DeliverySheetDayMetrics) -> DashboardDayPrepMetricsOut:
     return DashboardDayPrepMetricsOut(
         home_pending_meal_total=int(m.home_pending_meal_total),
@@ -902,6 +918,9 @@ def dashboard_meal_summary(
             tomorrow_metrics = _dashboard_day_prep_metrics_out(
                 delivery_sheet_metrics_for_date(db, delivery_date=day_after, store_id=sid)
             )
+            today_single_retail = count_paid_single_retail_portions_for_delivery_day(
+                db, anchor, store_id=sid
+            )
             return DashboardMealSummaryOut(
                 shanghai_today=cal_today,
                 business_anchor_date=anchor,
@@ -910,6 +929,7 @@ def dashboard_meal_summary(
                 tomorrow_leave_members=int(row.tomorrow_leave_members),
                 tomorrow_meals_to_prepare=np_snap,
                 today_expire_one_unit_members=int(row.today_expire_one_unit_members),
+                today_single_retail_total_quantity=today_single_retail,
                 **mem_kw,
                 tomorrow_first_meal_new_members=t_first,
                 today_meals_week_over_week_caption=today_wow_cap,
@@ -942,6 +962,7 @@ def dashboard_meal_summary(
     tomorrow_metrics = _dashboard_day_prep_metrics_out(
         delivery_sheet_metrics_for_date(db, delivery_date=day_after, store_id=sid)
     )
+    today_single_retail = count_paid_single_retail_portions_for_delivery_day(db, anchor, store_id=sid)
 
     out = DashboardMealSummaryOut(
         shanghai_today=cal_today,
@@ -951,6 +972,7 @@ def dashboard_meal_summary(
         tomorrow_leave_members=nl,
         tomorrow_meals_to_prepare=np,
         today_expire_one_unit_members=te,
+        today_single_retail_total_quantity=today_single_retail,
         **mem_kw,
         tomorrow_first_meal_new_members=t_first,
         today_meals_week_over_week_caption=today_wow_cap,
@@ -995,6 +1017,7 @@ def dashboard_meal_summary(
             tomorrow_leave_members=out.tomorrow_leave_members,
             tomorrow_meals_to_prepare=out.tomorrow_meals_to_prepare,
             today_expire_one_unit_members=out.today_expire_one_unit_members,
+            today_single_retail_total_quantity=out.today_single_retail_total_quantity,
             total_members=out.total_members,
             active_weekly_members=out.active_weekly_members,
             expired_weekly_members=out.expired_weekly_members,

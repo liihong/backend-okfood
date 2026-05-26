@@ -433,6 +433,7 @@ export function mapAdminUserToRow(raw, idx) {
       membership_refunded_at: null,
       store_pickup: false,
       skip_subscription_saturday: false,
+      updated_at: '',
     }
   }
   const balance = Number(raw.balance) || 0
@@ -513,5 +514,6 @@ export function mapAdminUserToRow(raw, idx) {
     membership_refunded_at: membershipRefundedAt,
     store_pickup: raw.store_pickup === true,
     skip_subscription_saturday: raw.skip_subscription_saturday === true,
+    updated_at: raw.updated_at != null ? String(raw.updated_at).trim() : '',
   }
 }

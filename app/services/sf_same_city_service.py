@@ -85,10 +85,9 @@ def _sf_push_request_snapshot(
     }
     mids = [int(x) for x in (fulfillment_member_ids or []) if x is not None]
     oids = [int(x) for x in (fulfillment_single_meal_order_ids or []) if x is not None]
-    if mids:
-        snap["fulfillment_member_ids"] = mids
-    if oids:
-        snap["fulfillment_single_meal_order_ids"] = oids
+    # 显式落库（含空列表），妥投回调仅按快照 id 履约，禁止用「重建大表」推断
+    snap["fulfillment_member_ids"] = mids
+    snap["fulfillment_single_meal_order_ids"] = oids
     return snap
 
 
@@ -813,6 +812,36 @@ def _fulfillment_ids_from_agg(db: Session, agg: _Agg | None) -> tuple[list[int],
     return ff_mids, ff_oids, member_ids
 
 
+def _fulfillment_ids_for_delivery_sheet_push(
+    db: Session, agg: _Agg | None
+) -> tuple[list[int], list[int], set[int]]:
+    """大表合并推单仅履约订阅；单次卡另走 ``retail-smo-{id}`` 独立创单。"""
+    ff_mids: list[int] = []
+    if agg is None:
+        return ff_mids, [], set()
+    member_ids: set[int] = set()
+    for sl in agg.sub_lines:
+        if sl.get("is_delivered"):
+            continue
+        if int(sl.get("units") or 0) <= 0:
+            continue
+        try:
+            mid = int(sl["member_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        ff_mids.append(mid)
+        member_ids.add(mid)
+    return ff_mids, [], member_ids
+
+
+def _delivery_sheet_push_row(item: SfSameCityPreviewRow) -> SfSameCityPreviewRow:
+    """大表推顺丰时仅含订阅份数；同停靠点单次卡不计入本单 product_num。"""
+    sub = int(item.subscription_pending_units or 0)
+    kg_unit = float(getattr(get_settings(), "SF_KG_PER_MEAL_UNIT", None) or 0.5)
+    wkg = max(0.1, kg_unit * float(max(1, sub)))
+    return item.model_copy(update={"single_meal_count": 0, "weight_kg": round(wkg, 2)})
+
+
 def _validate_sf_push_row(
     db: Session,
     item: SfSameCityPreviewRow,
@@ -919,6 +948,63 @@ def _sf_http_create_order(
         return client.create_order(pld, dev_id=dev_id, app_key=app_key)
 
 
+def _upsert_sf_push_row(
+    db: Session,
+    *,
+    existing_push_id: int | None,
+    store_id: int,
+    delivery_date: date,
+    stop_id: str,
+    shop_order_id: str,
+    error_code: int,
+    error_msg: str,
+    request_snapshot: dict[str, Any],
+    response_json: dict[str, Any] | None,
+    sf_order_id: str | None = None,
+    sf_bill_id: str | None = None,
+    push_kind: str = "delivery_sheet",
+) -> SfSameCityPush:
+    """落库或覆盖已有推单记录（监控页重试时更新原行，避免同停靠点重复失败行）。"""
+    if existing_push_id is not None:
+        row = db.get(SfSameCityPush, int(existing_push_id))
+        if row is None:
+            raise ValueError("推单记录不存在")
+        if str(row.stop_id) != str(stop_id):
+            raise ValueError("重试记录与停靠点不一致")
+        if row.delivery_date != delivery_date or int(row.store_id) != int(store_id):
+            raise ValueError("重试记录与业务日/门店不一致")
+        row.shop_order_id = shop_order_id
+        row.sf_order_id = sf_order_id
+        row.sf_bill_id = sf_bill_id
+        row.error_code = error_code
+        row.error_msg = error_msg
+        row.request_snapshot = request_snapshot
+        row.response_json = response_json
+        row.last_callback_at = None
+        row.last_callback_kind = None
+        row.sf_callback_order_status = None
+        row.merchant_cancel_requested_at = None
+        row.created_at = beijing_now_naive()
+        db.commit()
+        return row
+    row = SfSameCityPush(
+        store_id=int(store_id),
+        delivery_date=delivery_date,
+        stop_id=stop_id,
+        push_kind=(push_kind or "delivery_sheet").strip() or "delivery_sheet",
+        shop_order_id=shop_order_id,
+        sf_order_id=sf_order_id,
+        sf_bill_id=sf_bill_id,
+        error_code=error_code,
+        error_msg=error_msg,
+        request_snapshot=request_snapshot,
+        response_json=response_json,
+    )
+    db.add(row)
+    db.commit()
+    return row
+
+
 def _persist_sf_push_success(
     db: Session,
     *,
@@ -926,12 +1012,28 @@ def _persist_sf_push_success(
     d: date,
     prep: _PreparedSfPush,
     res: dict[str, Any],
+    existing_push_id: int | None = None,
 ) -> SfSameCityPushItemResult:
+    from app.services.single_meal_order_service import mark_single_meals_accepted_on_sf_push_no_commit
+
     r = res.get("result")
     sfo, sfb = None, None
     if isinstance(r, dict):
         sfo, sfb = r.get("sf_order_id"), r.get("sf_bill_id")
-    row = SfSameCityPush(
+    snap = prep.snap_db if isinstance(prep.snap_db, dict) else {}
+    raw_oids = snap.get("fulfillment_single_meal_order_ids")
+    ff_oids: list[int] = []
+    if isinstance(raw_oids, list):
+        for x in raw_oids:
+            try:
+                ff_oids.append(int(x))
+            except (TypeError, ValueError):
+                pass
+    if ff_oids:
+        mark_single_meals_accepted_on_sf_push_no_commit(db, ff_oids)
+    pus_row = _upsert_sf_push_row(
+        db,
+        existing_push_id=existing_push_id,
         store_id=sid,
         delivery_date=d,
         stop_id=prep.stop_id,
@@ -943,8 +1045,11 @@ def _persist_sf_push_success(
         request_snapshot=prep.snap_db,
         response_json=res if isinstance(res, dict) else None,
     )
-    db.add(row)
-    db.commit()
+    if ff_oids:
+        from app.services.single_meal_order_service import link_single_meal_orders_to_sf_push_no_commit
+
+        link_single_meal_orders_to_sf_push_no_commit(db, ff_oids, pus_row)
+        db.commit()
     return SfSameCityPushItemResult(
         stop_id=prep.stop_id,
         ok=True,
@@ -959,6 +1064,7 @@ def push_sf_same_city(
     *,
     store_id: int | None = None,
     ags_hint: dict[str, _Agg] | None = None,
+    retry_push_id: int | None = None,
 ) -> SfSameCityPushOut:
     base = get_settings()
     d = body.delivery_date
@@ -997,20 +1103,31 @@ def push_sf_same_city(
             if skip is not None:
                 out.append(skip)
                 continue
+            if int(item.subscription_pending_units or 0) <= 0:
+                out.append(
+                    SfSameCityPushItemResult(
+                        stop_id=item.stop_id,
+                        ok=True,
+                        message="已跳过（仅单次卡，将独立推顺丰）",
+                        sf_order_id=None,
+                    )
+                )
+                continue
             agg_cur = ags.get(item.stop_id)
             soid = f"OKF{d:%Y%m%d}{item.stop_id[:12]}{uuid.uuid4().hex[:8]}"
             if len(soid) > 64:
                 soid = soid[:64]
             snap_preview: dict[str, Any] = item.model_dump(mode="json")
+            item_ds = _delivery_sheet_push_row(item)
             pld = _create_order_payload(
-                item,
+                item_ds,
                 shop_order_id=soid,
                 gset=gset,
                 store=store,
                 now_ts=now_ts,
                 delivery_date=d,
             )
-            ff_mids, ff_oids, member_ids = _fulfillment_ids_from_agg(db, agg_cur)
+            ff_mids, ff_oids, member_ids = _fulfillment_ids_for_delivery_sheet_push(db, agg_cur)
             snap_db = _sf_push_request_snapshot(
                 snap_preview,
                 pld,
@@ -1020,7 +1137,7 @@ def push_sf_same_city(
             )
             pending.append(
                 _PreparedSfPush(
-                    item=item,
+                    item=item_ds,
                     stop_id=item.stop_id,
                     soid=soid,
                     snap_db=snap_db,
@@ -1084,6 +1201,7 @@ def push_sf_same_city(
                         err_code,
                         err_msg,
                         store_id=sid,
+                        existing_push_id=retry_push_id,
                     )
                     out.append(
                         SfSameCityPushItemResult(
@@ -1096,7 +1214,12 @@ def push_sf_same_city(
                     continue
                 try:
                     result = _persist_sf_push_success(
-                        db, sid=sid, d=d, prep=prep, res=raw
+                        db,
+                        sid=sid,
+                        d=d,
+                        prep=prep,
+                        res=raw,
+                        existing_push_id=retry_push_id,
                     )
                     success_stop_ids.add(prep.stop_id)
                     if prep.agg_cur is not None:
@@ -1107,7 +1230,15 @@ def push_sf_same_city(
                 except Exception as e:
                     db.rollback()
                     _persist_fail(
-                        db, d, prep.stop_id, prep.soid, prep.snap_db, -2, str(e)[:1000], store_id=sid
+                        db,
+                        d,
+                        prep.stop_id,
+                        prep.soid,
+                        prep.snap_db,
+                        -2,
+                        str(e)[:1000],
+                        store_id=sid,
+                        existing_push_id=retry_push_id,
                     )
                     out.append(
                         SfSameCityPushItemResult(
@@ -1135,20 +1266,21 @@ def _persist_fail(
     *,
     store_id: int,
     push_kind: str = "delivery_sheet",
+    existing_push_id: int | None = None,
 ) -> None:
-    row = SfSameCityPush(
+    _upsert_sf_push_row(
+        db,
+        existing_push_id=existing_push_id,
         store_id=int(store_id),
         delivery_date=d,
         stop_id=stop_id,
-        push_kind=(push_kind or "delivery_sheet").strip() or "delivery_sheet",
         shop_order_id=shop_order_id,
         error_code=err_code,
         error_msg=err_msg,
         request_snapshot=snap,
         response_json=None,
+        push_kind=push_kind,
     )
-    db.add(row)
-    db.commit()
 
 
 def cancel_sf_same_city_push(
@@ -1249,7 +1381,8 @@ def auto_push_sf_today_business_day_for_store(
     db: Session, *, store_id: int
 ) -> SfNightlyAutoPushStoreResult:
     """
-    早间定时任务：向顺丰推送「当日」上海业务日、当前仍待推的停靠点（与手动推单同一套预览/合并逻辑）。
+    早间定时任务：向顺丰推送「当日」上海业务日、当前仍待推的配送大表停靠点（与手动推单同一套预览/合并逻辑）。
+    仅推送大表合并（订阅）订单；单次零售不在此任务内，须订单管理手动推单。
     门店须启用 ``sf_nightly_auto_push_enabled`` 且处于营业状态。
     """
     st = db.get(Store, int(store_id))
@@ -1264,7 +1397,11 @@ def auto_push_sf_today_business_day_for_store(
     if not sf_configured:
         logger.info("顺丰自动推单跳过（未配置顺丰） store_id=%s", store_id)
         return SfNightlyAutoPushStoreResult(skip_reason="未配置顺丰")
-    pending = [r for r in rows if r.selected and not r.already_pushed]
+    pending = [
+        r
+        for r in rows
+        if r.selected and not r.already_pushed and int(r.subscription_pending_units or 0) > 0
+    ]
     if not pending:
         logger.info("顺丰自动推单跳过（无待推停靠点） store_id=%s date=%s", store_id, d)
         return SfNightlyAutoPushStoreResult(skip_reason="无待推停靠点")
@@ -1338,7 +1475,7 @@ def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
 
 
 def retry_sf_same_city_push_by_id(db: Session, *, push_id: int) -> SfSameCityPushItemResult:
-    """监控页：对创单失败记录按当前大表数据重试单停靠点推单。"""
+    """监控页：对创单失败记录按当前大表数据重试单停靠点推单（覆盖原记录，不新增行）。"""
     row = db.get(SfSameCityPush, push_id)
     if row is None:
         raise HTTPException(status_code=404, detail="推单记录不存在")
@@ -1369,7 +1506,7 @@ def retry_sf_same_city_push_by_id(db: Session, *, push_id: int) -> SfSameCityPus
             detail="该停靠点本日不可再推（本停靠点已成功创单，或同配送日内同一会员已在其他停靠点成功推单）。",
         )
     body = SfSameCityPushIn(delivery_date=d, rows=[prow])
-    out = push_sf_same_city(db, body, store_id=sid)
+    out = push_sf_same_city(db, body, store_id=sid, retry_push_id=int(push_id))
     if not out.results:
         raise HTTPException(status_code=500, detail="重试无返回结果")
     return out.results[0]
@@ -1540,6 +1677,10 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
                 )
                 order.fulfillment_status = "accepted"
                 db.add(row_db)
+                db.flush()
+                from app.services.single_meal_order_service import link_single_meal_orders_to_sf_push_no_commit
+
+                link_single_meal_orders_to_sf_push_no_commit(db, [int(order.id)], row_db)
                 db.add(order)
                 db.commit()
                 msg = (

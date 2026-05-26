@@ -44,6 +44,7 @@ function slotsToRows(slotList, weekStartIso) {
     single_order_price_yuan: bySlot[slot]?.single_order_price_yuan ?? null,
     total_stock: bySlot[slot]?.total_stock ?? null,
     subscription_meals_for_day: bySlot[slot]?.subscription_meals_for_day ?? null,
+    single_retail_paid_portions: bySlot[slot]?.single_retail_paid_portions ?? null,
     single_stock_remaining: bySlot[slot]?.single_stock_remaining ?? null,
   }))
 }
@@ -125,6 +126,24 @@ function deliverDisplay(row) {
   const v = row.subscription_meals_for_day
   if (v == null || v === '') return '—'
   return String(v)
+}
+
+/** 单次零售（已支付）份数展示 */
+function singleRetailDisplay(row) {
+  if (!row.dish_id) return '—'
+  const v = row.single_retail_paid_portions
+  if (v == null || v === '') return '—'
+  return String(v)
+}
+
+/** 单次零售徽章：有单时高亮，便于核对避免漏单 */
+function singleRetailBadgeClass(row) {
+  if (!row.dish_id) return 'wmenu-retail--none'
+  const v = row.single_retail_paid_portions
+  if (v == null || v === '') return 'wmenu-retail--none'
+  const n = Number(v)
+  if (!Number.isFinite(n) || n <= 0) return 'wmenu-retail--zero'
+  return 'wmenu-retail--active'
 }
 
 async function fetchDishes() {
@@ -356,7 +375,7 @@ onMounted(() => {
         <Info :size="18" stroke-width="2.5" aria-hidden="true" />
         <span>
           维护每周一至周日的固定槽位菜品（可与按日排期重复安排同一道菜）。日总份数：留空则单次卡不可售；填写后，单次可售
-          = 总份数 − 当日会员应配送份数 − 已付单次。同一自然日、同一道菜的日总份数在槽位上维护。
+          = 总份数 − 应配送（订阅）− 单次零售（已支付）。「单次零售」列单独统计当日已付单次点餐份数，便于核对、避免漏单混淆。
         </span>
       </div>
       <button type="button" class="wmenu-alert-close" aria-label="关闭提示" @click="bannerVisible = false">
@@ -380,6 +399,7 @@ onMounted(() => {
                 <th>星期</th>
                 <th>单点价</th>
                 <th>日总份数</th>
+                <th>单次零售</th>
                 <th>应配送</th>
                 <th>单次余</th>
                 <th>菜品</th>
@@ -417,6 +437,11 @@ onMounted(() => {
                     @blur="() => onTotalStockCommit(row)"
                   />
                   <span v-else class="wmenu-dash">—</span>
+                </td>
+                <td>
+                  <span class="wmenu-retail-badge" :class="singleRetailBadgeClass(row)">
+                    {{ singleRetailDisplay(row) }}
+                  </span>
                 </td>
                 <td>
                   <span class="wmenu-deliver-badge">{{ deliverDisplay(row) }}</span>
@@ -478,6 +503,7 @@ onMounted(() => {
                 <th>星期</th>
                 <th>单点价</th>
                 <th>日总份数</th>
+                <th>单次零售</th>
                 <th>应配送</th>
                 <th>单次余</th>
                 <th>菜品</th>
@@ -515,6 +541,11 @@ onMounted(() => {
                     @blur="() => onTotalStockCommit(row)"
                   />
                   <span v-else class="wmenu-dash">—</span>
+                </td>
+                <td>
+                  <span class="wmenu-retail-badge" :class="singleRetailBadgeClass(row)">
+                    {{ singleRetailDisplay(row) }}
+                  </span>
                 </td>
                 <td>
                   <span class="wmenu-deliver-badge">{{ deliverDisplay(row) }}</span>
@@ -844,6 +875,33 @@ onMounted(() => {
   display: inline-block;
   min-width: 44px;
   text-align: center;
+}
+
+.wmenu-retail-badge {
+  font-family: ui-monospace, monospace;
+  font-weight: 800;
+  padding: 6px 12px;
+  border-radius: 8px;
+  display: inline-block;
+  min-width: 44px;
+  text-align: center;
+}
+
+.wmenu-retail--none {
+  background: #f1f5f9;
+  color: var(--wmenu-muted);
+}
+
+.wmenu-retail--zero {
+  background: #f8fafc;
+  color: #94a3b8;
+  border: 1px solid var(--wmenu-border);
+}
+
+.wmenu-retail--active {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid rgba(249, 115, 22, 0.2);
 }
 
 .wmenu-remain-badge {

@@ -372,6 +372,11 @@ def persist_sf_callback_and_sync_push(
                 pus.sf_callback_order_status = 2
             elif route_kind == "rider_cancel":
                 pus.sf_callback_order_status = 22
+            if sf_order_id:
+                pus.sf_order_id = str(sf_order_id)[:32]
+            from app.services.single_meal_order_service import sync_single_meal_sf_order_id_for_push_no_commit
+
+            sync_single_meal_sf_order_id_for_push_no_commit(db, pus)
 
     side_effect = None
     if sign_ok and matched_push is not None:

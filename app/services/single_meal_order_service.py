@@ -109,11 +109,85 @@ def _retail_order_id_from_stop_id(stop_id: str | None) -> int | None:
         return None
 
 
-def _latest_success_sf_push_for_retail_order(
+def _single_meal_order_ids_from_push_snapshot(snap: object) -> list[int]:
+    if not isinstance(snap, dict):
+        return []
+    raw = snap.get("fulfillment_single_meal_order_ids")
+    if not isinstance(raw, list):
+        return []
+    out: list[int] = []
+    for x in raw:
+        try:
+            out.append(int(x))
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def link_single_meal_orders_to_sf_push_no_commit(
+    db: Session,
+    order_ids: list[int] | tuple[int, ...],
+    pus: SfSameCityPush,
+) -> int:
+    """创单/重推成功后：单次订单绑定推单主键，并冗余顺丰运单号。"""
+    if pus.id is None:
+        return 0
+    push_id = int(pus.id)
+    sf_oid = (pus.sf_order_id or "").strip() or None
+    linked = 0
+    for raw in order_ids:
+        try:
+            oid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        row = db.get(SingleMealOrder, oid)
+        if not row:
+            continue
+        row.sf_same_city_push_id = push_id
+        if sf_oid:
+            row.sf_order_id = sf_oid
+        linked += 1
+    return linked
+
+
+def sync_single_meal_sf_order_id_for_push_no_commit(db: Session, pus: SfSameCityPush) -> int:
+    """顺丰回调写入 push.sf_order_id 后，同步到已绑定该 push 的单次订单。"""
+    sf_oid = (pus.sf_order_id or "").strip() or None
+    if pus.id is None or not sf_oid:
+        return 0
+    rows = db.scalars(
+        select(SingleMealOrder).where(SingleMealOrder.sf_same_city_push_id == int(pus.id))
+    ).all()
+    n = 0
+    for row in rows:
+        if row.sf_order_id != sf_oid:
+            row.sf_order_id = sf_oid
+            n += 1
+    return n
+
+
+def resolve_sf_push_for_single_meal_order(
     db: Session, *, store_id: int, order_id: int
 ) -> SfSameCityPush | None:
-    """取该单次零售订单最近一次创单成功的顺丰推单（忽略后续失败重试行）。"""
-    stop_id = f"{_RETAIL_STOP_PREFIX}{int(order_id)}"
+    """
+    单次订单 → 顺丰推单：优先 ``single_meal_orders.sf_same_city_push_id``，
+    其次 retail-smo-{id} / 快照（兼容旧数据）。
+    """
+    oid = int(order_id)
+    o = db.get(SingleMealOrder, oid)
+    if o is not None and o.sf_same_city_push_id is not None:
+        pus = db.get(SfSameCityPush, int(o.sf_same_city_push_id))
+        if pus is not None and sf_push_create_succeeded(pus):
+            if int(o.store_id) == int(store_id) or int(pus.store_id) == int(store_id):
+                return pus
+    return _legacy_resolve_sf_push_for_single_meal_order(db, store_id=int(store_id), order_id=oid)
+
+
+def _legacy_resolve_sf_push_for_single_meal_order(
+    db: Session, *, store_id: int, order_id: int
+) -> SfSameCityPush | None:
+    oid = int(order_id)
+    stop_id = f"{_RETAIL_STOP_PREFIX}{oid}"
     row = db.scalars(
         select(SfSameCityPush)
         .where(
@@ -126,8 +200,7 @@ def _latest_success_sf_push_for_retail_order(
     ).first()
     if row is not None:
         return row
-    # 门店 id 不一致时仍尝试按 stop_id 找回推单（历史数据/多门店迁移）
-    return db.scalars(
+    row = db.scalars(
         select(SfSameCityPush)
         .where(
             SfSameCityPush.stop_id == stop_id,
@@ -136,6 +209,35 @@ def _latest_success_sf_push_for_retail_order(
         .order_by(SfSameCityPush.id.desc())
         .limit(1)
     ).first()
+    if row is not None:
+        return row
+    o = db.get(SingleMealOrder, oid)
+    if o is None or o.delivery_date is None:
+        return None
+    candidates = db.scalars(
+        select(SfSameCityPush)
+        .where(
+            SfSameCityPush.store_id == int(store_id),
+            SfSameCityPush.delivery_date == o.delivery_date,
+            SfSameCityPush.error_code == 0,
+            SfSameCityPush.push_kind == "delivery_sheet",
+        )
+        .order_by(SfSameCityPush.id.desc())
+    ).all()
+    for pus in candidates:
+        snap = pus.request_snapshot or {}
+        if "fulfillment_single_meal_order_ids" not in snap:
+            continue
+        if oid in _single_meal_order_ids_from_push_snapshot(snap):
+            return pus
+    return None
+
+
+def _latest_success_sf_push_for_retail_order(
+    db: Session, *, store_id: int, order_id: int
+) -> SfSameCityPush | None:
+    """兼容旧调用方：等同 ``resolve_sf_push_for_single_meal_order``。"""
+    return resolve_sf_push_for_single_meal_order(db, store_id=int(store_id), order_id=int(order_id))
 
 
 def _apply_sf_monitor_status_to_retail_order_no_commit(
@@ -153,6 +255,9 @@ def _apply_sf_monitor_status_to_retail_order_no_commit(
         return "skipped_store_pickup"
     if not sf_push_create_succeeded(pus):
         return "skipped_sf_not_success_push"
+
+    if o.sf_same_city_push_id is not None and int(o.sf_same_city_push_id) != int(pus.id):
+        return "skipped_push_order_mismatch"
 
     prev_f = str(o.fulfillment_status or "").strip().lower()
     st = pus.sf_callback_order_status
@@ -356,6 +461,8 @@ def _single_meal_order_row_to_out(
         pay_channel=row.pay_channel,
         fulfillment_status=str(row.fulfillment_status or ""),
         courier_id=row.courier_id,
+        sf_same_city_push_id=int(row.sf_same_city_push_id) if row.sf_same_city_push_id is not None else None,
+        sf_order_id=(row.sf_order_id or "").strip() or None,
         address_summary=address_summary,
         created_at=row.created_at,
     )
@@ -678,6 +785,36 @@ def confirm_single_order_delivery(db: Session, courier_id: str, order_id: int) -
     db.commit()
 
 
+def mark_single_meals_accepted_on_sf_push_no_commit(db: Session, order_ids: list[int] | tuple[int, ...]) -> int:
+    """
+    顺丰创单成功：单点餐进入「配送中」。
+    与订单管理直推顺丰、门店自配送指派口径一致；幂等，已送达/已取消不覆盖。
+    """
+    updated = 0
+    for raw in order_ids:
+        try:
+            oid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        row = db.get(SingleMealOrder, oid)
+        if not row:
+            continue
+        if row.pay_status != "已支付":
+            continue
+        if bool(getattr(row, "store_pickup", False)):
+            continue
+        prev = str(row.fulfillment_status or "").strip().lower()
+        if prev in ("delivered", "sf_cancelled", "cancelled"):
+            continue
+        if prev == "accepted":
+            continue
+        if not single_meal_fulfillment_allows_dispatch(prev):
+            continue
+        row.fulfillment_status = "accepted"
+        updated += 1
+    return updated
+
+
 def mark_single_meal_delivered_sf_completion_no_commit(db: Session, order_id: int) -> None:
     """
     顺丰订单完成：单点餐标履约已送达；餐费已预付，不扣会员次数、不产生骑手待结算。
@@ -806,9 +943,11 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
     scanned = len(rows)
     counts: dict[str, int] = {
         "updated": 0,
+        "updated_accepted": 0,
         "updated_cancel": 0,
         "already_completed": 0,
         "already_sf_cancelled": 0,
+        "already_accepted": 0,
         "skipped_unpaid": 0,
         "skipped_store_pickup": 0,
         "skipped_no_sf_push": 0,
@@ -825,6 +964,8 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
         key = outcome
         if key == "updated":
             counts["updated"] += 1
+        elif key == "updated_accepted":
+            counts["updated_accepted"] += 1
         elif key == "updated_cancel":
             counts["updated_cancel"] += 1
         elif key == "already_completed":
@@ -841,6 +982,16 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
         if pus is None:
             counts["skipped_no_sf_push"] += 1
             continue
+        prev_f = str(o.fulfillment_status or "").strip().lower()
+        if prev_f in ("pending", "sf_cancelled") and sf_push_create_succeeded(pus):
+            if mark_single_meals_accepted_on_sf_push_no_commit(db, [int(o.id)]) > 0:
+                db.commit()
+                db.refresh(o)
+                _bump("updated_accepted")
+                touched.add(int(o.id))
+                prev_f = str(o.fulfillment_status or "").strip().lower()
+        elif prev_f == "accepted":
+            _bump("already_accepted")
         outcome = _apply_sf_monitor_status_to_retail_order_no_commit(db, o, pus)
         if outcome in ("updated", "updated_cancel"):
             db.commit()
@@ -900,6 +1051,7 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
 
     parts = [
         f"扫描供餐日订单 {scanned} 条",
+        f"新对齐配送中 {counts['updated_accepted']} 条",
         f"新对齐妥投 {counts['updated']} 条",
         f"新对齐顺丰取消 {counts['updated_cancel']} 条",
         f"已是已完成 {counts['already_completed']}",

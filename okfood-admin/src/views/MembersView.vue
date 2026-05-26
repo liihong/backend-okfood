@@ -1054,6 +1054,16 @@ onMounted(async () => {
             <span :class="memberStatusClass(u.status)">{{ u.status }}</span>
           </template>
         </el-table-column>
+        <el-table-column
+          label="最近操作时间"
+          min-width="160"
+          class-name="td-col-updated-at"
+          label-class-name="td-col-updated-at"
+        >
+          <template #default="{ row: u }">
+            <span class="members-updated-at-cell">{{ formatOperationLogTime(u.updated_at) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="备注" min-width="100" class-name="td-remarks">
           <template #default="{ row: u }">
             {{ u.remarks || '—' }}

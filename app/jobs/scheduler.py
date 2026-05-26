@@ -102,7 +102,8 @@ def job_low_balance_notify() -> None:
 
 def job_sf_nightly_auto_push() -> None:
     """
-    每日 07:00（上海）：对启用「顺丰自动推单」的门店，自动推送当日业务日待配送停靠点至顺丰。
+    每日 07:00（上海）：对启用「顺丰自动推单」的门店，自动推送当日业务日配送大表（订阅合并）停靠点至顺丰。
+    单次零售订单不在此任务内，须订单管理手动推单。
     """
     from app.services.sf_same_city_service import run_sf_nightly_auto_push_for_all_stores
 

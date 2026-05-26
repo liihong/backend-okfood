@@ -359,6 +359,11 @@ const summarySlice = computed(() => ({
 
 const expireCount = computed(() => Number(dashboardStats.value[4]?.value) || 0)
 
+/** 今日单次零售总计数量（dashboard-summary.today_single_retail_total_quantity） */
+const todaySingleRetailTotalCount = computed(
+  () => Number(summaryMeta.value?.today_single_retail_total_quantity) || 0,
+)
+
 /** 备餐卡片「总数」：优先 dashboard-summary 拆分，否则回落营业概览 */
 const cardPrepTotal = computed(() => {
   const b = prepMetricsBreakdown(todayPrepMetrics.value)
@@ -517,6 +522,9 @@ const tomorrowHomeStopCountAnimated = useAnimatedInteger(() => tomorrowHomeStopC
 const todayLeaveAnimated = useAnimatedInteger(() => summarySlice.value.todayLeave, { duration: 620 })
 const tomorrowLeaveAnimated = useAnimatedInteger(() => summarySlice.value.tomorrowLeave, { duration: 620 })
 const expireCountAnimated = useAnimatedInteger(() => expireCount.value, { duration: 620 })
+const todaySingleRetailTotalAnimated = useAnimatedInteger(() => todaySingleRetailTotalCount.value, {
+  duration: 620,
+})
 const tomorrowFirstMealNewAnimated = useAnimatedInteger(() => tomorrowFirstMealNewCount.value, {
   duration: 620,
 })
@@ -674,6 +682,14 @@ onMounted(() => {
           <div class="dro-dash-chip dro-dash-chip--rose">
             <span class="dro-dash-chip__k">今日卡到期</span>
             <span class="dro-dash-chip__v">{{ expireCountAnimated }} <small>人</small></span>
+          </div>
+          <div
+            class="dro-dash-chip dro-dash-chip--emerald"
+            role="status"
+            :aria-label="`今日单次零售 ${todaySingleRetailTotalCount} 份`"
+          >
+            <span class="dro-dash-chip__k">今日单次零售</span>
+            <span class="dro-dash-chip__v">{{ todaySingleRetailTotalAnimated }} <small>份</small></span>
           </div>
           <div
             class="dro-dash-yoy-chip dro-dash-yoy-chip--today"
@@ -1590,18 +1606,17 @@ onMounted(() => {
   align-items: stretch;
 }
 
-/** 今日/明日：首行为双 chip，次行通栏同比条；与地图卡 stat-row 同一 border-top + padding-top */
+/** 今日/明日：首行双 chip，次行单次零售 + 同比上周并排 */
 .dro-dash-kpi__stat-row--chips-then-yoy {
   grid-template-columns: 1fr 1fr;
   align-items: stretch;
 }
 
 .dro-dash-kpi__stat-row--chips-then-yoy .dro-dash-yoy-chip {
-  grid-column: 1 / -1;
   margin-top: 0;
-  /* 与 .dro-dash-plan-box 竖向内边距一致，便于与「周卡明细」首行文字顶对齐 */
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
+  padding-top: 0.65rem;
+  padding-bottom: 0.65rem;
+  min-width: 0;
 }
 
 .dro-dash-chip {
@@ -1649,6 +1664,16 @@ onMounted(() => {
 
 .dro-dash-chip--rose .dro-dash-chip__v {
   color: #be123c;
+}
+
+.dro-dash-chip--emerald {
+  background: rgba(236, 253, 245, 0.85);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #047857;
+}
+
+.dro-dash-chip--emerald .dro-dash-chip__v {
+  color: #047857;
 }
 
 .dro-dash-chip--slate {

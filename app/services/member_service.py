@@ -532,7 +532,11 @@ def patch_member_profile(
 
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    if set_daily_meal_units and daily_meal_units is not None:
+    if (
+        (set_daily_meal_units and daily_meal_units is not None)
+        or (set_delivery_deferred and delivery_deferred is not None)
+        or set_delivery_start
+    ):
         guard_member_self_service_during_sf_fulfillment(db, m)
 
     # 采集变更前关键字段，供操作日志 before/after 对比

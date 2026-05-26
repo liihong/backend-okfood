@@ -172,3 +172,49 @@ def test_store_locked_when_sf_in_transit():
         )
         is True
     )
+
+
+def test_patch_profile_pause_raises_when_sf_locked():
+    from app.services.member_service import patch_member_profile
+
+    db = MagicMock()
+    m = Member(id=1, store_id=1, phone="13800000000", balance=5)
+    m.delivery_deferred = False
+    m.deleted_at = None
+    db.get.return_value = m
+
+    def raise_locked(*_args, **_kwargs):
+        raise HTTPException(status_code=400, detail=SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG)
+
+    with patch(
+        "app.services.member_service.guard_member_self_service_during_sf_fulfillment",
+        side_effect=raise_locked,
+    ):
+        with pytest.raises(HTTPException) as exc:
+            patch_member_profile(db, 1, set_delivery_deferred=True, delivery_deferred=True)
+    assert exc.value.detail == SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG
+
+
+def test_patch_profile_delivery_start_raises_when_sf_locked():
+    from app.services.member_service import patch_member_profile
+
+    db = MagicMock()
+    m = Member(id=1, store_id=1, phone="13800000000", balance=5)
+    m.deleted_at = None
+    db.get.return_value = m
+
+    def raise_locked(*_args, **_kwargs):
+        raise HTTPException(status_code=400, detail=SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG)
+
+    with patch(
+        "app.services.member_service.guard_member_self_service_during_sf_fulfillment",
+        side_effect=raise_locked,
+    ):
+        with pytest.raises(HTTPException) as exc:
+            patch_member_profile(
+                db,
+                1,
+                set_delivery_start=True,
+                delivery_start_date=date(2026, 5, 27),
+            )
+    assert exc.value.detail == SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG

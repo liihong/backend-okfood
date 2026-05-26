@@ -317,7 +317,7 @@ def weekly_slot_stock_extras(
     paid: dict[tuple[date, int], int] | None = None,
     skip_subscription_stats: bool = False,
 ) -> list[dict[str, Any]]:
-    """为每槽位附加 subscription_meals_for_day、single_stock_remaining；total_stock 由调用方自 payload 已带明。
+    """为每槽位附加 subscription_meals_for_day、single_retail_paid_portions、single_stock_remaining；total_stock 由调用方自 payload 已带明。
 
     ``skip_subscription_stats=True`` 时不查会员履约/已付单次（下周预告维护用，显著减库压）。
     """
@@ -349,11 +349,13 @@ def weekly_slot_stock_extras(
         if did is None:
             base["total_stock"] = None
             base["subscription_meals_for_day"] = None if skip_subscription_stats else 0
+            base["single_retail_paid_portions"] = None
             base["single_stock_remaining"] = None
             out.append(base)
             continue
         if skip_subscription_stats:
             base["subscription_meals_for_day"] = None
+            base["single_retail_paid_portions"] = None
             base["single_stock_remaining"] = None
             out.append(base)
             continue
@@ -362,6 +364,7 @@ def weekly_slot_stock_extras(
         sub = sub_by_date.get(menu_date, 0) if scheduled and int(scheduled.id) == did_i else 0
         paid_n = paid.get((menu_date, did_i), 0)
         base["subscription_meals_for_day"] = sub
+        base["single_retail_paid_portions"] = paid_n
         cap_raw = s.get("total_stock")
         if cap_raw is None:
             base["total_stock"] = None

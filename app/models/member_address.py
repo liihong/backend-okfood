@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, event, update
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -34,3 +34,16 @@ class MemberAddress(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)
+
+
+def _touch_member_updated_at_on_address_change(_mapper, connection, target: MemberAddress) -> None:
+    from app.models.member import Member
+
+    connection.execute(
+        update(Member).where(Member.id == target.member_id).values(updated_at=beijing_now_naive())
+    )
+
+
+event.listen(MemberAddress, "after_insert", _touch_member_updated_at_on_address_change)
+event.listen(MemberAddress, "after_update", _touch_member_updated_at_on_address_change)
+event.listen(MemberAddress, "after_delete", _touch_member_updated_at_on_address_change)
