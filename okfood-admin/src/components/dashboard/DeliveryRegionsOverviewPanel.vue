@@ -230,6 +230,40 @@ function addOneDayIso(iso) {
   ).padStart(2, '0')}`
 }
 
+/** 锚定营业日日历：与 dashboard-summary.business_date 一致；空串表示走服务端默认（上海当日） */
+const dashDatePickerValue = ref('')
+const dashDatePopoverVisible = ref(false)
+
+function syncDashDatePickerFromSummary() {
+  const raw =
+    summaryMeta.value?.business_anchor_date != null &&
+    String(summaryMeta.value.business_anchor_date).trim() !== ''
+      ? String(summaryMeta.value.business_anchor_date).trim().slice(0, 10)
+      : summaryAnchorDate.value.trim().slice(0, 10)
+  dashDatePickerValue.value = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : ''
+}
+
+function onDashDatePopoverShow() {
+  syncDashDatePickerFromSummary()
+}
+
+/**
+ * el-date-picker 选中或清空后立即拉取 dashboard-summary；
+ * 「当日」语义随锚定日与上海今日比较（summaryIsLiveToday）。
+ */
+function onDashboardAnchorDateChange(val) {
+  summaryAnchorDate.value = val && typeof val === 'string' ? val.slice(0, 10).trim() : ''
+  dashDatePopoverVisible.value = false
+  void fetchDashboardSummary()
+}
+
+/** 点击「配餐总盘」：清空锚定日，不传 business_date，按服务端上海当日重新拉 overview */
+function resetDashboardSummaryToShanghaiLiveToday() {
+  summaryAnchorDate.value = ''
+  dashDatePopoverVisible.value = false
+  void fetchDashboardSummary()
+}
+
 async function fetchDashboardSummary() {
   if (!adminAccessToken.value) return
   dashboardStatsLoading.value = true
@@ -253,6 +287,7 @@ async function fetchDashboardSummary() {
       { label: '明日需准备餐品', value: np, unit: '份', mapFilter: 'tomorrow_prep' },
       { label: '今日卡到期会员', value: te, unit: '人', mapFilter: null },
     ]
+    syncDashDatePickerFromSummary()
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -602,13 +637,48 @@ onMounted(() => {
       <article class="dro-dash-kpi" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
         <div class="dro-dash-kpi__head">
           <div class="dro-dash-kpi__tags">
-            <span class="dro-dash-pill dro-dash-pill--emerald"
-              >今日 · {{ businessAnchorMdDisplay || '—'
-              }}<template v-if="businessAnchorWeekdayDisplay">
-                {{ businessAnchorWeekdayDisplay }}</template
-              ></span
+            <el-popover
+              v-model:visible="dashDatePopoverVisible"
+              trigger="click"
+              placement="bottom-start"
+              :width="286"
+              @show="onDashDatePopoverShow"
             >
-            <span class="dro-dash-kpi__kicker">配餐总盘</span>
+              <template #reference>
+                <button
+                  type="button"
+                  class="dro-dash-pill dro-dash-pill--emerald dro-dash-pill--interactive"
+                  :aria-expanded="dashDatePopoverVisible ? 'true' : 'false'"
+                  aria-haspopup="dialog"
+                  aria-label="选择营业日，查看该日配餐总盘数据"
+                >
+                  {{ summaryIsLiveToday ? '今日' : '当日' }} · {{ businessAnchorMdDisplay || '—'
+                  }}<template v-if="businessAnchorWeekdayDisplay">
+                    {{ businessAnchorWeekdayDisplay }}</template
+                  >
+                </button>
+              </template>
+              <div class="dro-dash-date-picker-wrap">
+                <el-date-picker
+                  v-model="dashDatePickerValue"
+                  type="date"
+                  value-format="YYYY-MM-DD"
+                  placeholder="营业日"
+                  clearable
+                  class="dro-dash-date-picker"
+                  @change="onDashboardAnchorDateChange"
+                />
+                <p class="dro-dash-date-picker-hint">清空则按服务端默认（上海当日）</p>
+              </div>
+            </el-popover>
+            <button
+              type="button"
+              class="dro-dash-kpi__kicker dro-dash-kpi__kicker--reset-live"
+              aria-label="配餐总盘：恢复为上海当日营业数据"
+              @click="resetDashboardSummaryToShanghaiLiveToday"
+            >
+              配餐总盘
+            </button>
           </div>
           <Sun :size="22" class="dro-dash-kpi__ico dro-dash-kpi__ico--emerald" aria-hidden="true" />
         </div>
@@ -627,7 +697,7 @@ onMounted(() => {
                 >
                 <span class="dro-dash-kpi__hero-formula-plus"> + </span>
                 <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--pickup"
-                  >自提{{ todayTotalOutFormulaPickup }}</span
+                  >自提 {{ todayTotalOutFormulaPickup }}</span
                 >
               </span>
             </div>
@@ -765,7 +835,7 @@ onMounted(() => {
                 >
                 <span class="dro-dash-kpi__hero-formula-plus"> + </span>
                 <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--pickup"
-                  >自提{{ tomorrowTotalOutFormulaPickup }}</span
+                  >自提 {{ tomorrowTotalOutFormulaPickup }}</span
                 >
               </span>
             </div>
@@ -1190,6 +1260,34 @@ onMounted(() => {
   border-color: #d1fae5;
 }
 
+/* 配餐总盘营业日：可点开日历；重置 button 默认样式。
+ * 勿用 font:inherit：会压住 .dro-dash-pill 的字号/字重；右侧「明日」为 span，
+ * 两卡标题胶囊应共用同一套 typography。 */
+button.dro-dash-pill--interactive {
+  cursor: pointer;
+  margin: 0;
+  outline: none;
+}
+
+button.dro-dash-pill--interactive:focus-visible {
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.4);
+}
+
+.dro-dash-date-picker-wrap {
+  padding: 0.15rem 0;
+}
+
+.dro-dash-date-picker {
+  width: 100%;
+}
+
+.dro-dash-date-picker-hint {
+  margin: 0.5rem 0 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #64748b;
+}
+
 .dro-dash-pill--blue {
   background: #eff6ff;
   color: #1d4ed8;
@@ -1208,6 +1306,21 @@ onMounted(() => {
   color: #64748b;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+/* 「配餐总盘」：button 占位复位；勿 font:inherit（否则压住 .dro-dash-kpi__kicker，与「配餐预测」span 不齐） */
+button.dro-dash-kpi__kicker--reset-live {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+button.dro-dash-kpi__kicker--reset-live:focus-visible {
+  outline: 2px solid rgba(16, 185, 129, 0.45);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 .dro-dash-kpi__ico {
