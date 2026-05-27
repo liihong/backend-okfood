@@ -69,6 +69,7 @@ npm run build:mp-weixin
 ## 常见问题
 
 - **白屏或接口失败**：检查开发者工具是否关闭域名校验（仅开发）、以及正式环境是否已在公众平台配置 request 合法域名。
+- **换头像提示 `uploadFile:fail url not in domain list`**：头像走 `uni.uploadFile` 请求 `{API_BASE}/api/user/me/avatar`（默认 `https://ok.sourcefire.cn`）。除 **request 合法域名** 外，必须在 [微信公众平台](https://mp.weixin.qq.com) → **开发** → **开发管理** → **开发设置** → **服务器域名** 中，把 **`https://ok.sourcefire.cn`**（与 `src/utils/api.js` 里 **`API_BASE`** 一致的主机，不要带路径）加入 **uploadFile 合法域名**。保存后等待生效再真机重试。若仍走测试/备用域名，必须把**实际用于上传的 HTTPS 主机**一并加入该列表。开发者工具本地可勾选「不校验合法域名」；**真机体验版/正式版必须配置**。
 - **改代码不生效**：确认微信开发者工具打开的是当前构建输出目录，并尝试重新编译或清除缓存。
 
 ## 技术栈

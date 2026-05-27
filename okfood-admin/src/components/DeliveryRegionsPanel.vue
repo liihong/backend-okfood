@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, onMounted, onUnmounted, onActivated, nextTick, watch } from 'vue'
 import { MapPin, Trash2, Plus, Save, X } from 'lucide-vue-next'
 
 /** 新乡市城区中心（GCJ-02，与高德一致）；定位失败时使用 */
@@ -51,6 +51,8 @@ const formDrawerOpen = ref(false)
 const newRegionAwaitingMeta = ref(false)
 /** 当前多边形是否处于可拖折点编辑（供界面提示；mapPolygon 非响应式） */
 const vertexEditActive = ref(false)
+/** 当前左侧正在编辑的区域 id；新建时为 null */
+const editingId = ref(null)
 
 function showToast(msg, kind = 'success') {
   emit('toast', msg, kind)
@@ -60,7 +62,8 @@ async function refreshList() {
   loading.value = true
   try {
     const [r, c] = await Promise.all([
-      props.apiRequest('/api/admin/delivery-regions'),
+      /** include_polygon=true：与后端注释一致；本页需在列表中选择区域并在地图展示边界 */
+      props.apiRequest('/api/admin/delivery-regions?include_polygon=true'),
       props.apiRequest('/api/admin/couriers'),
     ])
     regions.value = Array.isArray(r) ? r : []
@@ -72,10 +75,38 @@ async function refreshList() {
   }
 }
 
+/** 解析 polygon_json 为高德 path：支持 [[lng,lat], …]、GeoJSON Polygon、Feature(Polygon)，与后端 extract_outer_ring 可对齐 */
 function pathFromPolygonJson(json) {
-  if (Array.isArray(json)) return json.map((p) => [Number(p[0]), Number(p[1])])
-  if (json && typeof json === 'object' && json.type === 'Polygon' && Array.isArray(json.coordinates?.[0])) {
-    return json.coordinates[0].map((p) => [Number(p[0]), Number(p[1])])
+  if (json == null) return []
+
+  /** @param {unknown} coords */
+  const ringFromCoordArray = (coords) => {
+    if (!Array.isArray(coords)) return []
+    const out = []
+    for (const p of coords) {
+      if (!Array.isArray(p) || p.length < 2) continue
+      out.push([Number(p[0]), Number(p[1])])
+    }
+    return out
+  }
+
+  if (Array.isArray(json)) return ringFromCoordArray(json)
+
+  if (typeof json === 'object' && json !== null) {
+    const t = json.type
+    /** GeoJSON Feature → 递归 geometry */
+    if (t === 'Feature' && json.geometry) return pathFromPolygonJson(json.geometry)
+    if (t === 'Polygon' && Array.isArray(json.coordinates?.[0])) {
+      return ringFromCoordArray(json.coordinates[0])
+    }
+    /** MultiPolygon：取首个面的外环 */
+    if (
+      t === 'MultiPolygon' &&
+      Array.isArray(json.coordinates?.[0]) &&
+      Array.isArray(json.coordinates[0]?.[0])
+    ) {
+      return ringFromCoordArray(json.coordinates[0][0])
+    }
   }
   return []
 }
@@ -268,8 +299,17 @@ function openPolygonEditor() {
  * @param {boolean} [enableVertexEdit] 为 true 时展示可拖拽折点（编辑已有区域、或画完后微调）
  */
 function showPolygonOnMap(path, enableVertexEdit = false) {
-  if (!map || !path.length) return
+  if (!map) {
+    showToast('地图尚未加载完成，请稍后重试点选或刷新页面', 'warning')
+    return
+  }
+  /** 先把旧图层与编辑器收起，避免出现「选了区域却仍是上一块图形」的假死感 */
   clearMapPolygon()
+  if (!path || !path.length) {
+    vertexEditActive.value = false
+    showToast('该区域边界数据为空或格式无法解析，请点「重绘多边形」重新框选（若库内为 GeoJSON Feature 也会自动识别）', 'error')
+    return
+  }
   mapPolygon = new window.AMap.Polygon({
     path: path.map(([lng, lat]) => [lng, lat]),
     strokeColor: '#0e5a44',
@@ -519,6 +559,24 @@ watch(formDrawerOpen, (open) => {
 onMounted(async () => {
   await nextTick()
   await Promise.all([refreshList(), initMap()])
+})
+
+/** keep-alive 切回标签页：地图画布高度可能需重算后才能正常响应点击 */
+onActivated(() => {
+  nextTick(() => {
+    try {
+      map?.resize?.()
+    } catch {
+      /* ignore */
+    }
+    requestAnimationFrame(() => {
+      try {
+        map?.resize?.()
+      } catch {
+        /* ignore */
+      }
+    })
+  })
 })
 
 onUnmounted(() => {

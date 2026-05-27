@@ -1,6 +1,9 @@
 <template>
   <view class="page">
-    <OkNavbar show-back title="" />
+    <!-- 沉浸式大图通顶：无整块白 Navbar，仅用悬浮返回（半透底色保证各种封面上可点） -->
+    <view class="detail-float-back-hit" :style="floatBackHitStyle" @tap="goBack">
+      <text class="detail-float-back-ico">‹</text>
+    </view>
     <view v-if="loading" class="detail-state">加载中…</view>
     <view v-else-if="loadError" class="detail-state detail-state--err">{{ loadError }}</view>
     <scroll-view
@@ -63,9 +66,8 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
   canSubmitSingleOrder,
   fetchMenuDetail,
@@ -91,16 +93,69 @@ const showDayStockBlock = computed(() => !!(serviceDateYmd.value && dish.value))
 
 /** scroll-view 必须用确定 px高度，微信里 flex+calc 易导致子节点不渲染 */
 const scrollStyle = ref({ height: '400px' })
+/** 与微信胶囊纵向居中对齐的悬浮返回键位置（top / left px） */
+const floatBackHitStyle = ref({
+  top: '48px',
+  left: '12px',
+})
+
+function syncImmersionChrome() {
+  const win = uni.getWindowInfo ? uni.getWindowInfo() : uni.getSystemInfoSync()
+  const lay = getNavbarLayout()
+  let menuTop = lay.statusBarHeight + 6
+  let menuHeight = 32
+  // #ifdef MP-WEIXIN
+  try {
+    const rect = uni.getMenuButtonBoundingClientRect()
+    if (rect && typeof rect.top === 'number' && typeof rect.height === 'number') {
+      menuTop = rect.top
+      menuHeight = rect.height
+    }
+  } catch {
+    /* ignore */
+  }
+  // #endif
+  /** 触控块约 88rpx 高，折算 px 后与胶囊竖直居中 */
+  let hitPx = 44
+  try {
+    if (typeof uni.upx2px === 'function') {
+      hitPx = Math.max(36, uni.upx2px(88))
+    }
+  } catch {
+    hitPx = 44
+  }
+  const top = Math.max(lay.statusBarHeight, Math.round(menuTop + (menuHeight - hitPx) / 2))
+  floatBackHitStyle.value = {
+    top: `${top}px`,
+    left: `${Math.round((win.safeAreaInsets && win.safeAreaInsets.left) || 0) + 12}px`,
+  }
+  /** 沉浸式无自定义顶栏：滚动区铺满窗口高度 */
+  const wh = Number(win.windowHeight) || 667
+  scrollStyle.value = { height: `${Math.max(240, wh)}px` }
+}
+
+function goBack() {
+  const pages = getCurrentPages()
+  if (pages.length > 1) {
+    uni.navigateBack()
+  } else {
+    uni.switchTab({ url: '/pages/order/index' })
+  }
+}
 
 onLoad((options) => {
-  try {
-    const win = uni.getWindowInfo ? uni.getWindowInfo() : uni.getSystemInfoSync()
-    const { navBarTotal } = getNavbarLayout()
-    const h = Math.max(240, (win.windowHeight || 667) - navBarTotal)
-    scrollStyle.value = { height: `${h}px` }
-  } catch {
-    /* 使用默认 height */
-  }
+  nextTick(() => {
+    try {
+      syncImmersionChrome()
+    } catch {
+      try {
+        const win = uni.getWindowInfo ? uni.getWindowInfo() : uni.getSystemInfoSync()
+        scrollStyle.value = { height: `${Math.max(240, win.windowHeight || 667)}px` }
+      } catch {
+        /* 保持默认 scrollStyle */
+      }
+    }
+  })
   const raw =
     (options && options.dish_id) ||
     (options && options.dishId) ||
@@ -199,6 +254,32 @@ function handleBuy() {
   box-sizing: border-box;
 }
 
+/* 悬浮返回：盖在首张图上，半透明底避免亮色/暗色封面都看不清 */
+.detail-float-back-hit {
+  position: fixed;
+  z-index: 1000;
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1rpx solid rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 12rpx 36rpx rgba(15, 23, 42, 0.14);
+}
+
+.detail-float-back-ico {
+  font-size: 56rpx;
+  font-weight: 950;
+  color: #0e5a44;
+  line-height: 1;
+  padding-right: 4rpx;
+}
+
 .scroll {
   width: 100%;
   box-sizing: border-box;
@@ -228,8 +309,10 @@ function handleBuy() {
 
 .detail-hero {
   width: 100%;
-  height: 70vw;
-  max-height: 100vw;
+  /* 沉浸式大图区域：更高、更醒目（仍随屏宽比例伸缩） */
+  height: 88vw;
+  max-height: 92vh;
+  min-height: 440rpx;
   position: relative;
 }
 

@@ -24,7 +24,9 @@
           <text class="leave-h3 leave-h3--compact">{{ activeLeaveTitle }}</text>
           <text v-if="isRangeOnlyLeave" class="leave-range-line">{{ serverLeaveStart }} 至 {{ serverLeaveEnd }}</text>
           <text class="leave-range-hint">{{ activeLeaveHint }}</text>
-          <button class="btn-cancel-leave" @click="confirmCancelAllLeave">取消请假</button>
+          <button class="btn-cancel-leave" :loading="leaveActionBusy" :disabled="leaveActionBusy" @tap="confirmCancelAllLeave">
+            取消请假
+          </button>
         </view>
         <view
           v-if="!isOnLeaveNow && !isLeavePastDeadline && !sfSelfServiceLocked"
@@ -34,7 +36,9 @@
           <button
             class="btn-fast-leave"
             :class="{ active: isTomorrowLeave }"
-            @click="toggleTomorrow"
+            :loading="leaveActionBusy"
+            :disabled="leaveActionBusy"
+            @tap="toggleTomorrow"
           >
             {{ isTomorrowLeave ? '👌 明天已请假 (点击取消)' : '明天有事，点此请假' }}
           </button>
@@ -47,15 +51,17 @@
           <text class="leave-h3">多天请假 (出差/旅游等)</text>
           <text class="leave-tip leave-tip--range">* 须在每日 {{ formatDeadlineHint(leaveDeadlineTime) }} 前提交，与上方快速请假相同 👌</text>
           <view class="date-group">
-            <view class="date-item" @click="openRangeDatePick('start')">
+            <view class="date-item" @tap="openRangeDatePick('start')">
               <text class="date-label">开始日期</text>
               <text class="date-val">{{ rangeStart || '年 / 月 / 日' }}</text>
             </view>
-            <view class="date-item" @click="openRangeDatePick('end')">
+            <view class="date-item" @tap="openRangeDatePick('end')">
               <text class="date-label">结束日期</text>
               <text class="date-val">{{ rangeEnd || '年 / 月 / 日' }}</text>
             </view>
-            <button class="btn-submit-range" @click="submitRange">提交多天计划</button>
+            <button class="btn-submit-range" :loading="leaveActionBusy" :disabled="leaveActionBusy" @tap="submitRange">
+              提交多天计划
+            </button>
           </view>
         </view>
         <view
@@ -71,16 +77,18 @@
     </scroll-view>
 
     <!-- 原生 picker 在最小日期前仍会露出相邻行；用 picker-view 只渲染合法日期 -->
-    <view v-if="rangePickKind" class="range-pick-mask" @click.self="closeRangeDatePick">
-      <view class="range-pick-sheet" @click.stop>
+    <view v-if="rangePickKind" class="range-pick-mask" @tap.self="closeRangeDatePick">
+      <view class="range-pick-sheet" @tap.stop>
         <view class="range-pick-bar">
-          <text class="range-pick-bar__btn range-pick-bar__btn--cancel" @click="closeRangeDatePick">取消</text>
+          <text class="range-pick-bar__btn range-pick-bar__btn--cancel" @tap="closeRangeDatePick">取消</text>
           <text class="range-pick-bar__title">{{ rangePickKind === 'start' ? '开始日期' : '结束日期' }}</text>
-          <text class="range-pick-bar__btn range-pick-bar__btn--ok" @click="confirmRangeDatePick">确定</text>
+          <text class="range-pick-bar__btn range-pick-bar__btn--ok" @tap="confirmRangeDatePick">确定</text>
+        </view>
+        <view v-if="!rangePickReady" class="range-pick-placeholder">
+          <text class="range-pick-placeholder__txt">正在加载日期…</text>
         </view>
         <picker-view
           v-if="rangePickReady"
-          :key="rangePickSession"
           class="range-pick-view"
           :value="pvValue"
           indicator-style="height: 72rpx"
@@ -135,6 +143,28 @@ const sfSelfServiceLocked = ref(false)
  * 部分机型/弱网下 uni.request 可能长时间不回调；单独缩短 timeout 并配合 race 硬截止，避免「一直正在同步」。
  */
 const LEAVE_ME_SYNC_MS = 20000
+/** 请假 POST 不必沿用全局 120s 超时；缩短后失败可重试，避免「像死机」 */
+const LEAVE_POST_TIMEOUT_MS = 35000
+
+function showLeaveMutationLoading(title) {
+  try {
+    uni.showLoading({
+      title: title || '请稍候…',
+      mask: true,
+    })
+  } catch {
+    /* ignore */
+  }
+}
+
+function hideLeaveMutationLoading() {
+  try {
+    uni.hideLoading()
+  } catch {
+    /* ignore */
+  }
+}
+
 /** 多天请假可选的最远日期（相对「明天」） */
 const RANGE_PICK_DAYS_MAX = 730
 
@@ -243,13 +273,21 @@ function openRangeDatePick(kind) {
   rangePickReady.value = false
   rangePickKind.value = kind
   rangePickSession.value += 1
+  const sessionAtOpen = Number(rangePickSession.value)
+
+  /** 安卓部分机型单次 nextTick 后 picker-view 列仍为 0 高→空白：延迟挂载并二次对齐 */
   nextTick(() => {
-    if (rangePickKind.value !== kind) return
-    rangePickReady.value = true
-    nextTick(() => {
-      if (rangePickKind.value !== kind) return
-      applyPickerState(lo, hi, cur)
-    })
+    setTimeout(() => {
+      if (rangePickKind.value !== kind || rangePickSession.value !== sessionAtOpen) return
+      rangePickReady.value = true
+      nextTick(() => {
+        setTimeout(() => {
+          if (rangePickKind.value !== kind || rangePickSession.value !== sessionAtOpen) return
+          applyPickerState(lo, hi, cur)
+          pvValue.value = [...pvValue.value]
+        }, 48)
+      })
+    }, 72)
   })
 }
 
@@ -364,8 +402,10 @@ const rangeEndPickerMinYmd = computed(() => {
 const activeLeaveTitle = computed(() => {
   if (isRangeOnlyLeave.value) return '当前区间请假'
   if (isTomorrowLeave.value) {
-    const md = ymdToDotMd(tomorrowTargetYmd.value)
-    return md ? `${md} 请假` : '请假中'
+    const raw = ymdFromApi(tomorrowTargetYmd.value)
+    const ymd = raw || addDaysIso(ymdTodayShanghai(), 1)
+    const md = ymdToCnMd(ymd)
+    return md ? `${md} 请假` : '明日请假'
   }
   return '当前请假'
 })
@@ -387,8 +427,8 @@ function ymdFromApi(d) {
   return s.length >= 10 ? s.slice(0, 10) : s
 }
 
-/** 展示用：月.日，与「我的」页一致 */
-function ymdToDotMd(ymd) {
+/** 展示用：如「5月28日」，与「我的」计划卡请假文案一致 */
+function ymdToCnMd(ymd) {
   const raw = ymdFromApi(ymd)
   if (!raw) return ''
   const parts = raw.split('-')
@@ -396,7 +436,7 @@ function ymdToDotMd(ymd) {
   const m = Number(parts[1])
   const d = Number(parts[2])
   if (!m || !d) return ''
-  return `${m}.${d}`
+  return `${m}月${d}日`
 }
 
 /**
@@ -474,19 +514,23 @@ function confirmCancelAllLeave() {
       if (!res.confirm) return
       if (leaveActionBusy.value) return
       leaveActionBusy.value = true
+      showLeaveMutationLoading()
       try {
         await request('/api/user/leave', {
           method: 'POST',
           data: { type: 'cancel' },
+          timeout: LEAVE_POST_TIMEOUT_MS,
         })
-        await syncLeaveFromServer()
+        await syncLeaveFromServer({ noBanner: true })
         uni.showToast({ title: '已取消请假', icon: 'success' })
       } catch (e) {
         uni.showToast({
           title: e instanceof Error ? e.message : '取消失败',
           icon: 'none',
+          duration: 3200,
         })
       } finally {
+        hideLeaveMutationLoading()
         leaveActionBusy.value = false
       }
     },
@@ -510,28 +554,33 @@ async function toggleTomorrow() {
     return
   }
   leaveActionBusy.value = true
+  showLeaveMutationLoading(wasTomorrow ? '取消中…' : '提交中…')
   try {
     if (wasTomorrow) {
       await request('/api/user/leave', {
         method: 'POST',
         data: { type: 'clear_tomorrow' },
+        timeout: LEAVE_POST_TIMEOUT_MS,
       })
-      await syncLeaveFromServer()
+      await syncLeaveFromServer({ noBanner: true })
       uni.showToast({ title: '已取消明天请假', icon: 'success' })
     } else {
       await request('/api/user/leave', {
         method: 'POST',
         data: { type: 'tomorrow' },
+        timeout: LEAVE_POST_TIMEOUT_MS,
       })
-      await syncLeaveFromServer()
+      await syncLeaveFromServer({ noBanner: true })
       uni.showToast({ title: '已提交明天请假', icon: 'success' })
     }
   } catch (e) {
     uni.showToast({
       title: e instanceof Error ? e.message : wasTomorrow ? '取消失败' : '提交失败',
       icon: 'none',
+      duration: 3200,
     })
   } finally {
+    hideLeaveMutationLoading()
     leaveActionBusy.value = false
   }
 }
@@ -559,6 +608,7 @@ async function submitRange() {
     return
   }
   leaveActionBusy.value = true
+  showLeaveMutationLoading('提交中…')
   try {
     await request('/api/user/leave', {
       method: 'POST',
@@ -567,8 +617,9 @@ async function submitRange() {
         start: rangeStart.value,
         end: rangeEnd.value,
       },
+      timeout: LEAVE_POST_TIMEOUT_MS,
     })
-    await syncLeaveFromServer()
+    await syncLeaveFromServer({ noBanner: true })
     uni.showToast({ title: '请假成功', icon: 'success' })
     setTimeout(() => {
       uni.switchTab({ url: '/pages/mine/index' })
@@ -577,8 +628,10 @@ async function submitRange() {
     uni.showToast({
       title: e instanceof Error ? e.message : '提交失败',
       icon: 'none',
+      duration: 3200,
     })
   } finally {
+    hideLeaveMutationLoading()
     leaveActionBusy.value = false
   }
 }
@@ -775,6 +828,9 @@ async function submitRange() {
   background: #fff;
   border-radius: 32rpx 32rpx 0 0;
   padding-bottom: env(safe-area-inset-bottom);
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
 }
 
 .range-pick-bar {
@@ -805,9 +861,28 @@ async function submitRange() {
   color: $ok-forest-green;
 }
 
+.range-pick-placeholder {
+  width: 100%;
+  height: 440rpx;
+  min-height: 440rpx;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.range-pick-placeholder__txt {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: $ok-slate-400;
+}
+
 .range-pick-view {
   width: 100%;
   height: 440rpx;
+  min-height: 440rpx;
+  flex-shrink: 0;
 }
 
 .range-pick-cell {

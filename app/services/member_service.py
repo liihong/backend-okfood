@@ -40,9 +40,14 @@ from app.schemas.user import Location, MemberOut, RegisterIn
 
 from app.services import amap
 
+from app.services.admin_system_notification_service import try_notify_delivery_sheet_manual_attention
+
+
 from app.services.leave import (
     guard_member_self_leave_during_sf_fulfillment,
     guard_member_self_service_during_sf_fulfillment,
+    is_absent_from_leave_snapshot_dict,
+    is_absent_on_delivery_date,
     is_leave_deadline_passed,
 )
 
@@ -77,6 +82,17 @@ from app.services.member_operation_log_service import (
 )
 from app.services.region_assignment import assign_region_for_coords
 from app.services.store_config_service import ensure_app_settings_row
+
+
+def _blocked_today_by_delivery_start_snapshot(delivery_start_iso: str | None, *, today: date) -> bool:
+    """与 ``eligible_members_for_delivery`` 中 started 条件对齐：有起送日且晚于业务日则当日不算起送。"""
+    if delivery_start_iso is None:
+        return False
+    try:
+        ds = date.fromisoformat(str(delivery_start_iso).strip()[:10])
+    except ValueError:
+        return False
+    return ds > today
 
 # 与 DB chk_members_daily_meal_units 上限一致
 MAX_DAILY_MEAL_UNITS = 50
@@ -536,6 +552,7 @@ def patch_member_profile(
         (set_daily_meal_units and daily_meal_units is not None)
         or (set_delivery_deferred and delivery_deferred is not None)
         or set_delivery_start
+        or (set_store_pickup and store_pickup is not None)
     ):
         guard_member_self_service_during_sf_fulfillment(db, m)
 
@@ -751,6 +768,35 @@ def patch_member_profile(
             ip_address=ip_address,
         )
 
+    today_d = today_shanghai()
+    attn_labels: list[str] = []
+    if (
+        set_delivery_deferred
+        and prev_snapshot["delivery_deferred"]
+        and not new_snapshot["delivery_deferred"]
+    ):
+        attn_labels.append("取消暂停配送")
+    if set_delivery_start and not defer_applied:
+        pblk = _blocked_today_by_delivery_start_snapshot(
+            prev_snapshot["delivery_start_date"], today=today_d
+        )
+        nblk = _blocked_today_by_delivery_start_snapshot(
+            new_snapshot["delivery_start_date"], today=today_d
+        )
+        if pblk and not nblk:
+            attn_labels.append("修改起送日")
+
+    attn_ordered = list(dict.fromkeys(attn_labels))
+    if attn_ordered:
+        try_notify_delivery_sheet_manual_attention(
+            db,
+            store_id=int(m.store_id),
+            action_labels_cn=attn_ordered,
+            member_id=int(m.id),
+            member_phone=str(m.phone or "").strip() or None,
+            member_name=str(m.name or "").strip() or None,
+        )
+
     db.commit()
 
     db.refresh(m)
@@ -820,6 +866,11 @@ def leave_request(
         "leave_range_end": m.leave_range_end.isoformat() if m.leave_range_end else None,
     }
 
+    today_d = today_shanghai()
+    before_absent_today = is_absent_from_leave_snapshot_dict(
+        prev, delivery_date=today_d, today=today_d
+    )
+
     if source == "miniprogram":
         guard_member_self_leave_during_sf_fulfillment(db, m)
 
@@ -886,6 +937,8 @@ def leave_request(
 
         raise HTTPException(status_code=400, detail="不支持的请假类型")
 
+    after_absent_today = is_absent_on_delivery_date(m, today_d, today=today_d)
+
     after = {
         "is_leaved_tomorrow": bool(m.is_leaved_tomorrow),
         "tomorrow_leave_target_date": (
@@ -919,6 +972,29 @@ def leave_request(
         source=source,
         operator=operator,
     )
+
+    if (
+        source == "miniprogram"
+        and typ != LeaveType.TOMORROW
+        and before_absent_today
+        and not after_absent_today
+    ):
+        if typ == LeaveType.CANCEL:
+            leave_lab = ["取消全部请假"]
+        elif typ == LeaveType.CLEAR_TOMORROW:
+            leave_lab = ["清除明天请假"]
+        elif typ == LeaveType.RANGE:
+            leave_lab = ["调整请假区间"]
+        else:
+            leave_lab = ["请假变更"]
+        try_notify_delivery_sheet_manual_attention(
+            db,
+            store_id=int(m.store_id),
+            action_labels_cn=leave_lab,
+            member_id=int(m.id),
+            member_phone=str(m.phone or "").strip() or None,
+            member_name=str(m.name or "").strip() or None,
+        )
 
     db.commit()
 

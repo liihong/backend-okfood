@@ -218,3 +218,27 @@ def test_patch_profile_delivery_start_raises_when_sf_locked():
                 delivery_start_date=date(2026, 5, 27),
             )
     assert exc.value.detail == SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG
+
+
+def test_patch_profile_store_pickup_raises_when_sf_locked():
+    """到店自提切换须走顺丰履约 guard（与份数/暂停/起送日一致）。"""
+    from app.services.member_service import patch_member_profile
+
+    db = MagicMock()
+    m = Member(id=1, store_id=1, phone="13800000000", balance=5)
+    m.deleted_at = None
+    m.store_pickup = False
+    m.delivery_deferred = False
+    m.delivery_start_date = None
+    db.get.return_value = m
+
+    def raise_locked(*_args, **_kwargs):
+        raise HTTPException(status_code=400, detail=SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG)
+
+    with patch(
+        "app.services.member_service.guard_member_self_service_during_sf_fulfillment",
+        side_effect=raise_locked,
+    ):
+        with pytest.raises(HTTPException) as exc:
+            patch_member_profile(db, 1, set_store_pickup=True, store_pickup=True)
+    assert exc.value.detail == SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG

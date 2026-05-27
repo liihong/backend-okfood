@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.core.timeutil import beijing_now_naive
+from app.core.timeutil import beijing_now_naive, now_shanghai, today_shanghai
 from app.models.admin_system_notification import AdminSystemNotification
+from app.models.sf_same_city_push import SfSameCityPush
+
+# 与 sf_same_city_pushes.push_kind 中「大表合并」取值一致
+_SF_PUSH_KIND_DELIVERY_SHEET = "delivery_sheet"
 
 KIND_SF_NIGHTLY_PUSH = "sf_nightly_push"
+# 顺丰大表快照已成立后，小程序侧又让会员「当日重新应配送」时需客服人工并入顺丰链路
+KIND_DELIVERY_SHEET_MANUAL_ATTENTION = "delivery_sheet_manual_attention"
 
 
 def _sf_nightly_push_message(*, total: int, success: int, failed: int, skip_reason: str | None) -> str:
@@ -66,6 +72,135 @@ def upsert_sf_nightly_push_notification(
         # 重新跑任务时刷新摘要，但不自动清除已确认状态
     db.flush()
     return row
+
+
+def store_should_prompt_manual_delivery_sheet_reconciliation(db: Session, *, store_id: int) -> bool:
+    """
+    是否适合对「小程序侧恢复当日应配送」发客服跟进提醒。
+
+    - 先满足：已过早间推单常见时点 (08:50) 或当日已有成功的大表合并推单（与原先一致）。
+    - 若当日存在未取消且创单成功的顺丰记录：仅当 **仍有未履约完毕的推单** 时继续提醒；
+      当日全部推单均已妥投/履约完成后不再发送（餐送完不再刷屏）。
+    - 若当日无任何有效顺丰推单：仍仅按上一条时间/大表快照条件判断（无顺丰时不做履约门禁）。
+    """
+    # 懒加载：避免 admin_system_notification → sf_order_fulfillment → … → member_service 循环 import
+    from app.services.sf_order_fulfillment_service import (
+        store_all_sf_pushes_fulfilled_on_delivery_date,
+        store_has_active_sf_push_on_delivery_date,
+    )
+
+    sid = int(store_id)
+    if sid <= 0:
+        return False
+    biz_today = today_shanghai()
+    wall = now_shanghai()
+    baseline_open = False
+    if wall.time() >= time(8, 50):
+        baseline_open = True
+    else:
+        row_id = db.scalar(
+            select(SfSameCityPush.id).where(
+                SfSameCityPush.store_id == sid,
+                SfSameCityPush.delivery_date == biz_today,
+                SfSameCityPush.error_code == 0,
+                or_(
+                    SfSameCityPush.push_kind.is_(None),
+                    SfSameCityPush.push_kind == "",
+                    SfSameCityPush.push_kind == _SF_PUSH_KIND_DELIVERY_SHEET,
+                ),
+            ).limit(1)
+        )
+        baseline_open = row_id is not None
+
+    if not baseline_open:
+        return False
+
+    if store_has_active_sf_push_on_delivery_date(db, store_id=sid, delivery_date=biz_today):
+        if store_all_sf_pushes_fulfilled_on_delivery_date(db, store_id=sid, delivery_date=biz_today):
+            return False
+    return True
+
+
+def create_delivery_sheet_manual_attention_notification(
+    db: Session,
+    *,
+    store_id: int,
+    business_date: date,
+    action_labels_cn: list[str],
+    member_id: int,
+    member_phone: str | None,
+    member_name: str | None,
+) -> AdminSystemNotification | None:
+    """新增一条配送大表跟进提醒（不 upsert）；message 总长受 500 字限制。"""
+    sid = int(store_id)
+    if sid <= 0:
+        return None
+    if not action_labels_cn:
+        return None
+    label_join = "、".join(str(x).strip() for x in action_labels_cn if str(x).strip())
+    if not label_join:
+        return None
+
+    phones = str(member_phone or "").strip()[:32]
+    if not phones:
+        phones = "(无手机号)"
+
+    naming = str(member_name or "").strip()
+    naming = naming[:40] + ("…" if len(naming) > 40 else "")
+
+    title = f"大表顺丰需人工跟进 · {business_date.isoformat()}"
+    # 说明：快照不自动追加，客服合并大表并补骑手/顺丰信息
+    body = (
+        f"小程序操作「{label_join}」，会员 mid={int(member_id)} {phones} "
+        f"{('「' + naming + '」') if naming else ''}"
+        "今日可能已计入大表但不在早间顺丰快照，请并入配送并补链路。"
+    )
+    if len(body) > 500:
+        body = body[:497] + "…"
+
+    row = AdminSystemNotification(
+        store_id=sid,
+        kind=KIND_DELIVERY_SHEET_MANUAL_ATTENTION,
+        business_date=business_date,
+        title=title[:200],
+        message=body,
+        total_count=0,
+        success_count=0,
+        failed_count=0,
+        skip_reason=None,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def try_notify_delivery_sheet_manual_attention(
+    db: Session,
+    *,
+    store_id: int,
+    action_labels_cn: list[str],
+    member_id: int,
+    member_phone: str | None,
+    member_name: str | None,
+) -> AdminSystemNotification | None:
+    """
+    在 ``store_should_prompt_manual_delivery_sheet_reconciliation`` 为真时写入一条跟进提醒；
+    与 ``upsert_sf_nightly_push_notification`` 不同，每次事件插入新行，便于客服逐条消除。
+
+    当日顺丰有效推单若已全部履约完毕，守门为假，不再写入（餐送完不再通知）。
+    """
+    if not store_should_prompt_manual_delivery_sheet_reconciliation(db, store_id=store_id):
+        return None
+    biz = today_shanghai()
+    return create_delivery_sheet_manual_attention_notification(
+        db,
+        store_id=int(store_id),
+        business_date=biz,
+        action_labels_cn=action_labels_cn,
+        member_id=int(member_id),
+        member_phone=member_phone,
+        member_name=member_name,
+    )
 
 
 def list_admin_system_notifications(

@@ -109,21 +109,6 @@ def _retail_order_id_from_stop_id(stop_id: str | None) -> int | None:
         return None
 
 
-def _single_meal_order_ids_from_push_snapshot(snap: object) -> list[int]:
-    if not isinstance(snap, dict):
-        return []
-    raw = snap.get("fulfillment_single_meal_order_ids")
-    if not isinstance(raw, list):
-        return []
-    out: list[int] = []
-    for x in raw:
-        try:
-            out.append(int(x))
-        except (TypeError, ValueError):
-            pass
-    return out
-
-
 def link_single_meal_orders_to_sf_push_no_commit(
     db: Session,
     order_ids: list[int] | tuple[int, ...],
@@ -170,16 +155,18 @@ def resolve_sf_push_for_single_meal_order(
     db: Session, *, store_id: int, order_id: int
 ) -> SfSameCityPush | None:
     """
-    单次订单 → 顺丰推单：优先 ``single_meal_orders.sf_same_city_push_id``，
-    其次 retail-smo-{id} / 快照（兼容旧数据）。
+    单次订单 → 顺丰推单：优先 ``single_meal_orders.sf_same_city_push_id``（须非大表合并单），
+    其次 stop_id = retail-smo-{order_id} 且创单成功的推单。
     """
     oid = int(order_id)
     o = db.get(SingleMealOrder, oid)
     if o is not None and o.sf_same_city_push_id is not None:
         pus = db.get(SfSameCityPush, int(o.sf_same_city_push_id))
         if pus is not None and sf_push_create_succeeded(pus):
-            if int(o.store_id) == int(store_id) or int(pus.store_id) == int(store_id):
-                return pus
+            # 历史误差：单笔曾绑定到大表 merged 推送行 → 不参与单笔顺丰对齐，交由下方 retail stop 兜底
+            if str(getattr(pus, "push_kind", "") or "").strip().lower() != "delivery_sheet":
+                if int(o.store_id) == int(store_id) or int(pus.store_id) == int(store_id):
+                    return pus
     return _legacy_resolve_sf_push_for_single_meal_order(db, store_id=int(store_id), order_id=oid)
 
 
@@ -211,25 +198,8 @@ def _legacy_resolve_sf_push_for_single_meal_order(
     ).first()
     if row is not None:
         return row
-    o = db.get(SingleMealOrder, oid)
-    if o is None or o.delivery_date is None:
-        return None
-    candidates = db.scalars(
-        select(SfSameCityPush)
-        .where(
-            SfSameCityPush.store_id == int(store_id),
-            SfSameCityPush.delivery_date == o.delivery_date,
-            SfSameCityPush.error_code == 0,
-            SfSameCityPush.push_kind == "delivery_sheet",
-        )
-        .order_by(SfSameCityPush.id.desc())
-    ).all()
-    for pus in candidates:
-        snap = pus.request_snapshot or {}
-        if "fulfillment_single_meal_order_ids" not in snap:
-            continue
-        if oid in _single_meal_order_ids_from_push_snapshot(snap):
-            return pus
+    # 业务约定：单笔零售不得通过「订阅大表 delivery_sheet」回溯到顺丰，
+    # 否则会与同一天同停靠点的预购单笔（供餐日为当日、下单在前一日）混入早间大表推单对齐。
     return None
 
 
@@ -255,6 +225,8 @@ def _apply_sf_monitor_status_to_retail_order_no_commit(
         return "skipped_store_pickup"
     if not sf_push_create_succeeded(pus):
         return "skipped_sf_not_success_push"
+    if str(getattr(pus, "push_kind", "") or "").strip().lower() == "delivery_sheet":
+        return "skipped_delivery_sheet_push"
 
     if o.sf_same_city_push_id is not None and int(o.sf_same_city_push_id) != int(pus.id):
         return "skipped_push_order_mismatch"
@@ -1013,6 +985,7 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
         "skipped_store_pickup": 0,
         "skipped_no_sf_push": 0,
         "skipped_sf_not_success_push": 0,
+        "skipped_delivery_sheet_push": 0,
         "skipped_sf_status_not_tuotou": 0,
         "skipped_sf_cancel": 0,
         "skipped_merchant_cancel_marker": 0,
@@ -1042,6 +1015,10 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
         pus = _latest_success_sf_push_for_retail_order(db, store_id=int(store_id), order_id=int(o.id))
         if pus is None:
             counts["skipped_no_sf_push"] += 1
+            continue
+        # 防御：单笔不得以大表订阅合并单归因（与 resolve 收口一致）
+        if str(getattr(pus, "push_kind", "") or "").strip().lower() == "delivery_sheet":
+            counts["skipped_delivery_sheet_push"] += 1
             continue
         prev_f = str(o.fulfillment_status or "").strip().lower()
         if prev_f in ("pending", "sf_cancelled") and sf_push_create_succeeded(pus):
@@ -1118,6 +1095,7 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
         f"已是已完成 {counts['already_completed']}",
         f"已是顺丰取消 {counts['already_sf_cancelled']}",
         f"无顺丰推单 {counts['skipped_no_sf_push']}",
+        f"跳过归因大表合并推单 {counts['skipped_delivery_sheet_push']}",
         f"顺丰未妥投(17)/未取消或未回调 {counts['skipped_sf_status_not_tuotou']}",
     ]
     summary = (
@@ -1144,7 +1122,7 @@ def diagnose_single_meal_sf_sync(
         f"订单#{order_id} fulfillment={o.fulfillment_status!r} pay={o.pay_status!r} store={o.store_id}",
     ]
     if pus is None:
-        hint_parts.append("未找到 error_code=0 的顺丰推单(retail-smo-{id})")
+        hint_parts.append("未找到 error_code=0 的单笔顺丰推单（stop_id 须为 retail-smo-{订单id}）；大表订阅合并推单不参与单笔归因")
         return {"ok": False, "hint": "；".join(hint_parts)}
 
     prev_f = str(o.fulfillment_status or "").strip().lower()
