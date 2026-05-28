@@ -890,6 +890,10 @@ def dashboard_meal_summary(
     wow_prev_anchor = date.fromordinal(anchor.toordinal() - 7)
     wow_prev_day_after = date.fromordinal(day_after.toordinal() - 7)
     mem_kw = _store_membership_counts(db, store_id=sid)
+    from app.services.menu_day_stock_service import weekly_menu_day_total_stock
+
+    today_menu_day_total_stock = weekly_menu_day_total_stock(db, anchor, store_id=sid)
+    tomorrow_menu_day_total_stock = weekly_menu_day_total_stock(db, day_after, store_id=sid)
 
     if anchor < cal_today and not force_recompute:
         row = db.get(
@@ -938,6 +942,8 @@ def dashboard_meal_summary(
                 tomorrow_first_meal_new_members=t_first,
                 today_meals_week_over_week_caption=today_wow_cap,
                 tomorrow_meals_week_over_week_caption=tomorrow_wow_cap,
+                today_menu_day_total_stock=today_menu_day_total_stock,
+                tomorrow_menu_day_total_stock=tomorrow_menu_day_total_stock,
                 today_prep_metrics=today_metrics,
                 tomorrow_prep_metrics=tomorrow_metrics,
                 from_snapshot=True,
@@ -985,6 +991,8 @@ def dashboard_meal_summary(
         tomorrow_first_meal_new_members=t_first,
         today_meals_week_over_week_caption=today_wow_cap,
         tomorrow_meals_week_over_week_caption=tomorrow_wow_cap,
+        today_menu_day_total_stock=today_menu_day_total_stock,
+        tomorrow_menu_day_total_stock=tomorrow_menu_day_total_stock,
         today_prep_metrics=today_metrics,
         tomorrow_prep_metrics=tomorrow_metrics,
         from_snapshot=False,
@@ -1035,6 +1043,8 @@ def dashboard_meal_summary(
             tomorrow_first_meal_new_members=out.tomorrow_first_meal_new_members,
             today_meals_week_over_week_caption=out.today_meals_week_over_week_caption,
             tomorrow_meals_week_over_week_caption=out.tomorrow_meals_week_over_week_caption,
+            today_menu_day_total_stock=today_menu_day_total_stock,
+            tomorrow_menu_day_total_stock=tomorrow_menu_day_total_stock,
             today_prep_metrics=out.today_prep_metrics,
             tomorrow_prep_metrics=out.tomorrow_prep_metrics,
             from_snapshot=False,

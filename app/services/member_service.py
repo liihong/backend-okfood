@@ -48,7 +48,6 @@ from app.services.leave import (
     guard_member_self_service_during_sf_fulfillment,
     is_absent_from_leave_snapshot_dict,
     is_absent_on_delivery_date,
-    is_leave_deadline_passed,
 )
 
 from app.services.member_address_service import (
@@ -848,12 +847,6 @@ def leave_request(
 
         raise HTTPException(status_code=404, detail="用户不存在")
 
-
-
-    settings_row = ensure_app_settings_row(db)
-
-
-
     now = now_shanghai()
 
     # 操作日志：采集变更前的请假状态，便于争议时还原
@@ -892,12 +885,6 @@ def leave_request(
 
     elif typ == LeaveType.TOMORROW:
 
-        if not skip_leave_deadline and is_leave_deadline_passed(
-            now.time(), settings_row.leave_deadline_time
-        ):
-
-            raise HTTPException(status_code=400, detail="已超过当日请假截止时间")
-
         t_target = tomorrow_shanghai()
 
         m.tomorrow_leave_target_date = t_target
@@ -905,12 +892,6 @@ def leave_request(
         m.is_leaved_tomorrow = True
 
     elif typ == LeaveType.RANGE:
-
-        if not skip_leave_deadline and is_leave_deadline_passed(
-            now.time(), settings_row.leave_deadline_time
-        ):
-
-            raise HTTPException(status_code=400, detail="已超过当日请假截止时间")
 
         if not start or not end:
 
@@ -1014,7 +995,7 @@ def admin_member_leave(
     operator: str | None = None,
     ip_address: str | None = None,
 ) -> MemberOut:
-    """管理端代会员设置请假：不校验当日 `leave_deadline_time`（小程序端提交「明天/区间」仍受截止限制）。"""
+    """管理端代会员设置请假：不校验「须从明天起」等小程序限制（可代填历史区间）。"""
 
     p = (phone or "").strip()
     m = _member_by_phone(db, p, int(store_id))

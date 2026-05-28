@@ -5,12 +5,6 @@
       <view class="wrap">
         <text class="lead">{{ leadText }}</text>
 
-        <view v-if="sfSelfServiceLocked" class="notice notice--warn">
-          <text class="notice-txt">
-            当日配送已向顺丰推单，配送全部完成前无法自助修改起送日或恢复配送，如需调整请联系客服。
-          </text>
-        </view>
-
         <view class="setup-module">
           <view class="section">
             <text class="sec-title">配送或门店自提</text>
@@ -76,7 +70,6 @@
           <button
             class="submit-btn"
             :loading="submitting"
-            :disabled="sfSelfServiceLocked"
             @click="onSubmit"
           >
             {{ submitButtonText }}
@@ -125,7 +118,6 @@ const resumeOnlyMode = ref(false)
 /** 购卡/续卡支付成功跳转（from=pay）：须重新选择起始业务日，不因档案已有旧日期而自动退回「我的」 */
 const postPaySetupMode = ref(false)
 const resumeHintShown = ref(false)
-const sfSelfServiceLocked = ref(false)
 
 const defaultAddressLine = ref('')
 const defaultAddressArea = ref('')
@@ -196,7 +188,6 @@ async function loadProfile() {
     const data = await request('/api/user/me', { method: 'GET' })
     minDeliveryYmd.value = minMemberDeliveryStartYmd()
     serverBalance.value = Math.max(0, Math.floor(Number(data.balance) || 0))
-    sfSelfServiceLocked.value = Boolean(data?.sf_self_service_locked)
 
     if (shouldPromptMemberCardPay(data)) {
       uni.showToast({ title: '请先购买自律卡包', icon: 'none' })
@@ -307,14 +298,6 @@ async function onSubmit() {
   const phone = memberPhone.value || uni.getStorageSync('memberPhone') || ''
   if (!getMemberToken() || !phone) {
     uni.showToast({ title: '登录已失效', icon: 'none' })
-    return
-  }
-  if (sfSelfServiceLocked.value) {
-    uni.showToast({
-      title: '当日配送已向顺丰推单，配送全部完成前无法自助修改，请联系客服',
-      icon: 'none',
-      duration: 2800,
-    })
     return
   }
   if (deliveryMode.value !== 'delivery' && deliveryMode.value !== 'pickup') {

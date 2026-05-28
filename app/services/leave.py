@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import date
 
 from typing import Any
 
@@ -78,17 +78,11 @@ def is_absent_on_delivery_date(member: Member, delivery_date: date, *, today: da
     )
 
 
-def is_leave_deadline_passed(now_time, deadline) -> bool:
-    """当前时间是否已超过「当日请假截止」时刻（仅比较 time，口径为北京时间）。"""
-    d = deadline if deadline is not None else time(21, 0, 0)
-    return now_time > d
-
-
 SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG = (
-    "当日配送已向顺丰推单，配送全部完成前无法自助修改，请联系客服"
+    "您的订单已经同步顺丰配送，完成后可进行操作"
 )
 SF_SELF_SERVICE_LOCK_LEAVE_MSG = (
-    "当日配送已向顺丰推单，配送全部完成前无法自助修改请假，请联系客服处理"
+    "您的订单已经同步顺丰配送，完成后可修改请假"
 )
 
 

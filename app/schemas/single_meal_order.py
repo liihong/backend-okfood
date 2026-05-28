@@ -56,4 +56,11 @@ class AdminSingleMealOrderListOut(SingleMealOrderOut):
 
     member_id: int
     member_phone: str = ""
-    member_name: str = ""
+    member_name: str = Field(
+        "",
+        description="会员展示名：档案非占位时用 members.name，否则回退订单地址收件人",
+    )
+    recipient_contact_name: str = Field(
+        "",
+        description="订单关联地址收件人（member_addresses.contact_name）",
+    )

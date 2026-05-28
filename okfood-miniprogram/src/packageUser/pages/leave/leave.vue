@@ -13,13 +13,7 @@
         <view v-if="leaveRefreshing" class="leave-sync-hint">
           <text class="leave-sync-hint__text">正在同步最新状态…</text>
         </view>
-        <view v-if="sfSelfServiceLocked" class="leave-block leave-block--deadline">
-          <text class="leave-h3">配送进行中</text>
-          <text class="leave-deadline-copy">
-            当日配送已向顺丰推单，配送全部完成前无法自助修改请假，如需调整请联系客服 👌
-          </text>
-        </view>
-        <view v-if="isOnLeaveNow && !sfSelfServiceLocked" class="leave-block leave-block--active">
+        <view v-if="isOnLeaveNow" class="leave-block leave-block--active">
           <text class="leave-status-tag">请假中</text>
           <text class="leave-h3 leave-h3--compact">{{ activeLeaveTitle }}</text>
           <text v-if="isRangeOnlyLeave" class="leave-range-line">{{ serverLeaveStart }} 至 {{ serverLeaveEnd }}</text>
@@ -28,10 +22,7 @@
             取消请假
           </button>
         </view>
-        <view
-          v-if="!isOnLeaveNow && !isLeavePastDeadline && !sfSelfServiceLocked"
-          class="leave-block"
-        >
+        <view v-if="!isOnLeaveNow" class="leave-block">
           <text class="leave-h3">明天有事 · 快速请假</text>
           <button
             class="btn-fast-leave"
@@ -42,14 +33,11 @@
           >
             {{ isTomorrowLeave ? '👌 明天已请假 (点击取消)' : '明天有事，点此请假' }}
           </button>
-          <text class="leave-tip">* 每日 {{ formatDeadlineHint(leaveDeadlineTime) }} 前操作，餐次顺延 👌</text>
+          <text class="leave-tip">* 供餐日当日 08:50 同步顺丰前可自助操作；推单配送完成前如需调整请联系客服 👌</text>
         </view>
-        <view
-          v-if="!isOnLeaveNow && !isLeavePastDeadline && !sfSelfServiceLocked"
-          class="leave-block"
-        >
+        <view v-if="!isOnLeaveNow" class="leave-block">
           <text class="leave-h3">多天请假 (出差/旅游等)</text>
-          <text class="leave-tip leave-tip--range">* 须在每日 {{ formatDeadlineHint(leaveDeadlineTime) }} 前提交，与上方快速请假相同 👌</text>
+          <text class="leave-tip leave-tip--range">* 须从明天起选日期；供餐日 08:50 推顺丰后至配送完成前请联系客服 👌</text>
           <view class="date-group">
             <view class="date-item" @tap="openRangeDatePick('start')">
               <text class="date-label">开始日期</text>
@@ -63,15 +51,6 @@
               提交多天计划
             </button>
           </view>
-        </view>
-        <view
-          v-if="!isOnLeaveNow && isLeavePastDeadline && !sfSelfServiceLocked"
-          class="leave-block leave-block--deadline"
-        >
-          <text class="leave-h3">今日已截止</text>
-          <text class="leave-deadline-copy">
-            已超过当日请假时间（ {{ formatDeadlineHint(leaveDeadlineTime) }} 前可提交新请假）。明日 0:00 起可再次操作 👌
-          </text>
         </view>
       </view>
     </scroll-view>
@@ -134,9 +113,6 @@ let leaveSyncGeneration = 0
 const leaveActionBusy = ref(false)
 /** scroll-view 下拉刷新动画状态 */
 const refresherTriggered = ref(false)
-/** 与后台 app_settings.leave_deadline_time 一致，默认 21:00:00 */
-const leaveDeadlineTime = ref('21:00:00')
-const sfSelfServiceLocked = ref(false)
 
 /**
  * 请假页专用：拉取 /api/user/me。
@@ -349,42 +325,6 @@ const isOnLeaveNow = computed(() => {
   return Boolean(s && e)
 })
 
-function shanghaiSecondsSinceMidnight() {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Shanghai',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date())
-  const hour = Number(parts.find((p) => p.type === 'hour')?.value)
-  const minute = Number(parts.find((p) => p.type === 'minute')?.value)
-  const second = Number(parts.find((p) => p.type === 'second')?.value)
-  if (Number.isNaN(hour) || Number.isNaN(minute)) return 0
-  return hour * 3600 + minute * 60 + (Number.isNaN(second) ? 0 : second)
-}
-
-function parseDeadlineToSeconds(str) {
-  const s = String(str || '21:00:00').trim()
-  const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/)
-  if (!m) return 21 * 3600
-  return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] ?? 0)
-}
-
-/** 与后端 is_leave_deadline_passed 一致：当前上海时刻严格晚于截止时刻（仅用于展示；提交前须再调一次） */
-function isLeavePastDeadlineNow() {
-  return shanghaiSecondsSinceMidnight() > parseDeadlineToSeconds(leaveDeadlineTime.value)
-}
-
-/** 展示用：因未用定时器，长时间停留可能不会自动切换为「已截止」，以提交时校验与后端为准 */
-const isLeavePastDeadline = computed(() => isLeavePastDeadlineNow())
-
-function formatDeadlineHint(t) {
-  const s = String(t || '21:00:00')
-  const m = s.match(/^(\d{1,2}):(\d{2})/)
-  return m ? `${m[1]}:${m[2]}` : '21:00'
-}
-
 const isRangeOnlyLeave = computed(
   () => Boolean(serverLeaveStart.value && serverLeaveEnd.value),
 )
@@ -456,10 +396,6 @@ async function syncLeaveFromServer(opts = {}) {
       }),
     ])
     if (gen !== leaveSyncGeneration) return
-    if (me?.leave_deadline_time) {
-      leaveDeadlineTime.value = String(me.leave_deadline_time).trim()
-    }
-    sfSelfServiceLocked.value = Boolean(me?.sf_self_service_locked)
     isTomorrowLeave.value = Boolean(me?.is_leaved_tomorrow)
     tomorrowTargetYmd.value = ymdFromApi(me?.tomorrow_leave_target_date)
     const lr = me?.leave_range
@@ -509,7 +445,7 @@ function confirmCancelAllLeave() {
   uni.showModal({
     title: '取消请假',
     content:
-      '将清除当前区间请假及「明天请假」标记，确定取消？\n若当日配送已向顺丰推单，将无法自助取消，请联系客服。',
+      '将清除当前区间请假及「明天请假」标记，确定取消？',
     success: async (res) => {
       if (!res.confirm) return
       if (leaveActionBusy.value) return
@@ -546,13 +482,6 @@ onShow(() => {
 async function toggleTomorrow() {
   if (leaveActionBusy.value) return
   const wasTomorrow = isTomorrowLeave.value
-  if (!wasTomorrow && isLeavePastDeadlineNow()) {
-    uni.showToast({
-      title: `已超过当日请假时间（${formatDeadlineHint(leaveDeadlineTime.value)} 前可提交）`,
-      icon: 'none',
-    })
-    return
-  }
   leaveActionBusy.value = true
   showLeaveMutationLoading(wasTomorrow ? '取消中…' : '提交中…')
   try {
@@ -587,13 +516,6 @@ async function toggleTomorrow() {
 
 async function submitRange() {
   if (leaveActionBusy.value) return
-  if (isLeavePastDeadlineNow()) {
-    uni.showToast({
-      title: `已超过当日请假时间（${formatDeadlineHint(leaveDeadlineTime.value)} 前可提交）`,
-      icon: 'none',
-    })
-    return
-  }
   if (!rangeStart.value || !rangeEnd.value) {
     uni.showToast({ title: '请选择起止日期', icon: 'none' })
     return

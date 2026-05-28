@@ -381,18 +381,12 @@ const showMemberCardModule = computed(() => {
 /** 有余额且暂停配送：计划卡上展示「恢复配送」（资料待完善也可点此进入资料页恢复） */
 const showResumeDeliveryEntry = computed(() => {
   if (!isLoggedIn.value) return false
-  if (sfSelfServiceLocked.value) return false
   return isDeliveryPausedWithBalance(memberProfileRaw.value)
 })
 
 /** 仍有餐次且当前未暂停：菜单中提供一键暂停（等同资料页「暂停配送」选项） */
-const sfSelfServiceLocked = computed(() =>
-  Boolean(memberProfileRaw.value?.sf_self_service_locked),
-)
-
 const showPauseDeliveryMenuRow = computed(() => {
   if (!isLoggedIn.value || needsMemberSetupPage.value) return false
-  if (sfSelfServiceLocked.value) return false
   const p = memberProfileRaw.value
   if (!p || typeof p !== 'object') return false
   if (p.delivery_deferred === true) return false
@@ -1074,14 +1068,6 @@ function goMemberSetup() {
 }
 
 function goResumeDelivery() {
-  if (sfSelfServiceLocked.value) {
-    uni.showToast({
-      title: '当日配送已向顺丰推单，配送全部完成前无法自助修改，请联系客服',
-      icon: 'none',
-      duration: 2800,
-    })
-    return
-  }
   uni.navigateTo({
     url: '/packageUser/pages/memberSetup/memberSetup?from=resume',
     fail: (e) => {
@@ -1094,14 +1080,6 @@ function goResumeDelivery() {
 function onPauseDeliveryTap() {
   if (!getMemberToken()) {
     uni.showToast({ title: '请先登录', icon: 'none' })
-    return
-  }
-  if (sfSelfServiceLocked.value) {
-    uni.showToast({
-      title: '当日配送已向顺丰推单，配送全部完成前无法自助修改，请联系客服',
-      icon: 'none',
-      duration: 2800,
-    })
     return
   }
   uni.showModal({

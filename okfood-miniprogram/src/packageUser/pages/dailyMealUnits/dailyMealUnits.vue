@@ -7,12 +7,6 @@
           每个配送日需送达的份数；骑手确认送达时按该份数从剩余次数中扣减。此处仅可通过加减调整，范围为
           1～10 份。
         </text>
-        <view class="notice notice--warn" v-if="sfSelfServiceLocked">
-          <text class="notice-txt">当日配送已向顺丰推单，配送全部完成前无法修改份数，如需调整请联系客服。</text>
-        </view>
-        <view class="notice notice--info" v-else>
-          <text class="notice-txt">修改次日配送日起生效；当日已向顺丰推单后，配送全部完成前无法修改。</text>
-        </view>
 
         <view v-if="serverUnitsRaw > 10" class="notice">
           <text class="notice-txt">
@@ -25,7 +19,7 @@
           <view class="units-stepper">
             <button
               class="units-stepper-btn"
-              :disabled="units <= MIN_U || loading || sfSelfServiceLocked"
+              :disabled="units <= MIN_U || loading"
               @click="bump(-1)"
             >
               -
@@ -33,7 +27,7 @@
             <text class="units-stepper-value">{{ units }}</text>
             <button
               class="units-stepper-btn"
-              :disabled="units >= MAX_U || loading || sfSelfServiceLocked"
+              :disabled="units >= MAX_U || loading"
               @click="bump(1)"
             >
               +
@@ -44,7 +38,7 @@
         <button
           class="submit-btn"
           :loading="saving"
-          :disabled="loading || !dirty || saving || sfSelfServiceLocked"
+          :disabled="loading || !dirty || saving"
           @click="onSave"
         >
           保存
@@ -72,7 +66,6 @@ const serverUnitsRaw = ref(1)
 /** 进入本页时的可选范围内快照，用于判断是否修改 */
 const baselineUnits = ref(1)
 const units = ref(1)
-const sfSelfServiceLocked = ref(false)
 
 const dirty = computed(() => !loading.value && units.value !== baselineUnits.value)
 
@@ -95,7 +88,6 @@ async function loadMe() {
   loading.value = true
   try {
     const data = await request('/api/user/me', { method: 'GET' })
-    sfSelfServiceLocked.value = Boolean(data?.sf_self_service_locked)
     const raw = Math.floor(Number(data?.daily_meal_units) || 0)
     const safeRaw = raw >= 1 && raw <= 50 ? raw : 1
     serverUnitsRaw.value = safeRaw

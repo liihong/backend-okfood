@@ -106,6 +106,23 @@ def resolve_dishes_for_dates_batch(
     return out
 
 
+def weekly_menu_day_total_stock(db: Session, menu_date: date, *, store_id: int) -> int | None:
+    """业务日对应周菜单槽位「日总份数」（与本周菜单配置同源）；未排菜或未填则 None。"""
+    sid = int(store_id)
+    anchor = _week_start(menu_date)
+    slot = menu_date.weekday() + 1
+    w = db.scalar(
+        select(WeeklyMenuSlot).where(
+            WeeklyMenuSlot.store_id == sid,
+            WeeklyMenuSlot.week_start == anchor,
+            WeeklyMenuSlot.slot == slot,
+        )
+    )
+    if w is None or w.dish_id is None or w.total_stock is None:
+        return None
+    return max(0, int(w.total_stock))
+
+
 def paid_single_portions_sum(db: Session, dish_id: int, menu_date: date, *, store_id: int) -> int:
     sid = int(store_id)
     v = db.scalar(

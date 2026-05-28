@@ -14,7 +14,7 @@ def test_min_leave_start_is_day_after_shanghai_today():
     now = datetime(2026, 5, 21, 4, 37, 36, tzinfo=ZoneInfo("Asia/Shanghai"))
     assert min_leave_start_shanghai(now).isoformat() == "2026-05-22"
 
-    # 当日 21:00 前同样不可请当天假
+    # 2026-05-21 20:00 上海：最早请假日仍为次日（与具体时刻无关）
     now_late = datetime(2026, 5, 21, 20, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
     assert min_leave_start_shanghai(now_late).isoformat() == "2026-05-22"
 

@@ -35,6 +35,7 @@ from app.models.menu_dish import MenuDish
 from app.models.menu_schedule import MenuSchedule
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.single_meal_order import SingleMealOrder
+from app.constants import STUB_MEMBER_NAME
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.schemas.courier import CourierTaskMemberOut
 from app.schemas.single_meal_order import (
@@ -52,6 +53,81 @@ from app.services.member_address_service import delivery_region_name_map, full_a
 from app.services.store_config_service import load_store_coordinates_for_sorting
 
 logger = logging.getLogger(__name__)
+
+
+def _admin_single_meal_member_display_name(
+    db: Session,
+    member: Member | None,
+    *,
+    member_address_id: int | None,
+    order_address: MemberAddress | None = None,
+) -> str:
+    """管理端展示名：档案仍为占位「待完善」时，优先用订单关联地址的收件人姓名。"""
+    profile = ((member.name or "").strip() if member else "") or ""
+
+    def _usable_contact(raw: str | None) -> str:
+        c = (raw or "").strip()
+        if not c or c == STUB_MEMBER_NAME:
+            return ""
+        return c
+
+    if profile and profile != STUB_MEMBER_NAME:
+        return profile
+
+    addr = order_address
+    if addr is None and member_address_id:
+        addr = db.get(MemberAddress, int(member_address_id))
+    contact = _usable_contact(addr.contact_name if addr else None)
+    if contact:
+        return contact
+
+    # 订单地址无收件人时：回退该会员默认/最近一条地址
+    if member is not None:
+        fallback_addr = db.scalar(
+            select(MemberAddress)
+            .where(MemberAddress.member_id == int(member.id))
+            .order_by(MemberAddress.is_default.desc(), MemberAddress.id.desc())
+            .limit(1)
+        )
+        contact = _usable_contact(fallback_addr.contact_name if fallback_addr else None)
+        if contact:
+            return contact
+
+    return profile
+
+
+def _admin_single_meal_recipient_contact_name(
+    *,
+    member_address_id: int | None,
+    order_address: MemberAddress | None = None,
+) -> str:
+    """订单关联地址上的收件人姓名（不做占位回退）。"""
+    if order_address is None:
+        return ""
+    return (order_address.contact_name or "").strip()
+
+
+def _admin_single_meal_member_list_fields(
+    db: Session,
+    member: Member | None,
+    *,
+    member_address_id: int | None,
+    order_address: MemberAddress | None = None,
+) -> tuple[str, str]:
+    addr = order_address
+    if addr is None and member_address_id:
+        addr = db.get(MemberAddress, int(member_address_id))
+    recipient = _admin_single_meal_recipient_contact_name(
+        member_address_id=member_address_id, order_address=addr
+    )
+    display = _admin_single_meal_member_display_name(
+        db,
+        member,
+        member_address_id=member_address_id,
+        order_address=addr,
+    )
+    return display, recipient
+
 
 _RETAIL_STOP_PREFIX = "retail-smo-"
 _SF_PUSH_KIND_SINGLE_MEAL_RETAIL = "single_meal_retail"
@@ -559,16 +635,33 @@ def list_admin_store_single_meal_orders_by_delivery_day(
     for f in filters:
         list_stmt = list_stmt.where(f)
     rows = db.scalars(list_stmt).all()
+    addr_ids = {int(r.member_address_id) for r in rows if r.member_address_id is not None}
+    addr_map: dict[int, MemberAddress] = {}
+    if addr_ids:
+        for addr_row in db.scalars(
+            select(MemberAddress).where(MemberAddress.id.in_(addr_ids))
+        ).all():
+            addr_map[int(addr_row.id)] = addr_row
+
     out: list[AdminSingleMealOrderListOut] = []
     for r in rows:
         m = db.get(Member, r.member_id)
         base = _single_meal_order_row_to_out(db, r)
+        aid = int(r.member_address_id) if r.member_address_id is not None else None
+        order_addr = addr_map.get(aid) if aid is not None else None
+        member_name, recipient_name = _admin_single_meal_member_list_fields(
+            db,
+            m,
+            member_address_id=aid,
+            order_address=order_addr,
+        )
         out.append(
             AdminSingleMealOrderListOut(
                 **base.model_dump(),
                 member_id=int(r.member_id),
                 member_phone=(m.phone or "") if m else "",
-                member_name=(((m.name or "").strip()) if m else "") or "",
+                member_name=member_name,
+                recipient_contact_name=recipient_name,
             )
         )
     return out, total
@@ -1199,11 +1292,17 @@ def admin_assign_courier_single_meal_order(
     db.refresh(o)
     m = db.get(Member, o.member_id)
     base = _single_meal_order_row_to_out(db, o)
+    member_name, recipient_name = _admin_single_meal_member_list_fields(
+        db,
+        m,
+        member_address_id=int(o.member_address_id) if o.member_address_id is not None else None,
+    )
     return AdminSingleMealOrderListOut(
         **base.model_dump(),
         member_id=int(o.member_id),
         member_phone=(m.phone or "") if m else "",
-        member_name=(((m.name or "").strip()) if m else "") or "",
+        member_name=member_name,
+        recipient_contact_name=recipient_name,
     )
 
 
@@ -1496,9 +1595,15 @@ def admin_update_single_meal_order(
     db.refresh(o)
     m = db.get(Member, o.member_id)
     base = _single_meal_order_row_to_out(db, o)
+    member_name, recipient_name = _admin_single_meal_member_list_fields(
+        db,
+        m,
+        member_address_id=int(o.member_address_id) if o.member_address_id is not None else None,
+    )
     return AdminSingleMealOrderListOut(
         **base.model_dump(),
         member_id=int(o.member_id),
         member_phone=(m.phone or "") if m else "",
-        member_name=(((m.name or "").strip()) if m else "") or "",
+        member_name=member_name,
+        recipient_contact_name=recipient_name,
     )
