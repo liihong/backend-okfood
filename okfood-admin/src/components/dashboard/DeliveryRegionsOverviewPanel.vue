@@ -387,7 +387,37 @@ const tomorrowSingleRetailTotalCount = computed(
   () => Number(summaryMeta.value?.tomorrow_single_retail_total_quantity) || 0,
 )
 
-/** 顶卡主数字「总出餐量」= 配送份数 + 单次零售 + 门店自提（与公式、右侧分项一致） */
+/** 锚定日 / 次日：周菜单「日总份数」（dashboard-summary.*_menu_day_total_stock） */
+const todayMenuDayTotalStock = computed(() => {
+  const raw = summaryMeta.value?.today_menu_day_total_stock
+  if (raw == null || raw === '') return null
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null
+})
+const tomorrowMenuDayTotalStock = computed(() => {
+  const raw = summaryMeta.value?.tomorrow_menu_day_total_stock
+  if (raw == null || raw === '') return null
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null
+})
+
+/** 后厨出餐量 = 周菜单「日总份数」；未配置时退化为大表需准备 + 单次零售 */
+const cardKitchenOutputTotal = computed(() => {
+  const menuStock = todayMenuDayTotalStock.value
+  if (menuStock != null) return menuStock
+  const tp = Number(summaryMeta.value?.today_meals_to_prepare)
+  const retail = todaySingleRetailTotalCount.value
+  if (Number.isFinite(tp) && tp >= 0) {
+    return Math.max(0, Math.trunc(tp) + Math.trunc(retail))
+  }
+  const b = prepMetricsBreakdown(todayPrepMetrics.value)
+  if (b != null) {
+    return Math.max(0, Math.trunc(b.total) + Math.trunc(retail))
+  }
+  return Math.max(0, Math.trunc(cardPrepTotalFallback.value))
+})
+
+/** 顶卡主数字「总销售量」= 配送份数 + 单次零售 + 门店自提（与公式、右侧分项一致） */
 const cardPrepTotal = computed(() => {
   const b = prepMetricsBreakdown(todayPrepMetrics.value)
   const retail = todaySingleRetailTotalCount.value
@@ -398,8 +428,11 @@ const cardPrepTotal = computed(() => {
     )
   }
   // 无 prep_metrics 时退化为「今日需准备」合计（无法再拆公式三项）
-  return Number(dashboardStats.value[2]?.value) || 0
+  return cardPrepTotalFallback.value
 })
+
+/** 无 prep_metrics 拆分时的总销售量兜底 */
+const cardPrepTotalFallback = computed(() => Number(dashboardStats.value[2]?.value) || 0)
 
 /** 配送餐=到家待送达+已送达；自提=门店自提分组 */
 const todayMealsDelivery = computed(() => {
@@ -424,7 +457,7 @@ const todayTotalOutFormulaPickup = computed(() =>
   todayMealsPickup.value == null ? '—' : String(Math.trunc(Number(todayMealsPickup.value))),
 )
 
-/** 明日顶卡「总出餐量」= 明日配送份数 + 明日单次零售 + 明日门店自提 */
+/** 明日顶卡「总销售量」= 明日配送份数 + 明日单次零售 + 明日门店自提 */
 const cardTomorrowPrepTotal = computed(() => {
   const b = prepMetricsBreakdown(tomorrowPrepMetrics.value)
   const retail = tomorrowSingleRetailTotalCount.value
@@ -435,6 +468,22 @@ const cardTomorrowPrepTotal = computed(() => {
     )
   }
   return Number(dashboardStats.value[3]?.value) || 0
+})
+
+/** 明日后厨出餐量 = 周菜单「日总份数」；未配置时退化为大表需准备 + 单次零售 */
+const cardTomorrowKitchenOutputTotal = computed(() => {
+  const menuStock = tomorrowMenuDayTotalStock.value
+  if (menuStock != null) return menuStock
+  const np = Number(summaryMeta.value?.tomorrow_meals_to_prepare)
+  const retail = tomorrowSingleRetailTotalCount.value
+  if (Number.isFinite(np) && np >= 0) {
+    return Math.max(0, Math.trunc(np) + Math.trunc(retail))
+  }
+  const b = prepMetricsBreakdown(tomorrowPrepMetrics.value)
+  if (b != null) {
+    return Math.max(0, Math.trunc(b.total) + Math.trunc(retail))
+  }
+  return Math.max(0, Math.trunc(cardTomorrowPrepTotal.value))
 })
 
 const tomorrowPrepDelivery = computed(() => {
@@ -564,12 +613,19 @@ const storePinLegendCount = computed(() =>
 )
 
 /** 概览数字滚动展示（加载 / 刷新 / 换日后过渡到新值） */
+const kitchenOutputTotalAnimated = useAnimatedInteger(() => cardKitchenOutputTotal.value, {
+  duration: 840,
+})
 const prepTotalAnimated = useAnimatedInteger(() => cardPrepTotal.value, { duration: 840 })
 const todayDeliveryAnimated = useAnimatedInteger(() => todayMealsDelivery.value, { duration: 700 })
 const todayPickupAnimated = useAnimatedInteger(() => todayMealsPickup.value, { duration: 700 })
 const todayHomeStopCountAnimated = useAnimatedInteger(() => todayHomeStopCount.value, {
   duration: 640,
 })
+const tomorrowKitchenOutputTotalAnimated = useAnimatedInteger(
+  () => cardTomorrowKitchenOutputTotal.value,
+  { duration: 840 },
+)
 const tomorrowTotalAnimated = useAnimatedInteger(() => cardTomorrowPrepTotal.value, { duration: 840 })
 const tomorrowDeliveryAnimated = useAnimatedInteger(() => tomorrowPrepDelivery.value, { duration: 700 })
 const tomorrowPickupAnimated = useAnimatedInteger(() => tomorrowPrepPickup.value, { duration: 700 })
@@ -684,22 +740,28 @@ onMounted(() => {
         </div>
         <div class="dro-dash-kpi__mid">
           <div class="dro-dash-kpi__main">
-            <div class="dro-dash-kpi__hero dro-dash-kpi__hero--total-out">
-              <span class="dro-dash-kpi__hero-num">{{ prepTotalAnimated }}</span>
-              <span class="dro-dash-kpi__hero-formula" role="note">
-                <span class="dro-dash-kpi__hero-formula-eq">总出餐量 = </span>
-                <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--delivery"
-                  >配送份数 {{ todayTotalOutFormulaDelivery }}</span
-                >
-                <span class="dro-dash-kpi__hero-formula-plus"> + </span>
-                <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--retail"
-                  >单次零售 {{ todayTotalOutFormulaRetail }}</span
-                >
-                <span class="dro-dash-kpi__hero-formula-plus"> + </span>
-                <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--pickup"
-                  >自提 {{ todayTotalOutFormulaPickup }}</span
-                >
-              </span>
+            <div class="dro-dash-kpi__main-col">
+              <div class="dro-dash-kpi__kitchen" role="status" aria-label="后厨出餐量">
+                <span class="dro-dash-kpi__kitchen-label">后厨出餐量</span>
+                <span class="dro-dash-kpi__kitchen-num">{{ kitchenOutputTotalAnimated }}</span>
+              </div>
+              <div class="dro-dash-kpi__hero dro-dash-kpi__hero--total-out">
+                <span class="dro-dash-kpi__hero-num">{{ prepTotalAnimated }}</span>
+                <span class="dro-dash-kpi__hero-formula" role="note">
+                  <span class="dro-dash-kpi__hero-formula-eq">总销售量 = </span>
+                  <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--delivery"
+                    >配送份数 {{ todayTotalOutFormulaDelivery }}</span
+                  >
+                  <span class="dro-dash-kpi__hero-formula-plus"> + </span>
+                  <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--retail"
+                    >单次零售 {{ todayTotalOutFormulaRetail }}</span
+                  >
+                  <span class="dro-dash-kpi__hero-formula-plus"> + </span>
+                  <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--pickup"
+                    >自提 {{ todayTotalOutFormulaPickup }}</span
+                  >
+                </span>
+              </div>
             </div>
             <div class="dro-dash-kpi__side">
               <div
@@ -822,22 +884,28 @@ onMounted(() => {
         </div>
         <div class="dro-dash-kpi__mid">
           <div class="dro-dash-kpi__main">
-            <div class="dro-dash-kpi__hero dro-dash-kpi__hero--total-out">
-              <span class="dro-dash-kpi__hero-num">{{ tomorrowTotalAnimated }}</span>
-              <span class="dro-dash-kpi__hero-formula" role="note">
-                <span class="dro-dash-kpi__hero-formula-eq">总出餐量 = </span>
-                <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--delivery"
-                  >配送份数 {{ tomorrowTotalOutFormulaDelivery }}</span
-                >
-                <span class="dro-dash-kpi__hero-formula-plus"> + </span>
-                <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--retail"
-                  >单次零售 {{ tomorrowTotalOutFormulaRetail }}</span
-                >
-                <span class="dro-dash-kpi__hero-formula-plus"> + </span>
-                <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--pickup"
-                  >自提 {{ tomorrowTotalOutFormulaPickup }}</span
-                >
-              </span>
+            <div class="dro-dash-kpi__main-col">
+              <div class="dro-dash-kpi__kitchen" role="status" aria-label="后厨出餐量">
+                <span class="dro-dash-kpi__kitchen-label">后厨出餐量</span>
+                <span class="dro-dash-kpi__kitchen-num">{{ tomorrowKitchenOutputTotalAnimated }}</span>
+              </div>
+              <div class="dro-dash-kpi__hero dro-dash-kpi__hero--total-out">
+                <span class="dro-dash-kpi__hero-num">{{ tomorrowTotalAnimated }}</span>
+                <span class="dro-dash-kpi__hero-formula" role="note">
+                  <span class="dro-dash-kpi__hero-formula-eq">总销售量 = </span>
+                  <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--delivery"
+                    >配送份数 {{ tomorrowTotalOutFormulaDelivery }}</span
+                  >
+                  <span class="dro-dash-kpi__hero-formula-plus"> + </span>
+                  <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--retail"
+                    >单次零售 {{ tomorrowTotalOutFormulaRetail }}</span
+                  >
+                  <span class="dro-dash-kpi__hero-formula-plus"> + </span>
+                  <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--pickup"
+                    >自提 {{ tomorrowTotalOutFormulaPickup }}</span
+                  >
+                </span>
+              </div>
             </div>
             <div class="dro-dash-kpi__side">
               <div
@@ -1349,6 +1417,39 @@ button.dro-dash-kpi__kicker--reset-live:focus-visible {
   min-height: 0;
 }
 
+/** 左侧：后厨出餐量 + 总销售量主数字纵向堆叠 */
+.dro-dash-kpi__main-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.dro-dash-kpi__kitchen {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  line-height: 1.2;
+}
+
+.dro-dash-kpi__kitchen-label {
+  font-size: clamp(13px, 1.45vw, 15px);
+  font-weight: 800;
+  color: #64748b;
+  letter-spacing: 0.02em;
+}
+
+.dro-dash-kpi__kitchen-num {
+  font-size: clamp(1.35rem, 2.4vw, 1.75rem);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
 .dro-dash-kpi__mid {
   display: flex;
   flex-direction: column;
@@ -1554,7 +1655,7 @@ button.dro-dash-kpi__kicker--reset-live:focus-visible {
   min-width: 0;
 }
 
-/** 今日/明日顶卡：总值后同一行展示「总出餐量 = 配送份数 + 单次零售 + 自提」拆解（窄屏可换行） */
+/** 今日/明日顶卡：总值后同一行展示「总销售量 = 配送份数 + 单次零售 + 自提」拆解（窄屏可换行） */
 .dro-dash-kpi__hero--total-out {
   flex-direction: row;
   align-items: baseline;

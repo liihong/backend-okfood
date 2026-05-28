@@ -21,6 +21,19 @@ function todayShanghaiStr() {
   return `${y}-${mo}-${da}`
 }
 
+/** ISO 日历日 YYYY-MM-DD → `2026年5月28日` */
+function formatIsoDateZh(isoDate) {
+  if (isoDate == null || isoDate === '') return '—'
+  const s = String(isoDate).trim().slice(0, 10)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (!m) return s || '—'
+  const y = Number(m[1])
+  const mo = Number(m[2])
+  const da = Number(m[3])
+  if (!y || !mo || !da) return s
+  return `${y}年${mo}月${da}日`
+}
+
 /** 展示用：将 Date 格式化为上海日历的 `MM-DD HH:mm` */
 function formatShanghaiMdHm(d) {
   if (Number.isNaN(d.getTime())) return null
@@ -49,6 +62,45 @@ function formatOrderCreatedAtMdHm(iso) {
   const x = s.replace('T', ' ')
   const m = x.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
   return m ? `${m[2]}-${m[3]} ${m[4]}:${m[5]}` : x.slice(0, 16)
+}
+
+/** 下单时间拆分为「年月日 / 时分」，供列表分两行展示 */
+function orderCreatedAtParts(iso) {
+  if (iso == null || iso === '') return { date: '—', time: '' }
+  const s = String(iso).trim()
+  const d = parseApiDateTimeBeijing(s)
+  if (!Number.isNaN(d.getTime())) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(d)
+    const y = parts.find((p) => p.type === 'year')?.value ?? ''
+    const mo = Number(parts.find((p) => p.type === 'month')?.value)
+    const da = Number(parts.find((p) => p.type === 'day')?.value)
+    const hr = parts.find((p) => p.type === 'hour')?.value ?? ''
+    const mi = parts.find((p) => p.type === 'minute')?.value ?? ''
+    const date = y && mo && da ? `${y}年${mo}月${da}日` : '—'
+    const time = hr && mi ? `${hr}:${mi}` : ''
+    return { date, time }
+  }
+  const dm = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (dm) {
+    const tm = s.match(/(\d{2}):(\d{2})/)
+    return {
+      date: formatIsoDateZh(`${dm[1]}-${dm[2]}-${dm[3]}`),
+      time: tm ? `${tm[1]}:${tm[2]}` : '',
+    }
+  }
+  const full = formatOrderCreatedAtMdHm(iso)
+  if (full === '—') return { date: '—', time: '' }
+  const legacy = full.match(/^(\d{2}-\d{2})\s+(\d{2}:\d{2})$/)
+  if (legacy) return { date: legacy[1], time: legacy[2] }
+  return { date: full, time: '' }
 }
 
 /**
@@ -151,6 +203,25 @@ const editForm = ref({
   store_pickup: false,
   member_address_id: null,
 })
+
+/** 与后端 STUB_MEMBER_NAME 一致：档案占位时展示地址收件人 */
+const MEMBER_STUB_NAME = '待完善'
+
+/** 列表/弹窗会员名：优先 API 的 member_name / recipient_contact_name，弹窗内再读地址草稿 */
+function resolveSingleOrderMemberDisplayName(row, addrDraft) {
+  if (!row) return '—'
+  const profile = String(row.member_name || '').trim()
+  if (profile && profile !== MEMBER_STUB_NAME) return profile
+  const recipient = String(row.recipient_contact_name || '').trim()
+  if (recipient) return recipient
+  const contact = String(addrDraft?.contact_name || '').trim()
+  if (contact) return contact
+  return profile || '—'
+}
+
+const editDialogMemberDisplayName = computed(() =>
+  resolveSingleOrderMemberDisplayName(editOrder.value, editAddrDraft.value),
+)
 
 const refundDialogMeta = computed(() => {
   const t = refundTarget.value
@@ -1250,35 +1321,65 @@ onMounted(() => {
            @selection-change="onSingleSelectionChange"
           >
            <el-table-column type="selection" width="42" :selectable="isSingleRowSelectable" />
-            <el-table-column label="#" width="56" class-name="td-mono">
-              <template #default="{ row }">{{ row.id }}</template>
+            <el-table-column label="序号" width="64" align="center" class-name="td-mono">
+              <template #default="{ $index }">
+                <span class="orders-cell-pill orders-cell-pill--idx">{{
+                  (page - 1) * pageSize + $index + 1
+                }}</span>
+              </template>
             </el-table-column>
-            <el-table-column label="下单时间" width="108" class-name="td-mono co-nowrap">
-              <template #default="{ row }">{{ formatOrderCreatedAtMdHm(row.created_at) }}</template>
-            </el-table-column>
-            <el-table-column label="会员" min-width="120">
+            <el-table-column label="下单时间" width="132" class-name="orders-created-at-col">
               <template #default="{ row }">
-                <div class="orders-m-cell">
-                  <span class="orders-m-name" :title="row.member_name || ''">{{
-                    (row.member_name || '').trim() || '—'
+                <div class="orders-created-at">
+                  <span class="orders-created-at__date">{{
+                    orderCreatedAtParts(row.created_at).date
                   }}</span>
-                  <span class="orders-m-phone td-mono" :title="row.member_phone || ''">{{
-                    (row.member_phone || '').trim() || ''
-                  }}</span>
+                  <span
+                    v-if="orderCreatedAtParts(row.created_at).time"
+                    class="orders-created-at__time"
+                    >{{ orderCreatedAtParts(row.created_at).time }}</span
+                  >
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="餐品" min-width="140" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.dish_title || '—' }}</template>
+            <el-table-column label="会员" min-width="120" class-name="orders-member-col">
+              <template #default="{ row }">
+                <div class="orders-m-cell">
+                  <span
+                    class="orders-cell-pill orders-cell-pill--member-name"
+                    :title="resolveSingleOrderMemberDisplayName(row)"
+                    >{{ resolveSingleOrderMemberDisplayName(row) }}</span
+                  >
+                  <span
+                    v-if="(row.member_phone || '').trim()"
+                    class="orders-cell-pill orders-cell-pill--member-phone td-mono"
+                    :title="row.member_phone || ''"
+                    >{{ (row.member_phone || '').trim() }}</span
+                  >
+                </div>
+              </template>
             </el-table-column>
-           <el-table-column label="份数" width="80" align="center">
-              <template #default="{ row }">{{ row.quantity ?? '—' }}</template>
+            <el-table-column label="餐品" min-width="140" show-overflow-tooltip class-name="orders-dish-col">
+              <template #default="{ row }">
+                <span class="orders-cell-pill orders-cell-pill--dish">{{ row.dish_title || '—' }}</span>
+              </template>
             </el-table-column>
-           <el-table-column label="供餐日" width="120" class-name="td-mono">
-              <template #default="{ row }">{{ row.delivery_date || '—' }}</template>
+           <el-table-column label="份数" width="80" align="center" class-name="orders-qty-col">
+              <template #default="{ row }">
+                <span class="orders-cell-pill orders-cell-pill--qty">{{ row.quantity ?? '—' }}</span>
+              </template>
             </el-table-column>
-           <el-table-column label="金额" width="90" align="right" class-name="td-mono">
-              <template #default="{ row }">{{ row.amount_yuan ?? '—' }}</template>
+           <el-table-column label="供餐日" width="132" class-name="co-nowrap orders-meal-date-col">
+              <template #default="{ row }">
+                <span class="orders-cell-pill orders-cell-pill--date">{{
+                  formatIsoDateZh(row.delivery_date)
+                }}</span>
+              </template>
+            </el-table-column>
+           <el-table-column label="金额" width="100" align="center" class-name="td-mono orders-amount-col co-nowrap">
+              <template #default="{ row }">
+                <span class="orders-cell-pill orders-cell-pill--amount">{{ row.amount_yuan ?? '—' }}</span>
+              </template>
             </el-table-column>
            <el-table-column label="支付" width="100" class-name="co-nowrap">
               <template #default="{ row }">
@@ -1292,8 +1393,8 @@ onMounted(() => {
             </el-table-column>
             <el-table-column
               label="配送/自提"
-              header-align="left"
-              align="left"
+              header-align="center"
+              align="center"
               min-width="480"
               :show-overflow-tooltip="false"
               class-name="orders-single-addr-col"
@@ -1305,8 +1406,10 @@ onMounted(() => {
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="单号" width="120" class-name="td-mono" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.out_trade_no || '—' }}</template>
+            <el-table-column label="单号" width="120" class-name="td-mono orders-trade-no-col" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span class="orders-cell-pill orders-cell-pill--trade-no">{{ row.out_trade_no || '—' }}</span>
+              </template>
             </el-table-column>
             <el-table-column label="操作" width="92" fixed="right" align="center" class-name="orders-col-more">
               <template #default="{ row }">
@@ -1379,8 +1482,19 @@ onMounted(() => {
             <el-table-column label="#" width="56" class-name="td-mono">
               <template #default="{ row }">{{ row.id }}</template>
             </el-table-column>
-            <el-table-column label="下单时间" width="108" class-name="td-mono co-nowrap">
-              <template #default="{ row }">{{ formatOrderCreatedAtMdHm(row.created_at) }}</template>
+            <el-table-column label="下单时间" width="132" class-name="orders-created-at-col">
+              <template #default="{ row }">
+                <div class="orders-created-at">
+                  <span class="orders-created-at__date">{{
+                    orderCreatedAtParts(row.created_at).date
+                  }}</span>
+                  <span
+                    v-if="orderCreatedAtParts(row.created_at).time"
+                    class="orders-created-at__time"
+                    >{{ orderCreatedAtParts(row.created_at).time }}</span
+                  >
+                </div>
+              </template>
             </el-table-column>
             <el-table-column label="会员" min-width="120">
               <template #default="{ row }">
@@ -1576,7 +1690,7 @@ onMounted(() => {
     >
       <template v-if="editOrder">
         <p class="orders-edit-hint">
-          订单 #{{ editOrder.id }} · {{ (editOrder.member_name || '').trim() || '—' }}
+          订单 #{{ editOrder.id }} · {{ editDialogMemberDisplayName }}
           {{ (editOrder.member_phone || '').trim() }}
         </p>
         <div class="orders-edit-field">
@@ -1616,7 +1730,7 @@ onMounted(() => {
           <div class="orders-edit-first-row">
             <el-space wrap :size="8" alignment="center">
               <span class="orders-edit-k">会员</span>
-              <el-text truncated class="orders-edit-inline-name">{{ (editOrder.member_name || '—').trim() }}</el-text>
+              <el-text truncated class="orders-edit-inline-name">{{ editDialogMemberDisplayName }}</el-text>
               <el-text type="info" truncated>{{ (editOrder.member_phone || '').trim() }}</el-text>
               <el-divider direction="vertical" />
               <span class="orders-edit-k">经纬度 GCJ-02</span>
@@ -1867,12 +1981,152 @@ onMounted(() => {
 .orders-filter-el-select--wide {
   width: 152px;
 }
+.orders-created-at {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  line-height: 1.15;
+}
+
+.orders-created-at__date {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: nowrap;
+  color: #065f46;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+}
+
+.orders-created-at__time {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #334155;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+.orders-manage-page :deep(td.orders-created-at-col .cell) {
+  overflow: visible;
+}
+
+/* 列表单元格：统一 pill 底色（与下单时间日期/时分标签同风格） */
+.orders-cell-pill {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+
+.orders-cell-pill--idx {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+.orders-cell-pill--member-name {
+  font-weight: 700;
+  color: #5b21b6;
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+}
+
+.orders-cell-pill--member-phone {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.orders-cell-pill--dish {
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+
+.orders-cell-pill--qty {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+
+.orders-cell-pill--date {
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #065f46;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+}
+
+.orders-cell-pill--amount {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: #be123c;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+}
+
+.orders-manage-page :deep(td.orders-amount-col .cell) {
+  overflow: visible;
+  white-space: nowrap !important;
+  text-align: center;
+}
+
+.orders-cell-pill--trade-no {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.orders-manage-page :deep(td.orders-member-col .cell),
+.orders-manage-page :deep(td.orders-dish-col .cell),
+.orders-manage-page :deep(td.orders-qty-col .cell),
+.orders-manage-page :deep(td.orders-meal-date-col .cell),
+.orders-manage-page :deep(td.orders-amount-col .cell),
+.orders-manage-page :deep(td.orders-trade-no-col .cell) {
+  overflow: visible;
+}
+
 .orders-m-cell {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  align-items: flex-start;
+  gap: 4px;
   line-height: 1.25;
 }
+
+.orders-m-cell .orders-cell-pill {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 商城卡包 Tab 仍用纯文字会员列 */
 .orders-m-name {
   font-weight: 600;
 }
@@ -1966,7 +2220,10 @@ onMounted(() => {
 }
 /* 订单列表：配送地址列完整展示（覆盖 Element Plus 表格 .cell 默认单行省略） */
 .orders-manage-page :deep(.admin-table--members.el-table td.orders-single-addr-col.el-table__cell) {
-  vertical-align: top;
+  vertical-align: middle;
+}
+.orders-manage-page :deep(.admin-table--members.el-table th.orders-single-addr-col.el-table__cell) {
+  text-align: center;
 }
 .orders-manage-page :deep(.admin-table--members.el-table td.orders-single-addr-col .cell) {
   white-space: normal !important;
@@ -1975,7 +2232,7 @@ onMounted(() => {
   overflow: visible !important;
   text-overflow: clip !important;
   line-height: 1.5;
-  text-align: left;
+  text-align: center;
   hyphens: auto;
 }
 .orders-addr-text {
@@ -1987,6 +2244,7 @@ onMounted(() => {
   overflow: visible;
   word-break: break-word;
   overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .orders-more-chevron {
