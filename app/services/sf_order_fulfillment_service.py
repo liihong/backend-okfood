@@ -670,8 +670,12 @@ def store_has_unfulfilled_sf_push_on_delivery_date(
     return False
 
 
+def _db_dialect_name(db: Session) -> str:
+    return getattr(db.get_bind().dialect, "name", "") or ""
+
+
 def _snapshot_member_id_like_clauses(member_id: int) -> list[Any]:
-    """在 request_snapshot JSON 文本中精确匹配 fulfillment_member_ids 数组元素。"""
+    """SQLite 等：在 request_snapshot JSON 文本中精确匹配 fulfillment_member_ids 数组元素。"""
     mid = str(int(member_id))
     snap = cast(SfSameCityPush.request_snapshot, String)
     return [
@@ -680,6 +684,61 @@ def _snapshot_member_id_like_clauses(member_id: int) -> list[Any]:
         snap.like(f'%"fulfillment_member_ids": [%, {mid}]%'),
         snap.like(f'%"fulfillment_member_ids": [%, {mid},%'),
     ]
+
+
+def _snapshot_json_array_contains(column: Any, scalar: int | str, json_path: str) -> Any:
+    """MySQL：JSON 数组是否包含标量元素（如 fulfillment_member_ids）。"""
+    return func.json_contains(
+        func.coalesce(func.json_extract(column, json_path), "[]"),
+        str(scalar),
+        "$",
+    )
+
+
+def _member_sf_push_snapshot_match_clauses(
+    db: Session,
+    *,
+    member_id: int,
+    member_phone: str | None,
+    single_meal_order_ids: list[int],
+) -> list[Any]:
+    """
+    按会员 id / 单次订单 id / 快照收货手机精确匹配顺丰 request_snapshot。
+    MySQL 走 JSON 函数；SQLite 测试环境回退 LIKE，避免 ``%{phone}%`` 扫当日全量推单行。
+    """
+    mid = int(member_id)
+    snap = SfSameCityPush.request_snapshot
+    clauses: list[Any] = []
+
+    if _db_dialect_name(db) == "mysql":
+        clauses.append(_snapshot_json_array_contains(snap, mid, "$.fulfillment_member_ids"))
+        for oid in single_meal_order_ids:
+            clauses.append(
+                _snapshot_json_array_contains(snap, int(oid), "$.fulfillment_single_meal_order_ids")
+            )
+        ph = (member_phone or "").strip()
+        if ph:
+            clauses.append(
+                func.json_unquote(func.json_extract(snap, "$.preview_row.recv_phone")) == ph
+            )
+        return clauses
+
+    clauses.extend(_snapshot_member_id_like_clauses(mid))
+    snap_text = cast(snap, String)
+    for oid in single_meal_order_ids:
+        oid_s = str(int(oid))
+        clauses.extend(
+            [
+                snap_text.like(f'%"fulfillment_single_meal_order_ids": [{oid_s}]%'),
+                snap_text.like(f'%"fulfillment_single_meal_order_ids": [{oid_s},%'),
+                snap_text.like(f'%"fulfillment_single_meal_order_ids": [%, {oid_s}]%'),
+                snap_text.like(f'%"fulfillment_single_meal_order_ids": [%, {oid_s},%'),
+            ]
+        )
+    ph = (member_phone or "").strip()
+    if ph:
+        clauses.append(snap_text.like(f'%"recv_phone": "{ph}"%'))
+    return clauses
 
 
 def _member_on_sf_push(
@@ -723,29 +782,41 @@ def _member_active_sf_pushes_on_delivery_date(
     member_id: int,
     store_id: int,
     delivery_date: date,
+    member_phone: str | None = None,
 ) -> list[SfSameCityPush]:
     """仅返回与指定会员相关的当日有效顺丰推单（不重建配送大表）。"""
     mid = int(member_id)
     sid = int(store_id)
-    member = db.get(Member, mid)
-    phone = (member.phone or "").strip() if member else ""
+    phone = (member_phone or "").strip()
+    if not phone:
+        member = db.get(Member, mid)
+        phone = (member.phone or "").strip() if member else ""
 
     base = _active_sf_push_base_filter(store_id=sid, delivery_date=delivery_date)
-    or_parts: list[Any] = list(_snapshot_member_id_like_clauses(mid))
 
-    order_ids = db.scalars(
-        select(SingleMealOrder.id).where(
-            SingleMealOrder.member_id == mid,
-            SingleMealOrder.delivery_date == delivery_date,
-        )
-    ).all()
+    order_ids = [
+        int(oid)
+        for oid in db.scalars(
+            select(SingleMealOrder.id).where(
+                SingleMealOrder.member_id == mid,
+                SingleMealOrder.delivery_date == delivery_date,
+            )
+        ).all()
+    ]
+
+    or_parts: list[Any] = _member_sf_push_snapshot_match_clauses(
+        db,
+        member_id=mid,
+        member_phone=phone or None,
+        single_meal_order_ids=order_ids,
+    )
     if order_ids:
         or_parts.append(
             SfSameCityPush.stop_id.in_(f"retail-smo-{int(oid)}" for oid in order_ids)
         )
 
-    if phone:
-        or_parts.append(cast(SfSameCityPush.request_snapshot, String).like(f"%{phone}%"))
+    if not or_parts:
+        return []
 
     rows = db.scalars(select(SfSameCityPush).where(and_(base, or_(*or_parts)))).all()
     seen: set[int] = set()
@@ -800,17 +871,20 @@ def member_sf_self_service_locked_on_delivery_date(
     member_id: int,
     store_id: int,
     delivery_date: date,
+    member_phone: str | None = None,
 ) -> bool:
     """
     当前会员当日命中顺丰推单且其配送尚未完成：锁定小程序自助改地址/份数/请假等。
 
     仅查与该会员相关的推单；门店其他会员的推单/履约状态不影响本会员。
+    调用方应传入 ``member_phone`` 与 ``delivery_date``，避免为查手机再读 members 且用 JSON 精确匹配快照。
     """
     pushes = _member_active_sf_pushes_on_delivery_date(
         db,
         member_id=int(member_id),
         store_id=int(store_id),
         delivery_date=delivery_date,
+        member_phone=member_phone,
     )
     if not pushes:
         return False
@@ -826,6 +900,7 @@ def member_has_active_sf_push_on_delivery_date(
     member_id: int,
     store_id: int,
     delivery_date: date,
+    member_phone: str | None = None,
 ) -> bool:
     """会员在指定业务日是否命中未取消的顺丰推单。"""
     return bool(
@@ -834,6 +909,7 @@ def member_has_active_sf_push_on_delivery_date(
             member_id=int(member_id),
             store_id=int(store_id),
             delivery_date=delivery_date,
+            member_phone=member_phone,
         )
     )
 

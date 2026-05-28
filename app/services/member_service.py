@@ -277,6 +277,7 @@ def _to_member_out(
         member_id=int(m.id),
         store_id=int(m.store_id),
         delivery_date=biz_today,
+        member_phone=(m.phone or "").strip() or None,
     )
 
     plan_out: PlanType | None = None

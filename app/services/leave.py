@@ -105,6 +105,7 @@ def guard_member_self_service_during_sf_fulfillment(
         member_id=int(member.id),
         store_id=int(member.store_id),
         delivery_date=d,
+        member_phone=(member.phone or "").strip() or None,
     ):
         raise HTTPException(status_code=400, detail=SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG)
 
