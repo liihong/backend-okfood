@@ -48,6 +48,11 @@ function todayInputDate() {
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
+/** 表格序号（跨页连续） */
+function tableRowIndex(index) {
+  return (page.value - 1) * pageSize.value + index + 1
+}
+
 function payStatusClass(s) {
   if (s === '已缴') return 'member-pill member-pill--emerald'
   return 'member-pill member-pill--amber'
@@ -536,14 +541,24 @@ onUnmounted(() => {
           empty-text="暂无工单"
           :height="cardOrdersTableScrollHeight"
         >
+       <el-table-column label="序号" width="72" align="center" class-name="td-mono td-co-idx">
+          <template #default="{ $index }">
+            <span class="co-cell-pill co-cell-pill--idx">{{ tableRowIndex($index) }}</span>
+          </template>
+        </el-table-column>
        <el-table-column label="单号" width="80" class-name="td-mono td-co-id">
           <template #default="{ row }">#{{ row.id }}</template>
         </el-table-column>
-       <el-table-column label="名称" min-width="88" class-name="td-co-name">
+       <el-table-column label="会员信息" min-width="120" class-name="td-co-name">
           <template #default="{ row }">
-            <span class="co-member-name" :title="row.member_name || ''">{{
-              row.member_name || '—'
-            }}</span>
+            <div class="co-member-info">
+              <div class="co-member-name" :title="row.member_name || ''">{{
+                row.member_name || '—'
+              }}</div>
+              <div v-if="(row.member_wechat_name || '').trim()" class="t-sub t-wechat">
+                微信 {{ (row.member_wechat_name || '').trim() }}
+              </div>
+            </div>
           </template>
         </el-table-column>
         <el-table-column
@@ -565,15 +580,6 @@ onUnmounted(() => {
             <span :title="(row.member_phone || '').trim() || undefined">{{
               (row.member_phone || '').trim() || '—'
             }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="微信名称" min-width="108" class-name="td-co-wxname">
-          <template #default="{ row }">
-            <span
-              class="co-wxname-text"
-              :title="(row.member_wechat_name || '').trim() || undefined"
-              >{{ (row.member_wechat_name || '').trim() || '—' }}</span
-            >
           </template>
         </el-table-column>
        <el-table-column
@@ -598,7 +604,7 @@ onUnmounted(() => {
           class-name="td-mono co-nowrap td-co-amt-col"
         >
           <template #default="{ row }">
-           <span class="font-black co-amt-num">
+           <span class="co-cell-pill co-cell-pill--amount">
               {{ formatAmountYuanInteger(row.amount_yuan) }}
             </span>
           </template>
@@ -1504,6 +1510,15 @@ class="member-pill"
   padding: 0.8rem;
 }
 /* 开卡工单列表：表头/行高沿用 admin-table--members；备注/创建列允许换行展示全文 */
+.co-member-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .co-member-name {
   display: block;
   font-weight: 900;
@@ -1526,21 +1541,22 @@ class="member-pill"
   color: #94a3b8;
 }
 
-.co-wxname-text {
-  display: block;
-  color: #475569;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  max-width: 100%;
-}
-
 .card-orders-page :deep(.co-nowrap .cell) {
   white-space: nowrap;
 }
 
 /* 起送日 / 渠道 / 入账 / 电话：避免表头与内容被截成「…」 */
+.card-orders-page :deep(.td-co-idx .cell) {
+  overflow: visible;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+
+.card-orders-page :deep(.td-co-name .cell) {
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .card-orders-page :deep(.td-co-start-date .cell),
 .card-orders-page :deep(.td-co-channel .cell),
 .card-orders-page :deep(.td-co-sync .cell),
@@ -1556,6 +1572,40 @@ class="member-pill"
   font-weight: 900;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+/* 列表序号 / 实收：pill 底色（与订单管理列表同风格） */
+.co-cell-pill {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+
+.co-cell-pill--idx {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 2.25em;
+  max-width: none;
+  text-align: center;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+.co-cell-pill--amount {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: #be123c;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
 }
 
 .co-remark-text {

@@ -748,15 +748,19 @@
 .admin-top-tab-bar {
   display: flex;
   flex-direction: row;
-  align-items: stretch;
-  gap: 0.75rem;
-  min-height: 56px;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
   margin: -1rem -1rem 1rem;
-  padding: 0 clamp(1rem, 2.4vw, 1.5rem);
+  /* 上下留白，避免激活页签描边/阴影被裁切 */
+  padding: 8px clamp(20px, 2.4vw, 28px);
   flex-shrink: 0;
-  background: #ffffff;
-  border-bottom: 1px solid #eaedf1;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
   box-sizing: border-box;
+  position: relative;
+  z-index: 5;
+  overflow: visible;
 }
 
 .admin-top-tab-bar__trailing {
@@ -859,6 +863,7 @@
   border-bottom: none;
   display: flex;
   align-items: center;
+  overflow: visible;
 }
 
 .admin-top-tab-bar .admin-page-tabs__scroll--top-bar {
@@ -867,76 +872,97 @@
   align-items: center;
   width: 100%;
   min-width: 0;
-  gap: clamp(10px, 1.8vw, 16px);
-  padding: 4px 0;
+  gap: 12px;
+  /* 为 1.5px 描边与阴影预留空间，防止顶部被 overflow 裁切 */
+  padding: 3px 0;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   -webkit-overflow-scrolling: touch;
-  /* 横向滚动时需可见细滚动条，避免用户不知道可滑动 */
-  scrollbar-width: thin;
-  scrollbar-color: #94a3b8 transparent;
+  scrollbar-width: none;
 }
 .admin-top-tab-bar .admin-page-tabs__scroll--top-bar::-webkit-scrollbar {
-  height: 6px;
-}
-.admin-top-tab-bar .admin-page-tabs__scroll--top-bar::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgb(148 163 184 / 0.75);
+  display: none;
 }
 
+/* 非激活页签：浅底 + 实线边框，提升与顶栏背景的区分度 */
 .admin-top-tab-bar .admin-page-tab {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
   max-width: 16rem;
   padding: 8px 18px;
-  gap: 10px;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 900;
+  gap: 8px;
+  border-radius: 14px;
+  font-size: 12.5px;
+  font-weight: 700;
   line-height: 1.25;
-  border: 1px solid #b8c5d6;
-  /* 非激活态：背景与文字对比加重，便于扫读 */
-  background: linear-gradient(180deg, #d1dce8 0%, #c5d4e3 100%);
-  color: #1e293b;
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.45),
-    0 1px 2px rgb(15 23 42 / 0.06);
+  border: 1px solid #c5d0dc;
+  background-color: #eef2f6;
+  color: #334155;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.65);
   cursor: pointer;
   user-select: none;
-  transition:
-    background 0.2s cubic-bezier(0.16, 1, 0.3, 1),
-    border-color 0.2s ease,
-    color 0.2s ease,
-    box-shadow 0.2s ease;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .admin-top-tab-bar .admin-page-tab:hover {
-  background: linear-gradient(180deg, #c3d2e4 0%, #b7cadb 100%);
+  background-color: #e2e8f0;
   color: #0f172a;
   border-color: #94a3b8;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8);
 }
 
+/* 激活态：加重描边、文字与投影，与未选中态拉开层次 */
 .admin-top-tab-bar .admin-page-tab--active {
-  background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%);
+  background: linear-gradient(180deg, #ffffff 0%, #ecfdf5 100%);
   color: #064e3b;
-  border-color: #0d5c46;
+  border: 1.5px solid #0d5c46;
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.75),
-    0 4px 12px rgb(13 92 70 / 0.12);
+    0 0 0 1px rgba(13, 92, 70, 0.08),
+    0 8px 18px -6px rgba(13, 92, 70, 0.22),
+    0 4px 10px rgba(15, 23, 42, 0.08);
   font-weight: 900;
+}
+
+.admin-top-tab-bar .admin-page-tab--active:hover {
+  background: linear-gradient(180deg, #ffffff 0%, #d1fae5 100%);
+  border-color: #093f30;
+  color: #052e16;
 }
 
 .admin-top-tab-bar .admin-page-tab__icon {
   flex-shrink: 0;
   color: currentColor;
-  opacity: 0.92;
+  opacity: 1;
 }
 
-.admin-top-tab-bar .admin-page-tab__close {
-  opacity: 0.65;
+.admin-top-tab-bar .admin-page-tab:not(.admin-page-tab--active) .admin-page-tab__icon {
+  color: #475569;
 }
+
+.admin-top-tab-bar .admin-page-tab--active .admin-page-tab__icon {
+  color: #0d5c46;
+}
+
+/* 胶囊化关闭按钮 */
+.admin-top-tab-bar .admin-page-tab__close {
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  border-radius: 50%;
+  opacity: 0.55;
+  color: currentColor;
+  background: transparent;
+}
+
+.admin-top-tab-bar .admin-page-tab--active .admin-page-tab__close {
+  opacity: 0.65;
+  color: #0d5c46;
+}
+
 .admin-top-tab-bar .admin-page-tab__close:hover {
+  background-color: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
   opacity: 1;
 }
 
@@ -1426,8 +1452,8 @@
 .members-toolbar-row .members-toolbar-primary .search-box.search-box--members-inline {
   flex: 0 0 auto;
   width: auto;
-  min-width: 9rem;
-  max-width: min(17.5rem, 100%);
+  min-width: 19rem;
+  max-width: min(22rem, 100%);
 }
 
 .members-toolbar-filters-scroll .members-filter-toolbar {
@@ -1474,8 +1500,8 @@
 .search-box.search-box--members-inline {
   width: auto;
   flex: 1 1 auto;
-  min-width: 9rem;
-  max-width: 16rem;
+  min-width: 19rem;
+  max-width: 22rem;
   padding: 0 0.85rem;
   border-radius: 999px;
 }

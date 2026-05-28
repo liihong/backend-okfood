@@ -1321,7 +1321,7 @@ onMounted(() => {
            @selection-change="onSingleSelectionChange"
           >
            <el-table-column type="selection" width="42" :selectable="isSingleRowSelectable" />
-            <el-table-column label="序号" width="64" align="center" class-name="td-mono">
+            <el-table-column label="序号" width="72" align="center" class-name="td-mono orders-idx-col">
               <template #default="{ $index }">
                 <span class="orders-cell-pill orders-cell-pill--idx">{{
                   (page - 1) * pageSize + $index + 1
@@ -2034,9 +2034,19 @@ onMounted(() => {
 .orders-cell-pill--idx {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 2.25em;
+  max-width: none;
+  text-align: center;
   color: #475569;
   background: #f1f5f9;
   border: 1px solid #e2e8f0;
+}
+
+.orders-manage-page :deep(.orders-idx-col .cell) {
+  overflow: visible;
+  white-space: nowrap;
+  text-overflow: clip;
 }
 
 .orders-cell-pill--member-name {

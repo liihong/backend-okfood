@@ -4,7 +4,6 @@ import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import {
   Search,
-  Phone,
   X,
   Trash2,
   MapPin,
@@ -56,13 +55,13 @@ function updateMembersTableHeight() {
 const membersTotal = ref(0)
 const membersLoading = ref(false)
 const searchQuery = ref('')
-/** 有效期：全部 | 生效中 | 已过期（默认全部，仅点选后带 validity 参数） */
-const membersValidityTab = ref('all')
+/** 状态：'' 全部 | active 生效中 | expired 已过期 | refunded 已退款（默认全部） */
+const membersValidityFilter = ref('')
 /** 套餐：'' | 周卡 | 月卡 */
 const membersPlanFilter = ref('')
 /** 片区：'' | 'unassigned' | 区域 id 字符串 */
 const membersRegionFilter = ref('')
-/** 会员状态筛选：'' | inactive 未开卡（不含暂停配送） | paused 暂停配送 | leave 请假中；三者互斥 */
+/** 会员卡状态：'' 全部 | inactive 未开卡 | paused 暂停配送 | leave 请假中 */
 const membersStatusSegment = ref('')
 const regionFilterOptions = ref([])
 
@@ -74,15 +73,21 @@ const membersTotalPages = computed(() =>
   Math.max(1, Math.ceil(membersTotal.value / membersPageSize.value)),
 )
 
+/** 表格序号（跨页连续） */
+function tableRowIndex(index) {
+  return (membersPage.value - 1) * membersPageSize.value + index + 1
+}
+
 /** el-table 行主键：组合 id+phone，避免 bigint/重复 id 导致 Diff 落在已销毁的 DOM 上 */
 function memberRowKey(row) {
   return `${String(row?.id ?? '')}__${String(row?.phone ?? '')}`
 }
 
 function validityQuery() {
-  if (membersValidityTab.value === 'expired') return 'expired'
-  if (membersValidityTab.value === 'refunded') return 'refunded'
-  if (membersValidityTab.value === 'active') return 'active'
+  const v = String(membersValidityFilter.value ?? '').trim()
+  if (v === 'expired') return 'expired'
+  if (v === 'refunded') return 'refunded'
+  if (v === 'active') return 'active'
   return ''
 }
 
@@ -99,10 +104,7 @@ async function loadRegionFilterOptions() {
   }
 }
 
-/** 再次点击同一项则清除状态筛选 */
-function selectMembersStatusSegment(seg) {
-  const next = membersStatusSegment.value === seg ? '' : seg
-  membersStatusSegment.value = next
+function onCardStatusFilterChange() {
   membersPage.value = 1
   void fetchMembers()
 }
@@ -113,6 +115,11 @@ function onRegionFilterChange() {
 }
 
 function onPlanFilterChange() {
+  membersPage.value = 1
+  void fetchMembers()
+}
+
+function onValidityFilterChange() {
   membersPage.value = 1
   void fetchMembers()
 }
@@ -305,6 +312,7 @@ async function exportMembersExcel() {
         ? [u.leave_badge, u.leave_detail].filter(Boolean).join(' ').trim()
         : '',
       状态: u.status || '',
+      用户操作时间: formatMemberOperationTime(u.updated_at),
       起送业务日: u.delivery_start_date || '',
       备注: u.remarks != null && String(u.remarks).length ? String(u.remarks) : '',
     }))
@@ -321,6 +329,7 @@ async function exportMembersExcel() {
       { wch: 8 },
       { wch: 22 },
       { wch: 10 },
+      { wch: 16 },
       { wch: 12 },
       { wch: 28 },
     ]
@@ -350,12 +359,6 @@ watch(searchQuery, () => {
     membersPage.value = 1
     void fetchMembers()
   }, 320)
-})
-
-watch(membersValidityTab, () => {
-  if (!adminAccessToken.value) return
-  membersPage.value = 1
-  void fetchMembers()
 })
 
 const goMembersPrev = () => {
@@ -760,6 +763,15 @@ function fmtRefundYuan(v) {
   return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+/** 用户操作时间：后端 updated_at（ISO），展示为 YYYY-MM-DD HH:mm */
+function formatMemberOperationTime(iso) {
+  const s = String(iso || '').trim()
+  if (!s) return '—'
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/)
+  if (m) return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`
+  return s.length >= 16 ? s.slice(0, 16).replace('T', ' ') : s
+}
+
 function canMemberRefund(row) {
   if (row?.membership_refunded_at) return false
   return Number(row?.balance) > 0
@@ -896,45 +908,20 @@ onUnmounted(() => {
             </div>
             <div class="members-toolbar-filters-scroll">
               <div class="members-filter-toolbar">
-                <div class="members-validity-tabs" role="tablist" aria-label="会员有效期">
-                  <el-button
-                    role="tab"
-                    class="members-validity-tab"
-                    :class="{ 'members-validity-tab--active': membersValidityTab === 'all' }"
-                    :aria-selected="membersValidityTab === 'all'"
-                    @click="membersValidityTab = 'all'"
+                <div class="members-extra-filters" aria-label="状态、套餐、片区与会员卡状态筛选">
+                  <label class="members-filter-label" for="members-validity-filter">状态</label>
+                  <el-select
+                    id="members-validity-filter"
+                    v-model="membersValidityFilter"
+                    class="members-region-select-el"
+                    placeholder="全部"
+                    @change="onValidityFilterChange"
                   >
-                    全部
-                  </el-button>
-                  <el-button
-                    role="tab"
-                    class="members-validity-tab"
-                    :class="{ 'members-validity-tab--active': membersValidityTab === 'active' }"
-                    :aria-selected="membersValidityTab === 'active'"
-                    @click="membersValidityTab = 'active'"
-                  >
-                    生效中
-                  </el-button>
-                  <el-button
-                    role="tab"
-                    class="members-validity-tab"
-                    :class="{ 'members-validity-tab--active': membersValidityTab === 'expired' }"
-                    :aria-selected="membersValidityTab === 'expired'"
-                    @click="membersValidityTab = 'expired'"
-                  >
-                    已过期
-                  </el-button>
-                  <el-button
-                    role="tab"
-                    class="members-validity-tab"
-                    :class="{ 'members-validity-tab--active': membersValidityTab === 'refunded' }"
-                    :aria-selected="membersValidityTab === 'refunded'"
-                    @click="membersValidityTab = 'refunded'"
-                  >
-                    已退款
-                  </el-button>
-                </div>
-                <div class="members-extra-filters" aria-label="套餐、片区与状态筛选">
+                    <el-option label="全部" value="" />
+                    <el-option label="生效中" value="active" />
+                    <el-option label="已过期" value="expired" />
+                    <el-option label="已退款" value="refunded" />
+                  </el-select>
                   <label class="members-filter-label" for="members-plan-filter">套餐</label>
                   <el-select
                     id="members-plan-filter"
@@ -967,35 +954,19 @@ onUnmounted(() => {
                       :value="String(r.id)"
                     />
                   </el-select>
-                  <el-button
-                    role="tab"
-                    class="members-validity-tab"
-                    :class="{ 'members-validity-tab--active': membersStatusSegment === 'inactive' }"
-                    :aria-selected="membersStatusSegment === 'inactive'"
-                    title="未激活会员卡且非暂停配送"
-                    @click="selectMembersStatusSegment('inactive')"
+                  <label class="members-filter-label" for="members-card-status-filter">会员卡状态</label>
+                  <el-select
+                    id="members-card-status-filter"
+                    v-model="membersStatusSegment"
+                    class="members-region-select-el"
+                    placeholder="全部"
+                    @change="onCardStatusFilterChange"
                   >
-                    未开卡
-                  </el-button>
-                  <el-button
-                    role="tab"
-                    class="members-validity-tab"
-                    :class="{ 'members-validity-tab--active': membersStatusSegment === 'paused' }"
-                    :aria-selected="membersStatusSegment === 'paused'"
-                    title="会员卡停用（暂停配送）"
-                    @click="selectMembersStatusSegment('paused')"
-                  >
-                    暂停配送
-                  </el-button>
-                  <el-button
-                    role="tab"
-                    class="members-validity-tab"
-                    :class="{ 'members-validity-tab--active': membersStatusSegment === 'leave' }"
-                    :aria-selected="membersStatusSegment === 'leave'"
-                    @click="selectMembersStatusSegment('leave')"
-                  >
-                    请假中
-                  </el-button>
+                    <el-option label="全部" value="" />
+                    <el-option label="未开卡" value="inactive" />
+                    <el-option label="暂停配送" value="paused" />
+                    <el-option label="请假中" value="leave" />
+                  </el-select>
                 </div>
               </div>
             </div>
@@ -1065,11 +1036,14 @@ onUnmounted(() => {
           :height="membersTableScrollHeight"
           empty-text="暂无会员数据"
         >
+        <el-table-column label="序号" width="72" align="center" class-name="td-mono td-members-idx">
+          <template #default="{ $index }">
+            <span class="members-cell-pill members-cell-pill--idx">{{ tableRowIndex($index) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="会员信息" min-width="100">
           <template #default="{ row: u }">
-            <div class="t-name">
-              {{ u.name }}
-            </div>
+            <div class="t-name">{{ u.name || '—' }}</div>
             <div v-if="u.wechat_name" class="t-sub t-wechat">微信 {{ u.wechat_name }}</div>
           </template>
         </el-table-column>
@@ -1080,10 +1054,7 @@ onUnmounted(() => {
           label-class-name="td-phone"
         >
           <template #default="{ row: u }">
-            <div class="member-phone-cell">
-              <Phone :size="12" class="member-phone-icon" />
-              <span class="member-phone-num">{{ u.phone || '—' }}</span>
-            </div>
+            <span class="member-phone-num">{{ u.phone || '—' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="级别" align="center" min-width="75">
@@ -1132,6 +1103,18 @@ onUnmounted(() => {
         <el-table-column label="状态" min-width="80">
           <template #default="{ row: u }">
             <span :class="memberStatusClass(u.status)">{{ u.status }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          label="用户操作时间"
+          min-width="128"
+          class-name="td-col-operation-time"
+          label-class-name="td-col-operation-time"
+        >
+          <template #default="{ row: u }">
+            <span class="members-operation-time" :title="u.updated_at || ''">{{
+              formatMemberOperationTime(u.updated_at)
+            }}</span>
           </template>
         </el-table-column>
         <el-table-column label="备注" min-width="100" class-name="td-remarks">
@@ -1527,7 +1510,12 @@ onUnmounted(() => {
 <style scoped>
 .members-search-el-input {
   flex: 1;
-  min-width: 0;
+  min-width: 14rem;
+  width: 100%;
+}
+
+.members-search-el-input :deep(.el-input__wrapper) {
+  width: 100%;
 }
 .members-overview-stats {
   display: flex;
@@ -1658,5 +1646,43 @@ onUnmounted(() => {
 }
 .modal-card--refund {
   max-width: 440px;
+}
+
+/* 列表序号 pill */
+.members-cell-pill {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+
+.members-cell-pill--idx {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 2.25em;
+  max-width: none;
+  text-align: center;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+.members-view-fill :deep(.td-members-idx .cell) {
+  overflow: visible;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+
+.members-operation-time {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-text-color-regular, #606266);
+  white-space: nowrap;
 }
 </style>
