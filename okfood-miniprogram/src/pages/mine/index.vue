@@ -1,6 +1,14 @@
 <template>
   <view class="page" :style="pageStyle">
-    <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
+    <scroll-view
+      scroll-y
+      class="scroll"
+      :style="scrollStyle"
+      :show-scrollbar="false"
+      refresher-enabled
+      :refresher-triggered="refresherTriggered"
+      @refresherrefresh="onMineRefresherRefresh"
+    >
       <view class="profile-container" :style="profileContainerStyle">
         <!-- 未登录 -->
         <view v-if="!isLoggedIn" class="mine-hero mine-hero--guest">
@@ -29,11 +37,7 @@
             :class="{ 'mine-hero--tap': needsMemberSetupPage }"
             @tap="onMineHeroTap"
           >
-            <view class="hero-stats-row">
-              <view class="hero-stat">
-                <text class="hero-stat-num">{{ disciplineDays }}</text>
-                <text class="hero-stat-label">累计自律天数</text>
-              </view>
+            <view class="hero-avatar-row">
               <view class="hero-avatar-wrap">
                 <view v-if="needsMemberSetupPage" class="hero-avatar-btn hero-avatar-btn--static">
                   <view class="avatar-ring">
@@ -57,10 +61,6 @@
                   </view>
                 </button>
               </view>
-              <view class="hero-stat">
-                <text class="hero-stat-num">{{ cumulativeMealsDisplay }}</text>
-                <text class="hero-stat-label">累计就餐/次</text>
-              </view>
             </view>
             <view
               class="hero-nick-wrap"
@@ -79,7 +79,7 @@
               <text v-if="!needsMemberSetupPage" class="hero-nick-edit">✎</text>
             </view>
             <view class="hero-phone-row" @tap.stop>
-              <text class="hero-phone">{{ maskedPhone }}</text>
+              <text class="hero-phone">{{ displayPhone }}</text>
               <view class="hero-gear" @tap.stop="goMemberSetup">
                 <text class="hero-gear-icon">⚙</text>
               </view>
@@ -133,7 +133,7 @@
                     mode="aspectFit"
                   />
                 </view>
-                <text class="menu-cap">修改送达份数</text>
+                <text class="menu-cap">份数管理</text>
               </view>
               <view class="menu-cell" @tap="goLeave">
                 <view class="menu-ico-wrap">
@@ -143,7 +143,7 @@
                     mode="aspectFit"
                   />
                 </view>
-                <text class="menu-cap">请假休假管理</text>
+                <text class="menu-cap">请假管理</text>
               </view>
               <view class="menu-cell" @tap="goAddress">
                 <view class="menu-ico-wrap">
@@ -153,7 +153,7 @@
                     mode="aspectFit"
                   />
                 </view>
-                <text class="menu-cap">我的地址管理</text>
+                <text class="menu-cap">地址管理</text>
               </view>
               <view class="menu-cell" @tap="goSingleOrders">
                 <view class="menu-ico-wrap">
@@ -163,7 +163,7 @@
                     mode="aspectFit"
                   />
                 </view>
-                <text class="menu-cap">就餐消费记录</text>
+                <text class="menu-cap">消费记录</text>
               </view>
             </view>
             <view v-if="showPauseDeliveryMenuRow" class="menu-extra" @tap="onPauseDeliveryTap">
@@ -173,7 +173,7 @@
           </view>
         </template>
 
-      <text class="page-version">版本 2.1.0 · 火源文化技术支持</text>
+      <text class="page-version">Version 2.1.1 · 火源文化技术支持</text>
       </view>
     </scroll-view>
 
@@ -234,6 +234,7 @@ import {
   sortAddressesDefaultFirst,
   isAddressItemDefault,
 } from '@/utils/addressApi.js'
+import { consumeMinePageNeedsRefresh, markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 
 const pageStyle = ref({})
 const scrollStyle = ref({})
@@ -260,8 +261,6 @@ const wxNickDraft = ref('')
 const showNickEditor = ref(false)
 const nickInputFocus = ref(false)
 const serverBalance = ref(0)
-/** 与 GET /api/user/me.meal_quota_total 一致，用于估算累计已消耗订餐次数 */
-const mealQuotaTotal = ref(0)
 const userName = ref('')
 const planType = ref('')
 const leaveRange = ref(null)
@@ -275,25 +274,29 @@ const createdAt = ref('')
 const dailyMealUnits = ref(1)
 /** 与界面同步的剩余餐次（含滚动动画） */
 const displayBalance = ref(0)
+/** 陪伴天数、每日份数展示用（含滚动动画） */
+const displayCompanionDays = ref(0)
+const displayDailyUnitsAnim = ref(1)
 /** 默认配送地址展示行（详细地址，与地址列表一致，不含所属片区） */
 const defaultAddrLine = ref('')
-let fetchDefaultAddrSeq = 0
+/** 防并发 onShow / 下拉刷新竞态，仅应用最新一次拉取结果 */
+let refreshMemberSeq = 0
+const refresherTriggered = ref(false)
 
-async function fetchDefaultAddressForCard() {
-  const seq = ++fetchDefaultAddrSeq
+async function syncDefaultAddressForCard(seq) {
   if (!getMemberToken()) {
-    defaultAddrLine.value = ''
+    if (seq === refreshMemberSeq) defaultAddrLine.value = ''
     return
   }
   try {
     const data = await request('/api/user/me/addresses', { method: 'GET' })
-    if (seq !== fetchDefaultAddrSeq) return
+    if (seq !== refreshMemberSeq) return
     const sorted = sortAddressesDefaultFirst(normalizeAddressList(data))
     const defItem = sorted.find((item) => isAddressItemDefault(item))
     const row = defItem ? addressListRow(defItem, 0) : null
     defaultAddrLine.value = row?.line?.trim() || ''
   } catch {
-    if (seq !== fetchDefaultAddrSeq) return
+    if (seq !== refreshMemberSeq) return
     defaultAddrLine.value = ''
   }
 }
@@ -328,31 +331,45 @@ function nextFrame(cb) {
   }
 }
 
-/** 数字递增至 target（购买成功等场景） */
-function animateBalanceTo(target) {
-  const to = Math.max(0, Math.floor(target))
-  const from = displayBalance.value
+/** 数字递增至 target（计划卡剩余餐次、陪伴天数、每日份数等） */
+function animateNumberTo(refObj, target, duration = 720) {
+  const to = Math.max(0, Math.floor(Number(target) || 0))
+  const from = Math.max(0, Math.floor(Number(refObj.value) || 0))
   if (from === to) return
-  const duration = 720
   const t0 = Date.now()
   const step = () => {
     const elapsed = Date.now() - t0
     const t = Math.min(1, elapsed / duration)
     const eased = 1 - (1 - t) ** 3
-    displayBalance.value = Math.round(from + (to - from) * eased)
+    refObj.value = Math.round(from + (to - from) * eased)
     if (t < 1) nextFrame(step)
-    else displayBalance.value = to
+    else refObj.value = to
   }
   nextFrame(step)
 }
 
-function syncDisplayNoAnim() {
+/** @param {{ animate?: boolean }} [options] */
+function syncPlanCardDisplay(options = {}) {
+  const { animate = false } = options
   if (!isLoggedIn.value) {
     displayBalance.value = 0
+    displayCompanionDays.value = 0
+    displayDailyUnitsAnim.value = 1
     return
   }
-  const total = serverBalance.value + getDemoCredits()
-  displayBalance.value = Math.max(0, total)
+  const balanceTotal = Math.max(0, serverBalance.value + getDemoCredits())
+  const days = daysSinceCreated(createdAt.value)
+  const n = Math.floor(Number(dailyMealUnits.value) || 0)
+  const units = n >= 1 ? Math.min(50, n) : 1
+  if (animate) {
+    animateNumberTo(displayBalance, balanceTotal)
+    animateNumberTo(displayCompanionDays, days)
+    animateNumberTo(displayDailyUnitsAnim, units)
+    return
+  }
+  displayBalance.value = balanceTotal
+  displayCompanionDays.value = days
+  displayDailyUnitsAnim.value = units
 }
 
 const profileName = computed(() => {
@@ -538,28 +555,16 @@ async function onChooseAvatar(e) {
   }
 }
 
-function maskPhone(raw) {
+/** 会员资料区展示手机号（完整显示，登录即本人可见） */
+function formatDisplayPhone(raw) {
   const digits = String(raw || '').replace(/\D/g, '')
   if (digits.length < 7) return raw && String(raw).trim() ? String(raw).trim() : '未绑定手机'
-  return `${digits.slice(0, 3)}****${digits.slice(-4)}`
+  return digits
 }
 
-const maskedPhone = computed(() => {
+const displayPhone = computed(() => {
   if (!isLoggedIn.value) return ''
-  return maskPhone(memberPhone.value)
-})
-
-const disciplineDays = computed(() => {
-  if (!isLoggedIn.value) return 0
-  return daysSinceCreated(createdAt.value)
-})
-
-const cumulativeMealsDisplay = computed(() => {
-  if (!isLoggedIn.value) return '—'
-  const total = Math.floor(Number(mealQuotaTotal.value) || 0)
-  if (total <= 0) return '—'
-  const used = Math.max(0, total - Math.floor(Number(serverBalance.value) || 0))
-  return String(used)
+  return formatDisplayPhone(memberPhone.value)
 })
 
 /** 计划卡片：未登录展示 0，已登录用动效后的余额（含体验加餐次） */
@@ -579,7 +584,7 @@ const planCardAddressLine = computed(() => {
 
 const planCardDailyUnitsText = computed(() => {
   if (!isLoggedIn.value) return ''
-  return `每日 ${displayDailyMealUnits.value} 份`
+  return `每日 ${displayDailyUnitsAnim.value} 份`
 })
 
 function onMineHeroTap() {
@@ -700,8 +705,8 @@ function ymdFromApi(d) {
   return s.length >= 10 ? s.slice(0, 10) : s
 }
 
-/** 展示用：月.日，如 10.12；与 leave 页区间格式一致 */
-function ymdToDotMd(ymd) {
+/** 展示用：如「5月28日」，计划卡状态文案用 */
+function ymdToCnMd(ymd) {
   const raw = ymdFromApi(ymd)
   if (!raw) return ''
   const parts = raw.split('-')
@@ -709,7 +714,7 @@ function ymdToDotMd(ymd) {
   const m = Number(parts[1])
   const d = Number(parts[2])
   if (!m || !d) return ''
-  return `${m}.${d}`
+  return `${m}月${d}日`
 }
 
 /** 与后台一致：区间、仅明日请假；含「已提交未来区间」；文案展示具体日期 */
@@ -725,11 +730,11 @@ const memberDeliveryStatus = computed(() => {
       const lr = leaveRange.value
       const sRaw = lr?.start != null ? String(lr.start).slice(0, 10) : ''
       const eRaw = lr?.end != null ? String(lr.end).slice(0, 10) : ''
-      const sm = ymdToDotMd(sRaw)
-      const em = ymdToDotMd(eRaw)
+      const sm = ymdToCnMd(sRaw)
+      const em = ymdToCnMd(eRaw)
       if (sm && em) {
-        if (sRaw === eRaw) return `${sm} 请假`
-        return `${sm}-${em} 请假`
+        if (sRaw === eRaw) return `${sm}请假`
+        return `${sm}-${em}请假`
       }
       return '请假中'
     }
@@ -737,24 +742,26 @@ const memberDeliveryStatus = computed(() => {
       const lr = leaveRange.value
       const sRaw = lr?.start != null ? String(lr.start).slice(0, 10) : ''
       const eRaw = lr?.end != null ? String(lr.end).slice(0, 10) : ''
-      const sm = ymdToDotMd(sRaw)
-      const em = ymdToDotMd(eRaw)
+      const sm = ymdToCnMd(sRaw)
+      const em = ymdToCnMd(eRaw)
       if (sm && em) {
-        if (sRaw === eRaw) return `${sm} 起请假`
-        return `${sm}-${em} 请假`
+        if (sRaw === eRaw) return `${sm}起请假`
+        return `${sm}-${em}请假`
       }
       return '已预约请假'
     }
     if (isLeavedTomorrow.value) {
       const t = tomorrowLeaveTargetYmd.value
-      const md = t ? ymdToDotMd(t) : ''
-      if (md) return `${md} 请假`
+      const md = t ? ymdToCnMd(t) : ''
+      if (md) return `${md}请假`
       return '请假中'
     }
     return '请假中'
   }
   if (isDeliveryPausedWithBalance(memberProfileRaw.value)) return '暂停配送'
   if (showMemberCardModule.value) return '待开卡/续费'
+  const startMd = ymdToCnMd(memberProfileRaw.value?.delivery_start_date)
+  if (startMd) return `${startMd}生效中`
   return '生效中'
 })
 
@@ -766,19 +773,13 @@ const planTypeMemberLabel = computed(() => {
 
 const cardFooter = computed(() => {
   if (!isLoggedIn.value) return '自律，从今天第一顿 OK 饭开始 👌'
-  const d = daysSinceCreated(createdAt.value)
-  return `已陪伴您自律生活：${d} 天 👌`
-})
-
-const displayDailyMealUnits = computed(() => {
-  const n = Math.floor(Number(dailyMealUnits.value) || 0)
-  return n >= 1 ? Math.min(50, n) : 1
+  return `已陪伴您自律生活：${displayCompanionDays.value} 天 👌`
 })
 
 const todayDeliveryAddressLine = computed(() => {
   const line = defaultAddrLine.value?.trim()
-  if (line) return `今日送餐地址：${line}`
-  return '今日送餐地址：未设置默认地址'
+  if (line) return `送餐地址：${line}`
+  return '送餐地址：未设置默认地址'
 })
 
 function mergeMemberApiProfile(data) {
@@ -793,7 +794,6 @@ function mergeMemberApiProfile(data) {
   }
   userName.value = data.name != null ? String(data.name) : ''
   serverBalance.value = Math.max(0, Math.floor(Number(data.balance) || 0))
-  mealQuotaTotal.value = Math.max(0, Math.floor(Number(data.meal_quota_total) || 0))
   planType.value = data.plan_type != null ? String(data.plan_type) : ''
   leaveRange.value =
     data.leave_range && typeof data.leave_range === 'object' ? data.leave_range : null
@@ -832,17 +832,19 @@ function mergeMemberApiProfile(data) {
   }
 }
 
-/** @param {{ prefetched?: object | null }} [options] 登录流程已请求过 GET /api/user/me 时可传入，避免重复请求 */
+/** @param {{ prefetched?: object | null, skipAddress?: boolean }} [options] 登录流程已请求过 GET /api/user/me 时可传入 prefetched */
 async function refreshMember(options = {}) {
+  const seq = ++refreshMemberSeq
+  const { prefetched, skipAddress = false } = options
   const token = getMemberToken()
   const phone = uni.getStorageSync('memberPhone') || ''
   isLoggedIn.value = !!token
   memberPhone.value = phone
 
   if (!isLoggedIn.value) {
+    if (seq !== refreshMemberSeq) return
     memberProfileRaw.value = null
     serverBalance.value = 0
-    mealQuotaTotal.value = 0
     userName.value = ''
     planType.value = ''
     leaveRange.value = null
@@ -854,13 +856,14 @@ async function refreshMember(options = {}) {
     wxProfile.value = null
     wxNickDraft.value = ''
     defaultAddrLine.value = ''
-    syncDisplayNoAnim()
+    syncPlanCardDisplay()
     return
   }
 
   loadWxProfileFromStorage()
-  const pre = options.prefetched
+  const pre = prefetched
   if (pre && typeof pre === 'object') {
+    if (seq !== refreshMemberSeq) return
     mergeMemberApiProfile(pre)
     const sp = pre.phone != null ? String(pre.phone).trim() : ''
     if (sp) {
@@ -874,6 +877,7 @@ async function refreshMember(options = {}) {
   } else {
     try {
       const data = await request('/api/user/me', { method: 'GET' })
+      if (seq !== refreshMemberSeq) return
       mergeMemberApiProfile(data)
       const sp = data?.phone != null ? String(data.phone).trim() : ''
       if (sp) {
@@ -885,12 +889,12 @@ async function refreshMember(options = {}) {
         }
       }
     } catch (e) {
+      if (seq !== refreshMemberSeq) return
       if (isUserMeNotFoundError(e)) {
         clearMemberSession()
       }
       memberProfileRaw.value = null
       serverBalance.value = 0
-      mealQuotaTotal.value = 0
       userName.value = ''
       planType.value = ''
       leaveRange.value = null
@@ -909,7 +913,24 @@ async function refreshMember(options = {}) {
       }
     }
   }
-  syncDisplayNoAnim()
+
+  if (seq !== refreshMemberSeq) return
+  if (getMemberToken() && !skipAddress) {
+    await syncDefaultAddressForCard(seq)
+  }
+
+  if (seq !== refreshMemberSeq) return
+  syncPlanCardDisplay({ animate: true })
+}
+
+/** 下拉刷新：强制拉取会员档案与默认地址 */
+async function onMineRefresherRefresh() {
+  refresherTriggered.value = true
+  try {
+    await refreshMember()
+  } finally {
+    refresherTriggered.value = false
+  }
 }
 
 onShow(() => {
@@ -928,8 +949,8 @@ onShow(() => {
     /* ignore */
   }
   tryOpenOrdersFromCheckoutFlag()
+  consumeMinePageNeedsRefresh()
   void refreshMember()
-  void fetchDefaultAddressForCard()
 })
 
 onMounted(() => {
@@ -997,7 +1018,7 @@ function handlePurchase(price, meals) {
       if (!res.confirm) return
       addDemoCredits(meals)
       const nextTotal = serverBalance.value + getDemoCredits()
-      animateBalanceTo(nextTotal)
+      animateNumberTo(displayBalance, nextTotal)
     },
   })
 }
@@ -1096,6 +1117,7 @@ function onPauseDeliveryTap() {
           method: 'PATCH',
           data: { delivery_deferred: true },
         })
+        markMinePageNeedsRefresh()
         await refreshMember()
         uni.showToast({ title: '已暂停配送', icon: 'success' })
       } catch (err) {
@@ -1170,42 +1192,16 @@ function onPauseDeliveryTap() {
   line-height: 1.45;
 }
 
-.hero-stats-row {
+.hero-avatar-row {
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   margin-bottom: 20rpx;
-  padding: 0 8rpx;
-}
-
-.hero-stat {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8rpx;
-}
-
-.hero-stat-num {
-  font-size: 44rpx;
-  font-weight: 950;
-  color: $ok-forest-green;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.hero-stat-label {
-  font-size: 22rpx;
-  font-weight: 700;
-  color: $ok-slate-500;
-  text-align: center;
 }
 
 .hero-avatar-wrap {
   flex-shrink: 0;
-  margin: 0 12rpx;
 }
 
 .hero-avatar-btn {
@@ -1236,7 +1232,7 @@ function onPauseDeliveryTap() {
   vertical-align: top;
 }
 
-.hero-stats-row .avatar-ring {
+.hero-avatar-row .avatar-ring {
   border-width: 4rpx;
   box-shadow: 0 10rpx 28rpx rgba(14, 90, 68, 0.14);
 }

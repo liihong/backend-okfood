@@ -102,6 +102,7 @@ import {
   isAddressItemDefault,
 } from '@/utils/addressApi.js'
 import { requestRenewRemindSubscribeAndGrant } from '@/utils/renewSubscribeMsg.js'
+import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 
 /** 与 uni.scss $ok-forest-green 一致 */
 const payRadioColor = '#0e5a44'
@@ -343,7 +344,11 @@ async function onSubmit() {
         store_pickup: deliveryMode.value === 'pickup',
       },
     })
-    await requestRenewRemindSubscribeAndGrant()
+    // 恢复配送与续费提醒无关，避免提交后弹出「优惠券到期」订阅框
+    if (!resumeOnlyMode.value) {
+      await requestRenewRemindSubscribeAndGrant()
+    }
+    markMinePageNeedsRefresh()
     uni.showToast({
       title: resumeOnlyMode.value ? '已恢复配送' : '已保存',
       icon: 'success',

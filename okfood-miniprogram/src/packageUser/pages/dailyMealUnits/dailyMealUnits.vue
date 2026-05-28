@@ -54,6 +54,7 @@ import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { request, getMemberToken, clearMemberSession, isUserMeNotFoundError } from '@/utils/api.js'
+import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 
 const MIN_U = 1
 const MAX_U = 10
@@ -119,6 +120,7 @@ async function onSave() {
       data: { daily_meal_units: clampUnits(units.value) },
     })
     baselineUnits.value = units.value
+    markMinePageNeedsRefresh()
     uni.showToast({ title: '已保存', icon: 'success' })
     setTimeout(() => uni.navigateBack(), 400)
   } catch (err) {

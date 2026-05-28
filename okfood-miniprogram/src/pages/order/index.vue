@@ -1,7 +1,15 @@
 <template>
   <view class="page" :style="pageStyle">
     <OkNavbar show-brand show-rider-entry />
-    <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
+    <scroll-view
+      scroll-y
+      class="scroll"
+      :style="scrollStyle"
+      :show-scrollbar="false"
+      refresher-enabled
+      :refresher-triggered="refresherTriggered"
+      @refresherrefresh="onMenuRefresherRefresh"
+    >
       <view class="order-page">
         <view class="week-tabs" role="tablist">
           <view
@@ -91,6 +99,8 @@ function syncTabLayout() {
 
 const loading = ref(true)
 const menu = ref([])
+/** scroll-view 下拉刷新指示器 */
+const refresherTriggered = ref(false)
 /** 当前页「本周」周一（YYYY-MM-DD），用于请求「下周」时 +7，避免与后台业务周不一致 */
 const cachedThisWeekMonday = ref('')
 /** `this` 本周 | `next` 下周，与后台 `GET /api/menu/weekly` 及 `week_start` 一致 */
@@ -126,7 +136,8 @@ function selectWeekTab(tab) {
   loadWeekly()
 }
 
-async function loadWeekly() {
+async function loadWeekly(opts = {}) {
+  const forceRefresh = opts.forceRefresh === true
   const seq = ++loadWeeklySeq
   const isThis = activeWeekTab.value === 'this'
 
@@ -142,7 +153,7 @@ async function loadWeekly() {
   const cacheOpts = isThis ? {} : { weekStart: requestWeekStart }
   const cached = peekWeeklyMenuCache(cacheOpts)
 
-  if (cached) {
+  if (cached && !forceRefresh) {
     if (seq !== loadWeeklySeq) return
     menu.value = cached.items
     if (cached.weekStart) {
@@ -155,14 +166,14 @@ async function loadWeekly() {
       }
       return
     }
-  } else {
+  } else if (!forceRefresh) {
     loading.value = true
   }
 
   try {
     const fresh = await fetchWeeklyMenu({
       ...cacheOpts,
-      forceRefresh: !!cached?.stale,
+      forceRefresh: forceRefresh || !!cached?.stale,
     })
     if (seq !== loadWeeklySeq) return
     if (fresh.weekStart) {
@@ -183,6 +194,16 @@ async function loadWeekly() {
     }
   } finally {
     if (seq === loadWeeklySeq) loading.value = false
+  }
+}
+
+/** 菜单列表下拉刷新：强制拉取最新周菜单，保留当前列表避免闪屏 */
+async function onMenuRefresherRefresh() {
+  refresherTriggered.value = true
+  try {
+    await loadWeekly({ forceRefresh: true })
+  } finally {
+    refresherTriggered.value = false
   }
 }
 

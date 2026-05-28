@@ -82,6 +82,7 @@ import {
 } from '@/utils/api.js'
 import { runMembershipTemplateWechatPay } from '@/utils/memberCardPay.js'
 import { shouldOpenMemberSetup } from '@/utils/memberProfile.js'
+import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 
 const DEFAULT_PRIV = [
   '全城顺丰免运费',
@@ -183,6 +184,7 @@ async function onPay() {
     await runMembershipTemplateWechatPay({
       membershipTemplateId: templateId.value,
     })
+    markMinePageNeedsRefresh()
     uni.showToast({ title: '支付成功', icon: 'success' })
     setTimeout(() => {
       if (activeRenewal) {

@@ -94,6 +94,7 @@ import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { request, clearMemberSession, isUserMeNotFoundError } from '@/utils/api.js'
+import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 import { ymdTodayShanghai, addDaysIso } from '@/utils/memberDeliveryDate.js'
 
 const isTomorrowLeave = ref(false)
@@ -458,6 +459,7 @@ function confirmCancelAllLeave() {
           timeout: LEAVE_POST_TIMEOUT_MS,
         })
         await syncLeaveFromServer({ noBanner: true })
+        markMinePageNeedsRefresh()
         uni.showToast({ title: '已取消请假', icon: 'success' })
       } catch (e) {
         uni.showToast({
@@ -492,6 +494,7 @@ async function toggleTomorrow() {
         timeout: LEAVE_POST_TIMEOUT_MS,
       })
       await syncLeaveFromServer({ noBanner: true })
+      markMinePageNeedsRefresh()
       uni.showToast({ title: '已取消明天请假', icon: 'success' })
     } else {
       await request('/api/user/leave', {
@@ -500,6 +503,7 @@ async function toggleTomorrow() {
         timeout: LEAVE_POST_TIMEOUT_MS,
       })
       await syncLeaveFromServer({ noBanner: true })
+      markMinePageNeedsRefresh()
       uni.showToast({ title: '已提交明天请假', icon: 'success' })
     }
   } catch (e) {
@@ -542,6 +546,7 @@ async function submitRange() {
       timeout: LEAVE_POST_TIMEOUT_MS,
     })
     await syncLeaveFromServer({ noBanner: true })
+    markMinePageNeedsRefresh()
     uni.showToast({ title: '请假成功', icon: 'success' })
     setTimeout(() => {
       uni.switchTab({ url: '/pages/mine/index' })

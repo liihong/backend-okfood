@@ -2,11 +2,14 @@
   <view class="plan-card" :class="themeClass">
     <text class="plan-card__watermark">OK</text>
 
+    <view v-if="planLabel" class="plan-card__vip-ribbon" :class="vipRibbonClass">
+      <text class="plan-card__vip-ribbon-txt">{{ planLabel }}</text>
+    </view>
+
     <view class="plan-card__head">
       <view class="plan-card__pill">
         <text class="plan-card__pill-txt">OK 饭 自律计划</text>
       </view>
-      <text v-if="planLabel" class="plan-card__plan-type">{{ planLabel }}</text>
     </view>
 
     <view class="plan-card__hero-row">
@@ -14,16 +17,8 @@
         <text class="plan-card__num">{{ remainingDisplay }}</text>
         <text class="plan-card__num-lab">剩余自律餐次</text>
       </view>
-      <view class="plan-card__slant-wrap">
-        <text
-          :class="['plan-card__slant', { 'plan-card__slant--alert': statusAlert }]"
-        >{{ statusText }}</text>
-      </view>
-    </view>
-
-    <view v-if="showResumeChip" class="plan-card__chip-row">
-      <view class="plan-card__chip" @tap.stop="$emit('resume')">
-        <text class="plan-card__chip-txt">恢复配送</text>
+      <view v-if="dailyUnitsText" class="plan-card__slant-wrap">
+        <text class="plan-card__slant">{{ dailyUnitsText }}</text>
       </view>
     </view>
 
@@ -31,7 +26,23 @@
 
     <view class="plan-card__foot">
       <text class="plan-card__foot-left">{{ footerTagline }}</text>
-      <text v-if="dailyUnitsText" class="plan-card__foot-right">{{ dailyUnitsText }}</text>
+      <view
+        v-if="showResumeChip"
+        class="plan-card__foot-resume"
+        @tap.stop="$emit('resume')"
+      >
+        <text class="plan-card__foot-resume-txt">点我恢复配送</text>
+      </view>
+      <view
+        v-else-if="statusText"
+        :class="[
+          'plan-card__foot-status',
+          { 'plan-card__foot-status--alert': statusAlert },
+          { 'plan-card__foot-status--active': isFootStatusBreathe },
+        ]"
+      >
+        <text class="plan-card__foot-right">{{ statusText }}</text>
+      </view>
     </view>
   </view>
 </template>
@@ -65,6 +76,22 @@ const themeClass = computed(() => {
   if (p === '次卡') return 'plan-card--times'
   return 'plan-card--week'
 })
+
+/** 会员角标样式：周卡 / 月卡 / 次卡 */
+const vipRibbonClass = computed(() => {
+  const p = String(props.planKind || '').trim()
+  if (p === '月卡') return 'plan-card__vip-ribbon--month'
+  if (p === '次卡') return 'plan-card__vip-ribbon--times'
+  return 'plan-card__vip-ribbon--week'
+})
+
+/** 生效中 / 请假：底部状态呼吸灯高亮 */
+const isFootStatusBreathe = computed(() => {
+  if (props.statusAlert || props.showResumeChip) return false
+  const s = String(props.statusText || '').trim()
+  if (!s) return false
+  return s.includes('生效中') || s.includes('请假')
+})
 </script>
 
 <style lang="scss" scoped>
@@ -85,12 +112,11 @@ const themeClass = computed(() => {
   background: linear-gradient(135deg, #b8860b 0%, #d97706 45%, #92400e 100%);
   box-shadow: 0 20rpx 48rpx rgba(146, 64, 14, 0.38);
 
-  .plan-card__slant {
+  .plan-card__slant,
+  .plan-card__addr,
+  .plan-card__foot-left,
+  .plan-card__foot-right {
     color: rgba(255, 248, 220, 0.95);
-  }
-
-  .plan-card__plan-type {
-    color: #fff;
   }
 }
 
@@ -98,12 +124,11 @@ const themeClass = computed(() => {
   background: linear-gradient(135deg, #1e3a5f 0%, #1d4ed8 50%, #312e81 100%);
   box-shadow: 0 20rpx 48rpx rgba(30, 58, 95, 0.38);
 
-  .plan-card__slant {
+  .plan-card__slant,
+  .plan-card__addr,
+  .plan-card__foot-left,
+  .plan-card__foot-right {
     color: rgba(191, 219, 254, 0.95);
-  }
-
-  .plan-card__plan-type {
-    color: rgba(254, 240, 138, 0.95);
   }
 }
 
@@ -122,9 +147,71 @@ const themeClass = computed(() => {
   display: flex;
   flex-direction: row;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 20rpx;
   margin-bottom: 28rpx;
+  padding-right: 120rpx;
+}
+
+/** 右上角斜角 VIP 会员标 */
+.plan-card__vip-ribbon {
+  position: absolute;
+  top: 22rpx;
+  right: -36rpx;
+  z-index: 3;
+  width: 220rpx;
+  padding: 10rpx 0;
+  transform: rotate(32deg);
+  transform-origin: center center;
+  text-align: center;
+  border-radius: 6rpx;
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.28);
+  animation: plan-card-vip-glow 3s ease-in-out infinite;
+}
+
+.plan-card__vip-ribbon--week {
+  background: linear-gradient(135deg, #fef9c3 0%, #fde047 42%, #facc15 100%);
+  border: 2rpx solid rgba(255, 255, 255, 0.55);
+}
+
+.plan-card__vip-ribbon--month {
+  background: linear-gradient(135deg, #fff7ed 0%, #fed7aa 50%, #fb923c 100%);
+  border: 2rpx solid rgba(255, 255, 255, 0.6);
+}
+
+.plan-card__vip-ribbon--times {
+  background: linear-gradient(135deg, #e0f2fe 0%, #93c5fd 50%, #6366f1 100%);
+  border: 2rpx solid rgba(255, 255, 255, 0.55);
+}
+
+.plan-card__vip-ribbon-txt {
+  display: block;
+  font-size: 22rpx;
+  font-weight: 950;
+  letter-spacing: 3rpx;
+  white-space: nowrap;
+}
+
+.plan-card__vip-ribbon--week .plan-card__vip-ribbon-txt {
+  color: #14532d;
+}
+
+.plan-card__vip-ribbon--month .plan-card__vip-ribbon-txt {
+  color: #7c2d12;
+}
+
+.plan-card__vip-ribbon--times .plan-card__vip-ribbon-txt {
+  color: #1e3a8a;
+}
+
+@keyframes plan-card-vip-glow {
+  0%,
+  100% {
+    box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.22);
+  }
+  50% {
+    box-shadow:
+      0 10rpx 28rpx rgba(0, 0, 0, 0.28),
+      0 0 24rpx rgba(254, 240, 138, 0.45);
+  }
 }
 
 .plan-card__pill {
@@ -188,49 +275,76 @@ const themeClass = computed(() => {
   color: rgba(180, 245, 200, 0.95);
   line-height: 1.35;
   text-align: right;
-  transform: rotate(-8deg);
 }
 
 .plan-card__slant--alert {
   color: #fef08a;
 }
 
-.plan-card__chip-row {
-  margin-top: 16rpx;
-  margin-bottom: 4rpx;
+/** 底部操作/状态：恢复配送、生效中等呼吸灯 */
+.plan-card__foot-resume,
+.plan-card__foot-status--active {
+  animation: plan-card-foot-breathe 2.2s ease-in-out infinite;
 }
 
-.plan-card__chip {
-  align-self: flex-start;
+@keyframes plan-card-foot-breathe {
+  0%,
+  100% {
+    background: rgba(255, 255, 255, 0.2);
+    box-shadow:
+      0 0 0 0 rgba(254, 240, 138, 0.35),
+      0 0 12rpx 0 rgba(254, 240, 138, 0.15);
+    transform: scale(1);
+  }
+  50% {
+    background: rgba(255, 255, 255, 0.38);
+    box-shadow:
+      0 0 0 6rpx rgba(254, 240, 138, 0.28),
+      0 0 28rpx 6rpx rgba(254, 240, 138, 0.55);
+    transform: scale(1.03);
+  }
+}
+
+.plan-card__foot-resume {
+  flex-shrink: 0;
   display: inline-flex;
-  padding: 10rpx 22rpx;
+  padding: 8rpx 18rpx;
   border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.2);
 }
 
-.plan-card__chip-txt {
-  font-size: 24rpx;
+.plan-card__foot-status {
+  flex-shrink: 0;
+  display: inline-flex;
+  padding: 8rpx 18rpx;
+  border-radius: 999rpx;
+}
+
+.plan-card__foot-status--active {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.plan-card__foot-status--alert .plan-card__foot-right {
+  color: #fef08a;
+}
+
+.plan-card__foot-resume-txt {
+  font-size: 22rpx;
   font-weight: 900;
   color: #fff;
-}
-
-.plan-card__plan-type {
-  flex-shrink: 0;
-  max-width: 52%;
-  text-align: right;
-  font-size: 30rpx;
-  font-weight: 900;
-  color: rgba(254, 240, 138, 0.95);
-  line-height: 1.25;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 
 .plan-card__addr {
   display: block;
   margin-top: 12rpx;
   font-size: 22rpx;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.72);
+  font-weight: 800;
+  color: rgba(180, 245, 200, 0.95);
   line-height: 1.45;
+  word-break: break-all;
+  white-space: normal;
 }
 
 .plan-card__foot {
@@ -248,15 +362,16 @@ const themeClass = computed(() => {
   flex: 1;
   min-width: 0;
   font-size: 22rpx;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.55);
+  font-weight: 800;
+  color: rgba(180, 245, 200, 0.95);
   line-height: 1.45;
 }
 
 .plan-card__foot-right {
-  flex-shrink: 0;
   font-size: 22rpx;
-  font-weight: 800;
-  color: rgba(255, 255, 255, 0.65);
+  font-weight: 900;
+  color: rgba(180, 245, 200, 0.95);
+  line-height: 1.35;
+  white-space: nowrap;
 }
 </style>

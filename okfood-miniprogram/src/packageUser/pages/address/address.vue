@@ -93,6 +93,7 @@ import { computed, reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { request, getMemberToken } from '@/utils/api.js'
+import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 import { normalizeAddressList, addressLineFromStructured } from '@/utils/addressApi.js'
 import { hasWxPhoneAuthDetail, wxMiniMemberLoginAndStore } from '@/utils/wxMemberLogin.js'
 
@@ -450,6 +451,7 @@ async function save() {
       location: hasCoords ? { lat: coords.value.lat, lng: coords.value.lng } : null,
     })
     const title = isNewAddress ? '地址添加成功' : '更新成功'
+    markMinePageNeedsRefresh()
     uni.showToast({ title, icon: 'success', duration: 2000 })
     setTimeout(() => {
       uni.navigateBack()

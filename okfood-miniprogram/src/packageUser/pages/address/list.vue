@@ -50,6 +50,7 @@ import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { request, getMemberToken } from '@/utils/api.js'
+import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 import {
   normalizeAddressList,
   addressListRow,
@@ -125,6 +126,7 @@ async function setAsDefault(item, index) {
       title: typeof tip === 'string' && tip.trim() ? tip.trim() : '已设为默认地址',
       icon: 'success',
     })
+    markMinePageNeedsRefresh()
     await fetchList()
   } catch (e) {
     uni.showToast({
@@ -175,6 +177,7 @@ async function deleteAddress(addressId) {
     uni.showToast({
       title: typeof tip === 'string' && tip.trim() ? tip.trim() : '已删除',
     })
+    markMinePageNeedsRefresh()
     await fetchList()
   } catch (e) {
     uni.showToast({
