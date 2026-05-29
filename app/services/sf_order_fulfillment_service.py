@@ -53,11 +53,15 @@ def _flush_renew_reminds(db: Session, pending: list[tuple[Member, int]]) -> None
         return
     from app.services.member_renew_subscribe_service import try_send_renew_remind_after_balance_change
 
+    dirty = False
     for member, balance_before in pending:
         try:
             try_send_renew_remind_after_balance_change(db, member, balance_before=balance_before)
+            dirty = True
         except Exception:
             logger.exception("续费提醒下发失败 member_id=%s", getattr(member, "id", None))
+    if dirty and (db.new or db.dirty or db.deleted):
+        db.commit()
 
 
 def _sf_fulfillment_try_lock(db: Session, push_id: int) -> bool:
