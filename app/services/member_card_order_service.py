@@ -18,6 +18,7 @@ from app.services.member_address_service import upsert_default_address_from_admi
 from app.services.store_config_service import get_member_card_prices_yuan
 
 MINIPROGRAM_OFFLINE_CLAIM_ORDER_CREATOR = "miniprogram-offline"
+MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR = "miniprogram"
 
 
 def _quota_for_card_kind(kind: str) -> tuple[PlanType, int]:
@@ -132,6 +133,35 @@ def ensure_miniprogram_offline_claim_order(
         created_by=MINIPROGRAM_OFFLINE_CLAIM_ORDER_CREATOR,
     )
     db.add(order)
+    db.flush()
+    return order
+
+
+def apply_delivery_start_to_pending_miniprogram_card_order(
+    db: Session,
+    member_id: int,
+    delivery_start_date: date,
+) -> MemberCardOrder | None:
+    """
+    小程序用户完善配送信息时，将起送日写入最近一条已缴、未入账的自助开卡工单。
+    便于客服在开卡工单中看到用户所选日期后再审批入账。
+    """
+    if delivery_start_date < min_member_delivery_start_shanghai():
+        return None
+    order = db.scalars(
+        select(MemberCardOrder)
+        .where(
+            MemberCardOrder.member_id == int(member_id),
+            MemberCardOrder.created_by == MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR,
+            MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+            MemberCardOrder.applied_to_member.is_(False),
+        )
+        .order_by(MemberCardOrder.id.desc())
+        .limit(1)
+    ).first()
+    if order is None:
+        return None
+    order.delivery_start_date = delivery_start_date
     db.flush()
     return order
 
@@ -481,6 +511,7 @@ def update_card_order(
     if order.pay_status == CardOrderPayStatus.REFUNDED.value:
         raise HTTPException(status_code=400, detail="已微信退款的工单不可编辑")
 
+    want_sync = "sync_member" in body.model_fields_set and body.sync_member is True
     patch = body.model_dump(exclude_unset=True)
     patch.pop("sync_member", None)
     updating_card_kind = "card_kind" in body.model_fields_set
@@ -492,11 +523,8 @@ def update_card_order(
             raise HTTPException(status_code=400, detail="卡类型无效")
         order.card_kind = body.card_kind.value
 
-    if not patch and not updating_card_kind:
-        if not (
-            order.pay_status == CardOrderPayStatus.PAID.value and not order.applied_to_member
-        ):
-            raise HTTPException(status_code=400, detail="请至少提交一项修改")
+    if not patch and not updating_card_kind and not want_sync:
+        raise HTTPException(status_code=400, detail="请至少提交一项修改")
 
     if "pay_status" in patch and body.pay_status is not None:
         if order.applied_to_member and body.pay_status == CardOrderPayStatus.UNPAID:
@@ -526,7 +554,11 @@ def update_card_order(
                 mem.delivery_start_date = order.delivery_start_date
 
     db.flush()
-    if order.pay_status == CardOrderPayStatus.PAID.value and not order.applied_to_member:
+    if want_sync:
+        if order.pay_status != CardOrderPayStatus.PAID.value:
+            raise HTTPException(status_code=400, detail="仅「已缴」工单可同步入账")
+        if order.applied_to_member:
+            raise HTTPException(status_code=400, detail="该工单已入账，请勿重复同步")
         _sync_order_to_member(db, order, operator=operator)
 
     db.commit()

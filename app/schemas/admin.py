@@ -908,7 +908,7 @@ class CardOrderPatchIn(BaseModel):
     remark: str | None = Field(None, max_length=500)
     sync_member: bool = Field(
         False,
-        description="已废弃：工单为「已缴」且尚未入账时，任意保存将自动同步会员次数",
+        description="为 true 时在保存后执行同步入账（写入会员次数/套餐）；默认仅更新工单字段",
     )
 
 

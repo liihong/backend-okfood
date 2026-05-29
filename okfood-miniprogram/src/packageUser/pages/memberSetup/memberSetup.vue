@@ -136,7 +136,7 @@ const submitButtonText = computed(() =>
 const leadText = computed(() => {
   if (resumeOnlyMode.value) return '请选择恢复方式与开始的业务日期，提交后立即生效。'
   if (postPaySetupMode.value) {
-    return '购卡或续卡已成功入账，请重新确认配送方式与收货信息，并选择新一周期的开始业务日期（续卡必须重选起始日），保存后将返回「我的」。'
+    return '支付已成功，请完善配送方式与收货信息并选择开始业务日期；客服确认后将为您入账激活。'
   }
   return '请确认用餐履约方式：配送到家需默认收货地址；门店自提请确认取餐门店与首日。'
 })

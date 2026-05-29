@@ -434,7 +434,7 @@ async function deleteCardOrder(row) {
   }
 }
 
-async function submitEdit() {
+async function submitEdit(syncMember = false) {
   if (!editForm.value.id) return
   const deferEdit = editForm.value.delivery_start_mode === 'defer'
   let editStartD = null
@@ -445,12 +445,36 @@ async function submitEdit() {
       return
     }
   }
+  if (syncMember) {
+    if (editForm.value.pay_status !== '已缴') {
+      showToast('仅「已缴」工单可确认入账', 'error')
+      return
+    }
+    if (editForm.value.applied_to_member) {
+      showToast('该工单已入账', 'error')
+      return
+    }
+    if (deferEdit) {
+      showToast('确认入账前请指定起送日', 'error')
+      return
+    }
+    const phone = (editForm.value.member_phone || '').trim()
+    const label = `#${editForm.value.id} ${phone || '会员'}`
+    if (
+      !confirm(
+        `确认将工单 ${label} 同步入账？\n\n将写入会员剩余次数与套餐，并按起送日激活（若已指定）。`,
+      )
+    ) {
+      return
+    }
+  }
   editSubmitting.value = true
   try {
     const body = {
       delivery_start_date: deferEdit ? null : editStartD,
       pay_channel: editForm.value.pay_channel,
       pay_status: editForm.value.pay_status,
+      sync_member: syncMember,
     }
     if (!editForm.value.applied_to_member) {
       body.card_kind = editForm.value.card_kind || '周卡'
@@ -473,7 +497,7 @@ async function submitEdit() {
       { method: 'PATCH', body: JSON.stringify(body) },
       { auth: true },
     )
-    showToast('工单已更新')
+    showToast(syncMember ? '已同步入账' : '工单已更新')
     showEditModal.value = false
     await fetchList()
   } catch (e) {
@@ -938,7 +962,7 @@ class="member-pill"
             <X :size="20" />
           </button>
         </div>
-        <form class="modal-form modal-form--card-order" @submit.prevent="submitEdit">
+        <form class="modal-form modal-form--card-order" @submit.prevent="() => submitEdit(false)">
           <div class="form-group">
             <label>会员</label>
             <el-input
@@ -1033,11 +1057,22 @@ class="member-pill"
             <el-input v-model="editForm.remark" type="textarea" :rows="3" maxlength="500" />
           </div>
           <p v-if="!editForm.applied_to_member" class="modal-hint">
-            缴费状态为「已缴」且尚未入账时，保存将自动同步剩余次数与套餐；仅「指定起送日」时同时写入会员起送日并激活。
+            「保存」仅更新工单字段；「确认入账」在核对起送日与缴费信息后将次数写入会员并激活。
           </p>
-          <button type="submit" class="btn-submit-order" :disabled="editSubmitting">
-            {{ editSubmitting ? '保存中…' : '保存' }}
-          </button>
+          <div class="card-order-edit-actions">
+            <button type="submit" class="btn-submit-order" :disabled="editSubmitting">
+              {{ editSubmitting ? '保存中…' : '保存' }}
+            </button>
+            <button
+              v-if="editForm.pay_status === '已缴' && !editForm.applied_to_member"
+              type="button"
+              class="btn-submit-order btn-submit-order--sync"
+              :disabled="editSubmitting"
+              @click.prevent="submitEdit(true)"
+            >
+              {{ editSubmitting ? '处理中…' : '确认入账' }}
+            </button>
+          </div>
         </form>
         </div>
       </div>
@@ -1674,5 +1709,22 @@ class="member-pill"
   flex-direction: column;
   width: 100%;
   gap: 8px;
+}
+
+.card-order-edit-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 0.5rem;
+}
+
+.card-order-edit-actions .btn-submit-order {
+  margin-top: 0;
+  width: 100%;
+}
+
+.card-order-edit-actions .btn-submit-order--sync {
+  background: #1d4ed8;
+  box-shadow: 0 15px 30px rgba(29, 78, 216, 0.2);
 }
 </style>

@@ -31,6 +31,9 @@ from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
 from app.models.membership_card_template import MembershipCardTemplate
 from app.services.catalog_admin_service import get_membership_template_row
+from app.services.admin_system_notification_service import (
+    create_miniprogram_card_order_pending_notification,
+)
 from app.services.member_card_order_service import (
     apply_paid_card_order_to_member_if_pending,
     enum_card_kind_for_template,
@@ -305,6 +308,25 @@ def sync_member_card_from_wechat_or_raise(db: Session, member_id: int, order_id:
         raise HTTPException(status_code=400, detail=reason[:200])
 
 
+def _is_miniprogram_self_service_card_order(order: MemberCardOrder) -> bool:
+    """小程序用户自助开卡/续卡（含卡包模版），支付后须客服确认起送日再同步入账。"""
+    return (order.created_by or "").strip() == "miniprogram"
+
+
+def _notify_miniprogram_card_order_pending_cs_review(db: Session, order: MemberCardOrder) -> None:
+    member = db.get(Member, int(order.member_id))
+    create_miniprogram_card_order_pending_notification(
+        db,
+        store_id=int(order.store_id),
+        order_id=int(order.id),
+        card_kind=(order.card_kind or "").strip(),
+        member_id=int(order.member_id),
+        member_phone=(member.phone if member else None),
+        member_name=(member.name if member else None),
+        delivery_start_date=order.delivery_start_date,
+    )
+
+
 def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyParsed) -> tuple[bool, str]:
     order = db.scalar(
         select(MemberCardOrder)
@@ -318,7 +340,8 @@ def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
         return False, "order_refunded"
 
     if order.pay_status == CardOrderPayStatus.PAID.value:
-        apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
+        if not _is_miniprogram_self_service_card_order(order):
+            apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
         db.commit()
         return True, "already_paid"
 
@@ -339,7 +362,10 @@ def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     order.pay_channel = CardPayChannel.WECHAT.value
     tid = (parsed.transaction_id or "").strip()
     order.wx_transaction_id = tid or order.wx_transaction_id
-    apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
+    if _is_miniprogram_self_service_card_order(order):
+        _notify_miniprogram_card_order_pending_cs_review(db, order)
+    else:
+        apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
     db.commit()
     return True, "paid"
 
