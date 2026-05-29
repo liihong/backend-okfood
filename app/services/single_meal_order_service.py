@@ -129,10 +129,44 @@ def _admin_single_meal_member_list_fields(
     return display, recipient
 
 
+def _member_address_remarks_text(addr: MemberAddress | None) -> str:
+    return (addr.remarks or "").strip() if addr else ""
+
+
+def _build_admin_single_meal_order_list_out(
+    db: Session,
+    row: SingleMealOrder,
+    *,
+    order_address: MemberAddress | None = None,
+) -> AdminSingleMealOrderListOut:
+    m = db.get(Member, row.member_id)
+    aid = int(row.member_address_id) if row.member_address_id is not None else None
+    addr = order_address
+    if addr is None and aid is not None:
+        addr = db.get(MemberAddress, aid)
+    base = _single_meal_order_row_to_out(db, row)
+    member_name, recipient_name = _admin_single_meal_member_list_fields(
+        db,
+        m,
+        member_address_id=aid,
+        order_address=addr,
+    )
+    return AdminSingleMealOrderListOut(
+        **base.model_dump(),
+        member_id=int(row.member_id),
+        member_phone=(m.phone or "") if m else "",
+        member_name=member_name,
+        recipient_contact_name=recipient_name,
+        address_remarks=_member_address_remarks_text(addr),
+    )
+
+
 _RETAIL_STOP_PREFIX = "retail-smo-"
 _SF_PUSH_KIND_SINGLE_MEAL_RETAIL = "single_meal_retail"
 _SF_TERMINAL_CANCEL_STATUSES = (2, 22)
 _SF_TERMINAL_DELIVERED_STATUS = 17
+_SF_ORDER_STATUS_PICKED_UP = 15  # 顺丰：配送员已取货，配送中
+_FULFILLMENT_SF_AWAITING_PICKUP = "sf_awaiting_pickup"
 _SF_CANCEL_CALLBACK_KINDS = frozenset({"cancel_by_sf", "rider_cancel"})
 
 
@@ -293,7 +327,7 @@ def _apply_sf_monitor_status_to_retail_order_no_commit(
 ) -> str | None:
     """
     按顺丰监控行回写单次零售订单履约状态（不 commit）。
-    返回：``updated_delivered`` / ``updated_cancel`` / ``already_*`` / ``skipped_*``。
+    返回：``updated_delivered`` / ``updated_cancel`` / ``updated_in_delivery`` / ``updated_awaiting_pickup`` / ``already_*`` / ``skipped_*``。
     """
     if str(o.pay_status or "").strip() != "已支付":
         return "skipped_unpaid"
@@ -322,6 +356,21 @@ def _apply_sf_monitor_status_to_retail_order_no_commit(
         mark_single_meal_sf_cancelled_no_commit(db, int(o.id))
         after = str(o.fulfillment_status or "").strip().lower()
         return "updated_cancel" if after == "sf_cancelled" else "skipped_sf_cancel"
+
+    # 已推顺丰、回调尚未到取货：纠正误标为「配送中」的历史单
+    if n is None or n < _SF_ORDER_STATUS_PICKED_UP:
+        if prev_f == "accepted":
+            o.fulfillment_status = _FULFILLMENT_SF_AWAITING_PICKUP
+            return "updated_awaiting_pickup"
+        if prev_f == "pending" and sf_push_create_succeeded(pus):
+            if mark_single_meals_sf_awaiting_pickup_on_push_no_commit(db, [int(o.id)]) > 0:
+                return "updated_awaiting_pickup"
+        return "skipped_sf_status_not_terminal"
+
+    if prev_f == _FULFILLMENT_SF_AWAITING_PICKUP:
+        if mark_single_meals_in_delivery_on_sf_pickup_no_commit(db, [int(o.id)]) > 0:
+            prev_f = "accepted"
+
     if sf_push_is_terminal_delivered(pus):
         if prev_f == "delivered":
             return "already_completed"
@@ -330,6 +379,13 @@ def _apply_sf_monitor_status_to_retail_order_no_commit(
         mark_single_meal_delivered_sf_completion_no_commit(db, int(o.id))
         after = str(o.fulfillment_status or "").strip().lower()
         return "updated" if after == "delivered" else "skipped_sf_status_not_terminal"
+
+    if prev_f == "accepted":
+        return "already_accepted"
+    if prev_f == _FULFILLMENT_SF_AWAITING_PICKUP:
+        return "skipped_sf_status_not_terminal"
+    if mark_single_meals_in_delivery_on_sf_pickup_no_commit(db, [int(o.id)]) > 0:
+        return "updated_in_delivery"
     return "skipped_sf_status_not_terminal"
 
 
@@ -534,7 +590,9 @@ def _admin_store_single_meal_scope_filters_for_delivery_day(
     dp = (delivery_phase or "").strip().lower()
     if dp == "awaiting":
         filters.append(
-            SingleMealOrder.fulfillment_status.in_(("pending", "accepted")),
+            SingleMealOrder.fulfillment_status.in_(
+                ("pending", _FULFILLMENT_SF_AWAITING_PICKUP, "accepted"),
+            ),
         )
     elif dp == "delivered":
         filters.append(SingleMealOrder.fulfillment_status == "delivered")
@@ -645,25 +703,9 @@ def list_admin_store_single_meal_orders_by_delivery_day(
 
     out: list[AdminSingleMealOrderListOut] = []
     for r in rows:
-        m = db.get(Member, r.member_id)
-        base = _single_meal_order_row_to_out(db, r)
         aid = int(r.member_address_id) if r.member_address_id is not None else None
         order_addr = addr_map.get(aid) if aid is not None else None
-        member_name, recipient_name = _admin_single_meal_member_list_fields(
-            db,
-            m,
-            member_address_id=aid,
-            order_address=order_addr,
-        )
-        out.append(
-            AdminSingleMealOrderListOut(
-                **base.model_dump(),
-                member_id=int(r.member_id),
-                member_phone=(m.phone or "") if m else "",
-                member_name=member_name,
-                recipient_contact_name=recipient_name,
-            )
-        )
+        out.append(_build_admin_single_meal_order_list_out(db, r, order_address=order_addr))
     return out, total
 
 
@@ -684,7 +726,9 @@ def list_member_single_meal_orders(
         filters.append(SingleMealOrder.pay_status == "未支付")
     elif ls == "pending_delivery":
         filters.append(SingleMealOrder.pay_status == "已支付")
-        filters.append(SingleMealOrder.fulfillment_status.in_(("pending", "accepted")))
+        filters.append(
+            SingleMealOrder.fulfillment_status.in_(("pending", _FULFILLMENT_SF_AWAITING_PICKUP, "accepted"))
+        )
     elif ls == "completed":
         filters.append(SingleMealOrder.pay_status == "已支付")
         filters.append(SingleMealOrder.fulfillment_status == "delivered")
@@ -911,10 +955,12 @@ def confirm_single_order_delivery(db: Session, courier_id: str, order_id: int) -
     db.commit()
 
 
-def mark_single_meals_accepted_on_sf_push_no_commit(db: Session, order_ids: list[int] | tuple[int, ...]) -> int:
+def mark_single_meals_sf_awaiting_pickup_on_push_no_commit(
+    db: Session, order_ids: list[int] | tuple[int, ...]
+) -> int:
     """
-    顺丰创单成功：单点餐进入「配送中」。
-    与订单管理直推顺丰、门店自配送指派口径一致；幂等，已送达/已取消不覆盖。
+    顺丰创单成功：单点餐进入「顺丰待取货」，等配送员取货后由回调 order_status≥15 标「配送中」。
+    幂等；已送达/已取消/已在途不覆盖。
     """
     updated = 0
     for raw in order_ids:
@@ -932,13 +978,89 @@ def mark_single_meals_accepted_on_sf_push_no_commit(db: Session, order_ids: list
         prev = str(row.fulfillment_status or "").strip().lower()
         if prev in ("delivered", "sf_cancelled", "cancelled"):
             continue
-        if prev == "accepted":
+        if prev in ("accepted", _FULFILLMENT_SF_AWAITING_PICKUP):
             continue
         if not single_meal_fulfillment_allows_dispatch(prev):
+            continue
+        row.fulfillment_status = _FULFILLMENT_SF_AWAITING_PICKUP
+        updated += 1
+    return updated
+
+
+def mark_single_meals_in_delivery_on_sf_pickup_no_commit(
+    db: Session, order_ids: list[int] | tuple[int, ...]
+) -> int:
+    """顺丰回调已取货（order_status≥15）：「顺丰待取货」→「配送中」。"""
+    updated = 0
+    for raw in order_ids:
+        try:
+            oid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        row = db.get(SingleMealOrder, oid)
+        if not row:
+            continue
+        if row.pay_status != "已支付":
+            continue
+        if bool(getattr(row, "store_pickup", False)):
+            continue
+        prev = str(row.fulfillment_status or "").strip().lower()
+        if prev == "accepted":
+            continue
+        if prev != _FULFILLMENT_SF_AWAITING_PICKUP:
             continue
         row.fulfillment_status = "accepted"
         updated += 1
     return updated
+
+
+def _single_meal_order_ids_for_sf_push(db: Session, pus: SfSameCityPush) -> list[int]:
+    oids: set[int] = set()
+    snap = pus.request_snapshot if isinstance(pus.request_snapshot, dict) else {}
+    raw = snap.get("fulfillment_single_meal_order_ids")
+    if isinstance(raw, list):
+        for x in raw:
+            try:
+                oids.add(int(x))
+            except (TypeError, ValueError):
+                pass
+    oid_retail = _retail_order_id_from_stop_id(str(pus.stop_id or ""))
+    if oid_retail is not None:
+        oids.add(int(oid_retail))
+    if pus.id is not None:
+        for row in db.scalars(
+            select(SingleMealOrder.id).where(SingleMealOrder.sf_same_city_push_id == int(pus.id))
+        ).all():
+            oids.add(int(row))
+    return sorted(oids)
+
+
+def sync_single_meal_pickup_status_from_sf_push_no_commit(db: Session, pus: SfSameCityPush) -> int:
+    """顺丰配送状态回调：已取货时把关联单次订单标为配送中。"""
+    if not sf_push_create_succeeded(pus):
+        return 0
+    if sf_push_is_terminal_cancel(pus):
+        return 0
+    st = pus.sf_callback_order_status
+    if st is None:
+        return 0
+    try:
+        n = int(st)
+    except (TypeError, ValueError):
+        return 0
+    if n == 31 or n < _SF_ORDER_STATUS_PICKED_UP:
+        return 0
+    oids = _single_meal_order_ids_for_sf_push(db, pus)
+    if not oids:
+        return 0
+    return mark_single_meals_in_delivery_on_sf_pickup_no_commit(db, oids)
+
+
+# 兼容旧调用方（大表推单等）
+def mark_single_meals_accepted_on_sf_push_no_commit(
+    db: Session, order_ids: list[int] | tuple[int, ...]
+) -> int:
+    return mark_single_meals_sf_awaiting_pickup_on_push_no_commit(db, order_ids)
 
 
 def mark_single_meal_delivered_sf_completion_no_commit(db: Session, order_id: int) -> None:
@@ -1070,6 +1192,8 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
     counts: dict[str, int] = {
         "updated": 0,
         "updated_accepted": 0,
+        "updated_awaiting_pickup": 0,
+        "updated_in_delivery": 0,
         "updated_cancel": 0,
         "already_completed": 0,
         "already_sf_cancelled": 0,
@@ -1093,6 +1217,11 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
             counts["updated"] += 1
         elif key == "updated_accepted":
             counts["updated_accepted"] += 1
+            counts["updated_in_delivery"] += 1
+        elif key == "updated_awaiting_pickup":
+            counts["updated_awaiting_pickup"] += 1
+        elif key == "updated_in_delivery":
+            counts["updated_in_delivery"] += 1
         elif key == "updated_cancel":
             counts["updated_cancel"] += 1
         elif key == "already_completed":
@@ -1115,16 +1244,16 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
             continue
         prev_f = str(o.fulfillment_status or "").strip().lower()
         if prev_f in ("pending", "sf_cancelled") and sf_push_create_succeeded(pus):
-            if mark_single_meals_accepted_on_sf_push_no_commit(db, [int(o.id)]) > 0:
+            if mark_single_meals_sf_awaiting_pickup_on_push_no_commit(db, [int(o.id)]) > 0:
                 db.commit()
                 db.refresh(o)
-                _bump("updated_accepted")
+                _bump("updated_awaiting_pickup")
                 touched.add(int(o.id))
                 prev_f = str(o.fulfillment_status or "").strip().lower()
         elif prev_f == "accepted":
             _bump("already_accepted")
         outcome = _apply_sf_monitor_status_to_retail_order_no_commit(db, o, pus)
-        if outcome in ("updated", "updated_cancel"):
+        if outcome in ("updated", "updated_cancel", "updated_in_delivery", "updated_awaiting_pickup"):
             db.commit()
             db.refresh(o)
         _bump(outcome)
@@ -1174,7 +1303,7 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
         if o is None or int(o.store_id) != int(store_id):
             continue
         outcome = _apply_sf_monitor_status_to_retail_order_no_commit(db, o, pus)
-        if outcome in ("updated", "updated_cancel"):
+        if outcome in ("updated", "updated_cancel", "updated_in_delivery", "updated_awaiting_pickup"):
             db.commit()
             db.refresh(o)
         _bump(outcome)
@@ -1182,7 +1311,8 @@ def bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day(
 
     parts = [
         f"扫描供餐日订单 {scanned} 条",
-        f"新对齐配送中 {counts['updated_accepted']} 条",
+        f"新对齐待取货 {counts['updated_awaiting_pickup']} 条",
+        f"新对齐配送中 {counts['updated_in_delivery']} 条",
         f"新对齐妥投 {counts['updated']} 条",
         f"新对齐顺丰取消 {counts['updated_cancel']} 条",
         f"已是已完成 {counts['already_completed']}",
@@ -1273,8 +1403,8 @@ def admin_assign_courier_single_meal_order(
     if o is None or int(o.store_id) != int(store_id):
         raise ValueError("订单不存在或不属于当前门店")
     fs = str(o.fulfillment_status or "").strip().lower()
-    if fs == "accepted":
-        raise ValueError("仅「待发货」订单可指派门店配送员（已进入「配送中」请走运力侧完成送达）")
+    if fs == "accepted" or fs == _FULFILLMENT_SF_AWAITING_PICKUP:
+        raise ValueError("仅「待发货」订单可指派门店配送员（已进入「待取货/配送中」请走运力侧完成送达）")
     if not single_meal_fulfillment_allows_dispatch(o.fulfillment_status):
         raise ValueError("仅「待发货」或「顺丰取消」订单可指派门店配送员")
     cid = (courier_id or "").strip()
@@ -1290,20 +1420,7 @@ def admin_assign_courier_single_meal_order(
     db.add(o)
     db.commit()
     db.refresh(o)
-    m = db.get(Member, o.member_id)
-    base = _single_meal_order_row_to_out(db, o)
-    member_name, recipient_name = _admin_single_meal_member_list_fields(
-        db,
-        m,
-        member_address_id=int(o.member_address_id) if o.member_address_id is not None else None,
-    )
-    return AdminSingleMealOrderListOut(
-        **base.model_dump(),
-        member_id=int(o.member_id),
-        member_phone=(m.phone or "") if m else "",
-        member_name=member_name,
-        recipient_contact_name=recipient_name,
-    )
+    return _build_admin_single_meal_order_list_out(db, o)
 
 
 def admin_wechat_refund_single_meal_order(db: Session, *, order_id: int, store_id: int) -> dict[str, str]:
@@ -1358,7 +1475,7 @@ def _can_admin_cancel_single_meal_order(o: SingleMealOrder) -> tuple[bool, str]:
         if f == "pending":
             return True, ""
         return False, f"当前状态不可取消（{f}）"
-    if pay == "已支付" and f in ("pending", "accepted", "sf_cancelled"):
+    if pay == "已支付" and f in ("pending", _FULFILLMENT_SF_AWAITING_PICKUP, "accepted", "sf_cancelled"):
         return True, ""
     return False, f"当前状态不可取消（支付={pay}，履约={f or '—'}）"
 
@@ -1403,7 +1520,7 @@ def admin_cancel_single_meal_order(
 
     sf_msg: str | None = None
     f = str(o.fulfillment_status or "").strip().lower()
-    if cancel_sf and f == "accepted" and not bool(getattr(o, "store_pickup", False)):
+    if cancel_sf and f in ("accepted", _FULFILLMENT_SF_AWAITING_PICKUP) and not bool(getattr(o, "store_pickup", False)):
         try:
             sf_msg = _try_cancel_sf_for_retail_order(
                 db,
@@ -1454,22 +1571,43 @@ def bulk_push_single_meal_retail_to_sf(
     order_ids: list[int],
     store_id: int,
 ) -> dict[str, Any]:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from app.core.config import get_settings
+    from app.db.session import SessionLocal
     from app.services.sf_same_city_service import push_single_meal_retail_to_sf
 
-    results: list[dict[str, Any]] = []
-    for oid in order_ids:
+    oids = [int(x) for x in order_ids]
+    if not oids:
+        return {"results": []}
+
+    def _push_one(oid: int) -> dict[str, Any]:
+        sdb = SessionLocal()
         try:
-            r = push_single_meal_retail_to_sf(db, order_id=int(oid), store_id=int(store_id))
-            results.append(
-                {
+            try:
+                r = push_single_meal_retail_to_sf(sdb, order_id=int(oid), store_id=int(store_id))
+                return {
                     "order_id": int(oid),
                     "ok": True,
                     "message": r.message or "已提交顺丰",
                     "sf_order_id": r.sf_order_id,
                 }
-            )
-        except ValueError as e:
-            results.append({"order_id": int(oid), "ok": False, "message": str(e)})
+            except ValueError as e:
+                return {"order_id": int(oid), "ok": False, "message": str(e)}
+        finally:
+            sdb.close()
+
+    concurrency = int(get_settings().SF_PUSH_HTTP_CONCURRENCY or 1)
+    if concurrency <= 1 or len(oids) == 1:
+        return {"results": [_push_one(oid) for oid in oids]}
+
+    results: list[dict[str, Any]] = []
+    workers = min(concurrency, len(oids))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        fut_map = {pool.submit(_push_one, oid): oid for oid in oids}
+        for fut in as_completed(fut_map):
+            results.append(fut.result())
+    results.sort(key=lambda x: int(x["order_id"]))
     return {"results": results}
 
 
@@ -1514,7 +1652,7 @@ def admin_mark_single_meal_order_delivered(
         return "订单已是已完成"
     if f in ("cancelled", "sf_cancelled"):
         raise ValueError("已取消订单不可标记完成")
-    if f not in ("pending", "accepted"):
+    if f not in ("pending", _FULFILLMENT_SF_AWAITING_PICKUP, "accepted"):
         raise ValueError(f"当前状态不可标记完成（{f or '—'}）")
     o.fulfillment_status = "delivered"
     db.add(o)
@@ -1549,8 +1687,8 @@ def _can_admin_update_single_meal_fulfillment(o: SingleMealOrder) -> tuple[bool,
         return False, "已退款订单不可修改"
     if f == "cancelled":
         return False, "已取消订单不可修改"
-    if f == "accepted":
-        return False, "配送中订单不可修改，请先取消配送或标记完成"
+    if f in ("accepted", _FULFILLMENT_SF_AWAITING_PICKUP):
+        return False, "已推顺丰/配送中订单不可修改，请先取消配送或标记完成"
     if f in ("pending", "sf_cancelled", "delivered"):
         return True, ""
     return False, f"当前状态不可修改（履约={f or '—'}）"
@@ -1593,17 +1731,4 @@ def admin_update_single_meal_order(
     db.add(o)
     db.commit()
     db.refresh(o)
-    m = db.get(Member, o.member_id)
-    base = _single_meal_order_row_to_out(db, o)
-    member_name, recipient_name = _admin_single_meal_member_list_fields(
-        db,
-        m,
-        member_address_id=int(o.member_address_id) if o.member_address_id is not None else None,
-    )
-    return AdminSingleMealOrderListOut(
-        **base.model_dump(),
-        member_id=int(o.member_id),
-        member_phone=(m.phone or "") if m else "",
-        member_name=member_name,
-        recipient_contact_name=recipient_name,
-    )
+    return _build_admin_single_meal_order_list_out(db, o)

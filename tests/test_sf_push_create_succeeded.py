@@ -39,6 +39,7 @@ def test_single_meal_fulfillment_allows_dispatch():
 
     assert single_meal_fulfillment_allows_dispatch("pending") is True
     assert single_meal_fulfillment_allows_dispatch("sf_cancelled") is True
+    assert single_meal_fulfillment_allows_dispatch("sf_awaiting_pickup") is False
     assert single_meal_fulfillment_allows_dispatch("accepted") is False
     assert single_meal_fulfillment_allows_dispatch("delivered") is False
     assert single_meal_fulfillment_allows_dispatch("cancelled") is False

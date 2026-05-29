@@ -1,13 +1,13 @@
-"""大表合并推顺丰成功后，合并停靠点内的单次卡应进入「配送中」。"""
+"""大表合并推顺丰成功后，合并停靠点内的单次卡应进入「顺丰待取货」。"""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from app.services.single_meal_order_service import mark_single_meals_accepted_on_sf_push_no_commit
+from app.services.single_meal_order_service import mark_single_meals_sf_awaiting_pickup_on_push_no_commit
 
 
-def test_mark_single_meals_accepted_on_sf_push_from_pending():
+def test_mark_single_meals_sf_awaiting_pickup_on_push_from_pending():
     db = MagicMock()
     row = MagicMock()
     row.pay_status = "已支付"
@@ -15,13 +15,13 @@ def test_mark_single_meals_accepted_on_sf_push_from_pending():
     row.fulfillment_status = "pending"
     db.get.return_value = row
 
-    n = mark_single_meals_accepted_on_sf_push_no_commit(db, [42])
+    n = mark_single_meals_sf_awaiting_pickup_on_push_no_commit(db, [42])
 
     assert n == 1
-    assert row.fulfillment_status == "accepted"
+    assert row.fulfillment_status == "sf_awaiting_pickup"
 
 
-def test_mark_single_meals_accepted_idempotent_when_already_accepted():
+def test_mark_single_meals_sf_awaiting_pickup_idempotent_when_already_in_delivery():
     db = MagicMock()
     row = MagicMock()
     row.pay_status = "已支付"
@@ -29,7 +29,7 @@ def test_mark_single_meals_accepted_idempotent_when_already_accepted():
     row.fulfillment_status = "accepted"
     db.get.return_value = row
 
-    n = mark_single_meals_accepted_on_sf_push_no_commit(db, [42])
+    n = mark_single_meals_sf_awaiting_pickup_on_push_no_commit(db, [42])
 
     assert n == 0
     assert row.fulfillment_status == "accepted"

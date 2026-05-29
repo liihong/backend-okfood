@@ -563,6 +563,28 @@ def _sf_push_serial_lock(db: Session, *, store_id: int, d: date):
         db.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": key})
 
 
+@contextmanager
+def _sf_retail_order_push_lock(db: Session, *, order_id: int):
+    """
+    单笔零售推顺丰：按订单 id 串行，防重复创单。
+
+    不使用门店级 ``_sf_push_serial_lock``，避免与大表批量推单或其它零售单互相阻塞
+    （原先 HTTP 在门店锁内可达 45s，并发推单会排队 30s 后直接 400）。
+    """
+    bind = db.get_bind()
+    if getattr(bind.dialect, "name", "") != "mysql":
+        yield
+        return
+    key = f"okf_sf_retail_{int(order_id)}"[:64]
+    rc = db.execute(text("SELECT GET_LOCK(:k, 5)"), {"k": key}).scalar()
+    if rc != 1:
+        raise ValueError(f"订单 #{int(order_id)} 正在推单中，请稍候再试")
+    try:
+        yield
+    finally:
+        db.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": key})
+
+
 def aggs_for_delivery_date(db: Session, d: date, *, store_id: int | None = None) -> dict[str, _Agg]:
     """当日全部停靠点聚合（与同业务日顺丰预览/履约同源）。"""
     sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
@@ -1519,7 +1541,10 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
     使用门店上单独配置的 ``sf_retail_push_shop_id``（及可选 shop_type），
     与租户对接里用于智能配送大表推单的顺丰店铺编号互不干扰；dev_id/secret/取件信息仍走租户合并配置。
     """
-    from app.services.single_meal_order_service import single_meal_fulfillment_allows_dispatch
+    from app.services.single_meal_order_service import (
+        mark_single_meals_sf_awaiting_pickup_on_push_no_commit,
+        single_meal_fulfillment_allows_dispatch,
+    )
 
     order = db.get(SingleMealOrder, int(order_id))
     if order is None or int(order.store_id) != int(store_id):
@@ -1533,7 +1558,7 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
 
     fs = str(order.fulfillment_status or "").strip().lower()
     if not single_meal_fulfillment_allows_dispatch(order.fulfillment_status):
-        raise ValueError("仅「待发货」或「顺丰取消」订单可推送顺丰（配送中或已完成的订单请勿重复操作）")
+        raise ValueError("仅「待发货」或「顺丰取消」订单可推送顺丰（待取货/配送中或已完成的订单请勿重复操作）")
 
     st_row = db.get(Store, int(store_id))
     if not st_row:
@@ -1570,13 +1595,12 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
     recv_lng = float(addr.lng) if addr.lng is not None else None
     recv_lat = float(addr.lat) if addr.lat is not None else None
 
-    nm_map = delivery_region_name_map(
-        db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set()
-    )
-    ar_lbl = routing_area_label(addr, nm_map)
-
     recv_phone = (addr.contact_phone or "").strip()
     recv_name = (addr.contact_name or "").strip()
+
+    base_remark = f"单次点餐 #{order.id}".strip()
+    addr_rmk = (addr.remarks or "").strip()
+    retail_remark = f"{base_remark} {addr_rmk}".strip()[:2000] if addr_rmk else base_remark[:2000]
 
     stop_id = f"retail-smo-{order.id}"
     d = order.delivery_date
@@ -1601,7 +1625,7 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
         weight_kg=weight_kg,
         push_immediately=True,
         expect_delivery_at=None,
-        remark=f"单次点餐 #{order.id} {ar_lbl}".strip()[:2000],
+        remark=retail_remark,
         is_direct=False,
         vehicle_type=(gset.SF_DEFAULT_VEHICLE_TYPE or "小轿车").strip(),
         is_insured=False,
@@ -1631,7 +1655,7 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
     snap_db: dict[str, Any] = snap_preview
 
     with SfOpenClient() as httpc:
-        with _sf_push_serial_lock(db, store_id=int(store_id), d=d):
+        with _sf_retail_order_push_lock(db, order_id=int(order.id)):
             if _has_active_success_push(db, d, stop_id, store_id=int(store_id)):
                 raise ValueError(
                     "该订单在供餐日仍有进行中的顺丰单，请勿重复推送（若顺丰侧已取消请稍候状态同步后再推）"
@@ -1675,12 +1699,12 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
                     request_snapshot=snap_db,
                     response_json=res if isinstance(res, dict) else None,
                 )
-                order.fulfillment_status = "accepted"
                 db.add(row_db)
                 db.flush()
                 from app.services.single_meal_order_service import link_single_meal_orders_to_sf_push_no_commit
 
                 link_single_meal_orders_to_sf_push_no_commit(db, [int(order.id)], row_db)
+                mark_single_meals_sf_awaiting_pickup_on_push_no_commit(db, [int(order.id)])
                 db.add(order)
                 db.commit()
                 msg = (

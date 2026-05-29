@@ -40,7 +40,7 @@ export function canCancelSingleMealOrder(o) {
   const f = String(o.fulfillment_status || '').trim().toLowerCase()
   if (pay === '已退款' || f === 'delivered' || f === 'cancelled') return false
   if (pay === '未支付') return f === 'pending'
-  if (pay === '已支付') return f === 'pending' || f === 'accepted' || f === 'sf_cancelled'
+  if (pay === '已支付') return f === 'pending' || f === 'sf_awaiting_pickup' || f === 'accepted' || f === 'sf_cancelled'
   return false
 }
 
@@ -69,7 +69,13 @@ export function singleOrderStatusMeta(o) {
   if (fulfill === 'sf_cancelled') {
     return { line1: '顺丰取消', line2: '配送已取消，如有疑问请联系客服', tone: 'warn' }
   }
-  return { line1: '待送达', line2: '骑手配餐配送中', tone: 'info' }
+  if (fulfill === 'sf_awaiting_pickup') {
+    return { line1: '待取货', line2: '已推顺丰，等待配送员取货', tone: 'info' }
+  }
+  if (fulfill === 'accepted') {
+    return { line1: '配送中', line2: '骑手正在配送', tone: 'info' }
+  }
+  return { line1: '待发货', line2: '等待商家安排配送', tone: 'info' }
 }
 
 /**
