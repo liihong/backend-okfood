@@ -181,6 +181,57 @@ def create_delivery_sheet_manual_attention_notification(
     return row
 
 
+def _miniprogram_card_order_pending_notification_marker(order_id: int) -> str:
+    """skip_reason 存工单 id，便于去重、跳转与入账后消隐。"""
+    return f"card_order_id:{int(order_id)}"
+
+
+def _miniprogram_card_order_pending_message(
+    *,
+    order_id: int,
+    card_kind: str,
+    member_id: int,
+    member_phone: str | None,
+    member_name: str | None,
+    delivery_start_date: date | None,
+) -> tuple[str, str]:
+    phones = str(member_phone or "").strip()[:32] or "(无手机号)"
+    naming = str(member_name or "").strip()
+    naming = naming[:40] + ("…" if len(naming) > 40 else "")
+
+    kind_label = str(card_kind or "").strip() or "会员卡"
+    ds_text = delivery_start_date.isoformat() if delivery_start_date else "未填写"
+    title = f"小程序自助购卡待审批 · 工单#{int(order_id)}"
+    body = (
+        f"会员 mid={int(member_id)} {phones} "
+        f"{('「' + naming + '」') if naming else ''}"
+        f"已微信支付购买{kind_label}，起送日 {ds_text}。"
+        "请在「开卡工单」核对起送日与配送方式，手动「确认入账」后再参与派单。"
+    )
+    if len(body) > 500:
+        body = body[:497] + "…"
+    return title[:200], body
+
+
+def _miniprogram_card_order_pending_notification_row(
+    db: Session,
+    *,
+    store_id: int,
+    order_id: int,
+) -> AdminSystemNotification | None:
+    marker = _miniprogram_card_order_pending_notification_marker(order_id)
+    return db.scalars(
+        select(AdminSystemNotification)
+        .where(
+            AdminSystemNotification.store_id == int(store_id),
+            AdminSystemNotification.kind == KIND_MINIPROGRAM_CARD_ORDER_PENDING,
+            AdminSystemNotification.skip_reason == marker,
+        )
+        .order_by(AdminSystemNotification.id.desc())
+        .limit(1)
+    ).first()
+
+
 def create_miniprogram_card_order_pending_notification(
     db: Session,
     *,
@@ -192,43 +243,103 @@ def create_miniprogram_card_order_pending_notification(
     member_name: str | None,
     delivery_start_date: date | None,
 ) -> AdminSystemNotification | None:
-    """小程序自助购卡支付成功：提醒客服确认起送日并在开卡工单中同步入账。"""
+    """小程序自助购卡支付成功：每工单仅 1 条待审批提醒，供客服确认入账。"""
     sid = int(store_id)
     if sid <= 0:
         return None
 
-    biz = today_shanghai()
-    phones = str(member_phone or "").strip()[:32] or "(无手机号)"
-    naming = str(member_name or "").strip()
-    naming = naming[:40] + ("…" if len(naming) > 40 else "")
-
-    kind_label = str(card_kind or "").strip() or "会员卡"
-    ds_text = delivery_start_date.isoformat() if delivery_start_date else "未填写"
-    title = f"小程序自助购卡待确认 · 工单#{int(order_id)}"
-    body = (
-        f"会员 mid={int(member_id)} {phones} "
-        f"{('「' + naming + '」') if naming else ''}"
-        f"已微信支付购买{kind_label}，用户所选起送日 {ds_text}。"
-        "用户可能在小程序完善配送信息中已填写起送日；"
-        "请在「开卡工单」核对起送日与配送方式后点击「确认入账」。"
+    existing = _miniprogram_card_order_pending_notification_row(
+        db, store_id=sid, order_id=int(order_id)
     )
-    if len(body) > 500:
-        body = body[:497] + "…"
+    if existing is not None:
+        return existing
+
+    biz = today_shanghai()
+    title, body = _miniprogram_card_order_pending_message(
+        order_id=int(order_id),
+        card_kind=card_kind,
+        member_id=int(member_id),
+        member_phone=member_phone,
+        member_name=member_name,
+        delivery_start_date=delivery_start_date,
+    )
+    marker = _miniprogram_card_order_pending_notification_marker(order_id)
 
     row = AdminSystemNotification(
         store_id=sid,
         kind=KIND_MINIPROGRAM_CARD_ORDER_PENDING,
         business_date=biz,
-        title=title[:200],
+        title=title,
         message=body,
         total_count=0,
         success_count=0,
         failed_count=0,
-        skip_reason=None,
+        skip_reason=marker,
     )
     db.add(row)
     db.flush()
     return row
+
+
+def refresh_miniprogram_card_order_pending_notification(
+    db: Session,
+    *,
+    store_id: int,
+    order_id: int,
+    card_kind: str,
+    member_id: int,
+    member_phone: str | None,
+    member_name: str | None,
+    delivery_start_date: date | None,
+) -> AdminSystemNotification | None:
+    """用户完善配送信息后刷新待审批消息中的起送日（未确认前）。"""
+    row = _miniprogram_card_order_pending_notification_row(
+        db, store_id=int(store_id), order_id=int(order_id)
+    )
+    if row is None or row.acknowledged_at is not None:
+        return None
+    title, body = _miniprogram_card_order_pending_message(
+        order_id=int(order_id),
+        card_kind=card_kind,
+        member_id=int(member_id),
+        member_phone=member_phone,
+        member_name=member_name,
+        delivery_start_date=delivery_start_date,
+    )
+    row.title = title
+    row.message = body
+    db.flush()
+    return row
+
+
+def acknowledge_miniprogram_card_order_pending_notifications(
+    db: Session,
+    *,
+    store_id: int,
+    order_id: int,
+    admin_username: str,
+) -> int:
+    """开卡工单确认入账后，自动消隐对应待审批系统消息。"""
+    marker = _miniprogram_card_order_pending_notification_marker(order_id)
+    rows = list(
+        db.scalars(
+            select(AdminSystemNotification).where(
+                AdminSystemNotification.store_id == int(store_id),
+                AdminSystemNotification.kind == KIND_MINIPROGRAM_CARD_ORDER_PENDING,
+                AdminSystemNotification.skip_reason == marker,
+                AdminSystemNotification.acknowledged_at.is_(None),
+            )
+        ).all()
+    )
+    if not rows:
+        return 0
+    now = beijing_now_naive()
+    who = str(admin_username or "").strip() or None
+    for row in rows:
+        row.acknowledged_at = now
+        row.acknowledged_by = who
+    db.flush()
+    return len(rows)
 
 
 def create_single_meal_order_paid_notification(

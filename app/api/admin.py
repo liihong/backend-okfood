@@ -725,6 +725,7 @@ def card_orders(
         bool,
         Query(description="true=含已缴且已入账等全部历史；默认 false 仅待处理工单"),
     ] = False,
+    order_id: Annotated[int | None, Query(description="按工单 id 精确筛选（通知跳转用）")] = None,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -740,6 +741,7 @@ def card_orders(
         page_size=page_size,
         include_history=include_history,
         store_id=store_id,
+        order_id=order_id,
     )
     serialized = [dump_model(i) for i in items]
     return page_response(

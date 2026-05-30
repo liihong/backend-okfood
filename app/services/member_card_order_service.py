@@ -137,32 +137,67 @@ def ensure_miniprogram_offline_claim_order(
     return order
 
 
+def _latest_miniprogram_self_service_card_order(
+    db: Session,
+    member_id: int,
+    *,
+    applied_to_member: bool | None = None,
+    delivery_start_missing: bool = False,
+) -> MemberCardOrder | None:
+    filters = [
+        MemberCardOrder.member_id == int(member_id),
+        MemberCardOrder.created_by == MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR,
+        MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+    ]
+    if applied_to_member is not None:
+        filters.append(MemberCardOrder.applied_to_member.is_(applied_to_member))
+    if delivery_start_missing:
+        filters.append(MemberCardOrder.delivery_start_date.is_(None))
+    return db.scalars(
+        select(MemberCardOrder)
+        .where(*filters)
+        .order_by(MemberCardOrder.id.desc())
+        .limit(1)
+    ).first()
+
+
 def apply_delivery_start_to_pending_miniprogram_card_order(
     db: Session,
     member_id: int,
     delivery_start_date: date,
 ) -> MemberCardOrder | None:
     """
-    小程序用户完善配送信息时，将起送日写入最近一条已缴、未入账的自助开卡工单。
-    便于客服在开卡工单中看到用户所选日期后再审批入账。
+    小程序用户完善配送信息时，将起送日写入最近一条自助开卡工单。
+    优先未入账工单；若客服已先入账单但工单仍缺起送日，则补写以便后台列表展示。
     """
     if delivery_start_date < min_member_delivery_start_shanghai():
         return None
-    order = db.scalars(
-        select(MemberCardOrder)
-        .where(
-            MemberCardOrder.member_id == int(member_id),
-            MemberCardOrder.created_by == MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR,
-            MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
-            MemberCardOrder.applied_to_member.is_(False),
+    order = _latest_miniprogram_self_service_card_order(
+        db, member_id, applied_to_member=False
+    )
+    if order is None:
+        order = _latest_miniprogram_self_service_card_order(
+            db, member_id, delivery_start_missing=True
         )
-        .order_by(MemberCardOrder.id.desc())
-        .limit(1)
-    ).first()
     if order is None:
         return None
     order.delivery_start_date = delivery_start_date
     db.flush()
+    member = db.get(Member, int(member_id))
+    from app.services.admin_system_notification_service import (
+        refresh_miniprogram_card_order_pending_notification,
+    )
+
+    refresh_miniprogram_card_order_pending_notification(
+        db,
+        store_id=int(order.store_id),
+        order_id=int(order.id),
+        card_kind=(order.card_kind or "").strip(),
+        member_id=int(member_id),
+        member_phone=(member.phone if member else None),
+        member_name=(member.name if member else None),
+        delivery_start_date=delivery_start_date,
+    )
     return order
 
 
@@ -208,6 +243,12 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
     m = db.get(Member, order.member_id)
     if not m:
         raise HTTPException(status_code=404, detail="会员不存在")
+    if (
+        order.delivery_start_date is None
+        and (order.created_by or "").strip() == MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR
+        and m.delivery_start_date is not None
+    ):
+        order.delivery_start_date = m.delivery_start_date
     tpl_id = getattr(order, "membership_template_id", None)
     if tpl_id is not None:
         tpl = db.get(MembershipCardTemplate, int(tpl_id))
@@ -285,12 +326,15 @@ def list_card_orders_paged(
     page_size: int,
     include_history: bool = False,
     store_id: int | None = None,
+    order_id: int | None = None,
 ) -> tuple[list[CardOrderOut], int]:
     join_on = Member.id == MemberCardOrder.member_id
     filters = []
     if store_id is not None:
         filters.append(MemberCardOrder.store_id == int(store_id))
-    if not include_history:
+    if order_id is not None:
+        filters.append(MemberCardOrder.id == int(order_id))
+    elif not include_history:
         # 默认工作台：隐藏「已缴且已同步入账」的完结单；其余（未缴、已缴待入账等）仍显示
         filters.append(
             or_(
@@ -560,6 +604,17 @@ def update_card_order(
         if order.applied_to_member:
             raise HTTPException(status_code=400, detail="该工单已入账，请勿重复同步")
         _sync_order_to_member(db, order, operator=operator)
+        if (order.created_by or "").strip() == MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR:
+            from app.services.admin_system_notification_service import (
+                acknowledge_miniprogram_card_order_pending_notifications,
+            )
+
+            acknowledge_miniprogram_card_order_pending_notifications(
+                db,
+                store_id=int(order.store_id),
+                order_id=int(order.id),
+                admin_username=operator,
+            )
 
     db.commit()
     db.refresh(order)

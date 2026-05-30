@@ -181,8 +181,13 @@ async function onPay() {
       typeof preProfile === 'object' &&
       !shouldOpenMemberSetup(preProfile)
 
+    const profileStartYmd =
+      preProfile?.delivery_start_date != null
+        ? String(preProfile.delivery_start_date).trim().slice(0, 10)
+        : ''
     await runMembershipTemplateWechatPay({
       membershipTemplateId: templateId.value,
+      deliveryStartYmd: activeRenewal && profileStartYmd ? profileStartYmd : undefined,
     })
     markMinePageNeedsRefresh()
     uni.showToast({ title: '支付成功', icon: 'success' })

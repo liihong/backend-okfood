@@ -99,6 +99,23 @@ function goOrdersManage(item) {
   router.push({ path: '/orders', query })
 }
 
+function parseCardOrderIdFromNotification(item) {
+  const marker = String(item?.skip_reason || '').trim()
+  const m1 = marker.match(/^card_order_id:(\d+)$/)
+  if (m1) return Number(m1[1])
+  const title = String(item?.title || '')
+  const m2 = title.match(/工单#(\d+)/)
+  if (m2) return Number(m2[1])
+  return null
+}
+
+function goCardOrders(item) {
+  notificationPopoverVisible.value = false
+  const oid = parseCardOrderIdFromNotification(item)
+  const query = oid ? { order_id: String(oid) } : {}
+  router.push({ path: '/card-orders', query })
+}
+
 /** 与模板绑定：明确布尔，避免 Element Plus 菜单缓存旧结构 */
 const showFullAdminMenus = computed(() => !isDeliveryOnly.value && !isSystemOnly.value)
 /** 仅店主完整账号：财务中心、门店配置 */
@@ -491,6 +508,15 @@ function onTabClose(tab) {
                       @click="goOrdersManage(item)"
                     >
                       去订单管理
+                    </el-button>
+                    <el-button
+                      v-if="item.kind === 'miniprogram_card_order_pending'"
+                      size="small"
+                      text
+                      type="primary"
+                      @click="goCardOrders(item)"
+                    >
+                      去开卡工单审批
                     </el-button>
                     <el-button
                       size="small"

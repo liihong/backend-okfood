@@ -109,17 +109,24 @@ export async function runMemberCardWechatPay({
 
 /**
  * 自律卡包：按后台模版创建订单并微信支付（成功后跳转「完善配送信息」页）。
- * @param {{ membershipTemplateId: number }} opts
+ * @param {{ membershipTemplateId: number, deliveryStartYmd?: string }} opts
+ * `deliveryStartYmd`: 续卡等档案已有起送日时可随单写入工单
  */
-export async function runMembershipTemplateWechatPay({ membershipTemplateId }) {
+export async function runMembershipTemplateWechatPay({
+  membershipTemplateId,
+  deliveryStartYmd,
+}) {
   const tid = Number(membershipTemplateId)
   if (!Number.isFinite(tid) || tid < 1) {
     throw new Error('卡包无效')
   }
+  const body = { membership_template_id: Math.floor(tid) }
+  const d0 = String(deliveryStartYmd || '').trim().slice(0, 10)
+  if (d0) {
+    body.delivery_start_date = d0
+  }
   await syncWxMiniOpenidFromLogin()
-  const { order, orderId } = await resolveMemberCardOrderId({
-    membership_template_id: Math.floor(tid),
-  })
+  const { order, orderId } = await resolveMemberCardOrderId(body)
   await runWechatPayForMemberCardOrder(orderId)
   return { order, orderId }
 }

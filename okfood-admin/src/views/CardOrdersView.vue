@@ -1,6 +1,7 @@
 <script setup>
 defineOptions({ name: 'CardOrdersView' })
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { CreditCard, MapPin, Plus, Search, UserRound, X, Zap } from 'lucide-vue-next'
 import {
   apiJson,
@@ -10,6 +11,8 @@ import {
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import MemberDeliveryMapPicker from '../components/MemberDeliveryMapPicker.vue'
+
+const route = useRoute()
 
 const list = ref([])
 const loading = ref(false)
@@ -97,7 +100,7 @@ function cardOrderCreatedLine(row) {
   return '—'
 }
 
-async function fetchList() {
+async function fetchList(extraParams = {}) {
   if (!adminAccessToken.value) return
   loading.value = true
   try {
@@ -110,6 +113,9 @@ async function fetchList() {
     const pf = String(payFilter.value ?? '').trim()
     if (pf === '未缴' || pf === '已缴') params.set('pay_status', pf)
     if (includeHistory.value) params.set('include_history', 'true')
+    for (const [k, v] of Object.entries(extraParams)) {
+      if (v != null && String(v).trim() !== '') params.set(k, String(v))
+    }
     const data = await apiJson(`/api/admin/card-orders?${params.toString()}`, {}, { auth: true })
     list.value = Array.isArray(data.items) ? data.items : []
     total.value = Number(data.total) || 0
@@ -382,6 +388,7 @@ const editForm = ref({
   amount_yuan: '',
   remark: '',
   applied_to_member: false,
+  created_by: '',
 })
 
 function openEditModal(row) {
@@ -399,8 +406,18 @@ function openEditModal(row) {
     amount_yuan: row.amount_yuan != null && row.amount_yuan !== '' ? String(row.amount_yuan) : '',
     remark: row.remark || '',
     applied_to_member: !!row.applied_to_member,
+    created_by: row.created_by || '',
   }
   showEditModal.value = true
+}
+
+async function tryOpenOrderFromRouteQuery() {
+  const raw = route.query?.order_id ?? route.query?.orderId
+  const oid = parseInt(String(raw || ''), 10)
+  if (!Number.isFinite(oid) || oid <= 0) return
+  await fetchList({ order_id: String(oid) })
+  const row = list.value.find((r) => Number(r.id) === oid)
+  if (row) openEditModal(row)
 }
 
 const deletingId = ref(0)
@@ -507,8 +524,9 @@ async function submitEdit(syncMember = false) {
   }
 }
 
-onMounted(() => {
-  void fetchList()
+onMounted(async () => {
+  await fetchList()
+  await tryOpenOrderFromRouteQuery()
   void nextTick(() => {
     updateCardOrdersTableHeight()
     cardOrdersTableResizeObserver = new ResizeObserver(() => {
@@ -539,6 +557,7 @@ onUnmounted(() => {
             <el-checkbox v-model="includeHistory" class="card-orders-history-el-checkbox">
               查看历史开卡记录
             </el-checkbox>
+            <span v-if="!includeHistory" class="card-orders-pending-hint">当前：待审批工单</span>
           </div>
           <div class="card-orders-filter-label card-orders-filter-el">
             <span class="card-orders-filter-el-text">缴费</span>
@@ -1059,6 +1078,16 @@ class="member-pill"
           <p v-if="!editForm.applied_to_member" class="modal-hint">
             「保存」仅更新工单字段；「确认入账」在核对起送日与缴费信息后将次数写入会员并激活。
           </p>
+          <p
+            v-if="
+              !editForm.applied_to_member &&
+              editForm.created_by === 'miniprogram' &&
+              editForm.pay_status === '已缴'
+            "
+            class="modal-hint card-order-pending-approval-hint"
+          >
+            小程序自助购卡：须手动「确认入账」后才会写入会员次数并参与配送派单。
+          </p>
           <div class="card-order-edit-actions">
             <button type="submit" class="btn-submit-order" :disabled="editSubmitting">
               {{ editSubmitting ? '保存中…' : '保存' }}
@@ -1102,6 +1131,17 @@ class="member-pill"
 .card-orders-filter-label--check {
   user-select: none;
   cursor: pointer;
+}
+
+.card-orders-pending-hint {
+  font-size: 12px;
+  font-weight: 600;
+  color: #b45309;
+}
+
+.card-order-pending-approval-hint {
+  color: #b45309;
+  font-weight: 600;
 }
 
 /* 查看历史记录：Element Plus Checkbox，默认 v-model=true */

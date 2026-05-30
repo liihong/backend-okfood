@@ -744,6 +744,7 @@ class DeliverySheetMemberOut(BaseModel):
     member_id: int = Field(..., ge=1, description="会员主键，供大表人工标记")
     phone: str
     name: str
+    plan_type: str | None = Field(None, description="套餐类型：次卡 / 周卡 / 月卡")
     daily_meal_units: int = Field(1, ge=1, description="该会员当日计入份数")
     remarks: str | None = None
     area_issue: bool = Field(False, description="会员主档或默认地址片区为空、未分配或与启用区域表不一致")
