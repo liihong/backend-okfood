@@ -8,11 +8,11 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.courier_delivery_fee import courier_delivery_fee_yuan_for_meal_units
-from app.core.timeutil import shanghai_naive_range_for_calendar_day
+from app.core.timeutil import beijing_now_naive, shanghai_naive_range_for_calendar_day
 from app.integrations.wechat_pay_v2 import (
     WeChatPayV2Error,
     WechatPayNotifyParsed,
@@ -50,6 +50,7 @@ from app.services.courier_task_sorting import (
     order_task_rows_by_nearest_neighbor,
 )
 from app.services.member_address_service import delivery_region_name_map, full_address_line, routing_area_label
+from app.services.admin_system_notification_service import create_single_meal_order_paid_notification
 from app.services.store_config_service import load_store_coordinates_for_sorting
 
 logger = logging.getLogger(__name__)
@@ -456,7 +457,56 @@ def primary_courier_for_region_id(db: Session, region_id: int | None) -> str | N
     return None
 
 
+UNPAID_SINGLE_MEAL_ORDER_EXPIRE_MINUTES = 30
+
+
+def _unpaid_single_order_expire_cutoff():
+    return beijing_now_naive() - timedelta(minutes=UNPAID_SINGLE_MEAL_ORDER_EXPIRE_MINUTES)
+
+
+def expire_stale_unpaid_single_meal_orders(db: Session, *, member_id: int | None = None) -> int:
+    """单次零售：创建超过 ``UNPAID_SINGLE_MEAL_ORDER_EXPIRE_MINUTES`` 仍未支付则自动取消（履约 cancelled）。"""
+    cutoff = _unpaid_single_order_expire_cutoff()
+    filters = [
+        SingleMealOrder.pay_status == "未支付",
+        SingleMealOrder.fulfillment_status == "pending",
+        SingleMealOrder.created_at < cutoff,
+    ]
+    if member_id is not None:
+        filters.append(SingleMealOrder.member_id == int(member_id))
+    result = db.execute(
+        update(SingleMealOrder)
+        .where(*filters)
+        .values(fulfillment_status="cancelled", courier_id=None)
+    )
+    n = int(result.rowcount or 0)
+    if n:
+        db.commit()
+    return n
+
+
+def _assert_no_pending_unpaid_single_order(db: Session, member_id: int) -> None:
+    """同一会员仅允许一笔待支付单次点餐单，避免取消支付后重复下单。"""
+    oid = db.scalars(
+        select(SingleMealOrder.id)
+        .where(
+            SingleMealOrder.member_id == int(member_id),
+            SingleMealOrder.pay_status == "未支付",
+            SingleMealOrder.fulfillment_status != "cancelled",
+        )
+        .order_by(SingleMealOrder.id.desc())
+        .limit(1)
+    ).first()
+    if oid is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"您有未支付的单次点餐订单（#{int(oid)}），请先完成支付或取消后再下单",
+        )
+
+
 def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderCreateIn) -> SingleMealOrderOut:
+    expire_stale_unpaid_single_meal_orders(db, member_id=member_id)
+    _assert_no_pending_unpaid_single_order(db, member_id)
     dish = db.get(MenuDish, body.dish_id)
     if not dish or not dish.is_enabled:
         raise HTTPException(status_code=404, detail="餐品不存在或已停用")
@@ -718,12 +768,14 @@ def list_member_single_meal_orders(
     list_status: str | None = None,
 ) -> tuple[list[SingleMealOrderOut], int]:
     """会员端列表。``list_status``：``all``（默认）、``pending_pay`` 待支付、``pending_delivery`` 待送达/待取货（已支付且未妥投/未自提）、``completed`` 已完成（已送达或已自提）。"""
+    expire_stale_unpaid_single_meal_orders(db, member_id=member_id)
     page = max(1, page)
     page_size = min(50, max(1, page_size))
     ls = (list_status or "all").strip().lower()
     filters: list = [SingleMealOrder.member_id == member_id]
     if ls == "pending_pay":
         filters.append(SingleMealOrder.pay_status == "未支付")
+        filters.append(SingleMealOrder.fulfillment_status == "pending")
     elif ls == "pending_delivery":
         filters.append(SingleMealOrder.pay_status == "已支付")
         filters.append(
@@ -749,6 +801,7 @@ def list_member_single_meal_orders(
 
 
 def get_member_single_meal_order(db: Session, member_id: int, order_id: int) -> SingleMealOrderOut:
+    expire_stale_unpaid_single_meal_orders(db, member_id=member_id)
     row = db.get(SingleMealOrder, order_id)
     if not row or int(row.member_id) != int(member_id):
         raise HTTPException(status_code=404, detail="订单不存在")
@@ -779,6 +832,7 @@ def member_cancel_single_meal_order(db: Session, *, member_id: int, order_id: in
 
 def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, client_ip: str) -> dict[str, str]:
     """调微信统一下单并返回小程序调起支付参数。"""
+    expire_stale_unpaid_single_meal_orders(db, member_id=member_id)
     order = db.get(SingleMealOrder, order_id)
     if not order or int(order.member_id) != int(member_id):
         raise HTTPException(status_code=404, detail="订单不存在")
@@ -786,6 +840,8 @@ def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, c
         raise HTTPException(status_code=400, detail="订单已支付")
     if order.pay_status == "已退款":
         raise HTTPException(status_code=400, detail="订单已退款")
+    if str(order.fulfillment_status or "").strip().lower() == "cancelled":
+        raise HTTPException(status_code=400, detail="订单已超时关闭，请重新下单")
 
     pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
     perr = wechat_pay_misconfiguration_detail_merged(pay_cfg)
@@ -819,6 +875,24 @@ def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, c
 
     return build_miniprogram_pay_params(
         prepay_id, appid=pay_cfg.wx_mini_appid, api_key=pay_cfg.wechat_pay_api_key
+    )
+
+
+def _notify_single_meal_order_paid_cs_review(db: Session, order: SingleMealOrder) -> None:
+    member = db.get(Member, int(order.member_id))
+    dish = db.get(MenuDish, int(order.dish_id)) if order.dish_id else None
+    create_single_meal_order_paid_notification(
+        db,
+        store_id=int(order.store_id),
+        order_id=int(order.id),
+        delivery_date=order.delivery_date,
+        dish_name=(dish.name if dish else None),
+        quantity=int(order.quantity or 1),
+        amount_yuan=_format_amount_yuan(Decimal(order.amount_yuan)),
+        store_pickup=bool(getattr(order, "store_pickup", False)),
+        member_id=int(order.member_id),
+        member_phone=(member.phone if member else None),
+        member_name=(member.name if member else None),
     )
 
 
@@ -860,6 +934,7 @@ def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
         order.courier_id = primary_courier_for_region_id(
             db, int(pay_addr.delivery_region_id) if pay_addr and pay_addr.delivery_region_id else None
         )
+    _notify_single_meal_order_paid_cs_review(db, order)
     db.commit()
     return True, "paid"
 

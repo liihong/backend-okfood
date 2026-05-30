@@ -49,7 +49,10 @@ export function singleOrderStatusMeta(o) {
   const fulfill = String(o.fulfillment_status || '')
   const pickup = !!o.store_pickup
   if (fulfill === 'cancelled') {
-    return { line1: '已取消', line2: pay === '已支付' ? '订单已取消，款项未自动退款' : '订单已关闭', tone: 'warn' }
+    if (pay === '未支付') {
+      return { line1: '已关闭', line2: '超时未支付，订单已自动取消', tone: 'warn' }
+    }
+    return { line1: '已取消', line2: '订单已取消，款项未自动退款', tone: 'warn' }
   }
   if (pay === '未支付') {
     return { line1: '待支付', line2: '请尽快完成支付', tone: 'warn' }

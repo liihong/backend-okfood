@@ -168,13 +168,13 @@ def eligible_members_for_delivery(
     return members, defaults
 
 
-def _member_subscription_eligibility_where(
+def _member_subscription_schedule_where(
     delivery_date: date,
     *,
     tenant_id: int | None = None,
     store_id: int | None = None,
 ) -> list:
-    """与 eligible_members_for_delivery / store_pickup 相同的会员资格条件（不含地址/片区）。"""
+    """与 eligible_members_for_delivery / store_pickup 相同的日程条件（不含余额门槛）。"""
     today = today_shanghai()
     tomorrow = date.fromordinal(today.toordinal() + 1)
     in_leave_range = and_(
@@ -198,16 +198,60 @@ def _member_subscription_eligibility_where(
         Member.delivery_start_date.is_(None),
         Member.delivery_start_date <= delivery_date,
     )
-    units_sql = sql_effective_daily_meal_units_column()
     return [
         Member.deleted_at.is_(None),
         Member.is_active.is_(True),
-        Member.balance >= units_sql,
         not_(absent),
         started,
         _member_not_skip_subscription_saturday(delivery_date),
         _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
     ]
+
+
+def _member_subscription_eligibility_where(
+    delivery_date: date,
+    *,
+    tenant_id: int | None = None,
+    store_id: int | None = None,
+) -> list:
+    """与 eligible_members_for_delivery / store_pickup 相同的会员资格条件（不含地址/片区）。"""
+    units_sql = sql_effective_daily_meal_units_column()
+    return [
+        *_member_subscription_schedule_where(
+            delivery_date, tenant_id=tenant_id, store_id=store_id
+        ),
+        Member.balance >= units_sql,
+    ]
+
+
+def list_members_insufficient_balance_for_delivery_day(
+    db: Session,
+    *,
+    delivery_date: date,
+    tenant_id: int | None = None,
+    store_id: int | None = None,
+) -> list[Member]:
+    """
+    当日本应履约（到家或自提），但剩余次数不足以覆盖每配送日份数、故未进配送大表的会员。
+
+    条件：``0 < balance < effective_daily_meal_units`` 且 ``daily_meal_units > 1``。
+    """
+    if not is_subscription_delivery_day(delivery_date):
+        return []
+    units_sql = sql_effective_daily_meal_units_column()
+    stmt = (
+        select(Member)
+        .where(
+            *_member_subscription_schedule_where(
+                delivery_date, tenant_id=tenant_id, store_id=store_id
+            ),
+            Member.balance > 0,
+            Member.balance < units_sql,
+            units_sql > literal(1),
+        )
+        .order_by(Member.id.asc())
+    )
+    return list(db.scalars(stmt).all())
 
 
 def sum_subscription_meals_on_date(

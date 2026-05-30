@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.delivery_calendar import is_subscription_delivery_day
 from app.core.timeutil import beijing_now_naive, now_shanghai, today_shanghai
 from app.models.admin_system_notification import AdminSystemNotification
 from app.models.sf_same_city_push import SfSameCityPush
@@ -20,6 +21,10 @@ KIND_SF_NIGHTLY_PUSH = "sf_nightly_push"
 KIND_DELIVERY_SHEET_MANUAL_ATTENTION = "delivery_sheet_manual_attention"
 # 小程序自助购卡已缴、待客服确认起送日并同步入账
 KIND_MINIPROGRAM_CARD_ORDER_PENDING = "miniprogram_card_order_pending"
+# 单次零售（单次点餐）微信支付成功，待客服在订单管理推送配送
+KIND_SINGLE_MEAL_ORDER_PAID = "single_meal_order_paid"
+# 每日多份但剩余次数不足当日份数，未进配送大表，待客服联系确认续卡
+KIND_MEMBER_INSUFFICIENT_BALANCE_FOR_DELIVERY = "member_insufficient_balance_for_delivery"
 
 
 def _sf_nightly_push_message(*, total: int, success: int, failed: int, skip_reason: str | None) -> str:
@@ -224,6 +229,177 @@ def create_miniprogram_card_order_pending_notification(
     db.add(row)
     db.flush()
     return row
+
+
+def create_single_meal_order_paid_notification(
+    db: Session,
+    *,
+    store_id: int,
+    order_id: int,
+    delivery_date: date,
+    dish_name: str | None,
+    quantity: int,
+    amount_yuan: str | None,
+    store_pickup: bool,
+    member_id: int,
+    member_phone: str | None,
+    member_name: str | None,
+) -> AdminSystemNotification | None:
+    """单次零售支付成功：提醒客服尽快在订单管理推送配送或安排自提。"""
+    sid = int(store_id)
+    if sid <= 0:
+        return None
+
+    phones = str(member_phone or "").strip()[:32] or "(无手机号)"
+    naming = str(member_name or "").strip()
+    naming = naming[:40] + ("…" if len(naming) > 40 else "")
+
+    dish = str(dish_name or "").strip() or "单次点餐"
+    fulfill = "门店自提" if bool(store_pickup) else "配送到家"
+    amt = str(amount_yuan or "").strip()
+    amt_text = f" ¥{amt}" if amt else ""
+
+    title = f"单次零售新订单 · #{int(order_id)}"
+    body = (
+        f"会员 mid={int(member_id)} {phones} "
+        f"{('「' + naming + '」') if naming else ''}"
+        f"已支付{amt_text} {dish}×{max(1, int(quantity))}，"
+        f"供餐日 {delivery_date.isoformat()}（{fulfill}）。"
+        "请尽快在「订单管理」推送配送或安排自提。"
+    )
+    if len(body) > 500:
+        body = body[:497] + "…"
+
+    row = AdminSystemNotification(
+        store_id=sid,
+        kind=KIND_SINGLE_MEAL_ORDER_PAID,
+        business_date=delivery_date,
+        title=title[:200],
+        message=body,
+        total_count=0,
+        success_count=0,
+        failed_count=0,
+        skip_reason=None,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _member_insufficient_balance_notification_exists(
+    db: Session,
+    *,
+    store_id: int,
+    business_date: date,
+    member_id: int,
+) -> bool:
+    """同日同店同会员是否已有余量不足配送提醒（含已确认），避免轮询重复写入。"""
+    marker = f"mid={int(member_id)} "
+    row_id = db.scalar(
+        select(AdminSystemNotification.id).where(
+            AdminSystemNotification.store_id == int(store_id),
+            AdminSystemNotification.kind == KIND_MEMBER_INSUFFICIENT_BALANCE_FOR_DELIVERY,
+            AdminSystemNotification.business_date == business_date,
+            AdminSystemNotification.message.like(f"%{marker}%"),
+        ).limit(1)
+    )
+    return row_id is not None
+
+
+def create_member_insufficient_balance_for_delivery_notification(
+    db: Session,
+    *,
+    store_id: int,
+    business_date: date,
+    member_id: int,
+    member_phone: str | None,
+    member_name: str | None,
+    balance: int,
+    daily_meal_units: int,
+) -> AdminSystemNotification | None:
+    """每日多份但剩余次数不足：提醒客服联系用户确认是否续卡。"""
+    sid = int(store_id)
+    if sid <= 0:
+        return None
+    if _member_insufficient_balance_notification_exists(
+        db, store_id=sid, business_date=business_date, member_id=int(member_id)
+    ):
+        return None
+
+    phones = str(member_phone or "").strip()[:32] or "(无手机号)"
+    naming = str(member_name or "").strip()
+    naming = naming[:40] + ("…" if len(naming) > 40 else "")
+
+    units = max(1, int(daily_meal_units))
+    bal = max(0, int(balance))
+    title = f"续费跟进·余量不足配送 · {business_date.isoformat()}"
+    body = (
+        f"会员 mid={int(member_id)} {phones} "
+        f"{('「' + naming + '」') if naming else ''}"
+        f"供餐日 {business_date.isoformat()} 应配送 {units} 份/日，剩余次数仅 {bal} 次，"
+        "已无法计入配送大表。请联系用户确认是否续卡。"
+    )
+    if len(body) > 500:
+        body = body[:497] + "…"
+
+    row = AdminSystemNotification(
+        store_id=sid,
+        kind=KIND_MEMBER_INSUFFICIENT_BALANCE_FOR_DELIVERY,
+        business_date=business_date,
+        title=title[:200],
+        message=body,
+        total_count=0,
+        success_count=0,
+        failed_count=0,
+        skip_reason=None,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def scan_insufficient_balance_delivery_notifications_for_all_stores(
+    db: Session,
+    *,
+    business_date: date | None = None,
+) -> int:
+    """
+    扫描全部门店：指定供餐日应履约但 ``balance < daily_meal_units``（且每日 >1 份）的会员，写入客服系统消息。
+    返回本次新写入条数。
+
+    头天晚间任务应传入 ``business_date=明日供餐日``，以便客服提前联系用户。
+    """
+    from app.models.store import Store
+    from app.services.courier_service import list_members_insufficient_balance_for_delivery_day
+    from app.services.member_service import effective_daily_meal_units
+
+    biz = business_date or today_shanghai()
+    if not is_subscription_delivery_day(biz):
+        return 0
+
+    store_ids = list(
+        db.scalars(select(Store.id).where(Store.is_active.is_(True)).order_by(Store.id.asc())).all()
+    )
+    created = 0
+    for sid in store_ids:
+        sid_int = int(sid)
+        members = list_members_insufficient_balance_for_delivery_day(
+            db, delivery_date=biz, store_id=sid_int
+        )
+        for m in members:
+            row = create_member_insufficient_balance_for_delivery_notification(
+                db,
+                store_id=sid_int,
+                business_date=biz,
+                member_id=int(m.id),
+                member_phone=m.phone,
+                member_name=m.name,
+                balance=int(m.balance or 0),
+                daily_meal_units=effective_daily_meal_units(m),
+            )
+            if row is not None:
+                created += 1
+    return created
 
 
 def try_notify_delivery_sheet_manual_attention(

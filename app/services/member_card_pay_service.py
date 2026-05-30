@@ -58,6 +58,34 @@ def _format_amount_yuan(v: Decimal) -> str:
     return f"{v.quantize(Decimal('0.01')):.2f}"
 
 
+def _is_member_self_service_renewal(db: Session, member: Member) -> bool:
+    """老用户自主购卡续费：曾有过入账权益、仍有剩余次数或已约定起送日。"""
+    if int(member.balance or 0) > 0:
+        return True
+    if int(member.meal_quota_total or 0) > 0:
+        return True
+    if member.delivery_start_date is not None:
+        return True
+    paid_count = db.scalar(
+        select(func.count())
+        .select_from(MemberCardOrder)
+        .where(
+            MemberCardOrder.member_id == int(member.id),
+            MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+        )
+    )
+    return int(paid_count or 0) > 0
+
+
+def _miniprogram_card_order_remark(base: str | None, *, is_renewal: bool) -> str | None:
+    """小程序开卡工单备注：续卡时前缀「老会员续卡」。"""
+    b = (base or "").strip()
+    if is_renewal:
+        prefix = "老会员续卡"
+        return f"{prefix}·{b}"[:500] if b else prefix
+    return b or None
+
+
 def card_order_amount_yuan_for_kind(db: Session, card_kind: str, *, store_id: int | None = None) -> Decimal:
     k = (card_kind or "").strip()
     if k == CardOrderKind.WEEK.value:
@@ -71,6 +99,27 @@ def card_order_amount_yuan_for_kind(db: Session, card_kind: str, *, store_id: in
     raise HTTPException(status_code=400, detail="无效开卡类型")
 
 
+def _assert_no_pending_miniprogram_wechat_card_order(db: Session, member_id: int) -> None:
+    """小程序微信开卡：已有未缴工单时不重复创建。"""
+    oid = db.scalars(
+        select(MemberCardOrder.id)
+        .where(
+            MemberCardOrder.member_id == int(member_id),
+            MemberCardOrder.pay_status == CardOrderPayStatus.UNPAID.value,
+            MemberCardOrder.applied_to_member.is_(False),
+            MemberCardOrder.pay_channel == CardPayChannel.WECHAT.value,
+            MemberCardOrder.created_by == "miniprogram",
+        )
+        .order_by(MemberCardOrder.id.desc())
+        .limit(1)
+    ).first()
+    if oid is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"您有未支付的开卡订单（#{int(oid)}），请先完成支付后再下单",
+        )
+
+
 def create_miniprogram_member_card_order(
     db: Session,
     member_id: int,
@@ -79,9 +128,12 @@ def create_miniprogram_member_card_order(
     delivery_start_date: date | None = None,
     membership_template_id: int | None = None,
 ) -> MemberCardOrder:
+    _assert_no_pending_miniprogram_wechat_card_order(db, member_id)
     m = db.get(Member, member_id)
     if not m or m.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    is_renewal = _is_member_self_service_renewal(db, m)
 
     tpl: MembershipCardTemplate | None = None
     if membership_template_id is not None:
@@ -104,7 +156,10 @@ def create_miniprogram_member_card_order(
                 status_code=400,
                 detail="起送日期须不早于今日（上海业务日）",
             )
-        rmk = f"卡包模版#{tpl.id}·{tpl.name.strip()}"[:500]
+        rmk = _miniprogram_card_order_remark(
+            f"卡包模版#{tpl.id}·{tpl.name.strip()}",
+            is_renewal=is_renewal,
+        )
         row = MemberCardOrder(
             member_id=member_id,
             tenant_id=int(m.tenant_id),
@@ -133,6 +188,7 @@ def create_miniprogram_member_card_order(
                 detail="起送日期须不早于今日（上海业务日）",
             )
         amt = card_order_amount_yuan_for_kind(db, k, store_id=int(m.store_id))
+        rmk = _miniprogram_card_order_remark(None, is_renewal=is_renewal)
         row = MemberCardOrder(
             member_id=member_id,
             tenant_id=int(m.tenant_id),
@@ -142,7 +198,7 @@ def create_miniprogram_member_card_order(
             pay_channel=CardPayChannel.WECHAT.value,
             pay_status=CardOrderPayStatus.UNPAID.value,
             amount_yuan=amt,
-            remark=None,
+            remark=rmk,
             delivery_start_date=delivery_start_date,
             applied_to_member=False,
             out_trade_no=_new_temp_out_trade_no(),

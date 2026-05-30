@@ -69,9 +69,16 @@ def job_reset_leave_flags() -> None:
 
 def job_low_balance_notify() -> None:
     """
-    每日 18:00：低余额扫描（兜底）。
-    主路径为扣次后 try_send_renew_remind_after_balance_change；此处仅记录仍有额度但未触达的用户。
+    每日 17:00（上海）：
+
+    1. 低余额兜底：记录仍有订阅额度但未触达微信续费提醒的用户（主路径为扣次后触达）。
+    2. 余量不足配送：扫描 **次日供餐日** 每日多份但剩余次数不够的会员，写入客服系统消息。
     """
+    from app.core.timeutil import tomorrow_shanghai
+    from app.services.admin_system_notification_service import (
+        scan_insufficient_balance_delivery_notifications_for_all_stores,
+    )
+
     db = SessionLocal()
     try:
         today = today_shanghai()
@@ -92,9 +99,35 @@ def job_low_balance_notify() -> None:
                 m.balance,
                 m.wx_renew_remind_quota,
             )
+        delivery_day = tomorrow_shanghai()
+        n_insuff = scan_insufficient_balance_delivery_notifications_for_all_stores(
+            db, business_date=delivery_day
+        )
+        if n_insuff:
+            logger.info(
+                "余量不足配送客服提醒（次日供餐日 %s）: created=%s",
+                delivery_day.isoformat(),
+                n_insuff,
+            )
         db.commit()
     except Exception:
         logger.exception("低余额扫描任务失败")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def job_expire_unpaid_single_meal_orders() -> None:
+    """每 2 分钟：单次零售未支付超过 30 分钟的订单自动取消。"""
+    from app.services.single_meal_order_service import expire_stale_unpaid_single_meal_orders
+
+    db = SessionLocal()
+    try:
+        n = expire_stale_unpaid_single_meal_orders(db)
+        if n:
+            logger.info("单次零售超时未支付自动取消: count=%s", n)
+    except Exception:
+        logger.exception("单次零售超时未支付自动取消任务失败")
         db.rollback()
     finally:
         db.close()
@@ -117,13 +150,22 @@ def job_sf_nightly_auto_push() -> None:
 def add_cron_jobs(sched) -> None:
     """向任意 APScheduler 实例注册全部 cron 任务（API 内嵌或独立 worker 共用）。"""
     sched.add_job(job_reset_leave_flags, "cron", hour=0, minute=1, id="reset_leave", replace_existing=True)
-    sched.add_job(job_low_balance_notify, "cron", hour=18, minute=0, id="low_balance", replace_existing=True)
+    sched.add_job(job_low_balance_notify, "cron", hour=17, minute=0, id="low_balance", replace_existing=True)
     sched.add_job(
         job_sf_nightly_auto_push,
         "cron",
         hour=8,
         minute=50,
         id="sf_nightly_push",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
+        job_expire_unpaid_single_meal_orders,
+        "interval",
+        minutes=2,
+        id="expire_unpaid_single_meals",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

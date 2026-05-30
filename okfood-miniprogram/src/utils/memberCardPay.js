@@ -4,7 +4,75 @@ import {
   fetchMemberCardWechatJsapiPayParams,
   syncMemberCardWechatPayResult,
 } from '@/utils/memberCardOrderApi.js'
+import {
+  confirmContinueExistingMallOrderPay,
+  isUnpaidOrderConflict,
+} from '@/utils/unpaidOrderPrompt.js'
 import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
+
+async function resolveMemberCardOrderId(createBody) {
+  try {
+    const order = await createMemberCardOrder(createBody)
+    const orderId = order && typeof order === 'object' ? order.id : null
+    if (orderId == null) {
+      throw new Error('开卡订单创建异常')
+    }
+    return { order, orderId }
+  } catch (e) {
+    const existingId = await confirmContinueExistingMallOrderPay(e)
+    if (existingId) {
+      return { order: { id: existingId }, orderId: existingId }
+    }
+    if (isUnpaidOrderConflict(e)) {
+      throw new Error(
+        e instanceof Error ? e.message : '您有待支付的开卡订单，请先完成支付',
+      )
+    }
+    throw e
+  }
+}
+
+async function runWechatPayForMemberCardOrder(orderId) {
+  const pay = await fetchMemberCardWechatJsapiPayParams(orderId)
+  await new Promise((resolve, reject) => {
+    uni.requestPayment({
+      provider: 'wxpay',
+      timeStamp: String(pay.timeStamp),
+      nonceStr: pay.nonceStr,
+      package: pay.package,
+      signType: pay.signType || 'MD5',
+      paySign: pay.paySign,
+      success: resolve,
+      fail: reject,
+    })
+  })
+  const maxTries = 6
+  for (let i = 0; i < maxTries; i++) {
+    try {
+      await syncMemberCardWechatPayResult(orderId)
+      break
+    } catch (e) {
+      const m = (e && e.message) || ''
+      const maybeWait =
+        m.includes('处理中') ||
+        m.includes('稍候') ||
+        m.includes('稍后再试') ||
+        m.includes('未支付') ||
+        m.includes('not_paid') ||
+        /PAY_USERPAYING/i.test(m)
+      if (maybeWait && i < maxTries - 1) {
+        await new Promise((r) => setTimeout(r, 1500))
+        continue
+      }
+      if (maybeWait) {
+        throw new Error(
+          '支付已提交。若「我的」中次数未更新，请下拉刷新或稍后再看；仍无请联客服。',
+        )
+      }
+      throw e
+    }
+  }
+}
 
 /**
  * 创建开卡工单并调起微信支付（资料页「保存并支付」与个人中心「再次支付」共用）。
@@ -31,52 +99,11 @@ export async function runMemberCardWechatPay({
     })
   }
   await syncWxMiniOpenidFromLogin()
-  const order = await createMemberCardOrder({
+  const { order, orderId } = await resolveMemberCardOrderId({
     card_kind: kind,
     delivery_start_date: d0,
   })
-  const orderId = order && typeof order === 'object' ? order.id : null
-  if (orderId == null) {
-    throw new Error('开卡订单创建异常')
-  }
-  const pay = await fetchMemberCardWechatJsapiPayParams(orderId)
-  await new Promise((resolve, reject) => {
-    uni.requestPayment({
-      provider: 'wxpay',
-      timeStamp: String(pay.timeStamp),
-      nonceStr: pay.nonceStr,
-      package: pay.package,
-      signType: pay.signType || 'MD5',
-      paySign: pay.paySign,
-      success: resolve,
-      fail: reject,
-    })
-  })
-  // 与微信异步通知互补：公网未收到 notify 时仍可按订单号拉单完成入账
-  const maxTries = 6
-  for (let i = 0; i < maxTries; i++) {
-    try {
-      await syncMemberCardWechatPayResult(orderId)
-      break
-    } catch (e) {
-      const m = (e && e.message) || ''
-      const maybeWait =
-        m.includes('处理中') ||
-        m.includes('稍候') ||
-        m.includes('稍后再试') ||
-        m.includes('未支付') ||
-        m.includes('not_paid') ||
-        /PAY_USERPAYING/i.test(m)
-      if (maybeWait && i < maxTries - 1) {
-        await new Promise((r) => setTimeout(r, 1500))
-        continue
-      }
-      if (maybeWait) {
-        throw new Error('支付已提交。若「我的」中次数未更新，请下拉刷新或稍后再看；仍无请联客服。')
-      }
-      throw e
-    }
-  }
+  await runWechatPayForMemberCardOrder(orderId)
   return { order, orderId }
 }
 
@@ -90,49 +117,9 @@ export async function runMembershipTemplateWechatPay({ membershipTemplateId }) {
     throw new Error('卡包无效')
   }
   await syncWxMiniOpenidFromLogin()
-  const order = await createMemberCardOrder({
+  const { order, orderId } = await resolveMemberCardOrderId({
     membership_template_id: Math.floor(tid),
   })
-  const orderId = order && typeof order === 'object' ? order.id : null
-  if (orderId == null) {
-    throw new Error('开卡订单创建异常')
-  }
-  const pay = await fetchMemberCardWechatJsapiPayParams(orderId)
-  await new Promise((resolve, reject) => {
-    uni.requestPayment({
-      provider: 'wxpay',
-      timeStamp: String(pay.timeStamp),
-      nonceStr: pay.nonceStr,
-      package: pay.package,
-      signType: pay.signType || 'MD5',
-      paySign: pay.paySign,
-      success: resolve,
-      fail: reject,
-    })
-  })
-  const maxTries = 6
-  for (let i = 0; i < maxTries; i++) {
-    try {
-      await syncMemberCardWechatPayResult(orderId)
-      break
-    } catch (e) {
-      const m = (e && e.message) || ''
-      const maybeWait =
-        m.includes('处理中') ||
-        m.includes('稍候') ||
-        m.includes('稍后再试') ||
-        m.includes('未支付') ||
-        m.includes('not_paid') ||
-        /PAY_USERPAYING/i.test(m)
-      if (maybeWait && i < maxTries - 1) {
-        await new Promise((r) => setTimeout(r, 1500))
-        continue
-      }
-      if (maybeWait) {
-        throw new Error('支付已提交。若「我的」中次数未更新，请下拉刷新或稍后再看；仍无请联客服。')
-      }
-      throw e
-    }
-  }
+  await runWechatPayForMemberCardOrder(orderId)
   return { order, orderId }
 }

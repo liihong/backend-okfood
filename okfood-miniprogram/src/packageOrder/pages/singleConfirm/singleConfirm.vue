@@ -131,6 +131,7 @@ import {
   addressListRow,
 } from '@/utils/addressApi.js'
 import { createSingleMealOrder, fetchWechatJsapiPayParams } from '@/utils/singleOrderApi.js'
+import { promptUnpaidOrderConflict } from '@/utils/unpaidOrderPrompt.js'
 import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
 
 const dish = ref(null)
@@ -392,6 +393,8 @@ async function handlePay() {
     const errMsg = typeof raw.errMsg === 'string' ? raw.errMsg : ''
     if (errMsg.includes('cancel') || errMsg.includes('取消')) {
       uni.showToast({ title: '已取消支付', icon: 'none' })
+    } else if (promptUnpaidOrderConflict(e, { kind: 'single' })) {
+      /* 已引导至待支付订单 */
     } else {
       const msg = e instanceof Error ? e.message : errMsg || '下单或支付失败'
       uni.showToast({ title: msg, icon: 'none' })

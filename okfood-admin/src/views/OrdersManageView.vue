@@ -1,6 +1,7 @@
 <script setup>
 defineOptions({ name: 'OrdersManageView' })
 import { ref, computed, watch, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { AlertTriangle, ChevronDown, RefreshCw, Search } from 'lucide-vue-next'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import MemberDeliveryMapPicker from '../components/MemberDeliveryMapPicker.vue'
@@ -123,6 +124,7 @@ function singleOrderDeliveryAddressTextOnly(row) {
 
 const activeTab = ref('single')
 const orderDate = ref(todayShanghaiStr())
+const route = useRoute()
 const searchQuery = ref('')
 /** 单次点餐 / 商城卡包：支付状态 Tab，默认全部 */
 const singlePayFilter = ref('all')
@@ -1191,6 +1193,14 @@ async function onSyncDeliveryStatus() {
 }
 
 onMounted(() => {
+  const qTab = String(route.query.tab || '').trim()
+  if (qTab === 'single' || qTab === 'mall') {
+    activeTab.value = qTab
+  }
+  const qDate = String(route.query.delivery_date || '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(qDate)) {
+    orderDate.value = qDate
+  }
   void loadCouriers()
   void fetchActive()
 })

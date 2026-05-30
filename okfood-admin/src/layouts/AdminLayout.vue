@@ -92,6 +92,13 @@ function goSfMonitor(item) {
   router.push({ path: '/delivery-sf-orders', query })
 }
 
+function goOrdersManage(item) {
+  const d = String(item?.business_date || '').trim()
+  notificationPopoverVisible.value = false
+  const query = d ? { delivery_date: d, tab: 'single' } : { tab: 'single' }
+  router.push({ path: '/orders', query })
+}
+
 /** 与模板绑定：明确布尔，避免 Element Plus 菜单缓存旧结构 */
 const showFullAdminMenus = computed(() => !isDeliveryOnly.value && !isSystemOnly.value)
 /** 仅店主完整账号：财务中心、门店配置 */
@@ -475,6 +482,15 @@ function onTabClose(tab) {
                       @click="goSfMonitor(item)"
                     >
                       查看详情
+                    </el-button>
+                    <el-button
+                      v-if="item.kind === 'single_meal_order_paid'"
+                      size="small"
+                      text
+                      type="primary"
+                      @click="goOrdersManage(item)"
+                    >
+                      去订单管理
                     </el-button>
                     <el-button
                       size="small"

@@ -74,7 +74,7 @@
         </view>
 
         <button
-          v-if="order.pay_status === '未支付'"
+          v-if="order.pay_status === '未支付' && order.fulfillment_status === 'pending'"
           class="btn-pay"
           :disabled="paying"
           hover-class="none"

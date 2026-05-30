@@ -103,6 +103,7 @@ import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { getMemberToken, reLaunchIfCourierModePreferred } from '@/utils/api.js'
 import { listSingleMealOrders, singleOrderStatusMeta } from '@/utils/singleOrderApi.js'
 import { listMemberCardOrders } from '@/utils/memberCardOrderApi.js'
+import { STORAGE_OPEN_ORDERS_PENDING_PAY } from '@/utils/unpaidOrderPrompt.js'
 import { syncCustomTabBar, getCustomTabBarBottomReservePx } from '@/utils/customTabBar.js'
 
 const MAIN_SINGLE = 'single'
@@ -305,6 +306,16 @@ function openMallHint(row) {
 onShow(() => {
   if (reLaunchIfCourierModePreferred()) return
   syncCustomTabBar()
+  try {
+    const hint = uni.getStorageSync(STORAGE_OPEN_ORDERS_PENDING_PAY)
+    if (hint === 'single' || hint === 'mall') {
+      uni.removeStorageSync(STORAGE_OPEN_ORDERS_PENDING_PAY)
+      mainTab.value = hint === 'mall' ? MAIN_MALL : MAIN_SINGLE
+      listStatus.value = 'pending_pay'
+    }
+  } catch {
+    /* ignore */
+  }
   void fetchPage(true)
 })
 </script>
