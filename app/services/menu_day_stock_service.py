@@ -272,6 +272,30 @@ def assert_single_order_stock_available(
         )
 
 
+def sync_kitchen_planned_to_menu_day_total_stock(
+    db: Session,
+    *,
+    store_id: int,
+    business_date: date,
+    planned_total: int,
+) -> bool:
+    """后厨计划联动：写入营业日对应周槽「日总份数」；槽位无菜品则跳过。"""
+    sid = int(store_id)
+    anchor = _week_start(business_date)
+    slot = business_date.weekday() + 1
+    w = db.scalar(
+        select(WeeklyMenuSlot).where(
+            WeeklyMenuSlot.store_id == sid,
+            WeeklyMenuSlot.week_start == anchor,
+            WeeklyMenuSlot.slot == slot,
+        )
+    )
+    if w is None or w.dish_id is None:
+        return False
+    w.total_stock = max(0, int(planned_total))
+    return True
+
+
 def set_weekly_slot_total_stock(
     db: Session, week_start: date, slot: int, total_stock: int | None, *, store_id: int
 ) -> None:

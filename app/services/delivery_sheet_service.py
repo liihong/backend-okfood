@@ -39,6 +39,15 @@ from app.services.member_address_service import delivery_region_name_map, full_a
 from app.services.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
 
 
+def _member_balance_quota(mem: Member) -> tuple[int, int]:
+    """剩余次数与展示用总次数（次卡无 quota 时用 balance 作为分母）。"""
+    bal = max(0, int(mem.balance or 0))
+    quota = max(0, int(getattr(mem, "meal_quota_total", 0) or 0))
+    if quota <= 0:
+        quota = bal
+    return bal, quota
+
+
 def _normalize_address_key(s: str) -> str:
     return " ".join(s.strip().split()).casefold()
 
@@ -593,6 +602,7 @@ def build_delivery_sheet(
             for mem in ms_sorted:
                 addr = default_by_id.get(mem.id)
                 rmk = _member_line_remarks(mem, addr)
+                bal, quota = _member_balance_quota(mem)
                 lines.append(
                     DeliverySheetMemberOut(
                         member_id=int(mem.id),
@@ -600,6 +610,8 @@ def build_delivery_sheet(
                         name=mem.name,
                         plan_type=(mem.plan_type or "").strip() or None,
                         daily_meal_units=effective_daily_meal_units(mem),
+                        balance=bal,
+                        meal_quota_total=quota,
                         remarks=rmk,
                         area_issue=_member_area_issue(addr, known_ids),
                         is_delivered=mem.id in delivered_set,
@@ -667,6 +679,7 @@ def build_delivery_sheet(
         ):
             addr = pu_defaults.get(mem.id)
             rmk = _member_line_remarks(mem, addr)
+            bal, quota = _member_balance_quota(mem)
             lines.append(
                 DeliverySheetMemberOut(
                     member_id=int(mem.id),
@@ -674,6 +687,8 @@ def build_delivery_sheet(
                     name=mem.name,
                     plan_type=(mem.plan_type or "").strip() or None,
                     daily_meal_units=effective_daily_meal_units(mem),
+                    balance=bal,
+                    meal_quota_total=quota,
                     remarks=rmk,
                     area_issue=False,
                     is_delivered=mem.id in delivered_set,

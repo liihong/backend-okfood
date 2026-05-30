@@ -532,6 +532,11 @@ class DashboardMealSummaryOut(BaseModel):
     business_anchor_date: date = Field(..., description="本响应中「今日/明日」所锚定的业务日(上海)，「明日」为其日历次日")
     today_leave_members: int = Field(..., description="今日请假会员数")
     today_meals_to_prepare: int = Field(..., description="今日需准备餐品份数（与大表分组合计一致）")
+    kitchen_planned_total: int | None = Field(
+        None,
+        ge=0,
+        description="已废弃，恒为 null；日总份数请使用 today_menu_day_total_stock",
+    )
     tomorrow_leave_members: int = Field(..., description="明日请假会员数")
     tomorrow_meals_to_prepare: int = Field(..., description="明日需准备餐品份数")
     today_expire_one_unit_members: int = Field(
@@ -629,6 +634,13 @@ class DashboardMealSummaryOut(BaseModel):
     snapshot_recorded_at: datetime | None = Field(
         None, description="归档写入时间；当日实时计算时通常为空（过去日首算写入后同次响应亦可为空）"
     )
+
+
+class AdminKitchenPlanUpsertIn(BaseModel):
+    """后厨快捷设定：写入锚定日周菜单槽位「日总份数」。"""
+
+    business_date: date = Field(..., description="上海业务日，通常与营业概览锚定日一致")
+    planned_total: int = Field(..., ge=0, le=99999, description="日总份数（与本周菜单配置同源）")
 
 
 class AdminDashboardSummaryApiOut(BaseModel):
@@ -746,6 +758,12 @@ class DeliverySheetMemberOut(BaseModel):
     name: str
     plan_type: str | None = Field(None, description="套餐类型：次卡 / 周卡 / 月卡")
     daily_meal_units: int = Field(1, ge=1, description="该会员当日计入份数")
+    balance: int = Field(0, ge=0, description="会员剩余次数（核销后扣减）")
+    meal_quota_total: int = Field(
+        0,
+        ge=0,
+        description="周/月卡累计总次数；次卡或与 balance 同源时为 0",
+    )
     remarks: str | None = None
     area_issue: bool = Field(False, description="会员主档或默认地址片区为空、未分配或与启用区域表不一致")
     is_delivered: bool = Field(

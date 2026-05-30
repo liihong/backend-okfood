@@ -47,6 +47,7 @@ from app.schemas.admin import (
     WeeklySlotAssignIn,
     MenuDayTotalStockIn,
     AdminDashboardSummaryApiOut,
+    AdminKitchenPlanUpsertIn,
     SfSameCityPreviewOut,
     SfSameCityPushIn,
     SfSameCityPushOut,
@@ -225,6 +226,32 @@ def dashboard_summary(
         store_id=store_id,
     )
     return AdminDashboardSummaryApiOut(data=summary, msg="获取成功")
+
+
+@router.put("/kitchen-plan", response_model=None)
+def upsert_kitchen_plan_route(
+    body: AdminKitchenPlanUpsertIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """快捷设定营业日周菜单「日总份数」（与本周菜单配置页同源，不联动顶卡等其他数据）。"""
+    from app.services.store_kitchen_plan_service import set_menu_day_total_stock_by_business_date
+
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    total = set_menu_day_total_stock_by_business_date(
+        db,
+        store_id=int(store_id),
+        business_date=body.business_date,
+        total_stock=int(body.planned_total),
+    )
+    return success(
+        data={
+            "business_date": body.business_date.isoformat(),
+            "total_stock": total,
+        },
+        msg="日总份数已保存",
+    )
 
 
 @router.get("/finance/received-summary")
