@@ -53,7 +53,7 @@ class Member(Base):
     # 固定周六不参与订阅履约（当周六十 global 仍为履约日时）；默认关闭
     skip_subscription_saturday: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     membership_refunded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
@@ -63,5 +63,8 @@ def _member_set_updated_at(_mapper, _connection, target: Member) -> None:
     changed = {attr.key for attr in inspect(target).attrs if attr.history.has_changes()}
     # 微信登录 / 同步 openid 不刷新档案最近操作时间
     if changed <= {"wx_mini_openid"}:
+        return
+    # 顺丰 / 骑手 / 管理端标记送达扣次：仅改 balance / is_active，不刷新
+    if changed <= {"balance", "is_active"}:
         return
     target.updated_at = beijing_now_naive()

@@ -269,21 +269,21 @@ function canCancelOrder(row) {
   const f = String(row.fulfillment_status || '').trim().toLowerCase()
   if (pay === '已退款' || f === 'delivered' || f === 'cancelled') return false
   if (pay === '未支付') return f === 'pending'
-  if (pay === '已支付') return f === 'pending' || f === 'accepted' || f === 'sf_cancelled'
+  if (pay === '已支付') return f === 'pending' || f === 'sf_awaiting_pickup' || f === 'accepted' || f === 'sf_cancelled'
   return false
 }
 
 function canMarkOrderComplete(row) {
   if (!row || row.pay_status !== '已支付') return false
   const f = String(row.fulfillment_status || '').trim().toLowerCase()
-  return f === 'pending' || f === 'accepted'
+  return f === 'pending' || f === 'sf_awaiting_pickup' || f === 'accepted'
 }
 
 function canModifyOrder(row) {
   if (!row) return false
   const pay = String(row.pay_status || '').trim()
   const f = String(row.fulfillment_status || '').trim().toLowerCase()
-  if (pay === '已退款' || f === 'cancelled' || f === 'accepted') return false
+  if (pay === '已退款' || f === 'cancelled' || f === 'accepted' || f === 'sf_awaiting_pickup') return false
   return f === 'pending' || f === 'sf_cancelled' || f === 'delivered'
 }
 
@@ -1018,6 +1018,7 @@ function mallPayClass(s) {
 /** 单次点餐订单状态（与接口 fulfillment_status 对应，商城常用口径） */
 const SINGLE_ORDER_STATUS_ZH = {
   pending: '待发货',
+  sf_awaiting_pickup: '待取货',
   accepted: '配送中',
   delivered: '已完成',
   sf_cancelled: '顺丰取消',
@@ -1039,6 +1040,7 @@ function singleOrderStatusClass(row) {
   if (x === 'delivered') return 'member-pill member-pill--emerald'
   if (x === 'sf_cancelled' || x === 'cancelled') return 'member-pill member-pill--rose'
   if (x === 'accepted') return 'member-pill member-pill--sky'
+  if (x === 'sf_awaiting_pickup') return 'member-pill member-pill--amber'
   if (x === 'pending') return 'member-pill member-pill--amber'
   return 'member-pill member-pill--slate'
 }
@@ -1404,6 +1406,12 @@ onMounted(() => {
                   <template v-if="row.store_pickup">门店自提</template>
                   <template v-else>{{ singleOrderDeliveryAddressTextOnly(row) }}</template>
                 </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="地址备注" min-width="140" show-overflow-tooltip class-name="td-remarks">
+              <template #default="{ row }">
+                <template v-if="row.store_pickup">—</template>
+                <template v-else>{{ (row.address_remarks || '').trim() || '—' }}</template>
               </template>
             </el-table-column>
             <el-table-column label="单号" width="120" class-name="td-mono orders-trade-no-col" show-overflow-tooltip>

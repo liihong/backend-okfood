@@ -377,6 +377,11 @@ def persist_sf_callback_and_sync_push(
             from app.services.single_meal_order_service import sync_single_meal_sf_order_id_for_push_no_commit
 
             sync_single_meal_sf_order_id_for_push_no_commit(db, pus)
+            from app.services.single_meal_order_service import (
+                sync_single_meal_pickup_status_from_sf_push_no_commit,
+            )
+
+            sync_single_meal_pickup_status_from_sf_push_no_commit(db, pus)
 
     side_effect = None
     if sign_ok and matched_push is not None:

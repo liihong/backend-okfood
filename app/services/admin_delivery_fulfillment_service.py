@@ -142,6 +142,8 @@ def admin_mark_subscription_fulfilled(
         from app.services.member_renew_subscribe_service import try_send_renew_remind_after_balance_change
 
         try_send_renew_remind_after_balance_change(db, renew[0], balance_before=renew[1])
+        if db.new or db.dirty or db.deleted:
+            db.commit()
 
 
 def subscription_fulfilled_try_sf_home_no_commit(

@@ -698,9 +698,6 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
             detail=None,
         )
     )
-    from app.services.member_renew_subscribe_service import try_send_renew_remind_after_balance_change
-
-    try_send_renew_remind_after_balance_change(db, member, balance_before=balance_before)
     fee_yuan = courier_delivery_fee_yuan_for_meal_units(db, deduct, store_id=int(member.store_id))
     courier_row = db.execute(select(Courier).where(Courier.courier_id == courier_id).with_for_update()).scalar_one_or_none()
     if not courier_row:
@@ -708,3 +705,8 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
     prev = courier_row.fee_pending if courier_row.fee_pending is not None else Decimal("0.00")
     courier_row.fee_pending = prev + fee_yuan
     db.commit()
+    from app.services.member_renew_subscribe_service import try_send_renew_remind_after_balance_change
+
+    try_send_renew_remind_after_balance_change(db, member, balance_before=balance_before)
+    if db.new or db.dirty or db.deleted:
+        db.commit()

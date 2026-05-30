@@ -18,6 +18,8 @@ _SF_PUSH_KIND_DELIVERY_SHEET = "delivery_sheet"
 KIND_SF_NIGHTLY_PUSH = "sf_nightly_push"
 # 顺丰大表快照已成立后，小程序侧又让会员「当日重新应配送」时需客服人工并入顺丰链路
 KIND_DELIVERY_SHEET_MANUAL_ATTENTION = "delivery_sheet_manual_attention"
+# 小程序自助购卡已缴、待客服确认起送日并同步入账
+KIND_MINIPROGRAM_CARD_ORDER_PENDING = "miniprogram_card_order_pending"
 
 
 def _sf_nightly_push_message(*, total: int, success: int, failed: int, skip_reason: str | None) -> str:
@@ -162,6 +164,56 @@ def create_delivery_sheet_manual_attention_notification(
         store_id=sid,
         kind=KIND_DELIVERY_SHEET_MANUAL_ATTENTION,
         business_date=business_date,
+        title=title[:200],
+        message=body,
+        total_count=0,
+        success_count=0,
+        failed_count=0,
+        skip_reason=None,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def create_miniprogram_card_order_pending_notification(
+    db: Session,
+    *,
+    store_id: int,
+    order_id: int,
+    card_kind: str,
+    member_id: int,
+    member_phone: str | None,
+    member_name: str | None,
+    delivery_start_date: date | None,
+) -> AdminSystemNotification | None:
+    """小程序自助购卡支付成功：提醒客服确认起送日并在开卡工单中同步入账。"""
+    sid = int(store_id)
+    if sid <= 0:
+        return None
+
+    biz = today_shanghai()
+    phones = str(member_phone or "").strip()[:32] or "(无手机号)"
+    naming = str(member_name or "").strip()
+    naming = naming[:40] + ("…" if len(naming) > 40 else "")
+
+    kind_label = str(card_kind or "").strip() or "会员卡"
+    ds_text = delivery_start_date.isoformat() if delivery_start_date else "未填写"
+    title = f"小程序自助购卡待确认 · 工单#{int(order_id)}"
+    body = (
+        f"会员 mid={int(member_id)} {phones} "
+        f"{('「' + naming + '」') if naming else ''}"
+        f"已微信支付购买{kind_label}，用户所选起送日 {ds_text}。"
+        "用户可能在小程序完善配送信息中已填写起送日；"
+        "请在「开卡工单」核对起送日与配送方式后点击「确认入账」。"
+    )
+    if len(body) > 500:
+        body = body[:497] + "…"
+
+    row = AdminSystemNotification(
+        store_id=sid,
+        kind=KIND_MINIPROGRAM_CARD_ORDER_PENDING,
+        business_date=biz,
         title=title[:200],
         message=body,
         total_count=0,

@@ -698,6 +698,17 @@ def patch_member_profile(
 
         )
 
+    if set_delivery_start and not defer_applied and m.delivery_start_date is not None:
+        from app.services.member_card_order_service import (
+            apply_delivery_start_to_pending_miniprogram_card_order,
+        )
+
+        apply_delivery_start_to_pending_miniprogram_card_order(
+            db,
+            member_id,
+            m.delivery_start_date,
+        )
+
     # 操作日志：仅记录「争议易扯皮」的字段变化（份数/暂停/自提/起送日）
     new_snapshot = {
         "daily_meal_units": int(m.daily_meal_units or 1),
