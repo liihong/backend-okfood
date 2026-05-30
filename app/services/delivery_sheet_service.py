@@ -23,8 +23,9 @@ from app.core.delivery_calendar import is_subscription_delivery_day
 from app.core.timeutil import today_shanghai
 from app.models.delivery_log import DeliveryLog
 from app.models.delivery_region import DeliveryRegion
-from app.models.enums import DeliveryStatus
+from app.models.enums import CardOrderKind, CardOrderPayStatus, DeliveryStatus
 from app.models.member import Member
+from app.models.member_card_order import MemberCardOrder
 from app.models.member_address import MemberAddress
 from app.models.store import Store
 from app.schemas.admin import DeliverySheetGroupOut, DeliverySheetMemberOut, DeliverySheetOut, DeliverySheetStopOut
@@ -397,6 +398,57 @@ def _store_membership_counts(db: Session, *, store_id: int) -> dict[str, int]:
         "expired_weekly_members": int(row.we or 0),
         "active_monthly_members": int(row.ma or 0),
         "expired_monthly_members": int(row.me or 0),
+    }
+
+
+def _card_reorder_members_for_kind(db: Session, *, store_id: int, card_kind: str) -> tuple[int, int]:
+    """某卡型「续卡率」分子/分母：跨日二次及以上已缴入账人数 ÷ 曾有过该卡型入账人数。"""
+    paid_filters = (
+        MemberCardOrder.store_id == int(store_id),
+        MemberCardOrder.card_kind == card_kind,
+        MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+        MemberCardOrder.applied_to_member.is_(True),
+        Member.deleted_at.is_(None),
+    )
+    base = int(
+        db.scalar(
+            select(func.count(func.distinct(MemberCardOrder.member_id)))
+            .select_from(MemberCardOrder)
+            .join(Member, Member.id == MemberCardOrder.member_id)
+            .where(*paid_filters)
+        )
+        or 0
+    )
+    reorder = int(
+        db.scalar(
+            select(func.count())
+            .select_from(
+                select(MemberCardOrder.member_id)
+                .join(Member, Member.id == MemberCardOrder.member_id)
+                .where(*paid_filters)
+                .group_by(MemberCardOrder.member_id)
+                .having(func.count(func.distinct(func.date(MemberCardOrder.created_at))) >= 2)
+                .subquery()
+            )
+        )
+        or 0
+    )
+    return reorder, base
+
+
+def _store_card_reorder_stats(db: Session, *, store_id: int) -> dict[str, int]:
+    """仪表盘地图会员库：周卡/月卡续卡率（跨日二次开卡入账）。"""
+    week_reorder, week_base = _card_reorder_members_for_kind(
+        db, store_id=store_id, card_kind=CardOrderKind.WEEK.value
+    )
+    month_reorder, month_base = _card_reorder_members_for_kind(
+        db, store_id=store_id, card_kind=CardOrderKind.MONTH.value
+    )
+    return {
+        "weekly_card_reorder_members": week_reorder,
+        "weekly_card_reorder_base_members": week_base,
+        "monthly_card_reorder_members": month_reorder,
+        "monthly_card_reorder_base_members": month_base,
     }
 
 

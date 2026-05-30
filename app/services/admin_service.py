@@ -47,6 +47,7 @@ from app.services.courier_service import (
 )
 from app.services.delivery_sheet_service import (
     DeliverySheetDayMetrics,
+    _store_card_reorder_stats,
     _store_membership_counts,
     delivery_sheet_metrics_for_date,
     meal_units_totals_for_delivery_dates,
@@ -295,6 +296,7 @@ def list_members_paged(
         store_id=store_id,
     )
     page_sq = (
+        # 用户操作时间：members.updated_at（小程序/管理端档案变更时刷新，微信仅同步 openid 不刷新）
         page_sq.order_by(func.coalesce(Member.updated_at, Member.created_at).desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -889,7 +891,10 @@ def dashboard_meal_summary(
     cal_today = today_shanghai()
     wow_prev_anchor = date.fromordinal(anchor.toordinal() - 7)
     wow_prev_day_after = date.fromordinal(day_after.toordinal() - 7)
-    mem_kw = _store_membership_counts(db, store_id=sid)
+    mem_kw = {
+        **_store_membership_counts(db, store_id=sid),
+        **_store_card_reorder_stats(db, store_id=sid),
+    }
     from app.services.menu_day_stock_service import weekly_menu_day_total_stock
 
     today_menu_day_total_stock = weekly_menu_day_total_stock(db, anchor, store_id=sid)
@@ -1040,6 +1045,10 @@ def dashboard_meal_summary(
             expired_weekly_members=out.expired_weekly_members,
             active_monthly_members=out.active_monthly_members,
             expired_monthly_members=out.expired_monthly_members,
+            weekly_card_reorder_members=out.weekly_card_reorder_members,
+            weekly_card_reorder_base_members=out.weekly_card_reorder_base_members,
+            monthly_card_reorder_members=out.monthly_card_reorder_members,
+            monthly_card_reorder_base_members=out.monthly_card_reorder_base_members,
             tomorrow_first_meal_new_members=out.tomorrow_first_meal_new_members,
             today_meals_week_over_week_caption=out.today_meals_week_over_week_caption,
             tomorrow_meals_week_over_week_caption=out.tomorrow_meals_week_over_week_caption,

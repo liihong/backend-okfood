@@ -407,7 +407,7 @@ class MemberAdminOut(BaseModel):
         description="退卡退款确认时刻（ISO）；非空则档案状态为已退款",
     )
     created_at: str
-    updated_at: str = Field("", description="档案最近更新时间（ISO，上海墙钟）")
+    updated_at: str = Field("", description="用户操作时间（档案最近更新时间，ISO 上海墙钟；列表默认按此倒序）")
 
 
 class MemberListStatsOut(BaseModel):
@@ -573,6 +573,26 @@ class DashboardMealSummaryOut(BaseModel):
         ...,
         ge=0,
         description="月卡且 balance=0",
+    )
+    weekly_card_reorder_members: int = Field(
+        ...,
+        ge=0,
+        description="周卡：不同日期二次及以上「已缴且已入账」开卡工单的去重会员数（续卡率分子）",
+    )
+    weekly_card_reorder_base_members: int = Field(
+        ...,
+        ge=0,
+        description="周卡：曾有过「已缴且已入账」周卡工单的去重会员数（续卡率分母）",
+    )
+    monthly_card_reorder_members: int = Field(
+        ...,
+        ge=0,
+        description="月卡：不同日期二次及以上「已缴且已入账」开卡工单的去重会员数（续卡率分子）",
+    )
+    monthly_card_reorder_base_members: int = Field(
+        ...,
+        ge=0,
+        description="月卡：曾有过「已缴且已入账」月卡工单的去重会员数（续卡率分母）",
     )
     tomorrow_first_meal_new_members: int = Field(
         ...,
