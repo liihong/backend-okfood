@@ -5,6 +5,7 @@ import { ElMessageBox } from 'element-plus'
 import { RefreshCw } from 'lucide-vue-next'
 import { apiBlob, apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import { toastSfPushBatchOutcome, toastSfPushError } from '../utils/sfPushMessages.js'
 
 function todayShanghaiStr() {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -353,7 +354,7 @@ async function onRetrySf(row) {
       { auth: true },
     )
     if (res && res.ok === false) {
-      showToast(res.message || '重试未成功', 'warning')
+      toastSfPushError(res.message || '重试未成功', showToast)
     } else {
       showToast('已提交重试', 'success')
     }
@@ -364,7 +365,7 @@ async function onRetrySf(row) {
       handleAdminLogout()
       return
     }
-    showToast(e instanceof Error ? e.message : '重试失败', 'error')
+    toastSfPushError(e instanceof Error ? e.message : '重试失败', showToast)
   } finally {
     retryBusyId.value = null
   }

@@ -6,6 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import MemberDeliveryMapPicker from '../components/MemberDeliveryMapPicker.vue'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import { toastSfPushBatchOutcome, toastSfPushError } from '../utils/sfPushMessages.js'
 import { parseApiDateTimeBeijing } from '../utils/beijingDateTime.js'
 
 function todayShanghaiStr() {
@@ -560,7 +561,7 @@ async function onPushSfRetail(row) {
       handleAdminLogout()
       return
     }
-    showToast(e instanceof Error ? e.message : '推送失败', 'error')
+    toastSfPushError(e instanceof Error ? e.message : '推送失败', showToast)
   } finally {
     dispatchLoadingId.value = 0
   }
@@ -815,13 +816,10 @@ async function onBatchPushSfRetail() {
     )
     const results = Array.isArray(data?.results) ? data.results : []
     const okCount = results.filter((x) => x && x.ok).length
-    const fail = results.filter((x) => x && !x.ok)
-    if (fail.length) {
-      const msg = fail.map((f) => `#${f.order_id}: ${f.message || ''}`).join('；')
-      showToast(`成功 ${okCount} 笔，失败 ${fail.length} 笔：${msg}`, fail.length === ids.length ? 'error' : 'warning')
-    } else {
-      showToast(`已全部提交顺丰（${okCount} 笔）`, 'success')
-    }
+    toastSfPushBatchOutcome(data, showToast, {
+      successText: `已全部提交顺丰（${okCount} 笔）`,
+      formatFailLine: (f) => `#${f.order_id}: ${f.message || ''}`,
+    })
     clearSingleSelection()
     await fetchSingleMeals()
   } catch (e) {
@@ -830,7 +828,7 @@ async function onBatchPushSfRetail() {
       handleAdminLogout()
       return
     }
-    showToast(e instanceof Error ? e.message : '批量推送失败', 'error')
+    toastSfPushError(e instanceof Error ? e.message : '批量推送失败', showToast)
   } finally {
     batchDispatchLoading.value = false
   }

@@ -1597,18 +1597,49 @@ def bulk_push_single_meal_retail_to_sf(
         finally:
             sdb.close()
 
-    concurrency = int(get_settings().SF_PUSH_HTTP_CONCURRENCY or 1)
-    if concurrency <= 1 or len(oids) == 1:
-        return {"results": [_push_one(oid) for oid in oids]}
+    from app.services.sf_open.user_messages import (
+        MSG_BALANCE_INSUFFICIENT,
+        MSG_SKIPPED_AFTER_BALANCE,
+        is_sf_balance_insufficient,
+    )
+
+    balance_halt = False
+    hint: str | None = None
+
+    def _append_result(item: dict[str, Any]) -> None:
+        nonlocal balance_halt, hint
+        results.append(item)
+        if not item.get("ok") and is_sf_balance_insufficient(
+            error_code=None, message=str(item.get("message") or "")
+        ):
+            balance_halt = True
+            hint = MSG_BALANCE_INSUFFICIENT
 
     results: list[dict[str, Any]] = []
+    concurrency = int(get_settings().SF_PUSH_HTTP_CONCURRENCY or 1)
+    if concurrency <= 1 or len(oids) == 1:
+        for oid in oids:
+            if balance_halt:
+                _append_result(
+                    {"order_id": int(oid), "ok": False, "message": MSG_SKIPPED_AFTER_BALANCE}
+                )
+                continue
+            _append_result(_push_one(oid))
+        return {"results": results, "hint": hint}
+
     workers = min(concurrency, len(oids))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         fut_map = {pool.submit(_push_one, oid): oid for oid in oids}
         for fut in as_completed(fut_map):
-            results.append(fut.result())
+            _append_result(fut.result())
     results.sort(key=lambda x: int(x["order_id"]))
-    return {"results": results}
+    if hint is None and any(
+        not r.get("ok")
+        and is_sf_balance_insufficient(error_code=None, message=str(r.get("message") or ""))
+        for r in results
+    ):
+        hint = MSG_BALANCE_INSUFFICIENT
+    return {"results": results, "hint": hint}
 
 
 def bulk_admin_assign_courier_single_meal_orders(

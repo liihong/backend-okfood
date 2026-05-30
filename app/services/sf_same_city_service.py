@@ -45,6 +45,14 @@ from app.services.member_address_service import delivery_region_name_map, full_a
 from app.services.member_service import effective_daily_meal_units
 from app.services.store_config_service import get_store_config
 from app.services.sf_open.client import SfOpenApiError, SfOpenClient
+from app.services.sf_open.user_messages import (
+    MSG_BALANCE_INSUFFICIENT,
+    MSG_PUSH_BUSY,
+    MSG_SKIPPED_AFTER_BALANCE,
+    classify_sf_push_exception,
+    is_sf_balance_insufficient,
+    sf_push_user_message,
+)
 from app.services.tenant_integration_service import merged_sf_integration_namespace
 from app.schemas.admin import (
     SfSameCityPreviewOut,
@@ -526,21 +534,39 @@ def _member_overlap_with_other_success_stops(
 
 
 @contextmanager
+def _mysql_named_lock(bind: Any, key: str, *, wait_sec: int):
+    """
+    MySQL GET_LOCK / RELEASE_LOCK 专用连接。
+
+    不可复用 FastAPI 的 Session 连接：推单流程内多次 ``db.commit()`` 会把连接还池，
+    锁仍留在原物理连接上，finally 在另一连接 RELEASE 无效，导致后续请求 30s 后 400。
+    """
+    with bind.connect() as lock_conn:
+        rc = lock_conn.execute(text("SELECT GET_LOCK(:k, :w)"), {"k": key, "w": int(wait_sec)}).scalar()
+        if rc != 1:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            try:
+                lock_conn.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": key})
+            except Exception:
+                logger.warning("RELEASE_LOCK 失败 key=%s", key, exc_info=True)
+
+
+@contextmanager
 def _sf_nightly_auto_push_global_lock(db: Session):
     """多进程/多实例部署时仅一个实例执行 08:50 自动推单；SQLite 等跳过。"""
     bind = db.get_bind()
     if getattr(bind.dialect, "name", "") != "mysql":
         yield True
         return
-    key = "okf_sf_nightly_push"
-    rc = db.execute(text("SELECT GET_LOCK(:k, 5)"), {"k": key}).scalar()
-    if rc != 1:
-        yield False
-        return
-    try:
+    with _mysql_named_lock(bind, "okf_sf_nightly_push", wait_sec=5) as acquired:
+        if not acquired:
+            yield False
+            return
         yield True
-    finally:
-        db.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": key})
 
 
 @contextmanager
@@ -554,13 +580,10 @@ def _sf_push_serial_lock(db: Session, *, store_id: int, d: date):
         yield
         return
     key = f"okf_sfpush_{store_id}_{d.isoformat()}"[:64]
-    rc = db.execute(text("SELECT GET_LOCK(:k, 30)"), {"k": key}).scalar()
-    if rc != 1:
-        raise ValueError("顺丰推单排队超时，请稍后重试")
-    try:
+    with _mysql_named_lock(bind, key, wait_sec=30) as acquired:
+        if not acquired:
+            raise ValueError(MSG_PUSH_BUSY)
         yield
-    finally:
-        db.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": key})
 
 
 @contextmanager
@@ -576,13 +599,10 @@ def _sf_retail_order_push_lock(db: Session, *, order_id: int):
         yield
         return
     key = f"okf_sf_retail_{int(order_id)}"[:64]
-    rc = db.execute(text("SELECT GET_LOCK(:k, 5)"), {"k": key}).scalar()
-    if rc != 1:
-        raise ValueError(f"订单 #{int(order_id)} 正在推单中，请稍候再试")
-    try:
+    with _mysql_named_lock(bind, key, wait_sec=5) as acquired:
+        if not acquired:
+            raise ValueError(f"订单 #{int(order_id)} 正在推单中，请稍候再试")
         yield
-    finally:
-        db.execute(text("SELECT RELEASE_LOCK(:k)"), {"k": key})
 
 
 def aggs_for_delivery_date(db: Session, d: date, *, store_id: int | None = None) -> dict[str, _Agg]:
@@ -1106,6 +1126,7 @@ def push_sf_same_city(
     dev_id = int(gset.SF_OPEN_DEV_ID)
     app_key = (gset.SF_OPEN_SECRET or "").strip()
     concurrency = int(base.SF_PUSH_HTTP_CONCURRENCY or 1)
+    batch_hint: str | None = None
 
     with _sf_push_serial_lock(db, store_id=sid, d=d):
         ags = ags_hint if ags_hint is not None else aggs_for_delivery_date(db, d, store_id=sid)
@@ -1202,6 +1223,7 @@ def push_sf_same_city(
                         except BaseException as e:
                             http_results[prep.stop_id] = (prep, e)
 
+            balance_halt = False
             for prep in wave:
                 packed = http_results.get(prep.stop_id)
                 if packed is None:
@@ -1209,11 +1231,10 @@ def push_sf_same_city(
                 _, raw = packed
                 if isinstance(raw, BaseException):
                     db.rollback()
-                    err_code = -2
-                    err_msg = str(raw)[:1000]
-                    if isinstance(raw, SfOpenApiError):
-                        err_code = int(raw.error_code) if raw.error_code is not None else -1
-                        err_msg = str(raw)[:1000]
+                    err_code, _raw, user_msg = classify_sf_push_exception(raw)
+                    if is_sf_balance_insufficient(error_code=err_code, message=_raw):
+                        balance_halt = True
+                        batch_hint = MSG_BALANCE_INSUFFICIENT
                     _persist_fail(
                         db,
                         d,
@@ -1221,7 +1242,7 @@ def push_sf_same_city(
                         prep.soid,
                         prep.snap_db,
                         err_code,
-                        err_msg,
+                        user_msg,
                         store_id=sid,
                         existing_push_id=retry_push_id,
                     )
@@ -1229,7 +1250,7 @@ def push_sf_same_city(
                         SfSameCityPushItemResult(
                             stop_id=prep.stop_id,
                             ok=False,
-                            message=err_msg,
+                            message=user_msg,
                             sf_order_id=None,
                         )
                     )
@@ -1251,6 +1272,7 @@ def push_sf_same_city(
                     out.append(result)
                 except Exception as e:
                     db.rollback()
+                    user_msg = sf_push_user_message(error_code=-2, message=str(e))
                     _persist_fail(
                         db,
                         d,
@@ -1258,7 +1280,7 @@ def push_sf_same_city(
                         prep.soid,
                         prep.snap_db,
                         -2,
-                        str(e)[:1000],
+                        user_msg,
                         store_id=sid,
                         existing_push_id=retry_push_id,
                     )
@@ -1266,15 +1288,33 @@ def push_sf_same_city(
                         SfSameCityPushItemResult(
                             stop_id=prep.stop_id,
                             ok=False,
-                            message=f"推单异常: {e!s}",
+                            message=user_msg,
                             sf_order_id=None,
                         )
                     )
 
+            if balance_halt:
+                for prep in queue:
+                    out.append(
+                        SfSameCityPushItemResult(
+                            stop_id=prep.stop_id,
+                            ok=False,
+                            message=MSG_SKIPPED_AFTER_BALANCE,
+                            sf_order_id=None,
+                        )
+                    )
+                queue.clear()
+                break
+
         order_index = {row.stop_id: idx for idx, row in enumerate(body.rows)}
         out.sort(key=lambda r: order_index.get(r.stop_id, len(body.rows)))
 
-    return SfSameCityPushOut(results=out)
+    if batch_hint is None and any(
+        not r.ok and is_sf_balance_insufficient(error_code=None, message=r.message) for r in out
+    ):
+        batch_hint = MSG_BALANCE_INSUFFICIENT
+
+    return SfSameCityPushOut(results=out, hint=batch_hint)
 
 
 def _persist_fail(
@@ -1720,6 +1760,8 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
                 )
             except SfOpenApiError as e:
                 db.rollback()
+                ec = int(e.error_code) if e.error_code is not None else -1
+                user_msg = sf_push_user_message(error_code=ec, message=str(e))
                 snap_fail = (
                     _sf_push_request_snapshot(snap_preview, pld, gset=gset)
                     if pld is not None
@@ -1731,12 +1773,12 @@ def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) 
                     stop_id,
                     soid,
                     snap_fail,
-                    int(e.error_code) if e.error_code is not None else -1,
-                    str(e)[:1000],
+                    ec,
+                    user_msg,
                     store_id=int(store_id),
                     push_kind=_SF_PUSH_KIND_SINGLE_MEAL_RETAIL,
                 )
-                raise ValueError(str(e)) from e
+                raise ValueError(user_msg) from e
             except Exception as e:
                 db.rollback()
                 snap_fail = (

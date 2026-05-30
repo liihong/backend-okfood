@@ -1034,6 +1034,10 @@ class SfSameCityPushItemResult(BaseModel):
 
 class SfSameCityPushOut(BaseModel):
     results: list[SfSameCityPushItemResult] = Field(default_factory=list)
+    hint: str | None = Field(
+        default=None,
+        description="批次级提示（如顺丰预付费余额不足），便于前端统一弹窗",
+    )
 
 
 class SfSameCityPushRetryOut(BaseModel):

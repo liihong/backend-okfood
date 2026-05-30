@@ -5,6 +5,7 @@ import { RefreshCw, MapPin, Truck, FileDown, Search, Loader2 } from 'lucide-vue-
 import * as XLSX from 'xlsx'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import { toastSfPushBatchOutcome, toastSfPushError } from '../utils/sfPushMessages.js'
 import { useAnimatedInteger } from '../composables/useAnimatedInteger.js'
 
 /** 与后端业务日一致：Asia/Shanghai 的日历日期 YYYY-MM-DD */
@@ -624,17 +625,10 @@ async function submitSfPush() {
       },
       { auth: true }
     )
-    const results = Array.isArray(data?.results) ? data.results : []
-    const fail = results.filter((x) => x && !x.ok)
-    if (fail.length) {
-      const msg = fail.map((f) => `${f.stop_id?.slice(0, 8)}: ${f.message || ''}`).join('；')
-      showToast(`部分失败：${msg}`, 'error')
-    } else {
-      showToast('已全部提交', 'success')
-    }
+    toastSfPushBatchOutcome(data, showToast)
     sfDialogOpen.value = false
   } catch (e) {
-    showToast(e instanceof Error ? e.message : '推单失败', 'error')
+    toastSfPushError(e instanceof Error ? e.message : '推单失败', showToast)
   } finally {
     sfPushSubmitting.value = false
   }
