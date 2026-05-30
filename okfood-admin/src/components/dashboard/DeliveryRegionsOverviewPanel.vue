@@ -2,11 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { Sun, Users, TrendingUp } from 'lucide-vue-next'
 import { useDeliveryRegionMapOverview } from '../../composables/useDeliveryRegionMapOverview.js'
-import DeliveryOverviewMap from './DeliveryOverviewMap.vue'
 import { UNASSIGNED_AREA_LABEL } from '../../utils/regionAssignment.js'
-import { apiJson, adminAccessToken, adminKind, handleAdminLogout } from '../../admin/core.js'
+import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 import { useAnimatedInteger } from '../../composables/useAnimatedInteger.js'
+import DashboardPickupKitchenPanel from './DashboardPickupKitchenPanel.vue'
 
 /** 营业概览顶卡数字条（请假/备餐/到期）；与 dashboard-summary / 归档接口回填 */
 const dashboardStats = ref([])
@@ -303,31 +303,15 @@ async function fetchDashboardSummary() {
   }
 }
 
-const amapKey = String(import.meta.env.VITE_AMAP_KEY || '').trim()
-const amapSecurity = String(import.meta.env.VITE_AMAP_SECURITY_CODE || '').trim()
-
 const {
   loading,
   error,
   load,
   regionsSorted,
   regionColorById,
-  mapMemberPoints,
-  storeAnchor,
-  stats,
   membersCountByArea,
   mapEligiblePlanCounts,
 } = useDeliveryRegionMapOverview()
-
-/** 与 layout 一致：完整店主菜单可见性 */
-const showFullAdminMenus = computed(() => {
-  const k = adminKind.value
-  return k !== 'delivery' && k !== 'system'
-})
-const showOwnerAdminMenus = computed(() => {
-  const k = adminKind.value
-  return k !== 'delivery' && k !== 'support' && k !== 'system'
-})
 
 const showDeliveryMetrics = computed(() => {
   if (error.value) return false
@@ -399,6 +383,14 @@ const cardPrepTotal = computed(() => {
   }
   // 无 prep_metrics 时退化为「今日需准备」合计（无法再拆公式三项）
   return cardPrepTotalFallback.value
+})
+
+/** 锚定日周菜单「日总份数」（供后厨计划面板读取，与本周菜单配置同源） */
+const menuDayTotalStock = computed(() => {
+  const v = summaryMeta.value?.today_menu_day_total_stock
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null
 })
 
 /** 无 prep_metrics 拆分时的总销售量兜底 */
@@ -572,10 +564,6 @@ const tomorrowSplitAria = computed(() => {
   return `明日配餐：配送餐 ${d} 份`
 })
 
-const storePinLegendCount = computed(() =>
-  storeAnchor.value?.store_lng != null && storeAnchor.value?.store_lat != null ? 1 : 0,
-)
-
 /** 概览数字滚动展示（加载 / 刷新 / 换日后过渡到新值） */
 const prepTotalAnimated = useAnimatedInteger(() => cardPrepTotal.value, { duration: 840 })
 const tomorrowTotalAnimated = useAnimatedInteger(() => cardTomorrowPrepTotal.value, { duration: 840 })
@@ -599,17 +587,6 @@ const mapLibActiveMonthlyAnimated = useAnimatedInteger(() => mapLibActiveMonthly
 const mapLibExpiredMonthlyAnimated = useAnimatedInteger(() => mapLibExpiredMonthly.value, { duration: 580 })
 const mapLibWeekSumAnimated = useAnimatedInteger(() => mapLibWeekSum.value, { duration: 560 })
 const mapLibMonthSumAnimated = useAnimatedInteger(() => mapLibMonthSum.value, { duration: 560 })
-const storePinLegendAnimated = useAnimatedInteger(() => storePinLegendCount.value, { duration: 420 })
-const deliveredTodayAnimated = useAnimatedInteger(() => stats.value.deliveredToday, { duration: 640 })
-const pendingTodayAnimated = useAnimatedInteger(() => stats.value.pendingToday, { duration: 640 })
-
-/** 勾选时仅显示「门店自提」会员坐标（档案 store_pickup） */
-const showSelfPickupPoints = ref(false)
-const mapPointsForDisplay = computed(() => {
-  const pts = mapMemberPoints.value
-  if (!showSelfPickupPoints.value) return pts
-  return pts.filter((p) => p.store_pickup === true || p.store_pickup === 1)
-})
 
 onMounted(() => {
   void load()
@@ -629,7 +606,7 @@ onMounted(() => {
 
     <p v-if="dashboardStatsLoading" class="dro-loading">正在加载营业概览…</p>
     <p v-else-if="!dashboardStats.length && !loading" class="dro-loading">
-      暂无营业概览数据，配送地图仍可查看。
+      暂无营业概览数据，片区覆盖仍可查看。
     </p>
 
     <!-- 三张概览卡：今日备餐 / 明日预测 / 地图会员库（样式对齐设计稿） -->
@@ -987,86 +964,32 @@ onMounted(() => {
       </article>
     </div>
 
+    <DashboardPickupKitchenPanel
+      v-if="(!dashboardStatsLoading && dashboardStats.length) || showDeliveryMetrics"
+      :business-date="businessAnchorIsoNormalized"
+      :menu-day-total-stock="menuDayTotalStock"
+      @menu-day-stock-saved="fetchDashboardSummary"
+    />
+
     <p v-if="loading && !regionsSorted.length" class="dro-loading">加载配送数据…</p>
     <p v-else-if="error" class="dro-error">{{ error }}</p>
 
-    <div v-else-if="showDeliveryMetrics" class="dro-dash-main">
-      <div class="dro-map-shell">
-        <div class="dro-map-toolbar">
-          <div class="dro-map-toolbar-left">
-            <span class="dro-map-toolbar-live-dot" aria-hidden="true" />
-            <span class="dro-map-toolbar-title">实时地理分布 (LIVE)</span>
-          </div>
-          <label class="dro-map-pickup-toggle">
-            <el-checkbox v-model="showSelfPickupPoints">自提显示</el-checkbox>
-          </label>
-        </div>
-        <div class="dro-map-body">
-          <DeliveryOverviewMap
-            :amap-key="amapKey"
-            :amap-security="amapSecurity"
-            :regions-sorted="regionsSorted"
-            :region-color-by-id="regionColorById"
-            :member-points="mapPointsForDisplay"
-            :store-anchor="storeAnchor"
-          />
-          <div class="dro-float-legends dro-float-legends--glass" aria-label="地图图例">
-            <div class="dro-legend-card dro-glass-legend">
-              <h4 class="dro-legend-h">标注图例</h4>
-              <ul class="dro-legend-metrics">
-                <li>
-                  <span class="dro-legend-metrics-left">
-                    <span class="dro-dot dro-dot--store" />
-                    <span>门店位置</span>
-                  </span>
-                  <span class="dro-legend-metrics-n">{{ storePinLegendAnimated }}</span>
-                </li>
-                <li>
-                  <span class="dro-legend-metrics-left">
-                    <span class="dro-dot dro-dot--leave" />
-                    <span>今日请假</span>
-                  </span>
-                  <span class="dro-legend-metrics-n">{{ todayLeaveAnimated }}</span>
-                </li>
-                <li>
-                  <span class="dro-legend-metrics-left">
-                    <span class="dro-dot dro-dot--done" />
-                    <span>当日已送达</span>
-                  </span>
-                  <span class="dro-legend-metrics-n">{{ deliveredTodayAnimated }}</span>
-                </li>
-                <li>
-                  <span class="dro-legend-metrics-left">
-                    <span class="dro-dot dro-dot--pending" />
-                    <span>尚未送达</span>
-                  </span>
-                  <span class="dro-legend-metrics-n">{{ pendingTodayAnimated }}</span>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <aside class="dro-rank-card" aria-label="片区覆盖排行">
+    <div v-else-if="showDeliveryMetrics" class="dro-rank-section">
+      <article class="dro-rank-card dro-rank-card--horizontal" aria-label="片区覆盖排行">
         <div class="dro-rank-head">
           <h3 class="dro-rank-title">片区覆盖排行</h3>
           <TrendingUp :size="18" class="dro-rank-trend-ico" aria-hidden="true" />
         </div>
-        <div class="dro-rank-list custom-scrollbar">
-          <div v-for="row in regionCoverageRows" :key="row.id" class="dro-rank-item">
-            <div class="dro-rank-item-head">
-              <div class="dro-rank-item-meta">
-                <p class="dro-rank-name">{{ row.name }}</p>
-                <p class="dro-rank-count">
-                  {{ row.memberCount }}
-                  <span class="dro-rank-count-unit">Member</span>
-                </p>
-              </div>
-              <span class="dro-rank-pct-wrap"
-                ><span class="dro-rank-pct">{{ row.coveragePercent }}%</span></span
-              >
+        <div class="dro-rank-grid">
+          <div v-for="row in regionCoverageRows" :key="row.id" class="dro-rank-tile">
+            <div class="dro-rank-tile__head">
+              <p class="dro-rank-name">{{ row.name }}</p>
+              <span class="dro-rank-pct">{{ row.coveragePercent }}%</span>
             </div>
+            <p class="dro-rank-count">
+              {{ row.memberCount }}
+              <span class="dro-rank-count-unit">Member</span>
+            </p>
             <div class="dro-rank-bar">
               <div
                 class="dro-rank-bar-fill"
@@ -1075,13 +998,7 @@ onMounted(() => {
             </div>
           </div>
         </div>
-        <!-- <div v-if="showFullAdminMenus" class="dro-rank-actions">
-          <router-link v-if="showOwnerAdminMenus" class="dro-rank-btn dro-rank-btn--primary" to="/store-config">
-            门店配置
-          </router-link>
-          <router-link class="dro-rank-btn dro-rank-btn--secondary" to="/regions">片区管理</router-link>
-        </div> -->
-      </aside>
+      </article>
     </div>
   </section>
 </template>
@@ -2420,283 +2337,30 @@ button.dro-dash-kpi__kicker--reset-live:focus-visible {
   color: #ca8a04;
 }
 
-/* 主区：地图宽 + 右侧排行 */
-.dro-dash-main {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1.5rem;
-  align-items: start;
+/* 片区覆盖排行：全宽横向卡片（对齐设计稿图2） */
+.dro-rank-section {
+  margin-top: 0;
 }
 
-@media (min-width: 1280px) {
-  .dro-dash-main {
-    grid-template-columns: minmax(0, 9fr) minmax(260px, 3fr);
-  }
-}
-
-.dro-map-shell {
-  background: #fff;
-  border-radius: 2.5rem;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  min-height: min(calc(100vh - 300px), 880px);
-}
-
-.dro-map-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem 1rem;
-  padding: 1.5rem;
-  border-bottom: 1px solid #f8fafc;
-  flex-shrink: 0;
-}
-
-.dro-map-toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.dro-map-toolbar-live-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #10b981;
-  flex-shrink: 0;
-}
-
-.dro-map-toolbar-title {
-  font-size: 14px;
-  font-weight: 900;
-  color: #334155;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dro-map-pickup-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-  user-select: none;
-  flex-shrink: 0;
-}
-
-.dro-map-pickup-label {
-  font-size: 12px;
-  font-weight: 700;
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-/**
- * 切勿给 el-checkbox 根节点写死宽高：会把整块控件压成极小区域，文案「自提显示」被裁切。
- * 勾选态颜色通过内部元素覆盖。
- */
-.dro-map-pickup-toggle :deep(.el-checkbox__label) {
-  font-size: 13px;
-  font-weight: 700;
-  color: #475569;
-}
-
-.dro-map-pickup-toggle :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
-  background-color: #10b981;
-  border-color: #10b981;
-}
-
-.dro-map-pickup-toggle :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
-  color: #0f766e;
-}
-
-.dro-map-body {
-  position: relative;
-  flex: 1;
-  min-height: 500px;
-  background-color: #f8fafc;
-  background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-
-.dro-map-body :deep(.delivery-overview-map) {
-  border: none;
-  border-radius: 0;
-  height: min(calc(100vh - 360px), 900px);
-  min-height: 500px;
-}
-
-.dro-map-body :deep(.delivery-overview-map-hint) {
-  border-radius: 0;
-  min-height: 240px;
-}
-
-.dro-float-legends {
-  position: absolute;
-  right: 1rem;
-  bottom: 1rem;
-  left: auto;
-  z-index: 400;
-  width: min(17rem, calc(100% - 2rem));
-  max-height: min(40vh, 320px);
-  overflow-y: auto;
-  pointer-events: auto;
-}
-
-.dro-float-legends--glass {
-  left: 2rem;
-  right: auto;
-  bottom: 2rem;
-}
-
-.dro-legend-card {
-  padding: 0.8rem 0.95rem;
-  border-radius: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  background: rgba(255, 255, 255, 0.42);
-  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04);
-  backdrop-filter: blur(16px) saturate(1.15);
-  -webkit-backdrop-filter: blur(16px) saturate(1.15);
-}
-
-/* 与 HTML 一致：图例卡为更强的毛玻璃（需置于 .dro-legend-card 之后以覆盖基础样式） */
-.dro-legend-card.dro-glass-legend {
-  padding: 1.5rem;
-  border-radius: 1.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06);
-}
-
-.dro-legend-h {
-  margin: 0 0 0.65rem;
-  padding-bottom: 0.45rem;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
-  font-size: 12px;
-  font-weight: 900;
-  color: #64748b;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.dro-legend-metrics {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.dro-legend-metrics li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-size: 12px;
-  font-weight: 700;
-  color: #475569;
-  margin-bottom: 0.45rem;
-}
-
-.dro-legend-metrics li:last-of-type {
-  margin-bottom: 0;
-}
-
-.dro-legend-metrics-left {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-width: 0;
-}
-
-.dro-legend-metrics-n {
-  font-weight: 900;
-  color: #94a3b8;
-  font-variant-numeric: tabular-nums;
-}
-
-/* 精雕版图例：标题字距与数字等宽字体（置于通用 .dro-legend-h 之后以保证覆盖） */
-.dro-legend-card.dro-glass-legend .dro-legend-h {
-  border-bottom-color: rgba(15, 23, 42, 0.05);
-  letter-spacing: 0.2em;
-}
-
-.dro-legend-card.dro-glass-legend .dro-legend-metrics li {
-  margin-bottom: 0.6rem;
-}
-
-.dro-legend-card.dro-glass-legend .dro-legend-metrics-n {
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    monospace;
-}
-
-.dro-legend-foot {
-  margin: 0.65rem 0 0;
-  padding-top: 0.5rem;
-  border-top: 1px solid rgba(148, 163, 184, 0.18);
-  font-size: 9px;
-  line-height: 1.5;
-  color: #64748b;
-  font-style: italic;
-}
-
-.dro-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  flex-shrink: 0;
-  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.12);
-}
-
-.dro-dot--store {
-  background: #059669;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
-}
-.dro-dot--leave {
-  background: #94a3b8;
-  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
-}
-.dro-dot--done {
-  background: #34d399;
-  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
-}
-.dro-dot--pending {
-  background: #f97316;
-  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18);
-}
-
-/* 右侧排行卡 */
 .dro-rank-card {
   background: #fff;
   border-radius: 2.5rem;
   border: 1px solid #e2e8f0;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  padding: 2rem;
+  padding: 1.75rem 1.75rem 1.5rem;
   display: flex;
   flex-direction: column;
-  min-height: min(calc(100vh - 300px), 880px);
+}
+
+.dro-rank-card--horizontal {
+  min-height: 0;
 }
 
 .dro-rank-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 2rem;
+  margin-bottom: 1.25rem;
 }
 
 .dro-rank-title {
@@ -2705,7 +2369,6 @@ button.dro-dash-kpi__kicker--reset-live:focus-visible {
   font-weight: 900;
   color: #0f172a;
   letter-spacing: -0.01em;
-  text-transform: uppercase;
 }
 
 .dro-rank-trend-ico {
@@ -2713,37 +2376,59 @@ button.dro-dash-kpi__kicker--reset-live:focus-visible {
   flex-shrink: 0;
 }
 
-.dro-rank-list {
-  flex: 1;
-  overflow-y: auto;
-  padding-right: 0.75rem;
+.dro-rank-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .dro-rank-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1120px) {
+  .dro-rank-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.dro-rank-tile {
+  background: #fafbfc;
+  border: 1px solid #f1f5f9;
+  border-radius: 1.25rem;
+  padding: 1.15rem 1.25rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 0.35rem;
+  min-width: 0;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
-.dro-rank-item-head {
+.dro-rank-tile:hover {
+  border-color: #e2e8f0;
+  box-shadow: 0 4px 14px -6px rgba(15, 23, 42, 0.12);
+}
+
+.dro-rank-tile__head {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem;
-  margin-bottom: 0.55rem;
-}
-
-.dro-rank-item-meta {
-  min-width: 0;
 }
 
 .dro-rank-name {
-  margin: 0 0 0.2rem;
+  margin: 0;
   font-size: 14px;
   font-weight: 700;
   color: #475569;
-  text-transform: none;
-  letter-spacing: normal;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .dro-rank-count {
@@ -2760,13 +2445,8 @@ button.dro-dash-kpi__kicker--reset-live:focus-visible {
   color: #cbd5e1;
 }
 
-.dro-rank-pct-wrap {
-  flex: 0 0 3.35rem;
-  width: 3.35rem;
-  text-align: right;
-}
-
 .dro-rank-pct {
+  flex-shrink: 0;
   font-size: 13px;
   font-weight: 900;
   color: #059669;
@@ -2782,70 +2462,15 @@ button.dro-dash-kpi__kicker--reset-live:focus-visible {
 
 .dro-rank-bar {
   height: 6px;
-  background: #f8fafc;
+  background: #eef2f7;
   border-radius: 999px;
   overflow: hidden;
+  margin-top: 0.35rem;
 }
 
 .dro-rank-bar-fill {
   height: 100%;
   border-radius: 999px;
   transition: width 0.45s ease;
-}
-
-.dro-rank-actions {
-  margin-top: 2rem;
-  padding-top: 2rem;
-  border-top: 1px solid #f1f5f9;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-}
-
-.dro-rank-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.875rem 0.5rem;
-  border-radius: 1rem;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  text-decoration: none;
-  text-align: center;
-  transition:
-    background 0.15s ease,
-    color 0.15s ease;
-}
-
-.dro-rank-btn--primary {
-  background: #ecfdf5;
-  color: #047857;
-}
-
-.dro-rank-btn--primary:hover {
-  background: #d1fae5;
-}
-
-.dro-rank-btn--secondary {
-  background: #f8fafc;
-  color: #475569;
-}
-
-.dro-rank-btn--secondary:hover {
-  background: #f1f5f9;
-}
-
-/* 滚动条（设计稿 custom-scrollbar） */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 5px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: #f1f5f9;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 10px;
 }
 </style>

@@ -20,6 +20,7 @@ const CardOrdersView = () => import('../views/CardOrdersView.vue')
 const OrdersManageView = () => import('../views/OrdersManageView.vue')
 const StoreConfigView = () => import('../views/StoreConfigView.vue')
 const SfOrdersMonitorView = () => import('../views/SfOrdersMonitorView.vue')
+const DeliveryGeoMapView = () => import('../views/DeliveryGeoMapView.vue')
 const TenantsView = () => import('../views/TenantsView.vue')
 const MembershipTemplatesView = () => import('../views/MembershipTemplatesView.vue')
 const RetailCatalogView = () => import('../views/RetailCatalogView.vue')
@@ -54,7 +55,7 @@ const router = createRouter({
           component: DashboardView,
           meta: {
             title: '今日营业概览',
-            pageSubtitle: '总览今日与明日备餐、请假与卡到期，地图展示会员分布与送达状态',
+            pageSubtitle: '总览今日与明日备餐、请假与卡到期，以及片区会员覆盖分布',
             hidePageTitle: true,
             fullAdminOnly: true,
           },
@@ -115,6 +116,17 @@ const router = createRouter({
           name: 'delivery-sf-orders',
           component: SfOrdersMonitorView,
           meta: { title: '顺丰订单监控' },
+        },
+        {
+          path: 'delivery-geo-map',
+          name: 'delivery-geo-map',
+          component: DeliveryGeoMapView,
+          meta: {
+            title: '实时地理分布',
+            pageSubtitle: '会员分布与送达状态地图（预留页面，侧栏暂不展示入口）',
+            fullAdminOnly: true,
+            hidePageTitle: true,
+          },
         },
         {
           path: 'finance',

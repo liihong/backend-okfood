@@ -19,6 +19,7 @@ export const ADMIN_TAB_COMPONENT_NAMES = {
   'delivery-range-check': 'DeliveryRangeCheckView',
   couriers: 'CouriersView',
   'delivery-sf-orders': 'SfOrdersMonitorView',
+  'delivery-geo-map': 'DeliveryGeoMapView',
   finance: 'FinanceView',
   menu: 'MenuView',
   'weekly-menu': 'WeeklyMenuView',
