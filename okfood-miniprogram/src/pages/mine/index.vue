@@ -181,7 +181,7 @@
           </view>
         </template>
 
-      <text class="page-version">Version 2.1.1 · 火源文化技术支持</text>
+      <text class="page-version">Version 2.1.2 · 火源文化技术支持</text>
       </view>
     </scroll-view>
 
