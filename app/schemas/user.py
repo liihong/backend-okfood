@@ -137,6 +137,7 @@ class UserMemberCardOrderCreateIn(BaseModel):
     card_kind: CardOrderKind | None = None
     delivery_start_date: date | None = None
     membership_template_id: int | None = Field(None, ge=1)
+    member_coupon_id: int | None = Field(None, ge=1, description="可选：使用的用户优惠券 id")
 
     @model_validator(mode="after")
     def _validate_mode(self):
@@ -149,10 +150,19 @@ class UserMemberCardOrderCreateIn(BaseModel):
         return self
 
 
+class UserMemberCardOrderApplyCouponIn(BaseModel):
+    """未支付购卡单：绑定或更换优惠券。"""
+
+    member_coupon_id: int | None = Field(None, ge=1, description="用户券 id；不传或 null 表示移除已选券")
+
+
 class UserMemberCardOrderOut(BaseModel):
     id: int
     card_kind: str
     amount_yuan: str | None = None
+    original_amount_yuan: str | None = Field(None, description="购卡标价原价")
+    coupon_discount_yuan: str | None = Field(None, description="优惠券抵扣")
+    member_coupon_id: int | None = Field(None, description="使用的用户券 id")
     pay_status: str
     delivery_start_date: str | None = None
     out_trade_no: str | None = None

@@ -14,6 +14,8 @@ from app.models.admin_system_notification import AdminSystemNotification
 from app.models.member import Member
 from app.models.member_operation_log import MemberOperationLog
 from app.models.member_card_order import MemberCardOrder
+from app.models.marketing_coupon_template import MarketingCouponTemplate
+from app.models.member_coupon import MemberCoupon
 from app.models.membership_card_template import MembershipCardTemplate
 from app.models.store import Store
 from app.models.tenant import Tenant
@@ -28,6 +30,8 @@ def db() -> Session:
         Store.__table__,
         Member.__table__,
         MembershipCardTemplate.__table__,
+        MarketingCouponTemplate.__table__,
+        MemberCoupon.__table__,
         MemberCardOrder.__table__,
         AdminSystemNotification.__table__,
         MemberOperationLog.__table__,

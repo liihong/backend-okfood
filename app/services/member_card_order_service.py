@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.timeutil import min_member_delivery_start_shanghai, shanghai_naive_range_for_calendar_day
-from app.models.enums import CardOpenMode, CardOrderKind, CardOrderPayStatus, CardPayChannel, PlanType
+from app.models.enums import CardOpenMode, CardOrderKind, CardOrderPayStatus, CardPayChannel, CouponLockedOrderBiz, PlanType
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
 from app.models.membership_card_template import MembershipCardTemplate
@@ -16,6 +16,10 @@ from app.services.admin_service import apply_member_recharge_delta
 from app.utils.sql_like import escape_like_fragment
 from app.services.member_address_service import upsert_default_address_from_admin_map_pick
 from app.services.store_config_service import get_member_card_prices_yuan
+from app.services.marketing.coupon_checkout_service import (
+    mark_member_coupon_used_for_order,
+    release_member_coupon_for_order,
+)
 
 MINIPROGRAM_OFFLINE_CLAIM_ORDER_CREATOR = "miniprogram-offline"
 MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR = "miniprogram"
@@ -567,6 +571,9 @@ def delete_card_order(db: Session, order_id: int, *, store_id: int | None = None
         )
     if order.pay_status == CardOrderPayStatus.REFUNDED.value:
         raise HTTPException(status_code=400, detail="已微信退款的工单不可删除")
+    release_member_coupon_for_order(
+        db, order_biz=CouponLockedOrderBiz.MEMBER_CARD, order_id=int(order_id)
+    )
     db.delete(order)
     db.commit()
 
@@ -601,7 +608,12 @@ def update_card_order(
     if "pay_status" in patch and body.pay_status is not None:
         if order.applied_to_member and body.pay_status == CardOrderPayStatus.UNPAID:
             raise HTTPException(status_code=400, detail="已入账的工单不可改回未缴")
+        was_paid = order.pay_status == CardOrderPayStatus.PAID.value
         order.pay_status = body.pay_status.value
+        if not was_paid and body.pay_status == CardOrderPayStatus.PAID:
+            mark_member_coupon_used_for_order(
+                db, order_biz=CouponLockedOrderBiz.MEMBER_CARD, order_id=int(order.id)
+            )
 
     if "pay_channel" in patch and body.pay_channel is not None:
         order.pay_channel = body.pay_channel.value

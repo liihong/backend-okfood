@@ -27,6 +27,22 @@ export function hasUsableMemberDisplayName(profile) {
   return wxOk || (!stub && nm !== '')
 }
 
+/** 服务端是否已上传头像 */
+export function hasMemberAvatar(profile) {
+  if (!profile || typeof profile !== 'object') return false
+  const av = profile.avatar_url != null ? String(profile.avatar_url).trim() : ''
+  return av !== ''
+}
+
+/**
+ * 新用户登录后是否须先完善昵称（头像可选，便于客服区分会员）
+ * @param {object | null | undefined} profile GET /api/user/me 的 data
+ */
+export function shouldCompleteMemberProfile(profile) {
+  if (!profile || typeof profile !== 'object') return false
+  return !hasUsableMemberDisplayName(profile)
+}
+
 /** @param {unknown} d */
 function ymdFromApiField(d) {
   if (d == null || d === '') return ''

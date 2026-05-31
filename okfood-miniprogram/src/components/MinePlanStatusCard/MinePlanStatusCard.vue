@@ -34,6 +34,13 @@
         <text class="plan-card__foot-resume-txt">点我恢复配送</text>
       </view>
       <view
+        v-else-if="showBuyCardChip"
+        class="plan-card__foot-resume"
+        @tap.stop="$emit('buy-card')"
+      >
+        <text class="plan-card__foot-resume-txt">去购卡</text>
+      </view>
+      <view
         v-else-if="statusText"
         :class="[
           'plan-card__foot-status',
@@ -62,9 +69,11 @@ const props = defineProps({
   addressLine: { type: String, default: '' },
   dailyUnitsText: { type: String, default: '' },
   showResumeChip: { type: Boolean, default: false },
+  /** 无剩余餐次时展示「去购卡」按钮 */
+  showBuyCardChip: { type: Boolean, default: false },
 })
 
-defineEmits(['resume'])
+defineEmits(['resume', 'buy-card'])
 
 const remainingDisplay = computed(() =>
   Math.max(0, Math.floor(Number(props.remainingMeals) || 0)),

@@ -35,9 +35,26 @@
               </view>
               <text class="dish-total-unit-hint">份</text>
             </view>
-            <text class="dish-total-amt">¥ {{ totalPriceText }}</text>
+            <text class="dish-total-amt">¥ {{ payablePriceText }}</text>
+            <text v-if="selectedCoupon" class="dish-total-orig">原价 ¥ {{ totalPriceText }}</text>
           </view>
         </view>
+
+        <view v-if="availableCoupons.length" class="card coupon-card">
+          <text class="card-label">优惠券</text>
+          <picker
+            mode="selector"
+            :range="availableCoupons"
+            range-key="template_name"
+            @change="onCouponPick"
+          >
+            <view class="coupon-pick-row">
+              <text>减 ¥{{ selectedCoupon ? selectedCoupon.discount_yuan : '0' }}</text>
+              <text class="coupon-arr">›</text>
+            </view>
+          </picker>
+        </view>
+        <view v-else-if="couponsLoading" class="coupon-loading">加载优惠券…</view>
 
       <view class="card mode-card">
           <text class="card-label">取餐方式</text>
@@ -112,7 +129,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
@@ -133,6 +150,7 @@ import {
 import { createSingleMealOrder, fetchWechatJsapiPayParams } from '@/utils/singleOrderApi.js'
 import { promptUnpaidOrderConflict } from '@/utils/unpaidOrderPrompt.js'
 import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
+import { listAvailableMemberCoupons } from '@/utils/memberCouponApi.js'
 
 const dish = ref(null)
 const loading = ref(true)
@@ -148,6 +166,9 @@ const scrollStyle = ref({ height: '400px' })
 const fulfillMode = ref('delivery')
 const quantity = ref(1)
 const QTY_MAX = 50
+const availableCoupons = ref([])
+const selectedCouponId = ref(null)
+const couponsLoading = ref(false)
 
 const qtyMaxEffective = computed(() => {
   if (!dish.value || !dish.value.singleStockLimited) return 0
@@ -166,6 +187,20 @@ const totalPriceText = computed(() => {
   if (u == null) return '—'
   const t = Number(u) * Math.max(1, Math.min(qtyMaxEffective.value, quantity.value))
   return Number.isFinite(t) ? t.toFixed(2) : '—'
+})
+
+const selectedCoupon = computed(() => {
+  const id = selectedCouponId.value
+  if (id == null) return null
+  return availableCoupons.value.find((c) => Number(c.id) === Number(id)) || null
+})
+
+const payablePriceText = computed(() => {
+  const orig = Number(totalPriceText.value)
+  if (!Number.isFinite(orig)) return totalPriceText.value
+  const disc = selectedCoupon.value ? Number(selectedCoupon.value.discount_yuan) : 0
+  const d = Number.isFinite(disc) ? disc : 0
+  return Math.max(0.01, orig - d).toFixed(2)
 })
 
 const canPay = computed(() => {
@@ -194,6 +229,39 @@ function incQty() {
   const cap = qtyMaxEffective.value
   if (quantity.value < cap) quantity.value += 1
 }
+
+async function loadCoupons() {
+  const dishId = dish.value?.dishId
+  if (!dishId) return
+  couponsLoading.value = true
+  selectedCouponId.value = null
+  try {
+    const q = Math.max(1, Math.min(qtyMaxEffective.value, quantity.value))
+    const rows = await listAvailableMemberCoupons({
+      biz_type: 'single_meal',
+      dish_id: Number(dishId),
+      quantity: q,
+    })
+    availableCoupons.value = Array.isArray(rows) ? rows : []
+    if (availableCoupons.value.length) {
+      selectedCouponId.value = availableCoupons.value[0].id
+    }
+  } catch {
+    availableCoupons.value = []
+  } finally {
+    couponsLoading.value = false
+  }
+}
+
+function onCouponPick(e) {
+  const idx = Number(e?.detail?.value)
+  const row = availableCoupons.value[idx]
+  selectedCouponId.value = row ? row.id : null
+}
+
+watch(quantity, () => {
+  if (dish.value) void loadCoupons()
+})
 
 onLoad((options) => {
   try {
@@ -297,6 +365,8 @@ async function loadPage() {
     selectedIndex.value = 0
     if (formatMenuPrice(dish.value.price) == null) {
       loadError.value = '该餐品单点价格待公布'
+    } else {
+      await loadCoupons()
     }
   } catch (e) {
     const msg =
@@ -346,6 +416,9 @@ async function handlePay() {
     }
     if (!isPickup) {
       payload.member_address_id = Number(addressId)
+    }
+    if (selectedCouponId.value != null) {
+      payload.member_coupon_id = Math.floor(Number(selectedCouponId.value))
     }
     const out = await createSingleMealOrder(payload)
     const orderId = out && typeof out === 'object' ? out.id : null

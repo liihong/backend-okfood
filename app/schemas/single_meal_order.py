@@ -13,6 +13,7 @@ class SingleMealOrderCreateIn(BaseModel):
     delivery_date: date = Field(..., description="与周菜单该道菜对应的供餐日")
     store_pickup: bool = Field(False, description="门店自提：无需地址，支付后为待自提，门店确认取货后完成")
     quantity: int = Field(1, ge=1, le=50, description="份数，总价=单价×份数")
+    member_coupon_id: int | None = Field(None, ge=1, description="可选：使用的用户优惠券 id")
 
     @model_validator(mode="after")
     def _address_when_delivery(self) -> "SingleMealOrderCreateIn":
@@ -32,6 +33,9 @@ class SingleMealOrderOut(BaseModel):
     delivery_date: date
     routing_area: str
     amount_yuan: str
+    original_amount_yuan: str | None = Field(None, description="未用券时为 null")
+    coupon_discount_yuan: str | None = Field(None, description="优惠券抵扣金额")
+    member_coupon_id: int | None = Field(None, description="使用的用户券 id")
     pay_status: str
     pay_channel: str | None = None
     fulfillment_status: str = Field(

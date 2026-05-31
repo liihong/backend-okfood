@@ -12,7 +12,9 @@
                 <text class="hero-cap">OK FITNESS VIP SPECIAL</text>
                 <text class="hero-name">{{ tpl.name }}</text>
               </view>
-              <view class="hero-badge"><text class="hero-badge-txt">推荐办理</text></view>
+              <view class="hero-badge" @tap="openShareSheet">
+                <text class="hero-badge-txt">推荐给好友</text>
+              </view>
             </view>
             <view class="hero-foot">
               <view>
@@ -47,6 +49,26 @@
             </view>
             <text class="agree-txt">阅读并同意《OK饭自律膳食卡用户服务及配送协议》</text>
           </view>
+
+          <view v-if="availableCoupons.length" class="coupon-box">
+            <text class="coupon-lab">优惠券</text>
+            <picker
+              mode="selector"
+              :range="availableCoupons"
+              range-key="template_name"
+              @change="onCouponPick"
+            >
+              <view class="coupon-pick">
+                <text class="coupon-pick-txt">
+                  {{ selectedCoupon ? `减 ¥${selectedCoupon.discount_yuan}` : '选择优惠券' }}
+                </text>
+                <text class="coupon-pick-arr">›</text>
+              </view>
+            </picker>
+            <text v-if="discountDisp" class="coupon-save">已优惠 ¥{{ discountDisp }}</text>
+          </view>
+          <view v-else-if="couponsLoading" class="coupon-hint">加载优惠券…</view>
+
           <view class="scroll-pad" />
         </template>
         <view v-else class="hint">卡包不存在或已下架</view>
@@ -56,7 +78,8 @@
     <view v-if="tpl && !loading" class="footer">
       <view class="foot-lab">
         <text class="foot-cap">TOTAL PRICE</text>
-        <text class="foot-price">¥{{ saleDisp }}</text>
+        <text v-if="discountDisp" class="foot-orig">¥{{ saleDisp }}</text>
+        <text class="foot-price">¥{{ payableDisp }}</text>
       </view>
       <button
         class="foot-pay"
@@ -67,12 +90,26 @@
         💳 立即支付开卡
       </button>
     </view>
+
+    <!-- 分享方式选择 -->
+    <view v-if="shareSheetVisible" class="share-mask" @tap="closeShareSheet">
+      <view class="share-sheet" @tap.stop>
+        <text class="share-sheet-title">推荐给好友</text>
+        <button class="share-sheet-btn" open-type="share" @tap="closeShareSheet">
+          分享给微信好友
+        </button>
+        <view class="share-sheet-btn share-sheet-btn--plain" @tap="onShareTimelineGuide">
+          分享到朋友圈
+        </view>
+        <view class="share-sheet-cancel" @tap="closeShareSheet">取消</view>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
   request,
@@ -81,6 +118,7 @@ import {
   isUserMeNotFoundError,
 } from '@/utils/api.js'
 import { runMembershipTemplateWechatPay } from '@/utils/memberCardPay.js'
+import { listAvailableMemberCoupons } from '@/utils/memberCouponApi.js'
 import { shouldOpenMemberSetup } from '@/utils/memberProfile.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 
@@ -96,6 +134,10 @@ const paying = ref(false)
 const agreed = ref(true)
 const tpl = ref(null)
 const templateId = ref(0)
+const availableCoupons = ref([])
+const selectedCouponId = ref(null)
+const couponsLoading = ref(false)
+const shareSheetVisible = ref(false)
 
 const pan4 = computed(() => {
   const id = templateId.value || 0
@@ -108,6 +150,32 @@ const saleDisp = computed(() => {
   if (s != null && s !== '') return String(s)
   if (l != null && l !== '') return String(l)
   return '—'
+})
+
+const originalPriceNum = computed(() => {
+  const n = Number(saleDisp.value)
+  return Number.isFinite(n) ? n : null
+})
+
+const selectedCoupon = computed(() => {
+  const id = selectedCouponId.value
+  if (id == null) return null
+  return availableCoupons.value.find((c) => Number(c.id) === Number(id)) || null
+})
+
+const discountDisp = computed(() => {
+  const c = selectedCoupon.value
+  if (!c) return null
+  const n = Number(c.discount_yuan)
+  return Number.isFinite(n) ? n.toFixed(2) : null
+})
+
+const payableDisp = computed(() => {
+  const orig = originalPriceNum.value
+  if (orig == null) return saleDisp.value
+  const disc = discountDisp.value != null ? Number(discountDisp.value) : 0
+  const pay = Math.max(0.01, orig - disc)
+  return pay.toFixed(2)
 })
 
 const introText = computed(() => {
@@ -135,6 +203,76 @@ function toggleAgree() {
   agreed.value = !agreed.value
 }
 
+/** 构建分享标题、路径与封面图 */
+function buildSharePayload() {
+  const t = tpl.value
+  const id = templateId.value
+  const name = t?.name ? String(t.name).trim() : '自律膳食卡'
+  const meals = t?.meals_grant != null ? String(t.meals_grant) : ''
+  const price = saleDisp.value
+  const title = meals
+    ? `推荐你办理「${name}」— OK饭 ${meals} 次餐，优惠价 ¥${price}`
+    : `推荐你办理「${name}」— OK饭自律膳食卡`
+  const path = `/packageUser/pages/membershipCardDetail/membershipCardDetail?templateId=${encodeURIComponent(String(id))}`
+  const imageUrl =
+    t?.card_style_image_url != null ? String(t.card_style_image_url).trim() : ''
+  return {
+    title,
+    path,
+    query: `templateId=${encodeURIComponent(String(id))}`,
+    imageUrl,
+  }
+}
+
+function enableWechatShareMenus() {
+  // #ifdef MP-WEIXIN
+  if (typeof wx !== 'undefined' && typeof wx.showShareMenu === 'function') {
+    wx.showShareMenu({
+      withShareTicket: true,
+      menus: ['shareAppMessage', 'shareTimeline'],
+    })
+  }
+  // #endif
+}
+
+function openShareSheet() {
+  if (!tpl.value) return
+  shareSheetVisible.value = true
+}
+
+function closeShareSheet() {
+  shareSheetVisible.value = false
+}
+
+/** 朋友圈无 open-type 按钮，引导用户使用右上角菜单分享 */
+function onShareTimelineGuide() {
+  closeShareSheet()
+  enableWechatShareMenus()
+  uni.showModal({
+    title: '分享到朋友圈',
+    content: '请点击右上角 ··· 菜单，选择「分享到朋友圈」',
+    showCancel: false,
+  })
+}
+
+onShareAppMessage(() => {
+  const { title, path, imageUrl } = buildSharePayload()
+  return {
+    title,
+    path,
+    ...(imageUrl ? { imageUrl } : {}),
+  }
+})
+
+onShareTimeline(() => {
+  const { title, query, imageUrl } = buildSharePayload()
+  return {
+    title,
+    query,
+    ...(imageUrl ? { imageUrl } : {}),
+  }
+})
+
 async function loadOne() {
   if (!getMemberToken()) {
     loading.value = false
@@ -154,6 +292,7 @@ async function loadOne() {
       retry: 1,
     })
     tpl.value = data && typeof data === 'object' ? data : null
+    await loadCoupons()
   } catch (e) {
     if (isUserMeNotFoundError(e)) clearMemberSession()
     tpl.value = null
@@ -161,6 +300,32 @@ async function loadOne() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadCoupons() {
+  if (!templateId.value) return
+  couponsLoading.value = true
+  selectedCouponId.value = null
+  try {
+    const rows = await listAvailableMemberCoupons({
+      biz_type: 'member_card',
+      membership_template_id: templateId.value,
+    })
+    availableCoupons.value = Array.isArray(rows) ? rows : []
+    if (availableCoupons.value.length) {
+      selectedCouponId.value = availableCoupons.value[0].id
+    }
+  } catch {
+    availableCoupons.value = []
+  } finally {
+    couponsLoading.value = false
+  }
+}
+
+function onCouponPick(e) {
+  const idx = Number(e?.detail?.value)
+  const row = availableCoupons.value[idx]
+  selectedCouponId.value = row ? row.id : null
 }
 
 async function onPay() {
@@ -188,6 +353,7 @@ async function onPay() {
     const payOut = await runMembershipTemplateWechatPay({
       membershipTemplateId: templateId.value,
       deliveryStartYmd: activeRenewal && profileStartYmd ? profileStartYmd : undefined,
+      memberCouponId: selectedCouponId.value,
     })
     const paySynced = payOut?.paySynced !== false
     markMinePageNeedsRefresh()
@@ -232,6 +398,7 @@ onLoad((opts) => {
   const id = parseInt(raw, 10)
   templateId.value = Number.isFinite(id) && id > 0 ? id : 0
   scrollStyle.value = { flex: '1', minHeight: '0' }
+  enableWechatShareMenus()
   void loadOne()
 })
 </script>
@@ -312,6 +479,10 @@ onLoad((opts) => {
   padding: 8rpx 16rpx;
   border-radius: 999rpx;
   background: rgba(250, 204, 21, 0.95);
+}
+
+.hero-badge:active {
+  opacity: 0.88;
 }
 
 .hero-badge-txt {
@@ -456,6 +627,48 @@ onLoad((opts) => {
   line-height: 1.45;
 }
 
+.foot-orig {
+  font-size: 22rpx;
+  color: $ok-slate-400;
+  text-decoration: line-through;
+  margin-right: 8rpx;
+}
+
+.coupon-box {
+  margin-top: 16rpx;
+  padding: 20rpx 24rpx;
+  background: #fff;
+  border-radius: 16rpx;
+}
+
+.coupon-lab {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: $ok-slate-800;
+}
+
+.coupon-pick {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12rpx;
+  padding: 16rpx 20rpx;
+  background: $ok-slate-100;
+  border-radius: 12rpx;
+}
+
+.coupon-save {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: $ok-emerald;
+}
+
+.coupon-hint {
+  font-size: 24rpx;
+  color: $ok-slate-500;
+  padding: 8rpx 0;
+}
+
 .scroll-pad {
   height: 180rpx;
 }
@@ -506,5 +719,64 @@ onLoad((opts) => {
 
 .foot-pay[disabled] {
   opacity: 0.45;
+}
+
+.share-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: flex-end;
+}
+
+.share-sheet {
+  width: 100%;
+  padding: 28rpx 32rpx calc(28rpx + env(safe-area-inset-bottom));
+  background: #fff;
+  border-radius: 28rpx 28rpx 0 0;
+}
+
+.share-sheet-title {
+  display: block;
+  text-align: center;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: $ok-slate-800;
+  margin-bottom: 24rpx;
+}
+
+.share-sheet-btn {
+  width: 100%;
+  height: 88rpx;
+  line-height: 88rpx;
+  margin: 0 0 16rpx;
+  padding: 0;
+  border: none;
+  border-radius: 20rpx;
+  background: $ok-forest-green;
+  color: #fff;
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.share-sheet-btn::after {
+  border: none;
+}
+
+.share-sheet-btn--plain {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: $ok-slate-100;
+  color: $ok-slate-800;
+}
+
+.share-sheet-cancel {
+  margin-top: 8rpx;
+  padding: 24rpx 0 8rpx;
+  text-align: center;
+  font-size: 28rpx;
+  color: $ok-slate-500;
 }
 </style>

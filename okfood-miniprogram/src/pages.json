@@ -157,6 +157,13 @@
           }
         },
         {
+          "path": "pages/memberProfileComplete/memberProfileComplete",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
+        },
+        {
           "path": "pages/membershipCardList/membershipCardList",
           "style": {
             "navigationStyle": "custom",
@@ -167,7 +174,9 @@
           "path": "pages/membershipCardDetail/membershipCardDetail",
           "style": {
             "navigationStyle": "custom",
-            "backgroundColor": "#f8fafc"
+            "backgroundColor": "#f8fafc",
+            "enableShareAppMessage": true,
+            "enableShareTimeline": true
           }
         },
         {

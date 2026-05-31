@@ -54,3 +54,48 @@ class CardOrderPayStatus(str, Enum):
     UNPAID = "未缴"
     PAID = "已缴"
     REFUNDED = "已退款"
+
+
+class CouponType(str, Enum):
+    """优惠券类型；MVP 仅代金券。"""
+
+    CASH = "cash"
+
+
+class CouponBizType(str, Enum):
+    """适用业务线。"""
+
+    ALL = "all"
+    MEMBER_CARD = "member_card"
+    SINGLE_MEAL = "single_meal"
+    STORE_RETAIL = "store_retail"
+
+
+class CouponScopeLevel(str, Enum):
+    """业务线内细粒度适用范围。"""
+
+    ALL = "all"
+    WEEK_MONTH = "week_month"
+    MEMBERSHIP_TEMPLATE = "membership_template"
+    MENU_DISH = "menu_dish"
+    RETAIL_CATEGORY = "retail_category"
+    RETAIL_PRODUCT = "retail_product"
+
+
+class CouponValidityMode(str, Enum):
+    FIXED_RANGE = "fixed_range"
+    DAYS_AFTER_GRANT = "days_after_grant"
+
+
+class MemberCouponStatus(str, Enum):
+    AVAILABLE = "available"
+    LOCKED = "locked"
+    USED = "used"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
+
+
+class CouponLockedOrderBiz(str, Enum):
+    MEMBER_CARD = "member_card"
+    SINGLE_MEAL = "single_meal"
+    STORE_RETAIL = "store_retail"

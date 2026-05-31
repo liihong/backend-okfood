@@ -30,6 +30,19 @@ export function createMemberCardOrder(body) {
 
 /**
  * @param {number} orderId
+ * @param {number|null|undefined} memberCouponId 用户券 id；不传表示移除已选券
+ */
+export function applyMemberCardOrderCoupon(orderId, memberCouponId) {
+  const data =
+    memberCouponId != null ? { member_coupon_id: Math.floor(Number(memberCouponId)) } : {}
+  return request(`/api/user/member-card-orders/${orderId}/apply-coupon`, {
+    method: 'POST',
+    data,
+  })
+}
+
+/**
+ * @param {number} orderId
  * @returns {Promise<{ appId: string, timeStamp: string, nonceStr: string, package: string, signType: string, paySign: string }>}
  */
 export function fetchMemberCardWechatJsapiPayParams(orderId) {

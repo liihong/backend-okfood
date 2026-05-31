@@ -25,6 +25,8 @@ const TenantsView = () => import('../views/TenantsView.vue')
 const MembershipTemplatesView = () => import('../views/MembershipTemplatesView.vue')
 const RetailCatalogView = () => import('../views/RetailCatalogView.vue')
 const DeliveryRangeCheckView = () => import('../views/DeliveryRangeCheckView.vue')
+const CouponTemplatesView = () => import('../views/marketing/CouponTemplatesView.vue')
+const MemberCouponGrantsView = () => import('../views/marketing/MemberCouponGrantsView.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -145,6 +147,26 @@ const router = createRouter({
           name: 'weekly-menu',
           component: WeeklyMenuView,
           meta: { title: '本周菜单', fullAdminOnly: true, hidePageTitle: true },
+        },
+        {
+          path: 'marketing/coupon-templates',
+          name: 'marketing-coupon-templates',
+          component: CouponTemplatesView,
+          meta: {
+            title: '优惠券管理',
+            pageSubtitle: '配置小程序代金券券种与适用范围',
+            fullAdminOnly: true,
+          },
+        },
+        {
+          path: 'marketing/member-coupons',
+          name: 'marketing-member-coupons',
+          component: MemberCouponGrantsView,
+          meta: {
+            title: '优惠券发放',
+            pageSubtitle: '向会员发放优惠券并管理记录',
+            fullAdminOnly: true,
+          },
         },
         {
           path: 'store-config',

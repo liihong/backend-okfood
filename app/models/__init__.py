@@ -16,7 +16,9 @@ from app.models.delivery_region import DeliveryRegion, DeliveryRegionCourier
 from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.models.member_card_order import MemberCardOrder
+from app.models.member_coupon import MemberCoupon
 from app.models.member_membership_refund import MemberMembershipRefund
+from app.models.marketing_coupon_template import MarketingCouponTemplate
 from app.models.member_operation_log import MemberOperationLog
 from app.models.membership_card_template import MembershipCardTemplate
 from app.models.single_meal_order import SingleMealOrder
@@ -46,7 +48,9 @@ __all__ = [
     "Member",
     "MemberAddress",
     "MemberCardOrder",
+    "MemberCoupon",
     "MemberOperationLog",
+    "MarketingCouponTemplate",
     "MembershipCardTemplate",
     "SingleMealOrder",
     "StoreRetailCategory",

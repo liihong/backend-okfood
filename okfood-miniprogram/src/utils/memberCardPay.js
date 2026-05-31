@@ -1,5 +1,6 @@
 import { request } from '@/utils/api.js'
 import {
+  applyMemberCardOrderCoupon,
   createMemberCardOrder,
   fetchMemberCardWechatJsapiPayParams,
   syncMemberCardWechatPayResult,
@@ -21,7 +22,14 @@ async function resolveMemberCardOrderId(createBody) {
   } catch (e) {
     const existingId = await confirmContinueExistingMallOrderPay(e)
     if (existingId) {
-      return { order: { id: existingId }, orderId: existingId }
+      let order = { id: existingId }
+      if (createBody.member_coupon_id != null) {
+        order = await applyMemberCardOrderCoupon(
+          existingId,
+          createBody.member_coupon_id,
+        )
+      }
+      return { order, orderId: existingId }
     }
     if (isUnpaidOrderConflict(e)) {
       throw new Error(
@@ -87,6 +95,7 @@ export async function runMemberCardWechatPay({
   cardKind,
   deliveryStartYmd,
   patchProfile = false,
+  memberCouponId = null,
 }) {
   const d0 = String(deliveryStartYmd || '').trim().slice(0, 10)
   if (!d0) {
@@ -103,10 +112,14 @@ export async function runMemberCardWechatPay({
     })
   }
   await syncWxMiniOpenidFromLogin()
-  const { order, orderId } = await resolveMemberCardOrderId({
+  const createBody = {
     card_kind: kind,
     delivery_start_date: d0,
-  })
+  }
+  if (memberCouponId != null) {
+    createBody.member_coupon_id = Math.floor(Number(memberCouponId))
+  }
+  const { order, orderId } = await resolveMemberCardOrderId(createBody)
   const payResult = await runWechatPayForMemberCardOrder(orderId)
   return { order, orderId, ...payResult }
 }
@@ -119,6 +132,7 @@ export async function runMemberCardWechatPay({
 export async function runMembershipTemplateWechatPay({
   membershipTemplateId,
   deliveryStartYmd,
+  memberCouponId = null,
 }) {
   const tid = Number(membershipTemplateId)
   if (!Number.isFinite(tid) || tid < 1) {
@@ -128,6 +142,9 @@ export async function runMembershipTemplateWechatPay({
   const d0 = String(deliveryStartYmd || '').trim().slice(0, 10)
   if (d0) {
     body.delivery_start_date = d0
+  }
+  if (memberCouponId != null) {
+    body.member_coupon_id = Math.floor(Number(memberCouponId))
   }
   await syncWxMiniOpenidFromLogin()
   const { order, orderId } = await resolveMemberCardOrderId(body)

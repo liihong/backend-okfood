@@ -48,12 +48,14 @@ from app.schemas.user import (
     MembershipCardTemplateMemberOut,
     ProfilePatchIn,
     RegisterIn,
+    UserMemberCardOrderApplyCouponIn,
     UserMemberCardOrderCreateIn,
     UserMemberCardOrderOut,
     WxMiniJsCodeIn,
     WxMiniLoginIn,
     RenewRemindSubscribeGrantOut,
 )
+from app.schemas.marketing.coupon import UserMemberCouponAvailableOut
 
 from app.services.member_delivery_deduction_service import list_member_delivery_deductions
 from app.services.oss_upload_service import upload_member_avatar_bytes
@@ -85,12 +87,14 @@ from app.services.member_service import (
 from app.schemas.single_meal_order import SingleMealOrderCreateIn
 
 from app.services.member_card_pay_service import (
+    apply_member_coupon_to_unpaid_card_order,
     create_miniprogram_member_card_order,
     list_member_card_orders_for_user,
     member_card_order_user_dict,
     prepare_wechat_jsapi_for_member_card_order,
     sync_member_card_from_wechat_or_raise,
 )
+from app.services.marketing.member_coupon_service import list_available_member_coupons_for_user
 from app.services.catalog_admin_service import (
     get_membership_template_row,
     list_membership_templates,
@@ -559,8 +563,77 @@ def prepay_single_order_wechat(
     return success(data=params, msg="获取支付参数成功")
 
 
+@router.get("/member-coupons/available")
+@limiter.limit("60/minute")
+def list_available_member_coupons_me(
+    request: Request,
+    db: SessionDep,
+    member_id: MemberIdScoped,
+    biz_type: Annotated[str, Query(description="member_card | single_meal | store_retail")],
+    card_kind: Annotated[str | None, Query(description="购卡：周卡/月卡")] = None,
+    membership_template_id: Annotated[int | None, Query(ge=1)] = None,
+    dish_id: Annotated[int | None, Query(ge=1)] = None,
+    quantity: Annotated[int | None, Query(ge=1, le=50)] = None,
+    retail_product_id: Annotated[int | None, Query(ge=1)] = None,
+):
+    """结算页可用优惠券列表（按业务线与订单原价预筛）。"""
+    _ = request
+    mem = db.get(Member, int(member_id))
+    if not mem or mem.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    store_id = int(mem.store_id)
+    original: Decimal | None = None
+    bt = (biz_type or "").strip()
+    if bt == "member_card":
+        if membership_template_id is not None:
+            tpl = get_membership_template_row(
+                db,
+                template_id=int(membership_template_id),
+                tenant_id=int(mem.tenant_id),
+                store_id=store_id,
+            )
+            price = tpl.sale_price_yuan if tpl.sale_price_yuan is not None else tpl.list_price_yuan
+            if price is not None:
+                original = Decimal(price).quantize(Decimal("0.01"))
+        elif card_kind:
+            from app.services.member_card_pay_service import card_order_amount_yuan_for_kind
+
+            original = card_order_amount_yuan_for_kind(db, card_kind.strip(), store_id=store_id)
+    elif bt == "single_meal" and dish_id is not None:
+        from app.models.menu_dish import MenuDish
+
+        dish = db.get(MenuDish, int(dish_id))
+        if dish and dish.single_order_price_yuan is not None:
+            q = max(1, int(quantity or 1))
+            original = (Decimal(dish.single_order_price_yuan) * Decimal(q)).quantize(Decimal("0.01"))
+    elif bt == "store_retail" and retail_product_id is not None:
+        from app.models.store_retail_product import StoreRetailProduct
+
+        prod = db.get(StoreRetailProduct, int(retail_product_id))
+        if prod and int(prod.store_id) == store_id:
+            original = Decimal(prod.unit_price_yuan).quantize(Decimal("0.01"))
+
+    items = list_available_member_coupons_for_user(
+        db,
+        member_id=int(member_id),
+        store_id=store_id,
+        biz_type=bt,
+        original_amount_yuan=original,
+        card_kind=card_kind,
+        membership_template_id=membership_template_id,
+        dish_id=dish_id,
+        retail_product_id=retail_product_id,
+    )
+    return success(
+        data=[dump_model(UserMemberCouponAvailableOut.model_validate(x)) for x in items],
+        msg="获取成功",
+    )
+
+
 @router.get("/member-card-orders")
+@limiter.limit("60/minute")
 def list_member_card_orders_me(
+    request: Request,
     db: SessionDep,
     member_id: MemberIdScoped,
     page: int = 1,
@@ -600,9 +673,31 @@ def create_member_card_order_me(
         card_kind=body.card_kind.value if body.card_kind else None,
         delivery_start_date=body.delivery_start_date,
         membership_template_id=body.membership_template_id,
+        member_coupon_id=body.member_coupon_id,
     )
     payload = UserMemberCardOrderOut.model_validate(member_card_order_user_dict(row))
     return success(data=dump_model(payload), msg="订单已创建，请继续支付")
+
+
+@router.post("/member-card-orders/{order_id}/apply-coupon")
+@limiter.limit("30/minute")
+def apply_member_card_order_coupon_me(
+    request: Request,
+    order_id: int,
+    body: UserMemberCardOrderApplyCouponIn,
+    db: SessionDep,
+    member_id: MemberIdScoped,
+):
+    """未支付购卡单：绑定/更换优惠券（409 续付场景或支付前换券）。"""
+    _ = request
+    row = apply_member_coupon_to_unpaid_card_order(
+        db,
+        member_id,
+        order_id,
+        body.member_coupon_id,
+    )
+    payload = UserMemberCardOrderOut.model_validate(member_card_order_user_dict(row))
+    return success(data=dump_model(payload), msg="优惠券已更新")
 
 
 @router.post("/member-card-orders/{order_id}/pay/wechat-jsapi")

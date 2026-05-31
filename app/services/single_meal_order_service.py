@@ -27,6 +27,7 @@ from app.services.tenant_integration_service import (
     get_merged_pay_config,
     wechat_pay_misconfiguration_detail_merged,
 )
+from app.models.enums import CouponLockedOrderBiz
 from app.models.courier import Courier
 from app.models.delivery_region import DeliveryRegion, DeliveryRegionCourier
 from app.models.member import Member
@@ -52,6 +53,12 @@ from app.services.courier_task_sorting import (
 from app.services.member_address_service import delivery_region_name_map, full_address_line, routing_area_label
 from app.services.admin_system_notification_service import create_single_meal_order_paid_notification
 from app.services.store_config_service import load_store_coordinates_for_sorting
+from app.services.marketing.coupon_checkout_service import (
+    CouponCheckoutContext,
+    lock_member_coupon_for_order,
+    mark_member_coupon_used_for_order,
+    release_member_coupon_for_order,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -474,15 +481,20 @@ def expire_stale_unpaid_single_meal_orders(db: Session, *, member_id: int | None
     ]
     if member_id is not None:
         filters.append(SingleMealOrder.member_id == int(member_id))
-    result = db.execute(
+    stale_ids = list(db.scalars(select(SingleMealOrder.id).where(*filters)).all())
+    if not stale_ids:
+        return 0
+    for oid in stale_ids:
+        release_member_coupon_for_order(
+            db, order_biz=CouponLockedOrderBiz.SINGLE_MEAL, order_id=int(oid)
+        )
+    db.execute(
         update(SingleMealOrder)
-        .where(*filters)
+        .where(SingleMealOrder.id.in_(stale_ids))
         .values(fulfillment_status="cancelled", courier_id=None)
     )
-    n = int(result.rowcount or 0)
-    if n:
-        db.commit()
-    return n
+    db.commit()
+    return len(stale_ids)
 
 
 def _assert_no_pending_unpaid_single_order(db: Session, member_id: int) -> None:
@@ -570,6 +582,27 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
     db.add(row)
     db.flush()
     row.out_trade_no = _final_out_trade_no(int(row.id))
+
+    coupon_id = body.member_coupon_id
+    if coupon_id is not None:
+        ctx = CouponCheckoutContext(
+            checkout_biz=CouponLockedOrderBiz.SINGLE_MEAL,
+            original_amount_yuan=amt,
+            dish_id=int(dish.id),
+        )
+        orig, disc, payable = lock_member_coupon_for_order(
+            db,
+            member_coupon_id=int(coupon_id),
+            member_id=int(member_id),
+            store_id=int(mem.store_id),
+            ctx=ctx,
+            order_id=int(row.id),
+        )
+        row.original_amount_yuan = orig
+        row.coupon_discount_yuan = disc
+        row.amount_yuan = payable
+        row.member_coupon_id = int(coupon_id)
+
     db.commit()
     db.refresh(row)
 
@@ -611,6 +644,17 @@ def _single_meal_order_row_to_out(
         delivery_date=row.delivery_date,
         routing_area=str(row.routing_area or ""),
         amount_yuan=_format_amount_yuan(Decimal(row.amount_yuan)),
+        original_amount_yuan=(
+            _format_amount_yuan(Decimal(row.original_amount_yuan))
+            if row.original_amount_yuan is not None
+            else None
+        ),
+        coupon_discount_yuan=(
+            _format_amount_yuan(Decimal(row.coupon_discount_yuan))
+            if row.coupon_discount_yuan is not None
+            else None
+        ),
+        member_coupon_id=int(row.member_coupon_id) if row.member_coupon_id is not None else None,
         pay_status=str(row.pay_status or ""),
         pay_channel=row.pay_channel,
         fulfillment_status=str(row.fulfillment_status or ""),
@@ -910,6 +954,10 @@ def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
         return False, "order_refunded"
 
     if order.pay_status == "已支付":
+        mark_member_coupon_used_for_order(
+            db, order_biz=CouponLockedOrderBiz.SINGLE_MEAL, order_id=int(order.id)
+        )
+        db.commit()
         return True, "already_paid"
 
     expect_fen = yuan_decimal_to_fen(order.amount_yuan)
@@ -935,6 +983,9 @@ def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
             db, int(pay_addr.delivery_region_id) if pay_addr and pay_addr.delivery_region_id else None
         )
     _notify_single_meal_order_paid_cs_review(db, order)
+    mark_member_coupon_used_for_order(
+        db, order_biz=CouponLockedOrderBiz.SINGLE_MEAL, order_id=int(order.id)
+    )
     db.commit()
     return True, "paid"
 
@@ -1609,6 +1660,10 @@ def admin_cancel_single_meal_order(
 
     o.fulfillment_status = "cancelled"
     o.courier_id = None
+    if (o.pay_status or "").strip() == "未支付":
+        release_member_coupon_for_order(
+            db, order_biz=CouponLockedOrderBiz.SINGLE_MEAL, order_id=int(order_id)
+        )
     db.add(o)
     db.commit()
     if sf_msg:

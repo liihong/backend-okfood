@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.timeutil import min_member_delivery_start_shanghai
+from app.core.timeutil import beijing_now_naive, min_member_delivery_start_shanghai
 from app.core.config import get_settings
 from app.integrations.wechat_pay_v2 import (
     WeChatPayV2Error,
@@ -26,7 +26,7 @@ from app.services.tenant_integration_service import (
     get_merged_pay_config,
     wechat_pay_misconfiguration_detail_merged,
 )
-from app.models.enums import CardOrderKind, CardOrderPayStatus, CardPayChannel
+from app.models.enums import CardOrderKind, CardOrderPayStatus, CardPayChannel, CouponLockedOrderBiz
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
 from app.models.membership_card_template import MembershipCardTemplate
@@ -39,8 +39,17 @@ from app.services.member_card_order_service import (
     enum_card_kind_for_template,
 )
 from app.services.store_config_service import get_member_card_prices_yuan
+from app.services.marketing.coupon_checkout_service import (
+    CouponCheckoutContext,
+    lock_member_coupon_for_order,
+    mark_member_coupon_used_for_order,
+    release_member_coupon_for_order,
+)
 
 logger = logging.getLogger(__name__)
+
+# 与单次零售未支付单一致：超时释放 locked 券并恢复订单原价
+UNPAID_MINIPROGRAM_CARD_ORDER_EXPIRE_MINUTES = 30
 
 
 def _new_temp_out_trade_no() -> str:
@@ -99,24 +108,131 @@ def card_order_amount_yuan_for_kind(db: Session, card_kind: str, *, store_id: in
     raise HTTPException(status_code=400, detail="无效开卡类型")
 
 
-def _assert_no_pending_miniprogram_wechat_card_order(db: Session, member_id: int) -> None:
-    """小程序微信开卡：已有未缴工单时不重复创建。"""
-    oid = db.scalars(
-        select(MemberCardOrder.id)
-        .where(
-            MemberCardOrder.member_id == int(member_id),
-            MemberCardOrder.pay_status == CardOrderPayStatus.UNPAID.value,
-            MemberCardOrder.applied_to_member.is_(False),
-            MemberCardOrder.pay_channel == CardPayChannel.WECHAT.value,
-            MemberCardOrder.created_by == "miniprogram",
-        )
+def _pending_miniprogram_wechat_card_order_filters(*, member_id: int | None = None) -> list:
+    """小程序微信自助开卡：未缴且未入账工单筛选条件。"""
+    filters = [
+        MemberCardOrder.pay_status == CardOrderPayStatus.UNPAID.value,
+        MemberCardOrder.applied_to_member.is_(False),
+        MemberCardOrder.pay_channel == CardPayChannel.WECHAT.value,
+        MemberCardOrder.created_by == "miniprogram",
+    ]
+    if member_id is not None:
+        filters.append(MemberCardOrder.member_id == int(member_id))
+    return filters
+
+
+def _unpaid_miniprogram_card_order_expire_cutoff():
+    return beijing_now_naive() - timedelta(minutes=UNPAID_MINIPROGRAM_CARD_ORDER_EXPIRE_MINUTES)
+
+
+def _find_pending_miniprogram_wechat_card_order(db: Session, member_id: int) -> MemberCardOrder | None:
+    return db.scalars(
+        select(MemberCardOrder)
+        .where(*_pending_miniprogram_wechat_card_order_filters(member_id=member_id))
         .order_by(MemberCardOrder.id.desc())
         .limit(1)
     ).first()
-    if oid is not None:
+
+
+def expire_stale_unpaid_miniprogram_card_orders(db: Session, *, member_id: int | None = None) -> int:
+    """购卡未支付超过阈值：释放 locked 券并恢复订单为原价（订单仍可继续支付）。"""
+    cutoff = _unpaid_miniprogram_card_order_expire_cutoff()
+    filters = _pending_miniprogram_wechat_card_order_filters(member_id=member_id)
+    filters.append(MemberCardOrder.created_at < cutoff)
+    stale = list(db.scalars(select(MemberCardOrder).where(*filters)).all())
+    if not stale:
+        return 0
+    for order in stale:
+        if order.member_coupon_id is not None:
+            release_member_coupon_for_order(
+                db, order_biz=CouponLockedOrderBiz.MEMBER_CARD, order_id=int(order.id)
+            )
+            orig = order.original_amount_yuan if order.original_amount_yuan is not None else order.amount_yuan
+            order.amount_yuan = orig
+            order.original_amount_yuan = None
+            order.coupon_discount_yuan = None
+            order.member_coupon_id = None
+    db.commit()
+    return len(stale)
+
+
+def _card_order_checkout_original_amount(order: MemberCardOrder) -> Decimal:
+    """结算用原价：有券时取 original_amount_yuan，否则取当前 amount_yuan。"""
+    if order.original_amount_yuan is not None:
+        return Decimal(order.original_amount_yuan).quantize(Decimal("0.01"))
+    return Decimal(order.amount_yuan or 0).quantize(Decimal("0.01"))
+
+
+def _member_card_coupon_checkout_context(order: MemberCardOrder) -> CouponCheckoutContext:
+    return CouponCheckoutContext(
+        checkout_biz=CouponLockedOrderBiz.MEMBER_CARD,
+        original_amount_yuan=_card_order_checkout_original_amount(order),
+        card_kind=order.card_kind,
+        membership_template_id=int(order.membership_template_id) if order.membership_template_id else None,
+    )
+
+
+def apply_member_coupon_to_unpaid_card_order(
+    db: Session,
+    member_id: int,
+    order_id: int,
+    member_coupon_id: int | None,
+) -> MemberCardOrder:
+    """未支付购卡单：更换或移除优惠券（先释放旧锁再锁新券）。"""
+    order = db.get(MemberCardOrder, order_id)
+    if not order or int(order.member_id) != int(member_id):
+        raise HTTPException(status_code=404, detail="开卡订单不存在")
+    if order.pay_status != CardOrderPayStatus.UNPAID.value:
+        raise HTTPException(status_code=400, detail="仅未支付订单可使用优惠券")
+    if order.applied_to_member:
+        raise HTTPException(status_code=400, detail="订单状态不允许修改优惠券")
+    if (order.pay_channel or "").strip() != CardPayChannel.WECHAT.value:
+        raise HTTPException(status_code=400, detail="仅微信自助开卡单支持用券")
+    if (order.created_by or "").strip() != "miniprogram":
+        raise HTTPException(status_code=400, detail="仅小程序自助开卡单支持用券")
+
+    release_member_coupon_for_order(
+        db, order_biz=CouponLockedOrderBiz.MEMBER_CARD, order_id=int(order.id)
+    )
+    orig = _card_order_checkout_original_amount(order)
+
+    if member_coupon_id is None:
+        order.amount_yuan = orig
+        order.original_amount_yuan = None
+        order.coupon_discount_yuan = None
+        order.member_coupon_id = None
+        db.commit()
+        db.refresh(order)
+        return order
+
+    mem = db.get(Member, member_id)
+    if not mem or mem.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    ctx = _member_card_coupon_checkout_context(order)
+    o2, disc, payable = lock_member_coupon_for_order(
+        db,
+        member_coupon_id=int(member_coupon_id),
+        member_id=int(member_id),
+        store_id=int(mem.store_id),
+        ctx=ctx,
+        order_id=int(order.id),
+    )
+    order.original_amount_yuan = o2
+    order.coupon_discount_yuan = disc
+    order.amount_yuan = payable
+    order.member_coupon_id = int(member_coupon_id)
+    db.commit()
+    db.refresh(order)
+    return order
+
+
+def _assert_no_pending_miniprogram_wechat_card_order(db: Session, member_id: int) -> None:
+    """小程序微信开卡：已有未缴工单时不重复创建。"""
+    pending = _find_pending_miniprogram_wechat_card_order(db, member_id)
+    if pending is not None:
         raise HTTPException(
             status_code=409,
-            detail=f"您有未支付的开卡订单（#{int(oid)}），请先完成支付后再下单",
+            detail=f"您有未支付的开卡订单（#{int(pending.id)}），请先完成支付后再下单",
         )
 
 
@@ -127,8 +243,16 @@ def create_miniprogram_member_card_order(
     card_kind: str | None = None,
     delivery_start_date: date | None = None,
     membership_template_id: int | None = None,
+    member_coupon_id: int | None = None,
 ) -> MemberCardOrder:
-    _assert_no_pending_miniprogram_wechat_card_order(db, member_id)
+    expire_stale_unpaid_miniprogram_card_orders(db, member_id=member_id)
+    pending = _find_pending_miniprogram_wechat_card_order(db, member_id)
+    if pending is not None:
+        if member_coupon_id is not None:
+            return apply_member_coupon_to_unpaid_card_order(
+                db, member_id, int(pending.id), int(member_coupon_id)
+            )
+        _assert_no_pending_miniprogram_wechat_card_order(db, member_id)
     m = db.get(Member, member_id)
     if not m or m.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
@@ -208,6 +332,27 @@ def create_miniprogram_member_card_order(
     db.add(row)
     db.flush()
     row.out_trade_no = _final_out_trade_no(int(row.id))
+
+    if member_coupon_id is not None:
+        ctx = CouponCheckoutContext(
+            checkout_biz=CouponLockedOrderBiz.MEMBER_CARD,
+            original_amount_yuan=amt,
+            card_kind=row.card_kind,
+            membership_template_id=int(row.membership_template_id) if row.membership_template_id else None,
+        )
+        orig, disc, payable = lock_member_coupon_for_order(
+            db,
+            member_coupon_id=int(member_coupon_id),
+            member_id=int(member_id),
+            store_id=int(m.store_id),
+            ctx=ctx,
+            order_id=int(row.id),
+        )
+        row.original_amount_yuan = orig
+        row.coupon_discount_yuan = disc
+        row.amount_yuan = payable
+        row.member_coupon_id = int(member_coupon_id)
+
     db.commit()
     db.refresh(row)
     return row
@@ -216,6 +361,7 @@ def create_miniprogram_member_card_order(
 def prepare_wechat_jsapi_for_member_card_order(
     db: Session, member_id: int, order_id: int, client_ip: str
 ) -> dict[str, str]:
+    expire_stale_unpaid_miniprogram_card_orders(db, member_id=member_id)
     order = db.get(MemberCardOrder, order_id)
     if not order or int(order.member_id) != int(member_id):
         raise HTTPException(status_code=404, detail="开卡订单不存在")
@@ -412,6 +558,9 @@ def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     if order.pay_status == CardOrderPayStatus.PAID.value:
         if not _is_miniprogram_self_service_card_order(order):
             apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
+        mark_member_coupon_used_for_order(
+            db, order_biz=CouponLockedOrderBiz.MEMBER_CARD, order_id=int(order.id)
+        )
         db.commit()
         return True, "already_paid"
 
@@ -445,6 +594,9 @@ def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
             )
     else:
         apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
+    mark_member_coupon_used_for_order(
+        db, order_biz=CouponLockedOrderBiz.MEMBER_CARD, order_id=int(order.id)
+    )
     db.commit()
     logger.info(
         "开卡工单微信入账成功 order_id=%s member_id=%s out=%s delivery_start=%s",
@@ -461,6 +613,13 @@ def member_card_order_user_dict(order: MemberCardOrder) -> dict:
         "id": int(order.id),
         "card_kind": order.card_kind,
         "amount_yuan": _format_amount_yuan(order.amount_yuan) if order.amount_yuan is not None else None,
+        "original_amount_yuan": (
+            _format_amount_yuan(order.original_amount_yuan) if order.original_amount_yuan is not None else None
+        ),
+        "coupon_discount_yuan": (
+            _format_amount_yuan(order.coupon_discount_yuan) if order.coupon_discount_yuan is not None else None
+        ),
+        "member_coupon_id": int(order.member_coupon_id) if order.member_coupon_id is not None else None,
         "pay_status": order.pay_status,
         "delivery_start_date": order.delivery_start_date.isoformat() if order.delivery_start_date else None,
         "out_trade_no": (order.out_trade_no or "").strip() or None,

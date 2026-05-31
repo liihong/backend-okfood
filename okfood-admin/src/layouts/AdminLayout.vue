@@ -21,6 +21,7 @@ import {
   Boxes,
   MapPinned,
   Activity,
+  Megaphone,
 } from 'lucide-vue-next'
 import {
   handleAdminLogout,
@@ -153,6 +154,8 @@ const TAB_ROUTE_ICONS = {
   'system-tenants': Building2,
   'system-membership-templates': CreditCard,
   'system-retail-catalog': Boxes,
+  'marketing-coupon-templates': Megaphone,
+  'marketing-member-coupons': Megaphone,
 }
 
 function tabLeadingIcon(routeName) {
@@ -389,6 +392,17 @@ function onTabClose(tab) {
           </template>
           <el-menu-item index="/menu">菜品管理</el-menu-item>
           <el-menu-item index="/weekly-menu">本周菜单</el-menu-item>
+        </el-sub-menu>
+
+        <el-sub-menu v-if="showFullAdminMenus" index="sub-marketing">
+          <template #title>
+            <div class="menu-item-inner">
+              <Megaphone :size="20" stroke-width="2" />
+              <span class="menu-item-label">小程序营销</span>
+            </div>
+          </template>
+          <el-menu-item index="/marketing/coupon-templates">优惠券管理</el-menu-item>
+          <el-menu-item index="/marketing/member-coupons">优惠券发放</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu v-if="showOwnerAdminMenus || showSystemAdminMenus" index="sub-system">

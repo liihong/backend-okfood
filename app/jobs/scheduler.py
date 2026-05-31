@@ -133,6 +133,22 @@ def job_expire_unpaid_single_meal_orders() -> None:
         db.close()
 
 
+def job_expire_stale_unpaid_miniprogram_card_orders() -> None:
+    """每 2 分钟：购卡未支付超过 30 分钟则释放 locked 券并恢复原价。"""
+    from app.services.member_card_pay_service import expire_stale_unpaid_miniprogram_card_orders
+
+    db = SessionLocal()
+    try:
+        n = expire_stale_unpaid_miniprogram_card_orders(db)
+        if n:
+            logger.info("购卡超时未支付释放优惠券: count=%s", n)
+    except Exception:
+        logger.exception("购卡超时未支付释放优惠券任务失败")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def job_sf_nightly_auto_push() -> None:
     """
     每日 08:50（上海）：对启用「顺丰自动推单」的门店，自动推送当日业务日配送大表（订阅合并）停靠点至顺丰。
@@ -166,6 +182,15 @@ def add_cron_jobs(sched) -> None:
         "interval",
         minutes=2,
         id="expire_unpaid_single_meals",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
+        job_expire_stale_unpaid_miniprogram_card_orders,
+        "interval",
+        minutes=2,
+        id="expire_stale_unpaid_card_coupons",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

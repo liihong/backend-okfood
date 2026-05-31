@@ -38,6 +38,14 @@ class SingleMealOrder(Base):
     delivery_date: Mapped[date] = mapped_column(Date, index=True)
     routing_area: Mapped[str] = mapped_column(String(64))
     amount_yuan: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    original_amount_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    coupon_discount_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    member_coupon_id: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("member_coupons.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     pay_status: Mapped[str] = mapped_column(String(10), default="未支付")
     pay_channel: Mapped[str | None] = mapped_column(String(16), nullable=True)
     wx_transaction_id: Mapped[str | None] = mapped_column(String(32), nullable=True)

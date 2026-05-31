@@ -27,6 +27,8 @@ export const ADMIN_TAB_COMPONENT_NAMES = {
   'system-tenants': 'TenantsView',
   'system-membership-templates': 'MembershipTemplatesView',
   'system-retail-catalog': 'RetailCatalogView',
+  'marketing-coupon-templates': 'CouponTemplatesView',
+  'marketing-member-coupons': 'MemberCouponGrantsView',
 }
 
 export const ADMIN_TABS_MAX_CACHE = 10

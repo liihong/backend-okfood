@@ -98,7 +98,9 @@
           :address-line="planCardAddressLine"
           :daily-units-text="planCardDailyUnitsText"
           :show-resume-chip="showResumeDeliveryEntry"
+          :show-buy-card-chip="showBuyCardChip"
           @resume="goResumeDelivery"
+          @buy-card="goMembershipCardPack"
         />
 
         <template v-if="isLoggedIn">
@@ -113,7 +115,7 @@
                     mode="aspectFit"
                   />
                 </view>
-                <text class="menu-cap">会员卡包</text>
+                <text class="menu-cap">点我购卡</text>
               </view>
               <view class="menu-cell" @tap="goMyOrders">
                 <view class="menu-ico-wrap">
@@ -220,6 +222,7 @@ import {
 import { wxMiniMemberLoginAndStore, hasWxPhoneAuthDetail } from '@/utils/wxMemberLogin.js'
 import {
   shouldOpenMemberSetup,
+  shouldCompleteMemberProfile,
   shouldPromptMemberCardPay,
   isDeliveryPausedWithBalance,
   MEMBER_STUB_NAME,
@@ -281,6 +284,8 @@ const displayDailyUnitsAnim = ref(1)
 const defaultAddrLine = ref('')
 /** 防并发 onShow / 下拉刷新竞态，仅应用最新一次拉取结果 */
 let refreshMemberSeq = 0
+/** 避免资料完善页与「我的」onShow 重复跳转 */
+let profileCompleteNavLock = false
 const refresherTriggered = ref(false)
 
 async function syncDefaultAddressForCard(seq) {
@@ -387,12 +392,18 @@ const needsMemberSetupPage = computed(() => {
   return shouldOpenMemberSetup(memberProfileRaw.value)
 })
 
-/** 与绿卡状态文案配套：资料或余额达到需引导购卡/续费时展示「待开卡/续费」等 */
+/** 无剩余餐次：计划卡展示「去购卡」按钮，不展示每日份数 */
 const showMemberCardModule = computed(() => {
   if (!isLoggedIn.value) return false
   const p = memberProfileRaw.value
   if (p && typeof p === 'object') return shouldPromptMemberCardPay(p)
   return serverBalance.value <= 0
+})
+
+/** 未完善资料时不展示购卡按钮（优先引导完善配送） */
+const showBuyCardChip = computed(() => {
+  if (!isLoggedIn.value || needsMemberSetupPage.value) return false
+  return showMemberCardModule.value
 })
 
 /** 有余额且暂停配送：计划卡上展示「恢复配送」（资料待完善也可点此进入资料页恢复） */
@@ -583,7 +594,7 @@ const planCardAddressLine = computed(() => {
 })
 
 const planCardDailyUnitsText = computed(() => {
-  if (!isLoggedIn.value) return ''
+  if (!isLoggedIn.value || showMemberCardModule.value) return ''
   return `每日 ${displayDailyUnitsAnim.value} 份`
 })
 
@@ -759,7 +770,7 @@ const memberDeliveryStatus = computed(() => {
     return '请假中'
   }
   if (isDeliveryPausedWithBalance(memberProfileRaw.value)) return '暂停配送'
-  if (showMemberCardModule.value) return '待开卡/续费'
+  if (showMemberCardModule.value) return ''
   const startMd = ymdToCnMd(memberProfileRaw.value?.delivery_start_date)
   if (startMd) return `${startMd}生效中`
   return '生效中'
@@ -832,10 +843,10 @@ function mergeMemberApiProfile(data) {
   }
 }
 
-/** @param {{ prefetched?: object | null, skipAddress?: boolean }} [options] 登录流程已请求过 GET /api/user/me 时可传入 prefetched */
+/** @param {{ prefetched?: object | null, skipAddress?: boolean, skipProfileCompleteRedirect?: boolean }} [options] 登录流程已请求过 GET /api/user/me 时可传入 prefetched */
 async function refreshMember(options = {}) {
   const seq = ++refreshMemberSeq
-  const { prefetched, skipAddress = false } = options
+  const { prefetched, skipAddress = false, skipProfileCompleteRedirect = false } = options
   const token = getMemberToken()
   const phone = uni.getStorageSync('memberPhone') || ''
   isLoggedIn.value = !!token
@@ -921,6 +932,39 @@ async function refreshMember(options = {}) {
 
   if (seq !== refreshMemberSeq) return
   syncPlanCardDisplay({ animate: true })
+  if (!skipProfileCompleteRedirect) {
+    maybeRedirectToProfileComplete()
+  }
+}
+
+/** 已登录但昵称未完善时，引导至设置昵称页 */
+function maybeRedirectToProfileComplete() {
+  if (!isLoggedIn.value || profileCompleteNavLock) return
+  if (!shouldCompleteMemberProfile(memberProfileRaw.value)) return
+  profileCompleteNavLock = true
+  uni.navigateTo({
+    url: '/packageUser/pages/memberProfileComplete/memberProfileComplete?from=required',
+    fail: (e) => {
+      console.error('navigateTo memberProfileComplete', e)
+      profileCompleteNavLock = false
+    },
+    complete: () => {
+      setTimeout(() => {
+        profileCompleteNavLock = false
+      }, 600)
+    },
+  })
+}
+
+function goMemberProfileComplete(from) {
+  const q = from ? `?from=${encodeURIComponent(from)}` : ''
+  uni.navigateTo({
+    url: `/packageUser/pages/memberProfileComplete/memberProfileComplete${q}`,
+    fail: (e) => {
+      console.error('navigateTo memberProfileComplete', e)
+      uni.showToast({ title: '无法打开页面，请重试', icon: 'none' })
+    },
+  })
 }
 
 /** 下拉刷新：强制拉取会员档案与默认地址 */
@@ -974,9 +1018,15 @@ async function onWxGetPhoneNumber(e) {
   uni.showLoading({ title: '登录中', mask: true })
   try {
     const { profile } = await wxMiniMemberLoginAndStore(detail)
-    await refreshMember({ prefetched: profile })
+    await refreshMember({ prefetched: profile, skipProfileCompleteRedirect: true })
     uni.hideLoading()
     const snapshot = memberProfileRaw.value ?? profile
+    if (shouldCompleteMemberProfile(snapshot)) {
+      setTimeout(() => {
+        goMemberProfileComplete('login')
+      }, 120)
+      return
+    }
     const needSetup = shouldOpenMemberSetup(snapshot)
     if (needSetup) {
       setTimeout(() => {

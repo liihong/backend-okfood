@@ -40,6 +40,14 @@ class MemberCardOrder(Base):
     pay_channel: Mapped[str] = mapped_column(String(10))
     pay_status: Mapped[str] = mapped_column(String(10), default="未缴")
     amount_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    original_amount_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    coupon_discount_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    member_coupon_id: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("member_coupons.id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     remark: Mapped[str | None] = mapped_column(String(500), nullable=True)
     delivery_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     applied_to_member: Mapped[bool] = mapped_column(Boolean, default=False)
