@@ -161,6 +161,40 @@ def _latest_miniprogram_self_service_card_order(
     ).first()
 
 
+def _latest_miniprogram_card_order_for_delivery_start_write(
+    db: Session, member_id: int
+) -> MemberCardOrder | None:
+    """
+    完善配送信息时写入工单起送日。
+
+    - 续卡：创建工单时常已带起送日，且支付后多为「已缴」。
+    - 新用户购卡包：工单创建时无起送日；若支付回调/拉单滞后，工单仍为「未缴」，
+      亦须把起送日写入该笔微信自助工单，避免 profile 已保存而开卡工单仍为空。
+    """
+    order = _latest_miniprogram_self_service_card_order(
+        db, member_id, applied_to_member=False
+    )
+    if order is not None:
+        return order
+    order = _latest_miniprogram_self_service_card_order(
+        db, member_id, delivery_start_missing=True
+    )
+    if order is not None:
+        return order
+    return db.scalars(
+        select(MemberCardOrder)
+        .where(
+            MemberCardOrder.member_id == int(member_id),
+            MemberCardOrder.created_by == MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR,
+            MemberCardOrder.pay_status == CardOrderPayStatus.UNPAID.value,
+            MemberCardOrder.pay_channel == CardPayChannel.WECHAT.value,
+            MemberCardOrder.applied_to_member.is_(False),
+        )
+        .order_by(MemberCardOrder.id.desc())
+        .limit(1)
+    ).first()
+
+
 def apply_delivery_start_to_pending_miniprogram_card_order(
     db: Session,
     member_id: int,
@@ -172,13 +206,7 @@ def apply_delivery_start_to_pending_miniprogram_card_order(
     """
     if delivery_start_date < min_member_delivery_start_shanghai():
         return None
-    order = _latest_miniprogram_self_service_card_order(
-        db, member_id, applied_to_member=False
-    )
-    if order is None:
-        order = _latest_miniprogram_self_service_card_order(
-            db, member_id, delivery_start_missing=True
-        )
+    order = _latest_miniprogram_card_order_for_delivery_start_write(db, member_id)
     if order is None:
         return None
     order.delivery_start_date = delivery_start_date

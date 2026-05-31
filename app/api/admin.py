@@ -131,7 +131,10 @@ from app.services.member_card_order_service import (
     list_mall_template_card_orders_for_order_day,
     update_card_order,
 )
-from app.services.member_card_pay_service import admin_wechat_refund_member_card_order
+from app.services.member_card_pay_service import (
+    admin_wechat_refund_member_card_order,
+    sync_member_card_from_wechat_admin_or_raise,
+)
 from app.services.finance_received_service import finance_received_summary, finance_today_paid_card_orders
 from app.services.member_membership_refund_service import (
     member_membership_refund_confirm,
@@ -799,6 +802,34 @@ def card_orders_patch(
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     out = update_card_order(db, order_id, body, operator=admin_username, store_id=store_id)
     return success(data=dump_model(out), msg="工单已更新")
+
+
+@router.post("/card-orders/{order_id}/sync-wechat-pay")
+def card_orders_sync_wechat_pay(
+    order_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """
+    向微信查询该工单商户单号支付结果并记为已缴（与小程序支付成功拉单、异步通知同路径）。
+
+    用于用户已扣款但工单仍显示「未缴」的人工补救。
+    """
+    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    sync_member_card_from_wechat_admin_or_raise(db, order_id, store_id=store_id)
+    items, _ = list_card_orders_paged(
+        db,
+        order_id=order_id,
+        page=1,
+        page_size=1,
+        include_history=True,
+        store_id=store_id,
+    )
+    if not items:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    return success(data=dump_model(items[0]), msg="已从微信同步支付状态")
 
 
 @router.delete("/card-orders/{order_id}")

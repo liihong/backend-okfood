@@ -129,7 +129,7 @@ python -m app.jobs.worker
 
 - 健康检查：`GET /health`（无需 `/api` 前缀）
 - 在线文档：`/docs`（Swagger）、`/redoc`
-- 冒烟测试：`pytest`（无需真实 MySQL）
+- 冒烟测试：`pytest`（无需真实 MySQL）；新用户卡包购卡回调链路：`pytest tests/test_miniprogram_new_user_card_flow.py -v`
 - 配送资质核验：`scripts/curl_delivery_region_consult.sh`（`POST /api/admin/delivery-region/consult`）
 
 ---

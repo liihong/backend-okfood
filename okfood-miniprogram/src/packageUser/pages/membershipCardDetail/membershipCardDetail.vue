@@ -185,21 +185,35 @@ async function onPay() {
       preProfile?.delivery_start_date != null
         ? String(preProfile.delivery_start_date).trim().slice(0, 10)
         : ''
-    await runMembershipTemplateWechatPay({
+    const payOut = await runMembershipTemplateWechatPay({
       membershipTemplateId: templateId.value,
       deliveryStartYmd: activeRenewal && profileStartYmd ? profileStartYmd : undefined,
     })
+    const paySynced = payOut?.paySynced !== false
     markMinePageNeedsRefresh()
-    uni.showToast({ title: '支付成功', icon: 'success' })
+    if (activeRenewal) {
+      uni.showToast({
+        title: paySynced ? '支付成功' : '支付已提交，状态同步中',
+        icon: 'success',
+      })
+      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+      return
+    }
+    if (paySynced) {
+      uni.showToast({ title: '支付成功', icon: 'success' })
+    } else {
+      uni.showModal({
+        title: '支付已提交',
+        content:
+          '微信已扣款，订单状态正在同步。请先完善配送信息；若后台长时间仍显示未缴，请联系客服核对。',
+        showCancel: false,
+      })
+    }
     setTimeout(() => {
-      if (activeRenewal) {
-        uni.switchTab({ url: '/pages/mine/index' })
-      } else {
-        uni.redirectTo({
-          url: '/packageUser/pages/memberSetup/memberSetup?from=pay',
-        })
-      }
-    }, 400)
+      uni.redirectTo({
+        url: '/packageUser/pages/memberSetup/memberSetup?from=pay',
+      })
+    }, paySynced ? 400 : 80)
   } catch (e) {
     const msg =
       e instanceof Error ? e.message : typeof e === 'string' ? e : '支付未完成'

@@ -32,6 +32,7 @@ async function resolveMemberCardOrderId(createBody) {
   }
 }
 
+/** 微信扣款成功后拉单同步；返回是否已在服务端记为已缴 */
 async function runWechatPayForMemberCardOrder(orderId) {
   const pay = await fetchMemberCardWechatJsapiPayParams(orderId)
   await new Promise((resolve, reject) => {
@@ -46,12 +47,15 @@ async function runWechatPayForMemberCardOrder(orderId) {
       fail: reject,
     })
   })
-  const maxTries = 6
+  const retryDelaysMs = [800, 1200, 1500, 2000, 2500, 3000, 3500, 4000]
+  const maxTries = retryDelaysMs.length + 1
+  let lastErr = null
   for (let i = 0; i < maxTries; i++) {
     try {
       await syncMemberCardWechatPayResult(orderId)
-      break
+      return { wechatPaid: true, paySynced: true }
     } catch (e) {
+      lastErr = e
       const m = (e && e.message) || ''
       const maybeWait =
         m.includes('处理中') ||
@@ -61,17 +65,17 @@ async function runWechatPayForMemberCardOrder(orderId) {
         m.includes('not_paid') ||
         /PAY_USERPAYING/i.test(m)
       if (maybeWait && i < maxTries - 1) {
-        await new Promise((r) => setTimeout(r, 1500))
+        await new Promise((r) => setTimeout(r, retryDelaysMs[i] ?? 2000))
         continue
       }
       if (maybeWait) {
-        throw new Error(
-          '支付已提交。若「我的」中次数未更新，请下拉刷新或稍后再看；仍无请联客服。',
-        )
+        return { wechatPaid: true, paySynced: false }
       }
       throw e
     }
   }
+  if (lastErr) throw lastErr
+  return { wechatPaid: true, paySynced: false }
 }
 
 /**
@@ -103,8 +107,8 @@ export async function runMemberCardWechatPay({
     card_kind: kind,
     delivery_start_date: d0,
   })
-  await runWechatPayForMemberCardOrder(orderId)
-  return { order, orderId }
+  const payResult = await runWechatPayForMemberCardOrder(orderId)
+  return { order, orderId, ...payResult }
 }
 
 /**
@@ -127,6 +131,6 @@ export async function runMembershipTemplateWechatPay({
   }
   await syncWxMiniOpenidFromLogin()
   const { order, orderId } = await resolveMemberCardOrderId(body)
-  await runWechatPayForMemberCardOrder(orderId)
-  return { order, orderId }
+  const payResult = await runWechatPayForMemberCardOrder(orderId)
+  return { order, orderId, ...payResult }
 }

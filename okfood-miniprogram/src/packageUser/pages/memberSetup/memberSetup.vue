@@ -190,7 +190,8 @@ async function loadProfile() {
     minDeliveryYmd.value = minMemberDeliveryStartYmd()
     serverBalance.value = Math.max(0, Math.floor(Number(data.balance) || 0))
 
-    if (shouldPromptMemberCardPay(data)) {
+    // 卡包购卡成功跳转（from=pay）：微信已扣款但客服未入账前 balance 仍为 0，不可误判为未购卡
+    if (!postPaySetupMode.value && shouldPromptMemberCardPay(data)) {
       uni.showToast({ title: '请先购买自律卡包', icon: 'none' })
       setTimeout(
         () =>

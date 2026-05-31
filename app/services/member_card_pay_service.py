@@ -364,6 +364,20 @@ def sync_member_card_from_wechat_or_raise(db: Session, member_id: int, order_id:
         raise HTTPException(status_code=400, detail=reason[:200])
 
 
+def sync_member_card_from_wechat_admin_or_raise(
+    db: Session, order_id: int, *, store_id: int | None = None
+) -> None:
+    """管理端：按工单 id 向微信查单并记已缴（补救「已扣款但库未更」）。"""
+    from fastapi import HTTPException
+
+    order = db.get(MemberCardOrder, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    if store_id is not None and int(order.store_id) != int(store_id):
+        raise HTTPException(status_code=404, detail="工单不存在")
+    sync_member_card_from_wechat_or_raise(db, int(order.member_id), int(order_id))
+
+
 def _is_miniprogram_self_service_card_order(order: MemberCardOrder) -> bool:
     """小程序用户自助开卡/续卡（含卡包模版），支付后须客服确认起送日再同步入账。"""
     return (order.created_by or "").strip() == "miniprogram"
@@ -419,10 +433,26 @@ def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     tid = (parsed.transaction_id or "").strip()
     order.wx_transaction_id = tid or order.wx_transaction_id
     if _is_miniprogram_self_service_card_order(order):
-        _notify_miniprogram_card_order_pending_cs_review(db, order)
+        try:
+            _notify_miniprogram_card_order_pending_cs_review(db, order)
+        except Exception:
+            # 待审批通知失败不应回滚「已缴」，否则与 #775 类「已扣款仍显示未缴」一致
+            logger.exception(
+                "小程序购卡待审批通知写入失败 order_id=%s member_id=%s out=%s",
+                int(order.id),
+                int(order.member_id),
+                parsed.out_trade_no,
+            )
     else:
         apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
     db.commit()
+    logger.info(
+        "开卡工单微信入账成功 order_id=%s member_id=%s out=%s delivery_start=%s",
+        int(order.id),
+        int(order.member_id),
+        parsed.out_trade_no,
+        order.delivery_start_date.isoformat() if order.delivery_start_date else None,
+    )
     return True, "paid"
 
 

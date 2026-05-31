@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from app.core.deps import SessionDep, MemberIdScoped
 from app.core.limiter import limiter
@@ -11,8 +11,12 @@ from app.integrations.wechat_pay_v2 import (
     resolve_request_client_ip,
     xml_to_dict,
 )
-from app.services.member_card_pay_service import sync_member_card_from_wechat_or_raise
-from app.services.member_service import get_member
+from app.models.member_card_order import MemberCardOrder
+from app.schemas.user import UserMemberCardOrderOut
+from app.services.member_card_pay_service import (
+    member_card_order_user_dict,
+    sync_member_card_from_wechat_or_raise,
+)
 from app.services.wechat_pay_notify_dispatch import apply_wechat_pay_notify
 from app.utils.response import dump_model, success
 
@@ -80,5 +84,8 @@ def wechat_member_card_order_sync_after_pay(
     """
     _ = request
     sync_member_card_from_wechat_or_raise(db, member_id, order_id)
-    member = get_member(db, member_id)
-    return success(data=dump_model(member), msg="支付结果已同步")
+    row = db.get(MemberCardOrder, order_id)
+    if not row or int(row.member_id) != int(member_id):
+        raise HTTPException(status_code=404, detail="开卡订单不存在")
+    payload = UserMemberCardOrderOut.model_validate(member_card_order_user_dict(row))
+    return success(data=dump_model(payload), msg="支付结果已同步")

@@ -39,6 +39,7 @@ from app.schemas.admin import FileUploadOut
 from sqlalchemy import select
 
 from app.models.member import Member
+from app.models.member_card_order import MemberCardOrder
 
 from app.schemas.user import (
     ActivateIn,
@@ -634,8 +635,11 @@ def sync_member_card_order_after_pay(
     """
     _ = request
     sync_member_card_from_wechat_or_raise(db, member_id, order_id)
-    member = get_member(db, member_id)
-    return success(data=dump_model(member), msg="支付结果已同步")
+    row = db.get(MemberCardOrder, order_id)
+    if not row or int(row.member_id) != int(member_id):
+        raise HTTPException(status_code=404, detail="开卡订单不存在")
+    payload = UserMemberCardOrderOut.model_validate(member_card_order_user_dict(row))
+    return success(data=dump_model(payload), msg="支付结果已同步")
 
 
 @router.patch("/profile")
