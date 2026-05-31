@@ -18,11 +18,17 @@
         <text class="plan-card__num-lab">剩余自律餐次</text>
       </view>
       <view v-if="dailyUnitsText" class="plan-card__slant-wrap">
-        <text class="plan-card__slant">{{ dailyUnitsText }}</text>
+        <text
+          class="plan-card__slant"
+          :class="{ 'plan-card__slant--alert': isDailyUnitsAlert }"
+        >{{ dailyUnitsText }}</text>
       </view>
     </view>
 
-    <text v-if="addressLine" class="plan-card__addr">{{ addressLine }}</text>
+    <text
+      v-if="addressLine"
+      :class="['plan-card__addr', { 'plan-card__addr--alert': statusAlert }]"
+    >{{ addressLine }}</text>
 
     <view class="plan-card__foot">
       <text class="plan-card__foot-left">{{ footerTagline }}</text>
@@ -32,6 +38,13 @@
         @tap.stop="$emit('resume')"
       >
         <text class="plan-card__foot-resume-txt">点我恢复配送</text>
+      </view>
+      <view
+        v-else-if="showSetupDeliveryChip"
+        class="plan-card__foot-resume"
+        @tap.stop="$emit('setup-delivery')"
+      >
+        <text class="plan-card__foot-resume-txt">设置配送信息</text>
       </view>
       <view
         v-else-if="showBuyCardChip"
@@ -56,6 +69,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { formatPlanCardDailyUnitsLine } from '@/utils/memberLeaveDisplay'
 
 const props = defineProps({
   remainingMeals: { type: Number, default: 0 },
@@ -67,17 +81,47 @@ const props = defineProps({
   /** 周卡 / 月卡 / 次卡，用于卡片配色 */
   planKind: { type: String, default: '' },
   addressLine: { type: String, default: '' },
-  dailyUnitsText: { type: String, default: '' },
+  isLoggedIn: { type: Boolean, default: false },
+  /** 每日送达份数（含滚动动画后的展示值） */
+  dailyUnits: { type: Number, default: 1 },
+  /** 与 /api/user/me.leave_range 一致 */
+  leaveRange: { type: Object, default: null },
+  /** 与 /api/user/me.is_leaved_tomorrow 一致 */
+  isLeavedTomorrow: { type: Boolean, default: false },
+  /** 无剩余餐次时不展示右上角份数/请假文案 */
+  hideDailyUnits: { type: Boolean, default: false },
+  /** 暂停配送时展示「已暂停配送」 */
+  isDeliveryPaused: { type: Boolean, default: false },
   showResumeChip: { type: Boolean, default: false },
+  /** 待完善配送信息时展示「设置配送信息」按钮 */
+  showSetupDeliveryChip: { type: Boolean, default: false },
   /** 无剩余餐次时展示「去购卡」按钮 */
   showBuyCardChip: { type: Boolean, default: false },
 })
 
-defineEmits(['resume', 'buy-card'])
+defineEmits(['resume', 'buy-card', 'setup-delivery'])
 
 const remainingDisplay = computed(() =>
   Math.max(0, Math.floor(Number(props.remainingMeals) || 0)),
 )
+
+/** 右上角：每日份数 / 请假中 / 暂停配送 */
+const dailyUnitsText = computed(() =>
+  formatPlanCardDailyUnitsLine({
+    isLoggedIn: props.isLoggedIn,
+    hideDailyUnits: props.hideDailyUnits,
+    isPaused: props.isDeliveryPaused,
+    dailyUnits: props.dailyUnits,
+    leaveRange: props.leaveRange,
+    isLeavedTomorrow: props.isLeavedTomorrow,
+  }),
+)
+
+/** 请假、暂停时用高亮色强调 */
+const isDailyUnitsAlert = computed(() => {
+  const t = String(dailyUnitsText.value || '')
+  return t.includes('请假') || t === '已暂停配送'
+})
 
 const themeClass = computed(() => {
   const p = String(props.planKind || '').trim()
@@ -94,12 +138,12 @@ const vipRibbonClass = computed(() => {
   return 'plan-card__vip-ribbon--week'
 })
 
-/** 生效中 / 请假：底部状态呼吸灯高亮 */
+/** 正常配送中 / 请假：底部状态呼吸灯高亮 */
 const isFootStatusBreathe = computed(() => {
-  if (props.statusAlert || props.showResumeChip) return false
+  if (props.statusAlert || props.showResumeChip || props.showSetupDeliveryChip) return false
   const s = String(props.statusText || '').trim()
   if (!s) return false
-  return s.includes('生效中') || s.includes('请假')
+  return s.includes('正常配送') || s.includes('请假') || s.includes('暂停配送')
 })
 </script>
 
@@ -354,6 +398,10 @@ const isFootStatusBreathe = computed(() => {
   line-height: 1.45;
   word-break: break-all;
   white-space: normal;
+}
+
+.plan-card__addr--alert {
+  color: #fef08a;
 }
 
 .plan-card__foot {

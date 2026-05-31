@@ -92,7 +92,7 @@ def ensure_miniprogram_offline_claim_order(
     if delivery_start_date < min_member_delivery_start_shanghai():
         raise HTTPException(
             status_code=400,
-            detail="起送日期须不早于今日（上海业务日）",
+            detail="起送日期须不早于明日（上海业务日）",
         )
     m = db.get(Member, member_id)
     if not m or m.deleted_at is not None:
@@ -139,6 +139,20 @@ def ensure_miniprogram_offline_claim_order(
     db.add(order)
     db.flush()
     return order
+
+
+def member_paid_card_awaiting_setup(db: Session, member_id: int) -> bool:
+    """
+    小程序自助购卡：微信已缴且工单未入账、会员 balance 仍为 0。
+    用于「我的」页引导完善配送信息，避免误判为未购卡。
+    """
+    m = db.get(Member, int(member_id))
+    if not m or int(m.balance) > 0:
+        return False
+    order = _latest_miniprogram_self_service_card_order(
+        db, int(member_id), applied_to_member=False
+    )
+    return order is not None
 
 
 def _latest_miniprogram_self_service_card_order(
@@ -517,7 +531,7 @@ def create_card_order(
         if body.delivery_start_date < min_member_delivery_start_shanghai():
             raise HTTPException(
                 status_code=400,
-                detail="起送日期须不早于今日（上海业务日）",
+                detail="起送日期须不早于明日（上海业务日）",
             )
     if body.delivery_address is not None:
         da = body.delivery_address
@@ -629,7 +643,7 @@ def update_card_order(
         if ds is not None and ds < min_member_delivery_start_shanghai():
             raise HTTPException(
                 status_code=400,
-                detail="起送日期须不早于今日（上海业务日）",
+                detail="起送日期须不早于明日（上海业务日）",
             )
         order.delivery_start_date = ds
         if order.applied_to_member:

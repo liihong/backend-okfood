@@ -7,10 +7,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from sqlalchemy import desc, select
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.models.member_operation_log import MemberOperationLog
 from app.models.member import Member
@@ -89,7 +93,7 @@ def record_member_operation(
     operator: str | None = None,
     source: str = "miniprogram",
 ) -> None:
-    """追加一条操作日志；不 commit（由上层事务一并提交）。"""
+    """追加一条操作日志；不 commit（由上层事务一并提交）。表未迁移时不阻断主业务。"""
 
     row = MemberOperationLog(
         member_id=int(member_id),
@@ -101,7 +105,17 @@ def record_member_operation(
         ip_address=(ip_address or None) and str(ip_address)[:64],
         operator=(operator or f"member:{member_id}")[:100],
     )
-    db.add(row)
+    try:
+        db.add(row)
+        db.flush()
+    except (OperationalError, ProgrammingError) as exc:
+        logger.warning(
+            "member_operation_logs 写入失败（请确认已执行 migration_033）: %s",
+            exc,
+            exc_info=True,
+        )
+        db.expunge(row)
+        return
     m = db.get(Member, int(member_id))
     if m is not None:
         m.updated_at = beijing_now_naive()

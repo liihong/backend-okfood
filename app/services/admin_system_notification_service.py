@@ -128,6 +128,38 @@ def store_should_prompt_manual_delivery_sheet_reconciliation(db: Session, *, sto
     return True
 
 
+def _delivery_sheet_manual_attention_event_line(
+    *,
+    action_labels_cn: list[str],
+    member_id: int,
+    member_phone: str | None,
+    member_name: str | None,
+) -> str:
+    """单条小程序侧操作摘要（用于合并进当日唯一系统消息）。"""
+    label_join = "、".join(str(x).strip() for x in action_labels_cn if str(x).strip())
+    if not label_join:
+        return ""
+    phones = str(member_phone or "").strip()[:32] or "(无手机号)"
+    naming = str(member_name or "").strip()
+    naming = naming[:40] + ("…" if len(naming) > 40 else "")
+    name_part = f"「{naming}」" if naming else ""
+    return (
+        f"小程序操作「{label_join}」，会员 mid={int(member_id)} {phones} {name_part}"
+        "今日可能已计入大表但不在早间顺丰快照，请并入配送并补链路。"
+    )
+
+
+def _append_message_capped(base: str, addon: str, *, max_len: int = 500) -> str:
+    base = (base or "").strip()
+    addon = (addon or "").strip()
+    if not addon:
+        return base
+    merged = f"{base}\n{addon}" if base else addon
+    if len(merged) <= max_len:
+        return merged
+    return merged[: max_len - 1] + "…"
+
+
 def create_delivery_sheet_manual_attention_notification(
     db: Session,
     *,
@@ -138,39 +170,42 @@ def create_delivery_sheet_manual_attention_notification(
     member_phone: str | None,
     member_name: str | None,
 ) -> AdminSystemNotification | None:
-    """新增一条配送大表跟进提醒（不 upsert）；message 总长受 500 字限制。"""
+    """写入或合并当日配送大表跟进提醒（同店同日 kind 唯一，重复操作追加 message）。"""
     sid = int(store_id)
     if sid <= 0:
         return None
-    if not action_labels_cn:
+    event_line = _delivery_sheet_manual_attention_event_line(
+        action_labels_cn=action_labels_cn,
+        member_id=member_id,
+        member_phone=member_phone,
+        member_name=member_name,
+    )
+    if not event_line:
         return None
-    label_join = "、".join(str(x).strip() for x in action_labels_cn if str(x).strip())
-    if not label_join:
-        return None
-
-    phones = str(member_phone or "").strip()[:32]
-    if not phones:
-        phones = "(无手机号)"
-
-    naming = str(member_name or "").strip()
-    naming = naming[:40] + ("…" if len(naming) > 40 else "")
 
     title = f"大表顺丰需人工跟进 · {business_date.isoformat()}"
-    # 说明：快照不自动追加，客服合并大表并补骑手/顺丰信息
-    body = (
-        f"小程序操作「{label_join}」，会员 mid={int(member_id)} {phones} "
-        f"{('「' + naming + '」') if naming else ''}"
-        "今日可能已计入大表但不在早间顺丰快照，请并入配送并补链路。"
-    )
-    if len(body) > 500:
-        body = body[:497] + "…"
+    existing = db.scalars(
+        select(AdminSystemNotification)
+        .where(
+            AdminSystemNotification.store_id == sid,
+            AdminSystemNotification.kind == KIND_DELIVERY_SHEET_MANUAL_ATTENTION,
+            AdminSystemNotification.business_date == business_date,
+        )
+        .limit(1)
+    ).first()
+
+    if existing is not None:
+        existing.title = title[:200]
+        existing.message = _append_message_capped(existing.message or "", event_line)
+        db.flush()
+        return existing
 
     row = AdminSystemNotification(
         store_id=sid,
         kind=KIND_DELIVERY_SHEET_MANUAL_ATTENTION,
         business_date=business_date,
         title=title[:200],
-        message=body,
+        message=event_line[:500] if len(event_line) <= 500 else event_line[:497] + "…",
         total_count=0,
         success_count=0,
         failed_count=0,
@@ -211,12 +246,12 @@ def _miniprogram_card_order_pending_message(
 
     kind_label = str(card_kind or "").strip() or "会员卡"
     ds_text = delivery_start_date.isoformat() if delivery_start_date else "未填写"
-    title = f"小程序自助购卡待审批 · 工单#{int(order_id)}"
+    title = f"小程序自助购卡待核对 · 工单#{int(order_id)}"
     body = (
         f"会员 mid={int(member_id)} {phones} "
         f"{('「' + naming + '」') if naming else ''}"
-        f"已微信支付购买{kind_label}，起送日 {ds_text}。"
-        "请在「开卡工单」核对起送日与配送方式，手动「确认入账」后再参与派单。"
+        f"已微信支付购买{kind_label}，餐次已入账；起送日 {ds_text}。"
+        "请在「开卡工单」核对配送方式与起送日，完善后用户即可参与派单。"
     )
     if len(body) > 500:
         body = body[:497] + "…"
@@ -253,7 +288,7 @@ def create_miniprogram_card_order_pending_notification(
     member_name: str | None,
     delivery_start_date: date | None,
 ) -> AdminSystemNotification | None:
-    """小程序自助购卡支付成功：每工单仅 1 条待审批提醒，供客服确认入账。"""
+    """小程序自助购卡支付成功：每工单仅 1 条待核对配送提醒，供客服核对履约信息。"""
     sid = int(store_id)
     if sid <= 0:
         return None
@@ -534,7 +569,7 @@ def try_notify_delivery_sheet_manual_attention(
 ) -> AdminSystemNotification | None:
     """
     在 ``store_should_prompt_manual_delivery_sheet_reconciliation`` 为真时写入一条跟进提醒；
-    与 ``upsert_sf_nightly_push_notification`` 不同，每次事件插入新行，便于客服逐条消除。
+    同店同日 ``delivery_sheet_manual_attention`` 仅一条（库表唯一键），重复事件合并进 message。
 
     当日顺丰有效推单若已全部履约完毕，守门为假，不再写入（餐送完不再通知）。
     """

@@ -84,7 +84,6 @@
                 <text class="hero-gear-icon">⚙</text>
               </view>
             </view>
-            <text v-if="needsMemberSetupPage" class="hero-setup-hint">点按此处完善配送或自提信息 ›</text>
           </view>
         </template>
 
@@ -96,10 +95,17 @@
           :plan-kind="planType"
           :plan-label="planTypeMemberLabel"
           :address-line="planCardAddressLine"
-          :daily-units-text="planCardDailyUnitsText"
+          :is-logged-in="isLoggedIn"
+          :daily-units="displayDailyUnitsAnim"
+          :leave-range="leaveRange"
+          :is-leaved-tomorrow="isLeavedTomorrow"
+          :hide-daily-units="showMemberCardModule"
+          :is-delivery-paused="showResumeDeliveryEntry"
           :show-resume-chip="showResumeDeliveryEntry"
+          :show-setup-delivery-chip="showSetupDeliveryChip"
           :show-buy-card-chip="showBuyCardChip"
           @resume="goResumeDelivery"
+          @setup-delivery="goMemberSetup"
           @buy-card="goMembershipCardPack"
         />
 
@@ -225,6 +231,8 @@ import {
   shouldCompleteMemberProfile,
   shouldPromptMemberCardPay,
   isDeliveryPausedWithBalance,
+  isMemberInActiveDelivery,
+  isMemberDeliveryScheduledFuture,
   MEMBER_STUB_NAME,
   WX_DEFAULT_NICK,
 } from '@/utils/memberProfile.js'
@@ -238,6 +246,13 @@ import {
   isAddressItemDefault,
 } from '@/utils/addressApi.js'
 import { consumeMinePageNeedsRefresh, markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
+import { ymdTodayShanghai } from '@/utils/memberDeliveryDate.js'
+import {
+  ymdFromApi,
+  ymdToCnMd,
+  isOnLeaveTodayShanghai,
+  hasLeaveRangeConfigured,
+} from '@/utils/memberLeaveDisplay.js'
 
 const pageStyle = ref({})
 const scrollStyle = ref({})
@@ -404,6 +419,12 @@ const showMemberCardModule = computed(() => {
 const showBuyCardChip = computed(() => {
   if (!isLoggedIn.value || needsMemberSetupPage.value) return false
   return showMemberCardModule.value
+})
+
+/** 待完善配送/自提：计划卡展示「设置配送信息」按钮 */
+const showSetupDeliveryChip = computed(() => {
+  if (!isLoggedIn.value) return false
+  return needsMemberSetupPage.value
 })
 
 /** 有余额且暂停配送：计划卡上展示「恢复配送」（资料待完善也可点此进入资料页恢复） */
@@ -593,11 +614,6 @@ const planCardAddressLine = computed(() => {
   return todayDeliveryAddressLine.value
 })
 
-const planCardDailyUnitsText = computed(() => {
-  if (!isLoggedIn.value || showMemberCardModule.value) return ''
-  return `每日 ${displayDailyUnitsAnim.value} 份`
-})
-
 function onMineHeroTap() {
   if (needsMemberSetupPage.value) goMemberSetup()
 }
@@ -672,72 +688,12 @@ async function confirmNickEdit() {
   }
 }
 
-function shanghaiTodayYmd() {
-  try {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Shanghai',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(new Date())
-    const y = parts.find((p) => p.type === 'year')?.value
-    const m = parts.find((p) => p.type === 'month')?.value
-    const d = parts.find((p) => p.type === 'day')?.value
-    if (y && m && d) return `${y}-${m}-${d}`
-  } catch {
-    /* ignore */
-  }
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-}
-
-function isOnLeaveTodayShanghai() {
-  const lr = leaveRange.value
-  if (!lr || typeof lr !== 'object') return false
-  const sRaw = lr.start != null ? String(lr.start).slice(0, 10) : ''
-  const eRaw = lr.end != null ? String(lr.end).slice(0, 10) : ''
-  if (!sRaw || !eRaw) return false
-  const today = shanghaiTodayYmd()
-  return today >= sRaw && today <= eRaw
-}
-
-/** 已设置区间起止（含「尚未开始」的未来区间），与请假页 isOnLeaveNow 中区间部分一致 */
-function hasLeaveRangeConfigured() {
-  const lr = leaveRange.value
-  if (!lr || typeof lr !== 'object') return false
-  const sRaw = lr.start != null ? String(lr.start).slice(0, 10) : ''
-  const eRaw = lr.end != null ? String(lr.end).slice(0, 10) : ''
-  return Boolean(sRaw && eRaw)
-}
-
-function ymdFromApi(d) {
-  if (d == null || d === '') return ''
-  const s = String(d)
-  return s.length >= 10 ? s.slice(0, 10) : s
-}
-
-/** 展示用：如「5月28日」，计划卡状态文案用 */
-function ymdToCnMd(ymd) {
-  const raw = ymdFromApi(ymd)
-  if (!raw) return ''
-  const parts = raw.split('-')
-  if (parts.length < 3) return ''
-  const m = Number(parts[1])
-  const d = Number(parts[2])
-  if (!m || !d) return ''
-  return `${m}月${d}日`
-}
-
 /** 与后台一致：区间、仅明日请假；含「已提交未来区间」；文案展示具体日期 */
-const isLeaveCardDetailStatus = computed(
-  () => isOnLeaveTodayShanghai() || isLeavedTomorrow.value || hasLeaveRangeConfigured(),
-)
-
 const memberDeliveryStatus = computed(() => {
   if (!isLoggedIn.value) return '尚未开启计划'
-  if (needsMemberSetupPage.value) return '待完善配送'
-  if (isOnLeaveTodayShanghai() || isLeavedTomorrow.value || hasLeaveRangeConfigured()) {
-    if (isOnLeaveTodayShanghai()) {
+  if (needsMemberSetupPage.value) return ''
+  if (isOnLeaveTodayShanghai(leaveRange.value) || isLeavedTomorrow.value || hasLeaveRangeConfigured(leaveRange.value)) {
+    if (isOnLeaveTodayShanghai(leaveRange.value)) {
       const lr = leaveRange.value
       const sRaw = lr?.start != null ? String(lr.start).slice(0, 10) : ''
       const eRaw = lr?.end != null ? String(lr.end).slice(0, 10) : ''
@@ -749,7 +705,7 @@ const memberDeliveryStatus = computed(() => {
       }
       return '请假中'
     }
-    if (hasLeaveRangeConfigured() && !isOnLeaveTodayShanghai()) {
+    if (hasLeaveRangeConfigured(leaveRange.value) && !isOnLeaveTodayShanghai(leaveRange.value)) {
       const lr = leaveRange.value
       const sRaw = lr?.start != null ? String(lr.start).slice(0, 10) : ''
       const eRaw = lr?.end != null ? String(lr.end).slice(0, 10) : ''
@@ -771,9 +727,14 @@ const memberDeliveryStatus = computed(() => {
   }
   if (isDeliveryPausedWithBalance(memberProfileRaw.value)) return '暂停配送'
   if (showMemberCardModule.value) return ''
-  const startMd = ymdToCnMd(memberProfileRaw.value?.delivery_start_date)
-  if (startMd) return `${startMd}生效中`
-  return '生效中'
+  const p = memberProfileRaw.value
+  const today = ymdTodayShanghai()
+  if (isMemberInActiveDelivery(p, today)) return '正常配送中'
+  if (isMemberDeliveryScheduledFuture(p, today)) {
+    const startMd = ymdToCnMd(p?.delivery_start_date)
+    return startMd ? `${startMd}起配送` : '待起送'
+  }
+  return ''
 })
 
 const planTypeMemberLabel = computed(() => {
@@ -788,8 +749,11 @@ const cardFooter = computed(() => {
 })
 
 const todayDeliveryAddressLine = computed(() => {
+  if (needsMemberSetupPage.value) return '配送状态：未开启配送'
   const line = defaultAddrLine.value?.trim()
   if (line) return `送餐地址：${line}`
+  const p = memberProfileRaw.value
+  if (p?.store_pickup === true) return '履约方式：门店自提'
   return '送餐地址：未设置默认地址'
 })
 
@@ -1029,9 +993,11 @@ async function onWxGetPhoneNumber(e) {
     }
     const needSetup = shouldOpenMemberSetup(snapshot)
     if (needSetup) {
+      const paidPending = snapshot?.paid_card_awaiting_setup === true
+      const fromQ = paidPending ? 'from=pay' : 'from=login'
       setTimeout(() => {
         uni.navigateTo({
-          url: '/packageUser/pages/memberSetup/memberSetup?from=login',
+          url: `/packageUser/pages/memberSetup/memberSetup?${fromQ}`,
           fail: (e) => {
             console.error('navigateTo memberSetup', e)
             uni.showToast({ title: '无法打开页面，请重试', icon: 'none' })
@@ -1135,7 +1101,29 @@ function goDailyMealUnits() {
 }
 
 function goMemberSetup() {
-  uni.navigateTo({ url: '/packageUser/pages/memberSetup/memberSetup' })
+  if (!getMemberToken()) {
+    uni.showToast({ title: '请先登录', icon: 'none' })
+    return
+  }
+  let from = ''
+  if (needsMemberSetupPage.value) {
+    const paidPending =
+      memberProfileRaw.value &&
+      typeof memberProfileRaw.value === 'object' &&
+      memberProfileRaw.value.paid_card_awaiting_setup === true
+    if (paidPending) from = 'pay'
+  } else {
+    // 资料已完善：齿轮入口进入修改配送/自提（勿被「配送信息已完善」拦截退回）
+    from = 'edit'
+  }
+  const q = from ? `?from=${encodeURIComponent(from)}` : ''
+  uni.navigateTo({
+    url: `/packageUser/pages/memberSetup/memberSetup${q}`,
+    fail: (e) => {
+      console.error('navigateTo memberSetup', e)
+      uni.showToast({ title: '无法打开页面，请重试', icon: 'none' })
+    },
+  })
 }
 
 function goResumeDelivery() {

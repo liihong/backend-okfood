@@ -351,13 +351,21 @@ const activeLeaveTitle = computed(() => {
   return '当前请假'
 })
 
+/** 请假结束提示：展示目标结束日 24:00，并说明到期自动恢复 */
+function buildLeaveEndHint(ymd) {
+  const md = ymdToCnMdHao(ymd)
+  if (!md) return ''
+  return `到${md}24：00结束请假。无需手动操作取消，请假状态会自动结束`
+}
+
 const activeLeaveHint = computed(() => {
   if (isRangeOnlyLeave.value) {
-    const end = serverLeaveEnd.value
-    return end ? `${end}日24：00结束请假` : ''
+    return buildLeaveEndHint(serverLeaveEnd.value)
   }
   if (isTomorrowLeave.value) {
-    return '到明日24：00结束请假'
+    const raw = ymdFromApi(tomorrowTargetYmd.value)
+    const ymd = raw || addDaysIso(ymdTodayShanghai(), 1)
+    return buildLeaveEndHint(ymd)
   }
   return ''
 })
@@ -378,6 +386,18 @@ function ymdToCnMd(ymd) {
   const d = Number(parts[2])
   if (!m || !d) return ''
   return `${m}月${d}日`
+}
+
+/** 展示用：如「5月28号」，用于请假结束时间提示 */
+function ymdToCnMdHao(ymd) {
+  const raw = ymdFromApi(ymd)
+  if (!raw) return ''
+  const parts = raw.split('-')
+  if (parts.length < 3) return ''
+  const m = Number(parts[1])
+  const d = Number(parts[2])
+  if (!m || !d) return ''
+  return `${m}月${d}号`
 }
 
 /**

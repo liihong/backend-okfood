@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.base import Base
+from app.models.balance_log import BalanceLog
 from app.models.admin_system_notification import AdminSystemNotification
 from app.models.member import Member
 from app.models.member_operation_log import MemberOperationLog
@@ -33,6 +34,7 @@ def db() -> Session:
         MarketingCouponTemplate.__table__,
         MemberCoupon.__table__,
         MemberCardOrder.__table__,
+        BalanceLog.__table__,
         AdminSystemNotification.__table__,
         MemberOperationLog.__table__,
     ]

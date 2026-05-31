@@ -54,9 +54,9 @@
                 deliveryMode === 'pickup' ? '开始自提日期' : '开始配送日期'
               }}</text>
               <text class="sec-sub">
-                以上海业务日历为准；最早可选「今天」为起点。
+                以上海业务日历为准；当天不可选，最早从「明天」起选。
               </text>
-              <picker mode="date" :value="pickerDeliveryYmd" :start="minDeliveryYmd" @change="onDeliveryPick">
+              <picker mode="date" :value="pickerDeliveryYmd" :start="pickerStartYmd" @change="onDeliveryPick">
                 <view class="date-picker-row">
                   <text :class="['date-picker-text', deliveryYmd ? '' : 'date-picker-text--ph']">
                     {{ deliveryYmd || '请选择业务日期' }}
@@ -64,6 +64,26 @@
                   <text class="date-picker-arrow">›</text>
                 </view>
               </picker>
+
+              <text class="sec-title sec-title--sp">每日配送份数</text>
+              <text class="sec-sub">每个配送日送达的份数，默认 1 份；确认送达时按份数扣减剩余餐次。</text>
+              <view class="units-stepper">
+                <button
+                  class="units-stepper-btn"
+                  :disabled="dailyUnits <= MIN_DAILY_UNITS || submitting"
+                  @click="bumpDailyUnits(-1)"
+                >
+                  -
+                </button>
+                <text class="units-stepper-value">{{ dailyUnits }}</text>
+                <button
+                  class="units-stepper-btn"
+                  :disabled="dailyUnits >= MAX_DAILY_UNITS || submitting"
+                  @click="bumpDailyUnits(1)"
+                >
+                  +
+                </button>
+              </view>
             </template>
           </view>
 
@@ -94,7 +114,11 @@ import {
   shouldOpenMemberSetup,
   shouldPromptMemberCardPay,
 } from '@/utils/memberProfile.js'
-import { minMemberDeliveryStartYmd } from '@/utils/menuApi.js'
+import {
+  minMemberDeliveryStartYmd,
+  pickerMinDeliveryStartYmd,
+  addDaysIso,
+} from '@/utils/memberDeliveryDate.js'
 import {
   normalizeAddressList,
   addressListRow,
@@ -107,6 +131,9 @@ import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 /** 与 uni.scss $ok-forest-green 一致 */
 const payRadioColor = '#0e5a44'
 
+const MIN_DAILY_UNITS = 1
+const MAX_DAILY_UNITS = 10
+
 const pickupStoreAddress = '天安名邸小区门面房（OK饭健康餐门店）'
 const deliveryMode = ref('delivery')
 const deliveryYmd = ref('')
@@ -118,16 +145,34 @@ const serverBalance = ref(0)
 const resumeOnlyMode = ref(false)
 /** 购卡/续卡支付成功跳转（from=pay）：须重新选择起始业务日，不因档案已有旧日期而自动退回「我的」 */
 const postPaySetupMode = ref(false)
+/** 资料已完善后从「我的」齿轮进入，允许修改配送/自提/份数/起送日 */
+const editDeliveryMode = ref(false)
 const resumeHintShown = ref(false)
 
 const defaultAddressLine = ref('')
 const defaultAddressArea = ref('')
 
 const pickupAcknowledged = ref(false)
+const dailyUnits = ref(1)
 
 const pickerDeliveryYmd = computed(() => deliveryYmd.value || minDeliveryYmd.value)
 
-const navbarTitle = computed(() => (resumeOnlyMode.value ? '恢复配送' : '完善配送信息'))
+/** 原生 picker 的 start（比业务最小日早 1 天，确保能选到「明天」） */
+const pickerStartYmd = computed(() => {
+  const anchor = minDeliveryYmd.value
+  let start = anchor ? addDaysIso(anchor, -1) || anchor : pickerMinDeliveryStartYmd()
+  const cur = deliveryYmd.value?.trim()
+  if (editDeliveryMode.value && cur && cur < start) {
+    start = addDaysIso(cur, -1) || cur
+  }
+  return start
+})
+
+const navbarTitle = computed(() => {
+  if (resumeOnlyMode.value) return '恢复配送'
+  if (editDeliveryMode.value) return '修改配送信息'
+  return '完善配送信息'
+})
 
 const submitButtonText = computed(() =>
   resumeOnlyMode.value ? '确认恢复配送' : '保存并返回「我的」',
@@ -136,15 +181,28 @@ const submitButtonText = computed(() =>
 const leadText = computed(() => {
   if (resumeOnlyMode.value) return '请选择恢复方式与开始的业务日期，提交后立即生效。'
   if (postPaySetupMode.value) {
-    return '支付已成功，请完善配送方式与收货信息并选择开始业务日期；客服确认后将为您入账激活。'
+    return '支付已成功，餐次已入账。请完善配送方式与收货信息并选择开始业务日期，完成后即可开始用餐。'
   }
-  return '请确认用餐履约方式：配送到家需默认收货地址；门店自提请确认取餐门店与首日。'
+  if (editDeliveryMode.value) {
+    return '可修改配送到家或门店自提、默认收货地址、每日份数与起送业务日；保存后立即生效。'
+  }
+  return '请确认用餐履约方式、每日份数与起送日期：配送到家需默认收货地址；门店自提请确认取餐门店与首日。'
 })
+
+function clampDailyUnits(n) {
+  const x = Math.floor(Number(n) || 0)
+  return Math.min(MAX_DAILY_UNITS, Math.max(MIN_DAILY_UNITS, x))
+}
+
+function bumpDailyUnits(delta) {
+  dailyUnits.value = clampDailyUnits(dailyUnits.value + delta)
+}
 
 onLoad((options) => {
   const fr = options?.from != null ? String(options.from).trim() : ''
   resumeOnlyMode.value = fr === 'resume'
   postPaySetupMode.value = fr === 'pay'
+  editDeliveryMode.value = fr === 'edit'
   resumeHintShown.value = false
 })
 
@@ -189,8 +247,13 @@ async function loadProfile() {
     const data = await request('/api/user/me', { method: 'GET' })
     minDeliveryYmd.value = minMemberDeliveryStartYmd()
     serverBalance.value = Math.max(0, Math.floor(Number(data.balance) || 0))
+    {
+      const raw = Math.floor(Number(data.daily_meal_units) || 0)
+      const safe = raw >= 1 && raw <= 50 ? raw : 1
+      dailyUnits.value = clampDailyUnits(safe)
+    }
 
-    // 卡包购卡成功跳转（from=pay）：微信已扣款但客服未入账前 balance 仍为 0，不可误判为未购卡
+    // 卡包购卡成功跳转（from=pay）：支付后次数已入账，仍须完善配送信息
     if (!postPaySetupMode.value && shouldPromptMemberCardPay(data)) {
       uni.showToast({ title: '请先购买自律卡包', icon: 'none' })
       setTimeout(
@@ -213,6 +276,7 @@ async function loadProfile() {
       }
     } else if (
       !postPaySetupMode.value &&
+      !editDeliveryMode.value &&
       !shouldOpenMemberSetup(data) &&
       !pausedWithBalance
     ) {
@@ -221,7 +285,9 @@ async function loadProfile() {
       return
     }
 
-    pickupAcknowledged.value = false
+    if (!editDeliveryMode.value) {
+      pickupAcknowledged.value = false
+    }
 
     if (data.delivery_deferred === true) {
       deliveryMode.value = data.store_pickup ? 'pickup' : 'delivery'
@@ -246,6 +312,7 @@ async function loadProfile() {
       let dPick = ds.length >= 10 ? ds.slice(0, 10) : ''
       if (dPick && dPick < minDeliveryYmd.value) dPick = ''
       deliveryYmd.value = dPick
+      if (editDeliveryMode.value) pickupAcknowledged.value = true
     } else {
       deliveryMode.value = 'delivery'
       const ds = data.delivery_start_date != null ? String(data.delivery_start_date).trim() : ''
@@ -257,6 +324,7 @@ async function loadProfile() {
     if (postPaySetupMode.value && !resumeOnlyMode.value) {
       deliveryYmd.value = ''
       pickupAcknowledged.value = false
+      dailyUnits.value = MIN_DAILY_UNITS
     }
   } catch (e) {
     if (isUserMeNotFoundError(e)) {
@@ -317,7 +385,7 @@ async function onSubmit() {
   }
   if (d0 < minDeliveryYmd.value) {
     uni.showToast({
-      title: '起始日须不早于当前允许的最小业务日（上海）',
+      title: '起送日须为明天或之后（上海业务日）',
       icon: 'none',
     })
     return
@@ -343,6 +411,7 @@ async function onSubmit() {
         delivery_deferred: false,
         delivery_start_date: d0,
         store_pickup: deliveryMode.value === 'pickup',
+        daily_meal_units: clampDailyUnits(dailyUnits.value),
       },
     })
     // 恢复配送与续费提醒无关，避免提交后弹出「优惠券到期」订阅框
@@ -633,6 +702,50 @@ async function onSubmit() {
   color: #cbd5e1;
   margin-left: 16rpx;
   flex-shrink: 0;
+}
+
+.units-stepper {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 28rpx;
+  padding: 8rpx 0 4rpx;
+  margin-bottom: 8rpx;
+}
+
+.units-stepper-btn {
+  min-width: 88rpx;
+  height: 88rpx;
+  padding: 0;
+  margin: 0;
+  line-height: 86rpx;
+  text-align: center;
+  font-size: 40rpx;
+  font-weight: 900;
+  color: $ok-forest-green;
+  background: #f1f5f9;
+  border: 3rpx solid $ok-slate-100;
+  border-radius: 20rpx;
+  box-sizing: border-box;
+}
+
+.units-stepper-btn::after {
+  border: none;
+}
+
+.units-stepper-btn[disabled] {
+  opacity: 0.35;
+  color: $ok-slate-500;
+}
+
+.units-stepper-value {
+  min-width: 100rpx;
+  text-align: center;
+  font-size: 44rpx;
+  font-weight: 950;
+  color: $ok-slate-800;
+  font-variant-numeric: tabular-nums;
 }
 
 .submit-btn {

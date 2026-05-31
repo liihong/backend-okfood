@@ -292,7 +292,9 @@ def _to_member_out(
 
             plan_out = None
 
+    from app.services.member_card_order_service import member_paid_card_awaiting_setup
 
+    paid_card_awaiting_setup = member_paid_card_awaiting_setup(db, int(m.id))
 
     return MemberOut(
 
@@ -339,6 +341,8 @@ def _to_member_out(
         leave_deadline_time=leave_deadline_str,
 
         sf_self_service_locked=sf_self_service_locked,
+
+        paid_card_awaiting_setup=paid_card_awaiting_setup,
 
         created_at=m.created_at.isoformat() if m.created_at else "",
 
@@ -633,7 +637,7 @@ def patch_member_profile(
 
                 raise HTTPException(
                     status_code=400,
-                    detail="起送日期须不早于今日（上海业务日）",
+                    detail="起送日期须不早于明日（上海业务日）",
                 )
 
             m.delivery_start_date = delivery_start_date
@@ -799,14 +803,23 @@ def patch_member_profile(
 
     attn_ordered = list(dict.fromkeys(attn_labels))
     if attn_ordered:
-        try_notify_delivery_sheet_manual_attention(
-            db,
-            store_id=int(m.store_id),
-            action_labels_cn=attn_ordered,
-            member_id=int(m.id),
-            member_phone=str(m.phone or "").strip() or None,
-            member_name=str(m.name or "").strip() or None,
-        )
+        try:
+            with db.begin_nested():
+                try_notify_delivery_sheet_manual_attention(
+                    db,
+                    store_id=int(m.store_id),
+                    action_labels_cn=attn_ordered,
+                    member_id=int(m.id),
+                    member_phone=str(m.phone or "").strip() or None,
+                    member_name=str(m.name or "").strip() or None,
+                )
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "配送大表跟进提醒写入失败 member_id=%s",
+                member_id,
+            )
 
     db.commit()
 

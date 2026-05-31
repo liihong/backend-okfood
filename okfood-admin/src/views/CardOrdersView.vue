@@ -2,6 +2,7 @@
 defineOptions({ name: 'CardOrdersView' })
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessageBox } from 'element-plus'
 import { CreditCard, MapPin, Plus, Search, UserRound, X, Zap } from 'lucide-vue-next'
 import {
   apiJson,
@@ -426,11 +427,13 @@ async function deleteCardOrder(row) {
   if (!row || !row.id) return
   const phone = (row.member_phone || '').trim()
   const label = `#${row.id} ${phone ? phone : '会员'}`
-  if (
-    !confirm(
-      `确定删除该开卡工单？\n${label}\n\n删除后不可恢复。若工单已缴或已同步入账，系统可能拒绝删除（以提示为准）。`,
+  try {
+    await ElMessageBox.confirm(
+      `${label}\n\n删除后不可恢复。若工单已缴或已同步入账，系统可能拒绝删除（以提示为准）。`,
+      '确定删除该开卡工单？',
+      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
     )
-  ) {
+  } catch {
     return
   }
   deletingId.value = row.id
@@ -477,11 +480,13 @@ async function submitEdit(syncMember = false) {
     }
     const phone = (editForm.value.member_phone || '').trim()
     const label = `#${editForm.value.id} ${phone || '会员'}`
-    if (
-      !confirm(
-        `确认将工单 ${label} 同步入账？\n\n将写入会员剩余次数与套餐，并按起送日激活（若已指定）。`,
+    try {
+      await ElMessageBox.confirm(
+        '将写入会员剩余次数与套餐，并按起送日激活（若已指定）。',
+        `确认将工单 ${label} 同步入账？`,
+        { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' },
       )
-    ) {
+    } catch {
       return
     }
   }

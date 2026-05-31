@@ -1,5 +1,14 @@
 /** 会员起送日等与 menuApi 一致的最小日期（独立模块，避免 memberProfile ↔ menuApi 打包顺序问题）。 */
 
+/** 无 Intl 时区时的上海日历日（UTC+8 墙钟） */
+function ymdTodayShanghaiFallback(now = new Date()) {
+  const t = now instanceof Date ? now.getTime() : Number(now)
+  const anchor = Number.isFinite(t) ? t : Date.now()
+  const shMs = anchor + 8 * 60 * 60 * 1000
+  const sh = new Date(shMs)
+  return `${sh.getUTCFullYear()}-${String(sh.getUTCMonth() + 1).padStart(2, '0')}-${String(sh.getUTCDate()).padStart(2, '0')}`
+}
+
 export function ymdTodayShanghai(now = new Date()) {
   try {
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -15,8 +24,7 @@ export function ymdTodayShanghai(now = new Date()) {
   } catch {
     /* ignore */
   }
-  const d = new Date(now)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return ymdTodayShanghaiFallback(now)
 }
 
 /** @param {string} isoDate YYYY-MM-DD */
@@ -29,7 +37,18 @@ export function addDaysIso(isoDate, days) {
   return `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, '0')}-${String(anchor.getDate()).padStart(2, '0')}`
 }
 
-/** 会员起送业务日可选的最小 YYYY-MM-DD（上海）：即为「当天」，与后端 `min_member_delivery_start_shanghai` 对齐。 */
+/** 会员起送业务日可选的最小 YYYY-MM-DD（上海）：当天不可选，最早为「明天」，与后端对齐。 */
 export function minMemberDeliveryStartYmd(now = new Date()) {
-  return ymdTodayShanghai(now)
+  const today = ymdTodayShanghai(now)
+  return addDaysIso(today, 1) || today
+}
+
+/**
+ * 供微信原生 date-picker 的 `start` 绑定：比业务最小日早 1 天。
+ * 部分机型对 `start` 按「严格大于」处理；业务最小日为「明天」时绑「今天」才能滚到明天。
+ * 保存时仍以 {@link minMemberDeliveryStartYmd} 校验。
+ */
+export function pickerMinDeliveryStartYmd(now = new Date()) {
+  const min = minMemberDeliveryStartYmd(now)
+  return addDaysIso(min, -1) || min
 }

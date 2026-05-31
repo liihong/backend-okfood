@@ -46,6 +46,10 @@ class MemberOut(BaseModel):
         False,
         description="当日该会员已进配送大表且顺丰推单配送未完成时为 true；未进大表者为 false，可正常自助操作",
     )
+    paid_card_awaiting_setup: bool = Field(
+        False,
+        description="小程序自助购卡微信已缴、尚未入账（balance 仍为 0）；须引导完善配送/自提信息",
+    )
     created_at: str
 
     model_config = {"from_attributes": True}

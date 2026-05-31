@@ -50,14 +50,21 @@ function ymdFromApiField(d) {
   return s.length >= 10 ? s.slice(0, 10) : ''
 }
 
+/** @param {object | null | undefined} profile */
+export function isPaidCardAwaitingSetup(profile) {
+  return profile != null && typeof profile === 'object' && profile.paid_card_awaiting_setup === true
+}
+
 /**
- * 是否需要引导「完善配送信息」：有余额、非暂停状态下，需补齐起送日与（配送到家时）默认地址
+ * 是否需要引导「完善配送信息」：有余额、非暂停状态下，需补齐起送日与（配送到家时）默认地址；
+ * 或微信已缴但尚未入账（paid_card_awaiting_setup）时同样须完善履约信息。
  * @param {object | null | undefined} profile GET /api/user/me 的 data
  */
 export function shouldOpenMemberSetup(profile) {
   if (!profile || typeof profile !== 'object') return false
   const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
-  if (balance <= 0) return false
+  const paidPending = isPaidCardAwaitingSetup(profile)
+  if (balance <= 0 && !paidPending) return false
   if (profile.delivery_deferred === true) return false
 
   const start = ymdFromApiField(profile.delivery_start_date)
@@ -78,6 +85,8 @@ export function shouldOpenMemberSetup(profile) {
  */
 export function shouldPromptMemberCardPay(profile) {
   if (!profile || typeof profile !== 'object') return false
+  // 微信已缴待完善配送：不可再引导购卡
+  if (isPaidCardAwaitingSetup(profile)) return false
   const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
   return balance <= 0
 }
@@ -90,4 +99,38 @@ export function isDeliveryPausedWithBalance(profile) {
   if (!profile || typeof profile !== 'object') return false
   const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
   return profile.delivery_deferred === true && balance > 0
+}
+
+/** 配送/自提信息已齐备，不再需进入「完善配送信息」页 */
+export function isMemberDeliveryConfigured(profile) {
+  if (!profile || typeof profile !== 'object') return false
+  return !shouldOpenMemberSetup(profile)
+}
+
+/**
+ * 是否已进入派单（与后台 is_active + 起送业务日一致；起送日未到则不算当日配送大表）
+ * @param {object | null | undefined} profile
+ * @param {string} [todayYmd] 上海业务日 YYYY-MM-DD
+ */
+export function isMemberInActiveDelivery(profile, todayYmd = '') {
+  if (!isMemberDeliveryConfigured(profile)) return false
+  if (profile.delivery_deferred === true) return false
+  if (!profile.is_active) return false
+  const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
+  if (balance <= 0) return false
+  const start = ymdFromApiField(profile.delivery_start_date)
+  if (!start) return false
+  const today = String(todayYmd || '').trim()
+  if (today && start > today) return false
+  return true
+}
+
+/** 已完善信息但起送日在未来（尚未进入当日配送大表） */
+export function isMemberDeliveryScheduledFuture(profile, todayYmd = '') {
+  if (!isMemberDeliveryConfigured(profile)) return false
+  if (profile.delivery_deferred === true) return false
+  const start = ymdFromApiField(profile.delivery_start_date)
+  const today = String(todayYmd || '').trim()
+  if (!start || !today) return false
+  return start > today
 }

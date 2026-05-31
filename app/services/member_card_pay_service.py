@@ -487,7 +487,7 @@ def create_miniprogram_member_card_order(
         if d0 is not None and d0 < min_member_delivery_start_shanghai():
             raise HTTPException(
                 status_code=400,
-                detail="起送日期须不早于今日（上海业务日）",
+                detail="起送日期须不早于明日（上海业务日）",
             )
         rmk = _miniprogram_card_order_remark(
             f"卡包模版#{tpl.id}·{tpl.name.strip()}",
@@ -518,7 +518,7 @@ def create_miniprogram_member_card_order(
         if delivery_start_date < min_member_delivery_start_shanghai():
             raise HTTPException(
                 status_code=400,
-                detail="起送日期须不早于今日（上海业务日）",
+                detail="起送日期须不早于明日（上海业务日）",
             )
         amt = card_order_amount_yuan_for_kind(db, k, store_id=int(m.store_id))
         rmk = _miniprogram_card_order_remark(None, is_renewal=is_renewal)
@@ -729,7 +729,7 @@ def sync_member_card_from_wechat_admin_or_raise(
 
 
 def _is_miniprogram_self_service_card_order(order: MemberCardOrder) -> bool:
-    """小程序用户自助开卡/续卡（含卡包模版），支付后须客服确认起送日再同步入账。"""
+    """小程序用户自助开卡/续卡（含卡包模版）；支付后次数即时入账，客服通知用于核对配送信息。"""
     return (order.created_by or "").strip() == "miniprogram"
 
 
@@ -760,8 +760,7 @@ def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
         return False, "order_refunded"
 
     if order.pay_status == CardOrderPayStatus.PAID.value:
-        if not _is_miniprogram_self_service_card_order(order):
-            apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
+        apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
         mark_member_coupon_used_for_order(
             db, order_biz=CouponLockedOrderBiz.MEMBER_CARD, order_id=int(order.id)
         )
@@ -785,6 +784,8 @@ def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     order.pay_channel = CardPayChannel.WECHAT.value
     tid = (parsed.transaction_id or "").strip()
     order.wx_transaction_id = tid or order.wx_transaction_id
+    # 支付成功即写入会员次数；无起送日时不激活，待用户完善配送后再派单
+    apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
     if _is_miniprogram_self_service_card_order(order):
         oid = int(order.id)
         mid = int(order.member_id)
@@ -793,15 +794,13 @@ def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
             with db.begin_nested():
                 _notify_miniprogram_card_order_pending_cs_review(db, order)
         except Exception:
-            # 待审批通知失败不应回滚「已缴」，否则与 #775/#776 类「已扣款仍显示未缴」一致
+            # 待核对配送通知失败不应回滚「已缴/已入账」
             logger.exception(
-                "小程序购卡待审批通知写入失败 order_id=%s member_id=%s out=%s",
+                "小程序购卡待核对配送通知写入失败 order_id=%s member_id=%s out=%s",
                 oid,
                 mid,
                 out_sn,
             )
-    else:
-        apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
     mark_member_coupon_used_for_order(
         db, order_biz=CouponLockedOrderBiz.MEMBER_CARD, order_id=int(order.id)
     )
