@@ -65,6 +65,10 @@ def test_grant_and_lock_member_card_coupon(db: Session, new_member, mall_templat
     assert order.original_amount_yuan == Decimal("188.00")
     assert order.coupon_discount_yuan == Decimal("50.00")
     assert order.amount_yuan == Decimal("138.00")
+    assert "优惠券" in (order.remark or "")
+    assert "卡包减50" in (order.remark or "")
+    assert "减50.00元" in (order.remark or "")
+    assert "用户券#" in (order.remark or "")
     mc = db.get(MemberCoupon, granted.id)
     assert mc is not None
     assert mc.status == "locked"
@@ -115,6 +119,8 @@ def test_apply_coupon_to_pending_card_order(db: Session, new_member, mall_templa
     assert int(updated.id) == int(pending.id)
     assert updated.amount_yuan == Decimal("158.00")
     assert updated.member_coupon_id == granted.id
+    assert "优惠券" in (updated.remark or "")
+    assert "续付减30" in (updated.remark or "")
 
 
 def test_expire_stale_unpaid_card_order_releases_coupon(db: Session, new_member, mall_template) -> None:
@@ -156,6 +162,7 @@ def test_expire_stale_unpaid_card_order_releases_coupon(db: Session, new_member,
     assert mc.status == "available"
     assert order.member_coupon_id is None
     assert order.amount_yuan == Decimal("188.00")
+    assert "优惠券" not in (order.remark or "")
 
 
 def test_grant_member_coupon_by_phone_and_batch(db: Session, new_member, mall_template) -> None:

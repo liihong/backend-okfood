@@ -68,6 +68,7 @@
         </view>
       </view>
     </scroll-view>
+    <MemberCouponReminderHost v-if="couponHostReady" />
   </view>
 </template>
 
@@ -75,6 +76,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import MemberCouponReminderHost from '@/components/MemberCouponReminderHost/MemberCouponReminderHost.vue'
+
+/** 首屏渲染后再挂载券提醒，避免与 App 启动竞态 */
+const couponHostReady = ref(false)
 import {
   addDaysIso,
   fetchWeeklyMenu,
@@ -229,6 +234,7 @@ onShow(() => {
 
 onMounted(() => {
   syncTabLayout()
+  couponHostReady.value = true
 })
 
 function goDetail(m) {

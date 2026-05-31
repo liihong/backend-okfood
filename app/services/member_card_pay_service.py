@@ -29,6 +29,8 @@ from app.services.tenant_integration_service import (
 from app.models.enums import CardOrderKind, CardOrderPayStatus, CardPayChannel, CouponLockedOrderBiz
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
+from app.models.member_coupon import MemberCoupon
+from app.models.marketing_coupon_template import MarketingCouponTemplate
 from app.models.membership_card_template import MembershipCardTemplate
 from app.services.catalog_admin_service import get_membership_template_row
 from app.services.admin_system_notification_service import (
@@ -95,6 +97,56 @@ def _miniprogram_card_order_remark(base: str | None, *, is_renewal: bool) -> str
     return b or None
 
 
+# 备注中优惠券段落前缀，便于换券/释券时剥离
+_CARD_ORDER_COUPON_REMARK_MARKER = "·优惠券"
+
+
+def _strip_coupon_from_card_order_remark(remark: str | None) -> str:
+    """移除备注末尾的优惠券说明（换券或取消用券时）。"""
+    r = (remark or "").strip()
+    idx = r.find(_CARD_ORDER_COUPON_REMARK_MARKER)
+    if idx >= 0:
+        return r[:idx].strip()
+    return r
+
+
+def _coupon_remark_segment(
+    db: Session, *, member_coupon_id: int, discount_yuan: Decimal
+) -> str:
+    """生成可追加到开卡工单备注的优惠券摘要。"""
+    disc = _format_amount_yuan(discount_yuan)
+    coupon = db.get(MemberCoupon, int(member_coupon_id))
+    tpl_name = ""
+    if coupon is not None:
+        tpl = db.get(MarketingCouponTemplate, int(coupon.template_id))
+        if tpl is not None:
+            tpl_name = (tpl.name or "").strip()
+    name_part = f"「{tpl_name}」" if tpl_name else ""
+    return f"{_CARD_ORDER_COUPON_REMARK_MARKER}{name_part}减{disc}元(用户券#{int(member_coupon_id)})"
+
+
+def _apply_coupon_to_card_order_remark(
+    db: Session,
+    order: MemberCardOrder,
+    *,
+    member_coupon_id: int,
+    discount_yuan: Decimal,
+) -> None:
+    """锁券成功后写入/更新备注中的优惠券信息。"""
+    base = _strip_coupon_from_card_order_remark(order.remark)
+    seg = _coupon_remark_segment(
+        db, member_coupon_id=int(member_coupon_id), discount_yuan=discount_yuan
+    )
+    combined = f"{base}{seg}" if base else seg.lstrip("·")
+    order.remark = combined[:500] if combined else None
+
+
+def _clear_coupon_from_card_order_remark(order: MemberCardOrder) -> None:
+    """释券后恢复不含优惠券段落的备注。"""
+    stripped = _strip_coupon_from_card_order_remark(order.remark)
+    order.remark = stripped or None
+
+
 def card_order_amount_yuan_for_kind(db: Session, card_kind: str, *, store_id: int | None = None) -> Decimal:
     k = (card_kind or "").strip()
     if k == CardOrderKind.WEEK.value:
@@ -152,6 +204,7 @@ def expire_stale_unpaid_miniprogram_card_orders(db: Session, *, member_id: int |
             order.original_amount_yuan = None
             order.coupon_discount_yuan = None
             order.member_coupon_id = None
+            _clear_coupon_from_card_order_remark(order)
     db.commit()
     return len(stale)
 
@@ -201,6 +254,7 @@ def apply_member_coupon_to_unpaid_card_order(
         order.original_amount_yuan = None
         order.coupon_discount_yuan = None
         order.member_coupon_id = None
+        _clear_coupon_from_card_order_remark(order)
         db.commit()
         db.refresh(order)
         return order
@@ -221,6 +275,9 @@ def apply_member_coupon_to_unpaid_card_order(
     order.coupon_discount_yuan = disc
     order.amount_yuan = payable
     order.member_coupon_id = int(member_coupon_id)
+    _apply_coupon_to_card_order_remark(
+        db, order, member_coupon_id=int(member_coupon_id), discount_yuan=disc
+    )
     db.commit()
     db.refresh(order)
     return order
@@ -352,6 +409,9 @@ def create_miniprogram_member_card_order(
         row.coupon_discount_yuan = disc
         row.amount_yuan = payable
         row.member_coupon_id = int(member_coupon_id)
+        _apply_coupon_to_card_order_remark(
+            db, row, member_coupon_id=int(member_coupon_id), discount_yuan=disc
+        )
 
     db.commit()
     db.refresh(row)
@@ -582,15 +642,19 @@ def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     tid = (parsed.transaction_id or "").strip()
     order.wx_transaction_id = tid or order.wx_transaction_id
     if _is_miniprogram_self_service_card_order(order):
+        oid = int(order.id)
+        mid = int(order.member_id)
+        out_sn = parsed.out_trade_no
         try:
-            _notify_miniprogram_card_order_pending_cs_review(db, order)
+            with db.begin_nested():
+                _notify_miniprogram_card_order_pending_cs_review(db, order)
         except Exception:
-            # 待审批通知失败不应回滚「已缴」，否则与 #775 类「已扣款仍显示未缴」一致
+            # 待审批通知失败不应回滚「已缴」，否则与 #775/#776 类「已扣款仍显示未缴」一致
             logger.exception(
                 "小程序购卡待审批通知写入失败 order_id=%s member_id=%s out=%s",
-                int(order.id),
-                int(order.member_id),
-                parsed.out_trade_no,
+                oid,
+                mid,
+                out_sn,
             )
     else:
         apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
@@ -661,6 +725,21 @@ def list_member_card_orders_for_user(
     return [member_card_order_user_dict(r) for r in rows], total
 
 
+def _sync_member_card_order_refunded_local(db: Session, order: MemberCardOrder) -> str:
+    """
+    将本地工单标记为「已退款」（幂等）。
+
+    微信退款 API 已成功但本地 commit 失败时，重试入口发现 trade_state=REFUND 可据此对齐状态。
+    """
+    out_refund_no = f"RFMC{order.id}"[:32]
+    if order.pay_status == CardOrderPayStatus.REFUNDED.value:
+        return out_refund_no
+    order.pay_status = CardOrderPayStatus.REFUNDED.value
+    db.add(order)
+    db.commit()
+    return out_refund_no
+
+
 def admin_wechat_refund_member_card_order(
     db: Session, *, order_id: int, store_id: int, require_mall_template: bool
 ) -> dict[str, str]:
@@ -685,6 +764,13 @@ def admin_wechat_refund_member_card_order(
     pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
     q = query_order_by_out_trade_no(out_no, pay=pay_cfg)
     trade_state = (q.get("trade_state") or "").strip().upper()
+    # 微信已退款但本地仍为「已缴」：首次退款 API 成功而 commit 失败时的补救（幂等）
+    if trade_state == "REFUND":
+        out_refund_no = _sync_member_card_order_refunded_local(db, order)
+        return {
+            "message": "微信侧已完成退款，本地订单状态已同步为「已退款」",
+            "out_refund_no": out_refund_no,
+        }
     if trade_state != "SUCCESS":
         raise ValueError(
             f"微信侧订单状态为「{trade_state or '未知'}」，需为支付成功（SUCCESS）才可退款",

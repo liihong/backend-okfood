@@ -22,8 +22,32 @@
                 <text class="hero-num">{{ tpl.meals_grant }} 次</text>
               </view>
               <view class="hero-foot-r">
-                <text class="hero-lab">优惠价</text>
-                <text class="hero-yuan">¥{{ saleDisp }}</text>
+                <text class="hero-lab">{{ discountDisp ? '券后价' : '优惠价' }}</text>
+                <text v-if="discountDisp" class="hero-orig-mini">¥{{ saleDisp }}</text>
+                <text class="hero-yuan">¥{{ discountDisp ? payableDisp : saleDisp }}</text>
+              </view>
+            </view>
+          </view>
+
+          <view v-if="couponsLoading" class="coupon-section coupon-section--loading">
+            <text class="coupon-section-hint">正在加载可用优惠券…</text>
+          </view>
+          <view v-else-if="availableCoupons.length" class="coupon-section">
+            <view class="coupon-section-head">
+              <text class="coupon-section-title">可用优惠券</text>
+              <text v-if="discountDisp" class="coupon-section-save">已选 · 立减 ¥{{ discountDisp }}</text>
+            </view>
+            <view class="coupon-section-list">
+              <view
+                v-for="c in availableCoupons"
+                :key="c.id"
+                class="coupon-section-item"
+              >
+                <MemberCouponCard
+                  :coupon="c"
+                  :selected="Number(selectedCouponId) === Number(c.id)"
+                  @select="onCouponSelect"
+                />
               </view>
             </view>
           </view>
@@ -49,25 +73,6 @@
             </view>
             <text class="agree-txt">阅读并同意《OK饭自律膳食卡用户服务及配送协议》</text>
           </view>
-
-          <view v-if="availableCoupons.length" class="coupon-box">
-            <text class="coupon-lab">优惠券</text>
-            <picker
-              mode="selector"
-              :range="availableCoupons"
-              range-key="template_name"
-              @change="onCouponPick"
-            >
-              <view class="coupon-pick">
-                <text class="coupon-pick-txt">
-                  {{ selectedCoupon ? `减 ¥${selectedCoupon.discount_yuan}` : '选择优惠券' }}
-                </text>
-                <text class="coupon-pick-arr">›</text>
-              </view>
-            </picker>
-            <text v-if="discountDisp" class="coupon-save">已优惠 ¥{{ discountDisp }}</text>
-          </view>
-          <view v-else-if="couponsLoading" class="coupon-hint">加载优惠券…</view>
 
           <view class="scroll-pad" />
         </template>
@@ -111,6 +116,7 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import MemberCouponCard from '@/components/MemberCouponCard/MemberCouponCard.vue'
 import {
   request,
   getMemberToken,
@@ -118,14 +124,15 @@ import {
   isUserMeNotFoundError,
 } from '@/utils/api.js'
 import { runMembershipTemplateWechatPay } from '@/utils/memberCardPay.js'
-import { listAvailableMemberCoupons } from '@/utils/memberCouponApi.js'
+import { listAvailableMemberCoupons, getMemberCouponReminder } from '@/utils/memberCouponApi.js'
+import { filterMemberCardCouponsForTemplate, pickBestMemberCoupon } from '@/utils/memberCouponScope.js'
 import { shouldOpenMemberSetup } from '@/utils/memberProfile.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 
 const DEFAULT_PRIV = [
   '全城顺丰免运费',
   '餐次自由随心停配',
-  '专属营养餐单建议',
+  '持证营养师餐品搭配',
 ]
 
 const scrollStyle = ref({})
@@ -302,19 +309,40 @@ async function loadOne() {
   }
 }
 
+/** 结算页可用券；失败时用提醒接口兜底（避免线上未部署 available 时无券展示） */
+async function fetchCouponsForTemplate() {
+  const tid = templateId.value
+  let rows = []
+  try {
+    const data = await listAvailableMemberCoupons({
+      biz_type: 'member_card',
+      membership_template_id: tid,
+    })
+    rows = Array.isArray(data) ? data : []
+  } catch {
+    rows = []
+  }
+  if (!rows.length) {
+    try {
+      const reminder = await getMemberCouponReminder()
+      const all = Array.isArray(reminder?.coupons) ? reminder.coupons : []
+      rows = filterMemberCardCouponsForTemplate(all, tid)
+    } catch {
+      rows = []
+    }
+  }
+  return rows
+}
+
 async function loadCoupons() {
   if (!templateId.value) return
   couponsLoading.value = true
   selectedCouponId.value = null
   try {
-    const rows = await listAvailableMemberCoupons({
-      biz_type: 'member_card',
-      membership_template_id: templateId.value,
-    })
-    availableCoupons.value = Array.isArray(rows) ? rows : []
-    if (availableCoupons.value.length) {
-      selectedCouponId.value = availableCoupons.value[0].id
-    }
+    const rows = await fetchCouponsForTemplate()
+    availableCoupons.value = rows
+    const best = pickBestMemberCoupon(rows)
+    if (best?.id != null) selectedCouponId.value = best.id
   } catch {
     availableCoupons.value = []
   } finally {
@@ -322,10 +350,10 @@ async function loadCoupons() {
   }
 }
 
-function onCouponPick(e) {
-  const idx = Number(e?.detail?.value)
-  const row = availableCoupons.value[idx]
-  selectedCouponId.value = row ? row.id : null
+/** @param {import('@/utils/memberCouponScope.js').MemberCouponItem} row */
+function onCouponSelect(row) {
+  if (!row || row.id == null) return
+  selectedCouponId.value = row.id
 }
 
 async function onPay() {
@@ -529,6 +557,14 @@ onLoad((opts) => {
   text-align: right;
 }
 
+.hero-orig-mini {
+  display: block;
+  font-size: 22rpx;
+  color: rgba(255, 255, 255, 0.55);
+  text-decoration: line-through;
+  margin-bottom: 2rpx;
+}
+
 .hero-yuan {
   font-size: 40rpx;
   font-weight: 800;
@@ -634,39 +670,45 @@ onLoad((opts) => {
   margin-right: 8rpx;
 }
 
-.coupon-box {
-  margin-top: 16rpx;
-  padding: 20rpx 24rpx;
-  background: #fff;
-  border-radius: 16rpx;
+.coupon-section {
+  margin-top: 20rpx;
 }
 
-.coupon-lab {
-  font-size: 26rpx;
-  font-weight: 700;
+.coupon-section--loading {
+  padding: 16rpx 8rpx;
+}
+
+.coupon-section-hint {
+  font-size: 24rpx;
+  color: $ok-slate-500;
+}
+
+.coupon-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16rpx;
+}
+
+.coupon-section-title {
+  font-size: 28rpx;
+  font-weight: 800;
   color: $ok-slate-800;
 }
 
-.coupon-pick {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 12rpx;
-  padding: 16rpx 20rpx;
-  background: $ok-slate-100;
-  border-radius: 12rpx;
-}
-
-.coupon-save {
-  display: block;
-  margin-top: 8rpx;
+.coupon-section-save {
   font-size: 24rpx;
+  font-weight: 700;
   color: $ok-emerald;
 }
 
-.coupon-hint {
-  font-size: 24rpx;
-  color: $ok-slate-500;
-  padding: 8rpx 0;
+.coupon-section-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.coupon-section-list .coupon-section-item + .coupon-section-item {
+  margin-top: 16rpx;
 }
 
 .scroll-pad {

@@ -5,11 +5,15 @@ import { enforceWxMiniUpdate } from '@/utils/wxMiniUpdate.js'
 import { reLaunchIfCourierModePreferred } from '@/utils/api.js'
 
 async function onMemberAppReady() {
-  await ensureMemberPhoneFromStoredToken()
-  // 略延迟，避免与首页/onLaunch 其它弹窗抢占
-  setTimeout(() => {
-    void tryShowMemberCouponReminder()
-  }, 600)
+  try {
+    await ensureMemberPhoneFromStoredToken()
+    // 延迟弹出，避免与首屏加载抢占（微信端不支持 import() 动态加载）
+    setTimeout(() => {
+      void tryShowMemberCouponReminder()
+    }, 800)
+  } catch (e) {
+    console.warn('[App] onMemberAppReady', e)
+  }
 }
 
 export default {

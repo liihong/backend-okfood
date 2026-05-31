@@ -215,6 +215,54 @@ def test_profile_patch_after_pay_does_not_activate_without_balance(
     assert row.applied_to_member is False
 
 
+def test_two_card_orders_same_day_both_create_pending_notifications(
+    db: Session, new_member: Member, mall_template: MembershipCardTemplate
+) -> None:
+    """同日多笔小程序购卡：待审批通知须各工单一条，不得触发唯一键冲突导致支付同步 500。"""
+    m2 = Member(
+        tenant_id=1,
+        store_id=1,
+        phone="13500002222",
+        name="用户二",
+        balance=0,
+        meal_quota_total=0,
+        wx_mini_openid="openid_second_user",
+        is_active=False,
+    )
+    db.add(m2)
+    db.commit()
+    db.refresh(m2)
+
+    o1 = create_miniprogram_member_card_order(
+        db, int(new_member.id), membership_template_id=int(mall_template.id)
+    )
+    o2 = create_miniprogram_member_card_order(
+        db, int(m2.id), membership_template_id=int(mall_template.id)
+    )
+    for order in (o1, o2):
+        ok, _ = finalize_member_card_order_wechat_pay(
+            db,
+            WechatPayNotifyParsed(
+                out_trade_no=order.out_trade_no or "",
+                transaction_id=f"wx_{order.id}",
+                total_fee=18800,
+            ),
+        )
+        assert ok is True
+
+    notifs = list(
+        db.scalars(
+            select(AdminSystemNotification).where(
+                AdminSystemNotification.kind == KIND_MINIPROGRAM_CARD_ORDER_PENDING,
+            )
+        ).all()
+    )
+    assert len(notifs) == 2
+    markers = {n.skip_reason for n in notifs}
+    assert f"card_order_id:{int(o1.id)}" in markers
+    assert f"card_order_id:{int(o2.id)}" in markers
+
+
 def test_finalize_idempotent_second_notify(
     db: Session, new_member: Member, mall_template: MembershipCardTemplate
 ) -> None:

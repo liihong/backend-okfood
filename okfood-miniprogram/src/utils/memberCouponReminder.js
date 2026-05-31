@@ -1,8 +1,8 @@
 import { request, getMemberToken, getCourierToken } from '@/utils/api.js'
 import { getMemberCouponReminder } from '@/utils/memberCouponApi.js'
+import { showCouponReminderModal } from '@/utils/memberCouponReminderState.js'
 
 const STORAGE_PREFIX = 'okfood_member_coupon_reminder_shown_v1'
-const MEMBER_CARD_LIST_URL = '/packageUser/pages/membershipCardList/membershipCardList'
 
 /** @param {string|number} memberId */
 function reminderStorageKey(memberId) {
@@ -65,25 +65,15 @@ export async function tryShowMemberCouponReminder() {
 
     const data = await getMemberCouponReminder()
     const count = Math.max(0, Math.floor(Number(data?.count) || 0))
-    if (count <= 0) return
-
-    const maxDisc = data?.max_discount_yuan != null ? String(data.max_discount_yuan).trim() : ''
-    const content =
-      maxDisc && maxDisc !== '0' && maxDisc !== '0.00'
-        ? `您有 ${count} 张购卡优惠券可用，最高可减 ¥${maxDisc}，开卡时可自动抵扣。`
-        : `您有 ${count} 张购卡优惠券可用，开卡时可自动抵扣。`
+    const coupons = Array.isArray(data?.coupons) ? data.coupons : []
+    if (count <= 0 || !coupons.length) return
 
     markReminderShown(memberId)
-    uni.showModal({
-      title: '优惠券提醒',
-      content,
-      confirmText: '去购卡',
-      cancelText: '知道了',
-      success: (res) => {
-        if (res.confirm) {
-          uni.navigateTo({ url: MEMBER_CARD_LIST_URL })
-        }
-      },
+    showCouponReminderModal({
+      count,
+      maxDiscountYuan:
+        data?.max_discount_yuan != null ? String(data.max_discount_yuan).trim() : '',
+      coupons,
     })
   } catch {
     /* 静默失败，不影响主流程 */

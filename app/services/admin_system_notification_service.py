@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, time, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
@@ -186,6 +186,16 @@ def _miniprogram_card_order_pending_notification_marker(order_id: int) -> str:
     return f"card_order_id:{int(order_id)}"
 
 
+def _miniprogram_card_order_pending_business_date(order_id: int) -> date:
+    """
+    每工单独占 (store_id, kind, business_date) 唯一键。
+
+    库表对 kind=miniprogram_card_order_pending 与顺丰日摘要等同约束「同店同日一条」；
+    购卡待审批须按工单区分，故用稳定映射日期，真实业务日见 title/message。
+    """
+    return date(2000, 1, 1) + timedelta(days=int(order_id))
+
+
 def _miniprogram_card_order_pending_message(
     *,
     order_id: int,
@@ -254,7 +264,7 @@ def create_miniprogram_card_order_pending_notification(
     if existing is not None:
         return existing
 
-    biz = today_shanghai()
+    biz = _miniprogram_card_order_pending_business_date(int(order_id))
     title, body = _miniprogram_card_order_pending_message(
         order_id=int(order_id),
         card_kind=card_kind,

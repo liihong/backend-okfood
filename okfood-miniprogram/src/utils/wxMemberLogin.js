@@ -151,7 +151,7 @@ export async function wxMiniMemberLoginAndStore(phoneAuth) {
     }
     setTimeout(() => {
       void tryShowMemberCouponReminder()
-    }, 400)
+    }, 500)
     return { login: loginPayload, profile: memberProfile }
   } catch (e) {
     if (isUserMeNotFoundError(e)) clearMemberSession()

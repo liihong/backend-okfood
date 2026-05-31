@@ -1565,6 +1565,17 @@ def admin_wechat_refund_single_meal_order(db: Session, *, order_id: int, store_i
     pay_cfg = get_merged_pay_config(db, int(o.tenant_id), store_id=int(o.store_id))
     q = query_order_by_out_trade_no(out_no, pay=pay_cfg)
     trade_state = (q.get("trade_state") or "").strip().upper()
+    # 微信已退款但本地仍为「已支付」：首次退款 API 成功而 commit 失败时的补救（幂等）
+    if trade_state == "REFUND":
+        out_refund_no = f"RFSM{o.id}"[:32]
+        if (o.pay_status or "").strip() != "已退款":
+            o.pay_status = "已退款"
+            db.add(o)
+            db.commit()
+        return {
+            "message": "微信侧已完成退款，本地订单状态已同步为「已退款」",
+            "out_refund_no": out_refund_no,
+        }
     if trade_state != "SUCCESS":
         raise ValueError(
             f"微信侧订单状态为「{trade_state or '未知'}」，需为支付成功（SUCCESS）才可退款；若已部分/全额退款请以微信商户平台为准",
