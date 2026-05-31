@@ -164,3 +164,11 @@ class UserMemberCouponAvailableOut(BaseModel):
     scope_level: str
     usage_instructions: str | None = None
     expires_at: str | None = None
+
+
+class UserMemberCouponReminderOut(BaseModel):
+    """进小程序购卡提醒：购卡线可用券汇总（不做结算 scope 预筛）。"""
+
+    count: int = Field(..., ge=0)
+    max_discount_yuan: str
+    coupons: list[UserMemberCouponAvailableOut] = Field(default_factory=list)

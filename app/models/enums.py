@@ -87,6 +87,10 @@ class CouponValidityMode(str, Enum):
     DAYS_AFTER_GRANT = "days_after_grant"
 
 
+# 进小程序购卡提醒：计入可用券的业务线（不含单餐/商城零售）
+MEMBER_COUPON_REMINDER_BIZ_TYPES = frozenset({"all", "member_card"})
+
+
 class MemberCouponStatus(str, Enum):
     AVAILABLE = "available"
     LOCKED = "locked"

@@ -55,7 +55,7 @@ from app.schemas.user import (
     WxMiniLoginIn,
     RenewRemindSubscribeGrantOut,
 )
-from app.schemas.marketing.coupon import UserMemberCouponAvailableOut
+from app.schemas.marketing.coupon import UserMemberCouponAvailableOut, UserMemberCouponReminderOut
 
 from app.services.member_delivery_deduction_service import list_member_delivery_deductions
 from app.services.oss_upload_service import upload_member_avatar_bytes
@@ -94,7 +94,10 @@ from app.services.member_card_pay_service import (
     prepare_wechat_jsapi_for_member_card_order,
     sync_member_card_from_wechat_or_raise,
 )
-from app.services.marketing.member_coupon_service import list_available_member_coupons_for_user
+from app.services.marketing.member_coupon_service import (
+    list_available_member_coupons_for_user,
+    list_member_card_coupons_for_reminder,
+)
 from app.services.catalog_admin_service import (
     get_membership_template_row,
     list_membership_templates,
@@ -628,6 +631,26 @@ def list_available_member_coupons_me(
         data=[dump_model(UserMemberCouponAvailableOut.model_validate(x)) for x in items],
         msg="获取成功",
     )
+
+
+@router.get("/member-coupons/reminder")
+@limiter.limit("60/minute")
+def get_member_coupon_reminder_me(
+    request: Request,
+    db: SessionDep,
+    member_id: MemberIdScoped,
+):
+    """进小程序购卡提醒：购卡线可用券汇总（每用户仅弹窗一次由客户端控制）。"""
+    _ = request
+    mem = db.get(Member, int(member_id))
+    if not mem or mem.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    payload = list_member_card_coupons_for_reminder(
+        db,
+        member_id=int(member_id),
+        store_id=int(mem.store_id),
+    )
+    return success(data=dump_model(payload), msg="获取成功")
 
 
 @router.get("/member-card-orders")

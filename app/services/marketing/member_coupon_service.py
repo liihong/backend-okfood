@@ -10,7 +10,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import beijing_now_naive
-from app.models.enums import CouponLockedOrderBiz, MemberCouponStatus
+from app.models.enums import (
+    MEMBER_COUPON_REMINDER_BIZ_TYPES,
+    CouponLockedOrderBiz,
+    MemberCouponStatus,
+)
 from app.models.marketing_coupon_template import MarketingCouponTemplate
 from app.models.member import Member
 from app.models.member_coupon import MemberCoupon
@@ -21,6 +25,7 @@ from app.schemas.marketing.coupon import (
     MemberCouponGrantIn,
     MemberCouponOut,
     UserMemberCouponAvailableOut,
+    UserMemberCouponReminderOut,
 )
 from app.services.marketing.coupon_checkout_service import (
     CouponCheckoutContext,
@@ -406,3 +411,56 @@ def list_available_member_coupons_for_user(
         db.commit()
     out.sort(key=lambda x: Decimal(x.discount_yuan), reverse=True)
     return out
+
+
+def list_member_card_coupons_for_reminder(
+    db: Session,
+    *,
+    member_id: int,
+    store_id: int,
+) -> UserMemberCouponReminderOut:
+    """进小程序提醒：列出购卡线可用券（不做 scope/门槛预筛）。"""
+    rows = db.scalars(
+        select(MemberCoupon)
+        .where(
+            MemberCoupon.member_id == int(member_id),
+            MemberCoupon.store_id == int(store_id),
+            MemberCoupon.status == MemberCouponStatus.AVAILABLE.value,
+        )
+        .order_by(MemberCoupon.id.desc())
+    ).all()
+
+    coupons: list[UserMemberCouponAvailableOut] = []
+    changed = False
+    max_disc = Decimal("0")
+    for row in rows:
+        if expire_member_coupon_if_needed(row):
+            changed = True
+            continue
+        biz = (row.biz_type or "").strip()
+        if biz not in MEMBER_COUPON_REMINDER_BIZ_TYPES:
+            continue
+        disc = Decimal(row.discount_yuan or 0).quantize(Decimal("0.01"))
+        if disc > max_disc:
+            max_disc = disc
+        tpl = db.get(MarketingCouponTemplate, int(row.template_id))
+        coupons.append(
+            UserMemberCouponAvailableOut(
+                id=int(row.id),
+                template_name=str(tpl.name) if tpl else None,
+                discount_yuan=format_amount_yuan(disc),
+                min_order_yuan=format_amount_yuan(Decimal(row.min_order_yuan or 0)),
+                biz_type=biz,
+                scope_level=str(row.scope_level),
+                usage_instructions=(tpl.usage_instructions or "").strip() if tpl else None,
+                expires_at=row.expires_at.isoformat() if row.expires_at else None,
+            )
+        )
+    if changed:
+        db.commit()
+    coupons.sort(key=lambda x: Decimal(x.discount_yuan), reverse=True)
+    return UserMemberCouponReminderOut(
+        count=len(coupons),
+        max_discount_yuan=format_amount_yuan(max_disc),
+        coupons=coupons,
+    )

@@ -1,4 +1,5 @@
 import { request, clearMemberSession, isUserMeNotFoundError } from './api.js'
+import { tryShowMemberCouponReminder } from './memberCouponReminder.js'
 
 function normalizeCnPhone(raw) {
   if (raw == null || raw === '') return ''
@@ -148,6 +149,9 @@ export async function wxMiniMemberLoginAndStore(phoneAuth) {
     if (memberProfile?.id != null) {
       uni.setStorageSync('memberId', String(memberProfile.id))
     }
+    setTimeout(() => {
+      void tryShowMemberCouponReminder()
+    }, 400)
     return { login: loginPayload, profile: memberProfile }
   } catch (e) {
     if (isUserMeNotFoundError(e)) clearMemberSession()

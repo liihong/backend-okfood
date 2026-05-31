@@ -20,3 +20,8 @@ export function listAvailableMemberCoupons(params) {
   }
   return request(`/api/user/member-coupons/available?${q.toString()}`, { method: 'GET' })
 }
+
+/** 进小程序购卡提醒：购卡线可用券汇总 */
+export function getMemberCouponReminder() {
+  return request('/api/user/member-coupons/reminder', { method: 'GET' })
+}

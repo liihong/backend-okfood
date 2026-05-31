@@ -22,7 +22,7 @@ from app.models.member_coupon import MemberCoupon
 from app.schemas.marketing.coupon import CouponTemplateCreateIn, MemberCouponBatchGrantIn, MemberCouponGrantIn
 from app.services.marketing.coupon_checkout_service import compute_coupon_payable, release_member_coupon_for_order
 from app.services.marketing.coupon_template_service import create_coupon_template
-from app.services.marketing.member_coupon_service import grant_member_coupon, grant_member_coupons_batch
+from app.services.marketing.member_coupon_service import grant_member_coupon, grant_member_coupons_batch, list_member_card_coupons_for_reminder
 from app.services.member_card_pay_service import (
     apply_member_coupon_to_unpaid_card_order,
     create_miniprogram_member_card_order,
@@ -193,3 +193,30 @@ def test_grant_member_coupon_by_phone_and_batch(db: Session, new_member, mall_te
     assert batch.success_count == 1
     assert len(batch.failed) == 1
     assert batch.failed[0].member_phone == "19900000000"
+
+
+def test_member_card_coupon_reminder_includes_available(db: Session, new_member, mall_template) -> None:
+    """进小程序提醒：购卡券存在且不做 scope 预筛。"""
+    body = CouponTemplateCreateIn(
+        name="提醒测试券",
+        coupon_type=CouponType.CASH,
+        discount_yuan=Decimal("10"),
+        min_order_yuan=Decimal("0"),
+        biz_type=CouponBizType.MEMBER_CARD,
+        scope_level=CouponScopeLevel.MEMBERSHIP_TEMPLATE,
+        scope_target_id=int(mall_template.id),
+        validity_mode=CouponValidityMode.DAYS_AFTER_GRANT,
+        valid_days_after_grant=30,
+    )
+    tpl = create_coupon_template(db, tenant_id=1, store_id=1, body=body, operator="admin")
+    grant_member_coupon(
+        db,
+        tenant_id=1,
+        store_id=1,
+        body=MemberCouponGrantIn(template_id=tpl.id, member_phone=str(new_member.phone)),
+        operator="admin",
+    )
+    reminder = list_member_card_coupons_for_reminder(db, member_id=int(new_member.id), store_id=1)
+    assert reminder.count == 1
+    assert reminder.max_discount_yuan == "10.00"
+    assert reminder.coupons[0].template_name == "提醒测试券"
