@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 UNIFIED_ORDER_URL = "https://api.mch.weixin.qq.com/pay/unifiedorder"
 ORDER_QUERY_URL = "https://api.mch.weixin.qq.com/pay/orderquery"
+CLOSE_ORDER_URL = "https://api.mch.weixin.qq.com/pay/closeorder"
 REFUND_URL = "https://api.mch.weixin.qq.com/secapi/pay/refund"
 
 
@@ -301,6 +302,67 @@ def query_order_by_out_trade_no(out_trade_no: str, *, pay: Any | None = None) ->
     if not verify_response_sign(data, api_key=api_key):
         logger.error("微信 orderquery 响应签名校验失败: %s", {k: data.get(k) for k in data.keys() if k != "sign"})
         raise WeChatPayV2Error(502, "微信查询订单响应签名校验失败")
+    return data
+
+
+def close_order_by_out_trade_no(out_trade_no: str, *, pay: Any | None = None) -> dict[str, str]:
+    """
+    关闭未支付的微信订单（换券改价、统一下单重入失败等场景需先关单再换新商户单号）。
+
+    若订单不存在或已关闭，视为成功（幂等）。
+    """
+    from app.services.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
+
+    cfg = pay
+    if cfg is None:
+        cfg = MergedPayConfig(
+            wx_mini_appid=(settings.WX_MINI_APPID or "").strip(),
+            wechat_pay_mch_id=(settings.WECHAT_PAY_MCH_ID or "").strip(),
+            wechat_pay_api_key=(settings.WECHAT_PAY_API_KEY or "").strip(),
+            wechat_pay_notify_url=(settings.WECHAT_PAY_NOTIFY_URL or "").strip(),
+        )
+    perr = wechat_pay_misconfiguration_detail_merged(cfg)
+    if perr:
+        raise WeChatPayV2Error(503, perr)
+    otn = (out_trade_no or "").strip()[:32]
+    if not otn:
+        raise WeChatPayV2Error(400, "缺少商户单号")
+    appid = cfg.wx_mini_appid
+    mch_id = cfg.wechat_pay_mch_id
+    api_key = cfg.wechat_pay_api_key
+    params: dict[str, Any] = {
+        "appid": appid,
+        "mch_id": mch_id,
+        "out_trade_no": otn,
+        "nonce_str": random_nonce_str(),
+    }
+    params["sign"] = sign_params_md5(params, api_key=api_key)
+    xml_body = dict_to_xml(params)
+    try:
+        resp = httpx.post(
+            CLOSE_ORDER_URL,
+            content=xml_body.encode("utf-8"),
+            headers={"Content-Type": "application/xml"},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        logger.warning("微信 closeorder 网络失败: %s", e)
+        raise WeChatPayV2Error(502, "微信关单网络失败") from e
+    data = xml_to_dict(resp.text)
+    if (data.get("return_code") or "").upper() != "SUCCESS":
+        msg = (data.get("return_msg") or "通信失败")[:200]
+        raise WeChatPayV2Error(502, f"微信关单：{msg}")
+    if not verify_response_sign(data, api_key=api_key):
+        logger.error("微信 closeorder 响应签名校验失败")
+        raise WeChatPayV2Error(502, "微信关单响应签名校验失败")
+    if (data.get("result_code") or "").upper() != "SUCCESS":
+        err_c = (data.get("err_code") or "").strip().upper()
+        # 订单不存在 / 已关单：视为关单目标已达成
+        if err_c in ("ORDERNOTEXIST", "ORDERCLOSED"):
+            return data
+        err = (data.get("err_code_des") or data.get("err_code") or "关单失败")[:200]
+        raise WeChatPayV2Error(400, f"微信：{err}")
     return data
 
 

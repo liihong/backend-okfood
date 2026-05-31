@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.integrations.wechat_pay_v2 import WechatPayNotifyParsed
+from app.integrations.wechat_pay_v2 import WeChatPayV2Error, WechatPayNotifyParsed
 from app.models.admin_system_notification import AdminSystemNotification
 from app.models.enums import CardOrderPayStatus, CardPayChannel
 from app.models.member import Member
@@ -30,9 +30,22 @@ from app.services.member_card_pay_service import (
     create_miniprogram_member_card_order,
     finalize_member_card_order_wechat_pay,
     get_member_card_order_for_user,
+    prepare_wechat_jsapi_for_member_card_order,
     sync_member_card_order_from_wechat_query,
 )
 from app.services.member_service import patch_member_profile
+
+
+def _mock_pay_cfg() -> object:
+    """测试用微信支付合并配置（避免依赖 tenant_integration_settings 表）。"""
+    return type(
+        "PayCfg",
+        (),
+        {
+            "wx_mini_appid": "wx_test_appid",
+            "wechat_pay_api_key": "01234567890123456789012345678901",
+        },
+    )()
 
 
 def test_new_user_create_order_unpaid_no_delivery_date(
@@ -295,3 +308,94 @@ def test_finalize_idempotent_second_notify(
     mem = db.get(Member, new_member.id)
     assert mem is not None
     assert int(mem.balance) == 0
+
+
+@patch(
+    "app.services.member_card_pay_service.wechat_pay_misconfiguration_detail_merged",
+    return_value=None,
+)
+@patch(
+    "app.services.member_card_pay_service.get_merged_pay_config",
+    return_value=_mock_pay_cfg(),
+)
+@patch("app.services.member_card_pay_service.close_order_by_out_trade_no")
+@patch("app.services.member_card_pay_service.unified_order_jsapi")
+@patch("app.services.member_card_pay_service.query_order_by_out_trade_no")
+def test_prepare_wechat_jsapi_rotates_out_trade_no_when_wx_amount_differs(
+    mock_query: object,
+    mock_unified: object,
+    mock_close: object,
+    _mock_pay: object,
+    _mock_perr: object,
+    db: Session,
+    new_member: Member,
+    mall_template: MembershipCardTemplate,
+) -> None:
+    """继续支付：微信侧仍为首次下单金额时，须关单并轮换商户单号再统一下单。"""
+    order = create_miniprogram_member_card_order(
+        db, int(new_member.id), membership_template_id=int(mall_template.id)
+    )
+    old_out = order.out_trade_no or ""
+    mock_query.return_value = {
+        "result_code": "SUCCESS",
+        "trade_state": "NOTPAY",
+        "total_fee": "17800",
+    }
+    mock_unified.return_value = "prepay_rotated_ok"
+
+    params = prepare_wechat_jsapi_for_member_card_order(
+        db, int(new_member.id), int(order.id), "127.0.0.1"
+    )
+
+    assert params.get("paySign")
+    mock_close.assert_called_once()
+    db.refresh(order)
+    assert (order.out_trade_no or "") != old_out
+    assert (order.out_trade_no or "").startswith(f"OKC{int(order.id)}")
+    mock_unified.assert_called_once()
+    call_kw = mock_unified.call_args.kwargs
+    assert call_kw["out_trade_no"] == order.out_trade_no
+    assert call_kw["total_fee_fen"] == 18800
+
+
+@patch(
+    "app.services.member_card_pay_service.wechat_pay_misconfiguration_detail_merged",
+    return_value=None,
+)
+@patch(
+    "app.services.member_card_pay_service.get_merged_pay_config",
+    return_value=_mock_pay_cfg(),
+)
+@patch("app.services.member_card_pay_service.close_order_by_out_trade_no")
+@patch("app.services.member_card_pay_service.unified_order_jsapi")
+@patch("app.services.member_card_pay_service.query_order_by_out_trade_no")
+def test_prepare_wechat_jsapi_retries_on_wechat_reentry_mismatch(
+    mock_query: object,
+    mock_unified: object,
+    mock_close: object,
+    _mock_pay: object,
+    _mock_perr: object,
+    db: Session,
+    new_member: Member,
+    mall_template: MembershipCardTemplate,
+) -> None:
+    """统一下单返回「重入参数不一致」时，关单轮换商户单号并重试一次。"""
+    order = create_miniprogram_member_card_order(
+        db, int(new_member.id), membership_template_id=int(mall_template.id)
+    )
+    old_out = order.out_trade_no or ""
+    mock_query.return_value = {"result_code": "FAIL", "err_code": "ORDERNOTEXIST"}
+    mock_unified.side_effect = [
+        WeChatPayV2Error(400, "请求重入时，参数与首次请求时不一致"),
+        "prepay_after_retry",
+    ]
+
+    params = prepare_wechat_jsapi_for_member_card_order(
+        db, int(new_member.id), int(order.id), "127.0.0.1"
+    )
+
+    assert params.get("package", "").startswith("prepay_id=")
+    assert mock_unified.call_count == 2
+    mock_close.assert_called_once()
+    db.refresh(order)
+    assert (order.out_trade_no or "") != old_out

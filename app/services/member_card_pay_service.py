@@ -17,6 +17,7 @@ from app.integrations.wechat_pay_v2 import (
     WeChatPayV2Error,
     WechatPayNotifyParsed,
     build_miniprogram_pay_params,
+    close_order_by_out_trade_no,
     query_order_by_out_trade_no,
     refund_order_v2,
     unified_order_jsapi,
@@ -63,6 +64,149 @@ def _final_out_trade_no(order_id: int) -> str:
     if len(s) > 32:
         raise HTTPException(status_code=500, detail="开卡订单号超长")
     return s
+
+
+def _rotated_member_card_out_trade_no(order_id: int) -> str:
+    """换券/改价后须换新商户单号，避免微信「重入参数不一致」。"""
+    suffix = secrets.token_hex(3).upper()
+    return f"OKC{int(order_id)}{suffix}"[:32]
+
+
+def _is_wechat_unified_reentry_mismatch(message: str) -> bool:
+    """微信统一下单：同一 out_trade_no 重入但 body/金额/openid 等与首次不一致。"""
+    m = (message or "").strip()
+    return "请求重入" in m or "参数与首次请求时不一致" in m
+
+
+def _close_wechat_order_best_effort(out_trade_no: str, *, pay: object) -> None:
+    """关单失败（如订单不存在）时忽略，不阻断后续轮换商户单号。"""
+    otn = (out_trade_no or "").strip()
+    if not otn:
+        return
+    try:
+        close_order_by_out_trade_no(otn, pay=pay)
+    except WeChatPayV2Error as e:
+        logger.info("微信关单（可忽略） out=%s err=%s", otn, e)
+
+
+def _rotate_member_card_order_out_trade_no(
+    db: Session,
+    order: MemberCardOrder,
+    *,
+    pay: object,
+    commit: bool = True,
+) -> str:
+    """关闭微信侧旧单并写入新商户单号（本地工单 id 不变）。"""
+    old = (order.out_trade_no or "").strip()
+    if old:
+        _close_wechat_order_best_effort(old, pay=pay)
+    new_no = _rotated_member_card_out_trade_no(int(order.id))
+    order.out_trade_no = new_no
+    if commit:
+        db.commit()
+        db.refresh(order)
+    logger.info(
+        "开卡工单轮换商户单号 order_id=%s old=%s new=%s",
+        int(order.id),
+        old,
+        new_no,
+    )
+    return new_no
+
+
+def _member_card_order_body_desc(db: Session, order: MemberCardOrder) -> str:
+    """统一下单商品描述（与首次下单保持一致，减少重入不一致）。"""
+    tid = getattr(order, "membership_template_id", None)
+    kind_label = (order.card_kind or "").strip() or "套卡"
+    body_desc = f"会员{kind_label}开卡"
+    if tid:
+        tpl = db.get(MembershipCardTemplate, int(tid))
+        if tpl:
+            nm = (tpl.name or "").strip() or kind_label
+            body_desc = f"OK饭自律卡·{nm}"
+            if len(body_desc) > 42:
+                body_desc = body_desc[:42]
+    return body_desc
+
+
+def _reconcile_wechat_out_trade_no_before_card_prepay(
+    db: Session,
+    order: MemberCardOrder,
+    *,
+    pay: object,
+) -> None:
+    """
+    统一下单前对齐微信侧状态：已支付则拉单入账；未支付但金额与本地不一致则关单并轮换商户单号。
+    """
+    out_no = (order.out_trade_no or "").strip()
+    if not out_no:
+        return
+    try:
+        data = query_order_by_out_trade_no(out_no, pay=pay)
+    except WeChatPayV2Error:
+        return
+
+    if (data.get("result_code") or "").upper() != "SUCCESS":
+        err_c = (data.get("err_code") or "").strip().upper()
+        if err_c == "ORDERNOTEXIST":
+            return
+        return
+
+    ts = (data.get("trade_state") or "").strip().upper()
+    if ts == "SUCCESS":
+        sync_member_card_from_wechat_or_raise(db, int(order.member_id), int(order.id))
+        raise HTTPException(status_code=400, detail="订单已支付，请下拉刷新")
+    if ts == "USERPAYING":
+        raise HTTPException(status_code=400, detail="微信侧支付处理中，请稍候再试")
+    if ts == "CLOSED":
+        return
+
+    if ts not in ("NOTPAY", ""):
+        return
+
+    try:
+        wx_fee = int((data.get("total_fee") or "0").strip() or 0)
+    except ValueError:
+        wx_fee = -1
+    expect_fee = yuan_decimal_to_fen(order.amount_yuan)
+    if wx_fee >= 0 and wx_fee != expect_fee:
+        _rotate_member_card_order_out_trade_no(db, order, pay=pay)
+
+
+def _unified_order_jsapi_for_member_card_order(
+    db: Session,
+    order: MemberCardOrder,
+    *,
+    body_desc: str,
+    openid: str,
+    client_ip: str,
+    pay: object,
+) -> str:
+    """统一下单；遇微信重入参数不一致时关单轮换商户单号并重试一次。"""
+    out_no = (order.out_trade_no or "").strip()
+    if not out_no:
+        raise HTTPException(status_code=500, detail="订单缺少商户单号")
+    total_fee_fen = yuan_decimal_to_fen(order.amount_yuan)
+    last_err: WeChatPayV2Error | None = None
+    for attempt in range(2):
+        try:
+            return unified_order_jsapi(
+                out_trade_no=out_no,
+                body=body_desc,
+                total_fee_fen=total_fee_fen,
+                openid=openid,
+                spbill_create_ip=client_ip,
+                pay=pay,
+            )
+        except WeChatPayV2Error as e:
+            last_err = e
+            if attempt == 0 and _is_wechat_unified_reentry_mismatch(str(e)):
+                out_no = _rotate_member_card_order_out_trade_no(db, order, pay=pay)
+                continue
+            raise
+    if last_err is not None:
+        raise last_err
+    raise WeChatPayV2Error(502, "微信统一下单失败")
 
 
 def _format_amount_yuan(v: Decimal) -> str:
@@ -205,6 +349,9 @@ def expire_stale_unpaid_miniprogram_card_orders(db: Session, *, member_id: int |
             order.coupon_discount_yuan = None
             order.member_coupon_id = None
             _clear_coupon_from_card_order_remark(order)
+            # 释券恢复原价后，微信侧仍可能是折后金额，须轮换商户单号
+            pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
+            _rotate_member_card_order_out_trade_no(db, order, pay=pay_cfg, commit=False)
     db.commit()
     return len(stale)
 
@@ -248,6 +395,7 @@ def apply_member_coupon_to_unpaid_card_order(
         db, order_biz=CouponLockedOrderBiz.MEMBER_CARD, order_id=int(order.id)
     )
     orig = _card_order_checkout_original_amount(order)
+    old_payable = Decimal(order.amount_yuan or 0).quantize(Decimal("0.01"))
 
     if member_coupon_id is None:
         order.amount_yuan = orig
@@ -255,29 +403,33 @@ def apply_member_coupon_to_unpaid_card_order(
         order.coupon_discount_yuan = None
         order.member_coupon_id = None
         _clear_coupon_from_card_order_remark(order)
-        db.commit()
-        db.refresh(order)
-        return order
+        new_payable = orig
+    else:
+        mem = db.get(Member, member_id)
+        if not mem or mem.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        ctx = _member_card_coupon_checkout_context(order)
+        o2, disc, payable = lock_member_coupon_for_order(
+            db,
+            member_coupon_id=int(member_coupon_id),
+            member_id=int(member_id),
+            store_id=int(mem.store_id),
+            ctx=ctx,
+            order_id=int(order.id),
+        )
+        order.original_amount_yuan = o2
+        order.coupon_discount_yuan = disc
+        order.amount_yuan = payable
+        order.member_coupon_id = int(member_coupon_id)
+        _apply_coupon_to_card_order_remark(
+            db, order, member_coupon_id=int(member_coupon_id), discount_yuan=disc
+        )
+        new_payable = payable
 
-    mem = db.get(Member, member_id)
-    if not mem or mem.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    ctx = _member_card_coupon_checkout_context(order)
-    o2, disc, payable = lock_member_coupon_for_order(
-        db,
-        member_coupon_id=int(member_coupon_id),
-        member_id=int(member_id),
-        store_id=int(mem.store_id),
-        ctx=ctx,
-        order_id=int(order.id),
-    )
-    order.original_amount_yuan = o2
-    order.coupon_discount_yuan = disc
-    order.amount_yuan = payable
-    order.member_coupon_id = int(member_coupon_id)
-    _apply_coupon_to_card_order_remark(
-        db, order, member_coupon_id=int(member_coupon_id), discount_yuan=disc
-    )
+    if new_payable.quantize(Decimal("0.01")) != old_payable:
+        pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
+        _rotate_member_card_order_out_trade_no(db, order, pay=pay_cfg, commit=False)
+
     db.commit()
     db.refresh(order)
     return order
@@ -449,23 +601,15 @@ def prepare_wechat_jsapi_for_member_card_order(
     if not out_no:
         raise HTTPException(status_code=500, detail="订单缺少商户单号")
 
-    tid = getattr(order, "membership_template_id", None)
-    kind_label = (order.card_kind or "").strip() or "套卡"
-    body_desc = f"会员{kind_label}开卡"
-    if tid:
-        tpl = db.get(MembershipCardTemplate, int(tid))
-        if tpl:
-            nm = (tpl.name or "").strip() or kind_label
-            body_desc = f"OK饭自律卡·{nm}"
-            if len(body_desc) > 42:
-                body_desc = body_desc[:42]
+    body_desc = _member_card_order_body_desc(db, order)
+    _reconcile_wechat_out_trade_no_before_card_prepay(db, order, pay=pay_cfg)
     try:
-        prepay_id = unified_order_jsapi(
-            out_trade_no=out_no,
-            body=body_desc,
-            total_fee_fen=yuan_decimal_to_fen(order.amount_yuan),
+        prepay_id = _unified_order_jsapi_for_member_card_order(
+            db,
+            order,
+            body_desc=body_desc,
             openid=openid,
-            spbill_create_ip=client_ip,
+            client_ip=client_ip,
             pay=pay_cfg,
         )
     except WeChatPayV2Error as e:
