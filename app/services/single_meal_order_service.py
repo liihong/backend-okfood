@@ -923,21 +923,31 @@ def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, c
 
 
 def _notify_single_meal_order_paid_cs_review(db: Session, order: SingleMealOrder) -> None:
+    """写入客服系统消息；失败仅回滚 savepoint，不得阻断支付入账。"""
     member = db.get(Member, int(order.member_id))
     dish = db.get(MenuDish, int(order.dish_id)) if order.dish_id else None
-    create_single_meal_order_paid_notification(
-        db,
-        store_id=int(order.store_id),
-        order_id=int(order.id),
-        delivery_date=order.delivery_date,
-        dish_name=(dish.name if dish else None),
-        quantity=int(order.quantity or 1),
-        amount_yuan=_format_amount_yuan(Decimal(order.amount_yuan)),
-        store_pickup=bool(getattr(order, "store_pickup", False)),
-        member_id=int(order.member_id),
-        member_phone=(member.phone if member else None),
-        member_name=(member.name if member else None),
-    )
+    try:
+        with db.begin_nested():
+            create_single_meal_order_paid_notification(
+                db,
+                store_id=int(order.store_id),
+                order_id=int(order.id),
+                delivery_date=order.delivery_date,
+                dish_name=(dish.name if dish else None),
+                quantity=int(order.quantity or 1),
+                amount_yuan=_format_amount_yuan(Decimal(order.amount_yuan)),
+                store_pickup=bool(getattr(order, "store_pickup", False)),
+                member_id=int(order.member_id),
+                member_phone=(member.phone if member else None),
+                member_name=(member.name if member else None),
+            )
+    except Exception:
+        logger.exception(
+            "单次零售支付成功但系统消息写入失败 order_id=%s out=%s delivery_date=%s",
+            int(order.id),
+            order.out_trade_no,
+            order.delivery_date,
+        )
 
 
 def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyParsed) -> tuple[bool, str]:

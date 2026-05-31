@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import secrets
+import time as time_mod
 from datetime import date, time, timedelta
 
 from fastapi import HTTPException
@@ -25,6 +28,8 @@ KIND_MINIPROGRAM_CARD_ORDER_PENDING = "miniprogram_card_order_pending"
 KIND_SINGLE_MEAL_ORDER_PAID = "single_meal_order_paid"
 # 每日多份但剩余次数不足当日份数，未进配送大表，待客服联系确认续卡
 KIND_MEMBER_INSUFFICIENT_BALANCE_FOR_DELIVERY = "member_insufficient_balance_for_delivery"
+
+logger = logging.getLogger(__name__)
 
 
 def _sf_nightly_push_message(*, total: int, success: int, failed: int, skip_reason: str | None) -> str:
@@ -387,24 +392,39 @@ def acknowledge_miniprogram_card_order_pending_notifications(
     return len(rows)
 
 
-def _single_meal_order_paid_order_marker(order_id: int) -> str:
-    """供餐日汇总通知内按订单号去重（与 skip_reason 无关，写在 message 中）。"""
-    return f"#{int(order_id)}"
+def _single_meal_order_paid_notification_marker(order_id: int) -> str:
+    """skip_reason 存订单 id，回调重试时幂等去重。"""
+    return f"single_meal_order_id:{int(order_id)}"
+
+
+def _single_meal_order_paid_business_date_for_uk(order_id: int) -> date:
+    """
+    每订单独占 ``(store_id, kind, business_date)`` 唯一键。
+
+    ``business_date`` 列仅为 DATE，无法存毫秒时间戳；与开卡待审批同策略用 order_id 映射槽位，
+    真实供餐日写在 title/message。trace 后缀含毫秒时间戳与随机数便于排查。
+    """
+    return date(2000, 1, 1) + timedelta(days=int(order_id))
+
+
+def _single_meal_order_paid_trace_suffix() -> str:
+    """消息末尾追踪串：毫秒时间戳 + 随机 hex，避免业务字段撞车。"""
+    return f"trace={int(time_mod.time() * 1000)}-{secrets.token_hex(4)}"
 
 
 def _single_meal_order_paid_notification_row(
     db: Session,
     *,
     store_id: int,
-    delivery_date: date,
+    order_id: int,
 ) -> AdminSystemNotification | None:
-    """同店同供餐日仅一条汇总通知（uk: store_id + kind + business_date）。"""
+    marker = _single_meal_order_paid_notification_marker(order_id)
     return db.scalars(
         select(AdminSystemNotification)
         .where(
             AdminSystemNotification.store_id == int(store_id),
             AdminSystemNotification.kind == KIND_SINGLE_MEAL_ORDER_PAID,
-            AdminSystemNotification.business_date == delivery_date,
+            AdminSystemNotification.skip_reason == marker,
         )
         .order_by(AdminSystemNotification.id.desc())
         .limit(1)
@@ -425,16 +445,15 @@ def create_single_meal_order_paid_notification(
     member_phone: str | None,
     member_name: str | None,
 ) -> AdminSystemNotification | None:
-    """单次零售支付成功：提醒客服尽快在订单管理推送配送或安排自提。
-
-    同店同供餐日合并为一条系统消息（表级唯一约束），批量补同步时幂等追加。
-    """
+    """单次零售支付成功：每订单一条客服提醒（幂等；不占用供餐日 uk 槽位）。"""
     sid = int(store_id)
     if sid <= 0:
         return None
 
     oid = int(order_id)
-    marker = _single_meal_order_paid_order_marker(oid)
+    existing = _single_meal_order_paid_notification_row(db, store_id=sid, order_id=oid)
+    if existing is not None:
+        return existing
 
     phones = str(member_phone or "").strip()[:32] or "(无手机号)"
     naming = str(member_name or "").strip()
@@ -445,34 +464,14 @@ def create_single_meal_order_paid_notification(
     amt = str(amount_yuan or "").strip()
     amt_text = f" ¥{amt}" if amt else ""
 
-    line = (
-        f"{marker} 会员 mid={int(member_id)} {phones} "
-        f"{('「' + naming + '」') if naming else ''}"
-        f"已支付{amt_text} {dish}×{max(1, int(quantity))}（{fulfill}）"
-    )
-    if len(line) > 240:
-        line = line[:237] + "…"
-
-    existing = _single_meal_order_paid_notification_row(
-        db, store_id=sid, delivery_date=delivery_date
-    )
-    if existing is not None:
-        msg = existing.message or ""
-        if marker in msg:
-            return existing
-        merged = f"{msg}\n{line}".strip()
-        if len(merged) > 500:
-            merged = merged[:497] + "…"
-        existing.message = merged
-        existing.title = f"单次零售新订单 · 供餐日 {delivery_date.isoformat()}"[:200]
-        db.flush()
-        return existing
-
-    title = f"单次零售新订单 · {marker}"
+    title = f"单次零售新订单 · #{oid}"
     body = (
-        f"供餐日 {delivery_date.isoformat()}。"
-        f"{line}。"
+        f"会员 mid={int(member_id)} {phones} "
+        f"{('「' + naming + '」') if naming else ''}"
+        f"已支付{amt_text} {dish}×{max(1, int(quantity))}，"
+        f"供餐日 {delivery_date.isoformat()}（{fulfill}）。"
         "请尽快在「订单管理」推送配送或安排自提。"
+        f" {_single_meal_order_paid_trace_suffix()}"
     )
     if len(body) > 500:
         body = body[:497] + "…"
@@ -480,13 +479,13 @@ def create_single_meal_order_paid_notification(
     row = AdminSystemNotification(
         store_id=sid,
         kind=KIND_SINGLE_MEAL_ORDER_PAID,
-        business_date=delivery_date,
+        business_date=_single_meal_order_paid_business_date_for_uk(oid),
         title=title[:200],
         message=body,
         total_count=0,
         success_count=0,
         failed_count=0,
-        skip_reason=None,
+        skip_reason=_single_meal_order_paid_notification_marker(oid),
     )
     db.add(row)
     db.flush()
