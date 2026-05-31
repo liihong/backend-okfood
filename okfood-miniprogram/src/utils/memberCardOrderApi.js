@@ -3,6 +3,19 @@ import { request } from '@/utils/api.js'
 /**
  * @param {{ page?: number, page_size?: number, list_status?: string }} [params]
  */
+/**
+ * @param {number} orderId
+ */
+export function getMemberCardOrder(orderId) {
+  const id = Math.floor(Number(orderId))
+  if (!Number.isFinite(id) || id < 1) {
+    return Promise.reject(new Error('订单编号无效'))
+  }
+  return request(`/api/user/member-card-orders/${id}`, {
+    method: 'GET',
+  })
+}
+
 export function listMemberCardOrders(params = {}) {
   const page = Number(params.page) > 0 ? Math.floor(Number(params.page)) : 1
   const page_size =

@@ -89,6 +89,7 @@ from app.schemas.single_meal_order import SingleMealOrderCreateIn
 from app.services.member_card_pay_service import (
     apply_member_coupon_to_unpaid_card_order,
     create_miniprogram_member_card_order,
+    get_member_card_order_for_user,
     list_member_card_orders_for_user,
     member_card_order_user_dict,
     prepare_wechat_jsapi_for_member_card_order,
@@ -678,6 +679,22 @@ def list_member_card_orders_me(
         page_size=page_size,
         msg="获取成功",
     )
+
+
+@router.get("/member-card-orders/{order_id}")
+@limiter.limit("60/minute")
+def get_member_card_order_me(
+    request: Request,
+    order_id: int,
+    db: SessionDep,
+    member_id: MemberIdScoped,
+):
+    """单条商城开卡工单详情（待支付续付、订单页跳转）。"""
+    _ = request
+    payload = UserMemberCardOrderOut.model_validate(
+        get_member_card_order_for_user(db, int(member_id), int(order_id))
+    )
+    return success(data=dump_model(payload), msg="获取成功")
 
 
 @router.post("/member-card-orders")

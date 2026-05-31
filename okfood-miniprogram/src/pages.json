@@ -115,6 +115,13 @@
             "navigationStyle": "custom",
             "backgroundColor": "#f8fafc"
           }
+        },
+        {
+          "path": "pages/memberCardOrderDetail/memberCardOrderDetail",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
         }
       ]
     },

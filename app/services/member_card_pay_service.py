@@ -692,6 +692,14 @@ def member_card_order_user_dict(order: MemberCardOrder) -> dict:
     }
 
 
+def get_member_card_order_for_user(db: Session, member_id: int, order_id: int) -> dict:
+    """小程序：单条开卡/续卡工单详情（仅本人）。"""
+    order = db.get(MemberCardOrder, int(order_id))
+    if not order or int(order.member_id) != int(member_id):
+        raise HTTPException(status_code=404, detail="开卡订单不存在")
+    return member_card_order_user_dict(order)
+
+
 def list_member_card_orders_for_user(
     db: Session,
     member_id: int,

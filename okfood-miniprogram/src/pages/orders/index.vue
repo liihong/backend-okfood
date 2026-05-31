@@ -68,7 +68,7 @@
             </view>
           </template>
           <template v-else>
-            <view v-for="row in items" :key="'m-' + row.id" class="order-row" @tap="openMallHint(row)">
+            <view v-for="row in items" :key="'m-' + row.id" class="order-row" @tap="openMallDetail(row)">
               <view class="order-row-head">
                 <text class="order-title">{{ mallTitle(row) }}</text>
                 <text class="order-amt">¥ {{ row.amount_yuan || '0.00' }}</text>
@@ -292,14 +292,11 @@ function openSingleDetail(orderId) {
   })
 }
 
-function openMallHint(row) {
-  const title = mallTitle(row)
-  const st = statusLineMall(row)
-  const amt = row?.amount_yuan != null ? `¥${row.amount_yuan}` : ''
-  uni.showModal({
-    title: '订单详情',
-    content: `${title}\n${amt ? `${amt} ` : ''}状态：${st}\n单号：${row?.out_trade_no || '—'}`,
-    showCancel: false,
+function openMallDetail(row) {
+  const id = Number(row?.id)
+  if (!Number.isFinite(id) || id < 1) return
+  uni.navigateTo({
+    url: `/packageOrder/pages/memberCardOrderDetail/memberCardOrderDetail?id=${encodeURIComponent(String(id))}`,
   })
 }
 

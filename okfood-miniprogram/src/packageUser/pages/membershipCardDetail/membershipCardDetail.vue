@@ -124,6 +124,10 @@ import {
   isUserMeNotFoundError,
 } from '@/utils/api.js'
 import { runMembershipTemplateWechatPay } from '@/utils/memberCardPay.js'
+import {
+  applyMemberCardOrderCoupon,
+  listMemberCardOrders,
+} from '@/utils/memberCardOrderApi.js'
 import { listAvailableMemberCoupons, getMemberCouponReminder } from '@/utils/memberCouponApi.js'
 import { filterMemberCardCouponsForTemplate, pickBestMemberCoupon } from '@/utils/memberCouponScope.js'
 import { shouldOpenMemberSetup } from '@/utils/memberProfile.js'
@@ -145,6 +149,91 @@ const availableCoupons = ref([])
 const selectedCouponId = ref(null)
 const couponsLoading = ref(false)
 const shareSheetVisible = ref(false)
+/** 避免 onLoad 与 loadOne 重复弹待支付提示 */
+let pendingPayPrompted = false
+
+/** 开卡工单详情页（内联路径，避免分包 utils 导出丢失） */
+const MEMBER_CARD_ORDER_DETAIL_PAGE =
+  '/packageOrder/pages/memberCardOrderDetail/memberCardOrderDetail'
+
+function openMemberCardOrderDetail(orderId) {
+  const id = Math.floor(Number(orderId))
+  if (!Number.isFinite(id) || id < 1) return
+  uni.navigateTo({
+    url: `${MEMBER_CARD_ORDER_DETAIL_PAGE}?id=${encodeURIComponent(String(id))}`,
+  })
+}
+
+async function fetchPendingMemberCardOrderIdLocal() {
+  try {
+    const data = await listMemberCardOrders({
+      page: 1,
+      page_size: 1,
+      list_status: 'pending_pay',
+    })
+    const first = Array.isArray(data?.items) ? data.items[0] : null
+    const oid = first?.id != null ? Number(first.id) : NaN
+    return Number.isFinite(oid) && oid > 0 ? oid : null
+  } catch {
+    return null
+  }
+}
+
+/** @param {unknown} err */
+function parsePendingOrderIdFromErrorLocal(err) {
+  const msg = err instanceof Error ? err.message : String(err || '')
+  const m = msg.match(/#(\d+)/)
+  const id = m ? parseInt(m[1], 10) : NaN
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+/** @param {unknown} err */
+function isUnpaidMemberCardOrderConflictLocal(err) {
+  return (
+    err &&
+    typeof err === 'object' &&
+    /** @type {{ status?: number }} */ (err).status === 409
+  )
+}
+
+function promptGoPayPendingOrder(orderId, memberCouponId) {
+  const id = Math.floor(Number(orderId))
+  if (!Number.isFinite(id) || id < 1) return Promise.resolve(false)
+  const msg = `您有未支付的开卡订单（#${id}），请先完成支付后再下单`
+  return new Promise((resolve) => {
+    uni.showModal({
+      title: '待支付订单',
+      content: msg,
+      confirmText: '去支付',
+      cancelText: '知道了',
+      success: async (res) => {
+        if (!res.confirm) {
+          resolve(false)
+          return
+        }
+        if (memberCouponId != null) {
+          try {
+            await applyMemberCardOrderCoupon(id, memberCouponId)
+          } catch {
+            /* 换券失败仍进入详情页 */
+          }
+        }
+        openMemberCardOrderDetail(id)
+        resolve(true)
+      },
+      fail: () => resolve(false),
+    })
+  })
+}
+
+/** 进入购卡页：有待支付工单则弹窗引导 */
+async function maybePromptPendingPayOnEnter() {
+  if (pendingPayPrompted) return
+  pendingPayPrompted = true
+  const orderId = await fetchPendingMemberCardOrderIdLocal()
+  if (!orderId) return
+  await promptGoPayPendingOrder(orderId, selectedCouponId.value)
+}
 
 const pan4 = computed(() => {
   const id = templateId.value || 0
@@ -307,6 +396,9 @@ async function loadOne() {
   } finally {
     loading.value = false
   }
+  if (tpl.value) {
+    void maybePromptPendingPayOnEnter()
+  }
 }
 
 /** 结算页可用券；失败时用提醒接口兜底（避免线上未部署 available 时无券展示） */
@@ -409,6 +501,11 @@ async function onPay() {
       })
     }, paySynced ? 400 : 80)
   } catch (e) {
+    const orderId = parsePendingOrderIdFromErrorLocal(e)
+    if (isUnpaidMemberCardOrderConflictLocal(e) && orderId) {
+      await promptGoPayPendingOrder(orderId, selectedCouponId.value)
+      return
+    }
     const msg =
       e instanceof Error ? e.message : typeof e === 'string' ? e : '支付未完成'
     if (msg.includes('cancel') || msg.includes('取消')) {

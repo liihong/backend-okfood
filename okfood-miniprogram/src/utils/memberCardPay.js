@@ -1,17 +1,39 @@
 import { request } from '@/utils/api.js'
 import {
-  applyMemberCardOrderCoupon,
   createMemberCardOrder,
   fetchMemberCardWechatJsapiPayParams,
+  listMemberCardOrders,
   syncMemberCardWechatPayResult,
 } from '@/utils/memberCardOrderApi.js'
-import {
-  confirmContinueExistingMallOrderPay,
-  isUnpaidOrderConflict,
-} from '@/utils/unpaidOrderPrompt.js'
 import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
 
+async function fetchPendingMemberCardOrderId() {
+  try {
+    const data = await listMemberCardOrders({
+      page: 1,
+      page_size: 1,
+      list_status: 'pending_pay',
+    })
+    const first = Array.isArray(data?.items) ? data.items[0] : null
+    const id = first?.id != null ? Number(first.id) : NaN
+    return Number.isFinite(id) && id > 0 ? id : null
+  } catch {
+    return null
+  }
+}
+
+/** 已有未支付工单时不重复创建，抛出 409 供页面引导至工单详情 */
+function throwPendingMemberCardOrderConflict(orderId) {
+  const err = new Error(`您有未支付的开卡订单（#${orderId}），请先完成支付后再下单`)
+  /** @type {Error & { status?: number }} */ (err).status = 409
+  throw err
+}
+
 async function resolveMemberCardOrderId(createBody) {
+  const pendingId = await fetchPendingMemberCardOrderId()
+  if (pendingId) {
+    throwPendingMemberCardOrderConflict(pendingId)
+  }
   try {
     const order = await createMemberCardOrder(createBody)
     const orderId = order && typeof order === 'object' ? order.id : null
@@ -20,22 +42,6 @@ async function resolveMemberCardOrderId(createBody) {
     }
     return { order, orderId }
   } catch (e) {
-    const existingId = await confirmContinueExistingMallOrderPay(e)
-    if (existingId) {
-      let order = { id: existingId }
-      if (createBody.member_coupon_id != null) {
-        order = await applyMemberCardOrderCoupon(
-          existingId,
-          createBody.member_coupon_id,
-        )
-      }
-      return { order, orderId: existingId }
-    }
-    if (isUnpaidOrderConflict(e)) {
-      throw new Error(
-        e instanceof Error ? e.message : '您有待支付的开卡订单，请先完成支付',
-      )
-    }
     throw e
   }
 }
@@ -70,6 +76,7 @@ async function runWechatPayForMemberCardOrder(orderId) {
         m.includes('稍候') ||
         m.includes('稍后再试') ||
         m.includes('未支付') ||
+        m.includes('未缴') ||
         m.includes('not_paid') ||
         /PAY_USERPAYING/i.test(m)
       if (maybeWait && i < maxTries - 1) {
@@ -84,6 +91,15 @@ async function runWechatPayForMemberCardOrder(orderId) {
   }
   if (lastErr) throw lastErr
   return { wechatPaid: true, paySynced: false }
+}
+
+/**
+ * 对已有开卡工单调起微信支付并同步入账。
+ * @param {number} orderId
+ */
+export async function payMemberCardOrderWechat(orderId) {
+  await syncWxMiniOpenidFromLogin()
+  return runWechatPayForMemberCardOrder(orderId)
 }
 
 /**

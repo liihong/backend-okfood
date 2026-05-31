@@ -29,6 +29,7 @@ from app.services.member_card_order_service import (
 from app.services.member_card_pay_service import (
     create_miniprogram_member_card_order,
     finalize_member_card_order_wechat_pay,
+    get_member_card_order_for_user,
     sync_member_card_order_from_wechat_query,
 )
 from app.services.member_service import patch_member_profile
@@ -49,6 +50,19 @@ def test_new_user_create_order_unpaid_no_delivery_date(
     assert order.pay_channel == CardPayChannel.WECHAT.value
     assert order.amount_yuan == Decimal("188.00")
     assert (order.out_trade_no or "").startswith("OKC")
+
+
+def test_get_member_card_order_for_user(
+    db: Session, new_member: Member, mall_template: MembershipCardTemplate
+) -> None:
+    order = create_miniprogram_member_card_order(
+        db,
+        int(new_member.id),
+        membership_template_id=int(mall_template.id),
+    )
+    payload = get_member_card_order_for_user(db, int(new_member.id), int(order.id))
+    assert int(payload["id"]) == int(order.id)
+    assert payload["pay_status"] == CardOrderPayStatus.UNPAID.value
 
 
 def test_finalize_wechat_pay_new_user_paid_not_synced_with_notification(
