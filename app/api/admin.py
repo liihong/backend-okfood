@@ -123,6 +123,8 @@ from app.services.single_meal_order_service import (
     summarize_admin_store_single_meal_orders_by_delivery_day,
     admin_mark_single_meal_order_delivered,
     admin_update_single_meal_order,
+    get_admin_single_meal_order_list_out,
+    sync_single_meal_from_wechat_admin_or_raise,
 )
 from app.services.member_card_order_service import (
     create_card_order,
@@ -1198,6 +1200,25 @@ def admin_single_meal_patch(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return success(data=dump_model(out), msg="订单已更新")
+
+
+@router.post("/orders/single-meals/{order_id}/sync-wechat-pay", response_model=None)
+def admin_single_meal_sync_wechat_pay(
+    order_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """
+    向微信查询该单次零售订单商户单号支付结果并记为已支付（与小程序拉单、异步通知同路径）。
+
+    用于用户已扣款但订单仍显示「未支付」的人工补救。
+    """
+    _ = admin_username
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    sync_single_meal_from_wechat_admin_or_raise(db, order_id, store_id=store_id)
+    out = get_admin_single_meal_order_list_out(db, order_id=int(order_id), store_id=store_id)
+    return success(data=dump_model(out), msg="已从微信同步支付状态")
 
 
 @router.post("/orders/single-meals/{order_id}/refund/wechat", response_model=None)

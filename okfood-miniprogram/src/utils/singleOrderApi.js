@@ -136,6 +136,17 @@ export function fetchWechatJsapiPayParams(orderId) {
 }
 
 /**
+ * 支付成功后向服务端拉单同步（与微信异步通知同路径入账）。
+ * @param {number} orderId
+ */
+export function syncSingleMealWechatPayResult(orderId) {
+  return request(`/api/user/single-orders/${orderId}/sync-wechat-pay`, {
+    method: 'POST',
+    data: {},
+  })
+}
+
+/**
  * @param {number} orderId
  */
 export function cancelSingleMealOrder(orderId) {

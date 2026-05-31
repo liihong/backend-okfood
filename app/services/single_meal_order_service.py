@@ -974,6 +974,9 @@ def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     order.pay_channel = "微信"
     tid = (parsed.transaction_id or "").strip()
     order.wx_transaction_id = tid or order.wx_transaction_id
+    # 超时未支付被自动取消后补同步入账：恢复为待履约
+    if str(order.fulfillment_status or "").strip().lower() == "cancelled":
+        order.fulfillment_status = "pending"
     if bool(getattr(order, "store_pickup", False)):
         order.courier_id = None
         # 门店自提：支付后仍为 pending，待管理员在后台标记取货完成
@@ -988,6 +991,116 @@ def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     )
     db.commit()
     return True, "paid"
+
+
+def sync_single_meal_order_from_wechat_query(
+    db: Session, member_id: int, order_id: int
+) -> tuple[bool, str]:
+    """
+    支付成功后由小程序主动拉单：调微信 orderquery，若已支付则与异步通知同路径入账（幂等）。
+
+    弥补异步通知 URL 不可达、IP 白名单/漏配等导致「钱已付但库未更」。
+    """
+    order = db.get(SingleMealOrder, order_id)
+    if not order or int(order.member_id) != int(member_id):
+        return False, "order_not_found"
+
+    out_no = (order.out_trade_no or "").strip()
+    if not out_no:
+        return False, "missing_out_trade_no"
+
+    if (order.pay_status or "").strip() == "已退款":
+        return False, "order_refunded"
+
+    if (order.pay_status or "").strip() == "已支付":
+        return True, "already_synced"
+
+    try:
+        pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
+        data = query_order_by_out_trade_no(out_no, pay=pay_cfg)
+    except WeChatPayV2Error as e:
+        return False, f"wechat_query:{str(e)}"[:220]
+
+    if (data.get("result_code") or "").upper() != "SUCCESS":
+        err_c = (data.get("err_code") or "").strip().upper()
+        if err_c == "ORDERNOTEXIST":
+            return False, "wechat_order_not_found"
+        err_msg = (data.get("err_code_des") or data.get("err_code") or "query_fail")[:200]
+        return False, err_msg
+
+    ts = (data.get("trade_state") or "").strip().upper()
+    if ts in ("", "NOTPAY"):
+        return False, "not_paid"
+    if ts == "USERPAYING":
+        return False, "PAY_USERPAYING"
+    if ts != "SUCCESS":
+        return False, f"trade_state_{ts}"
+
+    out_p = (data.get("out_trade_no") or "").strip() or out_no
+    tx_id = (data.get("transaction_id") or "").strip()
+    try:
+        total_fee = int((data.get("total_fee") or "0").strip() or 0)
+    except ValueError:
+        return False, "invalid_total_fee"
+    if not out_p:
+        return False, "missing_out_in_response"
+
+    parsed = WechatPayNotifyParsed(
+        out_trade_no=out_p,
+        transaction_id=tx_id,
+        total_fee=total_fee,
+    )
+    ok, reason = finalize_single_meal_order_wechat_pay(db, parsed)
+    if ok:
+        return True, reason
+    return False, reason
+
+
+def sync_single_meal_from_wechat_or_raise(db: Session, member_id: int, order_id: int) -> None:
+    """供 HTTP 层调用：拉单成功则已 commit 入账；失败时抛出与会员端一致的 HTTPException。"""
+    ok, reason = sync_single_meal_order_from_wechat_query(db, member_id, order_id)
+    if not ok:
+        if reason == "PAY_USERPAYING":
+            raise HTTPException(
+                status_code=400,
+                detail="微信侧支付处理中，请稍候再试或下拉刷新订单详情",
+            )
+        if reason == "order_not_found":
+            raise HTTPException(status_code=404, detail="订单不存在")
+        if reason == "order_refunded":
+            raise HTTPException(status_code=400, detail="订单已退款")
+        if reason.startswith("wechat_query:"):
+            raise HTTPException(
+                status_code=502, detail=reason.replace("wechat_query:", "", 1)[:200]
+            )
+        raise HTTPException(status_code=400, detail=reason[:200])
+
+
+def sync_single_meal_from_wechat_admin_or_raise(
+    db: Session, order_id: int, *, store_id: int | None = None
+) -> None:
+    """管理端：按订单 id 向微信查单并记已支付（补救「已扣款但库未更」）。"""
+    order = db.get(SingleMealOrder, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if store_id is not None and int(order.store_id) != int(store_id):
+        raise HTTPException(status_code=404, detail="订单不存在")
+    sync_single_meal_from_wechat_or_raise(db, int(order.member_id), int(order_id))
+
+
+def get_admin_single_meal_order_list_out(
+    db: Session, *, order_id: int, store_id: int
+) -> AdminSingleMealOrderListOut:
+    """管理端：按主键取单次零售订单列表项（供同步支付等接口返回）。"""
+    o = db.get(SingleMealOrder, int(order_id))
+    if o is None or int(o.store_id) != int(store_id):
+        raise HTTPException(status_code=404, detail="订单不存在")
+    order_addr = (
+        db.get(MemberAddress, int(o.member_address_id))
+        if o.member_address_id is not None
+        else None
+    )
+    return _build_admin_single_meal_order_list_out(db, o, order_address=order_addr)
 
 
 def apply_single_meal_order_wechat_notify(db: Session, data: dict[str, str]) -> tuple[bool, str]:

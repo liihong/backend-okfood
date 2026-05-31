@@ -110,13 +110,13 @@ import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
   canCancelSingleMealOrder,
   cancelSingleMealOrder,
-  fetchWechatJsapiPayParams,
   formatSingleOrderCreatedAt,
   getSingleMealOrder,
   singleOrderStatusMeta,
+  syncSingleMealWechatPayResult,
 } from '@/utils/singleOrderApi.js'
+import { paySingleMealOrderWechat } from '@/utils/singleOrderPay.js'
 import { getMemberToken } from '@/utils/api.js'
-import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
 
 const orderId = ref(0)
 const order = ref(null)
@@ -168,7 +168,21 @@ async function loadDetail() {
   try {
     const data = await getSingleMealOrder(orderId.value)
     order.value = data && typeof data === 'object' ? data : null
-    if (!order.value) loadError.value = '订单数据异常'
+    if (!order.value) {
+      loadError.value = '订单数据异常'
+      return
+    }
+    // 微信已扣款但异步通知未达时，静默拉单补救
+    if (order.value.pay_status === '未支付' && order.value.fulfillment_status === 'pending') {
+      try {
+        const synced = await syncSingleMealWechatPayResult(orderId.value)
+        if (synced && typeof synced === 'object' && synced.pay_status === '已支付') {
+          order.value = synced
+        }
+      } catch {
+        /* 仍待支付则保持原状 */
+      }
+    }
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : '加载失败'
   } finally {
@@ -232,23 +246,26 @@ async function continuePay() {
   if (!order.value || paying.value) return
   if (order.value.pay_status !== '未支付') return
   paying.value = true
-  uni.showLoading({ title: '拉起支付…', mask: true })
+  uni.showLoading({ title: '处理中…', mask: true })
   try {
-    await syncWxMiniOpenidFromLogin()
-    const pay = await fetchWechatJsapiPayParams(order.value.id)
-    await new Promise((resolve, reject) => {
-      uni.requestPayment({
-        provider: 'wxpay',
-        timeStamp: String(pay.timeStamp),
-        nonceStr: pay.nonceStr,
-        package: pay.package,
-        signType: pay.signType || 'MD5',
-        paySign: pay.paySign,
-        success: resolve,
-        fail: reject,
-      })
-    })
-    uni.showToast({ title: '支付成功', icon: 'success' })
+    // 已扣款但库未更：先拉单，避免重复支付
+    try {
+      const synced = await syncSingleMealWechatPayResult(order.value.id)
+      if (synced && typeof synced === 'object' && synced.pay_status === '已支付') {
+        order.value = synced
+        uni.showToast({ title: '支付状态已同步', icon: 'success' })
+        return
+      }
+    } catch {
+      /* 仍待支付则继续调起微信支付 */
+    }
+    uni.showLoading({ title: '拉起支付…', mask: true })
+    const payResult = await paySingleMealOrderWechat(order.value.id)
+    if (payResult.paySynced) {
+      uni.showToast({ title: '支付成功', icon: 'success' })
+    } else {
+      uni.showToast({ title: '支付成功，订单同步中请稍后刷新', icon: 'none', duration: 3000 })
+    }
     await loadDetail()
   } catch (e) {
     const msg =

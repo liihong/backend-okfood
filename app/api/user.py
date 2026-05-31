@@ -110,6 +110,7 @@ from app.services.single_meal_order_service import (
     list_member_single_meal_orders,
     member_cancel_single_meal_order,
     prepare_wechat_jsapi_for_order,
+    sync_single_meal_from_wechat_or_raise,
 )
 
 from app.services.store_config_service import get_member_card_prices_extended
@@ -565,6 +566,25 @@ def prepay_single_order_wechat(
     params = prepare_wechat_jsapi_for_order(db, member_id, order_id, ip)
 
     return success(data=params, msg="获取支付参数成功")
+
+
+@router.post("/single-orders/{order_id}/sync-wechat-pay")
+@limiter.limit("30/minute")
+def sync_single_meal_order_after_pay(
+    request: Request,
+    order_id: int,
+    db: SessionDep,
+    member_id: MemberIdScoped,
+):
+    """
+    小程序在 `requestPayment` 成功（`success`）后立即调用：向微信查询订单并执行与支付通知相同的入账逻辑。
+
+    用于弥补异步通知不可达或延迟时「已扣款但订单仍显示未支付」。
+    """
+    _ = request
+    sync_single_meal_from_wechat_or_raise(db, member_id, order_id)
+    out = get_member_single_meal_order(db, member_id, order_id)
+    return success(data=dump_model(out), msg="支付结果已同步")
 
 
 @router.get("/member-coupons/available")

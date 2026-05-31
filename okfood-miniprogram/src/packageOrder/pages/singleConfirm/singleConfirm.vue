@@ -147,7 +147,8 @@ import {
   getAddressRecordId,
   addressListRow,
 } from '@/utils/addressApi.js'
-import { createSingleMealOrder, fetchWechatJsapiPayParams } from '@/utils/singleOrderApi.js'
+import { createSingleMealOrder } from '@/utils/singleOrderApi.js'
+import { paySingleMealOrderWechat } from '@/utils/singleOrderPay.js'
 import { promptUnpaidOrderConflict } from '@/utils/unpaidOrderPrompt.js'
 import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
 import { listAvailableMemberCoupons } from '@/utils/memberCouponApi.js'
@@ -426,19 +427,10 @@ async function handlePay() {
       throw new Error('订单创建响应异常')
     }
     uni.showLoading({ title: '拉起支付…', mask: true })
-    const pay = await fetchWechatJsapiPayParams(orderId)
-    await new Promise((resolve, reject) => {
-      uni.requestPayment({
-        provider: 'wxpay',
-        timeStamp: String(pay.timeStamp),
-        nonceStr: pay.nonceStr,
-        package: pay.package,
-        signType: pay.signType || 'MD5',
-        paySign: pay.paySign,
-        success: resolve,
-        fail: reject,
-      })
-    })
+    const payResult = await paySingleMealOrderWechat(orderId)
+    if (!payResult.paySynced) {
+      uni.showToast({ title: '支付成功，订单同步中请稍后刷新', icon: 'none', duration: 3000 })
+    }
     const area = typeof out.routing_area === 'string' ? out.routing_area : '—'
     const amt =
       out && typeof out.amount_yuan === 'string'
