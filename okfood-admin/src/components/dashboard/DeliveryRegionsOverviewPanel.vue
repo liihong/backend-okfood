@@ -691,7 +691,7 @@ onMounted(async () => {
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />配送</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
-                    todayMealsDelivery == null ? '—' : `${Math.trunc(Number(todayMealsDelivery))}份`
+                    todayMealsDelivery == null ? '—' : `${Math.trunc(Number(todayMealsDelivery))}`
                   }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
@@ -699,14 +699,14 @@ onMounted(async () => {
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
-                    todayMealsPickup == null ? '—' : `${Math.trunc(Number(todayMealsPickup))}份`
+                    todayMealsPickup == null ? '—' : `${Math.trunc(Number(todayMealsPickup))}`
                   }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />零售</span
                   >
-                  <span class="dro-dash-branch-pill__val">{{ todaySingleRetailTotalCount }}份</span>
+                  <span class="dro-dash-branch-pill__val">{{ todaySingleRetailTotalCount }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
@@ -719,7 +719,7 @@ onMounted(async () => {
                         todaySellableQuantity != null && todaySellableQuantity <= 0,
                     }"
                     >{{
-                      todaySellableQuantity == null ? '—' : `${todaySellableQuantity}份`
+                      todaySellableQuantity == null ? '—' : `${todaySellableQuantity}`
                     }}</span
                   >
                 </div>
@@ -859,7 +859,7 @@ onMounted(async () => {
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />配送</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
-                    tomorrowPrepDelivery == null ? '—' : `${Math.trunc(Number(tomorrowPrepDelivery))}份`
+                    tomorrowPrepDelivery == null ? '—' : `${Math.trunc(Number(tomorrowPrepDelivery))}`
                   }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
@@ -867,14 +867,14 @@ onMounted(async () => {
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
-                    tomorrowPrepPickup == null ? '—' : `${Math.trunc(Number(tomorrowPrepPickup))}份`
+                    tomorrowPrepPickup == null ? '—' : `${Math.trunc(Number(tomorrowPrepPickup))}`
                   }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />零售</span
                   >
-                  <span class="dro-dash-branch-pill__val">{{ tomorrowSingleRetailTotalCount }}份</span>
+                  <span class="dro-dash-branch-pill__val">{{ tomorrowSingleRetailTotalCount }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
@@ -887,7 +887,7 @@ onMounted(async () => {
                         tomorrowSellableQuantity != null && tomorrowSellableQuantity <= 0,
                     }"
                     >{{
-                      tomorrowSellableQuantity == null ? '—' : `${tomorrowSellableQuantity}份`
+                      tomorrowSellableQuantity == null ? '—' : `${tomorrowSellableQuantity}`
                     }}</span
                   >
                 </div>
