@@ -1156,21 +1156,22 @@ function onPauseDeliveryTap() {
     return
   }
   if (pauseDeliveryPrepLocked.value) {
-    showOkAlert({
+    uni.showModal({
       title: '暂无法暂停',
       content: PAUSE_DELIVERY_PREP_LOCKED_MSG,
       showCancel: false,
       confirmText: '知道了',
-      tone: 'warning',
     })
     return
   }
-  showOkAlert({
+  // 真机 Tab 页：自定义 OkAlert Host 在部分机型上无法即时挂载，此处用原生弹窗保证可点即弹
+  uni.showModal({
     title: '暂停配送',
     content:
       '确认后暂停会员卡配送（剩余餐次保留）。恢复时需重新选择开始的业务日期。是否暂停？',
     confirmText: '暂停配送',
     cancelText: '取消',
+    confirmColor: '#0e5a44',
     success: async (res) => {
       if (!res.confirm) return
       uni.showLoading({ title: '提交中', mask: true })

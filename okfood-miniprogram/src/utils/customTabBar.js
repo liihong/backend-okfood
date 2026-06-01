@@ -1,4 +1,4 @@
-import { syncOkAlertHostToCurrentPage } from '@/utils/okAlertState.js'
+import { syncOkAlertHostToCurrentPage, tryFlushOkAlertQueue } from '@/utils/okAlertState.js'
 
 /** 与 `custom-tab-bar/index.wxss` 中 `.tab-bar` 高度一致 */
 const CUSTOM_TAB_BAR_HEIGHT_PX = 48
@@ -94,5 +94,6 @@ export function syncCustomTabBar() {
   const list = role === 'rider' ? TAB_BAR_RIDER_LIST : TAB_BAR_MEMBER_LIST
   applyCustomTabBarPatch(cur.getTabBar(), { selected, role, list })
   syncOkAlertHostToCurrentPage()
+  tryFlushOkAlertQueue()
   // #endif
 }

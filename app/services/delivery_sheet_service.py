@@ -304,15 +304,44 @@ class DeliverySheetDayMetrics:
         )
 
 
+def _count_home_delivery_stops(
+    sheet_members: list[Member],
+    sheet_defaults: dict[int, MemberAddress | None],
+    db: Session,
+) -> int:
+    """到家停靠点数：按片区+地址去重计数，供 dashboard metrics 使用（不构建完整停靠点结构）。"""
+    if not sheet_members:
+        return 0
+    region_ids: set[int] = set()
+    for m in sheet_members:
+        addr = sheet_defaults.get(int(m.id))
+        if addr and addr.delivery_region_id is not None:
+            region_ids.add(int(addr.delivery_region_id))
+    id_to_name = delivery_region_name_map(db, region_ids)
+    buckets: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    for m in sheet_members:
+        addr = sheet_defaults.get(int(m.id))
+        routing_area = routing_area_label(addr, id_to_name)
+        resolved = _resolve_delivery_line(addr, id_to_name)
+        addr_key = (_normalize_address_key(resolved.area), _normalize_address_key(resolved.detail))
+        buckets[routing_area].add(addr_key)
+    return sum(len(stop_map) for stop_map in buckets.values())
+
+
 def delivery_sheet_metrics_for_date(
     db: Session,
     *,
     delivery_date: date,
     store_id: int,
+    metrics_cache: dict[date, DeliverySheetDayMetrics] | None = None,
 ) -> DeliverySheetDayMetrics:
     """营业概览用：备餐拆分 / 履约进度 / 到家配送点数，避免拉整张大表 JSON。"""
+    if metrics_cache is not None and delivery_date in metrics_cache:
+        return metrics_cache[delivery_date]
     empty = DeliverySheetDayMetrics(0, 0, 0, 0, 0, 0)
     if not is_subscription_delivery_day(delivery_date):
+        if metrics_cache is not None:
+            metrics_cache[delivery_date] = empty
         return empty
 
     sid = int(store_id)
@@ -321,25 +350,8 @@ def delivery_sheet_metrics_for_date(
         db, delivery_date=d, delivery_region_id=None, store_id=sid
     )
     mlist = list(members)
-    stops = home_delivery_stops_for_aggs(
-        db,
-        delivery_date=d,
-        store_id=sid,
-        members=mlist,
-        default_by_id=default_by_id,
-    )
-    home_pending = 0
-    home_delivered = 0
-    for st in stops:
-        for mem, is_del in st.members:
-            u = int(effective_daily_meal_units(mem))
-            if is_del:
-                home_delivered += u
-            else:
-                home_pending += u
-
     pu_members, _pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d, store_id=sid)
-    _ex_h, _ex_dh, ex_pu, _ex_pud = extra_delivered_ineligible_subscribers(
+    ex_h, ex_dh, ex_pu, _ex_pud = extra_delivered_ineligible_subscribers(
         db,
         delivery_date=d,
         already_home={int(m.id) for m in mlist},
@@ -347,20 +359,40 @@ def delivery_sheet_metrics_for_date(
         delivery_region_id=None,
         store_id=sid,
     )
+    sheet_members = mlist + list(ex_h)
+    sheet_defaults: dict[int, MemberAddress | None] = dict(default_by_id)
+    for mid, addr in ex_dh.items():
+        sheet_defaults[int(mid)] = addr
+
+    home_mids = [int(m.id) for m in sheet_members]
+    home_delivered_set = _member_ids_delivered_on_date(db, d, home_mids) if home_mids else set()
+    home_pending = 0
+    home_delivered = 0
+    for m in sheet_members:
+        u = int(effective_daily_meal_units(m))
+        if int(m.id) in home_delivered_set:
+            home_delivered += u
+        else:
+            home_pending += u
+    home_stop_count = _count_home_delivery_stops(sheet_members, sheet_defaults, db)
+
     all_pu = list(pu_members) + list(ex_pu)
     pu_mids = [int(m.id) for m in all_pu]
-    delivered_set = _member_ids_delivered_on_date(db, d, pu_mids) if pu_mids else set()
-    pu_delivered = sum(int(effective_daily_meal_units(m)) for m in all_pu if int(m.id) in delivered_set)
-    pu_pending = sum(int(effective_daily_meal_units(m)) for m in all_pu if int(m.id) not in delivered_set)
+    pu_delivered_set = _member_ids_delivered_on_date(db, d, pu_mids) if pu_mids else set()
+    pu_delivered = sum(int(effective_daily_meal_units(m)) for m in all_pu if int(m.id) in pu_delivered_set)
+    pu_pending = sum(int(effective_daily_meal_units(m)) for m in all_pu if int(m.id) not in pu_delivered_set)
 
-    return DeliverySheetDayMetrics(
+    result = DeliverySheetDayMetrics(
         home_pending_meal_total=home_pending,
         home_delivered_meal_total=home_delivered,
         pickup_meal_total=pu_delivered + pu_pending,
         pickup_pending_meal_total=pu_pending,
         pickup_delivered_meal_total=pu_delivered,
-        home_stop_count=len(stops),
+        home_stop_count=home_stop_count,
     )
+    if metrics_cache is not None:
+        metrics_cache[delivery_date] = result
+    return result
 
 
 def _sum_meal_units_home_eligible_on_date(db: Session, *, delivery_date: date, store_id: int) -> int:
@@ -466,49 +498,68 @@ def _store_membership_counts(db: Session, *, store_id: int) -> dict[str, int]:
     }
 
 
-def _card_reorder_members_for_kind(db: Session, *, store_id: int, card_kind: str) -> tuple[int, int]:
-    """某卡型「续卡率」分子/分母：跨日二次及以上已缴入账人数 ÷ 曾有过该卡型入账人数。"""
+def _card_reorder_stats_for_kinds(
+    db: Session, *, store_id: int, card_kinds: list[str]
+) -> dict[str, tuple[int, int]]:
+    """批量统计各卡型续卡率分子/分母，避免 dashboard 对周卡/月卡各跑 2 次重查询。"""
+    kinds = [str(k).strip() for k in card_kinds if str(k).strip()]
+    if not kinds:
+        return {}
+    sid = int(store_id)
     paid_filters = (
-        MemberCardOrder.store_id == int(store_id),
-        MemberCardOrder.card_kind == card_kind,
+        MemberCardOrder.store_id == sid,
+        MemberCardOrder.card_kind.in_(kinds),
         MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
         MemberCardOrder.applied_to_member.is_(True),
         Member.deleted_at.is_(None),
     )
-    base = int(
-        db.scalar(
-            select(func.count(func.distinct(MemberCardOrder.member_id)))
-            .select_from(MemberCardOrder)
-            .join(Member, Member.id == MemberCardOrder.member_id)
-            .where(*paid_filters)
+    base_rows = db.execute(
+        select(
+            MemberCardOrder.card_kind,
+            func.count(func.distinct(MemberCardOrder.member_id)),
         )
-        or 0
+        .select_from(MemberCardOrder)
+        .join(Member, Member.id == MemberCardOrder.member_id)
+        .where(*paid_filters)
+        .group_by(MemberCardOrder.card_kind)
+    ).all()
+    base_map = {str(k): int(c or 0) for k, c in base_rows}
+
+    reorder_subq = (
+        select(MemberCardOrder.card_kind.label("card_kind"))
+        .select_from(MemberCardOrder)
+        .join(Member, Member.id == MemberCardOrder.member_id)
+        .where(*paid_filters)
+        .group_by(MemberCardOrder.card_kind, MemberCardOrder.member_id)
+        .having(func.count(func.distinct(func.date(MemberCardOrder.created_at))) >= 2)
+        .subquery()
     )
-    reorder = int(
-        db.scalar(
-            select(func.count())
-            .select_from(
-                select(MemberCardOrder.member_id)
-                .join(Member, Member.id == MemberCardOrder.member_id)
-                .where(*paid_filters)
-                .group_by(MemberCardOrder.member_id)
-                .having(func.count(func.distinct(func.date(MemberCardOrder.created_at))) >= 2)
-                .subquery()
-            )
-        )
-        or 0
-    )
-    return reorder, base
+    reorder_rows = db.execute(
+        select(reorder_subq.c.card_kind, func.count()).group_by(reorder_subq.c.card_kind)
+    ).all()
+    reorder_map = {str(k): int(c or 0) for k, c in reorder_rows}
+
+    out: dict[str, tuple[int, int]] = {}
+    for k in kinds:
+        out[k] = (reorder_map.get(k, 0), base_map.get(k, 0))
+    return out
+
+
+def _card_reorder_members_for_kind(db: Session, *, store_id: int, card_kind: str) -> tuple[int, int]:
+    """某卡型「续卡率」分子/分母：跨日二次及以上已缴入账人数 ÷ 曾有过该卡型入账人数。"""
+    m = _card_reorder_stats_for_kinds(db, store_id=store_id, card_kinds=[card_kind])
+    return m.get(card_kind, (0, 0))
 
 
 def _store_card_reorder_stats(db: Session, *, store_id: int) -> dict[str, int]:
     """仪表盘地图会员库：周卡/月卡续卡率（跨日二次开卡入账）。"""
-    week_reorder, week_base = _card_reorder_members_for_kind(
-        db, store_id=store_id, card_kind=CardOrderKind.WEEK.value
+    stats = _card_reorder_stats_for_kinds(
+        db,
+        store_id=store_id,
+        card_kinds=[CardOrderKind.WEEK.value, CardOrderKind.MONTH.value],
     )
-    month_reorder, month_base = _card_reorder_members_for_kind(
-        db, store_id=store_id, card_kind=CardOrderKind.MONTH.value
-    )
+    week_reorder, week_base = stats.get(CardOrderKind.WEEK.value, (0, 0))
+    month_reorder, month_base = stats.get(CardOrderKind.MONTH.value, (0, 0))
     return {
         "weekly_card_reorder_members": week_reorder,
         "weekly_card_reorder_base_members": week_base,
@@ -517,8 +568,26 @@ def _store_card_reorder_stats(db: Session, *, store_id: int) -> dict[str, int]:
     }
 
 
+def total_meal_units_sql_sum_only(
+    db: Session, *, delivery_date: date, store_id: int
+) -> int:
+    """仅 SQL SUM 聚合份数，不跑停靠点大表。Dashboard 同比基线等场景用（锁单日亦不走 metrics）。"""
+    if not is_subscription_delivery_day(delivery_date):
+        return 0
+    sid = int(store_id)
+    return (
+        _sum_meal_units_home_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
+        + _sum_meal_units_pickup_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
+        + _sum_meal_units_extra_delivered_on_date(db, delivery_date=delivery_date, store_id=sid)
+    )
+
+
 def total_meal_units_for_delivery_sheet(
-    db: Session, *, delivery_date: date, store_id: int | None = None
+    db: Session,
+    *,
+    delivery_date: date,
+    store_id: int | None = None,
+    metrics_cache: dict[date, DeliverySheetDayMetrics] | None = None,
 ) -> int:
     """与 ``build_delivery_sheet`` 各分组 ``meal_total`` 之和一致（到家+自提，含已送后不再应送仍并入大表者）。
 
@@ -531,7 +600,14 @@ def total_meal_units_for_delivery_sheet(
     from app.services.delivery_day_lock_service import is_delivery_day_sheet_locked
 
     if is_delivery_day_sheet_locked(db, store_id=sid, delivery_date=delivery_date):
-        return int(delivery_sheet_metrics_for_date(db, delivery_date=delivery_date, store_id=sid).meal_total)
+        return int(
+            delivery_sheet_metrics_for_date(
+                db,
+                delivery_date=delivery_date,
+                store_id=sid,
+                metrics_cache=metrics_cache,
+            ).meal_total
+        )
     return (
         _sum_meal_units_home_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
         + _sum_meal_units_pickup_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
@@ -544,10 +620,17 @@ def meal_units_totals_for_delivery_dates(
     *,
     dates: Iterable[date],
     store_id: int | None = None,
+    metrics_cache: dict[date, DeliverySheetDayMetrics] | None = None,
+    snapshot_meal_totals: dict[date, int] | None = None,
+    sql_sum_only: bool = False,
 ) -> dict[date, int]:
-    """与 ``total_meal_units_for_delivery_sheet`` 同源的对日映射；单会话 SQL SUM 串行计算。"""
+    """与 ``total_meal_units_for_delivery_sheet`` 同源的对日映射；单会话 SQL SUM 串行计算。
+
+    ``sql_sum_only=True``：同比基线等仅需整数份数时使用，锁单日也不触发 ``delivery_sheet_metrics``。
+    """
     cfg = get_settings()
     sid = int(store_id) if store_id is not None else int(cfg.DEFAULT_STORE_ID)
+    snap = snapshot_meal_totals or {}
 
     uniq: list[date] = []
     seen: set[date] = set()
@@ -558,7 +641,18 @@ def meal_units_totals_for_delivery_dates(
 
     out: dict[date, int] = {}
     for d in uniq:
-        out[d] = total_meal_units_for_delivery_sheet(db, delivery_date=d, store_id=sid)
+        if d in snap:
+            out[d] = int(snap[d])
+            continue
+        if sql_sum_only:
+            out[d] = total_meal_units_sql_sum_only(db, delivery_date=d, store_id=sid)
+            continue
+        out[d] = total_meal_units_for_delivery_sheet(
+            db,
+            delivery_date=d,
+            store_id=sid,
+            metrics_cache=metrics_cache,
+        )
     return out
 
 

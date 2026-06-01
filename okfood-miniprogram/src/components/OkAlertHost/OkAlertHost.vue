@@ -25,9 +25,16 @@ import {
   okAlertActiveHostId,
   registerOkAlertHost,
   unregisterOkAlertHost,
+  registerGlobalOkAlertHost,
+  unregisterGlobalOkAlertHost,
   activateOkAlertHost,
   finishOkAlert,
 } from '@/utils/okAlertState.js'
+
+const props = defineProps({
+  /** App 级唯一弹窗层，解决 Tab 页点击无弹窗、切页后才误弹的问题 */
+  global: { type: Boolean, default: false },
+})
 
 let hostSeq = 0
 const hostId = ++hostSeq
@@ -51,15 +58,25 @@ const tone = computed(() => okAlertOptions.value?.tone || 'default')
 const maskClosable = computed(() => !!okAlertOptions.value?.maskClosable)
 
 onMounted(() => {
+  if (props.global) {
+    registerGlobalOkAlertHost(hostId)
+    return
+  }
   registerOkAlertHost(hostId, resolveHostRoute())
 })
 
 onUnmounted(() => {
+  if (props.global) {
+    unregisterGlobalOkAlertHost(hostId)
+    return
+  }
   unregisterOkAlertHost(hostId)
 })
 
 onShow(() => {
-  activateOkAlertHost(hostId)
+  if (props.global) return
+  const route = resolveHostRoute()
+  activateOkAlertHost(hostId, route)
 })
 
 function onConfirm() {

@@ -1,7 +1,51 @@
-import { requestOkAlert } from '@/utils/okAlertState.js'
+import {
+  requestOkAlert,
+  syncOkAlertHostToCurrentPage,
+  isOkAlertHostReadyForCurrentPage,
+} from '@/utils/okAlertState.js'
+
+/**
+ * 微信原生弹窗兜底：Tab 页 Host 未就绪时保证真机可立即弹出。
+ * @param {object} options
+ * @returns {Promise<{ confirm?: boolean, cancel?: boolean }>}
+ */
+function showNativeModal(options = {}) {
+  const {
+    title = '',
+    content = '',
+    showCancel = true,
+    cancelText = '取消',
+    confirmText = '确定',
+    confirmColor,
+    success,
+    fail,
+  } = options
+
+  return new Promise((resolve) => {
+    uni.showModal({
+      title: String(title || ''),
+      content: String(content || ''),
+      showCancel: !!showCancel,
+      cancelText: cancelText || '取消',
+      confirmText: confirmText || '确定',
+      confirmColor: confirmColor || (showCancel ? '#0e5a44' : undefined),
+      success: (res) => {
+        const out = { confirm: !!res.confirm, cancel: !!res.cancel }
+        if (typeof success === 'function') success(out)
+        resolve(out)
+      },
+      fail: (e) => {
+        if (typeof fail === 'function') fail()
+        resolve({ confirm: false, cancel: true })
+        console.warn('[showOkAlert] uni.showModal fail', e)
+      },
+    })
+  })
+}
 
 /**
  * 自定义提醒卡片，API 对齐 uni.showModal。
+ * Host 不可用时自动降级为 uni.showModal（真机 Tab 页必需）。
  * @param {object} options
  * @param {string} [options.title]
  * @param {string} [options.content]
@@ -43,14 +87,21 @@ export function showOkAlert(options = {}) {
     maskClosable: !!maskClosable,
   }
 
+  syncOkAlertHostToCurrentPage()
+  if (!isOkAlertHostReadyForCurrentPage()) {
+    return showNativeModal(options)
+  }
+
   try {
-    const p = requestOkAlert(payload)
-    p.then((res) => {
+    return requestOkAlert(payload).then((res) => {
+      if (res == null) {
+        return showNativeModal(options)
+      }
       if (typeof success === 'function') success(res)
+      return res
     })
-    return p
   } catch (e) {
     if (typeof fail === 'function') fail()
-    throw e
+    return showNativeModal(options)
   }
 }

@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+import time
 import uuid
 
 from fastapi import HTTPException
@@ -840,15 +841,35 @@ def count_paid_single_retail_portions_for_delivery_day(
     db: Session, delivery_date: date, *, store_id: int
 ) -> int:
     """锚定业务日已支付单次零售份数合计（与周菜单「单次零售」列同源）。"""
+    m = _paid_single_retail_portions_by_dates(db, [delivery_date], store_id=store_id)
+    return int(m.get(delivery_date, 0))
+
+
+def _paid_single_retail_portions_by_dates(
+    db: Session, dates: list[date], *, store_id: int
+) -> dict[date, int]:
+    """批量查询多日已支付单次零售份数，减少 dashboard 重复扫描 single_meal_orders。"""
+    uniq = list(dict.fromkeys(dates))
+    if not uniq:
+        return {}
     sid = int(store_id)
-    v = db.scalar(
-        select(func.coalesce(func.sum(SingleMealOrder.quantity), 0)).where(
-            SingleMealOrder.delivery_date == delivery_date,
+    rows = db.execute(
+        select(
+            SingleMealOrder.delivery_date,
+            func.coalesce(func.sum(SingleMealOrder.quantity), 0),
+        )
+        .where(
+            SingleMealOrder.delivery_date.in_(uniq),
             SingleMealOrder.pay_status == "已支付",
             SingleMealOrder.store_id == sid,
         )
-    )
-    return int(v or 0)
+        .group_by(SingleMealOrder.delivery_date)
+    ).all()
+    out = {d: 0 for d in uniq}
+    for d, qty in rows:
+        if d is not None:
+            out[d] = int(qty or 0)
+    return out
 
 
 def _dashboard_day_prep_metrics_out(m: DeliverySheetDayMetrics) -> DashboardDayPrepMetricsOut:
@@ -870,6 +891,56 @@ def _dashboard_meals_week_over_week_caption(*, meals: int, baseline_meals: int) 
     return f"较上周{delta:+d}份"
 
 
+def _dashboard_snapshot_meal_totals(
+    db: Session,
+    *,
+    store_id: int,
+    dates: list[date],
+) -> dict[date, int]:
+    """批量读取历史锚日归档中的「当日备餐份数」，避免同比基线重复跑大表。"""
+    uniq = list(dict.fromkeys(dates))
+    if not uniq:
+        return {}
+    rows = db.scalars(
+        select(AdminDashboardBizDaySnapshot).where(
+            AdminDashboardBizDaySnapshot.store_id == int(store_id),
+            AdminDashboardBizDaySnapshot.business_anchor_date.in_(uniq),
+        )
+    ).all()
+    return {row.business_anchor_date: int(row.today_meals_to_prepare) for row in rows}
+
+
+def _dashboard_cached_sheet_metrics(
+    db: Session,
+    *,
+    delivery_date: date,
+    store_id: int,
+    metrics_cache: dict[date, DeliverySheetDayMetrics],
+) -> DeliverySheetDayMetrics:
+    """同一 dashboard-summary 请求内，每个业务日最多算一次大表拆分指标。"""
+    if delivery_date not in metrics_cache:
+        metrics_cache[delivery_date] = delivery_sheet_metrics_for_date(
+            db,
+            delivery_date=delivery_date,
+            store_id=store_id,
+            metrics_cache=metrics_cache,
+        )
+    return metrics_cache[delivery_date]
+
+
+# 上海「今日」概览短缓存：多管理员/前端重试时避免重复跑大表（进程内，单 worker 有效）
+_dashboard_live_summary_cache: dict[int, tuple[float, DashboardMealSummaryOut]] = {}
+_DASHBOARD_LIVE_SUMMARY_TTL_SEC = 90.0
+
+
+def invalidate_dashboard_live_summary_cache(store_id: int | None = None) -> None:
+    """供餐日数据变更后可按需清缓存；store_id 为空则清空全部门店。"""
+    if store_id is None:
+        _dashboard_live_summary_cache.clear()
+        return
+    _dashboard_live_summary_cache.pop(int(store_id), None)
+
+
 def dashboard_meal_summary(
     db: Session,
     *,
@@ -889,6 +960,14 @@ def dashboard_meal_summary(
     anchor = business_anchor_date or today_shanghai()
     day_after = date.fromordinal(anchor.toordinal() + 1)
     cal_today = today_shanghai()
+
+    if anchor == cal_today and not force_recompute:
+        cached = _dashboard_live_summary_cache.get(sid)
+        if cached is not None:
+            ts, payload = cached
+            if time.time() - ts < _DASHBOARD_LIVE_SUMMARY_TTL_SEC:
+                return payload
+
     wow_prev_anchor = date.fromordinal(anchor.toordinal() - 7)
     wow_prev_day_after = date.fromordinal(day_after.toordinal() - 7)
     mem_kw = {
@@ -899,6 +978,12 @@ def dashboard_meal_summary(
 
     today_menu_day_total_stock = weekly_menu_day_total_stock(db, anchor, store_id=sid)
     tomorrow_menu_day_total_stock = weekly_menu_day_total_stock(db, day_after, store_id=sid)
+    metrics_cache: dict[date, DeliverySheetDayMetrics] = {}
+    snapshot_meal_totals = _dashboard_snapshot_meal_totals(
+        db,
+        store_id=sid,
+        dates=[d for d in (wow_prev_anchor, wow_prev_day_after) if d < cal_today],
+    )
 
     if anchor < cal_today and not force_recompute:
         row = db.get(
@@ -908,7 +993,12 @@ def dashboard_meal_summary(
         if row is not None:
             # 快照已含锚日/次日备餐；环比文案仍按需重算两周前两日份数总和
             wow_only = meal_units_totals_for_delivery_dates(
-                db, dates=[wow_prev_anchor, wow_prev_day_after], store_id=sid
+                db,
+                dates=[wow_prev_anchor, wow_prev_day_after],
+                store_id=sid,
+                metrics_cache=metrics_cache,
+                snapshot_meal_totals=snapshot_meal_totals,
+                sql_sum_only=True,
             )
             baseline_meals_anchor_week = wow_only[wow_prev_anchor]
             baseline_meals_day_after_week = wow_only[wow_prev_day_after]
@@ -922,16 +1012,17 @@ def dashboard_meal_summary(
                 meals=np_snap, baseline_meals=baseline_meals_day_after_week
             )
             today_metrics = _dashboard_day_prep_metrics_out(
-                delivery_sheet_metrics_for_date(db, delivery_date=anchor, store_id=sid)
+                _dashboard_cached_sheet_metrics(
+                    db, delivery_date=anchor, store_id=sid, metrics_cache=metrics_cache
+                )
             )
             tomorrow_metrics = _dashboard_day_prep_metrics_out(
-                delivery_sheet_metrics_for_date(db, delivery_date=day_after, store_id=sid)
+                _dashboard_cached_sheet_metrics(
+                    db, delivery_date=day_after, store_id=sid, metrics_cache=metrics_cache
+                )
             )
-            today_single_retail = count_paid_single_retail_portions_for_delivery_day(
-                db, anchor, store_id=sid
-            )
-            tomorrow_single_retail = count_paid_single_retail_portions_for_delivery_day(
-                db, day_after, store_id=sid
+            today_single_retail = _paid_single_retail_portions_by_dates(
+                db, [anchor, day_after], store_id=sid
             )
             return DashboardMealSummaryOut(
                 shanghai_today=cal_today,
@@ -941,8 +1032,8 @@ def dashboard_meal_summary(
                 tomorrow_leave_members=int(row.tomorrow_leave_members),
                 tomorrow_meals_to_prepare=np_snap,
                 today_expire_one_unit_members=int(row.today_expire_one_unit_members),
-                today_single_retail_total_quantity=today_single_retail,
-                tomorrow_single_retail_total_quantity=tomorrow_single_retail,
+                today_single_retail_total_quantity=int(today_single_retail.get(anchor, 0)),
+                tomorrow_single_retail_total_quantity=int(today_single_retail.get(day_after, 0)),
                 **mem_kw,
                 tomorrow_first_meal_new_members=t_first,
                 today_meals_week_over_week_caption=today_wow_cap,
@@ -955,32 +1046,36 @@ def dashboard_meal_summary(
                 snapshot_recorded_at=row.recorded_at,
             )
 
-    meal_bundle = meal_units_totals_for_delivery_dates(
+    wow_bundle = meal_units_totals_for_delivery_dates(
         db,
-        dates=[wow_prev_anchor, wow_prev_day_after, anchor, day_after],
+        dates=[wow_prev_anchor, wow_prev_day_after],
         store_id=sid,
+        metrics_cache=metrics_cache,
+        snapshot_meal_totals=snapshot_meal_totals,
+        sql_sum_only=True,
     )
-    baseline_meals_anchor_week = meal_bundle[wow_prev_anchor]
-    baseline_meals_day_after_week = meal_bundle[wow_prev_day_after]
+    baseline_meals_anchor_week = wow_bundle[wow_prev_anchor]
+    baseline_meals_day_after_week = wow_bundle[wow_prev_day_after]
+
+    # 锚定日/次日：一次 delivery_sheet_metrics 同时产出 tp/np 与 prep 拆分，避免再跑 6 次 SQL SUM
+    today_m = _dashboard_cached_sheet_metrics(
+        db, delivery_date=anchor, store_id=sid, metrics_cache=metrics_cache
+    )
+    tomorrow_m = _dashboard_cached_sheet_metrics(
+        db, delivery_date=day_after, store_id=sid, metrics_cache=metrics_cache
+    )
+    tp = int(today_m.meal_total)
+    np = int(tomorrow_m.meal_total)
+    today_metrics = _dashboard_day_prep_metrics_out(today_m)
+    tomorrow_metrics = _dashboard_day_prep_metrics_out(tomorrow_m)
 
     tl = count_leave_members_for_delivery_day(db, anchor, store_id=sid)
-    tp = meal_bundle[anchor]
     nl = count_leave_members_for_delivery_day(db, day_after, store_id=sid)
-    np = meal_bundle[day_after]
     te = count_expire_one_unit_members_for_business_day(db, delivery_date=anchor, store_id=sid)
     t_first = count_members_first_scheduled_delivery_day(db, delivery_date=day_after, store_id=sid)
     today_wow_cap = _dashboard_meals_week_over_week_caption(meals=tp, baseline_meals=baseline_meals_anchor_week)
     tomorrow_wow_cap = _dashboard_meals_week_over_week_caption(meals=np, baseline_meals=baseline_meals_day_after_week)
-    today_metrics = _dashboard_day_prep_metrics_out(
-        delivery_sheet_metrics_for_date(db, delivery_date=anchor, store_id=sid)
-    )
-    tomorrow_metrics = _dashboard_day_prep_metrics_out(
-        delivery_sheet_metrics_for_date(db, delivery_date=day_after, store_id=sid)
-    )
-    today_single_retail = count_paid_single_retail_portions_for_delivery_day(db, anchor, store_id=sid)
-    tomorrow_single_retail = count_paid_single_retail_portions_for_delivery_day(
-        db, day_after, store_id=sid
-    )
+    single_retail_map = _paid_single_retail_portions_by_dates(db, [anchor, day_after], store_id=sid)
 
     out = DashboardMealSummaryOut(
         shanghai_today=cal_today,
@@ -990,8 +1085,8 @@ def dashboard_meal_summary(
         tomorrow_leave_members=nl,
         tomorrow_meals_to_prepare=np,
         today_expire_one_unit_members=te,
-        today_single_retail_total_quantity=today_single_retail,
-        tomorrow_single_retail_total_quantity=tomorrow_single_retail,
+        today_single_retail_total_quantity=int(single_retail_map.get(anchor, 0)),
+        tomorrow_single_retail_total_quantity=int(single_retail_map.get(day_after, 0)),
         **mem_kw,
         tomorrow_first_meal_new_members=t_first,
         today_meals_week_over_week_caption=today_wow_cap,
@@ -1059,5 +1154,8 @@ def dashboard_meal_summary(
             from_snapshot=False,
             snapshot_recorded_at=row.recorded_at,
         )
+
+    if anchor == cal_today and not force_recompute:
+        _dashboard_live_summary_cache[sid] = (time.time(), out)
 
     return out
