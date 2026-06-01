@@ -17,6 +17,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import OkAlertModal from '@/components/OkAlertModal/OkAlertModal.vue'
 import {
   okAlertVisible,
@@ -24,11 +25,18 @@ import {
   okAlertActiveHostId,
   registerOkAlertHost,
   unregisterOkAlertHost,
+  activateOkAlertHost,
   finishOkAlert,
 } from '@/utils/okAlertState.js'
 
 let hostSeq = 0
 const hostId = ++hostSeq
+
+function resolveHostRoute() {
+  const pages = getCurrentPages()
+  const page = pages[pages.length - 1]
+  return page?.route ? String(page.route) : ''
+}
 
 const isActiveHost = computed(() => okAlertActiveHostId.value === hostId)
 const visible = computed(() => !!okAlertVisible.value && isActiveHost.value)
@@ -43,11 +51,15 @@ const tone = computed(() => okAlertOptions.value?.tone || 'default')
 const maskClosable = computed(() => !!okAlertOptions.value?.maskClosable)
 
 onMounted(() => {
-  registerOkAlertHost(hostId)
+  registerOkAlertHost(hostId, resolveHostRoute())
 })
 
 onUnmounted(() => {
   unregisterOkAlertHost(hostId)
+})
+
+onShow(() => {
+  activateOkAlertHost(hostId)
 })
 
 function onConfirm() {

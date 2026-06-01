@@ -1,4 +1,5 @@
 <template>
+  <view class="page-shell">
   <view class="page" :style="pageStyle">
     <scroll-view
       scroll-y
@@ -208,7 +209,8 @@
         </view>
       </view>
     </view>
-    <OkAlertHost />
+  </view>
+  <OkAlertHost />
   </view>
 </template>
 
@@ -1195,6 +1197,11 @@ function onPauseDeliveryTap() {
 </script>
 
 <style lang="scss" scoped>
+.page-shell {
+  height: 100%;
+  position: relative;
+}
+
 .page {
   height: 100%;
   display: flex;

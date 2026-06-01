@@ -1,5 +1,10 @@
 <template>
-  <view v-if="visible" class="ok-alert-mask" @tap="onMaskTap">
+  <view
+    v-if="visible"
+    class="ok-alert-mask"
+    @tap="onMaskTap"
+    @touchmove.stop.prevent="onMaskTouchMove"
+  >
     <view class="ok-alert-panel" @tap.stop>
       <view class="ok-alert-glow" :class="glowClass" />
       <view v-if="tone !== 'default'" class="ok-alert-icon-wrap">
@@ -12,22 +17,22 @@
         <text v-if="content" class="ok-alert-content">{{ content }}</text>
       </view>
       <view class="ok-alert-actions" :class="{ 'ok-alert-actions--single': !showCancel }">
-        <view
+        <button
           v-if="showCancel"
           class="ok-alert-btn ok-alert-btn--ghost"
           hover-class="ok-alert-btn--hover"
-          @tap="onCancel"
+          @tap.stop="onCancel"
         >
-          <text>{{ cancelText }}</text>
-        </view>
-        <view
+          {{ cancelText }}
+        </button>
+        <button
           class="ok-alert-btn"
           :class="confirmBtnClass"
           hover-class="ok-alert-btn--hover"
-          @tap="onConfirm"
+          @tap.stop="onConfirm"
         >
-          <text>{{ confirmText }}</text>
-        </view>
+          {{ confirmText }}
+        </button>
       </view>
     </view>
   </view>
@@ -86,6 +91,9 @@ function onMaskTap() {
   emit('mask')
   emit('cancel')
 }
+
+/** 阻止底层 scroll-view 抢触摸，避免按钮点击失效 */
+function onMaskTouchMove() {}
 </script>
 
 <style lang="scss" scoped>
@@ -219,13 +227,22 @@ function onMaskTap() {
 
 .ok-alert-btn {
   flex: 1;
+  margin: 0;
+  padding: 0;
   height: 88rpx;
+  line-height: 88rpx;
   border-radius: 999rpx;
+  border: none;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 28rpx;
   font-weight: 700;
+  box-sizing: border-box;
+}
+
+.ok-alert-btn::after {
+  border: none;
 }
 
 .ok-alert-btn--ghost {
