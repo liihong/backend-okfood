@@ -688,7 +688,7 @@ onMounted(async () => {
               <div class="dro-dash-branch-pill-grid">
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />同城配送</span
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />配送</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
                     todayMealsDelivery == null ? '—' : `${Math.trunc(Number(todayMealsDelivery))}份`
@@ -696,7 +696,7 @@ onMounted(async () => {
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />门店自提</span
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
                     todayMealsPickup == null ? '—' : `${Math.trunc(Number(todayMealsPickup))}份`
@@ -704,13 +704,13 @@ onMounted(async () => {
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />单次零售</span
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />零售</span
                   >
                   <span class="dro-dash-branch-pill__val">{{ todaySingleRetailTotalCount }}份</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--sellable" aria-hidden="true" />剩余可售</span
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--sellable" aria-hidden="true" />剩余</span
                   >
                   <span
                     class="dro-dash-branch-pill__val dro-dash-branch-pill__val--sellable"
@@ -856,7 +856,7 @@ onMounted(async () => {
               <div class="dro-dash-branch-pill-grid">
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />同城配送</span
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />配送</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
                     tomorrowPrepDelivery == null ? '—' : `${Math.trunc(Number(tomorrowPrepDelivery))}份`
@@ -864,7 +864,7 @@ onMounted(async () => {
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />门店自提</span
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
                     tomorrowPrepPickup == null ? '—' : `${Math.trunc(Number(tomorrowPrepPickup))}份`
@@ -872,13 +872,13 @@ onMounted(async () => {
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />单次零售</span
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />零售</span
                   >
                   <span class="dro-dash-branch-pill__val">{{ tomorrowSingleRetailTotalCount }}份</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--sellable" aria-hidden="true" />剩余可售</span
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--sellable" aria-hidden="true" />剩余</span
                   >
                   <span
                     class="dro-dash-branch-pill__val dro-dash-branch-pill__val--sellable dro-dash-branch-pill__val--sellable-blue"
