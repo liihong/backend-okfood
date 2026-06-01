@@ -615,9 +615,10 @@ const mapLibExpiredMonthlyAnimated = useAnimatedInteger(() => mapLibExpiredMonth
 const mapLibWeekSumAnimated = useAnimatedInteger(() => mapLibWeekSum.value, { duration: 560 })
 const mapLibMonthSumAnimated = useAnimatedInteger(() => mapLibMonthSum.value, { duration: 560 })
 
-onMounted(() => {
+onMounted(async () => {
+  // 概览 KPI 优先；地图聚合较重，稍后再拉，避免同屏争抢 DB/连接
+  await fetchDashboardSummary()
   void load()
-  void fetchDashboardSummary()
 })
 </script>
 
@@ -631,7 +632,7 @@ onMounted(() => {
       </template>
     </p>
 
-    <p v-if="dashboardStatsLoading" class="dro-loading">正在加载营业概览…</p>
+    <p v-if="dashboardStatsLoading && !summaryMeta" class="dro-loading">正在加载营业概览…</p>
     <p v-else-if="!dashboardStats.length && !loading" class="dro-loading">
       暂无营业概览数据，片区覆盖仍可查看。
     </p>
