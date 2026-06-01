@@ -13,16 +13,28 @@
         <view v-if="leaveRefreshing" class="leave-sync-hint">
           <text class="leave-sync-hint__text">正在同步最新状态…</text>
         </view>
+        <view v-if="leavePrepLocked && !isOnLeaveNow" class="leave-block leave-block--deadline">
+          <text class="leave-deadline-copy">{{ LEAVE_PREP_LOCKED_MSG }}</text>
+        </view>
         <view v-if="isOnLeaveNow" class="leave-block leave-block--active">
           <text class="leave-status-tag">请假中</text>
           <text class="leave-h3 leave-h3--compact">{{ activeLeaveTitle }}</text>
           <text v-if="isRangeOnlyLeave" class="leave-range-line">{{ serverLeaveStart }} 至 {{ serverLeaveEnd }}</text>
           <text class="leave-range-hint">{{ activeLeaveHint }}</text>
-          <button class="btn-cancel-leave" :loading="leaveActionBusy" :disabled="leaveActionBusy" @tap="confirmCancelAllLeave">
+          <view v-if="leavePrepLocked" class="leave-prep-lock-hint">
+            <text class="leave-deadline-copy">{{ LEAVE_PREP_LOCKED_MSG }}</text>
+          </view>
+          <button
+            v-else
+            class="btn-cancel-leave"
+            :loading="leaveActionBusy"
+            :disabled="leaveActionBusy"
+            @tap="confirmCancelAllLeave"
+          >
             取消请假
           </button>
         </view>
-        <view v-if="!isOnLeaveNow" class="leave-block">
+        <view v-if="!isOnLeaveNow && !leavePrepLocked" class="leave-block">
           <text class="leave-h3">明天有事 · 快速请假</text>
           <button
             class="btn-fast-leave"
@@ -35,7 +47,7 @@
           </button>
           <text class="leave-tip">* 供餐日当日 08:50 同步顺丰前可自助操作；推单配送完成前如需调整请联系客服 👌</text>
         </view>
-        <view v-if="!isOnLeaveNow" class="leave-block">
+        <view v-if="!isOnLeaveNow && !leavePrepLocked" class="leave-block">
           <text class="leave-h3">多天请假 (出差/旅游等)</text>
           <text class="leave-tip leave-tip--range">* 须从明天起选日期；供餐日 08:50 推顺丰后至配送完成前请联系客服 👌</text>
           <view class="date-group">
@@ -92,6 +104,7 @@
 import { ref, computed, nextTick } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { showOkAlert } from '@/utils/okAlert.js'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { request, clearMemberSession, isUserMeNotFoundError } from '@/utils/api.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
@@ -114,6 +127,14 @@ let leaveSyncGeneration = 0
 const leaveActionBusy = ref(false)
 /** scroll-view 下拉刷新动画状态 */
 const refresherTriggered = ref(false)
+/** 备餐锁窗：当日 21:00 起至次日 09:00，与后端 leave_prep_locked 一致 */
+const leavePrepLocked = ref(false)
+
+const LEAVE_PREP_LOCKED_MSG = '您的菜品原材料已备好，不能请假，感谢理解和认可。'
+
+function toastLeavePrepLocked() {
+  uni.showToast({ title: LEAVE_PREP_LOCKED_MSG, icon: 'none', duration: 3600 })
+}
 
 /**
  * 请假页专用：拉取 /api/user/me。
@@ -417,6 +438,7 @@ async function syncLeaveFromServer(opts = {}) {
       }),
     ])
     if (gen !== leaveSyncGeneration) return
+    leavePrepLocked.value = Boolean(me?.leave_prep_locked)
     isTomorrowLeave.value = Boolean(me?.is_leaved_tomorrow)
     tomorrowTargetYmd.value = ymdFromApi(me?.tomorrow_leave_target_date)
     const lr = me?.leave_range
@@ -463,7 +485,7 @@ async function onLeaveRefresherRefresh() {
 }
 
 function confirmCancelAllLeave() {
-  uni.showModal({
+  showOkAlert({
     title: '取消请假',
     content:
       '将清除当前区间请假及「明天请假」标记，确定取消？',
@@ -503,6 +525,10 @@ onShow(() => {
 
 async function toggleTomorrow() {
   if (leaveActionBusy.value) return
+  if (leavePrepLocked.value) {
+    toastLeavePrepLocked()
+    return
+  }
   const wasTomorrow = isTomorrowLeave.value
   leaveActionBusy.value = true
   showLeaveMutationLoading(wasTomorrow ? '取消中…' : '提交中…')
@@ -540,6 +566,10 @@ async function toggleTomorrow() {
 
 async function submitRange() {
   if (leaveActionBusy.value) return
+  if (leavePrepLocked.value) {
+    toastLeavePrepLocked()
+    return
+  }
   if (!rangeStart.value || !rangeEnd.value) {
     uni.showToast({ title: '请选择起止日期', icon: 'none' })
     return
@@ -633,6 +663,10 @@ async function submitRange() {
   line-height: 1.55;
   color: $ok-slate-500;
   font-weight: 700;
+}
+
+.leave-prep-lock-hint {
+  margin-top: 8rpx;
 }
 
 .leave-status-tag {

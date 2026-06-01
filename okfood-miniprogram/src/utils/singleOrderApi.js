@@ -38,10 +38,40 @@ export function canCancelSingleMealOrder(o) {
   if (!o || typeof o !== 'object') return false
   const pay = String(o.pay_status || '').trim()
   const f = String(o.fulfillment_status || '').trim().toLowerCase()
+  const pickup = !!o.store_pickup
   if (pay === '已退款' || f === 'delivered' || f === 'cancelled') return false
   if (pay === '未支付') return f === 'pending'
-  if (pay === '已支付') return f === 'pending' || f === 'sf_awaiting_pickup' || f === 'accepted' || f === 'sf_cancelled'
-  return false
+  if (pay !== '已支付') return false
+  // 自提：支付后即待取货，不可自助取消
+  if (pickup) return false
+  // 配送：仅「待发货」(pending) 可取消
+  return f === 'pending'
+}
+
+/**
+ * 不可取消时的提示文案（引导联系客服）。
+ * @param {Record<string, unknown>} o
+ * @returns {string|null}
+ */
+export function singleMealOrderCancelBlockReason(o) {
+  if (!o || typeof o !== 'object') return null
+  if (canCancelSingleMealOrder(o)) return null
+  const pay = String(o.pay_status || '').trim()
+  const f = String(o.fulfillment_status || '').trim().toLowerCase()
+  if (pay === '已退款' || f === 'delivered' || f === 'cancelled') return null
+  if (pay === '未支付') return null
+  if (pay === '已支付') {
+    if (o.store_pickup) {
+      return '订单已进入待取货阶段，无法自助取消，请联系客服处理。'
+    }
+    if (f === 'sf_awaiting_pickup' || f === 'accepted') {
+      return '订单已进入待取货或配送中，无法自助取消，请联系客服处理。'
+    }
+    if (f === 'sf_cancelled') {
+      return '当前订单需联系客服处理。'
+    }
+  }
+  return null
 }
 
 export function singleOrderStatusMeta(o) {
@@ -52,7 +82,10 @@ export function singleOrderStatusMeta(o) {
     if (pay === '未支付') {
       return { line1: '已关闭', line2: '超时未支付，订单已自动取消', tone: 'warn' }
     }
-    return { line1: '已取消', line2: '订单已取消，款项未自动退款', tone: 'warn' }
+    if (pay === '已退款') {
+      return { line1: '已取消', line2: '订单已取消，款项已原路退回', tone: 'warn' }
+    }
+    return { line1: '已取消', line2: '订单已取消', tone: 'warn' }
   }
   if (pay === '未支付') {
     return { line1: '待支付', line2: '请尽快完成支付', tone: 'warn' }

@@ -857,21 +857,74 @@ def get_member_single_meal_order(db: Session, member_id: int, order_id: int) -> 
     return out.model_copy(update={"store_contact_phone": phone})
 
 
+def _can_member_cancel_single_meal_order(o: SingleMealOrder) -> tuple[bool, str]:
+    """会员自助取消：仅「待发货」且未进入取货/配送；已支付将原路退款。"""
+    pay = (o.pay_status or "").strip()
+    f = str(o.fulfillment_status or "").strip().lower()
+    if pay == "已退款":
+        return False, "已退款订单不可取消"
+    if f == "delivered":
+        return False, "已完成订单不可取消"
+    if f == "cancelled":
+        return False, "订单已是取消状态"
+    if pay == "未支付":
+        if f == "pending":
+            return True, ""
+        return False, "当前状态不可取消"
+    if pay != "已支付":
+        return False, "当前状态不可取消"
+    if bool(getattr(o, "store_pickup", False)):
+        return False, "订单已进入待取货阶段，无法自助取消，请联系客服处理"
+    if f == "pending":
+        return True, ""
+    if f in (_FULFILLMENT_SF_AWAITING_PICKUP, "accepted"):
+        return False, "订单已进入待取货或配送中，无法自助取消，请联系客服处理"
+    if f == "sf_cancelled":
+        return False, "请联系客服处理"
+    return False, "当前状态不可取消"
+
+
 def member_cancel_single_meal_order(db: Session, *, member_id: int, order_id: int) -> str:
-    """会员端取消本人单次点餐订单（规则同管理端；已支付不退款）。"""
+    """会员端取消本人单次点餐订单：待发货可取消；已支付微信单原路退款。"""
     row = db.get(SingleMealOrder, order_id)
     if not row or int(row.member_id) != int(member_id):
         raise HTTPException(status_code=404, detail="订单不存在")
-    try:
-        return admin_cancel_single_meal_order(
-            db,
-            order_id=int(order_id),
-            store_id=int(row.store_id),
-            cancel_reason="用户取消订单",
-            cancel_sf=True,
+    ok, err = _can_member_cancel_single_meal_order(row)
+    if not ok:
+        raise HTTPException(status_code=400, detail=err)
+
+    pay = (row.pay_status or "").strip()
+    refund_note = ""
+
+    if pay == "已支付":
+        channel = (row.pay_channel or "").strip()
+        if channel != "微信":
+            raise HTTPException(status_code=400, detail="暂不支持该支付渠道自动退款，请联系客服")
+        try:
+            out = admin_wechat_refund_single_meal_order(
+                db, order_id=int(order_id), store_id=int(row.store_id)
+            )
+            refund_note = (out.get("message") or "").strip()
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        row = db.get(SingleMealOrder, order_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="订单不存在")
+
+    row.fulfillment_status = "cancelled"
+    row.courier_id = None
+    if pay == "未支付":
+        release_member_coupon_for_order(
+            db, order_biz=CouponLockedOrderBiz.SINGLE_MEAL, order_id=int(order_id)
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    db.add(row)
+    db.commit()
+
+    if pay == "未支付":
+        return "订单已取消"
+    if refund_note:
+        return f"订单已取消，{refund_note}"
+    return "订单已取消，款项将原路退回"
 
 
 def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, client_ip: str) -> dict[str, str]:
@@ -1672,12 +1725,41 @@ def admin_assign_courier_single_meal_order(
     return _build_admin_single_meal_order_list_out(db, o)
 
 
+def _sync_single_meal_order_wechat_refunded_local(db: Session, o: SingleMealOrder) -> bool:
+    """
+    微信退款成功后同步本地：支付「已退款」且履约「已取消」（幂等）。
+
+    管理端原路退款与会员自助取消共用；微信侧已 REFUND 但本地 commit 失败时可重试对齐。
+    """
+    changed = False
+    if (o.pay_status or "").strip() != "已退款":
+        o.pay_status = "已退款"
+        changed = True
+    if str(o.fulfillment_status or "").strip().lower() != "cancelled":
+        o.fulfillment_status = "cancelled"
+        o.courier_id = None
+        changed = True
+    if changed:
+        db.add(o)
+        db.commit()
+    return changed
+
+
 def admin_wechat_refund_single_meal_order(db: Session, *, order_id: int, store_id: int) -> dict[str, str]:
     """管理端：已支付且微信渠道的单次点餐订单，调用微信 v2 退款接口全额原路退回。"""
     o = db.get(SingleMealOrder, int(order_id))
     if o is None or int(o.store_id) != int(store_id):
         raise ValueError("订单不存在或不属于当前门店")
-    if (o.pay_status or "").strip() != "已支付":
+    pay = (o.pay_status or "").strip()
+    if pay == "已退款":
+        if str(o.fulfillment_status or "").strip().lower() == "cancelled":
+            raise ValueError("订单已退款")
+        _sync_single_meal_order_wechat_refunded_local(db, o)
+        return {
+            "message": "订单已退款，履约状态已同步为「已取消」",
+            "out_refund_no": f"RFSM{o.id}"[:32],
+        }
+    if pay != "已支付":
         raise ValueError("仅「已支付」订单可发起微信退款")
     if (o.pay_channel or "").strip() != "微信":
         raise ValueError("仅微信支付订单可原路退回")
@@ -1688,15 +1770,12 @@ def admin_wechat_refund_single_meal_order(db: Session, *, order_id: int, store_i
     pay_cfg = get_merged_pay_config(db, int(o.tenant_id), store_id=int(o.store_id))
     q = query_order_by_out_trade_no(out_no, pay=pay_cfg)
     trade_state = (q.get("trade_state") or "").strip().upper()
+    out_refund_no = f"RFSM{o.id}"[:32]
     # 微信已退款但本地仍为「已支付」：首次退款 API 成功而 commit 失败时的补救（幂等）
     if trade_state == "REFUND":
-        out_refund_no = f"RFSM{o.id}"[:32]
-        if (o.pay_status or "").strip() != "已退款":
-            o.pay_status = "已退款"
-            db.add(o)
-            db.commit()
+        _sync_single_meal_order_wechat_refunded_local(db, o)
         return {
-            "message": "微信侧已完成退款，本地订单状态已同步为「已退款」",
+            "message": "微信侧已完成退款，本地订单状态已同步为「已退款 / 已取消」",
             "out_refund_no": out_refund_no,
         }
     if trade_state != "SUCCESS":
@@ -1707,7 +1786,6 @@ def admin_wechat_refund_single_meal_order(db: Session, *, order_id: int, store_i
         total_fee = int((q.get("total_fee") or "0").strip())
     except ValueError as e:
         raise ValueError("无法解析微信订单金额") from e
-    out_refund_no = f"RFSM{o.id}"[:32]
     refund_order_v2(
         out_trade_no=out_no,
         out_refund_no=out_refund_no,
@@ -1716,17 +1794,17 @@ def admin_wechat_refund_single_meal_order(db: Session, *, order_id: int, store_i
         pay=pay_cfg,
         transaction_id=(o.wx_transaction_id or "").strip() or None,
     )
-    o.pay_status = "已退款"
-    db.add(o)
-    db.commit()
-    return {"message": "微信退款已受理，资金将按支付渠道原路退回用户", "out_refund_no": out_refund_no}
+    _sync_single_meal_order_wechat_refunded_local(db, o)
+    return {"message": "微信退款已受理，订单已取消，资金将按支付渠道原路退回用户", "out_refund_no": out_refund_no}
 
 
 def _can_admin_cancel_single_meal_order(o: SingleMealOrder) -> tuple[bool, str]:
     pay = (o.pay_status or "").strip()
     f = str(o.fulfillment_status or "").strip().lower()
     if pay == "已退款":
-        return False, "已退款订单不可取消"
+        if f == "cancelled":
+            return False, "订单已是取消状态"
+        return True, ""
     if f == "delivered":
         return False, "已完成订单不可取消"
     if f == "cancelled":

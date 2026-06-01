@@ -542,7 +542,7 @@ class DashboardMealSummaryOut(BaseModel):
     today_expire_one_unit_members: int = Field(
         ...,
         ge=0,
-        description="锚定日应履约（到家+自提口径）且剩余次数恰为 1 次（balance 等于每配送日份数）的会员数",
+        description="锚定日已消费殆尽的末次出餐份数（到家；份数非人数，字段名历史沿用 members）：sum(当日末次配送扣次份数)，供后厨核对",
     )
     today_single_retail_total_quantity: int = Field(
         ...,

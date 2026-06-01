@@ -35,8 +35,64 @@ from app.services.courier_service import (
     eligible_members_for_store_pickup,
     extra_delivered_ineligible_subscribers,
 )
-from app.services.member_address_service import delivery_region_name_map, full_address_line, routing_area_label
+from app.services.member_address_service import delivery_region_name_map, full_address_line, load_default_address_map, routing_area_label
 from app.services.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
+
+
+def _home_members_for_delivery_sheet(
+    db: Session,
+    *,
+    delivery_date: date,
+    delivery_region_id: int | None,
+    store_id: int,
+) -> tuple[list[Member], dict[int, MemberAddress | None]]:
+    """
+    到家应配送会员。顺丰全部送达锁单后仅返回推单快照中的订阅会员，不再因取消请假等实时扩表。
+    """
+    from app.services.delivery_day_lock_service import (
+        is_delivery_day_sheet_locked,
+        sf_frozen_subscription_member_ids_for_delivery_date,
+    )
+
+    sid = int(store_id)
+    if not is_subscription_delivery_day(delivery_date):
+        return [], {}
+
+    if is_delivery_day_sheet_locked(db, store_id=sid, delivery_date=delivery_date):
+        frozen = sf_frozen_subscription_member_ids_for_delivery_date(
+            db, store_id=sid, delivery_date=delivery_date
+        )
+        if not frozen:
+            return [], {}
+        rows = list(
+            db.scalars(
+                select(Member).where(
+                    Member.id.in_(frozen),
+                    Member.deleted_at.is_(None),
+                    Member.store_pickup.is_(False),
+                    Member.store_id == sid,
+                )
+            ).all()
+        )
+        mid_list = [int(m.id) for m in rows]
+        defaults = load_default_address_map(db, mid_list)
+        if delivery_region_id is not None:
+            rid = int(delivery_region_id)
+            rows = [
+                m
+                for m in rows
+                if (addr := defaults.get(int(m.id))) is not None
+                and addr.delivery_region_id is not None
+                and int(addr.delivery_region_id) == rid
+            ]
+        return rows, {m.id: defaults.get(int(m.id)) for m in rows}
+
+    return eligible_members_for_delivery(
+        db,
+        delivery_date=delivery_date,
+        delivery_region_id=delivery_region_id,
+        store_id=sid,
+    )
 
 
 def _member_balance_quota(mem: Member) -> tuple[int, int]:
@@ -261,7 +317,7 @@ def delivery_sheet_metrics_for_date(
 
     sid = int(store_id)
     d = delivery_date
-    members, default_by_id = eligible_members_for_delivery(
+    members, default_by_id = _home_members_for_delivery_sheet(
         db, delivery_date=d, delivery_region_id=None, store_id=sid
     )
     mlist = list(members)
@@ -472,6 +528,10 @@ def total_meal_units_for_delivery_sheet(
         return 0
     cfg = get_settings()
     sid = int(store_id) if store_id is not None else int(cfg.DEFAULT_STORE_ID)
+    from app.services.delivery_day_lock_service import is_delivery_day_sheet_locked
+
+    if is_delivery_day_sheet_locked(db, store_id=sid, delivery_date=delivery_date):
+        return int(delivery_sheet_metrics_for_date(db, delivery_date=delivery_date, store_id=sid).meal_total)
     return (
         _sum_meal_units_home_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
         + _sum_meal_units_pickup_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
@@ -543,7 +603,7 @@ def build_delivery_sheet(
             )
         region_filter_id = int(rid)
 
-    members, default_by_id = eligible_members_for_delivery(
+    members, default_by_id = _home_members_for_delivery_sheet(
         db, delivery_date=d, delivery_region_id=region_filter_id, store_id=sid
     )
     # 与到家列表一并拉取自提会员，便于单次查询 delivery_logs（片区筛选不改变自提分组是否出现）

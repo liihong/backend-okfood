@@ -49,6 +49,7 @@
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { showOkAlert } from '@/utils/okAlert.js'
 import { request, getMemberToken } from '@/utils/api.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 import {
@@ -147,7 +148,7 @@ function confirmDelete(item, index) {
     uni.showToast({ title: '地址缺少编号', icon: 'none' })
     return
   }
-  uni.showModal({
+  showOkAlert({
     title: '提示',
     content: '确定删除该收货地址吗？删除后不可恢复。',
     confirmText: '删除',

@@ -329,7 +329,7 @@ CREATE TABLE IF NOT EXISTS `admin_dashboard_biz_day_snapshots` (
   `today_meals_to_prepare` INT NOT NULL COMMENT '与当日配送大表分组 meal_total 合计一致',
   `tomorrow_leave_members` INT NOT NULL,
   `tomorrow_meals_to_prepare` INT NOT NULL,
-  `today_expire_one_unit_members` INT NOT NULL DEFAULT 0 COMMENT '锚定日应履约且 balance 恰等于每配送日份数（仅剩 1 次）的会员数',
+  `today_expire_one_unit_members` INT NOT NULL DEFAULT 0 COMMENT '锚定日已消费殆尽的末次出餐份数（份数非人数），口径同 count_expire_one_unit_members_for_business_day',
   `recorded_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '首次落库或管理员强制重算覆盖时间',
   PRIMARY KEY (`business_anchor_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='营业概览与配送大表对齐的按日归档（过去日首读落库后默认不变）';

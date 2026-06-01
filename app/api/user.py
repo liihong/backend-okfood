@@ -509,7 +509,7 @@ def cancel_single_order_me(
     db: SessionDep,
     member_id: MemberIdScoped,
 ):
-    """会员取消本人单次点餐订单；已支付不退款，配送中订单会尝试同步取消顺丰。"""
+    """会员取消本人单次点餐订单；待发货可取消，已支付微信单原路退款。"""
     _ = request
     msg = member_cancel_single_meal_order(db, member_id=member_id, order_id=order_id)
     out = get_member_single_meal_order(db, member_id, order_id)

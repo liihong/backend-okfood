@@ -152,6 +152,7 @@ import { paySingleMealOrderWechat } from '@/utils/singleOrderPay.js'
 import { promptUnpaidOrderConflict } from '@/utils/unpaidOrderPrompt.js'
 import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
 import { listAvailableMemberCoupons } from '@/utils/memberCouponApi.js'
+import { showOkAlert } from '@/utils/okAlert.js'
 
 const dish = ref(null)
 const loading = ref(true)
@@ -289,7 +290,7 @@ onLoad((options) => {
   if (!getMemberToken()) {
     loading.value = false
     loadError.value = '请先登录'
-    uni.showModal({
+    showOkAlert({
       title: '需要登录',
       content: '请先在「我的」中完成手机号登录后再下单。',
       confirmText: '去登录',
@@ -431,17 +432,10 @@ async function handlePay() {
     if (!payResult.paySynced) {
       uni.showToast({ title: '支付成功，订单同步中请稍后刷新', icon: 'none', duration: 3000 })
     }
-    const area = typeof out.routing_area === 'string' ? out.routing_area : '—'
-    const amt =
-      out && typeof out.amount_yuan === 'string'
-        ? out.amount_yuan
-        : (Number(p) * q).toFixed(2)
-    const pickupHint = isPickup
-      ? `\n门店自提，请于供餐日到店取餐。`
-      : `\n微信支付确认后将派单，骑手可在配送端查看。`
-    uni.showModal({
+    showOkAlert({
       title: '支付成功',
-      content: `¥${amt} · ${out.delivery_date || serviceDateYmd.value}\n${isPickup ? '自提' : '片区'}：${area}${pickupHint}`,
+      content: '您的餐品后厨已开始备餐',
+      tone: 'success',
       showCancel: false,
       success: () => {
         try {

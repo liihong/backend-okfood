@@ -83,9 +83,9 @@
           {{ paying ? '支付中…' : '继续支付' }}
         </button>
 
-        <view v-if="showOrderActions" :class="['action-row', { 'action-row--solo': !canCancel }]">
+        <view v-if="showOrderActions" :class="['action-row', { 'action-row--solo': !showCancelAction }]">
           <button
-            v-if="canCancel"
+            v-if="showCancelAction"
             class="btn-action btn-action--ghost"
             :disabled="cancelling"
             hover-class="none"
@@ -107,11 +107,13 @@
 import { ref, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { showOkAlert } from '@/utils/okAlert.js'
 import {
   canCancelSingleMealOrder,
   cancelSingleMealOrder,
   formatSingleOrderCreatedAt,
   getSingleMealOrder,
+  singleMealOrderCancelBlockReason,
   singleOrderStatusMeta,
   syncSingleMealWechatPayResult,
 } from '@/utils/singleOrderApi.js'
@@ -128,6 +130,11 @@ const cancelling = ref(false)
 const status = computed(() => (order.value ? singleOrderStatusMeta(order.value) : { line1: '', line2: '', tone: 'info' }))
 
 const canCancel = computed(() => (order.value ? canCancelSingleMealOrder(order.value) : false))
+
+const showCancelAction = computed(() => {
+  if (!order.value) return false
+  return canCancel.value || !!singleMealOrderCancelBlockReason(order.value)
+})
 
 const showOrderActions = computed(() => !!order.value)
 
@@ -206,14 +213,27 @@ function onContactMerchant() {
 }
 
 function onCancelOrder() {
-  if (!order.value || cancelling.value || !canCancel.value) return
+  if (!order.value || cancelling.value) return
+  const blockReason = singleMealOrderCancelBlockReason(order.value)
+  if (blockReason) {
+    showOkAlert({
+      title: '无法取消',
+      content: blockReason,
+      showCancel: false,
+      confirmText: '我知道了',
+      tone: 'warning',
+    })
+    return
+  }
+  if (!canCancel.value) return
   const paid = order.value.pay_status === '已支付'
   const content = paid
-    ? '确定取消该订单？已支付金额不会自动退款，如有疑问请联系商家。'
+    ? '确定取消该订单？支付金额将原路退回至您的微信账户。'
     : '确定取消该订单？'
-  uni.showModal({
+  showOkAlert({
     title: '取消订单',
     content,
+    tone: 'warning',
     confirmText: '确定取消',
     confirmColor: '#b91c1c',
     success: (res) => {
@@ -229,7 +249,11 @@ async function doCancelOrder() {
   try {
     const data = await cancelSingleMealOrder(order.value.id)
     order.value = data && typeof data === 'object' ? data : order.value
-    uni.showToast({ title: '订单已取消', icon: 'success' })
+    const paid = order.value?.pay_status === '已退款'
+    uni.showToast({
+      title: paid ? '已取消，款项将原路退回' : '订单已取消',
+      icon: 'success',
+    })
     await loadDetail()
   } catch (e) {
     uni.showToast({

@@ -265,12 +265,18 @@ def _to_member_out(
         lr = {"start": m.leave_range_start, "end": m.leave_range_end}
 
     from app.core.timeutil import today_shanghai
-    from app.services.leave import guard_member_self_service_during_sf_fulfillment
+    from app.services.leave import (
+        guard_member_self_service_during_sf_fulfillment,
+        is_miniprogram_leave_prep_locked,
+        is_miniprogram_pause_delivery_prep_locked,
+    )
     from app.services.sf_order_fulfillment_service import member_sf_self_service_locked_on_delivery_date
     from app.services.store_config_service import get_leave_deadline_time_for_store
 
     ldt = get_leave_deadline_time_for_store(db, int(m.store_id))
     leave_deadline_str = ldt.isoformat() if ldt is not None else "21:00:00"
+    leave_prep_locked = is_miniprogram_leave_prep_locked(deadline_time=ldt)
+    pause_delivery_prep_locked = is_miniprogram_pause_delivery_prep_locked(db, m)
     biz_today = today_shanghai()
     sf_self_service_locked = member_sf_self_service_locked_on_delivery_date(
         db,
@@ -339,6 +345,10 @@ def _to_member_out(
         leave_range=lr,
 
         leave_deadline_time=leave_deadline_str,
+
+        leave_prep_locked=leave_prep_locked,
+
+        pause_delivery_prep_locked=pause_delivery_prep_locked,
 
         sf_self_service_locked=sf_self_service_locked,
 
@@ -606,6 +616,11 @@ def patch_member_profile(
         m.plan_type = new_val
 
     defer_applied = set_delivery_deferred and delivery_deferred is True
+
+    if defer_applied and not prev_snapshot["delivery_deferred"]:
+        from app.services.leave import guard_miniprogram_pause_delivery_prep_window
+
+        guard_miniprogram_pause_delivery_prep_window(db, m)
 
     if defer_applied:
 
@@ -891,6 +906,9 @@ def leave_request(
 
     if source == "miniprogram":
         guard_member_self_leave_during_sf_fulfillment(db, m)
+        from app.services.leave import guard_miniprogram_leave_prep_window
+
+        guard_miniprogram_leave_prep_window(db, m, now=now)
 
     if typ == LeaveType.CANCEL:
 
@@ -985,22 +1003,25 @@ def leave_request(
         and before_absent_today
         and not after_absent_today
     ):
-        if typ == LeaveType.CANCEL:
-            leave_lab = ["取消全部请假"]
-        elif typ == LeaveType.CLEAR_TOMORROW:
-            leave_lab = ["清除明天请假"]
-        elif typ == LeaveType.RANGE:
-            leave_lab = ["调整请假区间"]
-        else:
-            leave_lab = ["请假变更"]
-        try_notify_delivery_sheet_manual_attention(
-            db,
-            store_id=int(m.store_id),
-            action_labels_cn=leave_lab,
-            member_id=int(m.id),
-            member_phone=str(m.phone or "").strip() or None,
-            member_name=str(m.name or "").strip() or None,
-        )
+        from app.services.delivery_day_lock_service import is_delivery_day_sheet_locked
+
+        if not is_delivery_day_sheet_locked(db, store_id=int(m.store_id), delivery_date=today_d):
+            if typ == LeaveType.CANCEL:
+                leave_lab = ["取消全部请假"]
+            elif typ == LeaveType.CLEAR_TOMORROW:
+                leave_lab = ["清除明天请假"]
+            elif typ == LeaveType.RANGE:
+                leave_lab = ["调整请假区间"]
+            else:
+                leave_lab = ["请假变更"]
+            try_notify_delivery_sheet_manual_attention(
+                db,
+                store_id=int(m.store_id),
+                action_labels_cn=leave_lab,
+                member_id=int(m.id),
+                member_phone=str(m.phone or "").strip() or None,
+                member_name=str(m.name or "").strip() or None,
+            )
 
     db.commit()
 

@@ -1,5 +1,7 @@
 /** 后端 409：会员已有未支付订单，不宜重复下单。 */
 
+import { showOkAlert } from '@/utils/okAlert.js'
+
 const MEMBER_CARD_ORDER_DETAIL_PAGE =
   '/packageOrder/pages/memberCardOrderDetail/memberCardOrderDetail'
 
@@ -41,7 +43,7 @@ export function promptUnpaidOrderConflict(err, { kind }) {
     err instanceof Error ? err.message : '您有待支付订单，请先完成支付后再下单'
   const orderId = parsePendingOrderIdFromConflict(err)
   const isSingle = kind === 'single'
-  uni.showModal({
+  showOkAlert({
     title: '待支付订单',
     content: msg,
     confirmText: orderId ? '去支付' : '查看订单',
@@ -81,7 +83,7 @@ export function promptUnpaidMallOrderConflict(err, opts = {}) {
   if (!orderId) return false
   const msg =
     err instanceof Error ? err.message : '您有待支付的开卡订单，请先完成支付'
-  uni.showModal({
+  showOkAlert({
     title: '待支付订单',
     content: msg,
     confirmText: '去支付',

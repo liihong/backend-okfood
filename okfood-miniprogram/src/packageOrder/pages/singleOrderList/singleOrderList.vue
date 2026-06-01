@@ -41,6 +41,7 @@
 import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { showOkAlert } from '@/utils/okAlert.js'
 import { getMemberToken } from '@/utils/api.js'
 import { listDeliveryDeductions } from '@/utils/deliveryDeductionApi.js'
 
@@ -64,7 +65,7 @@ async function fetchPage(reset) {
     totalMealUnits.value = 0
     loading.value = false
     loadingMore.value = false
-    uni.showModal({
+    showOkAlert({
       title: '需要登录',
       content: '请先完成手机号登录后再查看消费记录。',
       confirmText: '去登录',

@@ -42,12 +42,14 @@
               <text class="field-title">收餐地址</text>
               <text class="field-required">*</text>
             </view>
-            <textarea
-              v-model="form.mapLocationText"
-              maxlength="500"
-              class="form-input-p form-textarea"
-              placeholder="请先在「地图选点」"
-            />
+            <view
+              class="form-input-p form-textarea map-addr-readonly"
+              hover-class="map-addr-readonly--hover"
+              @tap="chooseMapLocation"
+            >
+              <text v-if="form.mapLocationText" class="map-addr-readonly__text">{{ form.mapLocationText }}</text>
+              <text v-else class="map-addr-readonly__placeholder">请先在「地图选点」</text>
+            </view>
             <view class="map-pick-slot">
               <view class="map-pick-actions">
                 <button class="btn-map-pick" hover-class="none" @tap="chooseMapLocation">地图选点</button>
@@ -92,6 +94,7 @@ placeholder="备注"
 import { computed, reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { showOkAlert } from '@/utils/okAlert.js'
 import { request, getMemberToken } from '@/utils/api.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 import { normalizeAddressList, addressLineFromStructured } from '@/utils/addressApi.js'
@@ -258,7 +261,7 @@ function openChooseLocationCentered(lat, lng) {
       const ok = await ensureCoordsInDeliveryRegion(la, lo)
       uni.hideLoading()
       if (!ok) {
-        uni.showModal({
+        showOkAlert({
           title: '超出配送范围',
           content: '当前位置不在配送范围内，请重新选择位置。',
           showCancel: false,
@@ -299,7 +302,7 @@ function chooseMapLocation() {
       uni.hideLoading()
       const msg = err?.errMsg != null ? String(err.errMsg) : ''
       if (msg.includes('auth deny') || msg.includes('permission')) {
-        uni.showModal({
+        showOkAlert({
           title: '需要位置权限',
           content: '开启位置后，地图会定位到您附近，方便选择收货地点。',
           confirmText: '去设置',
@@ -571,6 +574,32 @@ async function save() {
   padding-top: 30rpx;
   padding-bottom: 30rpx;
   border-radius: 36rpx;
+}
+
+.map-addr-readonly {
+  display: block;
+  box-sizing: border-box;
+}
+
+.map-addr-readonly--hover {
+  background: #eef0f3;
+}
+
+.map-addr-readonly__text {
+  display: block;
+  font-weight: 800;
+  font-size: 30rpx;
+  color: $ok-slate-800;
+  line-height: 44rpx;
+  word-break: break-all;
+}
+
+.map-addr-readonly__placeholder {
+  display: block;
+  font-weight: 800;
+  font-size: 30rpx;
+  color: #94a3b8;
+  line-height: 44rpx;
 }
 
 .map-pick-slot {

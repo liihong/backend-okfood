@@ -34,7 +34,7 @@ class AdminDashboardBizDaySnapshot(Base):
         Integer,
         nullable=False,
         default=0,
-        comment="锚定日应履约且 balance 恰等于每配送日份数（仅剩 1 次）的会员数",
+        comment="锚定日已消费殆尽的末次出餐份数（份数非人数），口径同 count_expire_one_unit_members_for_business_day",
     )
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime,

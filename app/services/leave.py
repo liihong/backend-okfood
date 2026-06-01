@@ -1,11 +1,97 @@
-from datetime import date
+from datetime import date, datetime, time
 
 from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.timeutil import now_shanghai
 from app.models.member import Member
+
+# 小程序自助请假备餐锁窗：门店 leave_deadline_time（默认 21:00）起至次日 09:00 止。
+MINIPROGRAM_LEAVE_PREP_UNLOCK_TIME = time(9, 0, 0)
+MINIPROGRAM_LEAVE_PREP_LOCKED_MSG = (
+    "您的菜品原材料已备好，不能请假，感谢理解和认可。"
+)
+MINIPROGRAM_PAUSE_DELIVERY_PREP_LOCKED_MSG = (
+    "21点后无法操作暂停。明日餐品已准备，可配送后暂停"
+)
+
+
+def is_miniprogram_leave_prep_locked(
+    *,
+    deadline_time: time,
+    now: datetime | None = None,
+    unlock_time: time = MINIPROGRAM_LEAVE_PREP_UNLOCK_TIME,
+) -> bool:
+    """上海墙钟：当日 deadline 起至次日 unlock 前禁止小程序自助请假相关操作。"""
+    n = now if now is not None else now_shanghai()
+    t = n.time()
+    return t >= deadline_time or t < unlock_time
+
+
+def miniprogram_prep_lock_affected_delivery_date(
+    *,
+    now: datetime,
+    unlock_time: time = MINIPROGRAM_LEAVE_PREP_UNLOCK_TIME,
+) -> date:
+    """备餐锁窗内正在备餐的履约业务日（上海）：21:00 后起算次日；次日 09:00 前仍算当日。"""
+    biz_today = now.date()
+    if now.time() < unlock_time:
+        return biz_today
+    return date.fromordinal(biz_today.toordinal() + 1)
+
+
+def guard_miniprogram_leave_prep_window(
+    db: Session,
+    member: Member,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """备餐锁窗内：小程序禁止请假/取消请假等自助变更。"""
+    from app.services.store_config_service import get_leave_deadline_time_for_store
+
+    deadline = get_leave_deadline_time_for_store(db, int(member.store_id))
+    if is_miniprogram_leave_prep_locked(deadline_time=deadline, now=now):
+        raise HTTPException(status_code=400, detail=MINIPROGRAM_LEAVE_PREP_LOCKED_MSG)
+
+
+def is_miniprogram_pause_delivery_prep_locked(
+    db: Session,
+    member: Member,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """备餐锁窗内且已在锁窗履约日配送大表：小程序不可暂停（已暂停会员不受限）。"""
+    if bool(member.delivery_deferred):
+        return False
+    from app.services.courier_service import member_on_subscription_delivery_schedule
+    from app.services.store_config_service import get_leave_deadline_time_for_store
+
+    n = now if now is not None else now_shanghai()
+    deadline = get_leave_deadline_time_for_store(db, int(member.store_id))
+    if not is_miniprogram_leave_prep_locked(deadline_time=deadline, now=n):
+        return False
+    affected = miniprogram_prep_lock_affected_delivery_date(now=n)
+    return member_on_subscription_delivery_schedule(
+        member,
+        delivery_date=affected,
+        today=n.date(),
+    )
+
+
+def guard_miniprogram_pause_delivery_prep_window(
+    db: Session,
+    member: Member,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """备餐锁窗内：已在履约日配送大表的会员禁止小程序暂停配送；恢复配送不受限。"""
+    if is_miniprogram_pause_delivery_prep_locked(db, member, now=now):
+        raise HTTPException(
+            status_code=400,
+            detail=MINIPROGRAM_PAUSE_DELIVERY_PREP_LOCKED_MSG,
+        )
 
 
 def is_absent_on_delivery_date_for_leave_fields(

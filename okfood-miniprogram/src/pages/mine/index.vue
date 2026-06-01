@@ -208,10 +208,13 @@
         </view>
       </view>
     </view>
+    <OkAlertHost />
   </view>
 </template>
 
 <script setup>
+import OkAlertHost from '@/components/OkAlertHost/OkAlertHost.vue'
+import { showOkAlert } from '@/utils/okAlert.js'
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import MinePlanStatusCard from '@/components/MinePlanStatusCard/MinePlanStatusCard.vue'
@@ -440,6 +443,15 @@ const showPauseDeliveryMenuRow = computed(() => {
   if (!p || typeof p !== 'object') return false
   if (p.delivery_deferred === true) return false
   return Math.max(0, Math.floor(Number(p.balance) || 0)) > 0
+})
+
+/** 备餐锁窗内且已在履约日配送大表：禁止暂停（与后端 pause_delivery_prep_locked 一致） */
+const PAUSE_DELIVERY_PREP_LOCKED_MSG =
+  '21点后无法操作暂停。明日餐品已准备，可配送后暂停'
+
+const pauseDeliveryPrepLocked = computed(() => {
+  const p = memberProfileRaw.value
+  return Boolean(p && typeof p === 'object' && p.pause_delivery_prep_locked === true)
 })
 
 const setupRowTitle = computed(() => {
@@ -1027,7 +1039,7 @@ function handlePurchase(price, meals) {
     uni.showToast({ title: '请先登录', icon: 'none' })
     return
   }
-  uni.showModal({
+  showOkAlert({
     title: '套餐购买',
     content: `支付金额：¥${price}\n将为您增加 ${meals} 次餐次（演示：确认后本地累加，正式环境对接支付与后端）`,
     success: (res) => {
@@ -1141,7 +1153,17 @@ function onPauseDeliveryTap() {
     uni.showToast({ title: '请先登录', icon: 'none' })
     return
   }
-  uni.showModal({
+  if (pauseDeliveryPrepLocked.value) {
+    showOkAlert({
+      title: '暂无法暂停',
+      content: PAUSE_DELIVERY_PREP_LOCKED_MSG,
+      showCancel: false,
+      confirmText: '知道了',
+      tone: 'warning',
+    })
+    return
+  }
+  showOkAlert({
     title: '暂停配送',
     content:
       '确认后暂停会员卡配送（剩余餐次保留）。恢复时需重新选择开始的业务日期。是否暂停？',

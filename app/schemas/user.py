@@ -40,7 +40,15 @@ class MemberOut(BaseModel):
     leave_range: dict[str, date | None] | None
     leave_deadline_time: str = Field(
         "21:00:00",
-        description="历史配置字段（门店请假截止时刻）；小程序不再按此刻拦截，自助限制以顺丰推单状态为准",
+        description="门店请假截止时刻（HH:MM:SS）；自该时刻起至次日 09:00 小程序禁止自助请假",
+    )
+    leave_prep_locked: bool = Field(
+        False,
+        description="备餐锁窗内为 true：当日 leave_deadline_time 起至次日 09:00 禁止小程序自助请假",
+    )
+    pause_delivery_prep_locked: bool = Field(
+        False,
+        description="备餐锁窗内且已在履约日配送大表时为 true：禁止小程序暂停配送；已暂停会员为 false",
     )
     sf_self_service_locked: bool = Field(
         False,

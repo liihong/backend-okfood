@@ -57,7 +57,7 @@ const router = createRouter({
           component: DashboardView,
           meta: {
             title: '今日营业概览',
-            pageSubtitle: '总览今日与明日备餐、请假与卡到期，以及片区会员覆盖分布',
+            pageSubtitle: '总览今日与明日备餐、请假与当日已过期份数，以及片区会员覆盖分布',
             hidePageTitle: true,
             fullAdminOnly: true,
           },

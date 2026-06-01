@@ -18,11 +18,13 @@
       </view>
       <view class="ok-navbar__spacer" />
     </view>
+    <OkAlertHost />
   </view>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
+import OkAlertHost from '@/components/OkAlertHost/OkAlertHost.vue'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { getCourierToken, setAppUserMode } from '@/utils/api.js'
 

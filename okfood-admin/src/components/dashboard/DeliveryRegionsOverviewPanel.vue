@@ -8,7 +8,7 @@ import { showToast } from '../../composables/useToast.js'
 import { useAnimatedInteger } from '../../composables/useAnimatedInteger.js'
 import DashboardPickupKitchenPanel from './DashboardPickupKitchenPanel.vue'
 
-/** 营业概览顶卡数字条（请假/备餐/到期）；与 dashboard-summary / 归档接口回填 */
+/** 营业概览顶卡数字条（请假/备餐/当日已过期份数）；与 dashboard-summary / 归档接口回填 */
 const dashboardStats = ref([])
 const dashboardStatsLoading = ref(false)
 /** @type {import('vue').Ref<string>} */
@@ -32,6 +32,16 @@ function prepMetricsBreakdown(m) {
   const hd = Number(m.home_delivered_meal_total) || 0
   const pu = Number(m.pickup_meal_total) || 0
   return { total: hp + hd + pu, delivery: hp + hd, pickup: pu }
+}
+
+/** 后厨已出餐份数：仅已送达（不含待送；末次出餐份数已含在已送中，勿再叠加） */
+function prepMetricsKitchenOut(m) {
+  if (!m) return null
+  const hd = Number(m.home_delivered_meal_total) || 0
+  const hp = Number(m.home_pending_meal_total) || 0
+  const pd = Number(m.pickup_delivered_meal_total) || 0
+  const pp = Number(m.pickup_pending_meal_total) || 0
+  return { homeDelivered: hd, homePending: hp, pickupDelivered: pd, pickupPending: pp }
 }
 
 /** @param {Record<string, unknown> | null} m */
@@ -285,7 +295,7 @@ async function fetchDashboardSummary() {
       { label: '明日请假会员', value: nl, unit: '人', mapFilter: 'tomorrow_leave' },
       { label: '今日需准备餐品', value: tp, unit: '份', mapFilter: 'today_prep' },
       { label: '明日需准备餐品', value: np, unit: '份', mapFilter: 'tomorrow_prep' },
-      { label: '今日卡到期会员', value: te, unit: '人', mapFilter: null },
+      { label: '当日已过期份数', value: te, unit: '份', mapFilter: null },
     ]
     syncDashDatePickerFromSummary()
   } catch (e) {
@@ -359,7 +369,8 @@ const summarySlice = computed(() => ({
   tomorrowMeals: Number(dashboardStats.value[3]?.value) || 0,
 }))
 
-const expireCount = computed(() => Number(dashboardStats.value[4]?.value) || 0)
+/** 当日已消费殆尽的末次出餐份数（份数，非人数） */
+const expireMealPortions = computed(() => Number(dashboardStats.value[4]?.value) || 0)
 
 /** 今日单次零售总计数量（dashboard-summary.today_single_retail_total_quantity） */
 const todaySingleRetailTotalCount = computed(
@@ -371,19 +382,22 @@ const tomorrowSingleRetailTotalCount = computed(
   () => Number(summaryMeta.value?.tomorrow_single_retail_total_quantity) || 0,
 )
 
-/** 顶卡主数字「总销售量」= 配送份数 + 单次零售 + 门店自提（与公式一致） */
+const todayKitchenOut = computed(() => prepMetricsKitchenOut(todayPrepMetrics.value))
+
+/** 顶卡「总销售量」= 到家已送 + 自提已送 + 单次零售（份；不含待送、不重复计末次出餐） */
 const cardPrepTotal = computed(() => {
-  const b = prepMetricsBreakdown(todayPrepMetrics.value)
+  const k = todayKitchenOut.value
   const retail = todaySingleRetailTotalCount.value
-  if (b != null) {
+  if (k != null) {
     return Math.max(
       0,
-      Math.trunc(b.delivery) + Math.trunc(retail) + Math.trunc(b.pickup),
+      Math.trunc(k.homeDelivered) + Math.trunc(k.pickupDelivered) + Math.trunc(retail),
     )
   }
-  // 无 prep_metrics 时退化为「今日需准备」合计（无法再拆公式三项）
   return cardPrepTotalFallback.value
 })
+
+
 
 /** 锚定日周菜单「日总份数」（供后厨计划面板读取，与本周菜单配置同源） */
 const menuDayTotalStock = computed(() => {
@@ -392,6 +406,19 @@ const menuDayTotalStock = computed(() => {
   const n = Number(v)
   return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null
 })
+
+/** 锚定日次日周菜单「日总份数」（供后厨计划面板读取） */
+const menuDayTotalStockTomorrow = computed(() => {
+  const v = summaryMeta.value?.tomorrow_menu_day_total_stock
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null
+})
+
+/** 锚定日次日 ISO（YYYY-MM-DD） */
+const businessAnchorTomorrowIso = computed(() =>
+  businessAnchorIsoNormalized.value ? addOneDayIso(businessAnchorIsoNormalized.value) : '',
+)
 
 /** 无 prep_metrics 拆分时的总销售量兜底 */
 const cardPrepTotalFallback = computed(() => Number(dashboardStats.value[2]?.value) || 0)
@@ -408,15 +435,15 @@ const todayMealsPickup = computed(() => {
   return null
 })
 
-/** 主数字下方公式：配送份数 / 单次零售 / 自提份数（无拆分为 —） */
+/** 主数字下方公式：到家已送 / 单次零售 / 自提已送（与总销售量合计一致） */
 const todayTotalOutFormulaDelivery = computed(() =>
-  todayMealsDelivery.value == null ? '—' : String(Math.trunc(Number(todayMealsDelivery.value))),
+  todayKitchenOut.value == null ? '—' : String(Math.trunc(todayKitchenOut.value.homeDelivered)),
 )
 const todayTotalOutFormulaRetail = computed(() =>
   String(Math.trunc(todaySingleRetailTotalCount.value)),
 )
 const todayTotalOutFormulaPickup = computed(() =>
-  todayMealsPickup.value == null ? '—' : String(Math.trunc(Number(todayMealsPickup.value))),
+  todayKitchenOut.value == null ? '—' : String(Math.trunc(todayKitchenOut.value.pickupDelivered)),
 )
 
 /** 明日顶卡「总销售量」= 明日配送份数 + 明日单次零售 + 明日门店自提 */
@@ -569,7 +596,7 @@ const prepTotalAnimated = useAnimatedInteger(() => cardPrepTotal.value, { durati
 const tomorrowTotalAnimated = useAnimatedInteger(() => cardTomorrowPrepTotal.value, { duration: 840 })
 const todayLeaveAnimated = useAnimatedInteger(() => summarySlice.value.todayLeave, { duration: 620 })
 const tomorrowLeaveAnimated = useAnimatedInteger(() => summarySlice.value.tomorrowLeave, { duration: 620 })
-const expireCountAnimated = useAnimatedInteger(() => expireCount.value, { duration: 620 })
+const expireMealPortionsAnimated = useAnimatedInteger(() => expireMealPortions.value, { duration: 620 })
 const todaySingleRetailTotalAnimated = useAnimatedInteger(() => todaySingleRetailTotalCount.value, {
   duration: 620,
 })
@@ -668,20 +695,21 @@ onMounted(() => {
               <span class="dro-dash-kpi__hero-num dro-dash-kpi__hero-num--dark">{{ prepTotalAnimated }}</span>
             </div>
           </div>
-          <p class="dro-dash-kpi__hero-formula dro-dash-kpi__hero-formula--block" role="note">
-            <span class="dro-dash-kpi__hero-formula-eq">总销售量 = </span>
-            <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--delivery"
-              >配送份数 {{ todayTotalOutFormulaDelivery }}</span
-            >
-            <span class="dro-dash-kpi__hero-formula-plus"> + </span>
-            <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--retail"
-              >单次零售 {{ todayTotalOutFormulaRetail }}</span
-            >
-            <span class="dro-dash-kpi__hero-formula-plus"> + </span>
-            <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--pickup"
-              >自提 {{ todayTotalOutFormulaPickup }}</span
-            >
-          </p>
+         <div class="dro-dash-kpi__hero-formula-wrap">
+           <p class="dro-dash-kpi__hero-formula dro-dash-kpi__hero-formula--block" role="note">
+              <span class="dro-dash-kpi__hero-formula-eq">总销售量 = </span>
+              <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--delivery"
+>到家已送 {{
+                todayTotalOutFormulaDelivery }}</span>
+              <span class="dro-dash-kpi__hero-formula-plus"> + </span>
+             <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--retail">单次零售 {{
+                todayTotalOutFormulaRetail }}</span>
+              <span class="dro-dash-kpi__hero-formula-plus"> + </span>
+              <span class="dro-dash-kpi__hero-formula-part dro-dash-kpi__hero-formula-part--pickup"
+>自提已送 {{
+                todayTotalOutFormulaPickup }}</span>
+            </p>
+         </div>
           <div class="dro-prep-bar" role="img" :aria-label="todayFulfillAria">
             <div
               class="dro-prep-bar__seg dro-prep-bar__seg--today-done"
@@ -700,8 +728,8 @@ onMounted(() => {
             <span class="dro-dash-chip__v">{{ todayLeaveAnimated }} <small>人</small></span>
           </div>
           <div class="dro-dash-chip dro-dash-chip--rose">
-            <span class="dro-dash-chip__k">今日卡到期</span>
-            <span class="dro-dash-chip__v">{{ expireCountAnimated }} <small>人</small></span>
+           <span class="dro-dash-chip__k">当日已过期</span>
+            <span class="dro-dash-chip__v">{{ expireMealPortionsAnimated }} <small>份</small></span>
           </div>
           <div
             class="dro-dash-chip dro-dash-chip--blue"
@@ -967,7 +995,9 @@ onMounted(() => {
     <DashboardPickupKitchenPanel
       v-if="(!dashboardStatsLoading && dashboardStats.length) || showDeliveryMetrics"
       :business-date="businessAnchorIsoNormalized"
+:tomorrow-business-date="businessAnchorTomorrowIso"
       :menu-day-total-stock="menuDayTotalStock"
+:menu-day-total-stock-tomorrow="menuDayTotalStockTomorrow"
       @menu-day-stock-saved="fetchDashboardSummary"
     />
 
@@ -1254,9 +1284,16 @@ button.dro-dash-kpi__kicker--reset-live:focus-visible {
   width: 100%;
 }
 
+.dro-dash-kpi__hero-formula-wrap {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-self: end;
+  min-height: 2.55rem;
+  min-width: 0;
+}
 .dro-dash-kpi__mid .dro-dash-kpi__hero-formula--block {
   margin: 0;
-  align-self: end;
 }
 
 /** 三卡主数字行：189 / 203 / 731 顶对齐 */
@@ -1479,8 +1516,12 @@ button.dro-dash-kpi__kicker--reset-live:focus-visible {
   line-height: 1.3;
   letter-spacing: 0.02em;
   color: #475569;
-  /* 三卡公式区等高；内容底对齐，缩小公式与进度条之间的空白 */
+}
+
+/** 三卡公式区等高（wrap 承担 min-height；无 wrap 的明日/地图卡仍用 block 自身撑高） */
+.dro-dash-kpi__mid>.dro-dash-kpi__hero-formula--block {
   min-height: 2.55rem;
+  align-self: end;
 }
 
 .dro-dash-kpi__hero-formula {
@@ -1525,6 +1566,13 @@ button.dro-dash-kpi__kicker--reset-live:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+.dro-dash-kpi__hero-formula-note {
+  margin: 0.2rem 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #94a3b8;
+}
 .dro-dash-kpi__hero--compact {
   margin-bottom: 0;
 }

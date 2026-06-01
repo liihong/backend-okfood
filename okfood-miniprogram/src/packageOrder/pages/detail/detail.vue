@@ -62,10 +62,13 @@
       </view>
     </scroll-view>
     <view v-else class="detail-state detail-state--err">加载异常，请返回重试</view>
+    <OkAlertHost />
   </view>
 </template>
 
 <script setup>
+import OkAlertHost from '@/components/OkAlertHost/OkAlertHost.vue'
+import { showOkAlert } from '@/utils/okAlert.js'
 import { ref, computed, nextTick } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import {
@@ -223,7 +226,7 @@ function handleBuy() {
     return
   }
   if (!getMemberToken()) {
-    uni.showModal({
+    showOkAlert({
       title: '需要登录',
       content: '请先在「我的」中完成手机号登录后再下单。',
       confirmText: '去登录',

@@ -116,6 +116,7 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { showOkAlert } from '@/utils/okAlert.js'
 import MemberCouponCard from '@/components/MemberCouponCard/MemberCouponCard.vue'
 import {
   request,
@@ -132,6 +133,10 @@ import { listAvailableMemberCoupons, getMemberCouponReminder } from '@/utils/mem
 import { filterMemberCardCouponsForTemplate, pickBestMemberCoupon } from '@/utils/memberCouponScope.js'
 import { shouldOpenMemberSetup } from '@/utils/memberProfile.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
+import {
+  isUnpaidOrderConflict,
+  parsePendingOrderIdFromConflict,
+} from '@/utils/unpaidOrderPrompt.js'
 
 const DEFAULT_PRIV = [
   '全城顺丰免运费',
@@ -179,29 +184,12 @@ async function fetchPendingMemberCardOrderIdLocal() {
   }
 }
 
-/** @param {unknown} err */
-function parsePendingOrderIdFromErrorLocal(err) {
-  const msg = err instanceof Error ? err.message : String(err || '')
-  const m = msg.match(/#(\d+)/)
-  const id = m ? parseInt(m[1], 10) : NaN
-  return Number.isFinite(id) && id > 0 ? id : null
-}
-
-/** @param {unknown} err */
-function isUnpaidMemberCardOrderConflictLocal(err) {
-  return (
-    err &&
-    typeof err === 'object' &&
-    /** @type {{ status?: number }} */ (err).status === 409
-  )
-}
-
 function promptGoPayPendingOrder(orderId, memberCouponId) {
   const id = Math.floor(Number(orderId))
   if (!Number.isFinite(id) || id < 1) return Promise.resolve(false)
   const msg = `您有未支付的开卡订单（#${id}），请先完成支付后再下单`
   return new Promise((resolve) => {
-    uni.showModal({
+    showOkAlert({
       title: '待支付订单',
       content: msg,
       confirmText: '去支付',
@@ -234,11 +222,6 @@ async function maybePromptPendingPayOnEnter() {
   if (!orderId) return
   await promptGoPayPendingOrder(orderId, selectedCouponId.value)
 }
-
-const pan4 = computed(() => {
-  const id = templateId.value || 0
-  return String(id).padStart(4, '0').slice(-4)
-})
 
 const saleDisp = computed(() => {
   const s = tpl.value?.sale_price_yuan
@@ -344,7 +327,7 @@ function closeShareSheet() {
 function onShareTimelineGuide() {
   closeShareSheet()
   enableWechatShareMenus()
-  uni.showModal({
+  showOkAlert({
     title: '分享到朋友圈',
     content: '请点击右上角 ··· 菜单，选择「分享到朋友圈」',
     showCancel: false,
@@ -397,7 +380,7 @@ async function loadOne() {
     loading.value = false
   }
   if (tpl.value) {
-    void maybePromptPendingPayOnEnter()
+    maybePromptPendingPayOnEnter().catch(() => {})
   }
 }
 
@@ -488,7 +471,7 @@ async function onPay() {
     if (paySynced) {
       uni.showToast({ title: '支付成功', icon: 'success' })
     } else {
-      uni.showModal({
+      showOkAlert({
         title: '支付已提交',
         content:
           '微信已扣款，订单状态正在同步。请先完善配送信息；若后台长时间仍显示未缴，请联系客服核对。',
@@ -501,17 +484,17 @@ async function onPay() {
       })
     }, paySynced ? 400 : 80)
   } catch (e) {
-    const orderId = parsePendingOrderIdFromErrorLocal(e)
-    if (isUnpaidMemberCardOrderConflictLocal(e) && orderId) {
+    const orderId = parsePendingOrderIdFromConflict(e)
+    if (isUnpaidOrderConflict(e) && orderId) {
       await promptGoPayPendingOrder(orderId, selectedCouponId.value)
-      return
-    }
-    const msg =
-      e instanceof Error ? e.message : typeof e === 'string' ? e : '支付未完成'
-    if (msg.includes('cancel') || msg.includes('取消')) {
-      uni.showToast({ title: '已取消支付', icon: 'none' })
     } else {
-      uni.showToast({ title: msg, icon: 'none', duration: 2800 })
+      const msg =
+        e instanceof Error ? e.message : typeof e === 'string' ? e : '支付未完成'
+      if (msg.includes('cancel') || msg.includes('取消')) {
+        uni.showToast({ title: '已取消支付', icon: 'none' })
+      } else {
+        uni.showToast({ title: msg, icon: 'none', duration: 2800 })
+      }
     }
   } finally {
     paying.value = false
@@ -524,7 +507,7 @@ onLoad((opts) => {
   templateId.value = Number.isFinite(id) && id > 0 ? id : 0
   scrollStyle.value = { flex: '1', minHeight: '0' }
   enableWechatShareMenus()
-  void loadOne()
+  loadOne().catch(() => {})
 })
 </script>
 

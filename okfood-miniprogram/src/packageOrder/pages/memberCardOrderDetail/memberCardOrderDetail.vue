@@ -81,6 +81,7 @@
 import { ref, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { showOkAlert } from '@/utils/okAlert.js'
 import { getMemberToken, request } from '@/utils/api.js'
 import { getMemberCardOrder } from '@/utils/memberCardOrderApi.js'
 import { payMemberCardOrderWechat } from '@/utils/memberCardPay.js'
@@ -190,7 +191,7 @@ async function afterPaySuccess(paySynced) {
   if (paySynced) {
     uni.showToast({ title: '支付成功', icon: 'success' })
   } else {
-    uni.showModal({
+    showOkAlert({
       title: '支付已提交',
       content:
         '微信已扣款，订单状态正在同步。请先完善配送信息；若后台长时间仍显示未缴，请联系客服核对。',

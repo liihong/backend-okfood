@@ -59,6 +59,35 @@ def _member_not_skip_subscription_saturday(delivery_date: date):
     return literal(True)
 
 
+def member_on_subscription_delivery_schedule(
+    member: Member,
+    *,
+    delivery_date: date,
+    today: date | None = None,
+) -> bool:
+    """会员在指定业务日是否计入配送大表（到家或自提），与 eligible_members 口径一致。"""
+    if not is_subscription_delivery_day(delivery_date):
+        return False
+    if member.deleted_at is not None:
+        return False
+    if not bool(member.is_active):
+        return False
+    if bool(member.delivery_deferred):
+        return False
+    units = effective_daily_meal_units(member)
+    if int(member.balance) < units:
+        return False
+    biz_today = today if today is not None else today_shanghai()
+    if is_absent_on_delivery_date(member, delivery_date, today=biz_today):
+        return False
+    ds = member.delivery_start_date
+    if ds is not None and ds > delivery_date:
+        return False
+    if delivery_date.weekday() == 5 and bool(member.skip_subscription_saturday):
+        return False
+    return True
+
+
 def normalize_cn_mobile(raw: str) -> str:
     s = (raw or "").strip()
     digits = re.sub(r"\D", "", s)
@@ -401,62 +430,46 @@ def count_expire_one_unit_members_for_business_day(
     tenant_id: int | None = None,
     store_id: int | None = None,
 ) -> int:
-    """当日应履约（到家或自提）且 ``balance`` 恰等于每配送日份数的会员数（本日履约后将无余量）。
+    """当日已消费殆尽的末次出餐份数（到家；**份数非人数**，供后厨核对总出餐量）。
 
-    规则与 :func:`eligible_members_for_delivery` / :func:`eligible_members_for_store_pickup` 一致；
-    ``balance == daily_meal_units（封顶后）`` 表示仅剩 1 次配送。
+    字段名历史沿用 ``*_members``，返回值为餐份数。对锚定日已送达、``balance==0``、``is_active=False``、
+    ``store_pickup=False`` 的会员，汇总当日末次配送扣次 ``sum(abs(change))``（``abs(change)==daily_meal_units``）。
     """
     if not is_subscription_delivery_day(delivery_date):
         return 0
-    today = today_shanghai()
-    tomorrow = date.fromordinal(today.toordinal() + 1)
-    in_leave_range = and_(
-        Member.leave_range_start.is_not(None),
-        Member.leave_range_end.is_not(None),
-        Member.leave_range_start <= delivery_date,
-        Member.leave_range_end >= delivery_date,
-    )
-    target_hit = and_(
-        Member.is_leaved_tomorrow.is_(True),
-        Member.tomorrow_leave_target_date == delivery_date,
-    )
-    legacy_tomorrow = and_(
-        Member.is_leaved_tomorrow.is_(True),
-        Member.tomorrow_leave_target_date.is_(None),
-        literal(delivery_date) == literal(tomorrow),
-    )
-    tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
-    absent = or_(in_leave_range, tomorrow_leave_hit)
     started = or_(
         Member.delivery_start_date.is_(None),
         Member.delivery_start_date <= delivery_date,
     )
     units_sql = sql_effective_daily_meal_units_column()
-    daf = default_address_pick_subquery()
-    common = [
-        Member.deleted_at.is_(None),
-        Member.is_active.is_(True),
-        Member.balance == units_sql,
-        not_(absent),
-        started,
-        _member_not_skip_subscription_saturday(delivery_date),
-        _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
-    ]
-
-    def _one_count(*, store_pickup: bool) -> int:
-        q = (
-            select(func.count())
-            .select_from(Member)
-            .outerjoin(daf, daf.c.mid == Member.id)
-            .outerjoin(MemberAddress, MemberAddress.id == daf.c.addr_id)
-            .where(
-                *common,
-                Member.store_pickup.is_(store_pickup),
-            )
+    scope = _member_scope_clause(tenant_id=tenant_id, store_id=store_id)
+    saturday = _member_not_skip_subscription_saturday(delivery_date)
+    q = (
+        select(func.coalesce(func.sum(func.abs(BalanceLog.change)), 0))
+        .select_from(BalanceLog)
+        .join(Member, Member.id == BalanceLog.member_id)
+        .join(
+            DeliveryLog,
+            and_(
+                DeliveryLog.member_id == Member.id,
+                DeliveryLog.delivery_date == delivery_date,
+                DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+            ),
         )
-        return int(db.scalar(q) or 0)
-
-    return _one_count(store_pickup=False) + _one_count(store_pickup=True)
+        .where(
+            BalanceLog.reason == BalanceReason.DELIVERY.value,
+            func.date(BalanceLog.created_at) == delivery_date,
+            func.abs(BalanceLog.change) == units_sql,
+            Member.deleted_at.is_(None),
+            Member.store_pickup.is_(False),
+            Member.balance == 0,
+            Member.is_active.is_(False),
+            started,
+            saturday,
+            scope,
+        )
+    )
+    return int(db.scalar(q) or 0)
 
 
 def extra_delivered_ineligible_subscribers(

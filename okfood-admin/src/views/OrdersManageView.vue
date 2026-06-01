@@ -270,7 +270,8 @@ function canCancelOrder(row) {
   if (!row) return false
   const pay = String(row.pay_status || '').trim()
   const f = String(row.fulfillment_status || '').trim().toLowerCase()
-  if (pay === '已退款' || f === 'delivered' || f === 'cancelled') return false
+  if (f === 'delivered' || f === 'cancelled') return false
+  if (pay === '已退款') return f !== 'cancelled'
   if (pay === '未支付') return f === 'pending'
   if (pay === '已支付') return f === 'pending' || f === 'sf_awaiting_pickup' || f === 'accepted' || f === 'sf_cancelled'
   return false

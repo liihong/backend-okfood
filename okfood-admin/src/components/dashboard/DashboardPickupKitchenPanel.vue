@@ -7,8 +7,12 @@ import { showToast } from '../../composables/useToast.js'
 const props = defineProps({
   /** 营业锚定日 YYYY-MM-DD，与 dashboard-summary 一致 */
   businessDate: { type: String, default: '' },
+  /** 锚定日次日 YYYY-MM-DD */
+  tomorrowBusinessDate: { type: String, default: '' },
   /** 锚定日周菜单「日总份数」；null 表示未配置 */
   menuDayTotalStock: { type: Number, default: null },
+  /** 锚定日次日周菜单「日总份数」；null 表示未配置 */
+  menuDayTotalStockTomorrow: { type: Number, default: null },
 })
 
 const emit = defineEmits(['menu-day-stock-saved'])
@@ -22,17 +26,30 @@ const pickupRows = ref([])
 const markingMemberId = ref(null)
 
 const kitchenInput = ref(0)
+const kitchenInputTomorrow = ref(0)
 const kitchenSaving = ref(false)
+
+function syncKitchenInputFromStock(stock, targetRef) {
+  if (stock != null && stock >= 0) {
+    targetRef.value = stock
+  } else {
+    targetRef.value = 0
+  }
+}
 
 /** 后厨输入框：读取本周菜单对应日「日总份数」 */
 watch(
   () => [props.menuDayTotalStock, props.businessDate],
   () => {
-    if (props.menuDayTotalStock != null && props.menuDayTotalStock >= 0) {
-      kitchenInput.value = props.menuDayTotalStock
-    } else {
-      kitchenInput.value = 0
-    }
+    syncKitchenInputFromStock(props.menuDayTotalStock, kitchenInput)
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [props.menuDayTotalStockTomorrow, props.tomorrowBusinessDate],
+  () => {
+    syncKitchenInputFromStock(props.menuDayTotalStockTomorrow, kitchenInputTomorrow)
   },
   { immediate: true },
 )
@@ -129,39 +146,72 @@ async function verifyPickup(row) {
   }
 }
 
-/** 保存日总份数（仅更新本周菜单配置，不联动顶卡） */
+async function saveKitchenPlanForDate(businessDate, plannedTotal) {
+  await apiJson(
+    '/api/admin/kitchen-plan',
+    {
+      method: 'PUT',
+      body: JSON.stringify({ business_date: businessDate, planned_total: plannedTotal }),
+    },
+    { auth: true },
+  )
+}
+
+/** 保存今日/明日日总份数（仅更新本周菜单配置，不联动顶卡） */
 async function saveKitchenPlan() {
   if (kitchenSaving.value) return
   const d0 = (props.businessDate || '').trim()
+  const d1 = (props.tomorrowBusinessDate || '').trim()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d0)) {
     showToast('请先选择有效营业日', 'error')
     return
   }
-  const val = Math.trunc(Number(kitchenInput.value))
-  if (!Number.isFinite(val) || val < 0) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d1)) {
+    showToast('无法计算明日营业日，请刷新后重试', 'error')
+    return
+  }
+  const valToday = Math.trunc(Number(kitchenInput.value))
+  const valTomorrow = Math.trunc(Number(kitchenInputTomorrow.value))
+  if (!Number.isFinite(valToday) || valToday < 0 || !Number.isFinite(valTomorrow) || valTomorrow < 0) {
     showToast('请输入正确的日总份数', 'error')
     return
   }
   kitchenSaving.value = true
   try {
-    await apiJson(
-      '/api/admin/kitchen-plan',
-      {
-        method: 'PUT',
-        body: JSON.stringify({ business_date: d0, planned_total: val }),
-      },
-      { auth: true },
-    )
-    showToast(`日总份数已保存为 ${val} 份，本周菜单已同步`, 'success')
-    emit('menu-day-stock-saved')
-  } catch (e) {
-    const status = e && typeof e.status === 'number' ? e.status : 0
-    if (status === 401) {
-      alert('登录已过期，请重新登录')
-      handleAdminLogout()
+    const results = await Promise.allSettled([
+      saveKitchenPlanForDate(d0, valToday),
+      saveKitchenPlanForDate(d1, valTomorrow),
+    ])
+    const failed = results.filter((r) => r.status === 'rejected')
+    if (failed.length === 2) {
+      const firstErr = failed[0].reason
+      const status = firstErr && typeof firstErr.status === 'number' ? firstErr.status : 0
+      if (status === 401) {
+        alert('登录已过期，请重新登录')
+        handleAdminLogout()
+        return
+      }
+      showToast(firstErr instanceof Error ? firstErr.message : '保存后厨计划失败', 'error')
       return
     }
-    showToast(e instanceof Error ? e.message : '保存后厨计划失败', 'error')
+    if (failed.length === 1) {
+      const err = failed[0].reason
+      const status = err && typeof err.status === 'number' ? err.status : 0
+      if (status === 401) {
+        alert('登录已过期，请重新登录')
+        handleAdminLogout()
+        return
+      }
+      const failedLabel = results[0].status === 'rejected' ? '今日' : '明日'
+      showToast(
+        `${failedLabel}保存失败：${err instanceof Error ? err.message : '未知错误'}`,
+        'error',
+      )
+      emit('menu-day-stock-saved')
+      return
+    }
+    showToast(`今日 ${valToday} 份、明日 ${valTomorrow} 份已保存，本周菜单已同步`, 'success')
+    emit('menu-day-stock-saved')
   } finally {
     kitchenSaving.value = false
   }
@@ -187,18 +237,34 @@ onMounted(() => {
       <div class="dpk-formula">
         仅更新「本周菜单配置」中对应营业日的「日总份数」，不影响顶卡配餐总盘等其他数据
       </div>
-      <div class="dpk-form-group">
-        <label class="dpk-form-label">今日日总份数</label>
-        <div class="dpk-input-row">
-          <input
-            v-model.number="kitchenInput"
-            type="number"
-            class="dpk-form-control"
-            min="0"
-            max="99999"
-            inputmode="numeric"
-          />
-          <span class="dpk-unit">份</span>
+      <div class="dpk-form-row">
+        <div class="dpk-form-group">
+          <label class="dpk-form-label">今日日总份数</label>
+          <div class="dpk-input-row">
+            <input
+              v-model.number="kitchenInput"
+              type="number"
+              class="dpk-form-control"
+              min="0"
+              max="99999"
+              inputmode="numeric"
+            />
+            <span class="dpk-unit">份</span>
+          </div>
+        </div>
+        <div class="dpk-form-group">
+          <label class="dpk-form-label">明日日总份数</label>
+          <div class="dpk-input-row">
+            <input
+              v-model.number="kitchenInputTomorrow"
+              type="number"
+              class="dpk-form-control"
+              min="0"
+              max="99999"
+              inputmode="numeric"
+            />
+            <span class="dpk-unit">份</span>
+          </div>
         </div>
       </div>
       <button
@@ -509,11 +575,18 @@ onMounted(() => {
   text-align: center;
 }
 
+.dpk-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 4px;
+}
+
 .dpk-form-group {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 4px;
+  min-width: 0;
 }
 
 .dpk-form-label {
@@ -529,7 +602,9 @@ onMounted(() => {
 }
 
 .dpk-form-control {
-  width: 120px;
+  flex: 1;
+  min-width: 0;
+  max-width: 120px;
   padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid #eaedf1;

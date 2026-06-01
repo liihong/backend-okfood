@@ -1,4 +1,4 @@
-"""日菜单总库存存于 weekly_menu_slot.total_stock。单次卡剩余=总份数−应配送(订阅)−已付单次。"""
+"""日菜单总库存存于 weekly_menu_slot.total_stock。单次卡剩余=总份数−应配送(与配送大表一致)−已付单次。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,10 @@ from app.models.menu_dish import MenuDish
 from app.models.menu_schedule import MenuSchedule
 from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
-from app.services.courier_service import sum_subscription_meals_on_date
+from app.services.delivery_sheet_service import (
+    meal_units_totals_for_delivery_dates,
+    total_meal_units_for_delivery_sheet,
+)
 
 
 def _week_start(d: date) -> date:
@@ -49,21 +52,15 @@ def resolve_dish_for_calendar_date(db: Session, menu_date: date, *, store_id: in
 
 
 def subscription_total_meals_on_date(db: Session, menu_date: date, *, store_id: int) -> int:
-    """当日应配送的会员份数（到家+门店自提；与配送大表同一规则；非法定配送日则为 0）。"""
-    return sum_subscription_meals_on_date(db, delivery_date=menu_date, store_id=int(store_id))
+    """当日应配送份数（到家+自提，含已送后不再应送仍在大表者；与 ``build_delivery_sheet`` 合计一致；非法定配送日则为 0）。"""
+    return total_meal_units_for_delivery_sheet(db, delivery_date=menu_date, store_id=int(store_id))
 
 
 def subscription_total_meals_by_dates(
     db: Session, dates: Iterable[date], *, store_id: int
 ) -> dict[date, int]:
-    """批量计算多日订阅份数；去重后逐日 SUM，避免重复扫表。"""
-    sid = int(store_id)
-    out: dict[date, int] = {}
-    for d in dates:
-        if d in out:
-            continue
-        out[d] = subscription_total_meals_on_date(db, d, store_id=sid)
-    return out
+    """批量计算多日应配送份数；与配送大表 ``meal_units_totals_for_delivery_dates`` 同源。"""
+    return meal_units_totals_for_delivery_dates(db, dates=dates, store_id=int(store_id))
 
 
 def resolve_dishes_for_dates_batch(
