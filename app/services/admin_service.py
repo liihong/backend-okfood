@@ -51,6 +51,8 @@ from app.services.delivery_sheet_service import (
     _store_card_reorder_stats,
     _store_membership_counts,
     delivery_sheet_metrics_for_date,
+    delivery_sheet_metrics_pending_sql_for_future_date,
+    delivery_sheet_metrics_via_sql_for_unlocked_date,
     meal_units_totals_for_delivery_dates,
 )
 from app.services.member_address_service import (
@@ -919,26 +921,66 @@ def _dashboard_cached_sheet_metrics(
 ) -> DeliverySheetDayMetrics:
     """同一 dashboard-summary 请求内，每个业务日最多算一次大表拆分指标。"""
     if delivery_date not in metrics_cache:
-        metrics_cache[delivery_date] = delivery_sheet_metrics_for_date(
-            db,
-            delivery_date=delivery_date,
-            store_id=store_id,
-            metrics_cache=metrics_cache,
-        )
+        cal_today = today_shanghai()
+        if delivery_date > cal_today:
+            metrics_cache[delivery_date] = delivery_sheet_metrics_pending_sql_for_future_date(
+                db,
+                delivery_date=delivery_date,
+                store_id=store_id,
+            )
+        else:
+            from app.services.delivery_day_lock_service import is_delivery_day_sheet_locked
+
+            if is_delivery_day_sheet_locked(db, store_id=store_id, delivery_date=delivery_date):
+                metrics_cache[delivery_date] = delivery_sheet_metrics_for_date(
+                    db,
+                    delivery_date=delivery_date,
+                    store_id=store_id,
+                    metrics_cache=metrics_cache,
+                )
+            else:
+                metrics_cache[delivery_date] = delivery_sheet_metrics_via_sql_for_unlocked_date(
+                    db,
+                    delivery_date=delivery_date,
+                    store_id=store_id,
+                )
     return metrics_cache[delivery_date]
 
 
-# 上海「今日」概览短缓存：多管理员/前端重试时避免重复跑大表（进程内，单 worker 有效）
-_dashboard_live_summary_cache: dict[int, tuple[float, DashboardMealSummaryOut]] = {}
-_DASHBOARD_LIVE_SUMMARY_TTL_SEC = 90.0
+# 地图会员库/续卡率与锚定日无关，短 TTL 复用，避免换日时重复扫 member 表
+_dashboard_membership_kw_cache: dict[int, tuple[float, dict[str, int]]] = {}
+_DASHBOARD_MEMBERSHIP_KW_TTL_SEC = 90.0
+
+
+def _dashboard_membership_kw(db: Session, *, store_id: int) -> dict[str, int]:
+    sid = int(store_id)
+    cached = _dashboard_membership_kw_cache.get(sid)
+    if cached is not None:
+        ts, payload = cached
+        if time.time() - ts < _DASHBOARD_MEMBERSHIP_KW_TTL_SEC:
+            return payload
+    payload = {**_store_membership_counts(db, store_id=sid), **_store_card_reorder_stats(db, store_id=sid)}
+    _dashboard_membership_kw_cache[sid] = (time.time(), payload)
+    return payload
+
+
+# 按门店 + 锚定日缓存概览结果（进程内，单 worker 有效）
+_dashboard_anchor_summary_cache: dict[tuple[int, date], tuple[float, DashboardMealSummaryOut]] = {}
+_DASHBOARD_ANCHOR_SUMMARY_TTL_TODAY_SEC = 90.0
+_DASHBOARD_ANCHOR_SUMMARY_TTL_OTHER_SEC = 300.0
 
 
 def invalidate_dashboard_live_summary_cache(store_id: int | None = None) -> None:
     """供餐日数据变更后可按需清缓存；store_id 为空则清空全部门店。"""
     if store_id is None:
-        _dashboard_live_summary_cache.clear()
+        _dashboard_membership_kw_cache.clear()
+        _dashboard_anchor_summary_cache.clear()
         return
-    _dashboard_live_summary_cache.pop(int(store_id), None)
+    sid = int(store_id)
+    _dashboard_membership_kw_cache.pop(sid, None)
+    for key in list(_dashboard_anchor_summary_cache):
+        if key[0] == sid:
+            _dashboard_anchor_summary_cache.pop(key, None)
 
 
 def dashboard_meal_summary(
@@ -961,19 +1003,22 @@ def dashboard_meal_summary(
     day_after = date.fromordinal(anchor.toordinal() + 1)
     cal_today = today_shanghai()
 
-    if anchor == cal_today and not force_recompute:
-        cached = _dashboard_live_summary_cache.get(sid)
+    if not force_recompute:
+        cache_key = (sid, anchor)
+        cached = _dashboard_anchor_summary_cache.get(cache_key)
         if cached is not None:
             ts, payload = cached
-            if time.time() - ts < _DASHBOARD_LIVE_SUMMARY_TTL_SEC:
+            ttl = (
+                _DASHBOARD_ANCHOR_SUMMARY_TTL_TODAY_SEC
+                if anchor == cal_today
+                else _DASHBOARD_ANCHOR_SUMMARY_TTL_OTHER_SEC
+            )
+            if time.time() - ts < ttl:
                 return payload
 
     wow_prev_anchor = date.fromordinal(anchor.toordinal() - 7)
     wow_prev_day_after = date.fromordinal(day_after.toordinal() - 7)
-    mem_kw = {
-        **_store_membership_counts(db, store_id=sid),
-        **_store_card_reorder_stats(db, store_id=sid),
-    }
+    mem_kw = _dashboard_membership_kw(db, store_id=sid)
     from app.services.menu_day_stock_service import weekly_menu_day_total_stock
 
     today_menu_day_total_stock = weekly_menu_day_total_stock(db, anchor, store_id=sid)
@@ -1024,7 +1069,7 @@ def dashboard_meal_summary(
             today_single_retail = _paid_single_retail_portions_by_dates(
                 db, [anchor, day_after], store_id=sid
             )
-            return DashboardMealSummaryOut(
+            snap_out = DashboardMealSummaryOut(
                 shanghai_today=cal_today,
                 business_anchor_date=anchor,
                 today_leave_members=int(row.today_leave_members),
@@ -1045,6 +1090,9 @@ def dashboard_meal_summary(
                 from_snapshot=True,
                 snapshot_recorded_at=row.recorded_at,
             )
+            if not force_recompute:
+                _dashboard_anchor_summary_cache[(sid, anchor)] = (time.time(), snap_out)
+            return snap_out
 
     wow_bundle = meal_units_totals_for_delivery_dates(
         db,
@@ -1155,7 +1203,7 @@ def dashboard_meal_summary(
             snapshot_recorded_at=row.recorded_at,
         )
 
-    if anchor == cal_today and not force_recompute:
-        _dashboard_live_summary_cache[sid] = (time.time(), out)
+    if not force_recompute:
+        _dashboard_anchor_summary_cache[(sid, anchor)] = (time.time(), out)
 
     return out

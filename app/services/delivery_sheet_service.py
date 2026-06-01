@@ -501,7 +501,12 @@ def _store_membership_counts(db: Session, *, store_id: int) -> dict[str, int]:
 def _card_reorder_stats_for_kinds(
     db: Session, *, store_id: int, card_kinds: list[str]
 ) -> dict[str, tuple[int, int]]:
-    """批量统计各卡型续卡率分子/分母，避免 dashboard 对周卡/月卡各跑 2 次重查询。"""
+    """各卡型续卡率分子/分母（字段名历史沿用 reorder_*）。
+
+    分母：曾有过该卡型「已缴且已入账」工单的去重会员数。
+    分子：同一卡型有第 2 笔及以上入账的去重会员数；含提前续卡（如 6 次只吃 1 次又续）
+    与过期后续购，不要求先 balance 归零。
+    """
     kinds = [str(k).strip() for k in card_kinds if str(k).strip()]
     if not kinds:
         return {}
@@ -531,7 +536,7 @@ def _card_reorder_stats_for_kinds(
         .join(Member, Member.id == MemberCardOrder.member_id)
         .where(*paid_filters)
         .group_by(MemberCardOrder.card_kind, MemberCardOrder.member_id)
-        .having(func.count(func.distinct(func.date(MemberCardOrder.created_at))) >= 2)
+        .having(func.count(MemberCardOrder.id) >= 2)
         .subquery()
     )
     reorder_rows = db.execute(
@@ -539,20 +544,17 @@ def _card_reorder_stats_for_kinds(
     ).all()
     reorder_map = {str(k): int(c or 0) for k, c in reorder_rows}
 
-    out: dict[str, tuple[int, int]] = {}
-    for k in kinds:
-        out[k] = (reorder_map.get(k, 0), base_map.get(k, 0))
-    return out
+    return {k: (reorder_map.get(k, 0), base_map.get(k, 0)) for k in kinds}
 
 
 def _card_reorder_members_for_kind(db: Session, *, store_id: int, card_kind: str) -> tuple[int, int]:
-    """某卡型「续卡率」分子/分母：跨日二次及以上已缴入账人数 ÷ 曾有过该卡型入账人数。"""
+    """某卡型续卡率分子/分母（含提前续卡）。"""
     m = _card_reorder_stats_for_kinds(db, store_id=store_id, card_kinds=[card_kind])
     return m.get(card_kind, (0, 0))
 
 
 def _store_card_reorder_stats(db: Session, *, store_id: int) -> dict[str, int]:
-    """仪表盘地图会员库：周卡/月卡续卡率（跨日二次开卡入账）。"""
+    """仪表盘地图会员库：周卡/月卡续卡率（二次及以上入账，含提前续卡）。"""
     stats = _card_reorder_stats_for_kinds(
         db,
         store_id=store_id,
@@ -579,6 +581,141 @@ def total_meal_units_sql_sum_only(
         _sum_meal_units_home_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
         + _sum_meal_units_pickup_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
         + _sum_meal_units_extra_delivered_on_date(db, delivery_date=delivery_date, store_id=sid)
+    )
+
+
+def _delivered_member_ids_subquery(db: Session, *, delivery_date: date, store_id: int):
+    """当日 delivery_logs 已 DELIVERED 的会员 id 子查询（dashboard SQL 快速路径用）。"""
+    sid = int(store_id)
+    return (
+        select(DeliveryLog.member_id)
+        .join(Member, Member.id == DeliveryLog.member_id)
+        .where(
+            DeliveryLog.delivery_date == delivery_date,
+            DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+            Member.store_id == sid,
+            Member.deleted_at.is_(None),
+        )
+        .distinct()
+    )
+
+
+def _sum_meal_units_split_by_delivery_status(
+    db: Session,
+    *,
+    delivery_date: date,
+    store_id: int,
+    base_filters: tuple,
+) -> tuple[int, int]:
+    """按 delivery_logs 是否已 DELIVERED 拆分 SQL 份数（已送 / 待送）。"""
+    units_sql = sql_effective_daily_meal_units_column()
+    delivered_subq = _delivered_member_ids_subquery(db, delivery_date=delivery_date, store_id=store_id)
+    delivered = int(
+        db.scalar(
+            select(func.coalesce(func.sum(units_sql), 0)).where(
+                *base_filters,
+                Member.id.in_(delivered_subq),
+            )
+        )
+        or 0
+    )
+    pending = int(
+        db.scalar(
+            select(func.coalesce(func.sum(units_sql), 0)).where(
+                *base_filters,
+                Member.id.notin_(delivered_subq),
+            )
+        )
+        or 0
+    )
+    return delivered, pending
+
+
+def _sum_extra_delivered_by_pickup_on_date(
+    db: Session, *, delivery_date: date, store_id: int, store_pickup: bool
+) -> int:
+    """扣次后不再应送、但当日已 DELIVERED 的会员份数；按 store_pickup 拆分。"""
+    sid = int(store_id)
+    units_sql = sql_effective_daily_meal_units_column()
+    home_elig = select(Member.id).where(
+        *_member_subscription_eligibility_where(delivery_date, store_id=sid),
+        Member.store_pickup.is_(False),
+    )
+    pu_elig = select(Member.id).where(
+        *_member_subscription_eligibility_where(delivery_date, store_id=sid),
+        Member.store_pickup.is_(True),
+    )
+    delivered_subq = _delivered_member_ids_subquery(db, delivery_date=delivery_date, store_id=sid)
+    q = (
+        select(func.coalesce(func.sum(units_sql), 0))
+        .select_from(Member)
+        .where(
+            Member.store_id == sid,
+            Member.deleted_at.is_(None),
+            Member.store_pickup.is_(store_pickup),
+            Member.id.in_(delivered_subq),
+            Member.id.notin_(home_elig),
+            Member.id.notin_(pu_elig),
+        )
+    )
+    return int(db.scalar(q) or 0)
+
+
+def delivery_sheet_metrics_pending_sql_for_future_date(
+    db: Session, *, delivery_date: date, store_id: int
+) -> DeliverySheetDayMetrics:
+    """未来供餐日：尚无送达记录，全部待送；仅 SQL 聚合，不加载会员行。"""
+    empty = DeliverySheetDayMetrics(0, 0, 0, 0, 0, 0)
+    if not is_subscription_delivery_day(delivery_date):
+        return empty
+    sid = int(store_id)
+    home_pending = _sum_meal_units_home_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
+    pickup_pending = _sum_meal_units_pickup_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
+    return DeliverySheetDayMetrics(
+        home_pending_meal_total=home_pending,
+        home_delivered_meal_total=0,
+        pickup_meal_total=pickup_pending,
+        pickup_pending_meal_total=pickup_pending,
+        pickup_delivered_meal_total=0,
+        home_stop_count=0,
+    )
+
+
+def delivery_sheet_metrics_via_sql_for_unlocked_date(
+    db: Session, *, delivery_date: date, store_id: int
+) -> DeliverySheetDayMetrics:
+    """未锁单日：用 SQL 拆分已送/待送，避免 dashboard 加载整表会员。"""
+    empty = DeliverySheetDayMetrics(0, 0, 0, 0, 0, 0)
+    if not is_subscription_delivery_day(delivery_date):
+        return empty
+    sid = int(store_id)
+    home_base = (
+        *_member_subscription_eligibility_where(delivery_date, store_id=sid),
+        Member.store_pickup.is_(False),
+    )
+    pu_base = (
+        *_member_subscription_eligibility_where(delivery_date, store_id=sid),
+        Member.store_pickup.is_(True),
+    )
+    home_delivered, home_pending = _sum_meal_units_split_by_delivery_status(
+        db, delivery_date=delivery_date, store_id=sid, base_filters=home_base
+    )
+    pu_delivered, pu_pending = _sum_meal_units_split_by_delivery_status(
+        db, delivery_date=delivery_date, store_id=sid, base_filters=pu_base
+    )
+    home_delivered += _sum_extra_delivered_by_pickup_on_date(
+        db, delivery_date=delivery_date, store_id=sid, store_pickup=False
+    )
+    pu_delivered += _sum_extra_delivered_by_pickup_on_date(
+        db, delivery_date=delivery_date, store_id=sid, store_pickup=True
+    )
+    return DeliverySheetDayMetrics(
+        home_pending_meal_total=home_pending,
+        home_delivered_meal_total=home_delivered,
+        pickup_meal_total=pu_delivered + pu_pending,
+        pickup_pending_meal_total=pu_pending,
+        pickup_delivered_meal_total=pu_delivered,
+        home_stop_count=0,
     )
 
 

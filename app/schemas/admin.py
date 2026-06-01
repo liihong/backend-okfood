@@ -582,22 +582,22 @@ class DashboardMealSummaryOut(BaseModel):
     weekly_card_reorder_members: int = Field(
         ...,
         ge=0,
-        description="周卡：不同日期二次及以上「已缴且已入账」开卡工单的去重会员数（续卡率分子）",
+        description="周卡：二次及以上「已缴且已入账」工单的去重会员数（续卡率分子，含提前续卡）",
     )
     weekly_card_reorder_base_members: int = Field(
         ...,
         ge=0,
-        description="周卡：曾有过「已缴且已入账」周卡工单的去重会员数（续卡率分母）",
+        description="周卡：曾有过「已缴且已入账」工单的去重会员数（续卡率分母）",
     )
     monthly_card_reorder_members: int = Field(
         ...,
         ge=0,
-        description="月卡：不同日期二次及以上「已缴且已入账」开卡工单的去重会员数（续卡率分子）",
+        description="月卡：二次及以上「已缴且已入账」工单的去重会员数（续卡率分子，含提前续卡）",
     )
     monthly_card_reorder_base_members: int = Field(
         ...,
         ge=0,
-        description="月卡：曾有过「已缴且已入账」月卡工单的去重会员数（续卡率分母）",
+        description="月卡：曾有过「已缴且已入账」工单的去重会员数（续卡率分母）",
     )
     tomorrow_first_meal_new_members: int = Field(
         ...,

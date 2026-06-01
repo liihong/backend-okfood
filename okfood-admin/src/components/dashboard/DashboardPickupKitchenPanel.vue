@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Search } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
@@ -13,6 +13,10 @@ const props = defineProps({
   menuDayTotalStock: { type: Number, default: null },
   /** 锚定日次日周菜单「日总份数」；null 表示未配置 */
   menuDayTotalStockTomorrow: { type: Number, default: null },
+  /** 服务端上海当日 YYYY-MM-DD；未来营业日不拉配送大表 */
+  shanghaiToday: { type: String, default: '' },
+  /** 顶卡概览加载中：与 dashboard-summary 串行，避免同屏争抢 DB */
+  summaryLoading: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['menu-day-stock-saved'])
@@ -75,9 +79,14 @@ function formatQuotaDisplay(row) {
 }
 
 async function fetchPickupList() {
-  if (!adminAccessToken.value) return
+  if (!adminAccessToken.value || props.summaryLoading) return
   const d0 = (props.businessDate || '').trim()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d0)) return
+  const today = (props.shanghaiToday || '').trim()
+  if (today && d0 > today) {
+    pickupRows.value = []
+    return
+  }
   pickupLoading.value = true
   try {
     const data = await apiJson(
@@ -157,7 +166,7 @@ async function saveKitchenPlanForDate(businessDate, plannedTotal) {
   )
 }
 
-/** 保存今日/明日日总份数（仅更新本周菜单配置，不联动顶卡） */
+/** 保存今日/明日日总份数，并通知顶卡刷新 dashboard-summary */
 async function saveKitchenPlan() {
   if (kitchenSaving.value) return
   const d0 = (props.businessDate || '').trim()
@@ -207,26 +216,24 @@ async function saveKitchenPlan() {
         `${failedLabel}保存失败：${err instanceof Error ? err.message : '未知错误'}`,
         'error',
       )
-      emit('menu-day-stock-saved')
+      emit('menu-day-stock-saved', { today: valToday, tomorrow: valTomorrow })
       return
     }
     showToast(`今日 ${valToday} 份、明日 ${valTomorrow} 份已保存，本周菜单已同步`, 'success')
-    emit('menu-day-stock-saved')
+    emit('menu-day-stock-saved', { today: valToday, tomorrow: valTomorrow })
   } finally {
     kitchenSaving.value = false
   }
 }
 
 watch(
-  () => props.businessDate,
+  () => [props.businessDate, props.summaryLoading, props.shanghaiToday],
   () => {
+    if (props.summaryLoading) return
     void fetchPickupList()
   },
+  { immediate: true },
 )
-
-onMounted(() => {
-  void fetchPickupList()
-})
 </script>
 
 <template>
@@ -235,7 +242,7 @@ onMounted(() => {
     <article class="dpk-card dpk-card--kitchen">
       <div class="dpk-card-title dpk-card-title--blue">🍳 后厨计划管理</div>
       <div class="dpk-formula">
-        仅更新「本周菜单配置」中对应营业日的「日总份数」，不影响顶卡配餐总盘等其他数据
+        保存后同步更新「本周菜单配置」与顶卡「后厨总生产 / 可卖数量」
       </div>
       <div class="dpk-form-row">
         <div class="dpk-form-group">

@@ -31,4 +31,8 @@ def set_menu_day_total_stock_by_business_date(
             detail="该日菜单未排菜，请先在「本周菜单」选择菜品后再设日总份数",
         )
     db.commit()
+    # 顶卡 dashboard-summary 有 90s 锚点缓存，保存后需失效以免仍展示旧「日总份数」
+    from app.services.admin_service import invalidate_dashboard_live_summary_cache
+
+    invalidate_dashboard_live_summary_cache(int(store_id))
     return total
