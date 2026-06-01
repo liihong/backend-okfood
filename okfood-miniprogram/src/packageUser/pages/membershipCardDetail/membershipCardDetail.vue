@@ -114,8 +114,9 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
+import { onLoad, onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { getNavbarLayout } from '@/utils/navbar.js'
 import { showOkAlert } from '@/utils/okAlert.js'
 import MemberCouponCard from '@/components/MemberCouponCard/MemberCouponCard.vue'
 import {
@@ -501,11 +502,21 @@ async function onPay() {
   }
 }
 
+/** scroll-view 在真机上须明确高度，flex:1 会导致内容区高度为 0 而整页空白 */
+function applyScrollLayout() {
+  const { navBarTotal } = getNavbarLayout()
+  scrollStyle.value = { height: `calc(100vh - ${navBarTotal}px)` }
+}
+
+onShow(() => {
+  applyScrollLayout()
+})
+
 onLoad((opts) => {
   const raw = opts?.templateId != null ? String(opts.templateId) : ''
   const id = parseInt(raw, 10)
   templateId.value = Number.isFinite(id) && id > 0 ? id : 0
-  scrollStyle.value = { flex: '1', minHeight: '0' }
+  applyScrollLayout()
   enableWechatShareMenus()
   loadOne().catch(() => {})
 })
