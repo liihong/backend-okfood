@@ -890,7 +890,7 @@ def _dashboard_meals_week_over_week_caption(*, meals: int, baseline_meals: int) 
     delta = int(meals) - int(baseline_meals)
     if delta == 0:
         return "较上周持平"
-    return f"较上周{delta:+d}份"
+    return f"较上周{delta:+d}"
 
 
 def _dashboard_snapshot_meal_totals(

@@ -100,7 +100,7 @@ const tomorrowPrepHeadsYoyDelta = computed(() => {
 function stripMealsWowCaptionLeadingPhrase(raw) {
   const t = raw == null ? '' : String(raw).trim()
   if (!t) return ''
-  return t.replace(/^较上周[\s\u3000]*/, '').trim()
+  return t.replace(/^较上周[\s\u3000]*/, '').replace(/份$/u, '').trim()
 }
 
 /** 备餐份数同比上周说明（dashboard-summary）；展示在同比条右侧 */
@@ -523,17 +523,53 @@ const mapLibActivityRatePct = computed(() => {
   return Math.round(((mapLibActiveWeekly.value + mapLibActiveMonthly.value) / t) * 100)
 })
 
-/** 进度条四段：有效月、有效周、过期月、过期周（与参考 HTML 顺序一致） */
-const mapLibBarSegments = computed(() => {
-  const t = mapLibTotal.value
-  const raw = [
-    { key: 'am', n: mapLibActiveMonthly.value, cls: 'dro-map-bar__seg--month' },
-    { key: 'aw', n: mapLibActiveWeekly.value, cls: 'dro-map-bar__seg--week' },
-    { key: 'em', n: mapLibExpiredMonthly.value, cls: 'dro-map-bar__seg--exp-m' },
-    { key: 'ew', n: mapLibExpiredWeekly.value, cls: 'dro-map-bar__seg--exp-w' },
-  ]
-  if (t <= 0) return raw.map((s) => ({ ...s, width: 0 }))
-  return raw.map((s) => ({ ...s, width: (s.n / t) * 100 }))
+/** 有效会员总数（周卡有效 + 月卡有效，作占比分母） */
+const mapLibActiveMemberTotal = computed(
+  () => mapLibActiveWeekly.value + mapLibActiveMonthly.value,
+)
+
+/** 有效会员中周卡人数占比 */
+const mapLibWeeklyActiveSharePct = computed(() => {
+  const t = mapLibActiveMemberTotal.value
+  if (t <= 0) return 0
+  return Math.round((mapLibActiveWeekly.value / t) * 100)
+})
+
+/** 有效会员中月卡人数占比 */
+const mapLibMonthlyActiveSharePct = computed(() => {
+  const t = mapLibActiveMemberTotal.value
+  if (t <= 0) return 0
+  return Math.round((mapLibActiveMonthly.value / t) * 100)
+})
+
+const MAP_LIB_RING_R = 34
+const MAP_LIB_RING_CIRCUMFERENCE = 2 * Math.PI * MAP_LIB_RING_R
+
+/**
+ * SVG 圆环进度（参考稿：r=34、描边 6、-90deg 起笔）
+ * @param {number} pct 0–100
+ */
+function buildMapLibRingStroke(pct) {
+  const p = Math.min(100, Math.max(0, Math.round(Number(pct) || 0)))
+  return {
+    dasharray: MAP_LIB_RING_CIRCUMFERENCE,
+    dashoffset: MAP_LIB_RING_CIRCUMFERENCE * (1 - p / 100),
+  }
+}
+
+const mapLibWeeklyRingStroke = computed(() =>
+  buildMapLibRingStroke(mapLibWeeklyActiveSharePct.value),
+)
+const mapLibMonthlyRingStroke = computed(() =>
+  buildMapLibRingStroke(mapLibMonthlyActiveSharePct.value),
+)
+
+const mapLibRingAria = computed(() => {
+  const t = mapLibActiveMemberTotal.value
+  const aw = mapLibActiveWeekly.value
+  const am = mapLibActiveMonthly.value
+  if (t <= 0) return '有效会员周卡、月卡占比：暂无数据'
+  return `有效会员 ${t} 人：周卡占比 ${mapLibWeeklyActiveSharePct.value}%（${aw} 人），月卡占比 ${mapLibMonthlyActiveSharePct.value}%（${am} 人）`
 })
 
 /** 概览数字滚动展示（加载 / 刷新 / 换日后过渡到新值） */
@@ -731,19 +767,19 @@ onMounted(async () => {
         <div class="dro-dash-kpi__stat-row dro-dash-kpi__stat-row--chips-then-yoy">
           <div class="dro-dash-chip dro-dash-chip--amber">
             <span class="dro-dash-chip__k">今日请假</span>
-            <span class="dro-dash-chip__v">{{ todayLeaveAnimated }} <small>人</small></span>
+            <span class="dro-dash-chip__v">{{ todayLeaveAnimated }} <small></small></span>
           </div>
           <div class="dro-dash-chip dro-dash-chip--rose">
             <span class="dro-dash-chip__k">当日过期</span>
-            <span class="dro-dash-chip__v">{{ expireMealPortionsAnimated }} <small>份</small></span>
+            <span class="dro-dash-chip__v">{{ expireMealPortionsAnimated }} <small></small></span>
           </div>
           <div
             class="dro-dash-chip dro-dash-chip--blue"
             role="status"
-            :aria-label="`单次零售 ${todaySingleRetailTotalCount} 份`"
+            :aria-label="`单次零售 ${todaySingleRetailTotalCount} `"
           >
             <span class="dro-dash-chip__k">单次零售</span>
-            <span class="dro-dash-chip__v">{{ todaySingleRetailTotalAnimated }} <small>份</small></span>
+            <span class="dro-dash-chip__v">{{ todaySingleRetailTotalAnimated }} <small></small></span>
           </div>
           <div
             class="dro-dash-yoy-chip dro-dash-yoy-chip--today"
@@ -899,22 +935,22 @@ onMounted(async () => {
         <div class="dro-dash-kpi__stat-row dro-dash-kpi__stat-row--chips-then-yoy">
           <div class="dro-dash-chip dro-dash-chip--amber">
             <span class="dro-dash-chip__k">明日请假</span>
-            <span class="dro-dash-chip__v">{{ tomorrowLeaveAnimated }} <small>人</small></span>
+            <span class="dro-dash-chip__v">{{ tomorrowLeaveAnimated }} <small></small></span>
           </div>
           <div
             class="dro-dash-chip dro-dash-chip--rose"
             :class="{ 'dro-dash-chip--faded': tomorrowFirstMealNewCount === 0 }"
           >
             <span class="dro-dash-chip__k">首餐新客</span>
-            <span class="dro-dash-chip__v">{{ tomorrowFirstMealNewAnimated }} <small>人</small></span>
+            <span class="dro-dash-chip__v">{{ tomorrowFirstMealNewAnimated }} <small></small></span>
           </div>
           <div
             class="dro-dash-chip dro-dash-chip--blue"
             role="status"
-            :aria-label="`单次零售 ${tomorrowSingleRetailTotalCount} 份`"
+            :aria-label="`单次零售 ${tomorrowSingleRetailTotalCount} `"
           >
             <span class="dro-dash-chip__k">单次零售</span>
-            <span class="dro-dash-chip__v">{{ tomorrowSingleRetailTotalAnimated }} <small>份</small></span>
+            <span class="dro-dash-chip__v">{{ tomorrowSingleRetailTotalAnimated }} <small></small></span>
           </div>
           <div
             class="dro-dash-yoy-chip dro-dash-yoy-chip--tomorrow"
@@ -958,24 +994,86 @@ onMounted(async () => {
           </div>
           <Users :size="22" class="dro-dash-kpi__ico dro-dash-kpi__ico--purple" aria-hidden="true" />
         </div>
-        <div class="dro-dash-kpi__mid">
-          <div class="dro-dash-kpi__metric-top">
-            <div class="dro-dash-kpi__hero dro-dash-kpi__hero--compact">
-              <span class="dro-dash-kpi__hero-num dro-dash-kpi__hero-num--dark">{{ mapLibTotalAnimated }}</span>
-            </div>
-            <span class="dro-dash-kpi__rate">活跃率 {{ mapLibActivityRatePct }}%</span>
-          </div>
-          <p class="dro-dash-kpi__hero-formula dro-dash-kpi__hero-formula--block" role="note">
-            <span class="dro-dash-kpi__hero-suffix dro-dash-kpi__hero-suffix--below">位总会员</span>
-          </p>
-          <div class="dro-map-bar" aria-hidden="true">
-            <div
-              v-for="seg in mapLibBarSegments"
-              :key="seg.key"
-              class="dro-map-bar__seg"
-              :class="seg.cls"
-              :style="{ width: seg.width + '%' }"
-            />
+        <div class="dro-dash-kpi__hero-metric dro-dash-kpi__hero-metric--maplib">
+          <span class="dro-dash-kpi__hero-metric-num">{{ mapLibTotalAnimated }}</span>
+          <small class="dro-dash-kpi__hero-metric-suffix">位总会员</small>
+          <span
+            class="dro-dash-kpi__rate dro-dash-kpi__rate--maplib-end"
+            role="status"
+            :aria-label="`活跃率 ${mapLibActivityRatePct}%`"
+            >活跃率 {{ mapLibActivityRatePct }}%</span
+          >
+        </div>
+        <div class="dro-dash-kpi__mid dro-dash-kpi__mid--maplib">
+          <div class="dro-map-ring-panel" role="img" :aria-label="mapLibRingAria">
+            <figure class="dro-map-ring">
+              <div class="dro-map-ring__wrap">
+                <svg class="dro-map-ring__svg" viewBox="0 0 80 80" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="dro-map-ring-weekly" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stop-color="#10b981" />
+                      <stop offset="100%" stop-color="#34d399" />
+                    </linearGradient>
+                  </defs>
+                  <circle
+                    cx="40"
+                    cy="40"
+                    :r="MAP_LIB_RING_R"
+                    stroke="#f1f5f9"
+                    stroke-width="6"
+                    fill="transparent"
+                  />
+                  <circle
+                    cx="40"
+                    cy="40"
+                    :r="MAP_LIB_RING_R"
+                    stroke="url(#dro-map-ring-weekly)"
+                    stroke-width="6"
+                    fill="transparent"
+                    :stroke-dasharray="mapLibWeeklyRingStroke.dasharray"
+                    :stroke-dashoffset="mapLibWeeklyRingStroke.dashoffset"
+                    stroke-linecap="round"
+                    class="dro-map-ring__progress dro-map-ring__progress--week"
+                  />
+                </svg>
+                <span class="dro-map-ring__pct">{{ mapLibWeeklyActiveSharePct }}%</span>
+              </div>
+              <figcaption class="dro-map-ring__lbl">周卡比例</figcaption>
+            </figure>
+            <figure class="dro-map-ring">
+              <div class="dro-map-ring__wrap">
+                <svg class="dro-map-ring__svg" viewBox="0 0 80 80" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="dro-map-ring-monthly" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stop-color="#3b82f6" />
+                      <stop offset="100%" stop-color="#60a5fa" />
+                    </linearGradient>
+                  </defs>
+                  <circle
+                    cx="40"
+                    cy="40"
+                    :r="MAP_LIB_RING_R"
+                    stroke="#f1f5f9"
+                    stroke-width="6"
+                    fill="transparent"
+                  />
+                  <circle
+                    cx="40"
+                    cy="40"
+                    :r="MAP_LIB_RING_R"
+                    stroke="url(#dro-map-ring-monthly)"
+                    stroke-width="6"
+                    fill="transparent"
+                    :stroke-dasharray="mapLibMonthlyRingStroke.dasharray"
+                    :stroke-dashoffset="mapLibMonthlyRingStroke.dashoffset"
+                    stroke-linecap="round"
+                    class="dro-map-ring__progress dro-map-ring__progress--month"
+                  />
+                </svg>
+                <span class="dro-map-ring__pct">{{ mapLibMonthlyActiveSharePct }}%</span>
+              </div>
+              <figcaption class="dro-map-ring__lbl">月卡比例</figcaption>
+            </figure>
           </div>
           <div class="dro-dash-kpi__mid-spacer" aria-hidden="true" />
         </div>
@@ -1385,6 +1483,93 @@ button.dro-dash-pill--interactive:focus-visible {
   margin-top: 0.65rem;
 }
 
+/** 地图会员库：周/月有效占比圆环 + 弹性留白 */
+.dro-dash-kpi__mid--maplib {
+  grid-template-rows: auto minmax(0, 1fr);
+  margin-top: 0.15rem;
+}
+
+/** 主数字行与明日预测顶卡一致，活跃率仍靠右 */
+.dro-dash-kpi__hero-metric--maplib {
+  width: 100%;
+}
+
+.dro-dash-kpi__hero-metric--maplib .dro-dash-kpi__rate--maplib-end {
+  margin-left: auto;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+/** 有效会员周卡/月卡占比圆环（对齐参考稿 ring 面板） */
+.dro-map-ring-panel {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.875rem 0.5rem;
+  background: #fafbfc;
+  border: 1px solid #eaedf1;
+  border-radius: 20px;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.01);
+  flex-shrink: 0;
+}
+
+.dro-map-ring {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.dro-map-ring__wrap {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dro-map-ring__svg {
+  width: 80px;
+  height: 80px;
+  transform: rotate(-90deg);
+}
+
+.dro-map-ring__progress {
+  transition: stroke-dashoffset 0.5s ease;
+}
+
+.dro-map-ring__progress--week {
+  filter: drop-shadow(0 2px 4px rgba(16, 185, 129, 0.25));
+}
+
+.dro-map-ring__progress--month {
+  filter: drop-shadow(0 2px 4px rgba(59, 130, 246, 0.25));
+}
+
+.dro-map-ring__pct {
+  position: absolute;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 15px;
+  font-weight: 900;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.dro-map-ring__lbl {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
+  color: #64748b;
+  letter-spacing: 0.05em;
+}
+
 /** 出餐流向链条（对齐参考稿 distribution-chain） */
 .dro-dash-distribution-chain {
   display: flex;
@@ -1584,8 +1769,7 @@ button.dro-dash-pill--interactive:focus-visible {
   margin-bottom: 0.55rem;
 }
 
-.dro-prep-bar,
-.dro-map-bar {
+.dro-prep-bar {
   display: flex;
   width: 100%;
   height: 6px;
@@ -2118,28 +2302,6 @@ button.dro-dash-pill--interactive:focus-visible {
   background: #ecfdf5;
   padding: 0.25rem 0.55rem;
   border-radius: 0.375rem;
-}
-
-.dro-map-bar__seg {
-  height: 100%;
-  min-width: 0;
-  transition: width 0.45s ease;
-}
-
-.dro-map-bar__seg--month {
-  background: #3b82f6;
-}
-
-.dro-map-bar__seg--week {
-  background: #10b981;
-}
-
-.dro-map-bar__seg--exp-m {
-  background: #fbbf24;
-}
-
-.dro-map-bar__seg--exp-w {
-  background: #cbd5e1;
 }
 
 .dro-dash-plan-box {

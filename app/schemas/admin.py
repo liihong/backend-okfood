@@ -606,11 +606,11 @@ class DashboardMealSummaryOut(BaseModel):
     )
     today_meals_week_over_week_caption: str = Field(
         ...,
-        description="「今日」(锚定日) 备餐份数周同比文案，如「较上周+12份」「较上周持平」",
+        description="「今日」(锚定日) 备餐份数周同比文案，如「较上周+12」「较上周持平」",
     )
     tomorrow_meals_week_over_week_caption: str = Field(
         ...,
-        description="「明日」(锚定日次日) 备餐份数周同比文案，如「较上周+12份」「较上周持平」",
+        description="「明日」(锚定日次日) 备餐份数周同比文案，如「较上周+12」「较上周持平」",
     )
     today_menu_day_total_stock: int | None = Field(
         None,
