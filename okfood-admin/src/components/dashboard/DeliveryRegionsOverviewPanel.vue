@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { Users, TrendingUp } from 'lucide-vue-next'
+import { Users, TrendingUp, UtensilsCrossed } from 'lucide-vue-next'
 import { useDeliveryRegionMapOverview } from '../../composables/useDeliveryRegionMapOverview.js'
 import { UNASSIGNED_AREA_LABEL } from '../../utils/regionAssignment.js'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
@@ -8,7 +8,7 @@ import { showToast } from '../../composables/useToast.js'
 import { useAnimatedInteger } from '../../composables/useAnimatedInteger.js'
 import DashboardPickupKitchenPanel from './DashboardPickupKitchenPanel.vue'
 
-/** 营业概览顶卡数字条（请假/备餐/当日已过期份数）；与 dashboard-summary / 归档接口回填 */
+/** 营业概览顶卡数字条（请假/备餐/当日过期份数）；与 dashboard-summary / 归档接口回填 */
 const dashboardStats = ref([])
 const dashboardStatsLoading = ref(false)
 /** @type {import('vue').Ref<string>} */
@@ -103,7 +103,7 @@ function stripMealsWowCaptionLeadingPhrase(raw) {
   return t.replace(/^较上周[\s\u3000]*/, '').trim()
 }
 
-/** 备餐份数同比上周说明（dashboard-summary）；展示在同比条右侧（左侧日期仍由前端拼装） */
+/** 备餐份数同比上周说明（dashboard-summary）；展示在同比条右侧 */
 const todayMealsWeekOverWeekCaption = computed(() => {
   const raw = summaryMeta.value?.today_meals_week_over_week_caption
   return stripMealsWowCaptionLeadingPhrase(raw)
@@ -128,6 +128,13 @@ function formatYoyWeekHeadsSigned(delta) {
   if (delta === 0) return '0人'
   if (delta > 0) return `+${delta}人`
   return `${delta}人`
+}
+
+/** 顶卡右上角剩余可售：图标胶囊的无障碍/悬停文案 */
+function formatSellableGateLabel(qty) {
+  if (qty == null) return '剩余可售：—'
+  if (qty > 0) return `剩余可售：${qty}份（可售）`
+  return '剩余可售：0份（已售罄）'
 }
 
 /** 与 Date#getUTCDay() 一致：0=周日 … 6=周六（UTC，与锚定业务日一致） */
@@ -187,34 +194,6 @@ const businessAnchorIsoNormalized = computed(() => {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ''
 })
 
-/** 同比基准：上周同一日历日（今日卡 = 锚定日 −7 天） */
-const yoyLastWeekTodayIso = computed(() =>
-  businessAnchorIsoNormalized.value ? addCalendarDaysIso(businessAnchorIsoNormalized.value, -7) : '',
-)
-const yoyLastWeekTodayMd = computed(() => isoToMdDisplay(yoyLastWeekTodayIso.value))
-const yoyLastWeekTodayWeekday = computed(() => isoToWeekdayCn(yoyLastWeekTodayIso.value))
-
-/** 同比基准：上周与「明日」对应的日历日（锚定日+1 再 −7 天） */
-const yoyLastWeekTomorrowIso = computed(() => {
-  const a = businessAnchorIsoNormalized.value
-  if (!a) return ''
-  const next = addOneDayIso(a)
-  return next ? addCalendarDaysIso(next, -7) : ''
-})
-const yoyLastWeekTomorrowMd = computed(() => isoToMdDisplay(yoyLastWeekTomorrowIso.value))
-const yoyLastWeekTomorrowWeekday = computed(() => isoToWeekdayCn(yoyLastWeekTomorrowIso.value))
-
-/** ISO 日历日 YYYY-MM-DD 平移若干天（UTC，与业务日一致） */
-function addCalendarDaysIso(isoLike, deltaDays) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoLike).trim().slice(0, 10))
-  if (!m) return ''
-  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
-  dt.setUTCDate(dt.getUTCDate() + Number(deltaDays))
-  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(
-    dt.getUTCDate(),
-  ).padStart(2, '0')}`
-}
-
 /** ISO 日历日 YYYY-MM-DD 的次日（UTC，与业务日一致） */
 function addOneDayIso(iso) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso).trim().slice(0, 10))
@@ -249,13 +228,6 @@ function onDashDatePopoverShow() {
  */
 function onDashboardAnchorDateChange(val) {
   summaryAnchorDate.value = val && typeof val === 'string' ? val.slice(0, 10).trim() : ''
-  dashDatePopoverVisible.value = false
-  void fetchDashboardSummary()
-}
-
-/** 点击「配餐总盘」：清空锚定日，不传 business_date，按服务端上海当日重新拉 overview */
-function resetDashboardSummaryToShanghaiLiveToday() {
-  summaryAnchorDate.value = ''
   dashDatePopoverVisible.value = false
   void fetchDashboardSummary()
 }
@@ -296,7 +268,7 @@ async function fetchDashboardSummary() {
       { label: '明日请假会员', value: nl, unit: '人', mapFilter: 'tomorrow_leave' },
       { label: '今日需准备餐品', value: tp, unit: '份', mapFilter: 'today_prep' },
       { label: '明日需准备餐品', value: np, unit: '份', mapFilter: 'tomorrow_prep' },
-      { label: '当日已过期份数', value: te, unit: '份', mapFilter: null },
+      { label: '当日过期份数', value: te, unit: '份', mapFilter: null },
     ]
     syncDashDatePickerFromSummary()
   } catch (e) {
@@ -427,6 +399,16 @@ const todaySellableQuantity = computed(() => {
       Math.trunc(Number(todayMealsDelivery.value)) -
       Math.trunc(Number(todayMealsPickup.value)) -
       todaySingleRetailTotalCount.value,
+  )
+})
+
+/** 今日已售出 = 同城配送 + 门店自提 + 单次零售 */
+const todaySoldTotal = computed(() => {
+  if (todayMealsDelivery.value == null || todayMealsPickup.value == null) return null
+  return (
+    Math.trunc(Number(todayMealsDelivery.value)) +
+    Math.trunc(Number(todayMealsPickup.value)) +
+    todaySingleRetailTotalCount.value
   )
 })
 
@@ -619,9 +601,9 @@ onMounted(async () => {
                   class="dro-dash-pill dro-dash-pill--emerald dro-dash-pill--interactive"
                   :aria-expanded="dashDatePopoverVisible ? 'true' : 'false'"
                   aria-haspopup="dialog"
-                  aria-label="选择营业日，查看该日配餐总盘数据"
+                  aria-label="选择营业日，查看该日总盘数据"
                 >
-                  {{ summaryIsLiveToday ? '今日' : '当日' }} · {{ businessAnchorMdDisplay || '—'
+                  {{ summaryIsLiveToday ? '今日总盘' : '当日' }} · {{ businessAnchorMdDisplay || '—'
                   }}<template v-if="businessAnchorWeekdayDisplay">
                     {{ businessAnchorWeekdayDisplay }}</template
                   >
@@ -640,45 +622,21 @@ onMounted(async () => {
                 <p class="dro-dash-date-picker-hint">清空则按服务端默认（上海当日）</p>
               </div>
             </el-popover>
-            <button
-              type="button"
-              class="dro-dash-kpi__kicker dro-dash-kpi__kicker--reset-live"
-              aria-label="配餐总盘：恢复为上海当日营业数据"
-              @click="resetDashboardSummaryToShanghaiLiveToday"
-            >
-              配餐总盘
-            </button>
           </div>
           <span
-            class="dro-dash-kpi__sellable-gate"
-            :class="{
-              'dro-dash-kpi__sellable-gate--ok':
-                todaySellableQuantity != null && todaySellableQuantity > 0,
-              'dro-dash-kpi__sellable-gate--soldout':
-                todaySellableQuantity != null && todaySellableQuantity <= 0,
-            }"
+            class="dro-dash-kpi__ico-badge dro-dash-kpi__ico-badge--emerald"
             role="status"
+            :title="formatSellableGateLabel(todaySellableQuantity)"
+            :aria-label="formatSellableGateLabel(todaySellableQuantity)"
           >
-            ● 剩余可售:
-            {{ todaySellableQuantity == null ? '—' : todaySellableQuantity }}
-            份<template v-if="todaySellableQuantity != null && todaySellableQuantity > 0">
-              (可售)</template
-            ><template v-else-if="todaySellableQuantity != null && todaySellableQuantity <= 0">
-              (已售罄)</template
-            >
+            <UtensilsCrossed :size="18" aria-hidden="true" />
           </span>
         </div>
         <div class="dro-dash-kpi__hero-metric">
           <span class="dro-dash-kpi__hero-metric-num">{{
-            todayMealsDelivery == null || todayMealsPickup == null
-              ? '—'
-              : Math.trunc(Number(todayMealsDelivery)) +
-                Math.trunc(Number(todayMealsPickup)) +
-                todaySingleRetailTotalCount
+            menuDayTotalStock != null ? menuDayTotalStock : '—'
           }}</span>
-          <small class="dro-dash-kpi__hero-metric-suffix"
-            >份已售 / 计划 {{ menuDayTotalStock != null ? menuDayTotalStock : '—' }} 份</small
-          >
+          <small class="dro-dash-kpi__hero-metric-suffix">后厨总生产(份)</small>
         </div>
         <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
           <div class="dro-dash-kpi__metric-top">
@@ -694,7 +652,7 @@ onMounted(async () => {
               <div class="dro-dash-chain-node-header">
                 <span class="dro-dash-chain-node-label">配额去向拆解线</span>
                 <span class="dro-dash-chain-node dro-dash-chain-node--main">
-                  后厨总生产 {{ menuDayTotalStock != null ? `${menuDayTotalStock}份` : '—' }}
+                  已售出 {{ todaySoldTotal != null ? `${todaySoldTotal}份` : '—' }}
                 </span>
               </div>
               <div class="dro-dash-stacked-bar" aria-hidden="true">
@@ -730,7 +688,7 @@ onMounted(async () => {
               <div class="dro-dash-branch-pill-grid">
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />已定配送</span
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />同城配送</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
                     todayMealsDelivery == null ? '—' : `${Math.trunc(Number(todayMealsDelivery))}份`
@@ -738,7 +696,7 @@ onMounted(async () => {
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提核销</span
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />门店自提</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
                     todayMealsPickup == null ? '—' : `${Math.trunc(Number(todayMealsPickup))}份`
@@ -776,7 +734,7 @@ onMounted(async () => {
             <span class="dro-dash-chip__v">{{ todayLeaveAnimated }} <small>人</small></span>
           </div>
           <div class="dro-dash-chip dro-dash-chip--rose">
-           <span class="dro-dash-chip__k">当日已过期</span>
+            <span class="dro-dash-chip__k">当日过期</span>
             <span class="dro-dash-chip__v">{{ expireMealPortionsAnimated }} <small>份</small></span>
           </div>
           <div
@@ -791,21 +749,12 @@ onMounted(async () => {
             class="dro-dash-yoy-chip dro-dash-yoy-chip--today"
             role="status"
             :aria-label="
-              (yoyLastWeekTodayMd
-                ? '同比上周 · ' +
-                  yoyLastWeekTodayMd +
-                  (yoyLastWeekTodayWeekday || '') +
-                  '，'
-                : '') +
+              '同比上周，' +
               (todayMealsWeekOverWeekCaption || formatYoyWeekHeadsText(todayPrepHeadsYoyDelta))
             "
           >
             <div class="dro-dash-yoy-chip__left">
-              <span class="dro-dash-yoy-chip__line">
-                <span class="dro-dash-yoy-chip__prefix">同比上周 · </span>
-                <span class="dro-dash-yoy-chip__date">{{ yoyLastWeekTodayMd || '—' }}</span>
-                <span class="dro-dash-yoy-chip__week">{{ yoyLastWeekTodayWeekday || '' }}</span>
-              </span>
+              <span class="dro-dash-yoy-chip__prefix">同比上周</span>
             </div>
             <span
               class="dro-dash-yoy-chip__val"
@@ -841,25 +790,31 @@ onMounted(async () => {
                 {{ businessAnchorTomorrowWeekdayDisplay }}</template
               ></span
             >
-            <span class="dro-dash-kpi__kicker">配餐预测</span>
           </div>
-          <TrendingUp :size="22" class="dro-dash-kpi__ico dro-dash-kpi__ico--blue" aria-hidden="true" />
+          <span
+            class="dro-dash-kpi__ico-badge dro-dash-kpi__ico-badge--blue"
+            role="status"
+            :title="formatSellableGateLabel(tomorrowSellableQuantity)"
+            :aria-label="formatSellableGateLabel(tomorrowSellableQuantity)"
+          >
+            <TrendingUp :size="18" aria-hidden="true" />
+          </span>
         </div>
         <div class="dro-dash-kpi__hero-metric">
-          <span class="dro-dash-kpi__hero-metric-num">{{ cardTomorrowPrepTotal }}</span>
-          <small class="dro-dash-kpi__hero-metric-suffix">份预计</small>
+          <span class="dro-dash-kpi__hero-metric-num">{{ tomorrowDistributionMainTotal }}</span>
+          <small class="dro-dash-kpi__hero-metric-suffix">后厨总生产(份)</small>
         </div>
         <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
           <div class="dro-dash-kpi__metric-top">
             <div
               class="dro-dash-distribution-chain dro-dash-distribution-chain--tomorrow"
               role="note"
-              :aria-label="`${tomorrowDistributionMainTotal}份明日配餐预测等于配送、自提、单次零售与可卖数量之和`"
+              :aria-label="`${tomorrowDistributionMainTotal}份明日预测等于同城配送、门店自提、单次零售与可卖数量之和`"
             >
               <div class="dro-dash-chain-node-header">
                 <span class="dro-dash-chain-node-label">明日排产指标线</span>
                 <span class="dro-dash-chain-node dro-dash-chain-node--main dro-dash-chain-node--main-blue">
-                  后厨总生产 {{ tomorrowDistributionMainTotal }}份
+                  已售出 {{ cardTomorrowPrepTotal }}份
                 </span>
               </div>
               <div class="dro-dash-stacked-bar" aria-hidden="true">
@@ -901,7 +856,7 @@ onMounted(async () => {
               <div class="dro-dash-branch-pill-grid">
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />已定配送</span
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />同城配送</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
                     tomorrowPrepDelivery == null ? '—' : `${Math.trunc(Number(tomorrowPrepDelivery))}份`
@@ -909,7 +864,7 @@ onMounted(async () => {
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提核销</span
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />门店自提</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
                     tomorrowPrepPickup == null ? '—' : `${Math.trunc(Number(tomorrowPrepPickup))}份`
@@ -950,7 +905,7 @@ onMounted(async () => {
             class="dro-dash-chip dro-dash-chip--rose"
             :class="{ 'dro-dash-chip--faded': tomorrowFirstMealNewCount === 0 }"
           >
-            <span class="dro-dash-chip__k">明日首餐新客</span>
+            <span class="dro-dash-chip__k">首餐新客</span>
             <span class="dro-dash-chip__v">{{ tomorrowFirstMealNewAnimated }} <small>人</small></span>
           </div>
           <div
@@ -965,21 +920,12 @@ onMounted(async () => {
             class="dro-dash-yoy-chip dro-dash-yoy-chip--tomorrow"
             role="status"
             :aria-label="
-              (yoyLastWeekTomorrowMd
-                ? '同比上周 · ' +
-                  yoyLastWeekTomorrowMd +
-                  (yoyLastWeekTomorrowWeekday || '') +
-                  '，'
-                : '') +
+              '同比上周，' +
               (tomorrowMealsWeekOverWeekCaption || formatYoyWeekHeadsText(tomorrowPrepHeadsYoyDelta))
             "
           >
             <div class="dro-dash-yoy-chip__left">
-              <span class="dro-dash-yoy-chip__line">
-                <span class="dro-dash-yoy-chip__prefix">同比上周 · </span>
-                <span class="dro-dash-yoy-chip__date">{{ yoyLastWeekTomorrowMd || '—' }}</span>
-                <span class="dro-dash-yoy-chip__week">{{ yoyLastWeekTomorrowWeekday || '' }}</span>
-              </span>
+              <span class="dro-dash-yoy-chip__prefix">同比上周</span>
             </div>
             <span
               class="dro-dash-yoy-chip__val"
@@ -1290,31 +1236,6 @@ onMounted(async () => {
   color: #64748b;
 }
 
-/** 今日顶卡：剩余可售胶囊 */
-.dro-dash-kpi__sellable-gate {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.25rem 0.65rem;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1.2;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.dro-dash-kpi__sellable-gate--ok {
-  background: #ecfdf5;
-  color: #065f46;
-  border: 1px solid #a7f3d0;
-}
-
-.dro-dash-kpi__sellable-gate--soldout {
-  background: #fef2f2;
-  color: #b91c1c;
-  border: 1px solid #fecaca;
-}
-
 .dro-dash-kpi__tags {
   display: flex;
   flex-wrap: wrap;
@@ -1342,9 +1263,7 @@ onMounted(async () => {
   border-color: #d1fae5;
 }
 
-/* 配餐总盘营业日：可点开日历；重置 button 默认样式。
- * 勿用 font:inherit：会压住 .dro-dash-pill 的字号/字重；右侧「明日」为 span，
- * 两卡标题胶囊应共用同一套 typography。 */
+/* 今日总盘营业日：可点开日历；勿用 font:inherit，与右侧「明日预测」胶囊 typography 一致 */
 button.dro-dash-pill--interactive {
   cursor: pointer;
   margin: 0;
@@ -1390,23 +1309,32 @@ button.dro-dash-pill--interactive:focus-visible {
   text-transform: uppercase;
 }
 
-/* 「配餐总盘」：button 占位复位；勿 font:inherit（否则压住 .dro-dash-kpi__kicker，与「配餐预测」span 不齐） */
-button.dro-dash-kpi__kicker--reset-live {
-  border: none;
-  background: transparent;
-  padding: 0;
-  margin: 0;
-  cursor: pointer;
-}
-
-button.dro-dash-kpi__kicker--reset-live:focus-visible {
-  outline: 2px solid rgba(16, 185, 129, 0.45);
-  outline-offset: 2px;
-  border-radius: 2px;
-}
-
 .dro-dash-kpi__ico {
   flex-shrink: 0;
+}
+
+/** 今日/明日顶卡：圆角底托图标（与右侧会员库纯线型图标区分） */
+.dro-dash-kpi__ico-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+}
+
+.dro-dash-kpi__ico-badge--emerald {
+  background: rgba(236, 253, 245, 0.92);
+  border: 1px solid rgba(167, 243, 208, 0.85);
+  color: #059669;
+}
+
+.dro-dash-kpi__ico-badge--blue {
+  background: rgba(239, 246, 255, 0.92);
+  border: 1px solid rgba(191, 219, 254, 0.85);
+  color: #2563eb;
 }
 
 .dro-dash-kpi__ico--emerald {
@@ -2070,7 +1998,6 @@ button.dro-dash-kpi__kicker--reset-live:focus-visible {
   grid-template-columns: 1fr 1fr;
   gap: 0.75rem;
   padding-top: 0.75rem;
-  border-top: 1px dashed #eaedf1;
   flex-shrink: 0;
   margin-top: auto;
 }

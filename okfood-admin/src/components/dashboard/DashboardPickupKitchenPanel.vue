@@ -308,11 +308,11 @@ watch(
         <table v-else class="dpk-table">
           <thead>
             <tr>
-              <th>客户</th>
-              <th>联系电话</th>
-              <th>卡包剩余次数</th>
-              <th>核销状态</th>
-              <th class="dpk-th-action">对账核销</th>
+              <th>名称</th>
+              <th>电话</th>
+              <th>次数</th>
+              <th>状态</th>
+              <th class="dpk-th-action">操作</th>
             </tr>
           </thead>
           <tbody>
