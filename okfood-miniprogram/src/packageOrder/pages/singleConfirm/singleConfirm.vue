@@ -129,7 +129,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
@@ -163,7 +163,7 @@ const addressRows = ref([])
 const rawAddresses = ref([])
 const selectedIndex = ref(0)
 const paying = ref(false)
-const scrollStyle = ref({ height: '400px' })
+const scrollStyle = ref({})
 /** delivery | pickup */
 const fulfillMode = ref('delivery')
 const quantity = ref(1)
@@ -265,15 +265,14 @@ watch(quantity, () => {
   if (dish.value) void loadCoupons()
 })
 
+/** scroll-view 在真机上须明确高度，flex:1 会导致内容区高度为 0 而整页空白 */
+function applyScrollLayout() {
+  const { navBarTotal } = getNavbarLayout()
+  scrollStyle.value = { height: `calc(100vh - ${navBarTotal}px)` }
+}
+
 onLoad((options) => {
-  try {
-    const win = uni.getWindowInfo ? uni.getWindowInfo() : uni.getSystemInfoSync()
-    const { navBarTotal } = getNavbarLayout()
-    const h = Math.max(240, (win.windowHeight || 667) - navBarTotal)
-    scrollStyle.value = { height: `${h}px` }
-  } catch {
-    /* ignore */
-  }
+  applyScrollLayout()
   const raw =
     (options && options.dish_id) ||
     (options && options.dishId) ||
@@ -322,6 +321,7 @@ onLoad((options) => {
 })
 
 onShow(() => {
+  applyScrollLayout()
   if (!dishIdStr.value || !getMemberToken()) return
   refreshAddressesOnly()
 })
@@ -380,6 +380,8 @@ async function loadPage() {
     loadError.value = msg || '加载失败'
   } finally {
     loading.value = false
+    // scroll-view 在 v-else 中随 loading 结束才挂载，下一帧再算高度避免真机 0 高
+    nextTick(() => applyScrollLayout())
   }
 }
 
@@ -467,7 +469,7 @@ async function handlePay() {
 
 <style lang="scss" scoped>
 .page {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: #fff;
@@ -476,6 +478,7 @@ async function handlePay() {
 
 .scroll {
   flex: 1;
+  min-height: 0;
   width: 100%;
   box-sizing: border-box;
 }
