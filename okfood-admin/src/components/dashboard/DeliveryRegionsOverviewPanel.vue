@@ -636,7 +636,7 @@ onMounted(async () => {
           <span class="dro-dash-kpi__hero-metric-num">{{
             menuDayTotalStock != null ? menuDayTotalStock : '—'
           }}</span>
-          <small class="dro-dash-kpi__hero-metric-suffix">后厨总生产(份)</small>
+          <small class="dro-dash-kpi__hero-metric-suffix">份-后厨产出量</small>
         </div>
         <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
           <div class="dro-dash-kpi__metric-top">
@@ -802,7 +802,7 @@ onMounted(async () => {
         </div>
         <div class="dro-dash-kpi__hero-metric">
           <span class="dro-dash-kpi__hero-metric-num">{{ tomorrowDistributionMainTotal }}</span>
-          <small class="dro-dash-kpi__hero-metric-suffix">后厨总生产(份)</small>
+          <small class="dro-dash-kpi__hero-metric-suffix">份-后厨产出量</small>
         </div>
         <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
           <div class="dro-dash-kpi__metric-top">
