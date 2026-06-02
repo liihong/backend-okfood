@@ -52,7 +52,7 @@
 import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
-import { getNavbarLayout } from '@/utils/navbar.js'
+import { getPageScrollStyle } from '@/utils/navbar.js'
 import { request, getMemberToken, clearMemberSession, isUserMeNotFoundError } from '@/utils/api.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 
@@ -131,8 +131,7 @@ async function onSave() {
 }
 
 onShow(() => {
-  const { navBarTotal } = getNavbarLayout()
-  scrollStyle.value = { height: `calc(100vh - ${navBarTotal}px)` }
+  scrollStyle.value = getPageScrollStyle()
   void loadMe()
 })
 </script>

@@ -37,6 +37,7 @@
     <scroll-view
       scroll-y
       class="scroll"
+      :style="scrollStyle"
       :show-scrollbar="false"
       lower-threshold="120"
       @scrolltolower="loadMore"
@@ -106,6 +107,7 @@ import { listSingleMealOrders, singleOrderStatusMeta } from '@/utils/singleOrder
 import { listMemberCardOrders } from '@/utils/memberCardOrderApi.js'
 import { STORAGE_OPEN_ORDERS_PENDING_PAY } from '@/utils/unpaidOrderPrompt.js'
 import { syncCustomTabBar, getCustomTabBarBottomReservePx } from '@/utils/customTabBar.js'
+import { getPageScrollStyle, ORDERS_TAB_HEADER_CHROME_PX } from '@/utils/navbar.js'
 
 const MAIN_SINGLE = 'single'
 const MAIN_MALL = 'mall'
@@ -122,6 +124,13 @@ const STATUS_MALL = [
   { id: 'pending_pay', label: '待支付' },
   { id: 'completed', label: '已完成' },
 ]
+
+const scrollStyle = ref({})
+
+function applyScrollLayout() {
+  const tabBottom = getCustomTabBarBottomReservePx()
+  scrollStyle.value = getPageScrollStyle(tabBottom, ORDERS_TAB_HEADER_CHROME_PX)
+}
 
 const scrollTailStyle = computed(() => ({
   height: `${getCustomTabBarBottomReservePx()}px`,
@@ -303,6 +312,7 @@ function openMallDetail(row) {
 
 onShow(() => {
   if (reLaunchIfCourierModePreferred()) return
+  applyScrollLayout()
   syncCustomTabBar()
   try {
     const hint = uni.getStorageSync(STORAGE_OPEN_ORDERS_PENDING_PAY)

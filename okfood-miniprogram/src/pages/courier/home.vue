@@ -49,7 +49,7 @@
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
-import { getNavbarLayout } from '@/utils/navbar.js'
+import { getPageScrollStyle } from '@/utils/navbar.js'
 import { getCourierToken, clearCourierToken, setCourierMeCache } from '@/utils/api.js'
 import { fetchCourierMe, fetchCourierTasks } from '@/utils/courierApi.js'
 import { syncCustomTabBar } from '@/utils/customTabBar.js'
@@ -93,8 +93,7 @@ onShow(() => {
     return
   }
   authed.value = true
-  const { navBarTotal } = getNavbarLayout()
-  scrollStyle.value = { height: `calc(100vh - ${navBarTotal}px)` }
+  scrollStyle.value = getPageScrollStyle()
   void loadPage()
 })
 

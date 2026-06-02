@@ -4,6 +4,7 @@
     <scroll-view
       scroll-y
       class="scroll"
+      :style="scrollStyle"
       :show-scrollbar="false"
       lower-threshold="120"
       @scrolltolower="loadMore"
@@ -41,12 +42,18 @@
 import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { getPageScrollStyle } from '@/utils/navbar.js'
 import { showOkAlert } from '@/utils/okAlert.js'
 import { getMemberToken } from '@/utils/api.js'
 import { listDeliveryDeductions } from '@/utils/deliveryDeductionApi.js'
 
+const scrollStyle = ref({})
 const items = ref([])
 const total = ref(0)
+
+function applyScrollLayout() {
+  scrollStyle.value = getPageScrollStyle()
+}
 const totalMealUnits = ref(0)
 const page = ref(1)
 const pageSize = 20
@@ -122,6 +129,7 @@ function loadMore() {
 }
 
 onShow(() => {
+  applyScrollLayout()
   void fetchPage(true)
 })
 </script>

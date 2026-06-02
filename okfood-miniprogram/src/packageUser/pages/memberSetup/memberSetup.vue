@@ -1,7 +1,7 @@
 <template>
   <view class="page">
     <OkNavbar show-back :title="navbarTitle" />
-    <scroll-view scroll-y class="scroll" :show-scrollbar="false">
+    <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="wrap">
         <text class="lead">{{ leadText }}</text>
 
@@ -104,6 +104,7 @@
 import { ref, computed } from 'vue'
 import { onShow, onLoad } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { getPageScrollStyle } from '@/utils/navbar.js'
 import {
   request,
   getMemberToken,
@@ -198,7 +199,14 @@ function bumpDailyUnits(delta) {
   dailyUnits.value = clampDailyUnits(dailyUnits.value + delta)
 }
 
+const scrollStyle = ref({})
+
+function applyScrollLayout() {
+  scrollStyle.value = getPageScrollStyle()
+}
+
 onLoad((options) => {
+  applyScrollLayout()
   const fr = options?.from != null ? String(options.from).trim() : ''
   resumeOnlyMode.value = fr === 'resume'
   postPaySetupMode.value = fr === 'pay'
@@ -207,6 +215,7 @@ onLoad((options) => {
 })
 
 onShow(() => {
+  applyScrollLayout()
   minDeliveryYmd.value = minMemberDeliveryStartYmd()
   if (deliveryYmd.value && deliveryYmd.value < minDeliveryYmd.value) {
     deliveryYmd.value = ''

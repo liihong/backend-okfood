@@ -71,17 +71,15 @@ export function fetchMemberCardWechatJsapiPayParams(orderId) {
  * @param {number} orderId
  * @returns {Promise<object>} 与 GET /api/user/me 同结构（见 `request` 解包后的 `data`）
  */
-export async function syncMemberCardWechatPayResult(orderId) {
+export function syncMemberCardWechatPayResult(orderId) {
   const primary = `/api/pay/wechat/member-card-order-sync/${orderId}`
   const legacy = `/api/user/member-card-orders/${orderId}/sync-wechat-pay`
-  try {
-    return await request(primary, { method: 'POST', data: {} })
-  } catch (e) {
+  return request(primary, { method: 'POST', data: {} }).catch(function (e) {
     const st = e && e.status
     const m = (e && e.message) || ''
     if (st === 404 || m.includes('Not Found') || m.includes('404')) {
       return request(legacy, { method: 'POST', data: {} })
     }
     throw e
-  }
+  })
 }

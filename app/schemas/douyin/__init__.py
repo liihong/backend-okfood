@@ -95,7 +95,7 @@ class DouyinCertificateRedeemIn(BaseModel):
     code: str = Field(..., min_length=4, max_length=128, description="抖音订单券码明文")
     delivery_start_date: date | None = Field(
         None,
-        description="周卡/月卡映射时可选起送日；不传则仅入账不激活",
+        description="保留字段；小程序验券不传，起送日在购卡/用券或「我的」完善配送时设置",
     )
 
 

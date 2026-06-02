@@ -105,7 +105,7 @@ import { ref, computed, nextTick } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { showOkAlert } from '@/utils/okAlert.js'
-import { getNavbarLayout } from '@/utils/navbar.js'
+import { getPageScrollStyle } from '@/utils/navbar.js'
 import { request, clearMemberSession, isUserMeNotFoundError } from '@/utils/api.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 import { ymdTodayShanghai, addDaysIso } from '@/utils/memberDeliveryDate.js'
@@ -518,8 +518,7 @@ function confirmCancelAllLeave() {
 }
 
 onShow(() => {
-  const { navBarTotal } = getNavbarLayout()
-  scrollStyle.value = { height: `calc(100vh - ${navBarTotal}px)` }
+  scrollStyle.value = getPageScrollStyle()
   syncLeaveFromServer()
 })
 

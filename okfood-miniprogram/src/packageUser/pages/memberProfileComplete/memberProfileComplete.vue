@@ -1,7 +1,7 @@
 <template>
   <view class="page">
     <OkNavbar :show-back="showBack" title="设置昵称" />
-    <scroll-view scroll-y class="scroll" :show-scrollbar="false">
+    <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="wrap">
         <text class="lead">{{ leadText }}</text>
 
@@ -56,6 +56,7 @@
 import { ref, computed, nextTick } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { getPageScrollStyle } from '@/utils/navbar.js'
 import {
   request,
   getMemberToken,
@@ -75,6 +76,12 @@ import {
   isValidWxNick,
 } from '@/utils/memberWxProfile.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
+
+const scrollStyle = ref({})
+
+function applyScrollLayout() {
+  scrollStyle.value = getPageScrollStyle()
+}
 
 /** login：登录后强制完善；required：已登录但资料不全时兜底引导 */
 const entryFrom = ref('')
@@ -244,6 +251,7 @@ async function onSubmit(e) {
 }
 
 onLoad((query) => {
+  applyScrollLayout()
   entryFrom.value = query?.from != null ? String(query.from) : ''
   nextTick(() => {
     nickInputFocus.value = true
@@ -251,6 +259,7 @@ onLoad((query) => {
 })
 
 onShow(() => {
+  applyScrollLayout()
   void refreshProfile()
 })
 </script>

@@ -1,5 +1,5 @@
 {
-  "description": "小程序源码在 miniprogramRoot。请先 npm run build:mp-weixin；日常 dev:mp-weixin 时请把 miniprogramRoot 改成 dist/dev/mp-weixin/ 或直接用开发者工具打开该子目录。",
+  "description": "上传体验版/正式版：npm run build:mp-weixin 后用本配置（miniprogramRoot=dist/build）。本地 dev:mp-weixin 请改 miniprogramRoot 为 dist/dev/mp-weixin/ 或只打开该子目录。",
   "miniprogramRoot": "dist/build/mp-weixin/",
   "packOptions": {
     "ignore": []
@@ -7,6 +7,7 @@
   "setting": {
     "urlCheck": false,
     "es6": true,
+    "enhance": false,
     "postcss": false,
     "minified": false,
     "newFeature": true,

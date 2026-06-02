@@ -22,13 +22,21 @@ npm run dev:mp-weixin
 
 编译输出目录默认为 **`dist/dev/mp-weixin`**。用微信开发者工具打开该目录（或项目内配置的输出路径），在「详情 → 本地设置」中按需勾选「不校验合法域名」等（开发阶段 `manifest.json` 里已设置 `urlCheck: false`）。
 
-### 生产构建
+### 生产构建与上传
 
 ```bash
-npm run build:mp-weixin
+npm run prepare:mp-weixin-upload
 ```
 
 产物在 **`dist/build/mp-weixin`**，用于上传体验版/正式版。
+
+**上传前必读：**
+
+1. 必须用 **`npm run build:mp-weixin`**（或 `prepare:mp-weixin-upload`）生成 **`dist/build/mp-weixin`**，不要用 `dist/dev` 上传。
+2. 微信开发者工具打开 **`okfood-miniprogram` 根目录** 时，`project.config.json` 的 `miniprogramRoot` 应指向 **`dist/build/mp-weixin/`**（已默认）。
+3. 上传时勾选 **「将 JS 编译成 ES5」** 可以保留；构建脚本会把 `@babel/runtime/helpers` 同步到 `utils/@babel/runtime/helpers/`，供上传编译引用。
+4. **请关闭「增强编译」**（`enhance: false`），与产物内 `project.config.json` 一致。
+5. 日常本地调试：`npm run dev:mp-weixin` 后，将 `miniprogramRoot` 临时改为 **`dist/dev/mp-weixin/`**，或直接用开发者工具打开该子目录。
 
 ### 其他端（可选）
 

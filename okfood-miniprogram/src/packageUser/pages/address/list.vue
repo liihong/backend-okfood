@@ -1,7 +1,7 @@
 <template>
   <view class="page">
     <OkNavbar show-back title="我的配送地址 👌" />
-    <scroll-view scroll-y class="scroll" :show-scrollbar="false">
+    <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="list-inner">
         <view v-if="loading" class="state-text">加载中…</view>
         <view v-else-if="!list.length" class="state-text state-text--muted">暂无收货地址，点击下方添加</view>
@@ -49,6 +49,7 @@
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { getPageScrollStyle, FIXED_FOOTER_RESERVE_PX } from '@/utils/navbar.js'
 import { showOkAlert } from '@/utils/okAlert.js'
 import { request, getMemberToken } from '@/utils/api.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
@@ -59,8 +60,13 @@ import {
   isAddressItemDefault,
 } from '@/utils/addressApi.js'
 
+const scrollStyle = ref({})
 const list = ref([])
 const loading = ref(true)
+
+function applyScrollLayout() {
+  scrollStyle.value = getPageScrollStyle(FIXED_FOOTER_RESERVE_PX)
+}
 /** 避免 onShow 重叠或返回列表时旧请求先结束，连续改状态/提示触发基础库 timeout */
 let fetchListSeq = 0
 
@@ -86,6 +92,7 @@ async function fetchList() {
 }
 
 onShow(() => {
+  applyScrollLayout()
   fetchList()
 })
 

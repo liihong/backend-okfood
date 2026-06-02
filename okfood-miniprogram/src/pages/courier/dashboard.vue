@@ -102,7 +102,7 @@
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
-import { getNavbarLayout } from '@/utils/navbar.js'
+import { getPageScrollStyle } from '@/utils/navbar.js'
 import { clearCourierToken, setAppUserMode, setCourierMeCache } from '@/utils/api.js'
 import {
   confirmCourierDelivery,
@@ -200,9 +200,8 @@ const assignedLine = computed(() => {
 
 onShow(() => {
   syncCustomTabBar()
-  const { navBarTotal } = getNavbarLayout()
   const bottom = getCustomTabBarBottomReservePx()
-  scrollStyle.value = { height: `calc(100vh - ${navBarTotal + bottom}px)` }
+  scrollStyle.value = getPageScrollStyle(bottom)
   loadTasks()
 })
 

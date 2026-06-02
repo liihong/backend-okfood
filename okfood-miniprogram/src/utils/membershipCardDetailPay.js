@@ -20,21 +20,20 @@ function openMemberCardOrderDetail(orderId) {
   })
 }
 
-/** 待支付开卡工单：可选换券后跳转工单详情继续支付 */
 function createPendingPayAlertPromise(pendingOrderId, memberCouponId) {
   const msg = `您有未支付的开卡订单（#${pendingOrderId}），请先完成支付后再下单`
-  return new Promise((resolveAlert) => {
+  return new Promise(function (resolveAlert) {
     showOkAlert({
       title: '待支付订单',
       content: msg,
       confirmText: '去支付',
       cancelText: '知道了',
-      success: (alertRes) => {
+      success: function (alertRes) {
         if (!alertRes.confirm) {
           resolveAlert(false)
           return
         }
-        const finishNavigate = () => {
+        const finishNavigate = function () {
           openMemberCardOrderDetail(pendingOrderId)
           resolveAlert(true)
         }
@@ -46,7 +45,9 @@ function createPendingPayAlertPromise(pendingOrderId, memberCouponId) {
           .then(finishNavigate)
           .catch(finishNavigate)
       },
-      fail: () => resolveAlert(false),
+      fail: function () {
+        resolveAlert(false)
+      },
     })
   })
 }
@@ -59,47 +60,22 @@ export function promptGoPayPendingMemberCardOrder(orderIdRaw, memberCouponId) {
   return createPendingPayAlertPromise(pendingOrderId, memberCouponId)
 }
 
-async function loadPrePayProfile() {
-  try {
-    return await request('/api/user/me', { method: 'GET', retry: 0 })
-  } catch (_profileErr) {
+function loadPrePayProfile() {
+  return request('/api/user/me', { method: 'GET', retry: 0 }).catch(function () {
     return null
-  }
+  })
 }
 
-/**
- * 购卡详情页「立即支付开卡」
- * @param {{ membershipTemplateId: number, memberCouponId?: number | null }} opts
- */
-export async function runMembershipCardDetailPay(opts) {
-  const membershipTemplateId = Number(opts.membershipTemplateId)
-  const memberCouponId = opts.memberCouponId
-  const preProfile = await loadPrePayProfile()
-  const balBefore = Math.max(0, Math.floor(Number(preProfile?.balance) || 0))
-  const activeRenewal =
-    balBefore > 0 &&
-    preProfile &&
-    typeof preProfile === 'object' &&
-    !shouldOpenMemberSetup(preProfile)
-
-  const profileStartYmd =
-    preProfile?.delivery_start_date != null
-      ? String(preProfile.delivery_start_date).trim().slice(0, 10)
-      : ''
-  const payOut = await runMembershipTemplateWechatPay({
-    membershipTemplateId,
-    deliveryStartYmd: activeRenewal && profileStartYmd ? profileStartYmd : undefined,
-    memberCouponId,
-  })
-  const paySynced = payOut?.paySynced !== false
+function afterMembershipCardPaySuccess(activeRenewal, paySynced) {
   markMinePageNeedsRefresh()
-
   if (activeRenewal) {
     uni.showToast({
       title: paySynced ? '支付成功' : '支付已提交，状态同步中',
       icon: 'success',
     })
-    setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
+    setTimeout(function () {
+      uni.switchTab({ url: '/pages/mine/index' })
+    }, 400)
     return
   }
   if (paySynced) {
@@ -112,32 +88,65 @@ export async function runMembershipCardDetailPay(opts) {
       showCancel: false,
     })
   }
-  setTimeout(() => {
-    uni.redirectTo({
-      url: '/packageUser/pages/memberSetup/memberSetup?from=pay',
-    })
-  }, paySynced ? 400 : 80)
+  setTimeout(
+    function () {
+      uni.redirectTo({
+        url: '/packageUser/pages/memberSetup/memberSetup?from=pay',
+      })
+    },
+    paySynced ? 400 : 80
+  )
 }
 
-export async function runMembershipCardDetailPayWithPrompt(opts) {
-  try {
-    await runMembershipCardDetailPay(opts)
-  } catch (payErr) {
+/**
+ * 购卡详情页「立即支付开卡」
+ */
+export function runMembershipCardDetailPay(opts) {
+  const o = opts || {}
+  const membershipTemplateId = Number(o.membershipTemplateId)
+  const memberCouponId = o.memberCouponId
+  return loadPrePayProfile().then(function (preProfile) {
+    const balBefore = Math.max(0, Math.floor(Number(preProfile && preProfile.balance) || 0))
+    const activeRenewal =
+      balBefore > 0 &&
+      preProfile &&
+      typeof preProfile === 'object' &&
+      !shouldOpenMemberSetup(preProfile)
+    const profileStartYmd =
+      preProfile && preProfile.delivery_start_date != null
+        ? String(preProfile.delivery_start_date).trim().slice(0, 10)
+        : ''
+    const payOpts = {
+      membershipTemplateId: membershipTemplateId,
+      memberCouponId: memberCouponId,
+    }
+    if (activeRenewal && profileStartYmd) {
+      payOpts.deliveryStartYmd = profileStartYmd
+    }
+    return runMembershipTemplateWechatPay(payOpts).then(function (payOut) {
+      const paySynced = payOut && payOut.paySynced !== false
+      afterMembershipCardPaySuccess(activeRenewal, paySynced)
+    })
+  })
+}
+
+export function runMembershipCardDetailPayWithPrompt(opts) {
+  return runMembershipCardDetailPay(opts).catch(function (payErr) {
     const pendingOrderId = parsePendingOrderIdFromConflict(payErr)
     if (isUnpaidOrderConflict(payErr) && pendingOrderId) {
-      await promptGoPayPendingMemberCardOrder(pendingOrderId, opts.memberCouponId)
-    } else {
-      const msg =
-        payErr instanceof Error
-          ? payErr.message
-          : typeof payErr === 'string'
-            ? payErr
-            : '支付未完成'
-      if (msg.includes('cancel') || msg.includes('取消')) {
-        uni.showToast({ title: '已取消支付', icon: 'none' })
-      } else {
-        uni.showToast({ title: msg, icon: 'none', duration: 2800 })
-      }
+      const o = opts || {}
+      return promptGoPayPendingMemberCardOrder(pendingOrderId, o.memberCouponId)
     }
-  }
+    const msg =
+      payErr instanceof Error
+        ? payErr.message
+        : typeof payErr === 'string'
+          ? payErr
+          : '支付未完成'
+    if (msg.includes('cancel') || msg.includes('取消')) {
+      uni.showToast({ title: '已取消支付', icon: 'none' })
+    } else {
+      uni.showToast({ title: msg, icon: 'none', duration: 2800 })
+    }
+  })
 }

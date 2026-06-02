@@ -1,7 +1,7 @@
 <template>
   <view class="page">
     <OkNavbar show-back title="订单详情" />
-    <scroll-view scroll-y class="scroll" :show-scrollbar="false">
+    <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view v-if="loading" class="state-text">加载中…</view>
       <view v-else-if="loadError" class="state-text state-text--err">{{ loadError }}</view>
       <view v-else-if="order" class="body">
@@ -105,8 +105,9 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { getPageScrollStyle } from '@/utils/navbar.js'
 import { showOkAlert } from '@/utils/okAlert.js'
 import {
   canCancelSingleMealOrder,
@@ -120,6 +121,7 @@ import {
 import { paySingleMealOrderWechat } from '@/utils/singleOrderPay.js'
 import { getMemberToken } from '@/utils/api.js'
 
+const scrollStyle = ref({})
 const orderId = ref(0)
 const order = ref(null)
 const loading = ref(true)
@@ -151,7 +153,17 @@ const fulfillLabel = computed(() => {
 
 const createdAtText = computed(() => formatSingleOrderCreatedAt(order.value?.created_at))
 
+/** scroll-view 在真机上须明确高度，flex:1 会导致内容区高度为 0 而整页空白 */
+function applyScrollLayout() {
+  scrollStyle.value = getPageScrollStyle()
+}
+
+onShow(() => {
+  applyScrollLayout()
+})
+
 onLoad((options) => {
+  applyScrollLayout()
   const raw = options?.id || options?.order_id || options?.orderId || ''
   const id = raw ? parseInt(String(decodeURIComponent(raw)), 10) : NaN
   if (!Number.isFinite(id) || id < 1) {
@@ -186,7 +198,7 @@ async function loadDetail() {
         if (synced && typeof synced === 'object' && synced.pay_status === '已支付') {
           order.value = synced
         }
-      } catch {
+      } catch (_syncErr) {
         /* 仍待支付则保持原状 */
       }
     }
@@ -280,7 +292,7 @@ async function continuePay() {
         uni.showToast({ title: '支付状态已同步', icon: 'success' })
         return
       }
-    } catch {
+    } catch (_syncErr) {
       /* 仍待支付则继续调起微信支付 */
     }
     uni.showLoading({ title: '拉起支付…', mask: true })

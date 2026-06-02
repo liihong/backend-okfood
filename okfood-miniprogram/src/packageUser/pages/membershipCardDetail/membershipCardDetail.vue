@@ -116,7 +116,7 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
-import { getNavbarLayout } from '@/utils/navbar.js'
+import { getPageScrollStyle, FIXED_FOOTER_RESERVE_PX } from '@/utils/navbar.js'
 import { showOkAlert } from '@/utils/okAlert.js'
 import MemberCouponCard from '@/components/MemberCouponCard/MemberCouponCard.vue'
 import {
@@ -394,10 +394,9 @@ async function onPay() {
   }
 }
 
-/** scroll-view 在真机上须明确高度，flex:1 会导致内容区高度为 0 而整页空白 */
+/** scroll-view 在真机上须明确高度；calc(100vh) 在部分机型上无效，改用 windowHeight 像素值 */
 function applyScrollLayout() {
-  const { navBarTotal } = getNavbarLayout()
-  scrollStyle.value = { height: `calc(100vh - ${navBarTotal}px)` }
+  scrollStyle.value = getPageScrollStyle(FIXED_FOOTER_RESERVE_PX)
 }
 
 onShow(() => {
@@ -416,7 +415,7 @@ onLoad((opts) => {
 
 <style lang="scss" scoped>
 .page {
-  height: 100%;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   background: $ok-slate-50;

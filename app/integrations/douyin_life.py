@@ -56,13 +56,32 @@ def new_verify_token() -> str:
     return uuid.uuid4().hex
 
 
+def _humanize_douyin_description(desc: str) -> str:
+    """将开放平台原始文案转为用户/运营可理解的提示。"""
+    d = (desc or "").strip()
+    if not d:
+        return d
+    if "应用未获得该能力" in d or "未获得该能力" in d:
+        return (
+            "抖音应用未开通「团购验券核销」能力。"
+            "请登录抖音开放平台，为当前应用申请生活服务团购核销（验券准备/核销）权限，"
+            "审核通过后再试；详情见 open.douyin.com 能力中心。"
+        )
+    # 避免 Toast 被长链接撑满
+    if "open.douyin.com" in d and len(d) > 80:
+        head = d.split("https://", 1)[0].strip().rstrip("，,;；请去")
+        if head:
+            return f"{head}。请登录抖音开放平台能力中心申请对应权限。"
+    return d
+
+
 def _api_error_message(payload: dict[str, Any]) -> str:
     extra = payload.get("extra") if isinstance(payload.get("extra"), dict) else {}
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     for block in (extra, data, payload):
         desc = str(block.get("description") or block.get("sub_description") or "").strip()
         if desc:
-            return desc
+            return _humanize_douyin_description(desc)
     code = extra.get("error_code", data.get("error_code"))
     if code not in (None, 0):
         return f"抖音接口错误(error_code={code})"

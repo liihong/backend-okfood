@@ -1,7 +1,7 @@
 <template>
   <view class="page">
     <OkNavbar show-back :title="navbarTitle" />
-    <scroll-view scroll-y class="scroll" :show-scrollbar="false">
+    <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="page-address">
         <view class="form-box">
           <view class="form-field">
@@ -92,12 +92,19 @@ placeholder="备注"
 
 <script setup>
 import { computed, reactive, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { getPageScrollStyle, FIXED_FOOTER_RESERVE_PX } from '@/utils/navbar.js'
 import { showOkAlert } from '@/utils/okAlert.js'
 import { request, getMemberToken } from '@/utils/api.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 import { normalizeAddressList, addressLineFromStructured } from '@/utils/addressApi.js'
+
+const scrollStyle = ref({})
+
+function applyScrollLayout() {
+  scrollStyle.value = getPageScrollStyle(FIXED_FOOTER_RESERVE_PX)
+}
 import { hasWxPhoneAuthDetail, wxMiniMemberLoginAndStore } from '@/utils/wxMemberLogin.js'
 
 /** 导航标题；购卡成功后跳转时可传 title=完善配送信息 */
@@ -372,7 +379,12 @@ function buildAddressBody() {
   }
 }
 
+onShow(() => {
+  applyScrollLayout()
+})
+
 onLoad((options) => {
+  applyScrollLayout()
   const tRaw = options && options.title != null ? String(options.title).trim() : ''
   if (tRaw && tRaw !== 'undefined') {
     try {

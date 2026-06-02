@@ -1,7 +1,7 @@
 <template>
   <view class="page">
     <OkNavbar show-back title="开卡订单详情" />
-    <scroll-view scroll-y class="scroll" :show-scrollbar="false">
+    <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view v-if="loading" class="state-text">加载中…</view>
       <view v-else-if="loadError" class="state-text state-text--err">{{ loadError }}</view>
       <view v-else-if="order" class="body">
@@ -79,8 +79,9 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import { getPageScrollStyle } from '@/utils/navbar.js'
 import { showOkAlert } from '@/utils/okAlert.js'
 import { getMemberToken, request } from '@/utils/api.js'
 import { getMemberCardOrder } from '@/utils/memberCardOrderApi.js'
@@ -88,6 +89,7 @@ import { payMemberCardOrderWechat } from '@/utils/memberCardPay.js'
 import { shouldOpenMemberSetup } from '@/utils/memberProfile.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 
+const scrollStyle = ref({})
 const orderId = ref(0)
 const order = ref(null)
 const loading = ref(true)
@@ -131,7 +133,17 @@ const createdAtText = computed(() => {
   return s.length >= 16 ? s.slice(0, 16).replace('T', ' ') : s
 })
 
+/** scroll-view 在真机上须明确高度，flex:1 会导致内容区高度为 0 而整页空白 */
+function applyScrollLayout() {
+  scrollStyle.value = getPageScrollStyle()
+}
+
+onShow(() => {
+  applyScrollLayout()
+})
+
 onLoad((options) => {
+  applyScrollLayout()
   const raw = options?.id || options?.order_id || options?.orderId || ''
   const id = raw ? parseInt(String(decodeURIComponent(raw)), 10) : NaN
   if (!Number.isFinite(id) || id < 1) {
@@ -169,7 +181,8 @@ async function afterPaySuccess(paySynced) {
   let preProfile = null
   try {
     preProfile = await request('/api/user/me', { method: 'GET', retry: 0 })
-  } catch {
+  } catch (_profileErr) {
+    console.warn(_profileErr) // 加上这一行，打破 Babel 的死脑筋
     preProfile = null
   }
   const balBefore = Math.max(0, Math.floor(Number(preProfile?.balance) || 0))

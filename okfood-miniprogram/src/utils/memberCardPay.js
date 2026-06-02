@@ -7,163 +7,189 @@ import {
 } from '@/utils/memberCardOrderApi.js'
 import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
 
-async function fetchPendingMemberCardOrderId() {
-  try {
-    const data = await listMemberCardOrders({
-      page: 1,
-      page_size: 1,
-      list_status: 'pending_pay',
-    })
-    const first = Array.isArray(data?.items) ? data.items[0] : null
-    const id = first?.id != null ? Number(first.id) : NaN
-    return Number.isFinite(id) && id > 0 ? id : null
-  } catch {
-    return null
-  }
+/** 纯 Promise 实现，避免上传时「编译为 ES5」注入 @babel/runtime 导致白屏 */
+
+function delayMs(ms) {
+  return new Promise(function (resolve) {
+    setTimeout(resolve, ms)
+  })
 }
 
-/** 已有未支付工单时不重复创建，抛出 409 供页面引导至工单详情 */
+function fetchPendingMemberCardOrderId() {
+  return listMemberCardOrders({
+    page: 1,
+    page_size: 1,
+    list_status: 'pending_pay',
+  })
+    .then(function (data) {
+      const items = data && data.items
+      const first = Array.isArray(items) ? items[0] : null
+      const id = first && first.id != null ? Number(first.id) : NaN
+      return Number.isFinite(id) && id > 0 ? id : null
+    })
+    .catch(function () {
+      return null
+    })
+}
+
 function throwPendingMemberCardOrderConflict(orderId) {
   const err = new Error(`您有未支付的开卡订单（#${orderId}），请先完成支付后再下单`)
-  /** @type {Error & { status?: number }} */ (err).status = 409
+  err.status = 409
   throw err
 }
 
-async function resolveMemberCardOrderId(createBody) {
-  const pendingId = await fetchPendingMemberCardOrderId()
-  if (pendingId) {
-    throwPendingMemberCardOrderConflict(pendingId)
-  }
-  try {
-    const order = await createMemberCardOrder(createBody)
-    const orderId = order && typeof order === 'object' ? order.id : null
-    if (orderId == null) {
-      throw new Error('开卡订单创建异常')
+function resolveMemberCardOrderId(createBody) {
+  return fetchPendingMemberCardOrderId().then(function (pendingId) {
+    if (pendingId) {
+      throwPendingMemberCardOrderConflict(pendingId)
     }
-    return { order, orderId }
-  } catch (e) {
-    throw e
-  }
-}
-
-/** 微信扣款成功后拉单同步；返回是否已在服务端记为已缴 */
-async function runWechatPayForMemberCardOrder(orderId) {
-  const pay = await fetchMemberCardWechatJsapiPayParams(orderId)
-  await new Promise((resolve, reject) => {
-    uni.requestPayment({
-      provider: 'wxpay',
-      timeStamp: String(pay.timeStamp),
-      nonceStr: pay.nonceStr,
-      package: pay.package,
-      signType: pay.signType || 'MD5',
-      paySign: pay.paySign,
-      success: resolve,
-      fail: reject,
+    return createMemberCardOrder(createBody).then(function (order) {
+      const orderId = order && typeof order === 'object' ? order.id : null
+      if (orderId == null) {
+        throw new Error('开卡订单创建异常')
+      }
+      return { order: order, orderId: orderId }
     })
   })
-  const retryDelaysMs = [800, 1200, 1500, 2000, 2500, 3000, 3500, 4000]
-  const maxTries = retryDelaysMs.length + 1
-  let lastErr = null
-  for (let i = 0; i < maxTries; i++) {
-    try {
-      await syncMemberCardWechatPayResult(orderId)
+}
+
+function isPaySyncRetryable(err) {
+  const m = (err && err.message) || ''
+  return (
+    m.includes('处理中') ||
+    m.includes('稍候') ||
+    m.includes('稍后再试') ||
+    m.includes('未支付') ||
+    m.includes('未缴') ||
+    m.includes('not_paid') ||
+    /PAY_USERPAYING/i.test(m)
+  )
+}
+
+function syncMemberCardPayWithRetry(orderId, tryIndex, retryDelaysMs, maxTries) {
+  return syncMemberCardWechatPayResult(orderId)
+    .then(function () {
       return { wechatPaid: true, paySynced: true }
-    } catch (e) {
-      lastErr = e
-      const m = (e && e.message) || ''
-      const maybeWait =
-        m.includes('处理中') ||
-        m.includes('稍候') ||
-        m.includes('稍后再试') ||
-        m.includes('未支付') ||
-        m.includes('未缴') ||
-        m.includes('not_paid') ||
-        /PAY_USERPAYING/i.test(m)
-      if (maybeWait && i < maxTries - 1) {
-        await new Promise((r) => setTimeout(r, retryDelaysMs[i] ?? 2000))
-        continue
+    })
+    .catch(function (e) {
+      if (isPaySyncRetryable(e) && tryIndex < maxTries - 1) {
+        const delay = retryDelaysMs[tryIndex] != null ? retryDelaysMs[tryIndex] : 2000
+        return delayMs(delay).then(function () {
+          return syncMemberCardPayWithRetry(orderId, tryIndex + 1, retryDelaysMs, maxTries)
+        })
       }
-      if (maybeWait) {
+      if (isPaySyncRetryable(e)) {
         return { wechatPaid: true, paySynced: false }
       }
       throw e
-    }
+    })
+}
+
+function runWechatPayForMemberCardOrder(orderId) {
+  return fetchMemberCardWechatJsapiPayParams(orderId).then(function (pay) {
+    return new Promise(function (resolve, reject) {
+      uni.requestPayment({
+        provider: 'wxpay',
+        timeStamp: String(pay.timeStamp),
+        nonceStr: pay.nonceStr,
+        package: pay.package,
+        signType: pay.signType || 'MD5',
+        paySign: pay.paySign,
+        success: resolve,
+        fail: reject,
+      })
+    }).then(function () {
+      const retryDelaysMs = [800, 1200, 1500, 2000, 2500, 3000, 3500, 4000]
+      const maxTries = retryDelaysMs.length + 1
+      return syncMemberCardPayWithRetry(orderId, 0, retryDelaysMs, maxTries)
+    })
+  })
+}
+
+function mergePayResult(order, orderId, payResult) {
+  return {
+    order: order,
+    orderId: orderId,
+    wechatPaid: payResult.wechatPaid,
+    paySynced: payResult.paySynced,
   }
-  if (lastErr) throw lastErr
-  return { wechatPaid: true, paySynced: false }
 }
 
 /**
  * 对已有开卡工单调起微信支付并同步入账。
  * @param {number} orderId
  */
-export async function payMemberCardOrderWechat(orderId) {
-  await syncWxMiniOpenidFromLogin()
-  return runWechatPayForMemberCardOrder(orderId)
+export function payMemberCardOrderWechat(orderId) {
+  return syncWxMiniOpenidFromLogin().then(function () {
+    return runWechatPayForMemberCardOrder(orderId)
+  })
 }
 
 /**
  * 创建开卡工单并调起微信支付（资料页「保存并支付」与个人中心「再次支付」共用）。
- * @param {{ cardKind: string, deliveryStartYmd: string, patchProfile?: boolean }} opts
- * `patchProfile`: 为 true 时先 PATCH plan_type + delivery_start_date（个人中心快捷支付用）
  */
-export async function runMemberCardWechatPay({
-  cardKind,
-  deliveryStartYmd,
-  patchProfile = false,
-  memberCouponId = null,
-}) {
-  const d0 = String(deliveryStartYmd || '').trim().slice(0, 10)
+export function runMemberCardWechatPay(opts) {
+  const o = opts || {}
+  const d0 = String(o.deliveryStartYmd || '').trim().slice(0, 10)
   if (!d0) {
-    throw new Error('缺少开始配送日期')
+    return Promise.reject(new Error('缺少开始配送日期'))
   }
-  const kind = String(cardKind || '').trim()
+  const kind = String(o.cardKind || '').trim()
   if (kind !== '周卡' && kind !== '月卡') {
-    throw new Error('请选择周卡或月卡')
+    return Promise.reject(new Error('请选择周卡或月卡'))
   }
-  if (patchProfile) {
-    await request('/api/user/profile', {
+  let chain = Promise.resolve()
+  if (o.patchProfile) {
+    chain = request('/api/user/profile', {
       method: 'PATCH',
       data: { plan_type: kind, delivery_start_date: d0 },
     })
   }
-  await syncWxMiniOpenidFromLogin()
-  const createBody = {
-    card_kind: kind,
-    delivery_start_date: d0,
-  }
-  if (memberCouponId != null) {
-    createBody.member_coupon_id = Math.floor(Number(memberCouponId))
-  }
-  const { order, orderId } = await resolveMemberCardOrderId(createBody)
-  const payResult = await runWechatPayForMemberCardOrder(orderId)
-  return { order, orderId, ...payResult }
+  return chain
+    .then(function () {
+      return syncWxMiniOpenidFromLogin()
+    })
+    .then(function () {
+      const createBody = {
+        card_kind: kind,
+        delivery_start_date: d0,
+      }
+      if (o.memberCouponId != null) {
+        createBody.member_coupon_id = Math.floor(Number(o.memberCouponId))
+      }
+      return resolveMemberCardOrderId(createBody)
+    })
+    .then(function (resolved) {
+      return runWechatPayForMemberCardOrder(resolved.orderId).then(function (payResult) {
+        return mergePayResult(resolved.order, resolved.orderId, payResult)
+      })
+    })
 }
 
 /**
- * 自律卡包：按后台模版创建订单并微信支付（成功后跳转「完善配送信息」页）。
- * @param {{ membershipTemplateId: number, deliveryStartYmd?: string }} opts
- * `deliveryStartYmd`: 续卡等档案已有起送日时可随单写入工单
+ * 自律卡包：按后台模版创建订单并微信支付。
  */
-export async function runMembershipTemplateWechatPay({
-  membershipTemplateId,
-  deliveryStartYmd,
-  memberCouponId = null,
-}) {
-  const tid = Number(membershipTemplateId)
+export function runMembershipTemplateWechatPay(opts) {
+  const o = opts || {}
+  const tid = Number(o.membershipTemplateId)
   if (!Number.isFinite(tid) || tid < 1) {
-    throw new Error('卡包无效')
+    return Promise.reject(new Error('卡包无效'))
   }
   const body = { membership_template_id: Math.floor(tid) }
-  const d0 = String(deliveryStartYmd || '').trim().slice(0, 10)
+  const d0 = String(o.deliveryStartYmd || '').trim().slice(0, 10)
   if (d0) {
     body.delivery_start_date = d0
   }
-  if (memberCouponId != null) {
-    body.member_coupon_id = Math.floor(Number(memberCouponId))
+  if (o.memberCouponId != null) {
+    body.member_coupon_id = Math.floor(Number(o.memberCouponId))
   }
-  await syncWxMiniOpenidFromLogin()
-  const { order, orderId } = await resolveMemberCardOrderId(body)
-  const payResult = await runWechatPayForMemberCardOrder(orderId)
-  return { order, orderId, ...payResult }
+  return syncWxMiniOpenidFromLogin()
+    .then(function () {
+      return resolveMemberCardOrderId(body)
+    })
+    .then(function (resolved) {
+      return runWechatPayForMemberCardOrder(resolved.orderId).then(function (payResult) {
+        return mergePayResult(resolved.order, resolved.orderId, payResult)
+      })
+    })
 }

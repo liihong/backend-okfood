@@ -34,7 +34,7 @@ import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import MemberCouponCard from '@/components/MemberCouponCard/MemberCouponCard.vue'
-import { getNavbarLayout } from '@/utils/navbar.js'
+import { getPageScrollStyle } from '@/utils/navbar.js'
 import { getMemberToken, clearMemberSession } from '@/utils/api.js'
 import { listMemberCouponsWallet } from '@/utils/memberCouponWalletApi.js'
 
@@ -74,8 +74,7 @@ function switchTab(key) {
 }
 
 onShow(() => {
-  const layout = getNavbarLayout()
-  scrollStyle.value = { height: layout.scrollHeightPx }
+  scrollStyle.value = getPageScrollStyle()
   if (!getMemberToken()) {
     clearMemberSession()
     uni.reLaunch({ url: '/pages/mine/index' })

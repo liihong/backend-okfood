@@ -1,13 +1,22 @@
 import { ref, computed } from 'vue'
 import { apiJson, adminAccessToken } from '../admin/core.js'
+import {
+  handleRetailOrderNotifications,
+  resetRetailOrderVoiceAlertState,
+} from './useRetailOrderVoiceAlert.js'
 
 const notifications = ref([])
 const unacknowledgedCount = ref(0)
 const loading = ref(false)
 const acknowledgingId = ref(null)
 
+/** 页面可见时 30s 轮询，便于零售新单语音提醒；后台标签页 2min */
+const POLL_INTERVAL_VISIBLE_MS = 30 * 1000
+const POLL_INTERVAL_HIDDEN_MS = 2 * 60 * 1000
+
 let pollTimer = null
 let subscriberCount = 0
+let pollIntervalMs = POLL_INTERVAL_VISIBLE_MS
 
 export function useAdminSystemNotifications() {
   const hasUnread = computed(() => unacknowledgedCount.value > 0)

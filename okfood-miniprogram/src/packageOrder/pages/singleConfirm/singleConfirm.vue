@@ -56,7 +56,7 @@
         </view>
         <view v-else-if="couponsLoading" class="coupon-loading">加载优惠券…</view>
 
-      <view class="card mode-card">
+        <view class="card mode-card">
           <text class="card-label">取餐方式</text>
           <radio-group class="mode-group mode-group--row" @change="onFulfillModeChange">
             <label class="mode-row">
@@ -130,7 +130,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow, onReady } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
   canSubmitSingleOrder,
@@ -139,7 +139,7 @@ import {
   invalidateWeeklyMenuCache,
   singleOrderBlockReason,
 } from '@/utils/menuApi.js'
-import { getNavbarLayout } from '@/utils/navbar.js'
+import { getPageScrollStyle, schedulePageScrollLayout } from '@/utils/navbar.js'
 import { getMemberToken, request } from '@/utils/api.js'
 import {
   normalizeAddressList,
@@ -163,7 +163,7 @@ const addressRows = ref([])
 const rawAddresses = ref([])
 const selectedIndex = ref(0)
 const paying = ref(false)
-const scrollStyle = ref({})
+const scrollStyle = ref(getPageScrollStyle())
 /** delivery | pickup */
 const fulfillMode = ref('delivery')
 const quantity = ref(1)
@@ -173,7 +173,8 @@ const selectedCouponId = ref(null)
 const couponsLoading = ref(false)
 
 const qtyMaxEffective = computed(() => {
-  if (!dish.value || !dish.value.singleStockLimited) return 0
+  if (!dish.value) return 1
+  if (!dish.value.singleStockLimited) return QTY_MAX
   const r = dish.value.singleStockRemaining
   if (r == null || !Number.isFinite(Number(r))) return 0
   return Math.max(0, Math.min(QTY_MAX, Math.floor(Number(r))))
@@ -248,7 +249,7 @@ async function loadCoupons() {
     if (availableCoupons.value.length) {
       selectedCouponId.value = availableCoupons.value[0].id
     }
-  } catch {
+  } catch (_couponErr) {
     availableCoupons.value = []
   } finally {
     couponsLoading.value = false
@@ -265,11 +266,16 @@ watch(quantity, () => {
   if (dish.value) void loadCoupons()
 })
 
-/** scroll-view 在真机上须明确高度，flex:1 会导致内容区高度为 0 而整页空白 */
+/** scroll-view 在真机上须明确高度；v-else 延迟挂载时需 schedule 重算 */
 function applyScrollLayout() {
-  const { navBarTotal } = getNavbarLayout()
-  scrollStyle.value = { height: `calc(100vh - ${navBarTotal}px)` }
+  schedulePageScrollLayout((style) => {
+    scrollStyle.value = style
+  })
 }
+
+onReady(() => {
+  applyScrollLayout()
+})
 
 onLoad((options) => {
   applyScrollLayout()
@@ -335,7 +341,7 @@ async function refreshAddressesOnly() {
     if (selectedIndex.value >= addressRows.value.length) {
       selectedIndex.value = 0
     }
-  } catch {
+  } catch (_addrErr) {
     /* 保留列表；首次 loadPage 会报错 */
   }
 }
@@ -357,9 +363,12 @@ async function loadPage() {
     }
     const cap = d.singleStockLimited
       ? Math.max(0, Math.min(QTY_MAX, d.singleStockRemaining != null ? Math.floor(Number(d.singleStockRemaining)) : 0))
-      : 0
+      : QTY_MAX
     if (quantity.value > cap) {
-      quantity.value = cap
+      quantity.value = Math.max(1, cap)
+    }
+    if (quantity.value < 1) {
+      quantity.value = 1
     }
     const list = sortAddressesDefaultFirst(normalizeAddressList(raw))
     rawAddresses.value = list
@@ -380,7 +389,6 @@ async function loadPage() {
     loadError.value = msg || '加载失败'
   } finally {
     loading.value = false
-    // scroll-view 在 v-else 中随 loading 结束才挂载，下一帧再算高度避免真机 0 高
     nextTick(() => applyScrollLayout())
   }
 }
@@ -442,7 +450,7 @@ async function handlePay() {
       success: () => {
         try {
           uni.setStorageSync('okfood_open_my_orders_after_checkout', '1')
-        } catch {
+        } catch (_storageErr) {
           /* ignore */
         }
         invalidateWeeklyMenuCache()
@@ -469,7 +477,7 @@ async function handlePay() {
 
 <style lang="scss" scoped>
 .page {
-  height: 100%;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   background: #fff;
@@ -485,11 +493,13 @@ async function handlePay() {
 
 .state {
   flex: 1;
+  min-height: 50vh;
   padding: 48rpx 40rpx;
   text-align: center;
   font-size: 28rpx;
   color: $ok-slate-500;
   font-weight: 700;
+  box-sizing: border-box;
 }
 
 .state--err {
