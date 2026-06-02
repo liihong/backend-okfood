@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from app.api import admin, admin_catalog, admin_couriers, admin_marketing, admin_regions, admin_system, admin_uploads, courier, menu, sf_open_notify, user, wechat_pay
+from app.api import admin, admin_catalog, admin_couriers, admin_douyin, admin_marketing, admin_regions, admin_system, admin_uploads, courier, menu, sf_open_notify, user, user_douyin, wechat_pay
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.jobs.scheduler import setup_scheduler, shutdown_scheduler
@@ -59,6 +59,7 @@ app.add_middleware(
 )
 
 app.include_router(user.router, prefix="/api")
+app.include_router(user_douyin.router, prefix="/api")
 app.include_router(sf_open_notify.router_sf_callback, prefix="/api")
 app.include_router(sf_open_notify.router_sf_oauth, prefix="/api")
 app.include_router(wechat_pay.router, prefix="/api")
@@ -67,6 +68,7 @@ app.include_router(courier.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(admin_catalog.router, prefix="/api")
 app.include_router(admin_marketing.router, prefix="/api")
+app.include_router(admin_douyin.router, prefix="/api")
 app.include_router(admin_system.router, prefix="/api")
 app.include_router(admin_couriers.router, prefix="/api")
 app.include_router(admin_regions.router, prefix="/api")

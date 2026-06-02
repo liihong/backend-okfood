@@ -197,6 +197,8 @@ class StoreConfigOut(BaseModel):
         max_length=512,
         description="本门店微信退款 apiclient_key.pem 路径；空则回退租户对接或全局 .env",
     )
+    douyin_poi_id: str | None = Field(None, max_length=64, description="抖音来客核销门店 POI ID")
+    douyin_account_id: str | None = Field(None, max_length=64, description="抖音核销商户根账户 ID（可选）")
 
 
 class StoreConfigUpdateIn(BaseModel):
@@ -278,6 +280,8 @@ class StoreConfigUpdateIn(BaseModel):
         max_length=512,
         description="退款 key 路径；传 null 或不传表示不修改，传空字符串可清空本门店覆盖",
     )
+    douyin_poi_id: str | None = Field(None, max_length=64, description="抖音 POI；传空字符串可清空")
+    douyin_account_id: str | None = Field(None, max_length=64, description="抖音 account_id；传空字符串可清空")
 
     @model_validator(mode="after")
     def _lng_lat_pair(self) -> Self:

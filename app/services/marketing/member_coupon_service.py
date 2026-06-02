@@ -413,6 +413,55 @@ def list_available_member_coupons_for_user(
     return out
 
 
+def list_member_coupons_for_user_wallet(
+    db: Session,
+    *,
+    member_id: int,
+    store_id: int,
+    status: str | None = None,
+) -> list:
+    """小程序「我的优惠券」：列出持券（可按状态筛选）。"""
+    from app.schemas.douyin import UserMemberCouponWalletOut
+
+    q = select(MemberCoupon).where(
+        MemberCoupon.member_id == int(member_id),
+        MemberCoupon.store_id == int(store_id),
+    )
+    st = (status or "").strip()
+    if st:
+        q = q.where(MemberCoupon.status == st)
+
+    rows = db.scalars(q.order_by(MemberCoupon.id.desc())).all()
+    out: list[UserMemberCouponWalletOut] = []
+    changed = False
+    for row in rows:
+        if expire_member_coupon_if_needed(row):
+            changed = True
+            if st == MemberCouponStatus.AVAILABLE.value:
+                continue
+        if st and (row.status or "").strip() != st:
+            continue
+        tpl = db.get(MarketingCouponTemplate, int(row.template_id))
+        out.append(
+            UserMemberCouponWalletOut(
+                id=int(row.id),
+                template_name=str(tpl.name) if tpl else None,
+                discount_yuan=format_amount_yuan(Decimal(row.discount_yuan)),
+                min_order_yuan=format_amount_yuan(Decimal(row.min_order_yuan or 0)),
+                biz_type=str(row.biz_type),
+                scope_level=str(row.scope_level),
+                status=str(row.status),
+                usage_instructions=(tpl.usage_instructions or "").strip() if tpl else None,
+                expires_at=row.expires_at.isoformat() if row.expires_at else None,
+                used_at=row.used_at.isoformat() if row.used_at else None,
+                issued_at=row.issued_at.isoformat() if row.issued_at else None,
+            )
+        )
+    if changed:
+        db.commit()
+    return out
+
+
 def list_member_card_coupons_for_reminder(
     db: Session,
     *,

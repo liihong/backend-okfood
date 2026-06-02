@@ -683,3 +683,58 @@ def update_card_order(
     db.commit()
     db.refresh(order)
     return _order_to_out(db, order)
+
+
+def create_paid_card_order_for_douyin_redeem(
+    db: Session,
+    *,
+    member: Member,
+    card_kind: str | None = None,
+    membership_template_id: int | None = None,
+    delivery_start_date: date | None = None,
+    amount_yuan: Decimal | None = None,
+    remark: str | None = None,
+    operator: str = "douyin_redeem",
+) -> MemberCardOrder:
+    """抖音验券成功后创建已缴开卡工单并同步入账。"""
+    tpl: MembershipCardTemplate | None = None
+    ck = (card_kind or "").strip()
+    if membership_template_id is not None:
+        tpl = db.get(MembershipCardTemplate, int(membership_template_id))
+        if not tpl or int(tpl.store_id) != int(member.store_id):
+            raise HTTPException(status_code=404, detail="会员卡模版不存在")
+        if not bool(tpl.is_active):
+            raise HTTPException(status_code=400, detail="该卡包已下架")
+        ck = enum_card_kind_for_template(tpl)
+        if amount_yuan is None:
+            price = tpl.sale_price_yuan if tpl.sale_price_yuan is not None else tpl.list_price_yuan
+            amount_yuan = Decimal(price).quantize(Decimal("0.01")) if price is not None else Decimal("0.00")
+    else:
+        if ck not in (CardOrderKind.WEEK.value, CardOrderKind.MONTH.value):
+            raise HTTPException(status_code=400, detail="无效开卡类型")
+        if amount_yuan is None:
+            amount_yuan = _amount_yuan_for_card_kind_str(db, ck, store_id=int(member.store_id))
+
+    if delivery_start_date is not None and delivery_start_date < min_member_delivery_start_shanghai():
+        raise HTTPException(status_code=400, detail="起送日期须不早于明日（上海业务日）")
+
+    order = MemberCardOrder(
+        member_id=int(member.id),
+        tenant_id=int(member.tenant_id),
+        store_id=int(member.store_id),
+        membership_template_id=int(tpl.id) if tpl is not None else None,
+        card_kind=ck,
+        pay_channel=CardPayChannel.DOUYIN.value,
+        pay_status=CardOrderPayStatus.PAID.value,
+        amount_yuan=amount_yuan,
+        remark=(remark or "抖音验券兑换")[:500],
+        delivery_start_date=delivery_start_date,
+        applied_to_member=False,
+        out_trade_no=None,
+        wx_transaction_id=None,
+        created_by=operator,
+    )
+    db.add(order)
+    db.flush()
+    _apply_paid_card_order_to_member_balance(db, order, operator=operator)
+    return order

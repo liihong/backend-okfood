@@ -27,6 +27,8 @@ const RetailCatalogView = () => import('../views/RetailCatalogView.vue')
 const DeliveryRangeCheckView = () => import('../views/DeliveryRangeCheckView.vue')
 const CouponTemplatesView = () => import('../views/marketing/CouponTemplatesView.vue')
 const MemberCouponGrantsView = () => import('../views/marketing/MemberCouponGrantsView.vue')
+const DouyinProductMappingsView = () => import('../views/marketing/douyin/DouyinProductMappingsView.vue')
+const DouyinRedemptionsView = () => import('../views/marketing/douyin/DouyinRedemptionsView.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -165,6 +167,26 @@ const router = createRouter({
           meta: {
             title: '优惠券发放',
             pageSubtitle: '向会员发放优惠券并管理记录',
+            fullAdminOnly: true,
+          },
+        },
+        {
+          path: 'marketing/douyin-products',
+          name: 'marketing-douyin-products',
+          component: DouyinProductMappingsView,
+          meta: {
+            title: '抖音商品设置',
+            pageSubtitle: '配置抖音团购商品与本地权益映射',
+            fullAdminOnly: true,
+          },
+        },
+        {
+          path: 'marketing/douyin-redemptions',
+          name: 'marketing-douyin-redemptions',
+          component: DouyinRedemptionsView,
+          meta: {
+            title: '核销记录查询',
+            pageSubtitle: '抖音券验券兑换流水',
             fullAdminOnly: true,
           },
         },

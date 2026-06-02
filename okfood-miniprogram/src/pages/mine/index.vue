@@ -118,6 +118,26 @@
                 </view>
                 <text class="menu-cap">点我购卡</text>
               </view>
+              <view class="menu-cell" @tap="goMyCoupons">
+                <view class="menu-ico-wrap">
+                  <image
+                    class="menu-ico-img"
+                    src="/static/mine-icons/ticket.svg"
+                    mode="aspectFit"
+                  />
+                </view>
+                <text class="menu-cap">我的优惠券</text>
+              </view>
+              <view class="menu-cell" @tap="goDouyinRedeem">
+                <view class="menu-ico-wrap">
+                  <image
+                    class="menu-ico-img"
+                    src="/static/mine-icons/activity.svg"
+                    mode="aspectFit"
+                  />
+                </view>
+                <text class="menu-cap">抖音验券</text>
+              </view>
               <view class="menu-cell" @tap="goMyOrders">
                 <view class="menu-ico-wrap">
                   <image
@@ -635,6 +655,22 @@ function goMembershipCardPack() {
   uni.navigateTo({
     url: '/packageUser/pages/membershipCardList/membershipCardList',
   })
+}
+
+function goMyCoupons() {
+  if (!getMemberToken()) {
+    uni.showToast({ title: '请先登录', icon: 'none' })
+    return
+  }
+  uni.navigateTo({ url: '/packageUser/pages/myCoupons/myCoupons' })
+}
+
+function goDouyinRedeem() {
+  if (!getMemberToken()) {
+    uni.showToast({ title: '请先登录', icon: 'none' })
+    return
+  }
+  uni.navigateTo({ url: '/packageUser/pages/douyinRedeem/douyinRedeem' })
 }
 
 function onNickInput(e) {

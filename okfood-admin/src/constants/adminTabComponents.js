@@ -29,6 +29,8 @@ export const ADMIN_TAB_COMPONENT_NAMES = {
   'system-retail-catalog': 'RetailCatalogView',
   'marketing-coupon-templates': 'CouponTemplatesView',
   'marketing-member-coupons': 'MemberCouponGrantsView',
+  'marketing-douyin-products': 'DouyinProductMappingsView',
+  'marketing-douyin-redemptions': 'DouyinRedemptionsView',
 }
 
 export const ADMIN_TABS_MAX_CACHE = 10

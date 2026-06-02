@@ -193,6 +193,20 @@
             "backgroundColor": "#f8fafc",
             "disableScroll": true
           }
+        },
+        {
+          "path": "pages/myCoupons/myCoupons",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
+        },
+        {
+          "path": "pages/douyinRedeem/douyinRedeem",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
         }
       ]
     }

@@ -125,19 +125,15 @@ import {
   clearMemberSession,
   isUserMeNotFoundError,
 } from '@/utils/api.js'
-import { runMembershipTemplateWechatPay } from '@/utils/memberCardPay.js'
 import {
-  applyMemberCardOrderCoupon,
+  promptGoPayPendingMemberCardOrder,
+  runMembershipCardDetailPayWithPrompt,
+} from '@/utils/membershipCardDetailPay.js'
+import {
   listMemberCardOrders,
 } from '@/utils/memberCardOrderApi.js'
 import { listAvailableMemberCoupons, getMemberCouponReminder } from '@/utils/memberCouponApi.js'
 import { filterMemberCardCouponsForTemplate, pickBestMemberCoupon } from '@/utils/memberCouponScope.js'
-import { shouldOpenMemberSetup } from '@/utils/memberProfile.js'
-import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
-import {
-  isUnpaidOrderConflict,
-  parsePendingOrderIdFromConflict,
-} from '@/utils/unpaidOrderPrompt.js'
 
 const DEFAULT_PRIV = [
   '全城顺丰免运费',
@@ -158,18 +154,6 @@ const shareSheetVisible = ref(false)
 /** 避免 onLoad 与 loadOne 重复弹待支付提示 */
 let pendingPayPrompted = false
 
-/** 开卡工单详情页（内联路径，避免分包 utils 导出丢失） */
-const MEMBER_CARD_ORDER_DETAIL_PAGE =
-  '/packageOrder/pages/memberCardOrderDetail/memberCardOrderDetail'
-
-function openMemberCardOrderDetail(orderId) {
-  const id = Math.floor(Number(orderId))
-  if (!Number.isFinite(id) || id < 1) return
-  uni.navigateTo({
-    url: `${MEMBER_CARD_ORDER_DETAIL_PAGE}?id=${encodeURIComponent(String(id))}`,
-  })
-}
-
 async function fetchPendingMemberCardOrderIdLocal() {
   try {
     const data = await listMemberCardOrders({
@@ -180,39 +164,9 @@ async function fetchPendingMemberCardOrderIdLocal() {
     const first = Array.isArray(data?.items) ? data.items[0] : null
     const oid = first?.id != null ? Number(first.id) : NaN
     return Number.isFinite(oid) && oid > 0 ? oid : null
-  } catch {
+  } catch (_err) {
     return null
   }
-}
-
-function promptGoPayPendingOrder(orderId, memberCouponId) {
-  const id = Math.floor(Number(orderId))
-  if (!Number.isFinite(id) || id < 1) return Promise.resolve(false)
-  const msg = `您有未支付的开卡订单（#${id}），请先完成支付后再下单`
-  return new Promise((resolve) => {
-    showOkAlert({
-      title: '待支付订单',
-      content: msg,
-      confirmText: '去支付',
-      cancelText: '知道了',
-      success: async (res) => {
-        if (!res.confirm) {
-          resolve(false)
-          return
-        }
-        if (memberCouponId != null) {
-          try {
-            await applyMemberCardOrderCoupon(id, memberCouponId)
-          } catch {
-            /* 换券失败仍进入详情页 */
-          }
-        }
-        openMemberCardOrderDetail(id)
-        resolve(true)
-      },
-      fail: () => resolve(false),
-    })
-  })
 }
 
 /** 进入购卡页：有待支付工单则弹窗引导 */
@@ -221,7 +175,7 @@ async function maybePromptPendingPayOnEnter() {
   pendingPayPrompted = true
   const orderId = await fetchPendingMemberCardOrderIdLocal()
   if (!orderId) return
-  await promptGoPayPendingOrder(orderId, selectedCouponId.value)
+  await promptGoPayPendingMemberCardOrder(orderId, selectedCouponId.value)
 }
 
 const saleDisp = computed(() => {
@@ -337,20 +291,16 @@ function onShareTimelineGuide() {
 
 onShareAppMessage(() => {
   const { title, path, imageUrl } = buildSharePayload()
-  return {
-    title,
-    path,
-    ...(imageUrl ? { imageUrl } : {}),
-  }
+  const payload = { title, path }
+  if (imageUrl) payload.imageUrl = imageUrl
+  return payload
 })
 
 onShareTimeline(() => {
   const { title, query, imageUrl } = buildSharePayload()
-  return {
-    title,
-    query,
-    ...(imageUrl ? { imageUrl } : {}),
-  }
+  const payload = { title, query }
+  if (imageUrl) payload.imageUrl = imageUrl
+  return payload
 })
 
 async function loadOne() {
@@ -395,7 +345,7 @@ async function fetchCouponsForTemplate() {
       membership_template_id: tid,
     })
     rows = Array.isArray(data) ? data : []
-  } catch {
+  } catch (_err) {
     rows = []
   }
   if (!rows.length) {
@@ -403,7 +353,7 @@ async function fetchCouponsForTemplate() {
       const reminder = await getMemberCouponReminder()
       const all = Array.isArray(reminder?.coupons) ? reminder.coupons : []
       rows = filterMemberCardCouponsForTemplate(all, tid)
-    } catch {
+    } catch (_err) {
       rows = []
     }
   }
@@ -419,14 +369,13 @@ async function loadCoupons() {
     availableCoupons.value = rows
     const best = pickBestMemberCoupon(rows)
     if (best?.id != null) selectedCouponId.value = best.id
-  } catch {
+  } catch (_err) {
     availableCoupons.value = []
   } finally {
     couponsLoading.value = false
   }
 }
 
-/** @param {import('@/utils/memberCouponScope.js').MemberCouponItem} row */
 function onCouponSelect(row) {
   if (!row || row.id == null) return
   selectedCouponId.value = row.id
@@ -436,67 +385,10 @@ async function onPay() {
   if (!agreed.value || paying.value || !tpl.value) return
   paying.value = true
   try {
-    let preProfile = null
-    try {
-      preProfile = await request('/api/user/me', { method: 'GET', retry: 0 })
-    } catch {
-      preProfile = null
-    }
-    const balBefore = Math.max(0, Math.floor(Number(preProfile?.balance) || 0))
-    /** 仍有剩余餐次且履约信息已齐：视为有效期内续卡，仅叠加次数 */
-    const activeRenewal =
-      balBefore > 0 &&
-      preProfile &&
-      typeof preProfile === 'object' &&
-      !shouldOpenMemberSetup(preProfile)
-
-    const profileStartYmd =
-      preProfile?.delivery_start_date != null
-        ? String(preProfile.delivery_start_date).trim().slice(0, 10)
-        : ''
-    const payOut = await runMembershipTemplateWechatPay({
+    await runMembershipCardDetailPayWithPrompt({
       membershipTemplateId: templateId.value,
-      deliveryStartYmd: activeRenewal && profileStartYmd ? profileStartYmd : undefined,
       memberCouponId: selectedCouponId.value,
     })
-    const paySynced = payOut?.paySynced !== false
-    markMinePageNeedsRefresh()
-    if (activeRenewal) {
-      uni.showToast({
-        title: paySynced ? '支付成功' : '支付已提交，状态同步中',
-        icon: 'success',
-      })
-      setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
-      return
-    }
-    if (paySynced) {
-      uni.showToast({ title: '支付成功', icon: 'success' })
-    } else {
-      showOkAlert({
-        title: '支付已提交',
-        content:
-          '微信已扣款，订单状态正在同步。请先完善配送信息；若后台长时间仍显示未缴，请联系客服核对。',
-        showCancel: false,
-      })
-    }
-    setTimeout(() => {
-      uni.redirectTo({
-        url: '/packageUser/pages/memberSetup/memberSetup?from=pay',
-      })
-    }, paySynced ? 400 : 80)
-  } catch (e) {
-    const orderId = parsePendingOrderIdFromConflict(e)
-    if (isUnpaidOrderConflict(e) && orderId) {
-      await promptGoPayPendingOrder(orderId, selectedCouponId.value)
-    } else {
-      const msg =
-        e instanceof Error ? e.message : typeof e === 'string' ? e : '支付未完成'
-      if (msg.includes('cancel') || msg.includes('取消')) {
-        uni.showToast({ title: '已取消支付', icon: 'none' })
-      } else {
-        uni.showToast({ title: msg, icon: 'none', duration: 2800 })
-      }
-    }
   } finally {
     paying.value = false
   }

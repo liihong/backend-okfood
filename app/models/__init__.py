@@ -27,6 +27,7 @@ from app.models.store_retail_product import StoreRetailProduct
 from app.models.sf_same_city_callback import SfSameCityCallback
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store_kitchen_plan import StoreKitchenPlan
+from app.models.douyin import DouyinCertificateRedemption, DouyinProductMapping
 
 __all__ = [
     "AdminDashboardBizDaySnapshot",
@@ -56,6 +57,8 @@ __all__ = [
     "StoreRetailCategory",
     "StoreRetailProduct",
     "StoreKitchenPlan",
+    "DouyinCertificateRedemption",
+    "DouyinProductMapping",
     "SfSameCityCallback",
     "SfSameCityPush",
 ]

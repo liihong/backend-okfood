@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # 微信小程序：用于 code2Session + getuserphonenumber（手机号快速登录）
     WX_MINI_APPID: str = ""
     WX_MINI_SECRET: str = ""
+    # 抖音生活服务 OpenAPI（租户未配置 extra_json 时回退）
+    DOUYIN_CLIENT_KEY: str = ""
+    DOUYIN_CLIENT_SECRET: str = ""
     # 配送员确认送达后给会员下发订阅消息（需在公众平台申请模板，与下列字段名一致；留空则不下发）
     WX_MINI_SUBSCRIBE_DELIVERY_TMPL_ID: str = ""
     # 与模板中占位符 id 一致，逗号分隔，顺序对应：摘要、时间、说明（按你的模板增删）

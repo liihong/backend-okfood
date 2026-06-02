@@ -45,5 +45,7 @@ class Store(Base):
     uu_open_app_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     wechat_pay_ssl_cert_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     wechat_pay_ssl_key_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    douyin_poi_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    douyin_account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

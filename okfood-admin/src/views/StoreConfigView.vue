@@ -32,6 +32,8 @@ const form = ref({
   uu_open_app_key_set: false,
   wechat_pay_ssl_cert_path: '',
   wechat_pay_ssl_key_path: '',
+  douyin_poi_id: '',
+  douyin_account_id: '',
   courier_delivery_base_yuan: '',
   courier_delivery_extra_per_unit_yuan: '',
 })
@@ -65,6 +67,9 @@ async function loadConfig() {
       d?.wechat_pay_ssl_cert_path != null ? String(d.wechat_pay_ssl_cert_path).trim() : ''
     form.value.wechat_pay_ssl_key_path =
       d?.wechat_pay_ssl_key_path != null ? String(d.wechat_pay_ssl_key_path).trim() : ''
+    form.value.douyin_poi_id = d?.douyin_poi_id != null ? String(d.douyin_poi_id).trim() : ''
+    form.value.douyin_account_id =
+      d?.douyin_account_id != null ? String(d.douyin_account_id).trim() : ''
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -146,6 +151,8 @@ async function saveConfig() {
   }
   payload.wechat_pay_ssl_cert_path = form.value.wechat_pay_ssl_cert_path.trim() || null
   payload.wechat_pay_ssl_key_path = form.value.wechat_pay_ssl_key_path.trim() || null
+  payload.douyin_poi_id = form.value.douyin_poi_id.trim() || null
+  payload.douyin_account_id = form.value.douyin_account_id.trim() || null
 
   saving.value = true
   try {
@@ -404,6 +411,39 @@ onMounted(() => {
         </div>
         <div class="sc-field sc-checkbox-row sc-field--last">
           <el-checkbox v-model="form.uu_clear_app_key">清除已保存的 UU AppKey</el-checkbox>
+        </div>
+      </el-card>
+
+      <el-card class="sc-el-card" shadow="never">
+        <template #header>
+          <span class="sc-card-title">抖音团购 · 门店核销</span>
+        </template>
+        <p class="sc-hint sc-hint--card">
+          填写抖音来客门店 <strong>POI ID</strong>，小程序验券时将按此门店调用抖音核销接口。开放平台
+          <code class="sc-code">client_key/secret</code> 请在租户「对接配置」的 extra_json 或环境变量中配置。
+        </p>
+        <div class="sc-coord-grid">
+          <div class="sc-field">
+            <label class="sc-label" for="sc-dy-poi">抖音 POI ID</label>
+            <el-input
+              id="sc-dy-poi"
+              v-model="form.douyin_poi_id"
+              class="sc-input-el sc-input-el--mono"
+              maxlength="64"
+              clearable
+              placeholder="来客门店 POI"
+            />
+          </div>
+          <div class="sc-field">
+            <label class="sc-label" for="sc-dy-account">account_id（可选）</label>
+            <el-input
+              id="sc-dy-account"
+              v-model="form.douyin_account_id"
+              class="sc-input-el sc-input-el--mono"
+              maxlength="64"
+              clearable
+            />
+          </div>
         </div>
       </el-card>
 

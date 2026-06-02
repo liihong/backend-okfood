@@ -48,6 +48,24 @@ class CardPayChannel(str, Enum):
     WECHAT = "微信"
     ALIPAY = "支付宝"
     OFFLINE = "线下"
+    DOUYIN = "抖音"
+
+
+class DouyinGrantType(str, Enum):
+    """抖音团购商品映射：验券成功后发放的本地权益类型。"""
+
+    WEEK_CARD = "week_card"
+    MONTH_CARD = "month_card"
+    MEMBERSHIP_TEMPLATE = "membership_template"
+    COUPON_TEMPLATE = "coupon_template"
+
+
+class DouyinRedemptionStatus(str, Enum):
+    """抖音验券流水状态。"""
+
+    SUCCESS = "success"
+    FAILED = "failed"
+    GRANT_FAILED = "grant_failed"
 
 
 class CardOrderPayStatus(str, Enum):

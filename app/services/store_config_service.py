@@ -127,6 +127,16 @@ def _store_out_from_row(st: Store) -> StoreConfigOut:
             and str(st.wechat_pay_ssl_key_path or "").strip()
             else None
         ),
+        douyin_poi_id=(
+            str(st.douyin_poi_id).strip() or None
+            if getattr(st, "douyin_poi_id", None) is not None and str(st.douyin_poi_id or "").strip()
+            else None
+        ),
+        douyin_account_id=(
+            str(st.douyin_account_id).strip() or None
+            if getattr(st, "douyin_account_id", None) is not None and str(st.douyin_account_id or "").strip()
+            else None
+        ),
     )
 
 
@@ -285,6 +295,12 @@ def update_store_config(db: Session, store_id: int, body: StoreConfigUpdateIn) -
     if "wechat_pay_ssl_key_path" in fs:
         raw = body.wechat_pay_ssl_key_path
         st.wechat_pay_ssl_key_path = None if raw is None else (str(raw).strip() or None)
+    if "douyin_poi_id" in fs:
+        raw = body.douyin_poi_id
+        st.douyin_poi_id = None if raw is None else (str(raw).strip() or None)
+    if "douyin_account_id" in fs:
+        raw = body.douyin_account_id
+        st.douyin_account_id = None if raw is None else (str(raw).strip() or None)
     db.add(st)
     db.commit()
     db.refresh(st)
