@@ -35,6 +35,12 @@ def min_member_delivery_start_shanghai(now: datetime | None = None) -> date:
     return t.fromordinal(t.toordinal() + 1)
 
 
+def min_admin_card_order_delivery_start_shanghai(now: datetime | None = None) -> date:
+    """后台开卡工单起送业务日允许选择的最早日期（上海）：含当日，不含过去日期。"""
+    n = now if now is not None else now_shanghai()
+    return n.date()
+
+
 def min_leave_start_shanghai(now: datetime | None = None) -> date:
     """会员自助请假允许的最早业务日（上海）：跨日后不可请「当日」假，最早为明天。"""
     n = now if now is not None else now_shanghai()

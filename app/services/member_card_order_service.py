@@ -6,7 +6,11 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.timeutil import min_member_delivery_start_shanghai, shanghai_naive_range_for_calendar_day
+from app.core.timeutil import (
+    min_admin_card_order_delivery_start_shanghai,
+    min_member_delivery_start_shanghai,
+    shanghai_naive_range_for_calendar_day,
+)
 from app.models.enums import CardOpenMode, CardOrderKind, CardOrderPayStatus, CardPayChannel, CouponLockedOrderBiz, PlanType
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
@@ -528,10 +532,11 @@ def create_card_order(
             wx = body.wechat_name.strip()
             m.wechat_name = wx[:100] if wx else None
     if body.delivery_start_date is not None:
-        if body.delivery_start_date < min_member_delivery_start_shanghai():
+        # 后台开卡工单允许选当日；小程序仍走 min_member_delivery_start_shanghai（最早明日）
+        if body.delivery_start_date < min_admin_card_order_delivery_start_shanghai():
             raise HTTPException(
                 status_code=400,
-                detail="起送日期须不早于明日（上海业务日）",
+                detail="起送日期须不早于当日（上海业务日）",
             )
     if body.delivery_address is not None:
         da = body.delivery_address
@@ -640,10 +645,11 @@ def update_card_order(
 
     if "delivery_start_date" in patch:
         ds = body.delivery_start_date
-        if ds is not None and ds < min_member_delivery_start_shanghai():
+        # 后台更新工单允许选当日；小程序仍走 min_member_delivery_start_shanghai（最早明日）
+        if ds is not None and ds < min_admin_card_order_delivery_start_shanghai():
             raise HTTPException(
                 status_code=400,
-                detail="起送日期须不早于明日（上海业务日）",
+                detail="起送日期须不早于当日（上海业务日）",
             )
         order.delivery_start_date = ds
         if order.applied_to_member:
