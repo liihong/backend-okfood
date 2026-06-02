@@ -96,26 +96,30 @@ const loading = ref(true)
 const loadError = ref('')
 const paying = ref(false)
 
-const isPendingPay = computed(() => String(order.value?.pay_status || '') === '未缴')
+const isPendingPay = computed(() => {
+  const o = order.value
+  return String((o && o.pay_status) || '') === '未缴'
+})
 
 const orderTitle = computed(() => {
-  const r = order.value?.remark
+  const o = order.value
+  const r = o && o.remark
   if (r && String(r).length > 0) {
     return String(r).replace(/^卡包模版#\d+·/, '卡包 · ')
   }
-  const k = order.value?.card_kind || '会员'
+  const k = (o && o.card_kind) || '会员'
   return `${k} · 开卡订单`
 })
 
 const statusLine = computed(() => {
-  const ps = String(order.value?.pay_status || '')
+  const ps = String((order.value && order.value.pay_status) || '')
   if (ps === '未缴') return '待支付'
   if (ps === '已缴') return '已支付'
   return ps || '—'
 })
 
 const statusTone = computed(() => {
-  const ps = String(order.value?.pay_status || '')
+  const ps = String((order.value && order.value.pay_status) || '')
   if (ps === '未缴') return 'warn'
   if (ps === '已缴') return 'ok'
   return 'info'
@@ -127,7 +131,7 @@ const statusSub = computed(() => {
 })
 
 const createdAtText = computed(() => {
-  const ca = order.value?.created_at
+  const ca = order.value && order.value.created_at
   if (!ca) return '—'
   const s = String(ca)
   return s.length >= 16 ? s.slice(0, 16).replace('T', ' ') : s
@@ -144,7 +148,8 @@ onShow(() => {
 
 onLoad((options) => {
   applyScrollLayout()
-  const raw = options?.id || options?.order_id || options?.orderId || ''
+  const raw =
+    (options && (options.id || options.order_id || options.orderId)) || ''
   const id = raw ? parseInt(String(decodeURIComponent(raw)), 10) : NaN
   if (!Number.isFinite(id) || id < 1) {
     loading.value = false
@@ -155,89 +160,106 @@ onLoad((options) => {
   void loadDetail()
 })
 
-async function loadDetail() {
+function loadDetail() {
   if (!getMemberToken()) {
     loading.value = false
     loadError.value = '请先登录'
-    return
+    return Promise.resolve()
   }
   loading.value = true
   loadError.value = ''
   order.value = null
-  try {
-    const data = await getMemberCardOrder(orderId.value)
-    order.value = data && typeof data === 'object' ? data : null
-    if (!order.value) loadError.value = '订单数据异常'
-  } catch (e) {
-    loadError.value = e instanceof Error ? e.message : '加载失败'
-  } finally {
-    loading.value = false
-  }
+  return getMemberCardOrder(orderId.value)
+    .then(function (data) {
+      order.value = data && typeof data === 'object' ? data : null
+      if (!order.value) loadError.value = '订单数据异常'
+    })
+    .catch(function (e) {
+      loadError.value = e instanceof Error ? e.message : '加载失败'
+    })
+    .then(function () {
+      loading.value = false
+    })
 }
 
 /** 支付成功后：续卡回「我的」，新用户去完善配送信息 */
-async function afterPaySuccess(paySynced) {
+function afterPaySuccess(paySynced) {
   markMinePageNeedsRefresh()
-  let preProfile = null
-  try {
-    preProfile = await request('/api/user/me', { method: 'GET', retry: 0 })
-  } catch (_profileErr) {
-    console.warn(_profileErr) // 加上这一行，打破 Babel 的死脑筋
-    preProfile = null
-  }
-  const balBefore = Math.max(0, Math.floor(Number(preProfile?.balance) || 0))
-  const activeRenewal =
-    balBefore > 0 &&
-    preProfile &&
-    typeof preProfile === 'object' &&
-    !shouldOpenMemberSetup(preProfile)
+  return request('/api/user/me', { method: 'GET', retry: 0 })
+    .catch(function (_profileErr) {
+      console.warn(_profileErr)
+      return null
+    })
+    .then(function (preProfile) {
+      const balBefore = Math.max(
+        0,
+        Math.floor(Number(preProfile && preProfile.balance) || 0)
+      )
+      const activeRenewal =
+        balBefore > 0 &&
+        preProfile &&
+        typeof preProfile === 'object' &&
+        !shouldOpenMemberSetup(preProfile)
 
-  if (activeRenewal) {
-    uni.showToast({
-      title: paySynced ? '支付成功' : '支付已提交，状态同步中',
-      icon: 'success',
-    })
-    setTimeout(() => uni.switchTab({ url: '/pages/mine/index' }), 400)
-    return
-  }
+      if (activeRenewal) {
+        uni.showToast({
+          title: paySynced ? '支付成功' : '支付已提交，状态同步中',
+          icon: 'success',
+        })
+        setTimeout(function () {
+          uni.switchTab({ url: '/pages/mine/index' })
+        }, 400)
+        return
+      }
 
-  if (paySynced) {
-    uni.showToast({ title: '支付成功', icon: 'success' })
-  } else {
-    showOkAlert({
-      title: '支付已提交',
-      content:
-        '微信已扣款，订单状态正在同步。请先完善配送信息；若后台长时间仍显示未缴，请联系客服核对。',
-      showCancel: false,
+      if (paySynced) {
+        uni.showToast({ title: '支付成功', icon: 'success' })
+      } else {
+        showOkAlert({
+          title: '支付已提交',
+          content:
+            '微信已扣款，订单状态正在同步。请先完善配送信息；若后台长时间仍显示未缴，请联系客服核对。',
+          showCancel: false,
+        })
+      }
+      setTimeout(
+        function () {
+          uni.redirectTo({
+            url: '/packageUser/pages/memberSetup/memberSetup?from=pay',
+          })
+        },
+        paySynced ? 400 : 80
+      )
     })
-  }
-  setTimeout(() => {
-    uni.redirectTo({
-      url: '/packageUser/pages/memberSetup/memberSetup?from=pay',
-    })
-  }, paySynced ? 400 : 80)
 }
 
-async function continuePay() {
+function finishContinuePay() {
+  paying.value = false
+  uni.hideLoading()
+}
+
+function continuePay() {
   if (!order.value || paying.value || !isPendingPay.value) return
   paying.value = true
   uni.showLoading({ title: '拉起支付…', mask: true })
-  try {
-    const payOut = await payMemberCardOrderWechat(order.value.id)
-    const paySynced = payOut?.paySynced !== false
-    await loadDetail()
-    await afterPaySuccess(paySynced)
-  } catch (e) {
-    const raw = e && typeof e === 'object' ? e : {}
-    const errMsg = typeof raw.errMsg === 'string' ? raw.errMsg : ''
-    const msg = errMsg || (e instanceof Error ? e.message : '支付未完成')
-    if (!String(msg).includes('cancel') && !String(msg).includes('取消')) {
-      uni.showToast({ title: msg, icon: 'none' })
-    }
-  } finally {
-    paying.value = false
-    uni.hideLoading()
-  }
+  payMemberCardOrderWechat(order.value.id)
+    .then(function (payOut) {
+      const paySynced = payOut && payOut.paySynced !== false
+      return loadDetail().then(function () {
+        return afterPaySuccess(paySynced)
+      })
+    })
+    .catch(function (e) {
+      const raw = e && typeof e === 'object' ? e : {}
+      const errMsg = typeof raw.errMsg === 'string' ? raw.errMsg : ''
+      const msg = errMsg || (e instanceof Error ? e.message : '支付未完成')
+      if (!String(msg).includes('cancel') && !String(msg).includes('取消')) {
+        uni.showToast({ title: msg, icon: 'none' })
+      }
+    })
+    .then(function () {
+      finishContinuePay()
+    })
 }
 </script>
 

@@ -207,6 +207,30 @@
 
 /* 窄屏侧栏改为默认图标收起后，沿用竖向菜单与桌面一致的交互（子菜单仍为弹出层），不再使用横向铺满布局 */
 
+/* 侧栏收起时子菜单弹出层（teleport + 浅底 tooltip）：覆盖继承的白字，保证可读 */
+.okfood-sidebar-menu-popup.el-menu--popup-container,
+.okfood-sidebar-menu-popup .el-menu.el-menu--popup {
+  --el-menu-text-color: #1e293b;
+  --el-menu-hover-text-color: #0e5a44;
+  --el-menu-active-color: #0e5a44;
+  --el-menu-bg-color: #ffffff;
+  --el-menu-hover-bg-color: #f1f5f9;
+}
+
+.okfood-sidebar-menu-popup .el-menu-item {
+  color: #1e293b !important;
+}
+
+.okfood-sidebar-menu-popup .el-menu-item:hover {
+  color: #0e5a44 !important;
+  background-color: #f1f5f9 !important;
+}
+
+.okfood-sidebar-menu-popup .el-menu-item.is-active {
+  color: #0e5a44 !important;
+  background-color: #ecfdf5 !important;
+}
+
 /* --- el-table 表头：墨绿背景（与侧栏 / 主色 #0e5a44 一致）--- */
 .el-table thead th.el-table__cell {
   background-color: var(--okfood-el-table-header-bg) !important;

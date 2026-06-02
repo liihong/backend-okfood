@@ -333,6 +333,7 @@ function onTabClose(tab) {
         :collapse="sidebarCollapsed"
         router
         :ellipsis="false"
+        popper-class="okfood-sidebar-menu-popup"
         background-color="transparent"
         text-color="rgba(255, 255, 255, 0.75)"
         active-text-color="#ffffff"

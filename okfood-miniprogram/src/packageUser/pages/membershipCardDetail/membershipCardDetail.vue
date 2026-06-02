@@ -154,33 +154,38 @@ const shareSheetVisible = ref(false)
 /** 避免 onLoad 与 loadOne 重复弹待支付提示 */
 let pendingPayPrompted = false
 
-async function fetchPendingMemberCardOrderIdLocal() {
-  try {
-    const data = await listMemberCardOrders({
-      page: 1,
-      page_size: 1,
-      list_status: 'pending_pay',
+function fetchPendingMemberCardOrderIdLocal() {
+  return listMemberCardOrders({
+    page: 1,
+    page_size: 1,
+    list_status: 'pending_pay',
+  })
+    .then(function (data) {
+      const items = data && data.items
+      const first = Array.isArray(items) ? items[0] : null
+      const oid = first && first.id != null ? Number(first.id) : NaN
+      return Number.isFinite(oid) && oid > 0 ? oid : null
     })
-    const first = Array.isArray(data?.items) ? data.items[0] : null
-    const oid = first?.id != null ? Number(first.id) : NaN
-    return Number.isFinite(oid) && oid > 0 ? oid : null
-  } catch (_err) {
-    return null
-  }
+    .catch(function (_err) {
+      void _err
+      return null
+    })
 }
 
 /** 进入购卡页：有待支付工单则弹窗引导 */
-async function maybePromptPendingPayOnEnter() {
-  if (pendingPayPrompted) return
+function maybePromptPendingPayOnEnter() {
+  if (pendingPayPrompted) return Promise.resolve()
   pendingPayPrompted = true
-  const orderId = await fetchPendingMemberCardOrderIdLocal()
-  if (!orderId) return
-  await promptGoPayPendingMemberCardOrder(orderId, selectedCouponId.value)
+  return fetchPendingMemberCardOrderIdLocal().then(function (orderId) {
+    if (!orderId) return
+    return promptGoPayPendingMemberCardOrder(orderId, selectedCouponId.value)
+  })
 }
 
 const saleDisp = computed(() => {
-  const s = tpl.value?.sale_price_yuan
-  const l = tpl.value?.list_price_yuan
+  const t = tpl.value
+  const s = t && t.sale_price_yuan
+  const l = t && t.list_price_yuan
   if (s != null && s !== '') return String(s)
   if (l != null && l !== '') return String(l)
   return '—'
@@ -222,7 +227,7 @@ const introText = computed(() => {
 })
 
 const privilegeLines = computed(() => {
-  const raw = tpl.value?.purchase_notice
+  const raw = tpl.value && tpl.value.purchase_notice
   if (raw && String(raw).trim()) {
     const lines = String(raw)
       .split(/\r?\n/)
@@ -241,15 +246,15 @@ function toggleAgree() {
 function buildSharePayload() {
   const t = tpl.value
   const id = templateId.value
-  const name = t?.name ? String(t.name).trim() : '自律膳食卡'
-  const meals = t?.meals_grant != null ? String(t.meals_grant) : ''
+  const name = t && t.name ? String(t.name).trim() : '自律膳食卡'
+  const meals = t && t.meals_grant != null ? String(t.meals_grant) : ''
   const price = saleDisp.value
   const title = meals
     ? `推荐你办理「${name}」— OK饭 ${meals} 次餐，优惠价 ¥${price}`
     : `推荐你办理「${name}」— OK饭自律膳食卡`
   const path = `/packageUser/pages/membershipCardDetail/membershipCardDetail?templateId=${encodeURIComponent(String(id))}`
   const imageUrl =
-    t?.card_style_image_url != null ? String(t.card_style_image_url).trim() : ''
+    t && t.card_style_image_url != null ? String(t.card_style_image_url).trim() : ''
   return {
     title,
     path,
@@ -303,11 +308,13 @@ onShareTimeline(() => {
   return payload
 })
 
-async function loadOne() {
+function loadOne() {
   if (!getMemberToken()) {
     loading.value = false
     uni.showToast({ title: '请先登录', icon: 'none' })
-    setTimeout(() => uni.navigateBack(), 400)
+    setTimeout(function () {
+      uni.navigateBack()
+    }, 400)
     return
   }
   const id = templateId.value
@@ -316,64 +323,73 @@ async function loadOne() {
     return
   }
   loading.value = true
-  try {
-    const data = await request(`/api/user/membership-card-templates/${id}`, {
-      method: 'GET',
-      retry: 1,
+  request(`/api/user/membership-card-templates/${id}`, {
+    method: 'GET',
+    retry: 1,
+  })
+    .then(function (data) {
+      tpl.value = data && typeof data === 'object' ? data : null
+      return loadCoupons()
     })
-    tpl.value = data && typeof data === 'object' ? data : null
-    await loadCoupons()
-  } catch (e) {
-    if (isUserMeNotFoundError(e)) clearMemberSession()
-    tpl.value = null
-    uni.showToast({ title: e instanceof Error ? e.message : '加载失败', icon: 'none' })
-  } finally {
-    loading.value = false
-  }
-  if (tpl.value) {
-    maybePromptPendingPayOnEnter().catch(() => {})
-  }
+    .catch(function (e) {
+      if (isUserMeNotFoundError(e)) clearMemberSession()
+      tpl.value = null
+      uni.showToast({ title: e instanceof Error ? e.message : '加载失败', icon: 'none' })
+    })
+    .then(function () {
+      loading.value = false
+      if (tpl.value) {
+        maybePromptPendingPayOnEnter().catch(function () {})
+      }
+    })
 }
 
 /** 结算页可用券；失败时用提醒接口兜底（避免线上未部署 available 时无券展示） */
-async function fetchCouponsForTemplate() {
+function fetchCouponsForTemplate() {
   const tid = templateId.value
-  let rows = []
-  try {
-    const data = await listAvailableMemberCoupons({
-      biz_type: 'member_card',
-      membership_template_id: tid,
+  return listAvailableMemberCoupons({
+    biz_type: 'member_card',
+    membership_template_id: tid,
+  })
+    .then(function (data) {
+      return Array.isArray(data) ? data : []
     })
-    rows = Array.isArray(data) ? data : []
-  } catch (_err) {
-    rows = []
-  }
-  if (!rows.length) {
-    try {
-      const reminder = await getMemberCouponReminder()
-      const all = Array.isArray(reminder?.coupons) ? reminder.coupons : []
-      rows = filterMemberCardCouponsForTemplate(all, tid)
-    } catch (_err) {
-      rows = []
-    }
-  }
-  return rows
+    .catch(function (_err) {
+      void _err
+      return []
+    })
+    .then(function (rows) {
+      if (rows.length) return rows
+      return getMemberCouponReminder()
+        .then(function (reminder) {
+          const coupons = reminder && reminder.coupons
+          const all = Array.isArray(coupons) ? coupons : []
+          return filterMemberCardCouponsForTemplate(all, tid)
+        })
+        .catch(function (_err2) {
+          void _err2
+          return []
+        })
+    })
 }
 
-async function loadCoupons() {
-  if (!templateId.value) return
+function loadCoupons() {
+  if (!templateId.value) return Promise.resolve()
   couponsLoading.value = true
   selectedCouponId.value = null
-  try {
-    const rows = await fetchCouponsForTemplate()
-    availableCoupons.value = rows
-    const best = pickBestMemberCoupon(rows)
-    if (best?.id != null) selectedCouponId.value = best.id
-  } catch (_err) {
-    availableCoupons.value = []
-  } finally {
-    couponsLoading.value = false
-  }
+  return fetchCouponsForTemplate()
+    .then(function (rows) {
+      availableCoupons.value = rows
+      const best = pickBestMemberCoupon(rows)
+      if (best && best.id != null) selectedCouponId.value = best.id
+    })
+    .catch(function (_err) {
+      void _err
+      availableCoupons.value = []
+    })
+    .then(function () {
+      couponsLoading.value = false
+    })
 }
 
 function onCouponSelect(row) {
@@ -381,17 +397,17 @@ function onCouponSelect(row) {
   selectedCouponId.value = row.id
 }
 
-async function onPay() {
+function onPay() {
   if (!agreed.value || paying.value || !tpl.value) return
   paying.value = true
-  try {
-    await runMembershipCardDetailPayWithPrompt({
-      membershipTemplateId: templateId.value,
-      memberCouponId: selectedCouponId.value,
-    })
-  } finally {
+  runMembershipCardDetailPayWithPrompt({
+    membershipTemplateId: templateId.value,
+    memberCouponId: selectedCouponId.value,
+  }).then(function () {
     paying.value = false
-  }
+  }).catch(function () {
+    paying.value = false
+  })
 }
 
 /** scroll-view 在真机上须明确高度；calc(100vh) 在部分机型上无效，改用 windowHeight 像素值 */
@@ -404,12 +420,12 @@ onShow(() => {
 })
 
 onLoad((opts) => {
-  const raw = opts?.templateId != null ? String(opts.templateId) : ''
+  const raw = opts && opts.templateId != null ? String(opts.templateId) : ''
   const id = parseInt(raw, 10)
   templateId.value = Number.isFinite(id) && id > 0 ? id : 0
   applyScrollLayout()
   enableWechatShareMenus()
-  loadOne().catch(() => {})
+  loadOne()
 })
 </script>
 
