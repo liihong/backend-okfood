@@ -584,6 +584,40 @@ def total_meal_units_sql_sum_only(
     )
 
 
+def _total_meal_units_locked_date_sql(
+    db: Session, *, delivery_date: date, store_id: int
+) -> int:
+    """锁单日应配送份数合计：冻结到家名单 SQL SUM + 自提应送 + 扣次后已送。
+
+    与 ``delivery_sheet_metrics_for_date(...).meal_total`` 口径一致，但不加载会员行与地址。
+    """
+    from app.services.delivery_day_lock_service import sf_frozen_subscription_member_ids_for_delivery_date
+
+    sid = int(store_id)
+    frozen = sf_frozen_subscription_member_ids_for_delivery_date(
+        db, store_id=sid, delivery_date=delivery_date
+    )
+    units_sql = sql_effective_daily_meal_units_column()
+    home_frozen = 0
+    if frozen:
+        home_frozen = int(
+            db.scalar(
+                select(func.coalesce(func.sum(units_sql), 0)).where(
+                    Member.id.in_(frozen),
+                    Member.deleted_at.is_(None),
+                    Member.store_pickup.is_(False),
+                    Member.store_id == sid,
+                )
+            )
+            or 0
+        )
+    return (
+        home_frozen
+        + _sum_meal_units_pickup_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
+        + _sum_meal_units_extra_delivered_on_date(db, delivery_date=delivery_date, store_id=sid)
+    )
+
+
 def _delivered_member_ids_subquery(db: Session, *, delivery_date: date, store_id: int):
     """当日 delivery_logs 已 DELIVERED 的会员 id 子查询（dashboard SQL 快速路径用）。"""
     sid = int(store_id)
@@ -737,14 +771,7 @@ def total_meal_units_for_delivery_sheet(
     from app.services.delivery_day_lock_service import is_delivery_day_sheet_locked
 
     if is_delivery_day_sheet_locked(db, store_id=sid, delivery_date=delivery_date):
-        return int(
-            delivery_sheet_metrics_for_date(
-                db,
-                delivery_date=delivery_date,
-                store_id=sid,
-                metrics_cache=metrics_cache,
-            ).meal_total
-        )
+        return _total_meal_units_locked_date_sql(db, delivery_date=delivery_date, store_id=sid)
     return (
         _sum_meal_units_home_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
         + _sum_meal_units_pickup_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)

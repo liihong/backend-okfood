@@ -16,13 +16,37 @@ from app.models.menu_schedule import MenuSchedule
 from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.services.delivery_sheet_service import (
+    _total_meal_units_locked_date_sql,
     meal_units_totals_for_delivery_dates,
-    total_meal_units_for_delivery_sheet,
+    total_meal_units_sql_sum_only,
 )
 
 
 def _week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
+
+
+def scheduled_dish_id_for_calendar_date(db: Session, menu_date: date, *, store_id: int) -> int | None:
+    """某日排期菜品 id：按日排期优先，否则周槽；无排期则 None。仅查 id，供库存/比对用。"""
+    sid = int(store_id)
+    sched_id = db.scalar(
+        select(MenuSchedule.dish_id).where(
+            MenuSchedule.menu_date == menu_date,
+            MenuSchedule.store_id == sid,
+        )
+    )
+    if sched_id is not None:
+        return int(sched_id)
+    anchor = _week_start(menu_date)
+    slot = menu_date.weekday() + 1
+    slot_dish = db.scalar(
+        select(WeeklyMenuSlot.dish_id).where(
+            WeeklyMenuSlot.store_id == sid,
+            WeeklyMenuSlot.week_start == anchor,
+            WeeklyMenuSlot.slot == slot,
+        )
+    )
+    return int(slot_dish) if slot_dish is not None else None
 
 
 def resolve_dish_for_calendar_date(db: Session, menu_date: date, *, store_id: int) -> MenuDish | None:
@@ -52,8 +76,17 @@ def resolve_dish_for_calendar_date(db: Session, menu_date: date, *, store_id: in
 
 
 def subscription_total_meals_on_date(db: Session, menu_date: date, *, store_id: int) -> int:
-    """当日应配送份数（到家+自提，含已送后不再应送仍在大表者；与 ``build_delivery_sheet`` 合计一致；非法定配送日则为 0）。"""
-    return total_meal_units_for_delivery_sheet(db, delivery_date=menu_date, store_id=int(store_id))
+    """当日应配送份数（到家+自提，含已送后不再应送仍在大表者；与 ``build_delivery_sheet`` 合计一致；非法定配送日则为 0）。
+
+    菜单/库存读路径：未锁单走 SQL SUM；已锁单走冻结名单聚合，避免 ``total_meal_units_for_delivery_sheet`` 内重复全量推单探测。
+    """
+    from app.services.delivery_day_lock_service import is_delivery_day_sheet_locked
+
+    sid = int(store_id)
+    d = menu_date
+    if not is_delivery_day_sheet_locked(db, store_id=sid, delivery_date=d):
+        return total_meal_units_sql_sum_only(db, delivery_date=d, store_id=sid)
+    return _total_meal_units_locked_date_sql(db, delivery_date=d, store_id=sid)
 
 
 def subscription_total_meals_by_dates(
@@ -174,14 +207,16 @@ def single_order_stock_for_dish_date(
     db: Session, dish_id: int, menu_date: date, *, store_id: int
 ) -> SingleOrderStockInfo:
     sid = int(store_id)
-    w = weekly_slot_row_for_dish_date(db, dish_id, menu_date, store_id=sid)
-    scheduled = resolve_dish_for_calendar_date(db, menu_date, store_id=sid)
+    did = int(dish_id)
+    w = weekly_slot_row_for_dish_date(db, did, menu_date, store_id=sid)
+    scheduled_id = scheduled_dish_id_for_calendar_date(db, menu_date, store_id=sid)
+    # 仅当该日为当前菜品供餐时才统计订阅占用（避免无关日触发配送大表级聚合）
     sub = (
         subscription_total_meals_on_date(db, menu_date, store_id=sid)
-        if scheduled and int(scheduled.id) == int(dish_id)
+        if scheduled_id is not None and scheduled_id == did
         else 0
     )
-    paid = paid_single_portions_sum(db, dish_id, menu_date, store_id=sid)
+    paid = paid_single_portions_sum(db, did, menu_date, store_id=sid)
     if w is None or w.total_stock is None:
         return SingleOrderStockInfo(
             limited=True, total_stock=None, subscription_meals=sub, paid_single_portions=paid, remaining=0
