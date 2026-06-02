@@ -200,7 +200,8 @@ def member_membership_refund_confirm(
         log_detail=log_detail,
         member_id=int(m.id),
     )
-    m.meal_quota_total = int(preview.meals_consumed)
+    # 清零展示用总次数；历史配额与已消费次数已写入 member_membership_refunds
+    m.meal_quota_total = 0
     m.is_active = False
     m.delivery_deferred = True
     m.membership_refunded_at = beijing_now_naive()

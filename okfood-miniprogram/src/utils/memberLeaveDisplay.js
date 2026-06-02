@@ -43,6 +43,21 @@ export function hasLeaveRangeConfigured(leaveRange) {
   return Boolean(start && end)
 }
 
+/** 区间请假仍生效或尚未开始（结束日 >= 上海业务日） */
+export function isLeaveRangeActiveOrFuture(leaveRange, todayYmd = ymdTodayShanghai()) {
+  const { start, end } = leaveRangeYmdPair(leaveRange)
+  if (!start || !end) return false
+  return end >= todayYmd
+}
+
+/** 「仅明天请假」是否仍有效（目标业务日未过） */
+export function isTomorrowLeaveActive(isLeavedTomorrow, targetYmd, todayYmd = ymdTodayShanghai()) {
+  if (!isLeavedTomorrow) return false
+  const t = ymdFromApi(targetYmd)
+  if (!t) return true
+  return t >= todayYmd
+}
+
 /** 区间请假在计划卡上的展示文案 */
 function formatRangeLeaveLine(leaveRange) {
   const { start: sRaw, end: eRaw } = leaveRangeYmdPair(leaveRange)
@@ -62,6 +77,7 @@ function formatRangeLeaveLine(leaveRange) {
  *   dailyUnits?: number
  *   leaveRange?: object | null
  *   isLeavedTomorrow?: boolean
+ *   tomorrowLeaveTargetYmd?: string
  * }} [options]
  */
 export function formatPlanCardDailyUnitsLine(options = {}) {
@@ -72,6 +88,7 @@ export function formatPlanCardDailyUnitsLine(options = {}) {
     dailyUnits = 1,
     leaveRange = null,
     isLeavedTomorrow = false,
+    tomorrowLeaveTargetYmd = '',
   } = options
 
   if (!isLoggedIn || hideDailyUnits) return ''
@@ -81,11 +98,11 @@ export function formatPlanCardDailyUnitsLine(options = {}) {
     return formatRangeLeaveLine(leaveRange) || '请假中'
   }
 
-  if (hasLeaveRangeConfigured(leaveRange) && !isOnLeaveTodayShanghai(leaveRange)) {
+  if (isLeaveRangeActiveOrFuture(leaveRange) && !isOnLeaveTodayShanghai(leaveRange)) {
     return formatRangeLeaveLine(leaveRange) || '已预约请假'
   }
 
-  if (isLeavedTomorrow) return '明日请假中'
+  if (isTomorrowLeaveActive(isLeavedTomorrow, tomorrowLeaveTargetYmd)) return '明日请假中'
 
   const n = Math.max(1, Math.floor(Number(dailyUnits) || 0))
   return `每日 ${n} 份`

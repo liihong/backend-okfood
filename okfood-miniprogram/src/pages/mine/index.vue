@@ -96,12 +96,6 @@
           :plan-kind="planType"
           :plan-label="planTypeMemberLabel"
           :address-line="planCardAddressLine"
-          :is-logged-in="isLoggedIn"
-          :daily-units="displayDailyUnitsAnim"
-          :leave-range="leaveRange"
-          :is-leaved-tomorrow="isLeavedTomorrow"
-          :hide-daily-units="showMemberCardModule"
-          :is-delivery-paused="showResumeDeliveryEntry"
           :show-resume-chip="showResumeDeliveryEntry"
           :show-setup-delivery-chip="showSetupDeliveryChip"
           :show-buy-card-chip="showBuyCardChip"
@@ -256,7 +250,8 @@ import {
   ymdFromApi,
   ymdToCnMd,
   isOnLeaveTodayShanghai,
-  hasLeaveRangeConfigured,
+  isLeaveRangeActiveOrFuture,
+  isTomorrowLeaveActive,
 } from '@/utils/memberLeaveDisplay.js'
 
 const pageStyle = ref({})
@@ -706,7 +701,11 @@ async function confirmNickEdit() {
 const memberDeliveryStatus = computed(() => {
   if (!isLoggedIn.value) return '尚未开启计划'
   if (needsMemberSetupPage.value) return ''
-  if (isOnLeaveTodayShanghai(leaveRange.value) || isLeavedTomorrow.value || hasLeaveRangeConfigured(leaveRange.value)) {
+  if (
+    isOnLeaveTodayShanghai(leaveRange.value) ||
+    isTomorrowLeaveActive(isLeavedTomorrow.value, tomorrowLeaveTargetYmd.value) ||
+    isLeaveRangeActiveOrFuture(leaveRange.value)
+  ) {
     if (isOnLeaveTodayShanghai(leaveRange.value)) {
       const lr = leaveRange.value
       const sRaw = lr?.start != null ? String(lr.start).slice(0, 10) : ''
@@ -719,7 +718,7 @@ const memberDeliveryStatus = computed(() => {
       }
       return '请假中'
     }
-    if (hasLeaveRangeConfigured(leaveRange.value) && !isOnLeaveTodayShanghai(leaveRange.value)) {
+    if (isLeaveRangeActiveOrFuture(leaveRange.value) && !isOnLeaveTodayShanghai(leaveRange.value)) {
       const lr = leaveRange.value
       const sRaw = lr?.start != null ? String(lr.start).slice(0, 10) : ''
       const eRaw = lr?.end != null ? String(lr.end).slice(0, 10) : ''
@@ -731,11 +730,8 @@ const memberDeliveryStatus = computed(() => {
       }
       return '已预约请假'
     }
-    if (isLeavedTomorrow.value) {
-      const t = tomorrowLeaveTargetYmd.value
-      const md = t ? ymdToCnMd(t) : ''
-      if (md) return `${md}请假`
-      return '请假中'
+    if (isTomorrowLeaveActive(isLeavedTomorrow.value, tomorrowLeaveTargetYmd.value)) {
+      return '明日请假中'
     }
     return '请假中'
   }
@@ -763,12 +759,13 @@ const cardFooter = computed(() => {
 })
 
 const todayDeliveryAddressLine = computed(() => {
-  if (needsMemberSetupPage.value) return '配送状态：未开启配送'
   const line = defaultAddrLine.value?.trim()
-  if (line) return `送餐地址：${line}`
+  if (line) return `默认配送地址：${line}`
   const p = memberProfileRaw.value
+  const profileAddr = p?.address != null ? String(p.address).trim() : ''
+  if (profileAddr) return `默认配送地址：${profileAddr}`
   if (p?.store_pickup === true) return '履约方式：门店自提'
-  return '送餐地址：未设置默认地址'
+  return '默认配送地址：未设置'
 })
 
 function mergeMemberApiProfile(data) {

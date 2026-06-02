@@ -1,4 +1,4 @@
-import { minMemberDeliveryStartYmd } from '@/utils/memberDeliveryDate.js'
+import { minMemberDeliveryStartYmd, ymdTodayShanghai } from '@/utils/memberDeliveryDate.js'
 
 /** 与后端 `STUB_MEMBER_NAME` 一致 */
 export const MEMBER_STUB_NAME = '待完善'
@@ -69,8 +69,12 @@ export function shouldOpenMemberSetup(profile) {
 
   const start = ymdFromApiField(profile.delivery_start_date)
   if (!start) return true
-  const minD = minMemberDeliveryStartYmd()
-  if (start < minD) return true
+  // 已在履约中的会员起送日可为过去；仅对未来起送日校验「最早明天」
+  const today = ymdTodayShanghai()
+  if (start > today) {
+    const minD = minMemberDeliveryStartYmd()
+    if (start < minD) return true
+  }
 
   if (profile.store_pickup === true) return false
 

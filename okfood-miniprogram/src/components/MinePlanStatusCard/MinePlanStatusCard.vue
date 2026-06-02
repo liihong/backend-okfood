@@ -17,11 +17,14 @@
         <text class="plan-card__num">{{ remainingDisplay }}</text>
         <text class="plan-card__num-lab">剩余自律餐次</text>
       </view>
-      <view v-if="dailyUnitsText" class="plan-card__slant-wrap">
+      <view v-if="statusText" class="plan-card__slant-wrap">
         <text
           class="plan-card__slant"
-          :class="{ 'plan-card__slant--alert': isDailyUnitsAlert }"
-        >{{ dailyUnitsText }}</text>
+          :class="{
+            'plan-card__slant--alert': statusAlert || isHeroStatusAlert,
+            'plan-card__slant--active': isHeroStatusBreathe,
+          }"
+        >{{ statusText }}</text>
       </view>
     </view>
 
@@ -53,23 +56,12 @@
       >
         <text class="plan-card__foot-resume-txt">去购卡</text>
       </view>
-      <view
-        v-else-if="statusText"
-        :class="[
-          'plan-card__foot-status',
-          { 'plan-card__foot-status--alert': statusAlert },
-          { 'plan-card__foot-status--active': isFootStatusBreathe },
-        ]"
-      >
-        <text class="plan-card__foot-right">{{ statusText }}</text>
-      </view>
     </view>
   </view>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { formatPlanCardDailyUnitsLine } from '@/utils/memberLeaveDisplay'
 
 const props = defineProps({
   remainingMeals: { type: Number, default: 0 },
@@ -81,17 +73,6 @@ const props = defineProps({
   /** 周卡 / 月卡 / 次卡，用于卡片配色 */
   planKind: { type: String, default: '' },
   addressLine: { type: String, default: '' },
-  isLoggedIn: { type: Boolean, default: false },
-  /** 每日送达份数（含滚动动画后的展示值） */
-  dailyUnits: { type: Number, default: 1 },
-  /** 与 /api/user/me.leave_range 一致 */
-  leaveRange: { type: Object, default: null },
-  /** 与 /api/user/me.is_leaved_tomorrow 一致 */
-  isLeavedTomorrow: { type: Boolean, default: false },
-  /** 无剩余餐次时不展示右上角份数/请假文案 */
-  hideDailyUnits: { type: Boolean, default: false },
-  /** 暂停配送时展示「已暂停配送」 */
-  isDeliveryPaused: { type: Boolean, default: false },
   showResumeChip: { type: Boolean, default: false },
   /** 待完善配送信息时展示「设置配送信息」按钮 */
   showSetupDeliveryChip: { type: Boolean, default: false },
@@ -105,22 +86,18 @@ const remainingDisplay = computed(() =>
   Math.max(0, Math.floor(Number(props.remainingMeals) || 0)),
 )
 
-/** 右上角：每日份数 / 请假中 / 暂停配送 */
-const dailyUnitsText = computed(() =>
-  formatPlanCardDailyUnitsLine({
-    isLoggedIn: props.isLoggedIn,
-    hideDailyUnits: props.hideDailyUnits,
-    isPaused: props.isDeliveryPaused,
-    dailyUnits: props.dailyUnits,
-    leaveRange: props.leaveRange,
-    isLeavedTomorrow: props.isLeavedTomorrow,
-  }),
-)
-
 /** 请假、暂停时用高亮色强调 */
-const isDailyUnitsAlert = computed(() => {
-  const t = String(dailyUnitsText.value || '')
-  return t.includes('请假') || t === '已暂停配送'
+const isHeroStatusAlert = computed(() => {
+  const t = String(props.statusText || '')
+  return t.includes('请假') || t.includes('暂停配送')
+})
+
+/** 正常配送中 / 请假：右上角状态呼吸灯高亮 */
+const isHeroStatusBreathe = computed(() => {
+  if (props.statusAlert || props.showResumeChip || props.showSetupDeliveryChip) return false
+  const s = String(props.statusText || '').trim()
+  if (!s) return false
+  return s.includes('正常配送') || s.includes('请假') || s.includes('暂停配送')
 })
 
 const themeClass = computed(() => {
@@ -136,14 +113,6 @@ const vipRibbonClass = computed(() => {
   if (p === '月卡') return 'plan-card__vip-ribbon--month'
   if (p === '次卡') return 'plan-card__vip-ribbon--times'
   return 'plan-card__vip-ribbon--week'
-})
-
-/** 正常配送中 / 请假：底部状态呼吸灯高亮 */
-const isFootStatusBreathe = computed(() => {
-  if (props.statusAlert || props.showResumeChip || props.showSetupDeliveryChip) return false
-  const s = String(props.statusText || '').trim()
-  if (!s) return false
-  return s.includes('正常配送') || s.includes('请假') || s.includes('暂停配送')
 })
 </script>
 
@@ -334,9 +303,20 @@ const isFootStatusBreathe = computed(() => {
   color: #fef08a;
 }
 
-/** 底部操作/状态：恢复配送、生效中等呼吸灯 */
-.plan-card__foot-resume,
-.plan-card__foot-status--active {
+.plan-card__slant--active {
+  animation: plan-card-foot-breathe 2.2s ease-in-out infinite;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/** 底部操作：恢复配送、设置配送信息等呼吸灯 */
+.plan-card__foot-resume {
+  flex-shrink: 0;
+  display: inline-flex;
+  padding: 8rpx 18rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.2);
   animation: plan-card-foot-breathe 2.2s ease-in-out infinite;
 }
 
@@ -356,29 +336,6 @@ const isFootStatusBreathe = computed(() => {
       0 0 28rpx 6rpx rgba(254, 240, 138, 0.55);
     transform: scale(1.03);
   }
-}
-
-.plan-card__foot-resume {
-  flex-shrink: 0;
-  display: inline-flex;
-  padding: 8rpx 18rpx;
-  border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.plan-card__foot-status {
-  flex-shrink: 0;
-  display: inline-flex;
-  padding: 8rpx 18rpx;
-  border-radius: 999rpx;
-}
-
-.plan-card__foot-status--active {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.plan-card__foot-status--alert .plan-card__foot-right {
-  color: #fef08a;
 }
 
 .plan-card__foot-resume-txt {

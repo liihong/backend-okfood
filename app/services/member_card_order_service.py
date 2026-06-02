@@ -333,6 +333,10 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
         parts.append(f"备注{rmk[:180]}")
     log_detail = "；".join(parts)
     bump_quota = tpl_id is not None
+    # 退卡后重新开卡：清除退款标记并重置总次数，避免状态仍为「已退款」、剩余/总叠加旧周期
+    if m.membership_refunded_at is not None:
+        m.membership_refunded_at = None
+        m.meal_quota_total = 0
     apply_member_recharge_delta(
         db,
         RechargeIn(phone=m.phone, amount=amt, plan_type=plan, bump_meal_quota_total=bump_quota),

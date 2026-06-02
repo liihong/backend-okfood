@@ -231,6 +231,16 @@ function flatStopsForSheet(sheet) {
 
 const flatStops = computed(() => flatStopsForSheet(sheetToday.value))
 
+/** 到家配送点数量（排除「门店自提」分组，自提不是配送停靠点） */
+const homeDeliveryStopCount = computed(() => {
+  let n = 0
+  for (const g of sheetToday.value.groups || []) {
+    if (g.area === '门店自提') continue
+    n += (g.stops || []).length
+  }
+  return n
+})
+
 /** 大表停靠点合计份数（与列表「餐」汇总一致：后厨需出） */
 const sheetKitchenMealTotal = computed(() =>
   flatStops.value.reduce((s, x) => s + (Number(x.meal_count) || 0), 0)
@@ -260,7 +270,7 @@ const displayPickupMealTotal = useAnimatedInteger(
   () => Number(sheetToday.value.pickup_meal_total) || 0,
   { duration: 820 },
 )
-const displayStopCount = useAnimatedInteger(() => flatStops.value.length, { duration: 820 })
+const displayStopCount = useAnimatedInteger(() => homeDeliveryStopCount.value, { duration: 820 })
 
 /** 当前所选业务日是否为上海「今天」（用于「今日实时」徽标） */
 const deliveryQueryIsTodayShanghai = computed(
