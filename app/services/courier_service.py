@@ -128,6 +128,64 @@ def courier_login_by_phone(db: Session, phone_raw: str) -> Courier:
     return matched[0]
 
 
+def _home_delivery_absent_clause(delivery_date: date):
+    """到家应送 SQL：业务日命中请假区间 / 明天请假（与 leave.is_absent_on_delivery_date 一致）。"""
+    today = today_shanghai()
+    tomorrow = date.fromordinal(today.toordinal() + 1)
+    in_leave_range = and_(
+        Member.leave_range_start.is_not(None),
+        Member.leave_range_end.is_not(None),
+        Member.leave_range_start <= delivery_date,
+        Member.leave_range_end >= delivery_date,
+    )
+    target_hit = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date == delivery_date,
+    )
+    legacy_tomorrow = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date.is_(None),
+        literal(delivery_date) == literal(tomorrow),
+    )
+    return or_(in_leave_range, target_hit, legacy_tomorrow)
+
+
+def post_push_first_day_whitelist_member_ids(
+    db: Session,
+    *,
+    delivery_date: date,
+    delivery_region_id: int | None = None,
+    tenant_id: int | None = None,
+    store_id: int | None = None,
+) -> set[int]:
+    """
+    推单后白名单：起送业务日恰为 ``delivery_date`` 且当前满足应送 SQL 的到家会员 id。
+    仅返回 id，避免为合并名单扫描全量 eligible 行。
+    """
+    if not is_subscription_delivery_day(delivery_date):
+        return set()
+    units_sql = sql_effective_daily_meal_units_column()
+    q = select(Member.id).where(
+        Member.deleted_at.is_(None),
+        Member.is_active.is_(True),
+        Member.balance >= units_sql,
+        Member.store_pickup.is_(False),
+        not_(_home_delivery_absent_clause(delivery_date)),
+        Member.delivery_start_date == delivery_date,
+        _member_not_skip_subscription_saturday(delivery_date),
+        _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
+    )
+    if delivery_region_id is not None:
+        daf = default_address_pick_subquery()
+        q = (
+            q.select_from(Member)
+            .outerjoin(daf, daf.c.mid == Member.id)
+            .outerjoin(MemberAddress, MemberAddress.id == daf.c.addr_id)
+            .where(MemberAddress.delivery_region_id == int(delivery_region_id))
+        )
+    return {int(x) for x in db.scalars(q).all()}
+
+
 def eligible_members_for_delivery(
     db: Session,
     *,
@@ -146,26 +204,7 @@ def eligible_members_for_delivery(
     """
     if not is_subscription_delivery_day(delivery_date):
         return [], {}
-    today = today_shanghai()
-    tomorrow = date.fromordinal(today.toordinal() + 1)
-    in_leave_range = and_(
-        Member.leave_range_start.is_not(None),
-        Member.leave_range_end.is_not(None),
-        Member.leave_range_start <= delivery_date,
-        Member.leave_range_end >= delivery_date,
-    )
-    # target 须与 is_leaved_tomorrow 同时成立（与 model、leave.is_absent 一致；避免撤销后残留 target 误整表排除）
-    target_hit = and_(
-        Member.is_leaved_tomorrow.is_(True),
-        Member.tomorrow_leave_target_date == delivery_date,
-    )
-    legacy_tomorrow = and_(
-        Member.is_leaved_tomorrow.is_(True),
-        Member.tomorrow_leave_target_date.is_(None),
-        literal(delivery_date) == literal(tomorrow),
-    )
-    tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
-    absent = or_(in_leave_range, tomorrow_leave_hit)
+    absent = _home_delivery_absent_clause(delivery_date)
     started = or_(
         Member.delivery_start_date.is_(None),
         Member.delivery_start_date <= delivery_date,

@@ -255,30 +255,62 @@ def sf_frozen_subscription_member_ids_for_delivery_date(
     delivery_date: date,
 ) -> frozenset[int]:
     """当日有效顺丰推单 ``fulfillment_member_ids`` 并集（与扣次快照同源）。"""
+    import json
+
+    from sqlalchemy import func
+
     from app.services.sf_order_fulfillment_service import (
+        _db_dialect_name,
         _ids_from_push_snapshot,
         _subscription_member_ids_for_push,
     )
 
-    snap_rows = db.execute(
-        select(SfSameCityPush.id, SfSameCityPush.request_snapshot).where(
-            *_sf_push_lock_filter(int(store_id), delivery_date, delivery_sheet_only=True)
-        )
-    ).all()
-
+    filt = _sf_push_lock_filter(int(store_id), delivery_date, delivery_sheet_only=True)
     seen: set[int] = set()
-    need_fallback: list[SfSameCityPush] = []
-    for pid, snap in snap_rows:
-        snap_mids, _ = _ids_from_push_snapshot(snap)
-        if snap_mids:
-            for mid in snap_mids:
-                seen.add(int(mid))
-            continue
+    need_fallback_ids: list[int] = []
+
+    if _db_dialect_name(db) == "mysql":
+        snap_rows = db.execute(
+            select(
+                SfSameCityPush.id,
+                func.json_extract(SfSameCityPush.request_snapshot, "$.fulfillment_member_ids"),
+            ).where(*filt)
+        ).all()
+        for pid, raw_mids in snap_rows:
+            mids: list[int] = []
+            if raw_mids is not None:
+                parsed = raw_mids
+                if isinstance(parsed, (bytes, str)):
+                    try:
+                        parsed = json.loads(parsed)
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        parsed = None
+                if isinstance(parsed, list):
+                    for x in parsed:
+                        try:
+                            mids.append(int(x))
+                        except (TypeError, ValueError):
+                            pass
+            if mids:
+                for mid in mids:
+                    seen.add(int(mid))
+                continue
+            need_fallback_ids.append(int(pid))
+    else:
+        snap_rows = db.execute(
+            select(SfSameCityPush.id, SfSameCityPush.request_snapshot).where(*filt)
+        ).all()
+        for pid, snap in snap_rows:
+            snap_mids, _ = _ids_from_push_snapshot(snap)
+            if snap_mids:
+                for mid in snap_mids:
+                    seen.add(int(mid))
+                continue
+            need_fallback_ids.append(int(pid))
+
+    for pid in need_fallback_ids:
         row = db.get(SfSameCityPush, int(pid))
         if row is not None:
-            need_fallback.append(row)
-
-    for pus in need_fallback:
-        for mid in _subscription_member_ids_for_push(db, pus, None):
-            seen.add(int(mid))
+            for mid in _subscription_member_ids_for_push(db, row, None):
+                seen.add(int(mid))
     return frozenset(seen)

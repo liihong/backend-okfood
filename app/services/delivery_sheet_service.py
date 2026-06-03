@@ -34,6 +34,7 @@ from app.services.courier_service import (
     eligible_members_for_delivery,
     eligible_members_for_store_pickup,
     extra_delivered_ineligible_subscribers,
+    post_push_first_day_whitelist_member_ids,
 )
 from app.services.member_address_service import delivery_region_name_map, full_address_line, load_default_address_map, routing_area_label
 from app.services.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
@@ -45,24 +46,75 @@ def _merged_home_member_ids_when_sheet_frozen(
     delivery_date: date,
     store_id: int,
     delivery_region_id: int | None = None,
+    frozen_ids: frozenset[int] | None = None,
 ) -> set[int]:
-    """大表已推单：推单快照会员 id ∪ 当前 eligible 且不在快照的新进会员。"""
+    """
+    大表已推单：顺丰快照 frozen ∪ 推单后白名单（当日首餐新客）。
+    推单当日曾请假的会员（首次推单快照）不因取消请假再并入；无快照行时仅 frozen（兼容历史日）。
+    """
     from app.services.delivery_day_lock_service import sf_frozen_subscription_member_ids_for_delivery_date
+    from app.services.delivery_sheet_push_snapshot_service import absent_member_ids_at_first_push
 
     sid = int(store_id)
-    frozen = sf_frozen_subscription_member_ids_for_delivery_date(
+    frozen = (
+        frozen_ids
+        if frozen_ids is not None
+        else sf_frozen_subscription_member_ids_for_delivery_date(
+            db, store_id=sid, delivery_date=delivery_date
+        )
+    )
+    absent_at_push = absent_member_ids_at_first_push(
         db, store_id=sid, delivery_date=delivery_date
     )
-    realtime, _ = eligible_members_for_delivery(
+    merged = set(frozen)
+    whitelist = post_push_first_day_whitelist_member_ids(
         db,
         delivery_date=delivery_date,
         delivery_region_id=delivery_region_id,
         store_id=sid,
     )
-    merged = set(frozen)
-    for m in realtime:
-        merged.add(int(m.id))
+    for mid in whitelist:
+        if mid in merged:
+            continue
+        if absent_at_push is not None and mid in absent_at_push:
+            continue
+        merged.add(mid)
     return merged
+
+
+def _load_home_members_with_default_addresses(
+    db: Session,
+    *,
+    member_ids: set[int],
+    store_id: int,
+    delivery_region_id: int | None = None,
+) -> tuple[list[Member], dict[int, MemberAddress | None]]:
+    """按 id 批量加载到家会员与默认地址（一次 JOIN，供推单冻结大表用）。"""
+    from app.services.member_address_service import default_address_pick_subquery
+
+    if not member_ids:
+        return [], {}
+    sid = int(store_id)
+    daf = default_address_pick_subquery()
+    q = (
+        select(Member, MemberAddress)
+        .outerjoin(daf, daf.c.mid == Member.id)
+        .outerjoin(MemberAddress, MemberAddress.id == daf.c.addr_id)
+        .where(
+            Member.id.in_(member_ids),
+            Member.deleted_at.is_(None),
+            Member.store_pickup.is_(False),
+            Member.store_id == sid,
+        )
+    )
+    if delivery_region_id is not None:
+        q = q.where(MemberAddress.delivery_region_id == int(delivery_region_id))
+    members: list[Member] = []
+    defaults: dict[int, MemberAddress | None] = {}
+    for m, addr in db.execute(q).all():
+        members.append(m)
+        defaults[int(m.id)] = addr
+    return members, defaults
 
 
 def _home_members_for_delivery_sheet(
@@ -73,10 +125,10 @@ def _home_members_for_delivery_sheet(
     store_id: int,
 ) -> tuple[list[Member], dict[int, MemberAddress | None]]:
     """
-    到家应配送会员。大表顺丰推单后：推单快照 ∪ 推单后新达标会员；不因取消请假扩入快照外老会员。
+    到家应配送会员。大表顺丰推单后：快照 ∪ 当日首餐白名单；推单当日曾请假者取消请假不并入。
     """
     from app.services.delivery_day_lock_service import (
-        is_delivery_day_sheet_frozen_after_sf_push,
+        has_delivery_sheet_sf_push_on_date,
         sf_frozen_subscription_member_ids_for_delivery_date,
     )
 
@@ -84,48 +136,23 @@ def _home_members_for_delivery_sheet(
     if not is_subscription_delivery_day(delivery_date):
         return [], {}
 
-    if is_delivery_day_sheet_frozen_after_sf_push(
-        db, store_id=sid, delivery_date=delivery_date
-    ):
+    if has_delivery_sheet_sf_push_on_date(db, store_id=sid, delivery_date=delivery_date):
+        frozen_ids = sf_frozen_subscription_member_ids_for_delivery_date(
+            db, store_id=sid, delivery_date=delivery_date
+        )
         merged_ids = _merged_home_member_ids_when_sheet_frozen(
             db,
             delivery_date=delivery_date,
             store_id=sid,
             delivery_region_id=delivery_region_id,
+            frozen_ids=frozen_ids,
         )
-        realtime, rt_defaults = eligible_members_for_delivery(
+        return _load_home_members_with_default_addresses(
             db,
-            delivery_date=delivery_date,
-            delivery_region_id=delivery_region_id,
+            member_ids=merged_ids,
             store_id=sid,
+            delivery_region_id=delivery_region_id,
         )
-        if not merged_ids:
-            return [], {}
-        rows = list(
-            db.scalars(
-                select(Member).where(
-                    Member.id.in_(merged_ids),
-                    Member.deleted_at.is_(None),
-                    Member.store_pickup.is_(False),
-                    Member.store_id == sid,
-                )
-            ).all()
-        )
-        mid_list = [int(m.id) for m in rows]
-        defaults = load_default_address_map(db, mid_list)
-        for mid, addr in rt_defaults.items():
-            if addr is not None:
-                defaults[mid] = addr
-        if delivery_region_id is not None:
-            rid = int(delivery_region_id)
-            rows = [
-                m
-                for m in rows
-                if (addr := defaults.get(int(m.id))) is not None
-                and addr.delivery_region_id is not None
-                and int(addr.delivery_region_id) == rid
-            ]
-        return rows, {m.id: defaults.get(int(m.id)) for m in rows}
 
     return eligible_members_for_delivery(
         db,

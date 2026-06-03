@@ -1073,6 +1073,16 @@ def _persist_sf_push_success(
                 pass
     if ff_oids:
         mark_single_meals_accepted_on_sf_push_no_commit(db, ff_oids)
+    is_delivery_sheet_push = "fulfillment_member_ids" in snap
+    if is_delivery_sheet_push:
+        from app.services.delivery_day_lock_service import has_delivery_sheet_sf_push_on_date
+
+        first_sheet_push_today = not has_delivery_sheet_sf_push_on_date(
+            db, store_id=sid, delivery_date=d
+        )
+    else:
+        first_sheet_push_today = False
+
     pus_row = _upsert_sf_push_row(
         db,
         existing_push_id=existing_push_id,
@@ -1087,6 +1097,15 @@ def _persist_sf_push_success(
         request_snapshot=prep.snap_db,
         response_json=res if isinstance(res, dict) else None,
     )
+    if is_delivery_sheet_push and first_sheet_push_today:
+        from app.services.delivery_sheet_push_snapshot_service import (
+            capture_delivery_sheet_absent_members_on_first_push,
+        )
+
+        capture_delivery_sheet_absent_members_on_first_push(
+            db, store_id=sid, delivery_date=d
+        )
+        db.commit()
     if ff_oids:
         from app.services.single_meal_order_service import link_single_meal_orders_to_sf_push_no_commit
 

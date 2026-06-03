@@ -12,6 +12,7 @@ from app.models.menu_schedule import MenuSchedule
 from app.models.product_category import ProductCategory
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.models.delivery_log import DeliveryLog
+from app.models.delivery_sheet_push_absent_snapshot import DeliverySheetPushAbsentSnapshot
 from app.models.delivery_region import DeliveryRegion, DeliveryRegionCourier
 from app.models.member import Member
 from app.models.member_address import MemberAddress
@@ -44,6 +45,7 @@ __all__ = [
     "ProductCategory",
     "WeeklyMenuSlot",
     "DeliveryLog",
+    "DeliverySheetPushAbsentSnapshot",
     "DeliveryRegion",
     "DeliveryRegionCourier",
     "Member",
