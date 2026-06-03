@@ -929,9 +929,13 @@ def _dashboard_cached_sheet_metrics(
                 store_id=store_id,
             )
         else:
-            from app.services.delivery_day_lock_service import is_delivery_day_sheet_locked
+            from app.services.delivery_day_lock_service import (
+                is_delivery_day_sheet_frozen_after_sf_push,
+            )
 
-            if is_delivery_day_sheet_locked(db, store_id=store_id, delivery_date=delivery_date):
+            if is_delivery_day_sheet_frozen_after_sf_push(
+                db, store_id=store_id, delivery_date=delivery_date
+            ):
                 metrics_cache[delivery_date] = delivery_sheet_metrics_for_date(
                     db,
                     delivery_date=delivery_date,

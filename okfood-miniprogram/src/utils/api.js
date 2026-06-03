@@ -290,6 +290,20 @@ export function request(path, options = {}) {
           if (data && typeof data === 'object' && !Array.isArray(data) && 'code' in data) {
             const c = Number(data.code)
             if (c === 200) {
+              if (options.withMsg) {
+                const payload =
+                  data.data !== undefined
+                    ? data.data
+                    : (() => {
+                        const { code: _c, message: _m, msg: _msg, detail: _d, ...rest } = data
+                        return Object.keys(rest).length ? rest : data
+                      })()
+                resolve({
+                  data: payload,
+                  msg: typeof data.msg === 'string' ? data.msg : '',
+                })
+                return
+              }
               if (data.data !== undefined) {
                 resolve(data.data)
               } else {
@@ -451,6 +465,20 @@ export function courierRequest(path, options = {}) {
           if (data && typeof data === 'object' && !Array.isArray(data) && 'code' in data) {
             const c = Number(data.code)
             if (c === 200) {
+              if (options.withMsg) {
+                const payload =
+                  data.data !== undefined
+                    ? data.data
+                    : (() => {
+                        const { code: _c, message: _m, msg: _msg, detail: _d, ...rest } = data
+                        return Object.keys(rest).length ? rest : data
+                      })()
+                resolve({
+                  data: payload,
+                  msg: typeof data.msg === 'string' ? data.msg : '',
+                })
+                return
+              }
               if (data.data !== undefined) {
                 resolve(data.data)
               } else {

@@ -1,4 +1,4 @@
-"""配送业务日锁单：门店当日顺丰推单全部履约完成后，当日到家名单不再随请假等实时扩表。"""
+"""配送业务日锁单：大表顺丰推单后冻结订阅名单；全部履约完成后口径与冻结快照一致。"""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from datetime import date
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
+
 
 from app.models.delivery_log import DeliveryLog
 from app.models.enums import DeliveryStatus
@@ -28,8 +29,18 @@ class _SfPushLockLite:
     sf_callback_order_status: int | None
 
 
-def _sf_push_lock_filter(store_id: int, delivery_date: date) -> tuple:
-    return (
+def _delivery_sheet_push_kind_clause():
+    from app.services.sf_order_fulfillment_service import SF_PUSH_KIND_DELIVERY_SHEET
+
+    return or_(
+        SfSameCityPush.push_kind.is_(None),
+        SfSameCityPush.push_kind == "",
+        SfSameCityPush.push_kind == SF_PUSH_KIND_DELIVERY_SHEET,
+    )
+
+
+def _sf_push_lock_filter(store_id: int, delivery_date: date, *, delivery_sheet_only: bool = False) -> tuple:
+    clauses: list = [
         SfSameCityPush.store_id == int(store_id),
         SfSameCityPush.delivery_date == delivery_date,
         SfSameCityPush.error_code == 0,
@@ -38,7 +49,10 @@ def _sf_push_lock_filter(store_id: int, delivery_date: date) -> tuple:
             SfSameCityPush.sf_callback_order_status.is_(None),
             SfSameCityPush.sf_callback_order_status.not_in((2, 22)),
         ),
-    )
+    ]
+    if delivery_sheet_only:
+        clauses.append(_delivery_sheet_push_kind_clause())
+    return tuple(clauses)
 
 
 def _sf_push_lock_lite_rows(
@@ -163,6 +177,33 @@ def _push_fulfilled_for_lock_check(db: Session, lite: _SfPushLockLite, *, delive
     return sf_push_fulfilled_quick_check(db, full)
 
 
+def has_delivery_sheet_sf_push_on_date(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+) -> bool:
+    """当日是否存在创单成功的智能配送大表（订阅合并）顺丰推单。"""
+    row_id = db.scalar(
+        select(SfSameCityPush.id).where(
+            *_sf_push_lock_filter(int(store_id), delivery_date, delivery_sheet_only=True)
+        ).limit(1)
+    )
+    return row_id is not None
+
+
+def is_delivery_day_sheet_frozen_after_sf_push(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+) -> bool:
+    """大表已向顺丰推单后冻结当日订阅扩表（与 ``has_delivery_sheet_sf_push_on_date`` 同义）。"""
+    return has_delivery_sheet_sf_push_on_date(
+        db, store_id=int(store_id), delivery_date=delivery_date
+    )
+
+
 def is_delivery_day_sheet_locked(
     db: Session,
     *,
@@ -221,7 +262,7 @@ def sf_frozen_subscription_member_ids_for_delivery_date(
 
     snap_rows = db.execute(
         select(SfSameCityPush.id, SfSameCityPush.request_snapshot).where(
-            *_sf_push_lock_filter(int(store_id), delivery_date)
+            *_sf_push_lock_filter(int(store_id), delivery_date, delivery_sheet_only=True)
         )
     ).all()
 

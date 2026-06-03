@@ -13,7 +13,7 @@
         <view v-if="leaveRefreshing" class="leave-sync-hint">
           <text class="leave-sync-hint__text">正在同步最新状态…</text>
         </view>
-        <view v-if="leavePrepLocked && !isOnLeaveNow" class="leave-block leave-block--deadline">
+        <view v-if="showNewLeavePrepBlock" class="leave-block leave-block--deadline">
           <text class="leave-deadline-copy">{{ LEAVE_PREP_LOCKED_MSG }}</text>
         </view>
         <view v-if="isOnLeaveNow" class="leave-block leave-block--active">
@@ -21,11 +21,11 @@
           <text class="leave-h3 leave-h3--compact">{{ activeLeaveTitle }}</text>
           <text v-if="isRangeOnlyLeave" class="leave-range-line">{{ serverLeaveStart }} 至 {{ serverLeaveEnd }}</text>
           <text class="leave-range-hint">{{ activeLeaveHint }}</text>
-          <view v-if="leavePrepLocked" class="leave-prep-lock-hint">
-            <text class="leave-deadline-copy">{{ LEAVE_PREP_LOCKED_MSG }}</text>
+          <view v-if="showActiveLeaveCancelLockHint" class="leave-prep-lock-hint">
+            <text class="leave-deadline-copy">{{ LEAVE_PREP_CANCEL_LOCKED_HINT }}</text>
           </view>
           <button
-            v-else
+            v-else-if="canCancelLeaveNow"
             class="btn-cancel-leave"
             :loading="leaveActionBusy"
             :disabled="leaveActionBusy"
@@ -130,10 +130,18 @@ const refresherTriggered = ref(false)
 /** 备餐锁窗：当日 21:00 起至次日 09:00，与后端 leave_prep_locked 一致 */
 const leavePrepLocked = ref(false)
 
+/** 备餐锁窗内禁止新提交请假（与后端 guard 文案一致） */
 const LEAVE_PREP_LOCKED_MSG = '您的菜品原材料已备好，不能请假，感谢理解和认可。'
+/** 已在请假中、备餐锁窗内禁止自助取消（勿复用「不能请假」，避免与「请假中」矛盾） */
+const LEAVE_PREP_CANCEL_LOCKED_HINT =
+  '原材料备货中，暂不支持自助取消请假；到期将自动恢复，如需提前调整请联系客服 👌'
 
 function toastLeavePrepLocked() {
   uni.showToast({ title: LEAVE_PREP_LOCKED_MSG, icon: 'none', duration: 3600 })
+}
+
+function toastLeaveCancelPrepLocked() {
+  uni.showToast({ title: LEAVE_PREP_CANCEL_LOCKED_HINT, icon: 'none', duration: 3600 })
 }
 
 /**
@@ -347,6 +355,17 @@ const isOnLeaveNow = computed(() => {
   return Boolean(s && e)
 })
 
+/** 仅未在请假中时展示「不能请假」独立提示块 */
+const showNewLeavePrepBlock = computed(() => leavePrepLocked.value && !isOnLeaveNow.value)
+
+/** 已在请假中且备餐锁窗：说明暂不可取消，而非「不能请假」 */
+const showActiveLeaveCancelLockHint = computed(
+  () => isOnLeaveNow.value && leavePrepLocked.value,
+)
+
+/** 请假中且非备餐锁窗：展示「取消请假」 */
+const canCancelLeaveNow = computed(() => isOnLeaveNow.value && !leavePrepLocked.value)
+
 const isRangeOnlyLeave = computed(
   () => Boolean(serverLeaveStart.value && serverLeaveEnd.value),
 )
@@ -485,10 +504,14 @@ async function onLeaveRefresherRefresh() {
 }
 
 function confirmCancelAllLeave() {
+  if (leavePrepLocked.value) {
+    toastLeaveCancelPrepLocked()
+    return
+  }
   showOkAlert({
     title: '取消请假',
     content:
-      '将清除当前区间请假及「明天请假」标记，确定取消？',
+      '将清除当前区间请假及「明天请假」标记。今日仍不配送，自明日起恢复。确定取消？',
     success: async (res) => {
       if (!res.confirm) return
       if (leaveActionBusy.value) return

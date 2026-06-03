@@ -80,11 +80,13 @@ def subscription_total_meals_on_date(db: Session, menu_date: date, *, store_id: 
 
     菜单/库存读路径：未锁单走 SQL SUM；已锁单走冻结名单聚合，避免 ``total_meal_units_for_delivery_sheet`` 内重复全量推单探测。
     """
-    from app.services.delivery_day_lock_service import is_delivery_day_sheet_locked
+    from app.services.delivery_day_lock_service import is_delivery_day_sheet_frozen_after_sf_push
 
     sid = int(store_id)
     d = menu_date
-    if not is_delivery_day_sheet_locked(db, store_id=sid, delivery_date=d):
+    if not is_delivery_day_sheet_frozen_after_sf_push(
+        db, store_id=sid, delivery_date=d
+    ):
         return total_meal_units_sql_sum_only(db, delivery_date=d, store_id=sid)
     return _total_meal_units_locked_date_sql(db, delivery_date=d, store_id=sid)
 
