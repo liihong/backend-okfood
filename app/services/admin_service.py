@@ -1005,6 +1005,7 @@ def dashboard_meal_summary(
     sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
     anchor = business_anchor_date or today_shanghai()
     day_after = date.fromordinal(anchor.toordinal() + 1)
+    day_after_tomorrow = date.fromordinal(day_after.toordinal() + 1)
     cal_today = today_shanghai()
 
     if not force_recompute:
@@ -1027,6 +1028,9 @@ def dashboard_meal_summary(
 
     today_menu_day_total_stock = weekly_menu_day_total_stock(db, anchor, store_id=sid)
     tomorrow_menu_day_total_stock = weekly_menu_day_total_stock(db, day_after, store_id=sid)
+    day_after_tomorrow_menu_day_total_stock = weekly_menu_day_total_stock(
+        db, day_after_tomorrow, store_id=sid
+    )
     metrics_cache: dict[date, DeliverySheetDayMetrics] = {}
     snapshot_meal_totals = _dashboard_snapshot_meal_totals(
         db,
@@ -1089,6 +1093,7 @@ def dashboard_meal_summary(
                 tomorrow_meals_week_over_week_caption=tomorrow_wow_cap,
                 today_menu_day_total_stock=today_menu_day_total_stock,
                 tomorrow_menu_day_total_stock=tomorrow_menu_day_total_stock,
+                day_after_tomorrow_menu_day_total_stock=day_after_tomorrow_menu_day_total_stock,
                 today_prep_metrics=today_metrics,
                 tomorrow_prep_metrics=tomorrow_metrics,
                 from_snapshot=True,
@@ -1145,6 +1150,7 @@ def dashboard_meal_summary(
         tomorrow_meals_week_over_week_caption=tomorrow_wow_cap,
         today_menu_day_total_stock=today_menu_day_total_stock,
         tomorrow_menu_day_total_stock=tomorrow_menu_day_total_stock,
+        day_after_tomorrow_menu_day_total_stock=day_after_tomorrow_menu_day_total_stock,
         today_prep_metrics=today_metrics,
         tomorrow_prep_metrics=tomorrow_metrics,
         from_snapshot=False,
@@ -1201,6 +1207,7 @@ def dashboard_meal_summary(
             tomorrow_meals_week_over_week_caption=out.tomorrow_meals_week_over_week_caption,
             today_menu_day_total_stock=today_menu_day_total_stock,
             tomorrow_menu_day_total_stock=tomorrow_menu_day_total_stock,
+            day_after_tomorrow_menu_day_total_stock=day_after_tomorrow_menu_day_total_stock,
             today_prep_metrics=out.today_prep_metrics,
             tomorrow_prep_metrics=out.tomorrow_prep_metrics,
             from_snapshot=False,

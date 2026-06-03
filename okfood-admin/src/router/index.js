@@ -157,7 +157,7 @@ const router = createRouter({
           meta: {
             title: '优惠券管理',
             pageSubtitle: '配置小程序代金券券种与适用范围',
-            fullAdminOnly: true,
+            supportMarketing: true,
           },
         },
         {
@@ -167,7 +167,7 @@ const router = createRouter({
           meta: {
             title: '优惠券发放',
             pageSubtitle: '向会员发放优惠券并管理记录',
-            fullAdminOnly: true,
+            supportMarketing: true,
           },
         },
         {
@@ -177,7 +177,7 @@ const router = createRouter({
           meta: {
             title: '抖音商品设置',
             pageSubtitle: '配置抖音团购商品与本地权益映射',
-            fullAdminOnly: true,
+            supportMarketing: true,
           },
         },
         {
@@ -187,7 +187,7 @@ const router = createRouter({
           meta: {
             title: '核销记录查询',
             pageSubtitle: '抖音券验券兑换流水',
-            fullAdminOnly: true,
+            supportMarketing: true,
           },
         },
         {
@@ -239,7 +239,8 @@ router.beforeEach((to) => {
   if (hasToken && adminKind.value === 'system' && !isSystemAdminRoute) {
     return { name: 'system-tenants', replace: true }
   }
-  if (hasToken && to.meta.ownerAdminOnly) {
+  const isOwnerAdminRoute = to.matched.some((record) => record.meta.ownerAdminOnly)
+  if (hasToken && isOwnerAdminRoute) {
     if (adminKind.value === 'delivery') {
       return { name: 'regions', replace: true }
     }
@@ -247,7 +248,11 @@ router.beforeEach((to) => {
       return { name: 'dashboard', replace: true }
     }
   }
-  if (hasToken && to.meta.fullAdminOnly && adminKind.value === 'delivery') {
+  /** 营业工作台（含小程序营销）：店主与客服可进，仅配送专员拦截 */
+  const isStaffWorkbenchRoute = to.matched.some(
+    (record) => record.meta.fullAdminOnly || record.meta.supportMarketing,
+  )
+  if (hasToken && isStaffWorkbenchRoute && adminKind.value === 'delivery') {
     return { name: 'regions', replace: true }
   }
   return true

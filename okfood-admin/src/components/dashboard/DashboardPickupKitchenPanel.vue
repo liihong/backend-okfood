@@ -9,10 +9,14 @@ const props = defineProps({
   businessDate: { type: String, default: '' },
   /** 锚定日次日 YYYY-MM-DD */
   tomorrowBusinessDate: { type: String, default: '' },
+  /** 锚定日后天 YYYY-MM-DD */
+  dayAfterTomorrowBusinessDate: { type: String, default: '' },
   /** 锚定日周菜单「日总份数」；null 表示未配置 */
   menuDayTotalStock: { type: Number, default: null },
   /** 锚定日次日周菜单「日总份数」；null 表示未配置 */
   menuDayTotalStockTomorrow: { type: Number, default: null },
+  /** 锚定日后天周菜单「日总份数」；null 表示未配置 */
+  menuDayTotalStockDayAfterTomorrow: { type: Number, default: null },
   /** 服务端上海当日 YYYY-MM-DD；未来营业日不拉配送大表 */
   shanghaiToday: { type: String, default: '' },
   /** 顶卡概览加载中：与 dashboard-summary 串行，避免同屏争抢 DB */
@@ -31,6 +35,7 @@ const markingMemberId = ref(null)
 
 const kitchenInput = ref(0)
 const kitchenInputTomorrow = ref(0)
+const kitchenInputDayAfterTomorrow = ref(0)
 const kitchenSaving = ref(false)
 
 function syncKitchenInputFromStock(stock, targetRef) {
@@ -54,6 +59,14 @@ watch(
   () => [props.menuDayTotalStockTomorrow, props.tomorrowBusinessDate],
   () => {
     syncKitchenInputFromStock(props.menuDayTotalStockTomorrow, kitchenInputTomorrow)
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [props.menuDayTotalStockDayAfterTomorrow, props.dayAfterTomorrowBusinessDate],
+  () => {
+    syncKitchenInputFromStock(props.menuDayTotalStockDayAfterTomorrow, kitchenInputDayAfterTomorrow)
   },
   { immediate: true },
 )
@@ -166,34 +179,47 @@ async function saveKitchenPlanForDate(businessDate, plannedTotal) {
   )
 }
 
-/** 保存今日/明日日总份数，并通知顶卡刷新 dashboard-summary */
+const KITCHEN_SAVE_LABELS = ['今日', '明日', '后天']
+
+/** 保存今日/明日/后天日总份数，并通知顶卡刷新 dashboard-summary */
 async function saveKitchenPlan() {
   if (kitchenSaving.value) return
-  const d0 = (props.businessDate || '').trim()
-  const d1 = (props.tomorrowBusinessDate || '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(d0)) {
+  const dates = [
+    (props.businessDate || '').trim(),
+    (props.tomorrowBusinessDate || '').trim(),
+    (props.dayAfterTomorrowBusinessDate || '').trim(),
+  ]
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dates[0])) {
     showToast('请先选择有效营业日', 'error')
     return
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(d1)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dates[1])) {
     showToast('无法计算明日营业日，请刷新后重试', 'error')
     return
   }
-  const valToday = Math.trunc(Number(kitchenInput.value))
-  const valTomorrow = Math.trunc(Number(kitchenInputTomorrow.value))
-  if (!Number.isFinite(valToday) || valToday < 0 || !Number.isFinite(valTomorrow) || valTomorrow < 0) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dates[2])) {
+    showToast('无法计算后天营业日，请刷新后重试', 'error')
+    return
+  }
+  const values = [
+    Math.trunc(Number(kitchenInput.value)),
+    Math.trunc(Number(kitchenInputTomorrow.value)),
+    Math.trunc(Number(kitchenInputDayAfterTomorrow.value)),
+  ]
+  if (values.some((v) => !Number.isFinite(v) || v < 0)) {
     showToast('请输入正确的日总份数', 'error')
     return
   }
   kitchenSaving.value = true
   try {
-    const results = await Promise.allSettled([
-      saveKitchenPlanForDate(d0, valToday),
-      saveKitchenPlanForDate(d1, valTomorrow),
-    ])
-    const failed = results.filter((r) => r.status === 'rejected')
-    if (failed.length === 2) {
-      const firstErr = failed[0].reason
+    const results = await Promise.allSettled(
+      dates.map((d, i) => saveKitchenPlanForDate(d, values[i])),
+    )
+    const failed = results
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.status === 'rejected')
+    if (failed.length === dates.length) {
+      const firstErr = failed[0].r.reason
       const status = firstErr && typeof firstErr.status === 'number' ? firstErr.status : 0
       if (status === 401) {
         alert('登录已过期，请重新登录')
@@ -203,24 +229,32 @@ async function saveKitchenPlan() {
       showToast(firstErr instanceof Error ? firstErr.message : '保存后厨计划失败', 'error')
       return
     }
-    if (failed.length === 1) {
-      const err = failed[0].reason
+    const payload = {
+      today: values[0],
+      tomorrow: values[1],
+      dayAfterTomorrow: values[2],
+    }
+    if (failed.length > 0) {
+      const { r: failResult, i } = failed[0]
+      const err = failResult.reason
       const status = err && typeof err.status === 'number' ? err.status : 0
       if (status === 401) {
         alert('登录已过期，请重新登录')
         handleAdminLogout()
         return
       }
-      const failedLabel = results[0].status === 'rejected' ? '今日' : '明日'
       showToast(
-        `${failedLabel}保存失败：${err instanceof Error ? err.message : '未知错误'}`,
+        `${KITCHEN_SAVE_LABELS[i]}保存失败：${err instanceof Error ? err.message : '未知错误'}`,
         'error',
       )
-      emit('menu-day-stock-saved', { today: valToday, tomorrow: valTomorrow })
+      emit('menu-day-stock-saved', payload)
       return
     }
-    showToast(`今日 ${valToday} 份、明日 ${valTomorrow} 份已保存，本周菜单已同步`, 'success')
-    emit('menu-day-stock-saved', { today: valToday, tomorrow: valTomorrow })
+    showToast(
+      `今日 ${values[0]} 份、明日 ${values[1]} 份、后天 ${values[2]} 份已保存，本周菜单已同步`,
+      'success',
+    )
+    emit('menu-day-stock-saved', payload)
   } finally {
     kitchenSaving.value = false
   }
@@ -264,6 +298,20 @@ watch(
           <div class="dpk-input-row">
             <input
               v-model.number="kitchenInputTomorrow"
+              type="number"
+              class="dpk-form-control"
+              min="0"
+              max="99999"
+              inputmode="numeric"
+            />
+            <span class="dpk-unit">份</span>
+          </div>
+        </div>
+        <div class="dpk-form-group">
+          <label class="dpk-form-label">后天日总份数</label>
+          <div class="dpk-input-row">
+            <input
+              v-model.number="kitchenInputDayAfterTomorrow"
               type="number"
               class="dpk-form-control"
               min="0"
@@ -584,9 +632,15 @@ watch(
 
 .dpk-form-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
   margin-top: 4px;
+}
+
+@media (max-width: 640px) {
+  .dpk-form-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .dpk-form-group {

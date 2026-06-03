@@ -242,6 +242,9 @@ function onMenuDayStockSaved(payload) {
     if (Number.isFinite(payload.tomorrow) && payload.tomorrow >= 0) {
       next.tomorrow_menu_day_total_stock = Math.trunc(payload.tomorrow)
     }
+    if (Number.isFinite(payload.dayAfterTomorrow) && payload.dayAfterTomorrow >= 0) {
+      next.day_after_tomorrow_menu_day_total_stock = Math.trunc(payload.dayAfterTomorrow)
+    }
     summaryMeta.value = next
   }
   void fetchDashboardSummary()
@@ -371,9 +374,22 @@ const menuDayTotalStockTomorrow = computed(() => {
   return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null
 })
 
+/** 锚定日后天周菜单「日总份数」（供后厨计划面板读取） */
+const menuDayTotalStockDayAfterTomorrow = computed(() => {
+  const v = summaryMeta.value?.day_after_tomorrow_menu_day_total_stock
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null
+})
+
 /** 锚定日次日 ISO（YYYY-MM-DD） */
 const businessAnchorTomorrowIso = computed(() =>
   businessAnchorIsoNormalized.value ? addOneDayIso(businessAnchorIsoNormalized.value) : '',
+)
+
+/** 锚定日后天 ISO（YYYY-MM-DD） */
+const businessAnchorDayAfterTomorrowIso = computed(() =>
+  businessAnchorTomorrowIso.value ? addOneDayIso(businessAnchorTomorrowIso.value) : '',
 )
 
 /** 配送餐=到家待送达+已送达；自提=门店自提分组 */
@@ -1156,8 +1172,10 @@ onMounted(async () => {
       v-if="(!dashboardStatsLoading && dashboardStats.length) || showDeliveryMetrics"
       :business-date="businessAnchorIsoNormalized"
       :tomorrow-business-date="businessAnchorTomorrowIso"
+      :day-after-tomorrow-business-date="businessAnchorDayAfterTomorrowIso"
       :menu-day-total-stock="menuDayTotalStock"
       :menu-day-total-stock-tomorrow="menuDayTotalStockTomorrow"
+      :menu-day-total-stock-day-after-tomorrow="menuDayTotalStockDayAfterTomorrow"
       :shanghai-today="String(summaryMeta?.shanghai_today || '')"
       :summary-loading="dashboardStatsLoading"
       @menu-day-stock-saved="onMenuDayStockSaved"

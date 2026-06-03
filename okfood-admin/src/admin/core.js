@@ -166,10 +166,21 @@ export function clearAdminToken() {
   }
 }
 
-export function handleAdminLogout() {
+/**
+ * 401 时清空登录并跳转登录页。
+ * @param {unknown} [err] 传入 apiJson 抛出的 Error（含 status）时，仅 status===401 才登出并返回 true。
+ * @returns {boolean} 是否已处理为登出
+ */
+export function handleAdminLogout(err) {
+  if (err != null) {
+    const status =
+      err && typeof err === 'object' && 'status' in err ? Number(err.status) : 0
+    if (status !== 401) return false
+  }
   memberList.value = []
   clearAdminToken()
   adminRouter?.push({ name: 'login' })
+  return true
 }
 
 /** 后端统一响应 { code, data, msg }；成功码见 isApiSuccessCode */

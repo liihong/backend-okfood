@@ -626,6 +626,11 @@ class DashboardMealSummaryOut(BaseModel):
         ge=0,
         description="锚定日次日周菜单槽位「日总份数」；未排菜或未配置则为 null",
     )
+    day_after_tomorrow_menu_day_total_stock: int | None = Field(
+        None,
+        ge=0,
+        description="锚定日后天（次日+1）周菜单槽位「日总份数」；未排菜或未配置则为 null",
+    )
     today_prep_metrics: DashboardDayPrepMetricsOut = Field(
         ...,
         description="锚定日备餐拆分/履约/到家配送点数（与大表同源，无需再拉 delivery-sheet）",
