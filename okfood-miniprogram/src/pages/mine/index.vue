@@ -265,6 +265,7 @@ import {
   isAddressItemDefault,
 } from '@/utils/addressApi.js'
 import { consumeMinePageNeedsRefresh, markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
+import { guardMemberDeliverySelfService } from '@/utils/memberSelfServiceGuard.js'
 import { ymdTodayShanghai } from '@/utils/memberDeliveryDate.js'
 import {
   ymdFromApi,
@@ -1096,6 +1097,11 @@ function goCourier() {
 }
 
 function goLeave() {
+  if (!getMemberToken()) {
+    uni.showToast({ title: '请先登录', icon: 'none' })
+    return
+  }
+  if (!guardMemberDeliverySelfService(memberProfileRaw.value)) return
   uni.navigateTo({ url: '/packageUser/pages/leave/leave' })
 }
 function goAddress() {
@@ -1144,6 +1150,7 @@ function goDailyMealUnits() {
     uni.showToast({ title: '请先登录', icon: 'none' })
     return
   }
+  if (!guardMemberDeliverySelfService(memberProfileRaw.value)) return
   uni.navigateTo({ url: '/packageUser/pages/dailyMealUnits/dailyMealUnits' })
 }
 
@@ -1188,6 +1195,7 @@ function onPauseDeliveryTap() {
     uni.showToast({ title: '请先登录', icon: 'none' })
     return
   }
+  if (!guardMemberDeliverySelfService(memberProfileRaw.value)) return
   if (pauseDeliveryPrepLocked.value) {
     uni.showModal({
       title: '暂无法暂停',

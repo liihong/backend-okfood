@@ -34,7 +34,10 @@
             取消请假
           </button>
         </view>
-        <view v-if="!isOnLeaveNow && !leavePrepLocked" class="leave-block">
+        <view v-if="memberCardBlocked && !isOnLeaveNow" class="leave-block leave-block--deadline">
+          <text class="leave-deadline-copy">尚未开卡，无法提交请假。请先购买自律卡包并开通计划。</text>
+        </view>
+        <view v-if="!isOnLeaveNow && !leavePrepLocked && !memberCardBlocked" class="leave-block">
           <text class="leave-h3">明天有事 · 快速请假</text>
           <button
             class="btn-fast-leave"
@@ -47,7 +50,7 @@
           </button>
           <text class="leave-tip">* 供餐日当日 08:50 同步顺丰前可自助操作；推单配送完成前如需调整请联系客服 👌</text>
         </view>
-        <view v-if="!isOnLeaveNow && !leavePrepLocked" class="leave-block">
+        <view v-if="!isOnLeaveNow && !leavePrepLocked && !memberCardBlocked" class="leave-block">
           <text class="leave-h3">多天请假 (出差/旅游等)</text>
           <text class="leave-tip leave-tip--range">* 须从明天起选日期；供餐日 08:50 推顺丰后至配送完成前请联系客服 👌</text>
           <view class="date-group">
@@ -109,6 +112,11 @@ import { getPageScrollStyle } from '@/utils/navbar.js'
 import { request, clearMemberSession, isUserMeNotFoundError } from '@/utils/api.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 import { ymdTodayShanghai, addDaysIso } from '@/utils/memberDeliveryDate.js'
+import {
+  isPaidCardAwaitingSetup,
+  shouldPromptMemberCardPay,
+} from '@/utils/memberProfile.js'
+import { guardMemberDeliverySelfService } from '@/utils/memberSelfServiceGuard.js'
 
 const isTomorrowLeave = ref(false)
 const rangeStart = ref('')
@@ -129,6 +137,9 @@ const leaveActionBusy = ref(false)
 const refresherTriggered = ref(false)
 /** 备餐锁窗：当日 21:00 起至次日 09:00，与后端 leave_prep_locked 一致 */
 const leavePrepLocked = ref(false)
+/** 未开卡：禁止新提交请假（若仍有历史请假记录则仅可取消） */
+const memberCardBlocked = ref(false)
+let leaveCardBlockRedirecting = false
 
 /** 备餐锁窗内禁止新提交请假（与后端 guard 文案一致） */
 const LEAVE_PREP_LOCKED_MSG = '您的菜品原材料已备好，不能请假，感谢理解和认可。'
@@ -142,6 +153,32 @@ function toastLeavePrepLocked() {
 
 function toastLeaveCancelPrepLocked() {
   uni.showToast({ title: LEAVE_PREP_CANCEL_LOCKED_HINT, icon: 'none', duration: 3600 })
+}
+
+function applyMemberCardBlockFromMe(me) {
+  const blocked =
+    Boolean(me) &&
+    typeof me === 'object' &&
+    (shouldPromptMemberCardPay(me) || isPaidCardAwaitingSetup(me))
+  memberCardBlocked.value = blocked
+  return blocked
+}
+
+function redirectLeaveIfNoCardAndNotOnLeave(me) {
+  if (!applyMemberCardBlockFromMe(me)) return
+  if (isTomorrowLeave.value) return
+  const s = serverLeaveStart.value
+  const e = serverLeaveEnd.value
+  if (s && e) return
+  if (leaveCardBlockRedirecting) return
+  leaveCardBlockRedirecting = true
+  guardMemberDeliverySelfService(me)
+  setTimeout(() => {
+    uni.navigateBack({
+      fail: () => uni.switchTab({ url: '/pages/mine/index' }),
+    })
+    leaveCardBlockRedirecting = false
+  }, 300)
 }
 
 /**
@@ -474,6 +511,7 @@ async function syncLeaveFromServer(opts = {}) {
       rangeStart.value = ''
       rangeEnd.value = ''
     }
+    redirectLeaveIfNoCardAndNotOnLeave(me)
   } catch (e) {
     if (gen !== leaveSyncGeneration) return
     if (isUserMeNotFoundError(e)) {
@@ -546,6 +584,10 @@ onShow(() => {
 })
 
 async function toggleTomorrow() {
+  if (memberCardBlocked.value && !isTomorrowLeave.value) {
+    uni.showToast({ title: '请先购买自律卡包', icon: 'none' })
+    return
+  }
   if (leaveActionBusy.value) return
   if (leavePrepLocked.value) {
     toastLeavePrepLocked()
@@ -587,6 +629,10 @@ async function toggleTomorrow() {
 }
 
 async function submitRange() {
+  if (memberCardBlocked.value) {
+    uni.showToast({ title: '请先购买自律卡包', icon: 'none' })
+    return
+  }
   if (leaveActionBusy.value) return
   if (leavePrepLocked.value) {
     toastLeavePrepLocked()

@@ -580,6 +580,9 @@ def patch_member_profile(
     }
 
     if set_daily_meal_units and daily_meal_units is not None:
+        from app.services.leave import guard_miniprogram_self_service_requires_balance
+
+        guard_miniprogram_self_service_requires_balance(db, m)
 
         u = int(daily_meal_units)
 
@@ -618,8 +621,12 @@ def patch_member_profile(
     defer_applied = set_delivery_deferred and delivery_deferred is True
 
     if defer_applied and not prev_snapshot["delivery_deferred"]:
-        from app.services.leave import guard_miniprogram_pause_delivery_prep_window
+        from app.services.leave import (
+            guard_miniprogram_pause_delivery_prep_window,
+            guard_miniprogram_self_service_requires_balance,
+        )
 
+        guard_miniprogram_self_service_requires_balance(db, m)
         guard_miniprogram_pause_delivery_prep_window(db, m)
 
     if defer_applied:
@@ -906,8 +913,13 @@ def leave_request(
 
     if source == "miniprogram":
         guard_member_self_leave_during_sf_fulfillment(db, m)
-        from app.services.leave import guard_miniprogram_leave_prep_window
+        from app.services.leave import (
+            guard_miniprogram_leave_prep_window,
+            guard_miniprogram_self_service_requires_balance,
+        )
 
+        if typ not in (LeaveType.CANCEL, LeaveType.CLEAR_TOMORROW):
+            guard_miniprogram_self_service_requires_balance(db, m)
         guard_miniprogram_leave_prep_window(db, m, now=now)
 
     if typ == LeaveType.CANCEL:

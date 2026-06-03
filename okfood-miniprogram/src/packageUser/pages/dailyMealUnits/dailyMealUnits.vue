@@ -55,6 +55,7 @@ import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { getPageScrollStyle } from '@/utils/navbar.js'
 import { request, getMemberToken, clearMemberSession, isUserMeNotFoundError } from '@/utils/api.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
+import { guardMemberDeliverySelfService } from '@/utils/memberSelfServiceGuard.js'
 
 const MIN_U = 1
 const MAX_U = 10
@@ -89,6 +90,10 @@ async function loadMe() {
   loading.value = true
   try {
     const data = await request('/api/user/me', { method: 'GET' })
+    if (!guardMemberDeliverySelfService(data)) {
+      setTimeout(() => uni.navigateBack(), 400)
+      return
+    }
     const raw = Math.floor(Number(data?.daily_meal_units) || 0)
     const safeRaw = raw >= 1 && raw <= 50 ? raw : 1
     serverUnitsRaw.value = safeRaw

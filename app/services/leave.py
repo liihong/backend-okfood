@@ -16,6 +16,8 @@ MINIPROGRAM_LEAVE_PREP_LOCKED_MSG = (
 MINIPROGRAM_PAUSE_DELIVERY_PREP_LOCKED_MSG = (
     "21点后无法操作暂停。明日餐品已准备，可配送后暂停"
 )
+MINIPROGRAM_NO_CARD_MSG = "请先购买自律卡包后再操作"
+MINIPROGRAM_AWAITING_SETUP_MSG = "请先完善配送信息后再操作"
 
 
 def is_miniprogram_leave_prep_locked(
@@ -92,6 +94,17 @@ def guard_miniprogram_pause_delivery_prep_window(
             status_code=400,
             detail=MINIPROGRAM_PAUSE_DELIVERY_PREP_LOCKED_MSG,
         )
+
+
+def guard_miniprogram_self_service_requires_balance(db: Session, member: Member) -> None:
+    """小程序自助请假/暂停配送/份数等须已开卡（剩余餐次 > 0）。"""
+    if int(member.balance) > 0:
+        return
+    from app.services.member_card_order_service import member_paid_card_awaiting_setup
+
+    if member_paid_card_awaiting_setup(db, int(member.id)):
+        raise HTTPException(status_code=400, detail=MINIPROGRAM_AWAITING_SETUP_MSG)
+    raise HTTPException(status_code=400, detail=MINIPROGRAM_NO_CARD_MSG)
 
 
 def is_absent_on_delivery_date_for_leave_fields(
