@@ -42,12 +42,36 @@ const payFilter = ref('')
 /** 默认 true：进入页面即查全部历史；取消勾选则仅待处理（未缴或已缴未入账） */
 const includeHistory = ref(true)
 
+function ymdInTimeZone(date, timeZone) {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const parts = fmt.formatToParts(date)
+  const map = Object.fromEntries(parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]))
+  return `${map.year}-${map.month}-${map.day}`
+}
+
+function todayShanghaiStr() {
+  return ymdInTimeZone(new Date(), 'Asia/Shanghai')
+}
+
+function shanghaiWallClockHM() {
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+  const parts = fmt.formatToParts(new Date())
+  const map = Object.fromEntries(parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]))
+  return { hour: Number(map.hour) || 0, minute: Number(map.minute) || 0 }
+}
+
 function todayInputDate() {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+  return todayShanghaiStr()
 }
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
@@ -223,6 +247,63 @@ function onCreatePhoneInput() {
   if (createForm.value.open_mode === 'renew') scheduleRenewPreview()
 }
 
+/** 续卡：仍有剩余且未暂停 → 仅叠加次数，不改起送日 */
+const renewStillDelivering = computed(() => {
+  const p = renewPreview.value
+  if (!p || createForm.value.open_mode !== 'renew') return false
+  const bal = Number(p.balance) || 0
+  if (bal <= 0) return false
+  return !p.delivery_deferred
+})
+
+/** 续卡：档案已有起送日且未暂停 → 可选「保持当前配送安排」 */
+const renewCanKeepSchedule = computed(() => {
+  const p = renewPreview.value
+  if (!p || createForm.value.open_mode !== 'renew') return false
+  if (p.delivery_deferred) return false
+  const ds = p.delivery_start_date ? String(p.delivery_start_date).slice(0, 10) : ''
+  return ds.length >= 10
+})
+
+const renewActivationOptionCount = computed(() => {
+  if (createForm.value.open_mode === 'renew' && renewStillDelivering.value) return 0
+  if (createForm.value.open_mode === 'renew' && renewCanKeepSchedule.value) return 3
+  return 2
+})
+
+/** 指定起送日为今日时的说明（仅文案，不限制可选日期） */
+const activationStartDateHint = computed(() => {
+  if (createForm.value.delivery_start_mode !== 'date') return ''
+  if (createForm.value.open_mode === 'renew' && renewStillDelivering.value) return ''
+  const d = (createForm.value.delivery_start_date || '').trim()
+  if (d !== todayShanghaiStr()) return ''
+  const { hour, minute } = shanghaiWallClockHM()
+  if (hour > 8 || (hour === 8 && minute >= 50)) {
+    return {
+      type: 'info',
+      text: '已过当日 08:50 备餐推单窗口。今日能否进配送大表视备餐与厨房安排而定；有加备餐需今日配送时请继续选今日，并与厨房确认。',
+    }
+  }
+  return {
+    type: 'info',
+    text: '已选今日起送：入账后若当日为配送日、余额与请假规则满足，可进入当日大表。',
+  }
+})
+
+function applyRenewActivationDefaults() {
+  if (createForm.value.open_mode !== 'renew') return
+  if (renewStillDelivering.value) {
+    createForm.value.delivery_start_mode = 'keep_schedule'
+    return
+  }
+  if (renewCanKeepSchedule.value) {
+    createForm.value.delivery_start_mode = 'keep_schedule'
+  } else {
+    createForm.value.delivery_start_mode = 'date'
+    createForm.value.delivery_start_date = todayShanghaiStr()
+  }
+}
+
 /** 续卡同步入账后：剩余、总次数均 +本次卡次数 */
 const renewSyncPreview = computed(() => {
   const p = renewPreview.value
@@ -251,9 +332,18 @@ watch(
   () => createForm.value.open_mode,
   (mode) => {
     renewPreview.value = null
-    if (mode === 'renew') scheduleRenewPreview()
+    if (mode === 'renew') {
+      scheduleRenewPreview()
+    } else {
+      createForm.value.delivery_start_mode = 'date'
+      createForm.value.delivery_start_date = todayShanghaiStr()
+    }
   },
 )
+
+watch(renewPreview, () => {
+  applyRenewActivationDefaults()
+})
 
 function onDeliveryMapWarn(msg) {
   showToast(msg || '地图提示', 'error')
@@ -300,12 +390,20 @@ async function submitCreate() {
       return
     }
   }
+  const keepSchedule =
+    createForm.value.open_mode === 'renew' &&
+    (renewStillDelivering.value || createForm.value.delivery_start_mode === 'keep_schedule')
   const deferStart = createForm.value.delivery_start_mode === 'defer'
   let startD = null
-  if (!deferStart) {
+  if (!keepSchedule && !deferStart) {
     startD = (createForm.value.delivery_start_date || '').trim()
     if (!startD) {
       showToast('请选择开始配送日期', 'error')
+      return
+    }
+    const today = todayShanghaiStr()
+    if (startD < today) {
+      showToast('起送日不能早于今日（上海业务日）', 'error')
       return
     }
   }
@@ -334,7 +432,7 @@ async function submitCreate() {
     const body = {
       phone,
       open_mode: openMode,
-      delivery_start_date: deferStart ? null : startD,
+      delivery_start_date: keepSchedule || deferStart ? null : startD,
       card_kind: createForm.value.card_kind,
       pay_channel: createForm.value.pay_channel,
       pay_status: createForm.value.pay_status,
@@ -799,8 +897,15 @@ class="member-pill"
                         · 套餐 {{ renewPreview.plan_type || '—' }}
                         · 当前剩余 <strong>{{ Number(renewPreview.balance) || 0 }}</strong>
                         次
+                        <template v-if="renewPreview.delivery_start_date">
+                          · 起送日 {{ String(renewPreview.delivery_start_date).slice(0, 10) }}
+                        </template>
+                        <template v-if="renewPreview.delivery_deferred"> · 已暂停配送</template>
                       </p>
-                      <p v-if="renewSyncPreview" class="modal-hint modal-hint--accent">
+                      <p v-if="renewStillDelivering" class="modal-hint modal-hint--accent">
+                        仍在履约中，续卡仅叠加次数，不修改起送日与配送安排。
+                      </p>
+                      <p v-else-if="renewSyncPreview" class="modal-hint modal-hint--accent">
                         同步入账后约：<strong>剩余 {{ renewSyncPreview.nextBal }}</strong> /
                         <strong>总 {{ renewSyncPreview.nextTotal }}</strong>
                         （本次 +{{ renewSyncPreview.add }}）
@@ -881,39 +986,71 @@ class="member-pill"
                 激活设置
               </div>
               <div class="co-create-activation-row">
-                <el-radio-group v-model="createForm.delivery_start_mode" class="co-activation-radio-group">
-                  <div class="open-mode-options open-mode-options--activation">
-                    <el-radio value="date" border class="co-activation-radio-item">
-                      <div class="co-open-mode-radio-body">
-                        <span class="radio-tile-title">指定起送日</span>
-                        <span class="radio-tile-sub">选择具体业务日起参与配送大表</span>
-                      </div>
-                    </el-radio>
-                    <el-radio value="defer" border class="co-activation-radio-item">
-                      <div class="co-open-mode-radio-body">
-                        <span class="radio-tile-title">暂不开卡</span>
-                        <span class="radio-tile-sub">已缴仍入次数与套餐；暂不写入起送日，可日后在「更新」中补日期</span>
-                      </div>
-                    </el-radio>
+                <el-alert
+                  v-if="createForm.open_mode === 'renew' && renewStillDelivering"
+                  type="success"
+                  :closable="false"
+                  show-icon
+                  class="co-renew-activation-alert"
+                  title="保持当前配送安排"
+                  description="该会员仍有剩余次数且未暂停，续卡仅叠加次数，不会修改档案中的起送日。"
+                />
+                <template v-else>
+                  <el-radio-group v-model="createForm.delivery_start_mode" class="co-activation-radio-group">
+                    <div
+                      class="open-mode-options open-mode-options--activation"
+                      :class="{
+                        'open-mode-options--activation-3': renewActivationOptionCount === 3,
+                      }"
+                    >
+                      <el-radio
+                        v-if="createForm.open_mode === 'renew' && renewCanKeepSchedule"
+                        value="keep_schedule"
+                        border
+                        class="co-activation-radio-item"
+                      >
+                        <div class="co-open-mode-radio-body">
+                          <span class="radio-tile-title">保持当前配送安排</span>
+                          <span class="radio-tile-sub">不修改档案起送日，续卡后按原节奏进配送大表</span>
+                        </div>
+                      </el-radio>
+                      <el-radio value="date" border class="co-activation-radio-item">
+                        <div class="co-open-mode-radio-body">
+                          <span class="radio-tile-title">指定起送日</span>
+                          <span class="radio-tile-sub">选择具体业务日起参与配送大表</span>
+                        </div>
+                      </el-radio>
+                      <el-radio value="defer" border class="co-activation-radio-item">
+                        <div class="co-open-mode-radio-body">
+                          <span class="radio-tile-title">暂不开卡</span>
+                          <span class="radio-tile-sub">已缴仍入次数与套餐；暂不写入起送日，可日后在「更新」中补日期</span>
+                        </div>
+                      </el-radio>
+                    </div>
+                  </el-radio-group>
+                  <div
+                    v-if="createForm.delivery_start_mode === 'date'"
+                    class="card-order-delivery-block co-create-activation-date"
+                  >
+                    <el-date-picker
+                      v-model="createForm.delivery_start_date"
+                      type="date"
+                      value-format="YYYY-MM-DD"
+                      format="YYYY-MM-DD"
+                      placeholder="选择开始配送日"
+                      class="card-order-date-picker"
+                      :clearable="false"
+                    />
+                    <el-alert
+                      v-if="activationStartDateHint"
+                      :type="activationStartDateHint.type"
+                      :closable="false"
+                      show-icon
+                      class="co-activation-date-hint"
+                      :title="activationStartDateHint.text"
+                    />
                   </div>
-                </el-radio-group>
-                <div
-                  v-if="createForm.delivery_start_mode === 'date'"
-                  class="card-order-delivery-block co-create-activation-date"
-                >
-                  <el-date-picker
-                    v-model="createForm.delivery_start_date"
-                    type="date"
-                    value-format="YYYY-MM-DD"
-                    format="YYYY-MM-DD"
-                    placeholder="选择开始配送日"
-                    class="card-order-date-picker"
-                    :clearable="false"
-                  />
-                  <!-- <p class="modal-hint card-order-delivery-hint">
-                    须不早于系统允许的最早业务日；该日起可查见、可派单。
-                  </p> -->
-                </div>
+                </template>
               </div>
             </div>
           </div>
@@ -1374,6 +1511,24 @@ class="member-pill"
   align-items: stretch;
 }
 
+.open-mode-options--activation-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.co-renew-activation-alert {
+  width: 100%;
+}
+
+.co-activation-date-hint {
+  width: 100%;
+}
+
+.co-activation-date-hint :deep(.el-alert__title) {
+  font-size: 12px;
+  line-height: 1.55;
+  font-weight: 500;
+}
+
 .co-create-activation-date {
   width: 100%;
   max-width: 100%;
@@ -1443,6 +1598,12 @@ class="member-pill"
 
 @media (max-width: 720px) {
   .co-create-fees-row2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .open-mode-options--activation-3 {
     grid-template-columns: 1fr;
   }
 }
