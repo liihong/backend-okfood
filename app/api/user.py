@@ -104,6 +104,10 @@ from app.services.catalog_admin_service import (
     list_membership_templates,
     membership_template_public_dump,
 )
+from app.services.single_meal_balance_pay_service import (
+    evaluate_single_meal_balance_pay,
+    pay_single_meal_order_with_member_balance,
+)
 from app.services.single_meal_order_service import (
     create_single_meal_order,
     get_member_single_meal_order,
@@ -509,7 +513,7 @@ def cancel_single_order_me(
     db: SessionDep,
     member_id: MemberIdScoped,
 ):
-    """会员取消本人单次点餐订单；待发货可取消，已支付微信单原路退款。"""
+    """会员取消本人单次点餐订单；待发货可取消；微信单原路退款，会员卡次数单退次。"""
     _ = request
     msg = member_cancel_single_meal_order(db, member_id=member_id, order_id=order_id)
     out = get_member_single_meal_order(db, member_id, order_id)
@@ -585,6 +589,49 @@ def sync_single_meal_order_after_pay(
     sync_single_meal_from_wechat_or_raise(db, member_id, order_id)
     out = get_member_single_meal_order(db, member_id, order_id)
     return success(data=dump_model(out), msg="支付结果已同步")
+
+
+@router.get("/single-meal-balance-pay-eligibility")
+@limiter.limit("60/minute")
+def single_meal_balance_pay_eligibility_me(
+    request: Request,
+    db: SessionDep,
+    member_id: MemberIdScoped,
+    quantity: Annotated[int, Query(ge=1, le=50, description="拟购买份数")] = 1,
+):
+    """周卡/月卡：是否可用剩余次数支付单点（含当日套餐预留次数判断）。"""
+    _ = request
+    mem = db.get(Member, int(member_id))
+    if not mem or mem.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    ev = evaluate_single_meal_balance_pay(db, mem, quantity=int(quantity))
+    return success(
+        data={
+            "can_use": ev.can_use,
+            "message": ev.message,
+            "balance": ev.balance,
+            "meal_quota_total": ev.meal_quota_total,
+            "plan_type": ev.plan_type,
+            "reserve_for_today": ev.reserve_for_today,
+            "required_balance": ev.required_balance,
+        },
+        msg="ok",
+    )
+
+
+@router.post("/single-orders/{order_id}/pay/member-balance")
+@limiter.limit("30/minute")
+def pay_single_order_member_balance_me(
+    request: Request,
+    order_id: int,
+    db: SessionDep,
+    member_id: MemberIdScoped,
+):
+    """会员卡次数支付单次点餐（扣减 balance，0 元实收）。"""
+    _ = request
+    pay_single_meal_order_with_member_balance(db, member_id=int(member_id), order_id=int(order_id))
+    out = get_member_single_meal_order(db, member_id, order_id)
+    return success(data=dump_model(out), msg="支付成功")
 
 
 @router.get("/member-coupons/available")

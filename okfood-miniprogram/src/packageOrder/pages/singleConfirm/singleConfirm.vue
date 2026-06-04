@@ -40,7 +40,7 @@
           </view>
         </view>
 
-        <view v-if="availableCoupons.length" class="card coupon-card">
+        <view v-if="availableCoupons.length && payMethod !== 'balance'" class="card coupon-card">
           <text class="card-label">优惠券</text>
           <picker
             mode="selector"
@@ -68,6 +68,45 @@
               <text class="mode-label">门店自提</text>
             </label>
           </radio-group>
+        </view>
+
+        <view v-if="showPaymentMethodCard" class="card pay-card">
+          <text class="card-label">支付方式</text>
+          <radio-group class="mode-group mode-group--row" @change="onPayMethodChange">
+            <label class="mode-row">
+              <radio value="wechat" :checked="payMethod === 'wechat'" color="#0e5a44" />
+              <text class="mode-label">微信支付</text>
+            </label>
+            <label class="mode-row">
+              <radio
+                value="balance"
+                :checked="payMethod === 'balance'"
+                :disabled="!balancePayEligible"
+                color="#0e5a44"
+              />
+              <text class="mode-label" :class="{ 'mode-label--muted': !balancePayEligible }">会员卡支付</text>
+            </label>
+          </radio-group>
+          <view v-if="payMethod === 'balance' && balancePayInfo" class="pay-balance-hint">
+            <text class="pay-balance-line">
+              {{ balanceDisplay.plan_type || '会员卡' }} · 剩余
+              <text class="pay-balance-num">{{ balanceDisplay.balance }}</text>
+              <text v-if="balanceQuotaDenom">/{{ balanceQuotaDenom }}</text>
+              次
+            </text>
+            <text v-if="balancePayInfo.reserve_for_today > 0" class="pay-balance-sub">
+              今日套餐配送将预留 {{ balancePayInfo.reserve_for_today }} 次，本次将扣 {{ quantity }} 次
+            </text>
+          </view>
+          <view v-else-if="balanceDisplay.balance > 0" class="pay-balance-hint pay-balance-hint--idle">
+            <text class="pay-balance-line">
+              {{ balanceDisplay.plan_type || '会员卡' }} · 剩余
+              <text class="pay-balance-num">{{ balanceDisplay.balance }}</text>
+              <text v-if="balanceQuotaDenom">/{{ balanceQuotaDenom }}</text>
+              次
+            </text>
+          </view>
+          <text v-if="!balancePayEligible && balancePayHint" class="pay-balance-warn">{{ balancePayHint }}</text>
         </view>
 
         <view v-if="fulfillMode === 'delivery'" class="card addr-card">
@@ -106,7 +145,10 @@
         <view class="hint-box">
           <text class="hint-title">支付说明</text>
           <text class="hint-text">
-           <template v-if="fulfillMode === 'delivery'">
+            <template v-if="payMethod === 'balance'">
+              将使用会员卡剩余次数支付，无需微信支付。支付成功后{{ fulfillMode === 'delivery' ? '将按配送片区派单' : '为待取货状态，请按供餐日到店取餐' }}。
+            </template>
+            <template v-else-if="fulfillMode === 'delivery'">
               点击「去支付」将调起微信支付。支付成功后，系统会按配送片区派单给骑手。
             </template>
             <template v-else>
@@ -121,7 +163,7 @@
           :class="{ 'btn-pay--disabled': !canPay || paying }"
           @tap="handlePay"
         >
-          {{ paying ? '处理中…' : '去支付' }}
+          {{ payButtonText }}
         </button>
       </view>
     </scroll-view>
@@ -147,7 +189,11 @@ import {
   getAddressRecordId,
   addressListRow,
 } from '@/utils/addressApi.js'
-import { createSingleMealOrder } from '@/utils/singleOrderApi.js'
+import {
+  createSingleMealOrder,
+  fetchSingleMealBalancePayEligibility,
+  paySingleMealOrderMemberBalance,
+} from '@/utils/singleOrderApi.js'
 import { paySingleMealOrderWechat } from '@/utils/singleOrderPay.js'
 import { promptUnpaidOrderConflict } from '@/utils/unpaidOrderPrompt.js'
 import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
@@ -171,6 +217,32 @@ const QTY_MAX = 50
 const availableCoupons = ref([])
 const selectedCouponId = ref(null)
 const couponsLoading = ref(false)
+/** wechat | balance */
+const payMethod = ref('wechat')
+const balancePayInfo = ref(null)
+const balancePayLoading = ref(false)
+/** GET /api/user/me：用于展示周卡/月卡与剩余次数（不依赖资格接口是否上线） */
+const memberProfile = ref(null)
+
+const BALANCE_PLAN_TYPES = new Set(['周卡', '月卡'])
+
+function inferPlanTypeFromQuota(me) {
+  if (!me || typeof me !== 'object') return ''
+  const quota = Math.floor(Number(me.meal_quota_total) || 0)
+  const bal = Math.floor(Number(me.balance) || 0)
+  if (bal <= 0 && quota <= 0) return ''
+  if (quota >= 24) return '月卡'
+  if (quota >= 6) return '周卡'
+  return ''
+}
+
+function resolveMemberPlanType() {
+  const fromElig = balancePayInfo.value?.plan_type
+  const fromMe = memberProfile.value?.plan_type
+  const raw = fromElig != null && String(fromElig).trim() ? fromElig : fromMe
+  if (raw != null && String(raw).trim()) return String(raw).trim()
+  return inferPlanTypeFromQuota(memberProfile.value)
+}
 
 const qtyMaxEffective = computed(() => {
   if (!dish.value) return 1
@@ -219,11 +291,49 @@ const payablePriceText = computed(() => {
   return Math.max(0.01, orig - d).toFixed(2)
 })
 
+const showPaymentMethodCard = computed(() => BALANCE_PLAN_TYPES.has(resolveMemberPlanType()))
+
+const balanceDisplay = computed(() => {
+  const info = balancePayInfo.value
+  const me = memberProfile.value
+  const plan = resolveMemberPlanType()
+  return {
+    plan_type: plan || null,
+    balance: Math.max(
+      0,
+      Math.floor(Number(info?.balance ?? me?.balance) || 0),
+    ),
+    meal_quota_total: Math.max(
+      0,
+      Math.floor(Number(info?.meal_quota_total ?? me?.meal_quota_total) || 0),
+    ),
+  }
+})
+
+const balancePayEligible = computed(() => !!balancePayInfo.value?.can_use)
+
+const balancePayHint = computed(() => {
+  const msg = balancePayInfo.value?.message
+  return msg && String(msg).trim() ? String(msg).trim() : '当前无法使用次数支付，请使用微信支付'
+})
+
+const balanceQuotaDenom = computed(() => {
+  const t = balanceDisplay.value.meal_quota_total
+  return t > 0 ? t : null
+})
+
+const payButtonText = computed(() => {
+  if (paying.value) return '处理中…'
+  if (payMethod.value === 'balance') return '使用次数支付'
+  return '去支付'
+})
+
 const canPay = computed(() => {
   if (!canSubmitSingleOrder(dish.value, serviceDateYmd.value)) return false
   if (unitPrice.value == null) return false
   const q = Math.max(1, Math.min(qtyMaxEffective.value, quantity.value))
   if (q < 1) return false
+  if (payMethod.value === 'balance' && !balancePayEligible.value) return false
   if (fulfillMode.value === 'delivery') {
     if (!addressRows.value.length) return false
     const row = addressRows.value[selectedIndex.value]
@@ -235,6 +345,85 @@ const canPay = computed(() => {
 function onFulfillModeChange(e) {
   const v = e?.detail?.value
   fulfillMode.value = v === 'pickup' ? 'pickup' : 'delivery'
+}
+
+function onPayMethodChange(e) {
+  const v = e?.detail?.value === 'balance' ? 'balance' : 'wechat'
+  if (v === 'balance' && !balancePayEligible.value) {
+    uni.showToast({ title: balancePayHint.value, icon: 'none', duration: 2800 })
+    payMethod.value = 'wechat'
+    return
+  }
+  payMethod.value = v
+  if (v === 'balance') {
+    selectedCouponId.value = null
+  }
+}
+
+function buildFallbackBalancePayInfo(err) {
+  const plan = resolveMemberPlanType()
+  if (!BALANCE_PLAN_TYPES.has(plan)) return null
+  const me = memberProfile.value
+  const msg =
+    err instanceof Error && (err.status === 404 || /404|不存在/.test(err.message))
+      ? '次数支付服务未就绪，请使用微信支付或联系门店'
+      : '暂时无法校验次数，请使用微信支付'
+  return {
+    can_use: false,
+    message: msg,
+    balance: Math.max(0, Math.floor(Number(me?.balance) || 0)),
+    meal_quota_total: Math.max(0, Math.floor(Number(me?.meal_quota_total) || 0)),
+    plan_type: plan,
+    reserve_for_today: 0,
+    required_balance: 0,
+  }
+}
+
+async function refreshBalancePayEligibility() {
+  if (!dish.value || !getMemberToken()) {
+    balancePayInfo.value = null
+    return
+  }
+  if (!showPaymentMethodCard.value) {
+    balancePayInfo.value = null
+    payMethod.value = 'wechat'
+    return
+  }
+  const q = Math.max(1, Math.min(qtyMaxEffective.value, quantity.value))
+  balancePayLoading.value = true
+  try {
+    const data = await fetchSingleMealBalancePayEligibility(q)
+    balancePayInfo.value = data && typeof data === 'object' ? data : null
+    if (!balancePayInfo.value?.plan_type && resolveMemberPlanType()) {
+      balancePayInfo.value = {
+        ...balancePayInfo.value,
+        plan_type: resolveMemberPlanType(),
+        balance: balanceDisplay.value.balance,
+        meal_quota_total: balanceDisplay.value.meal_quota_total,
+      }
+    }
+    if (payMethod.value === 'balance' && !balancePayInfo.value?.can_use) {
+      payMethod.value = 'wechat'
+    }
+  } catch (e) {
+    balancePayInfo.value = buildFallbackBalancePayInfo(e)
+    payMethod.value = 'wechat'
+  } finally {
+    balancePayLoading.value = false
+  }
+}
+
+async function refreshMemberProfile() {
+  if (!getMemberToken()) {
+    memberProfile.value = null
+    return
+  }
+  try {
+    const me = await request('/api/user/me', { method: 'GET', retry: 1 })
+    memberProfile.value = me && typeof me === 'object' ? me : null
+  } catch (_meErr) {
+    memberProfile.value = null
+  }
 }
 
 function decQty() {
@@ -277,7 +466,10 @@ function onCouponPick(e) {
 }
 
 watch(quantity, () => {
-  if (dish.value) void loadCoupons()
+  if (dish.value) {
+    void loadCoupons()
+    void refreshBalancePayEligibility()
+  }
 })
 
 watch(fulfillMode, () => {
@@ -347,6 +539,9 @@ onLoad((options) => {
 onShow(() => {
   applyScrollLayout()
   if (!dishIdStr.value || !getMemberToken()) return
+  void refreshMemberProfile().then(() => {
+    if (dish.value) void refreshBalancePayEligibility()
+  })
   refreshAddressesOnly()
 })
 
@@ -369,10 +564,12 @@ async function loadPage() {
   loadError.value = ''
   dish.value = null
   try {
-    const [d, raw] = await Promise.all([
+    const [d, raw, me] = await Promise.all([
       fetchMenuDetail(dishIdStr.value, serviceDateYmd.value),
       request('/api/user/me/addresses', { method: 'GET', retry: 1 }),
+      request('/api/user/me', { method: 'GET', retry: 1 }),
     ])
+    memberProfile.value = me && typeof me === 'object' ? me : null
     if (!d) throw new Error('暂无餐品数据')
     dish.value = d
     const stockBlock = singleOrderBlockReason(d, serviceDateYmd.value)
@@ -395,7 +592,7 @@ async function loadPage() {
     if (formatMenuPrice(dish.value.price) == null) {
       loadError.value = '该餐品单点价格待公布'
     } else {
-      await loadCoupons()
+      await Promise.all([loadCoupons(), refreshBalancePayEligibility()])
     }
   } catch (e) {
     const msg =
@@ -447,7 +644,7 @@ async function handlePay() {
     if (!isPickup) {
       payload.member_address_id = Number(addressId)
     }
-    if (selectedCouponId.value != null) {
+    if (payMethod.value !== 'balance' && selectedCouponId.value != null) {
       payload.member_coupon_id = Math.floor(Number(selectedCouponId.value))
     }
     const out = await createSingleMealOrder(payload)
@@ -455,10 +652,15 @@ async function handlePay() {
     if (orderId == null) {
       throw new Error('订单创建响应异常')
     }
-    uni.showLoading({ title: '拉起支付…', mask: true })
-    const payResult = await paySingleMealOrderWechat(orderId)
-    if (!payResult.paySynced) {
-      uni.showToast({ title: '支付成功，订单同步中请稍后刷新', icon: 'none', duration: 3000 })
+    if (payMethod.value === 'balance') {
+      uni.showLoading({ title: '扣次支付…', mask: true })
+      await paySingleMealOrderMemberBalance(orderId)
+    } else {
+      uni.showLoading({ title: '拉起支付…', mask: true })
+      const payResult = await paySingleMealOrderWechat(orderId)
+      if (!payResult.paySynced) {
+        uni.showToast({ title: '支付成功，订单同步中请稍后刷新', icon: 'none', duration: 3000 })
+      }
     }
     showOkAlert({
       title: '支付成功',
@@ -695,6 +897,53 @@ async function handlePay() {
   font-size: 28rpx;
   font-weight: 800;
   color: $ok-slate-800;
+}
+
+.mode-label--muted {
+  color: $ok-slate-400;
+}
+
+.pay-balance-hint {
+  margin-top: 20rpx;
+  padding: 20rpx 24rpx;
+  background: rgba(14, 90, 68, 0.08);
+  border-radius: 20rpx;
+}
+
+.pay-balance-hint--idle {
+  opacity: 0.92;
+}
+
+.pay-balance-line {
+  display: block;
+  font-size: 26rpx;
+  font-weight: 850;
+  color: $ok-slate-700;
+  line-height: 1.5;
+}
+
+.pay-balance-num {
+  color: $ok-forest-green;
+  font-weight: 1000;
+  font-size: 32rpx;
+}
+
+.pay-balance-sub {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  font-weight: 750;
+  color: $ok-slate-500;
+  line-height: 1.45;
+}
+
+.pay-balance-warn {
+  display: block;
+  margin-top: 16rpx;
+  font-size: 24rpx;
+  font-weight: 800;
+  color: #b45309;
+  line-height: 1.45;
 }
 
 .qty-btn {

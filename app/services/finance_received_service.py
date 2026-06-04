@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import (
@@ -88,7 +88,11 @@ def _window_paid(
     card_weekly = _card_kind_bucket(db, base_conds=card_conds, card_kind="周卡")
     card_monthly = _card_kind_bucket(db, base_conds=card_conds, card_kind="月卡")
 
-    sm_conds = [SingleMealOrder.pay_status == "已支付"]
+    # 单次点餐实收仅统计微信支付；会员卡次数支付为 0 元核销，不计入金额
+    sm_conds = [
+        SingleMealOrder.pay_status == "已支付",
+        or_(SingleMealOrder.pay_channel == "微信", SingleMealOrder.pay_channel.is_(None)),
+    ]
     if store_id is not None:
         sm_conds.append(SingleMealOrder.store_id == int(store_id))
     if start is not None:

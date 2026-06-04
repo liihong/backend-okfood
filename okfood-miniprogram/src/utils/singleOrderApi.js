@@ -83,7 +83,10 @@ export function singleOrderStatusMeta(o) {
       return { line1: '已关闭', line2: '超时未支付，订单已自动取消', tone: 'warn' }
     }
     if (pay === '已退款') {
-      return { line1: '已取消', line2: '订单已取消，款项已原路退回', tone: 'warn' }
+      const ch = String(o.pay_channel || '').trim()
+      const line2 =
+        ch === '会员卡' ? '订单已取消，次数已退回会员卡' : '订单已取消，款项已原路退回'
+      return { line1: '已取消', line2, tone: 'warn' }
     }
     return { line1: '已取消', line2: '订单已取消', tone: 'warn' }
   }
@@ -174,6 +177,29 @@ export function fetchWechatJsapiPayParams(orderId) {
  */
 export function syncSingleMealWechatPayResult(orderId) {
   return request(`/api/user/single-orders/${orderId}/sync-wechat-pay`, {
+    method: 'POST',
+    data: {},
+  })
+}
+
+/**
+ * 周卡/月卡：是否可用次数支付单点（含当日套餐预留判断）。
+ * @param {number} quantity
+ * @returns {Promise<{ can_use: boolean, message?: string, balance: number, meal_quota_total: number, plan_type?: string|null, reserve_for_today: number, required_balance: number }>}
+ */
+export function fetchSingleMealBalancePayEligibility(quantity = 1) {
+  const q = Math.max(1, Math.min(50, Math.floor(Number(quantity) || 1)))
+  return request(`/api/user/single-meal-balance-pay-eligibility?quantity=${q}`, {
+    method: 'GET',
+  })
+}
+
+/**
+ * 会员卡次数支付单次点餐订单。
+ * @param {number} orderId
+ */
+export function paySingleMealOrderMemberBalance(orderId) {
+  return request(`/api/user/single-orders/${orderId}/pay/member-balance`, {
     method: 'POST',
     data: {},
   })

@@ -902,18 +902,28 @@ def member_cancel_single_meal_order(db: Session, *, member_id: int, order_id: in
 
     if pay == "已支付":
         channel = (row.pay_channel or "").strip()
-        if channel != "微信":
-            raise HTTPException(status_code=400, detail="暂不支持该支付渠道自动退款，请联系客服")
-        try:
-            out = admin_wechat_refund_single_meal_order(
-                db, order_id=int(order_id), store_id=int(row.store_id)
+        if channel == "会员卡":
+            from app.services.single_meal_balance_pay_service import (
+                restore_member_balance_for_cancelled_single_meal,
             )
-            refund_note = (out.get("message") or "").strip()
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        row = db.get(SingleMealOrder, order_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="订单不存在")
+
+            restore_member_balance_for_cancelled_single_meal(
+                db, order=row, operator="member:miniprogram"
+            )
+            refund_note = "次数已退回会员卡"
+        elif channel == "微信":
+            try:
+                out = admin_wechat_refund_single_meal_order(
+                    db, order_id=int(order_id), store_id=int(row.store_id)
+                )
+                refund_note = (out.get("message") or "").strip()
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
+            row = db.get(SingleMealOrder, order_id)
+            if row is None:
+                raise HTTPException(status_code=404, detail="订单不存在")
+        else:
+            raise HTTPException(status_code=400, detail="暂不支持该支付渠道自动退款，请联系客服")
 
     row.fulfillment_status = "cancelled"
     row.courier_id = None
@@ -1874,9 +1884,19 @@ def admin_cancel_single_meal_order(
             detail = e.detail if isinstance(e.detail, str) else str(e.detail)
             raise ValueError(f"顺丰取消失败：{detail}") from e
 
+    pay = (o.pay_status or "").strip()
+    if pay == "已支付" and (o.pay_channel or "").strip() == "会员卡":
+        from app.services.single_meal_balance_pay_service import (
+            restore_member_balance_for_cancelled_single_meal,
+        )
+
+        restore_member_balance_for_cancelled_single_meal(
+            db, order=o, operator="admin:cancel"
+        )
+
     o.fulfillment_status = "cancelled"
     o.courier_id = None
-    if (o.pay_status or "").strip() == "未支付":
+    if pay == "未支付":
         release_member_coupon_for_order(
             db, order_biz=CouponLockedOrderBiz.SINGLE_MEAL, order_id=int(order_id)
         )
@@ -1884,6 +1904,8 @@ def admin_cancel_single_meal_order(
     db.commit()
     if sf_msg:
         return f"订单已取消（{sf_msg}）"
+    if pay == "已支付" and (o.pay_channel or "").strip() == "会员卡":
+        return "订单已取消，次数已退回会员卡"
     return "订单已取消"
 
 
