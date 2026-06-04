@@ -1370,6 +1370,10 @@ def get_menu_detail_by_dish_id(
 
     out.update(_member_spice_public_fields(dish))
 
+    from app.services.store_config_service import get_store_base_delivery_fee_yuan
+
+    out["base_delivery_fee_yuan"] = float(get_store_base_delivery_fee_yuan(db, store_id=int(store_id)))
+
     if service_date is not None:
         from app.services.menu_day_stock_service import single_order_stock_for_dish_date
 

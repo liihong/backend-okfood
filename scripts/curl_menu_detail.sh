@@ -11,7 +11,7 @@ STORE_ID="${STORE_ID:-1}"
 DISH_ID="${1:-32}"
 SERVICE_DATE="${2:-2026-06-02}"
 
-echo "=== GET /menu/detail/${DISH_ID}?service_date=${SERVICE_DATE} ==="
+echo "=== GET /menu/detail/${DISH_ID}?service_date=${SERVICE_DATE} (含 base_delivery_fee_yuan) ==="
 curl -sS -w "\n\nHTTP %{http_code} time_total=%{time_total}s\n" \
   "${API_BASE}/menu/detail/${DISH_ID}?service_date=${SERVICE_DATE}" \
   -H "X-Store-Id: ${STORE_ID}"

@@ -180,9 +180,22 @@ const qtyMaxEffective = computed(() => {
   return Math.max(0, Math.min(QTY_MAX, Math.floor(Number(r))))
 })
 
+/** 门店固定配送费（元），来自 menu/detail.base_delivery_fee_yuan */
+const baseDeliveryFee = computed(() => {
+  if (!dish.value) return 0
+  const fee = formatMenuPrice(dish.value.baseDeliveryFee)
+  return fee != null && fee >= 0 ? fee : 0
+})
+
+/** 当前取餐方式下的单价：配送=price；自提=price-配送费 */
 const unitPrice = computed(() => {
   if (!dish.value) return null
-  return formatMenuPrice(dish.value.price)
+  const list = formatMenuPrice(dish.value.price)
+  if (list == null) return null
+  if (fulfillMode.value === 'pickup') {
+    return Math.max(0.01, list - baseDeliveryFee.value)
+  }
+  return list
 })
 
 const totalPriceText = computed(() => {
@@ -244,6 +257,7 @@ async function loadCoupons() {
       biz_type: 'single_meal',
       dish_id: Number(dishId),
       quantity: q,
+      store_pickup: fulfillMode.value === 'pickup',
     })
     availableCoupons.value = Array.isArray(rows) ? rows : []
     if (availableCoupons.value.length) {
@@ -263,6 +277,10 @@ function onCouponPick(e) {
 }
 
 watch(quantity, () => {
+  if (dish.value) void loadCoupons()
+})
+
+watch(fulfillMode, () => {
   if (dish.value) void loadCoupons()
 })
 

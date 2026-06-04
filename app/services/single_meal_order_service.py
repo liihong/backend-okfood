@@ -52,7 +52,7 @@ from app.services.courier_task_sorting import (
 )
 from app.services.member_address_service import delivery_region_name_map, full_address_line, routing_area_label
 from app.services.admin_system_notification_service import create_single_meal_order_paid_notification
-from app.services.store_config_service import load_store_coordinates_for_sorting
+from app.services.store_config_service import get_store_base_delivery_fee_yuan, load_store_coordinates_for_sorting
 from app.services.marketing.coupon_checkout_service import (
     CouponCheckoutContext,
     lock_member_coupon_for_order,
@@ -560,7 +560,11 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
     unit = dish.single_order_price_yuan
     if unit is None:
         raise HTTPException(status_code=400, detail="该餐品暂未开放单点")
-    amt = (Decimal(unit) * Decimal(qty)).quantize(Decimal("0.01"))
+    unit_dec = Decimal(unit)
+    if body.store_pickup:
+        fee = get_store_base_delivery_fee_yuan(db, store_id=int(mem.store_id))
+        unit_dec = max(Decimal("0.01"), (unit_dec - fee).quantize(Decimal("0.01")))
+    amt = (unit_dec * Decimal(qty)).quantize(Decimal("0.01"))
 
     row = SingleMealOrder(
         tenant_id=int(mem.tenant_id),

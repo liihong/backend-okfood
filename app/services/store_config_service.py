@@ -189,6 +189,12 @@ def get_store_config(db: Session, *, store_id: int) -> StoreConfigOut:
     )
 
 
+def get_store_base_delivery_fee_yuan(db: Session, *, store_id: int | None = None) -> Decimal:
+    """单次点餐用户侧固定配送费（元）：取门店配置基础价，无份数阶梯。"""
+    base, _extra = get_courier_delivery_fee_config(db, store_id=store_id)
+    return Decimal(base).quantize(Decimal("0.01"))
+
+
 def get_courier_delivery_fee_config(db: Session, *, store_id: int | None = None) -> tuple[Decimal, Decimal]:
     """骑手配送费：(首份基础价, 每多一份加价)。"""
     s = get_settings()

@@ -358,6 +358,12 @@ export function mapMenuDetail(raw) {
       typeof raw.spice_label === 'string' && raw.spice_label.trim()
         ? raw.spice_label.trim()
         : '',
+    /** 门店固定配送费（元）；自提展示价 = price - baseDeliveryFee */
+    baseDeliveryFee:
+      raw.base_delivery_fee_yuan ??
+      raw.baseDeliveryFeeYuan ??
+      raw.base_delivery_fee ??
+      null,
   }
 }
 

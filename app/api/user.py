@@ -599,6 +599,10 @@ def list_available_member_coupons_me(
     dish_id: Annotated[int | None, Query(ge=1)] = None,
     quantity: Annotated[int | None, Query(ge=1, le=50)] = None,
     retail_product_id: Annotated[int | None, Query(ge=1)] = None,
+    store_pickup: Annotated[
+        bool,
+        Query(description="单次点餐：true=门店自提，原价按单点价减门店固定配送费"),
+    ] = False,
 ):
     """结算页可用优惠券列表（按业务线与订单原价预筛）。"""
     _ = request
@@ -625,11 +629,16 @@ def list_available_member_coupons_me(
             original = card_order_amount_yuan_for_kind(db, card_kind.strip(), store_id=store_id)
     elif bt == "single_meal" and dish_id is not None:
         from app.models.menu_dish import MenuDish
+        from app.services.store_config_service import get_store_base_delivery_fee_yuan
 
         dish = db.get(MenuDish, int(dish_id))
         if dish and dish.single_order_price_yuan is not None:
             q = max(1, int(quantity or 1))
-            original = (Decimal(dish.single_order_price_yuan) * Decimal(q)).quantize(Decimal("0.01"))
+            unit = Decimal(dish.single_order_price_yuan)
+            if store_pickup:
+                fee = get_store_base_delivery_fee_yuan(db, store_id=store_id)
+                unit = max(Decimal("0.01"), (unit - fee).quantize(Decimal("0.01")))
+            original = (unit * Decimal(q)).quantize(Decimal("0.01"))
     elif bt == "store_retail" and retail_product_id is not None:
         from app.models.store_retail_product import StoreRetailProduct
 

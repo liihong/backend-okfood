@@ -3,7 +3,7 @@ import { buildQueryString } from '@/utils/queryString.js'
 
 /**
  * 结算页可用优惠券
- * @param {{ biz_type: string, card_kind?: string, membership_template_id?: number, dish_id?: number, quantity?: number, retail_product_id?: number }} params
+ * @param {{ biz_type: string, card_kind?: string, membership_template_id?: number, dish_id?: number, quantity?: number, retail_product_id?: number, store_pickup?: boolean }} params
  */
 export function listAvailableMemberCoupons(params) {
   const biz = String(params?.biz_type || '').trim()
@@ -20,6 +20,9 @@ export function listAvailableMemberCoupons(params) {
   }
   if (params.retail_product_id != null) {
     query.retail_product_id = String(Math.floor(Number(params.retail_product_id)))
+  }
+  if (params.store_pickup === true) {
+    query.store_pickup = 'true'
   }
   return request(`/api/user/member-coupons/available?${buildQueryString(query)}`, { method: 'GET' })
 }
