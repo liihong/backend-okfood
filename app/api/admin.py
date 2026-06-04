@@ -1295,7 +1295,7 @@ def admin_mall_card_refund_wechat(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """商城卡包：微信已缴且未同步入账的工单可全额原路退款。"""
+    """商城卡包：微信已缴工单可全额原路退款；已同步入账的将先扣回会员次数再退款。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
         payload = admin_wechat_refund_member_card_order(

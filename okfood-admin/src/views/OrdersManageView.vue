@@ -250,7 +250,9 @@ const refundDialogMeta = computed(() => {
     orderId: row.id,
     amountStr,
     sub: '全额退回支付用户微信零钱',
-    tip: '退款成功后订单状态将变为「已退款」。若工单曾同步会员次数/配额，请先人工处理会员权益。',
+    tip: row.applied_to_member
+      ? '该单已同步入账：退款时将先扣回对应餐次再发起微信原路退款，请确认会员剩余次数足够。'
+      : '退款成功后订单状态将变为「已退款」，操作不可撤销。',
   }
 })
 
@@ -668,8 +670,9 @@ function canRefundWechatSingle(row) {
 }
 
 function canRefundWechatMall(row) {
-  if (!row || row.pay_status !== '已缴') return false
-  if (row.applied_to_member) return false
+  if (!row) return false
+  const ps = String(row.pay_status || '').trim()
+  if (ps !== '已缴') return false
   return String(row.pay_channel || '').trim() === '微信'
 }
 
@@ -680,7 +683,7 @@ function openRefundWechat(row, kind) {
       return
     }
   } else if (!canRefundWechatMall(row)) {
-    showToast('仅「已缴」、微信支付且未同步入账的卡包订单可原路退款', 'error')
+    showToast('仅「已缴」且微信支付的商城卡包订单可原路退款', 'error')
     return
   }
   refundTarget.value = { kind, row }
@@ -1017,7 +1020,12 @@ function singlePayClass(s) {
 function mallPayClass(s) {
   if (s === '已缴') return 'member-pill member-pill--emerald'
   if (s === '已退款') return 'member-pill member-pill--rose'
+  if (s === '已取消') return 'member-pill member-pill--rose'
   return 'member-pill member-pill--amber'
+}
+
+function mallSyncClass(row) {
+  return row?.applied_to_member ? 'member-pill member-pill--emerald' : 'member-pill member-pill--slate'
 }
 
 /** 单次点餐订单状态（与接口 fulfillment_status 对应，商城常用口径） */
@@ -1516,8 +1524,12 @@ onMounted(() => {
             row-key="id"
             empty-text="当日暂无商城卡包订单"
           >
-            <el-table-column label="#" width="56" class-name="td-mono">
-              <template #default="{ row }">{{ row.id }}</template>
+            <el-table-column label="序号" width="72" align="center" class-name="td-mono orders-idx-col">
+              <template #default="{ $index }">
+                <span class="orders-cell-pill orders-cell-pill--idx">{{
+                  (page - 1) * pageSize + $index + 1
+                }}</span>
+              </template>
             </el-table-column>
             <el-table-column label="下单时间" width="132" class-name="orders-created-at-col">
               <template #default="{ row }">
@@ -1533,49 +1545,72 @@ onMounted(() => {
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="会员" min-width="120">
+            <el-table-column label="会员" min-width="132" class-name="orders-member-col">
               <template #default="{ row }">
                 <div class="orders-m-cell">
-                  <span class="orders-m-name" :title="row.member_name || ''">{{
-                    (row.member_name || '').trim() || '—'
-                  }}</span>
-                  <span class="orders-m-phone td-mono" :title="row.member_phone || ''">{{
-                    (row.member_phone || '').trim() || ''
-                  }}</span>
+                  <span
+                    class="orders-cell-pill orders-cell-pill--member-name"
+                    :title="(row.member_name || '').trim() || '—'"
+                    >{{ (row.member_name || '').trim() || '—' }}</span
+                  >
+                  <span
+                    v-if="(row.member_phone || '').trim()"
+                    class="orders-cell-pill orders-cell-pill--member-phone td-mono"
+                    :title="row.member_phone || ''"
+                    >{{ (row.member_phone || '').trim() }}</span
+                  >
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="商品" min-width="180" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.template_product_label || '—' }}</template>
+            <el-table-column label="商品" min-width="140" show-overflow-tooltip class-name="orders-dish-col">
+              <template #default="{ row }">
+                <span class="orders-cell-pill orders-cell-pill--dish">{{
+                  row.template_product_label || '—'
+                }}</span>
+              </template>
             </el-table-column>
-            <el-table-column label="卡型" width="72" align="center">
-              <template #default="{ row }">{{ row.card_kind || '—' }}</template>
+            <el-table-column label="卡型" width="80" align="center" class-name="orders-qty-col">
+              <template #default="{ row }">
+                <span class="orders-cell-pill orders-cell-pill--card-kind">{{
+                  row.card_kind || '—'
+                }}</span>
+              </template>
             </el-table-column>
-            <el-table-column label="金额" width="72" align="right" class-name="td-mono">
-              <template #default="{ row }">{{ row.amount_yuan ?? '—' }}</template>
+            <el-table-column label="金额" width="116" align="center" class-name="td-mono orders-amount-col co-nowrap">
+              <template #default="{ row }">
+                <span class="orders-cell-pill orders-cell-pill--amount">{{
+                  row.amount_yuan != null && row.amount_yuan !== '' ? row.amount_yuan : '—'
+                }}</span>
+              </template>
             </el-table-column>
-            <el-table-column label="渠道" width="72">
-              <template #default="{ row }">{{ row.pay_channel || '—' }}</template>
+            <el-table-column label="渠道" width="88" align="center" class-name="co-nowrap">
+              <template #default="{ row }">
+                <span class="orders-cell-pill orders-cell-pill--channel">{{
+                  row.pay_channel || '—'
+                }}</span>
+              </template>
             </el-table-column>
-            <el-table-column label="缴费" width="76" align="center" class-name="co-nowrap">
+            <el-table-column label="缴费" width="100" class-name="co-nowrap">
               <template #default="{ row }">
                 <span :class="mallPayClass(row.pay_status)">{{ row.pay_status || '—' }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="入账" width="76" align="center" class-name="co-nowrap">
+            <el-table-column label="入账" width="100" class-name="co-nowrap">
               <template #default="{ row }">
-                <span
-                  class="member-pill"
-                  :class="row.applied_to_member ? 'member-pill--emerald' : 'member-pill--slate'"
-                >
-                  {{ row.applied_to_member ? '已同步' : '未同步' }}
-                </span>
+                <span :class="mallSyncClass(row)">{{
+                  row.applied_to_member ? '已同步' : '未同步'
+                }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="备注" min-width="160" show-overflow-tooltip>
+            <el-table-column label="备注" min-width="140" show-overflow-tooltip class-name="td-remarks">
               <template #default="{ row }">{{
                 (row.remark || '').trim() ? row.remark : '—'
               }}</template>
+            </el-table-column>
+            <el-table-column label="配送" width="108" align="center" class-name="co-nowrap">
+              <template #default>
+                <span class="orders-cell-pill orders-cell-pill--mall-tag">卡包无配送</span>
+              </template>
             </el-table-column>
             <el-table-column label="操作" width="92" fixed="right" align="center" class-name="orders-col-more">
               <template #default="{ row }">
@@ -1599,11 +1634,6 @@ onMounted(() => {
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
-              </template>
-            </el-table-column>
-            <el-table-column label="配送" width="108" align="center" class-name="co-nowrap">
-              <template #default>
-                <span class="orders-mall-no-dispatch">卡包无配送</span>
               </template>
             </el-table-column>
           </AdminTable>
@@ -2162,6 +2192,29 @@ onMounted(() => {
   border: 1px solid #e2e8f0;
 }
 
+.orders-cell-pill--card-kind {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+
+.orders-cell-pill--channel {
+  font-weight: 700;
+  color: #0369a1;
+  background: #e0f2fe;
+  border: 1px solid #bae6fd;
+}
+
+.orders-cell-pill--mall-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
 .orders-manage-page :deep(td.orders-member-col.el-table__cell) {
   min-width: 132px;
 }
@@ -2195,14 +2248,6 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-/* 商城卡包 Tab 仍用纯文字会员列 */
-.orders-m-name {
-  font-weight: 600;
-}
-.orders-m-phone {
-  font-size: 0.8rem;
-  opacity: 0.85;
-}
 .orders-page-size {
   display: inline-flex;
   align-items: center;
@@ -2283,10 +2328,6 @@ onMounted(() => {
   overflow-y: auto;
 }
 
-.orders-mall-no-dispatch {
-  font-size: 12px;
-  color: var(--text-muted, #94a3b8);
-}
 /* 订单列表：配送地址列完整展示（覆盖 Element Plus 表格 .cell 默认单行省略） */
 .orders-manage-page :deep(.admin-table--members.el-table td.orders-single-addr-col.el-table__cell) {
   vertical-align: middle;

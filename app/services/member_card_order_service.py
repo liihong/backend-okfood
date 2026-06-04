@@ -354,6 +354,46 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
     order.applied_to_member = True
 
 
+def _meals_grant_units_for_card_order(db: Session, order: MemberCardOrder) -> tuple[int, bool]:
+    """返回开卡工单入账份数及是否曾累加 meal_quota_total（卡包模版）。"""
+    tpl_id = getattr(order, "membership_template_id", None)
+    if tpl_id is not None:
+        tpl = db.get(MembershipCardTemplate, int(tpl_id))
+        if not tpl:
+            raise ValueError("会员卡模版不存在，无法撤销入账")
+        return max(1, int(tpl.meals_grant)), True
+    _, amt = _quota_for_card_kind(order.card_kind)
+    return max(1, int(amt)), False
+
+
+def revoke_paid_card_order_member_sync(db: Session, order: MemberCardOrder, *, operator: str) -> None:
+    """微信原路退款前：若工单已同步入账，扣回会员次数/总配额并标记未入账。"""
+    if not order.applied_to_member:
+        return
+    m = db.get(Member, int(order.member_id))
+    if not m or m.deleted_at is not None:
+        raise ValueError("会员不存在，无法撤销入账")
+    units, bump_quota_total = _meals_grant_units_for_card_order(db, order)
+    bal = int(m.balance or 0)
+    if bal < units:
+        raise ValueError(
+            f"会员剩余次数 {bal} 不足扣回本次入账 {units} 次，无法原路退款；请先在会员档案调整次数",
+        )
+    detail = f"开卡工单#{int(order.id)}微信退款撤销入账-{units}次"
+    apply_member_recharge_delta(
+        db,
+        RechargeIn(phone=m.phone, amount=-units, plan_type=None),
+        operator=operator,
+        log_detail=detail,
+        member_id=int(m.id),
+    )
+    if bump_quota_total:
+        m.meal_quota_total = max(0, int(m.meal_quota_total or 0) - units)
+        db.add(m)
+    order.applied_to_member = False
+    db.add(order)
+
+
 def apply_paid_card_order_to_member_if_pending(db: Session, order: MemberCardOrder, *, operator: str) -> None:
     """支付回调等场景：仅当已缴且未入账时入账（可重复调用）。"""
     if order.applied_to_member:

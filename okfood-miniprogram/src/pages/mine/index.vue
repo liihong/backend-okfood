@@ -128,7 +128,7 @@
                 </view>
                 <text class="menu-cap">我的优惠券</text>
               </view>
-              <view class="menu-cell" @tap="goDouyinRedeem">
+              <view v-if="showDouyinRedeemMenu" class="menu-cell" @tap="goDouyinRedeem">
                 <view class="menu-ico-wrap">
                   <image
                     class="menu-ico-img"
@@ -196,7 +196,7 @@
           </view>
         </template>
 
-      <text class="page-version">Version 2.1.2 · 火源文化技术支持</text>
+      <text class="page-version">Version 2.1.8 · 火源文化技术支持</text>
       </view>
     </scroll-view>
 
@@ -265,6 +265,9 @@ import {
   isAddressItemDefault,
 } from '@/utils/addressApi.js'
 import { consumeMinePageNeedsRefresh, markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
+
+/** 抖音验券入口：下一版再开放 */
+const showDouyinRedeemMenu = false
 import { guardMemberDeliverySelfService } from '@/utils/memberSelfServiceGuard.js'
 import { ymdTodayShanghai } from '@/utils/memberDeliveryDate.js'
 import {

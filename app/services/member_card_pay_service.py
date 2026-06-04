@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError, DataError, IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import beijing_now_naive, min_member_delivery_start_shanghai
@@ -40,6 +41,7 @@ from app.services.admin_system_notification_service import (
 from app.services.member_card_order_service import (
     apply_paid_card_order_to_member_if_pending,
     enum_card_kind_for_template,
+    revoke_paid_card_order_member_sync,
 )
 from app.services.store_config_service import get_member_card_prices_yuan
 from app.services.marketing.coupon_checkout_service import (
@@ -53,6 +55,10 @@ logger = logging.getLogger(__name__)
 
 # 与单次零售未支付单一致：超时释放 locked 券并恢复订单原价
 UNPAID_MINIPROGRAM_CARD_ORDER_EXPIRE_MINUTES = 30
+MINIPROGRAM_WECHAT_ORDER_CREATOR = "miniprogram"
+# 旧库 pay_status ENUM 无「已取消」时，用 created_by 标记取消（见 migration_037）
+MINIPROGRAM_WECHAT_ORDER_CANCELLED_CREATOR = "miniprogram:cancelled"
+_MEMBER_CARD_CANCEL_REMARK_TAG = "[会员已取消]"
 
 
 def _new_temp_out_trade_no() -> str:
@@ -304,13 +310,65 @@ def card_order_amount_yuan_for_kind(db: Session, card_kind: str, *, store_id: in
     raise HTTPException(status_code=400, detail="无效开卡类型")
 
 
+def _is_pay_status_column_reject(exc: BaseException) -> bool:
+    """MySQL ENUM 未扩展「已取消」等写入失败时识别。"""
+    msg = str(exc).lower()
+    if getattr(exc, "orig", None) is not None:
+        msg = f"{msg} {str(exc.orig).lower()}"
+    return any(
+        token in msg
+        for token in (
+            "data truncated",
+            "incorrect enum",
+            "invalid enum",
+            "1265",
+            "check constraint",
+            "check violation",
+        )
+    )
+
+
+def is_member_card_order_cancelled(order: MemberCardOrder) -> bool:
+    """是否已会员自助取消（含旧库 created_by 兼容标记）。"""
+    if (order.pay_status or "").strip() == CardOrderPayStatus.CANCELLED.value:
+        return True
+    return (order.created_by or "").strip() == MINIPROGRAM_WECHAT_ORDER_CANCELLED_CREATOR
+
+
+def _member_card_order_pay_status_display(order: MemberCardOrder) -> str:
+    if is_member_card_order_cancelled(order):
+        return CardOrderPayStatus.CANCELLED.value
+    return (order.pay_status or "").strip()
+
+
+def _persist_card_order_cancelled(db: Session, order: MemberCardOrder) -> None:
+    """写入取消态；旧库 ENUM 仅 未缴/已缴 时回退 created_by 标记。"""
+    order.pay_status = CardOrderPayStatus.CANCELLED.value
+    try:
+        with db.begin_nested():
+            db.flush()
+    except (DataError, IntegrityError, OperationalError, DBAPIError) as e:
+        if not _is_pay_status_column_reject(e):
+            raise
+        order.pay_status = CardOrderPayStatus.UNPAID.value
+        order.created_by = MINIPROGRAM_WECHAT_ORDER_CANCELLED_CREATOR
+        base = (order.remark or "").strip()
+        if _MEMBER_CARD_CANCEL_REMARK_TAG not in base:
+            order.remark = (
+                f"{base}\n{_MEMBER_CARD_CANCEL_REMARK_TAG}".strip()[:500]
+                if base
+                else _MEMBER_CARD_CANCEL_REMARK_TAG
+            )
+        db.flush()
+
+
 def _pending_miniprogram_wechat_card_order_filters(*, member_id: int | None = None) -> list:
     """小程序微信自助开卡：未缴且未入账工单筛选条件。"""
     filters = [
         MemberCardOrder.pay_status == CardOrderPayStatus.UNPAID.value,
         MemberCardOrder.applied_to_member.is_(False),
         MemberCardOrder.pay_channel == CardPayChannel.WECHAT.value,
-        MemberCardOrder.created_by == "miniprogram",
+        MemberCardOrder.created_by == MINIPROGRAM_WECHAT_ORDER_CREATOR,
     ]
     if member_id is not None:
         filters.append(MemberCardOrder.member_id == int(member_id))
@@ -348,9 +406,9 @@ def member_cancel_miniprogram_wechat_card_order(
     )
     if not order:
         raise HTTPException(status_code=404, detail="开卡订单不存在")
-    ps = (order.pay_status or "").strip()
-    if ps == CardOrderPayStatus.CANCELLED.value:
+    if is_member_card_order_cancelled(order):
         return "订单已取消"
+    ps = (order.pay_status or "").strip()
     if ps == CardOrderPayStatus.PAID.value:
         raise HTTPException(status_code=400, detail="订单已支付，无法取消")
     if ps == CardOrderPayStatus.REFUNDED.value:
@@ -361,7 +419,7 @@ def member_cancel_miniprogram_wechat_card_order(
         raise HTTPException(status_code=400, detail="订单已入账，无法取消")
     if (order.pay_channel or "").strip() != CardPayChannel.WECHAT.value:
         raise HTTPException(status_code=400, detail="仅小程序微信开卡订单可在此取消")
-    if (order.created_by or "").strip() != "miniprogram":
+    if (order.created_by or "").strip() != MINIPROGRAM_WECHAT_ORDER_CREATOR:
         raise HTTPException(status_code=400, detail="当前订单不支持自助取消")
 
     if order.member_coupon_id is not None:
@@ -378,7 +436,7 @@ def member_cancel_miniprogram_wechat_card_order(
         pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
         _close_wechat_order_best_effort(out_no, pay=pay_cfg)
 
-    order.pay_status = CardOrderPayStatus.CANCELLED.value
+    _persist_card_order_cancelled(db, order)
     db.add(order)
     db.commit()
     db.refresh(order)
@@ -636,7 +694,7 @@ def prepare_wechat_jsapi_for_member_card_order(
         raise HTTPException(status_code=400, detail="订单已支付")
     if order.pay_status == CardOrderPayStatus.REFUNDED.value:
         raise HTTPException(status_code=400, detail="订单已退款")
-    if order.pay_status == CardOrderPayStatus.CANCELLED.value:
+    if is_member_card_order_cancelled(order):
         raise HTTPException(status_code=400, detail="订单已取消")
 
     pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
@@ -884,7 +942,7 @@ def member_card_order_user_dict(order: MemberCardOrder) -> dict:
             _format_amount_yuan(order.coupon_discount_yuan) if order.coupon_discount_yuan is not None else None
         ),
         "member_coupon_id": int(order.member_coupon_id) if order.member_coupon_id is not None else None,
-        "pay_status": order.pay_status,
+        "pay_status": _member_card_order_pay_status_display(order),
         "delivery_start_date": order.delivery_start_date.isoformat() if order.delivery_start_date else None,
         "out_trade_no": (order.out_trade_no or "").strip() or None,
         "created_at": order.created_at.isoformat() if order.created_at else None,
@@ -915,6 +973,7 @@ def list_member_card_orders_for_user(
     ls = (list_status or "all").strip().lower()
     if ls == "pending_pay":
         filters.append(MemberCardOrder.pay_status == CardOrderPayStatus.UNPAID.value)
+        filters.append(MemberCardOrder.created_by == MINIPROGRAM_WECHAT_ORDER_CREATOR)
     elif ls == "completed":
         filters.append(MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value)
     elif ls != "all":
@@ -961,10 +1020,11 @@ def admin_wechat_refund_member_card_order(
         raise ValueError('仅「已缴」订单可发起微信退款')
     if (order.pay_channel or "").strip() != CardPayChannel.WECHAT.value:
         raise ValueError("仅微信支付订单可原路退回")
-    if order.applied_to_member:
-        raise ValueError(
-            "该工单已同步入账会员权益，系统不支持直接原路退款；请先在后台调整会员次数/配额后另行协商",
-        )
+    if order.pay_status == CardOrderPayStatus.REFUNDED.value:
+        raise ValueError("订单已退款")
+    revoke_paid_card_order_member_sync(
+        db, order, operator="admin:mall_card_wechat_refund"
+    )
     out_no = (order.out_trade_no or "").strip()
     if not out_no:
         raise ValueError("订单缺少商户单号，无法退款")
