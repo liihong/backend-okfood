@@ -1413,7 +1413,7 @@ def admin_member_delivered_dates(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
 ):
-    """会员档案：该会员订阅套餐已确认送达的配送业务日（去重），用于核对消费 / 履约记录。"""
+    """会员档案：消费记录（套餐送达扣次 + 单次购买会员卡扣次）。"""
     _ = admin_username
     m = db.get(Member, member_id)
     if not m or m.deleted_at is not None:

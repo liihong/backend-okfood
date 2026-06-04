@@ -1,5 +1,8 @@
-"""会员端：套餐配送确认送达时的扣次记录（按配送业务日）。"""
+"""会员端 / 管理端：消费记录（套餐送达扣次 + 单次购买会员卡扣次）。"""
 
+from __future__ import annotations
+
+import re
 from datetime import date
 
 from sqlalchemy import func, select
@@ -8,9 +11,13 @@ from sqlalchemy.orm import Session
 from app.models.balance_log import BalanceLog
 from app.models.delivery_log import DeliveryLog
 from app.models.enums import BalanceReason, DeliveryStatus
+from app.models.single_meal_order import SingleMealOrder
 from app.schemas.user import DeliveryDeductionOut
 
 _ADMIN_MEMBER_DELIVERED_DATES_LIMIT = 2000
+_SINGLE_MEAL_ORDER_ID_RE = re.compile(r"single_meal_orders\.id=(\d+)")
+_DEDUCTION_KIND_SUBSCRIPTION = "subscription"
+_DEDUCTION_KIND_SINGLE_MEAL = "single_meal"
 
 
 def _delivery_meal_units_by_date(db: Session, member_id: int) -> dict[date, int]:
@@ -49,7 +56,7 @@ def delivery_meal_units_by_date(db: Session, member_id: int) -> dict[date, int]:
 
 
 def total_member_delivery_meal_units_consumed(db: Session, member_id: int) -> int:
-    """累计已消费份数：配送扣次 balance_logs 绝对值之和。"""
+    """累计已消费份数：仅套餐配送扣次 balance_logs 绝对值之和（退卡计价用）。"""
     mid = int(member_id)
     val = db.scalar(
         select(func.coalesce(func.sum(func.abs(BalanceLog.change)), 0)).where(
@@ -61,6 +68,83 @@ def total_member_delivery_meal_units_consumed(db: Session, member_id: int) -> in
     return int(val or 0)
 
 
+def _parse_single_meal_order_id_from_balance_detail(detail: str | None) -> int | None:
+    if not detail:
+        return None
+    m = _SINGLE_MEAL_ORDER_ID_RE.search(detail)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def _single_meal_deduction_items(db: Session, member_id: int) -> list[DeliveryDeductionOut]:
+    """单次购买：会员卡支付扣次（已退款订单不计入）。"""
+    mid = int(member_id)
+    bl_rows = db.scalars(
+        select(BalanceLog)
+        .where(
+            BalanceLog.member_id == mid,
+            BalanceLog.reason == BalanceReason.SINGLE_MEAL.value,
+            BalanceLog.change < 0,
+        )
+        .order_by(BalanceLog.created_at.desc(), BalanceLog.id.desc())
+    ).all()
+    items: list[DeliveryDeductionOut] = []
+    for bl in bl_rows:
+        oid = _parse_single_meal_order_id_from_balance_detail(bl.detail)
+        if oid is None:
+            continue
+        order = db.get(SingleMealOrder, oid)
+        if not order or int(order.member_id) != mid:
+            continue
+        if (order.pay_status or "").strip() == "已退款":
+            continue
+        items.append(
+            DeliveryDeductionOut(
+                delivery_date=order.delivery_date,
+                meal_units=max(1, abs(int(bl.change))),
+                deduction_kind=_DEDUCTION_KIND_SINGLE_MEAL,
+            )
+        )
+    return items
+
+
+def _subscription_deduction_items(db: Session, member_id: int) -> list[DeliveryDeductionOut]:
+    """订阅套餐：已确认送达的配送业务日（去重，一日一条）。"""
+    mid = int(member_id)
+    filt = (DeliveryLog.member_id == mid) & (DeliveryLog.status == DeliveryStatus.DELIVERED.value)
+    dates = db.scalars(
+        select(DeliveryLog.delivery_date).where(filt).distinct().order_by(DeliveryLog.delivery_date.desc())
+    ).all()
+    units_map = _delivery_meal_units_by_date(db, mid)
+    return [
+        DeliveryDeductionOut(
+            delivery_date=d,
+            meal_units=units_map.get(d, 1),
+            deduction_kind=_DEDUCTION_KIND_SUBSCRIPTION,
+        )
+        for d in dates
+    ]
+
+
+def _merged_consumption_items(db: Session, member_id: int) -> list[DeliveryDeductionOut]:
+    items = _subscription_deduction_items(db, member_id) + _single_meal_deduction_items(db, member_id)
+    return sorted(items, key=lambda x: x.delivery_date, reverse=True)
+
+
+def total_member_consumption_meal_units(db: Session, member_id: int) -> int:
+    """消费记录页累计份数：套餐送达扣次 + 单次购买会员卡扣次（不含已退款单次）。"""
+    delivery_total = total_member_delivery_meal_units_consumed(db, member_id)
+    mid = int(member_id)
+    single_total = 0
+    for row in _single_meal_deduction_items(db, mid):
+        single_total += int(row.meal_units)
+    return delivery_total + single_total
+
+
 def list_member_delivery_deductions(
     db: Session,
     member_id: int,
@@ -70,21 +154,11 @@ def list_member_delivery_deductions(
 ) -> tuple[list[DeliveryDeductionOut], int, int]:
     page = max(1, page)
     page_size = min(50, max(1, page_size))
-    mid = int(member_id)
-    filt = (DeliveryLog.member_id == mid) & (DeliveryLog.status == DeliveryStatus.DELIVERED.value)
-    total = int(db.scalar(select(func.count()).select_from(DeliveryLog).where(filt)) or 0)
-    base = select(DeliveryLog).where(filt).order_by(DeliveryLog.delivery_date.desc(), DeliveryLog.id.desc())
+    all_items = _merged_consumption_items(db, int(member_id))
+    total = len(all_items)
     offset = (page - 1) * page_size
-    rows = db.scalars(base.offset(offset).limit(page_size)).all()
-    units_map = _delivery_meal_units_by_date(db, mid)
-    items = [
-        DeliveryDeductionOut(
-            delivery_date=r.delivery_date,
-            meal_units=units_map.get(r.delivery_date, 1),
-        )
-        for r in rows
-    ]
-    total_meals = total_member_delivery_meal_units_consumed(db, mid)
+    items = all_items[offset : offset + page_size]
+    total_meals = total_member_consumption_meal_units(db, member_id)
     return items, total, total_meals
 
 
@@ -92,20 +166,11 @@ def list_member_delivered_dates_admin(
     db: Session,
     member_id: int,
 ) -> tuple[list[DeliveryDeductionOut], int, int, bool]:
-    """管理端：某会员已确认送达的去重配送业务日（新在前）。`truncated` 表示超过单次返回上限。"""
+    """管理端：消费记录（套餐送达 + 单次购买会员卡扣次，新在前）。`truncated` 表示超过单次返回上限。"""
     cap = _ADMIN_MEMBER_DELIVERED_DATES_LIMIT
-    mid = int(member_id)
-    filt = (DeliveryLog.member_id == mid) & (DeliveryLog.status == DeliveryStatus.DELIVERED.value)
-    subq = select(DeliveryLog.delivery_date).where(filt).distinct().subquery()
-    total = int(db.scalar(select(func.count()).select_from(subq)) or 0)
-    dates = db.scalars(
-        select(DeliveryLog.delivery_date).where(filt).distinct().order_by(DeliveryLog.delivery_date.desc()).limit(cap)
-    ).all()
-    truncated = total > len(dates)
-    units_map = _delivery_meal_units_by_date(db, mid)
-    total_meals = total_member_delivery_meal_units_consumed(db, mid)
-    items = [
-        DeliveryDeductionOut(delivery_date=d, meal_units=units_map.get(d, 1))
-        for d in dates
-    ]
+    all_items = _merged_consumption_items(db, int(member_id))
+    total = len(all_items)
+    items = all_items[:cap]
+    truncated = total > len(items)
+    total_meals = total_member_consumption_meal_units(db, member_id)
     return items, total, total_meals, truncated

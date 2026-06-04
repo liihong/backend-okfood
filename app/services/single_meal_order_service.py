@@ -1007,6 +1007,9 @@ def _notify_single_meal_order_paid_cs_review(db: Session, order: SingleMealOrder
                 member_id=int(order.member_id),
                 member_phone=(member.phone if member else None),
                 member_name=(member.name if member else None),
+                order_created_at=order.created_at,
+                out_trade_no=str(order.out_trade_no or ""),
+                pay_channel=str(order.pay_channel or ""),
             )
     except Exception:
         logger.exception(

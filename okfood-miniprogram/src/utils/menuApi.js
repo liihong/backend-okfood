@@ -73,6 +73,14 @@ export function dateToWeekdayLabel(isoDate) {
   return map[d.getDay()]
 }
 
+/** 供餐日展示：YYYY-MM-DD 周几 */
+export function formatServiceDateYmdWithWeekday(ymd) {
+  const t = String(ymd || '').trim()
+  if (!t) return ''
+  const w = dateToWeekdayLabel(t)
+  return w ? `${t} ${w}` : t
+}
+
 /** @param {Record<string, unknown> | null | undefined} item */
 function weeklyRowDishIdRaw(item) {
   if (!item || typeof item !== 'object') return null

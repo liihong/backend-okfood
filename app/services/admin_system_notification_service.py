@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
-import secrets
-import time as time_mod
-from datetime import date, time, timedelta
+import re
+from datetime import date, datetime, time, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
@@ -392,6 +391,16 @@ def acknowledge_miniprogram_card_order_pending_notifications(
     return len(rows)
 
 
+_SINGLE_MEAL_SUPPLY_DAY_RE = re.compile(r"供餐日[：:\s]*(\d{4}-\d{2}-\d{2})")
+_SINGLE_MEAL_ORDER_ID_MARKER_RE = re.compile(r"^single_meal_order_id:(\d+)$")
+
+
+def supply_day_from_single_meal_notification_message(message: str | None) -> str:
+    """从单次零售系统消息正文解析真实供餐日（business_date 列为 uk 槽位，非供餐日）。"""
+    m = _SINGLE_MEAL_SUPPLY_DAY_RE.search(str(message or ""))
+    return m.group(1) if m else ""
+
+
 def _single_meal_order_paid_notification_marker(order_id: int) -> str:
     """skip_reason 存订单 id，回调重试时幂等去重。"""
     return f"single_meal_order_id:{int(order_id)}"
@@ -402,14 +411,121 @@ def _single_meal_order_paid_business_date_for_uk(order_id: int) -> date:
     每订单独占 ``(store_id, kind, business_date)`` 唯一键。
 
     ``business_date`` 列仅为 DATE，无法存毫秒时间戳；与开卡待审批同策略用 order_id 映射槽位，
-    真实供餐日写在 title/message。trace 后缀含毫秒时间戳与随机数便于排查。
+    真实供餐日写在 message 多行正文中。
     """
     return date(2000, 1, 1) + timedelta(days=int(order_id))
 
 
-def _single_meal_order_paid_trace_suffix() -> str:
-    """消息末尾追踪串：毫秒时间戳 + 随机 hex，避免业务字段撞车。"""
-    return f"trace={int(time_mod.time() * 1000)}-{secrets.token_hex(4)}"
+def _format_single_meal_order_paid_time_zh(dt: datetime) -> str:
+    """支付入账时刻（库内北京时间 naive）→「2026年6月4日17点8分35秒」。"""
+    return f"{int(dt.year)}年{int(dt.month)}月{int(dt.day)}日{int(dt.hour)}点{int(dt.minute)}分{int(dt.second)}秒"
+
+
+def _order_id_from_single_meal_paid_skip_reason(skip_reason: str | None) -> int | None:
+    m = _SINGLE_MEAL_ORDER_ID_MARKER_RE.match(str(skip_reason or "").strip())
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_legacy_single_meal_paid_notification_message(message: str | None) -> bool:
+    """旧版单行 mid=/trace= 文案；新版以「用户：」分行展示。"""
+    msg = str(message or "")
+    if "用户：" in msg:
+        return False
+    return "mid=" in msg or "trace=" in msg or "已支付" in msg
+
+
+def _build_single_meal_order_paid_notification_text(
+    *,
+    order_id: int,
+    delivery_date: date,
+    dish_name: str | None,
+    quantity: int,
+    store_pickup: bool,
+    member_phone: str | None,
+    member_name: str | None,
+    order_created_at: datetime | None,
+    out_trade_no: str | None,
+    pay_channel: str | None,
+) -> tuple[str, str]:
+    """生成单次零售系统消息标题与正文（多行，pre-line 展示）。"""
+    oid = int(order_id)
+    phone = str(member_phone or "").strip()[:20] or "无手机号"
+    naming = str(member_name or "").strip()
+    naming = (naming[:24] + "…") if len(naming) > 24 else (naming or "会员")
+
+    dish = str(dish_name or "").strip() or "单次点餐"
+    qty = max(1, int(quantity))
+    fulfill = "门店自提" if bool(store_pickup) else "配送到家"
+    paid_at = order_created_at if isinstance(order_created_at, datetime) else beijing_now_naive()
+    time_text = _format_single_meal_order_paid_time_zh(paid_at)
+    supply_day = delivery_date.isoformat()
+    order_no = (str(out_trade_no or "").strip()) or str(oid)
+
+    pay_tag = (str(pay_channel or "").strip())
+    pay_note = "（会员卡支付）" if pay_tag == "会员卡" else ""
+
+    title = f"单次零售新订单 · #{oid}"
+    dish_line = f"{dish}×{qty}{pay_note}"
+    body_lines = [
+        f"用户：{naming}",
+        f"手机号：{phone}",
+        f"下单时间：{time_text}",
+        f"餐品：{dish_line}",
+        f"供餐日：{supply_day}（{fulfill}）",
+        f"配送方式：{fulfill}",
+        f"订单号：{order_no}",
+        "",
+        "请尽快在「订单管理」推送配送或安排自提。",
+    ]
+    body = "\n".join(body_lines)
+    if len(body) > 500:
+        body = body[:497] + "…"
+    return title[:200], body
+
+
+def try_refresh_legacy_single_meal_order_paid_notification(
+    db: Session,
+    row: AdminSystemNotification,
+) -> bool:
+    """将库内旧版单行消息升级为最新多行格式（列表拉取时懒修复）。"""
+    if row.kind != KIND_SINGLE_MEAL_ORDER_PAID:
+        return False
+    if not _is_legacy_single_meal_paid_notification_message(row.message):
+        return False
+    oid = _order_id_from_single_meal_paid_skip_reason(row.skip_reason)
+    if oid is None:
+        return False
+
+    from app.models.member import Member
+    from app.models.menu_dish import MenuDish
+    from app.models.single_meal_order import SingleMealOrder
+
+    order = db.get(SingleMealOrder, oid)
+    if not order or int(order.store_id) != int(row.store_id):
+        return False
+    member = db.get(Member, int(order.member_id))
+    dish = db.get(MenuDish, int(order.dish_id)) if order.dish_id else None
+    title, body = _build_single_meal_order_paid_notification_text(
+        order_id=oid,
+        delivery_date=order.delivery_date,
+        dish_name=(dish.name if dish else None),
+        quantity=int(order.quantity or 1),
+        store_pickup=bool(getattr(order, "store_pickup", False)),
+        member_phone=(member.phone if member else None),
+        member_name=(member.name if member else None),
+        order_created_at=order.created_at,
+        out_trade_no=str(order.out_trade_no or ""),
+        pay_channel=str(order.pay_channel or ""),
+    )
+    row.title = title
+    row.message = body
+    db.add(row)
+    return True
 
 
 def _single_meal_order_paid_notification_row(
@@ -444,43 +560,43 @@ def create_single_meal_order_paid_notification(
     member_id: int,
     member_phone: str | None,
     member_name: str | None,
+    order_created_at: datetime | None = None,
+    out_trade_no: str | None = None,
+    pay_channel: str | None = None,
 ) -> AdminSystemNotification | None:
     """单次零售支付成功：每订单一条客服提醒（幂等；不占用供餐日 uk 槽位）。"""
+    _ = amount_yuan, member_id
     sid = int(store_id)
     if sid <= 0:
         return None
 
     oid = int(order_id)
+    title, body = _build_single_meal_order_paid_notification_text(
+        order_id=oid,
+        delivery_date=delivery_date,
+        dish_name=dish_name,
+        quantity=quantity,
+        store_pickup=store_pickup,
+        member_phone=member_phone,
+        member_name=member_name,
+        order_created_at=order_created_at,
+        out_trade_no=out_trade_no,
+        pay_channel=pay_channel,
+    )
     existing = _single_meal_order_paid_notification_row(db, store_id=sid, order_id=oid)
     if existing is not None:
+        if existing.title != title or existing.message != body:
+            existing.title = title
+            existing.message = body
+            db.add(existing)
+            db.flush()
         return existing
-
-    phones = str(member_phone or "").strip()[:32] or "(无手机号)"
-    naming = str(member_name or "").strip()
-    naming = naming[:40] + ("…" if len(naming) > 40 else "")
-
-    dish = str(dish_name or "").strip() or "单次点餐"
-    fulfill = "门店自提" if bool(store_pickup) else "配送到家"
-    amt = str(amount_yuan or "").strip()
-    amt_text = f" ¥{amt}" if amt else ""
-
-    title = f"单次零售新订单 · #{oid}"
-    body = (
-        f"会员 mid={int(member_id)} {phones} "
-        f"{('「' + naming + '」') if naming else ''}"
-        f"已支付{amt_text} {dish}×{max(1, int(quantity))}，"
-        f"供餐日 {delivery_date.isoformat()}（{fulfill}）。"
-        "请尽快在「订单管理」推送配送或安排自提。"
-        f" {_single_meal_order_paid_trace_suffix()}"
-    )
-    if len(body) > 500:
-        body = body[:497] + "…"
 
     row = AdminSystemNotification(
         store_id=sid,
         kind=KIND_SINGLE_MEAL_ORDER_PAID,
         business_date=_single_meal_order_paid_business_date_for_uk(oid),
-        title=title[:200],
+        title=title,
         message=body,
         total_count=0,
         success_count=0,
@@ -652,7 +768,14 @@ def list_admin_system_notifications(
     )
     if unacknowledged_only:
         stmt = stmt.where(AdminSystemNotification.acknowledged_at.is_(None))
-    return list(db.scalars(stmt).all())
+    rows = list(db.scalars(stmt).all())
+    changed = False
+    for row in rows:
+        if try_refresh_legacy_single_meal_order_paid_notification(db, row):
+            changed = True
+    if changed:
+        db.commit()
+    return rows
 
 
 def count_unacknowledged_admin_system_notifications(db: Session, *, store_id: int) -> int:
@@ -689,11 +812,15 @@ def acknowledge_admin_system_notification(
 
 
 def admin_system_notification_to_dict(row: AdminSystemNotification) -> dict:
+    delivery_date = ""
+    if row.kind == KIND_SINGLE_MEAL_ORDER_PAID:
+        delivery_date = supply_day_from_single_meal_notification_message(row.message)
     return {
         "id": int(row.id),
         "store_id": int(row.store_id),
         "kind": row.kind,
         "business_date": row.business_date.isoformat() if row.business_date else "",
+        "delivery_date": delivery_date,
         "title": row.title,
         "message": row.message,
         "total": int(row.total_count),

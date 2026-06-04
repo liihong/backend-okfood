@@ -1310,6 +1310,10 @@ class AdminSystemNotificationOut(BaseModel):
     store_id: int
     kind: str
     business_date: str
+    delivery_date: str = Field(
+        default="",
+        description="单次零售消息解析出的供餐日；其它 kind 为空",
+    )
     title: str
     message: str
     total: int = 0

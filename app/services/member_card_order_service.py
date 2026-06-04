@@ -410,6 +410,7 @@ def list_card_orders_paged(
         CardOrderPayStatus.UNPAID.value,
         CardOrderPayStatus.PAID.value,
         CardOrderPayStatus.REFUNDED.value,
+        CardOrderPayStatus.CANCELLED.value,
     ):
         filters.append(MemberCardOrder.pay_status == ps)
 
@@ -464,6 +465,7 @@ def list_mall_template_card_orders_for_order_day(
         CardOrderPayStatus.UNPAID.value,
         CardOrderPayStatus.PAID.value,
         CardOrderPayStatus.REFUNDED.value,
+        CardOrderPayStatus.CANCELLED.value,
     ):
         filters.append(MemberCardOrder.pay_status == ps)
 

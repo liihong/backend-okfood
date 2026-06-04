@@ -12,17 +12,28 @@
       <view class="list-inner">
         <view v-if="loading && !items.length" class="state-text">加载中…</view>
         <view v-else-if="!items.length" class="state-text state-text--muted">
-         暂无扣次记录。套餐配送在确认送达、扣减「剩余餐次」后，会按配送业务日显示在此。
+          暂无消费记录。套餐确认送达扣次，或单次购买使用会员卡扣次后，将按供餐日显示在此。
         </view>
         <template v-else>
          <view v-if="total > 0" class="summary-card">
             <text class="summary-title">累计消费</text>
             <text class="summary-num">{{ totalMealUnits }} 份餐</text>
-            <text class="summary-hint">共 {{ total }} 个配送日 · 下列为每次扣次对应的配送日期与份数</text>
+            <text class="summary-hint">
+              共 {{ total }} 条 · 含套餐送达扣次与单次购买（会员卡）扣次
+            </text>
           </view>
-         <view v-for="(row, idx) in items" :key="row.delivery_date + '-' + idx" class="record-row">
+          <view
+            v-for="(row, idx) in items"
+            :key="row.delivery_date + '-' + (row.deduction_kind || 'subscription') + '-' + idx"
+            class="record-row"
+          >
             <view class="record-main">
-              <text class="record-label">配送日</text>
+              <view class="record-label-row">
+                <text class="record-label">
+                  {{ row.deduction_kind === 'single_meal' ? '供餐日' : '配送日' }}
+                </text>
+                <text v-if="row.deduction_kind === 'single_meal'" class="record-kind-tag">单次购买</text>
+              </view>
               <text class="record-date">{{ row.delivery_date || '—' }}</text>
             </view>
             <text class="record-units">{{ row.meal_units || 1 }} 份</text>
@@ -208,10 +219,26 @@ onShow(() => {
   flex: 1;
 }
 
+.record-label-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
 .record-label {
   font-size: 28rpx;
   font-weight: 800;
   color: $ok-slate-500;
+}
+
+.record-kind-tag {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: #0e5a44;
+  background: rgba(14, 90, 68, 0.1);
+  padding: 4rpx 14rpx;
+  border-radius: 8rpx;
 }
 
 .record-date {

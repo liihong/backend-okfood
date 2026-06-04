@@ -26,6 +26,7 @@
 --  22) weekly_menu_slot.total_stock 日总份与单次可售（见 migrations/20260425_weekly_menu_slot_total_stock.sql）
 --  23) members.store_pickup 门店自提（见 migrations/20260424_members_store_pickup.sql）
 --  24) members.skip_subscription_saturday 固定周六不履约（见 migrations/20260506_members_skip_subscription_saturday.sql）
+--  25) balance_logs.reason 增加 single_meal 单点扣次（见 migration_036_balance_logs_single_meal_reason.sql）
 
 SET NAMES utf8mb4;
 
@@ -161,7 +162,7 @@ CREATE TABLE IF NOT EXISTS `balance_logs` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `member_id` BIGINT UNSIGNED NOT NULL,
   `change` INT NOT NULL COMMENT '正数充值/退款增加，负数扣减',
-  `reason` ENUM('recharge','delivery','refund','admin_adjust') NOT NULL COMMENT 'admin_adjust=后台档案直接改剩余次数',
+  `reason` ENUM('recharge','delivery','refund','admin_adjust','single_meal') NOT NULL COMMENT 'admin_adjust=后台改次; single_meal=单点会员卡扣次',
   `operator` VARCHAR(50) NOT NULL COMMENT 'admin 用户名、courier_id或 system',
   `detail` VARCHAR(500) NULL COMMENT '业务说明：如开卡工单号、备注摘要等',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -176,7 +177,7 @@ CREATE TABLE IF NOT EXISTS `member_card_orders` (
   `member_id` BIGINT UNSIGNED NOT NULL COMMENT 'members.id',
   `card_kind` ENUM('周卡','月卡','次卡') NOT NULL COMMENT '开卡类型',
   `pay_channel` ENUM('微信','支付宝','线下') NOT NULL COMMENT '缴费渠道',
-  `pay_status` ENUM('未缴','已缴') NOT NULL DEFAULT '未缴' COMMENT '缴费情况',
+  `pay_status` VARCHAR(10) NOT NULL DEFAULT '未缴' COMMENT '未缴/已缴/已退款/已取消',
   `amount_yuan` DECIMAL(12,2) NULL COMMENT '实收金额(元)，可选',
   `remark` VARCHAR(500) NULL,
   `delivery_start_date` DATE NULL COMMENT '约定起送业务日，同步入账时写入 members.delivery_start_date',

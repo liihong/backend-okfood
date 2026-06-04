@@ -71,6 +71,21 @@ export function fetchMemberCardWechatJsapiPayParams(orderId) {
  * @param {number} orderId
  * @returns {Promise<object>} 与 GET /api/user/me 同结构（见 `request` 解包后的 `data`）
  */
+/**
+ * 取消未支付的小程序微信开卡工单。
+ * @param {number} orderId
+ */
+export function cancelMemberCardOrder(orderId) {
+  const id = Math.floor(Number(orderId))
+  if (!Number.isFinite(id) || id < 1) {
+    return Promise.reject(new Error('订单编号无效'))
+  }
+  return request(`/api/user/member-card-orders/${id}/cancel`, {
+    method: 'POST',
+    data: {},
+  })
+}
+
 export function syncMemberCardWechatPayResult(orderId) {
   const primary = `/api/pay/wechat/member-card-order-sync/${orderId}`
   const legacy = `/api/user/member-card-orders/${orderId}/sync-wechat-pay`

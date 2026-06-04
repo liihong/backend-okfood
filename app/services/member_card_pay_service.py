@@ -330,6 +330,61 @@ def _find_pending_miniprogram_wechat_card_order(db: Session, member_id: int) -> 
     ).first()
 
 
+def member_cancel_miniprogram_wechat_card_order(
+    db: Session,
+    *,
+    member_id: int,
+    order_id: int,
+) -> str:
+    """会员取消本人未支付的小程序微信开卡工单：释券、关微信单、标已取消。"""
+    expire_stale_unpaid_miniprogram_card_orders(db, member_id=member_id)
+    order = db.scalar(
+        select(MemberCardOrder)
+        .where(
+            MemberCardOrder.id == int(order_id),
+            MemberCardOrder.member_id == int(member_id),
+        )
+        .with_for_update()
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="开卡订单不存在")
+    ps = (order.pay_status or "").strip()
+    if ps == CardOrderPayStatus.CANCELLED.value:
+        return "订单已取消"
+    if ps == CardOrderPayStatus.PAID.value:
+        raise HTTPException(status_code=400, detail="订单已支付，无法取消")
+    if ps == CardOrderPayStatus.REFUNDED.value:
+        raise HTTPException(status_code=400, detail="订单已退款，无法取消")
+    if ps != CardOrderPayStatus.UNPAID.value:
+        raise HTTPException(status_code=400, detail="当前订单状态不可取消")
+    if bool(order.applied_to_member):
+        raise HTTPException(status_code=400, detail="订单已入账，无法取消")
+    if (order.pay_channel or "").strip() != CardPayChannel.WECHAT.value:
+        raise HTTPException(status_code=400, detail="仅小程序微信开卡订单可在此取消")
+    if (order.created_by or "").strip() != "miniprogram":
+        raise HTTPException(status_code=400, detail="当前订单不支持自助取消")
+
+    if order.member_coupon_id is not None:
+        release_member_coupon_for_order(
+            db, order_biz=CouponLockedOrderBiz.MEMBER_CARD, order_id=int(order.id)
+        )
+        order.member_coupon_id = None
+        order.original_amount_yuan = None
+        order.coupon_discount_yuan = None
+        _clear_coupon_from_card_order_remark(order)
+
+    out_no = (order.out_trade_no or "").strip()
+    if out_no:
+        pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
+        _close_wechat_order_best_effort(out_no, pay=pay_cfg)
+
+    order.pay_status = CardOrderPayStatus.CANCELLED.value
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+    return "订单已取消"
+
+
 def expire_stale_unpaid_miniprogram_card_orders(db: Session, *, member_id: int | None = None) -> int:
     """购卡未支付超过阈值：释放 locked 券并恢复订单为原价（订单仍可继续支付）。"""
     cutoff = _unpaid_miniprogram_card_order_expire_cutoff()
@@ -581,6 +636,8 @@ def prepare_wechat_jsapi_for_member_card_order(
         raise HTTPException(status_code=400, detail="订单已支付")
     if order.pay_status == CardOrderPayStatus.REFUNDED.value:
         raise HTTPException(status_code=400, detail="订单已退款")
+    if order.pay_status == CardOrderPayStatus.CANCELLED.value:
+        raise HTTPException(status_code=400, detail="订单已取消")
 
     pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
     perr = wechat_pay_misconfiguration_detail_merged(pay_cfg)

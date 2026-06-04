@@ -15,7 +15,7 @@
             </view>
           </view>
           <view class="dish-meta">
-            <text class="meta-tag">{{ dish.day }} · {{ serviceDateYmd }}</text>
+            <text class="meta-tag">{{ serviceDateDisplay }}</text>
           </view>
           <view v-if="dish.spiceLabel" class="dish-spice-line">
             <text class="dish-spice-line-txt">辣度 {{ dish.spiceLabel }}</text>
@@ -28,7 +28,7 @@
           <view v-if="unitPrice != null" class="dish-total-row">
             <view class="dish-total-left">
               <text class="dish-total-label">小计</text>
-              <view class="qty-inline" @tap.stop>
+              <view class="qty-inline" @catchtap="onStopTapBubble">
                 <button type="button" class="qty-btn qty-btn--sm" @tap="decQty">−</button>
                 <text class="qty-num qty-num--sm">{{ quantity }}</text>
                 <button type="button" class="qty-btn qty-btn--sm" @tap="incQty">+</button>
@@ -77,36 +77,25 @@
               <radio value="wechat" :checked="payMethod === 'wechat'" color="#0e5a44" />
               <text class="mode-label">微信支付</text>
             </label>
-            <label class="mode-row">
-              <radio
-                value="balance"
-                :checked="payMethod === 'balance'"
-                :disabled="!balancePayEligible"
-                color="#0e5a44"
-              />
+            <label class="mode-row" @tap="onBalancePayLabelTap">
+              <radio value="balance" :checked="payMethod === 'balance'" color="#0e5a44" />
               <text class="mode-label" :class="{ 'mode-label--muted': !balancePayEligible }">会员卡支付</text>
             </label>
           </radio-group>
-          <view v-if="payMethod === 'balance' && balancePayInfo" class="pay-balance-hint">
+          <view v-if="payMethod === 'balance'" class="pay-balance-hint">
             <text class="pay-balance-line">
               {{ balanceDisplay.plan_type || '会员卡' }} · 剩余
               <text class="pay-balance-num">{{ balanceDisplay.balance }}</text>
               <text v-if="balanceQuotaDenom">/{{ balanceQuotaDenom }}</text>
               次
             </text>
-            <text v-if="balancePayInfo.reserve_for_today > 0" class="pay-balance-sub">
+            <text v-if="balancePayInfo && balancePayInfo.reserve_for_today > 0" class="pay-balance-sub">
               今日套餐配送将预留 {{ balancePayInfo.reserve_for_today }} 次，本次将扣 {{ quantity }} 次
             </text>
-          </view>
-          <view v-else-if="balanceDisplay.balance > 0" class="pay-balance-hint pay-balance-hint--idle">
-            <text class="pay-balance-line">
-              {{ balanceDisplay.plan_type || '会员卡' }} · 剩余
-              <text class="pay-balance-num">{{ balanceDisplay.balance }}</text>
-              <text v-if="balanceQuotaDenom">/{{ balanceQuotaDenom }}</text>
-              次
+            <text v-if="!balancePayEligible && balancePayHint" class="pay-balance-warn pay-balance-warn--inline">
+              {{ balancePayHint }}
             </text>
           </view>
-          <text v-if="!balancePayEligible && balancePayHint" class="pay-balance-warn">{{ balancePayHint }}</text>
         </view>
 
         <view v-if="fulfillMode === 'delivery'" class="card addr-card">
@@ -114,9 +103,12 @@
             <text class="card-label">配送地址</text>
             <text class="addr-manage" @tap="goAddressList">管理地址</text>
           </view>
-          <view v-if="!addressRows.length" class="addr-empty">
+          <view v-if="addressesLoading && !addressRows.length" class="addr-empty">
+            <text>地址加载中…</text>
+          </view>
+          <view v-else-if="!addressRows.length" class="addr-empty">
             <text>暂无地址，请先添加</text>
-            <button class="btn-ghost" @tap="goAddressList">去添加</button>
+            <button type="button" class="btn-ghost" hover-class="none" @tap="goAddressList">去添加</button>
           </view>
           <view v-else class="addr-list">
             <view
@@ -124,7 +116,8 @@
               :key="row.id || i"
               class="addr-row"
               :class="{ 'addr-row--on': selectedIndex === i }"
-              @tap="selectedIndex = i"
+              :data-index="i"
+              @tap="onAddressRowTap"
             >
               <view class="addr-radio">
                 <view v-if="selectedIndex === i" class="addr-dot-fill" />
@@ -178,6 +171,7 @@ import {
   canSubmitSingleOrder,
   fetchMenuDetail,
   formatMenuPrice,
+  formatServiceDateYmdWithWeekday,
   invalidateWeeklyMenuCache,
   singleOrderBlockReason,
 } from '@/utils/menuApi.js'
@@ -195,6 +189,7 @@ import {
   paySingleMealOrderMemberBalance,
 } from '@/utils/singleOrderApi.js'
 import { paySingleMealOrderWechat } from '@/utils/singleOrderPay.js'
+import { clearSingleOrderPayIntent, setSingleOrderPayIntent } from '@/utils/singleOrderPayIntent.js'
 import { promptUnpaidOrderConflict } from '@/utils/unpaidOrderPrompt.js'
 import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
 import { listAvailableMemberCoupons } from '@/utils/memberCouponApi.js'
@@ -204,6 +199,11 @@ const dish = ref(null)
 const loading = ref(true)
 const loadError = ref('')
 const serviceDateYmd = ref('')
+
+const serviceDateDisplay = computed(() => {
+  const text = formatServiceDateYmdWithWeekday(serviceDateYmd.value)
+  return text || '—'
+})
 const dishIdStr = ref('')
 const addressRows = ref([])
 const rawAddresses = ref([])
@@ -221,6 +221,7 @@ const couponsLoading = ref(false)
 const payMethod = ref('wechat')
 const balancePayInfo = ref(null)
 const balancePayLoading = ref(false)
+const addressesLoading = ref(false)
 /** GET /api/user/me：用于展示周卡/月卡与剩余次数（不依赖资格接口是否上线） */
 const memberProfile = ref(null)
 
@@ -349,6 +350,11 @@ function onFulfillModeChange(e) {
 
 function onPayMethodChange(e) {
   const v = e?.detail?.value === 'balance' ? 'balance' : 'wechat'
+  applyPayMethod(v)
+}
+
+/** 微信小程序不支持 @tap="a = b"；须用具名方法 */
+function applyPayMethod(v) {
   if (v === 'balance' && !balancePayEligible.value) {
     uni.showToast({ title: balancePayHint.value, icon: 'none', duration: 2800 })
     payMethod.value = 'wechat'
@@ -357,6 +363,32 @@ function onPayMethodChange(e) {
   payMethod.value = v
   if (v === 'balance') {
     selectedCouponId.value = null
+  }
+}
+
+function onBalancePayLabelTap() {
+  if (!balancePayEligible.value) {
+    uni.showToast({ title: balancePayHint.value, icon: 'none', duration: 2800 })
+  }
+}
+
+function onStopTapBubble() {
+  /* 阻止数量区点击冒泡；勿用 @tap.stop 无处理器（基础库会报 method "false"） */
+}
+
+function onAddressRowTap(e) {
+  const idx = Number(e?.currentTarget?.dataset?.index)
+  if (Number.isFinite(idx) && idx >= 0) {
+    selectedIndex.value = idx
+  }
+}
+
+function applyAddressList(raw) {
+  const list = sortAddressesDefaultFirst(normalizeAddressList(raw))
+  rawAddresses.value = list
+  addressRows.value = list.map((it, i) => addressListRow(it, i))
+  if (selectedIndex.value >= addressRows.value.length) {
+    selectedIndex.value = 0
   }
 }
 
@@ -546,16 +578,14 @@ onShow(() => {
 })
 
 async function refreshAddressesOnly() {
+  addressesLoading.value = true
   try {
     const raw = await request('/api/user/me/addresses', { method: 'GET', retry: 1 })
-    const list = sortAddressesDefaultFirst(normalizeAddressList(raw))
-    rawAddresses.value = list
-    addressRows.value = list.map((it, i) => addressListRow(it, i))
-    if (selectedIndex.value >= addressRows.value.length) {
-      selectedIndex.value = 0
-    }
+    applyAddressList(raw)
   } catch (_addrErr) {
-    /* 保留列表；首次 loadPage 会报错 */
+    /* 保留已有列表 */
+  } finally {
+    addressesLoading.value = false
   }
 }
 
@@ -564,12 +594,16 @@ async function loadPage() {
   loadError.value = ''
   dish.value = null
   try {
-    const [d, raw, me] = await Promise.all([
+    const [d, raw] = await Promise.all([
       fetchMenuDetail(dishIdStr.value, serviceDateYmd.value),
       request('/api/user/me/addresses', { method: 'GET', retry: 1 }),
-      request('/api/user/me', { method: 'GET', retry: 1 }),
     ])
-    memberProfile.value = me && typeof me === 'object' ? me : null
+    try {
+      const me = await request('/api/user/me', { method: 'GET', retry: 1 })
+      memberProfile.value = me && typeof me === 'object' ? me : null
+    } catch (_meErr) {
+      memberProfile.value = null
+    }
     if (!d) throw new Error('暂无餐品数据')
     dish.value = d
     const stockBlock = singleOrderBlockReason(d, serviceDateYmd.value)
@@ -585,9 +619,7 @@ async function loadPage() {
     if (quantity.value < 1) {
       quantity.value = 1
     }
-    const list = sortAddressesDefaultFirst(normalizeAddressList(raw))
-    rawAddresses.value = list
-    addressRows.value = list.map((it, i) => addressListRow(it, i))
+    applyAddressList(raw)
     selectedIndex.value = 0
     if (formatMenuPrice(dish.value.price) == null) {
       loadError.value = '该餐品单点价格待公布'
@@ -609,7 +641,12 @@ async function loadPage() {
 }
 
 function goAddressList() {
-  uni.navigateTo({ url: '/packageUser/pages/address/list' })
+  uni.navigateTo({
+    url: '/packageUser/pages/address/list',
+    fail: () => {
+      uni.showToast({ title: '无法打开地址页', icon: 'none' })
+    },
+  })
 }
 
 async function handlePay() {
@@ -652,6 +689,7 @@ async function handlePay() {
     if (orderId == null) {
       throw new Error('订单创建响应异常')
     }
+    setSingleOrderPayIntent(orderId, payMethod.value === 'balance' ? 'balance' : 'wechat')
     if (payMethod.value === 'balance') {
       uni.showLoading({ title: '扣次支付…', mask: true })
       await paySingleMealOrderMemberBalance(orderId)
@@ -662,6 +700,7 @@ async function handlePay() {
         uni.showToast({ title: '支付成功，订单同步中请稍后刷新', icon: 'none', duration: 3000 })
       }
     }
+    clearSingleOrderPayIntent(orderId)
     showOkAlert({
       title: '支付成功',
       content: '您的餐品后厨已开始备餐',
@@ -910,10 +949,6 @@ async function handlePay() {
   border-radius: 20rpx;
 }
 
-.pay-balance-hint--idle {
-  opacity: 0.92;
-}
-
 .pay-balance-line {
   display: block;
   font-size: 26rpx;
@@ -937,9 +972,9 @@ async function handlePay() {
   line-height: 1.45;
 }
 
-.pay-balance-warn {
+.pay-balance-warn--inline {
   display: block;
-  margin-top: 16rpx;
+  margin-top: 12rpx;
   font-size: 24rpx;
   font-weight: 800;
   color: #b45309;

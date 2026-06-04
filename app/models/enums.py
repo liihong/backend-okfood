@@ -73,6 +73,7 @@ class CardOrderPayStatus(str, Enum):
     UNPAID = "未缴"
     PAID = "已缴"
     REFUNDED = "已退款"
+    CANCELLED = "已取消"
 
 
 class CouponType(str, Enum):

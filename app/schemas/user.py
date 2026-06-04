@@ -64,10 +64,14 @@ class MemberOut(BaseModel):
 
 
 class DeliveryDeductionOut(BaseModel):
-    """套餐订阅：某日确认送达后按该业务日扣减剩余餐次。"""
+    """会员消费记录：套餐送达扣次或单次购买（会员卡）扣次。"""
 
-    delivery_date: date = Field(..., description="配送业务日（上海）")
-    meal_units: int = Field(1, ge=1, description="当日确认送达扣减份数")
+    delivery_date: date = Field(..., description="配送/供餐业务日（上海）")
+    meal_units: int = Field(1, ge=1, description="本条扣减份数")
+    deduction_kind: str = Field(
+        default="subscription",
+        description="subscription=套餐确认送达扣次；single_meal=单次购买会员卡扣次",
+    )
 
 
 class RegisterIn(BaseModel):

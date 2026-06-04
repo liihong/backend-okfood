@@ -1,10 +1,10 @@
 import { request } from '@/utils/api.js'
 
 /**
- * 套餐配送：已送达并扣次的业务日列表。
+ * 消费记录：套餐送达扣次 + 单次购买（会员卡）扣次。
  *
  * @param {{ page?: number, page_size?: number }} [params]
- * @returns {Promise<{ items: { delivery_date: string }[], total: number, page: number, page_size: number }>}
+ * @returns {Promise<{ items: { delivery_date: string, meal_units?: number, deduction_kind?: string }[], total: number, total_meal_units?: number, page: number, page_size: number }>}
  */
 export function listDeliveryDeductions(params = {}) {
   const page = Number(params.page) > 0 ? Math.floor(Number(params.page)) : 1

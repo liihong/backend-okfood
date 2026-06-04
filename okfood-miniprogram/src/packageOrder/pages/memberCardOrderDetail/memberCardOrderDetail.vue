@@ -61,15 +61,24 @@
           </view>
         </view>
 
-        <button
-          v-if="isPendingPay"
-          class="btn-pay"
-          :disabled="paying"
-          hover-class="none"
-          @tap="continuePay"
-        >
-          {{ paying ? '支付中…' : '继续支付' }}
-        </button>
+        <view v-if="isPendingPay" class="footer-actions">
+          <button
+            class="btn-pay"
+            :disabled="paying || cancelling"
+            hover-class="none"
+            @tap="continuePay"
+          >
+            {{ paying ? '支付中…' : '继续支付' }}
+          </button>
+          <button
+            class="btn-cancel"
+            :disabled="paying || cancelling"
+            hover-class="none"
+            @tap="onCancelOrder"
+          >
+            {{ cancelling ? '取消中…' : '取消订单' }}
+          </button>
+        </view>
 
         <view class="tail" />
       </view>
@@ -84,7 +93,7 @@ import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { getPageScrollStyle } from '@/utils/navbar.js'
 import { showOkAlert } from '@/utils/okAlert.js'
 import { getMemberToken, request } from '@/utils/api.js'
-import { getMemberCardOrder } from '@/utils/memberCardOrderApi.js'
+import { cancelMemberCardOrder, getMemberCardOrder } from '@/utils/memberCardOrderApi.js'
 import { payMemberCardOrderWechat } from '@/utils/memberCardPay.js'
 import { shouldOpenMemberSetup } from '@/utils/memberProfile.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
@@ -95,10 +104,16 @@ const order = ref(null)
 const loading = ref(true)
 const loadError = ref('')
 const paying = ref(false)
+const cancelling = ref(false)
 
 const isPendingPay = computed(() => {
   const o = order.value
   return String((o && o.pay_status) || '') === '未缴'
+})
+
+const isCancelled = computed(() => {
+  const o = order.value
+  return String((o && o.pay_status) || '') === '已取消'
 })
 
 const orderTitle = computed(() => {
@@ -115,6 +130,7 @@ const statusLine = computed(() => {
   const ps = String((order.value && order.value.pay_status) || '')
   if (ps === '未缴') return '待支付'
   if (ps === '已缴') return '已支付'
+  if (ps === '已取消') return '已取消'
   return ps || '—'
 })
 
@@ -122,12 +138,18 @@ const statusTone = computed(() => {
   const ps = String((order.value && order.value.pay_status) || '')
   if (ps === '未缴') return 'warn'
   if (ps === '已缴') return 'ok'
+  if (ps === '已取消') return 'muted'
   return 'info'
 })
 
 const statusSub = computed(() => {
-  if (!isPendingPay.value) return ''
-  return '请完成支付；支付成功后将引导您完善配送信息。'
+  if (isPendingPay.value) {
+    return '请完成支付；支付成功后将引导您完善配送信息。'
+  }
+  if (isCancelled.value) {
+    return '订单已关闭，如需开卡请重新下单。'
+  }
+  return ''
 })
 
 const createdAtText = computed(() => {
@@ -238,8 +260,39 @@ function finishContinuePay() {
   uni.hideLoading()
 }
 
+function onCancelOrder() {
+  if (!order.value || paying.value || cancelling.value || !isPendingPay.value) return
+  showOkAlert({
+    title: '取消订单',
+    content: '取消后本单将关闭，已选优惠券将释放，可重新下单。',
+    confirmText: '确认取消',
+    cancelText: '再想想',
+    success: (res) => {
+      if (!res.confirm) return
+      cancelling.value = true
+      uni.showLoading({ title: '取消中…', mask: true })
+      cancelMemberCardOrder(order.value.id)
+        .then(function (data) {
+          order.value = data && typeof data === 'object' ? data : order.value
+          markMinePageNeedsRefresh()
+          uni.showToast({ title: '订单已取消', icon: 'success' })
+        })
+        .catch(function (e) {
+          uni.showToast({
+            title: e instanceof Error ? e.message : '取消失败',
+            icon: 'none',
+          })
+        })
+        .then(function () {
+          cancelling.value = false
+          uni.hideLoading()
+        })
+    },
+  })
+}
+
 function continuePay() {
-  if (!order.value || paying.value || !isPendingPay.value) return
+  if (!order.value || paying.value || cancelling.value || !isPendingPay.value) return
   paying.value = true
   uni.showLoading({ title: '拉起支付…', mask: true })
   payMemberCardOrderWechat(order.value.id)
@@ -382,6 +435,10 @@ function continuePay() {
   color: $ok-emerald;
 }
 
+.status-main--muted {
+  color: $ok-slate-500;
+}
+
 .status-main--info {
   color: $ok-slate-600;
 }
@@ -393,11 +450,18 @@ function continuePay() {
   line-height: 1.45;
 }
 
+.footer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+  margin-top: 8rpx;
+}
+
 .btn-pay {
   width: 100%;
   height: 96rpx;
   line-height: 96rpx;
-  margin: 8rpx 0 0;
+  margin: 0;
   border-radius: 48rpx;
   background: $ok-forest-green;
   color: #fff;
@@ -406,11 +470,26 @@ function continuePay() {
   border: none;
 }
 
-.btn-pay[disabled] {
+.btn-cancel {
+  width: 100%;
+  height: 88rpx;
+  line-height: 88rpx;
+  margin: 0;
+  border-radius: 48rpx;
+  background: #fff;
+  color: $ok-slate-600;
+  font-size: 28rpx;
+  font-weight: 800;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.btn-pay[disabled],
+.btn-cancel[disabled] {
   opacity: 0.55;
 }
 
-.btn-pay::after {
+.btn-pay::after,
+.btn-cancel::after {
   border: none;
 }
 

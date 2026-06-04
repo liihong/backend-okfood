@@ -25,11 +25,11 @@
           </view>
           <view class="row">
             <text class="label">供餐日</text>
-            <text class="value">{{ order.delivery_date || '—' }}</text>
+            <text class="value">{{ deliveryDateText }}</text>
           </view>
           <view class="row">
-            <text class="label">实付</text>
-            <text class="value value--amt">¥ {{ order.amount_yuan || '0.00' }}</text>
+            <text class="label">{{ amountRowLabel }}</text>
+            <text class="value value--amt">{{ amountDisplay }}</text>
           </view>
         </view>
 
@@ -57,11 +57,11 @@
           </view>
           <view class="row">
             <text class="label">支付</text>
-            <text class="value">{{ order.pay_status || '—' }}</text>
+            <text class="value">{{ payStatusDisplay }}</text>
           </view>
-          <view v-if="order.pay_channel" class="row">
+          <view v-if="showPayChannelRow" class="row">
             <text class="label">支付渠道</text>
-            <text class="value">{{ order.pay_channel }}</text>
+            <text class="value">{{ payChannelDisplay }}</text>
           </view>
           <view class="row">
             <text class="label">履约</text>
@@ -80,7 +80,7 @@
           hover-class="none"
           @tap="continuePay"
         >
-          {{ paying ? '支付中…' : '继续支付' }}
+          {{ paying ? '处理中…' : continuePayButtonText }}
         </button>
 
         <view v-if="showOrderActions" :class="['action-row', { 'action-row--solo': !showCancelAction }]">
@@ -114,11 +114,19 @@ import {
   cancelSingleMealOrder,
   formatSingleOrderCreatedAt,
   getSingleMealOrder,
+  paySingleMealOrderMemberBalance,
   singleMealOrderCancelBlockReason,
   singleOrderStatusMeta,
   syncSingleMealWechatPayResult,
 } from '@/utils/singleOrderApi.js'
+import { formatServiceDateYmdWithWeekday } from '@/utils/menuApi.js'
 import { paySingleMealOrderWechat } from '@/utils/singleOrderPay.js'
+import {
+  clearSingleOrderPayIntent,
+  getSingleOrderPayIntent,
+  isMemberCardSingleMealOrder,
+  setSingleOrderPayIntent,
+} from '@/utils/singleOrderPayIntent.js'
 import { getMemberToken } from '@/utils/api.js'
 
 const scrollStyle = ref({})
@@ -128,8 +136,78 @@ const loading = ref(true)
 const loadError = ref('')
 const paying = ref(false)
 const cancelling = ref(false)
+/** 待支付单的支付方式意向：wechat | balance */
+const payIntent = ref('wechat')
 
-const status = computed(() => (order.value ? singleOrderStatusMeta(order.value) : { line1: '', line2: '', tone: 'info' }))
+const useMemberCardPay = computed(() => {
+  if (!order.value) return false
+  if (isMemberCardSingleMealOrder(order.value)) return true
+  return (
+    order.value.pay_status === '未支付' &&
+    payIntent.value === 'balance'
+  )
+})
+
+const status = computed(() => {
+  if (!order.value) return { line1: '', line2: '', tone: 'info' }
+  if (order.value.pay_status === '未支付' && useMemberCardPay.value) {
+    return {
+      line1: '待支付',
+      line2: '请使用会员卡次数完成支付',
+      tone: 'warn',
+    }
+  }
+  return singleOrderStatusMeta(order.value)
+})
+
+const deliveryDateText = computed(() => {
+  const d = order.value?.delivery_date
+  if (!d) return '—'
+  const text = formatServiceDateYmdWithWeekday(String(d))
+  return text || String(d)
+})
+
+const amountRowLabel = computed(() =>
+  useMemberCardPay.value ? '扣次' : '实付',
+)
+
+const amountDisplay = computed(() => {
+  if (!order.value) return '—'
+  if (useMemberCardPay.value) {
+    const q = Math.max(1, Math.floor(Number(order.value.quantity) || 1))
+    if (order.value.pay_status === '已支付') {
+      return `已扣 ${q} 次`
+    }
+    return `将扣 ${q} 次`
+  }
+  return `¥ ${order.value.amount_yuan || '0.00'}`
+})
+
+const payStatusDisplay = computed(() => {
+  const o = order.value
+  if (!o) return '—'
+  const ps = String(o.pay_status || '').trim() || '—'
+  if (isMemberCardSingleMealOrder(o)) return `${ps}（会员卡）`
+  if (ps === '未支付' && payIntent.value === 'balance') return '未支付（会员卡待扣次）'
+  return ps
+})
+
+const showPayChannelRow = computed(() => {
+  const o = order.value
+  if (!o) return false
+  if (isMemberCardSingleMealOrder(o)) return true
+  return o.pay_status === '未支付' && payIntent.value === 'balance'
+})
+
+const payChannelDisplay = computed(() => {
+  if (isMemberCardSingleMealOrder(order.value)) return '会员卡'
+  if (payIntent.value === 'balance') return '会员卡（待扣次）'
+  return order.value?.pay_channel || '—'
+})
+
+const continuePayButtonText = computed(() =>
+  useMemberCardPay.value ? '使用次数支付' : '继续支付',
+)
 
 const canCancel = computed(() => (order.value ? canCancelSingleMealOrder(order.value) : false))
 
@@ -172,6 +250,7 @@ onLoad((options) => {
     return
   }
   orderId.value = id
+  payIntent.value = getSingleOrderPayIntent(id, options?.pay_method)
   void loadDetail()
 })
 
@@ -191,8 +270,15 @@ async function loadDetail() {
       loadError.value = '订单数据异常'
       return
     }
-    // 微信已扣款但异步通知未达时，静默拉单补救
-    if (order.value.pay_status === '未支付' && order.value.fulfillment_status === 'pending') {
+    if (isMemberCardSingleMealOrder(order.value)) {
+      payIntent.value = 'balance'
+    }
+    // 仅微信支付意向：微信已扣款但异步通知未达时静默拉单
+    if (
+      order.value.pay_status === '未支付' &&
+      order.value.fulfillment_status === 'pending' &&
+      payIntent.value !== 'balance'
+    ) {
       try {
         const synced = await syncSingleMealWechatPayResult(orderId.value)
         if (synced && typeof synced === 'object' && synced.pay_status === '已支付') {
@@ -240,7 +326,9 @@ function onCancelOrder() {
   if (!canCancel.value) return
   const paid = order.value.pay_status === '已支付'
   const content = paid
-    ? '确定取消该订单？支付金额将原路退回至您的微信账户。'
+    ? isMemberCardSingleMealOrder(order.value)
+      ? '确定取消该订单？已扣次数将退回会员卡。'
+      : '确定取消该订单？支付金额将原路退回至您的微信账户。'
     : '确定取消该订单？'
   showOkAlert({
     title: '取消订单',
@@ -261,11 +349,18 @@ async function doCancelOrder() {
   try {
     const data = await cancelSingleMealOrder(order.value.id)
     order.value = data && typeof data === 'object' ? data : order.value
-    const paid = order.value?.pay_status === '已退款'
+    const refunded = order.value?.pay_status === '已退款'
+    const cardRefund = refunded && isMemberCardSingleMealOrder(order.value)
     uni.showToast({
-      title: paid ? '已取消，款项将原路退回' : '订单已取消',
+      title: cardRefund
+        ? '已取消，次数已退回'
+        : refunded
+          ? '已取消，款项将原路退回'
+          : '订单已取消',
       icon: 'success',
     })
+    clearSingleOrderPayIntent(orderId.value)
+    payIntent.value = 'wechat'
     await loadDetail()
   } catch (e) {
     uni.showToast({
@@ -282,11 +377,20 @@ async function continuePay() {
   if (!order.value || paying.value) return
   if (order.value.pay_status !== '未支付') return
   paying.value = true
-  uni.showLoading({ title: '处理中…', mask: true })
+  const oid = order.value.id
+  const useBalance = useMemberCardPay.value
+  uni.showLoading({ title: useBalance ? '扣次支付…' : '处理中…', mask: true })
   try {
-    // 已扣款但库未更：先拉单，避免重复支付
+    if (useBalance) {
+      setSingleOrderPayIntent(oid, 'balance')
+      await paySingleMealOrderMemberBalance(oid)
+      clearSingleOrderPayIntent(oid)
+      uni.showToast({ title: '支付成功', icon: 'success' })
+      await loadDetail()
+      return
+    }
     try {
-      const synced = await syncSingleMealWechatPayResult(order.value.id)
+      const synced = await syncSingleMealWechatPayResult(oid)
       if (synced && typeof synced === 'object' && synced.pay_status === '已支付') {
         order.value = synced
         uni.showToast({ title: '支付状态已同步', icon: 'success' })
@@ -296,7 +400,7 @@ async function continuePay() {
       /* 仍待支付则继续调起微信支付 */
     }
     uni.showLoading({ title: '拉起支付…', mask: true })
-    const payResult = await paySingleMealOrderWechat(order.value.id)
+    const payResult = await paySingleMealOrderWechat(oid)
     if (payResult.paySynced) {
       uni.showToast({ title: '支付成功', icon: 'success' })
     } else {

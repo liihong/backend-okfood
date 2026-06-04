@@ -57,7 +57,12 @@
             >
               <view class="order-row-head">
                 <text class="order-title">{{ row.dish_title || '餐品' }}</text>
-                <text class="order-amt">¥ {{ row.amount_yuan || '0.00' }}</text>
+                <text
+                  class="order-amt"
+                  :class="{ 'order-amt--card': isSingleMealCardPayLabel(row) }"
+                >
+                  {{ singleOrderAmountText(row) }}
+                </text>
               </view>
               <text class="order-meta">{{ metaLineSingle(row) }}</text>
               <view class="order-foot">
@@ -104,6 +109,7 @@ import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { showOkAlert } from '@/utils/okAlert.js'
 import { getMemberToken, reLaunchIfCourierModePreferred } from '@/utils/api.js'
 import { listSingleMealOrders, singleOrderStatusMeta } from '@/utils/singleOrderApi.js'
+import { singleMealOrderAmountLabel } from '@/utils/singleOrderPayIntent.js'
 import { listMemberCardOrders } from '@/utils/memberCardOrderApi.js'
 import { STORAGE_OPEN_ORDERS_PENDING_PAY } from '@/utils/unpaidOrderPrompt.js'
 import { syncCustomTabBar, getCustomTabBarBottomReservePx } from '@/utils/customTabBar.js'
@@ -160,6 +166,14 @@ let fetchSeq = 0
 
 const hasMore = computed(() => items.value.length < total.value)
 
+function singleOrderAmountText(row) {
+  return singleMealOrderAmountLabel(row)
+}
+
+function isSingleMealCardPayLabel(row) {
+  return singleOrderAmountText(row) === '会员卡支付'
+}
+
 function metaLineSingle(o) {
   const d = o?.delivery_date != null ? String(o.delivery_date) : '—'
   const qty = Number(o?.quantity)
@@ -203,6 +217,7 @@ function statusLineMall(row) {
   const ps = String(row?.pay_status || '')
   if (ps === '未缴') return '待支付'
   if (ps === '已缴') return '已完成'
+  if (ps === '已取消') return '已取消'
   return ps || '—'
 }
 
@@ -210,6 +225,7 @@ function statusToneMall(row) {
   const ps = String(row?.pay_status || '')
   if (ps === '未缴') return 'warn'
   if (ps === '已缴') return 'ok'
+  if (ps === '已取消') return 'muted'
   return 'info'
 }
 
@@ -462,6 +478,13 @@ onShow(() => {
   font-variant-numeric: tabular-nums;
 }
 
+.order-amt--card {
+  font-size: 26rpx;
+  font-weight: 900;
+  max-width: 42%;
+  text-align: right;
+}
+
 .order-meta {
   display: block;
   font-size: 24rpx;
@@ -490,6 +513,10 @@ onShow(() => {
 
 .order-status--ok {
   color: #047857;
+}
+
+.order-status--muted {
+  color: $ok-slate-500;
 }
 
 .order-status--info {

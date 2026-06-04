@@ -91,6 +91,7 @@ from app.services.member_card_pay_service import (
     create_miniprogram_member_card_order,
     get_member_card_order_for_user,
     list_member_card_orders_for_user,
+    member_cancel_miniprogram_wechat_card_order,
     member_card_order_user_dict,
     prepare_wechat_jsapi_for_member_card_order,
     sync_member_card_from_wechat_or_raise,
@@ -451,7 +452,7 @@ def list_delivery_deductions_me(
     page: int = 1,
     page_size: int = 20,
 ):
-    """套餐配送：已确认送达并扣减剩余餐次的业务日列表（按配送日倒序）。"""
+    """消费记录：套餐送达扣次与单次购买（会员卡）扣次，按供餐/配送业务日倒序。"""
     items, total, total_meal_units = list_member_delivery_deductions(
         db, member_id, page=page, page_size=page_size
     )
@@ -829,6 +830,25 @@ def prepay_member_card_order_wechat(
     ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
     params = prepare_wechat_jsapi_for_member_card_order(db, member_id, order_id, ip)
     return success(data=params, msg="获取支付参数成功")
+
+
+@router.post("/member-card-orders/{order_id}/cancel")
+@limiter.limit("30/minute")
+def cancel_member_card_order_me(
+    request: Request,
+    order_id: int,
+    db: SessionDep,
+    member_id: MemberIdScoped,
+):
+    """会员取消本人未支付的小程序微信开卡工单。"""
+    _ = request
+    msg = member_cancel_miniprogram_wechat_card_order(
+        db, member_id=int(member_id), order_id=int(order_id)
+    )
+    payload = UserMemberCardOrderOut.model_validate(
+        get_member_card_order_for_user(db, int(member_id), int(order_id))
+    )
+    return success(data=dump_model(payload), msg=msg)
 
 
 @router.post("/member-card-orders/{order_id}/sync-wechat-pay")

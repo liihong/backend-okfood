@@ -1,6 +1,7 @@
 /** 后端 409：会员已有未支付订单，不宜重复下单。 */
 
 import { showOkAlert } from '@/utils/okAlert.js'
+import { getSingleOrderPayIntent } from '@/utils/singleOrderPayIntent.js'
 
 const MEMBER_CARD_ORDER_DETAIL_PAGE =
   '/packageOrder/pages/memberCardOrderDetail/memberCardOrderDetail'
@@ -51,8 +52,10 @@ export function promptUnpaidOrderConflict(err, { kind }) {
     success: (res) => {
       if (!res.confirm) return
       if (isSingle && orderId) {
+        const pm =
+          getSingleOrderPayIntent(orderId) === 'balance' ? '&pay_method=balance' : ''
         uni.navigateTo({
-          url: `/packageOrder/pages/singleOrderDetail/singleOrderDetail?id=${encodeURIComponent(String(orderId))}`,
+          url: `/packageOrder/pages/singleOrderDetail/singleOrderDetail?id=${encodeURIComponent(String(orderId))}${pm}`,
         })
         return
       }
