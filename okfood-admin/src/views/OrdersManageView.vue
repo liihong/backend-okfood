@@ -9,6 +9,10 @@ import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import { toastSfPushBatchOutcome, toastSfPushError } from '../utils/sfPushMessages.js'
 import { parseApiDateTimeBeijing } from '../utils/beijingDateTime.js'
+import {
+  isMemberCardPaidSingleMeal,
+  singleMealOrderAmountDisplay,
+} from '../utils/singleMealOrderDisplay.js'
 
 function todayShanghaiStr() {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -1193,7 +1197,7 @@ async function onSyncDeliveryStatus() {
   }
 }
 
-onMounted(() => {
+function applyOrdersRouteQuery() {
   const qTab = String(route.query.tab || '').trim()
   if (qTab === 'single' || qTab === 'mall') {
     activeTab.value = qTab
@@ -1202,6 +1206,17 @@ onMounted(() => {
   if (/^\d{4}-\d{2}-\d{2}$/.test(qDate)) {
     orderDate.value = qDate
   }
+}
+
+watch(
+  () => [route.query.tab, route.query.delivery_date],
+  () => {
+    applyOrdersRouteQuery()
+  },
+)
+
+onMounted(() => {
+  applyOrdersRouteQuery()
   void loadCouriers()
   void fetchActive()
 })
@@ -1387,9 +1402,14 @@ onMounted(() => {
                 }}</span>
               </template>
             </el-table-column>
-           <el-table-column label="金额" width="100" align="center" class-name="td-mono orders-amount-col co-nowrap">
+           <el-table-column label="金额" width="116" align="center" class-name="td-mono orders-amount-col co-nowrap">
               <template #default="{ row }">
-                <span class="orders-cell-pill orders-cell-pill--amount">{{ row.amount_yuan ?? '—' }}</span>
+                <span
+                  class="orders-cell-pill orders-cell-pill--amount"
+                  :class="{ 'orders-cell-pill--member-card': isMemberCardPaidSingleMeal(row) }"
+                >
+                  {{ singleMealOrderAmountDisplay(row) }}
+                </span>
               </template>
             </el-table-column>
            <el-table-column label="支付" width="100" class-name="co-nowrap">
@@ -2117,6 +2137,14 @@ onMounted(() => {
   color: #be123c;
   background: #fff1f2;
   border: 1px solid #fecdd3;
+}
+
+.orders-cell-pill--amount.orders-cell-pill--member-card {
+  font-size: 11px;
+  font-weight: 700;
+  color: #065f46;
+  background: #ecfdf5;
+  border-color: #a7f3d0;
 }
 
 .orders-manage-page :deep(td.orders-amount-col .cell) {

@@ -734,6 +734,52 @@
   font-size: 13px;
   line-height: 1.5;
   color: #334155;
+  white-space: pre-line;
+}
+
+.admin-system-notifications-item__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-top: 0.15rem;
+}
+
+.admin-system-notifications-item__actions .admin-notifications-action-btn {
+  margin: 0 !important;
+  height: 30px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.admin-system-notifications-item__actions .admin-notifications-action-btn--secondary {
+  color: #0e5a44 !important;
+  background: #ecfdf5 !important;
+  border-color: #a7f3d0 !important;
+}
+
+.admin-system-notifications-item__actions .admin-notifications-action-btn--secondary:hover,
+.admin-system-notifications-item__actions .admin-notifications-action-btn--secondary:focus {
+  color: #0e5a44 !important;
+  background: #d1fae5 !important;
+  border-color: #6ee7b7 !important;
+}
+
+.admin-system-notifications-item__actions .admin-notifications-action-btn--primary {
+  color: #fff !important;
+  background: #0e5a44 !important;
+  border-color: #0e5a44 !important;
+}
+
+.admin-system-notifications-item__actions .admin-notifications-action-btn--primary:hover,
+.admin-system-notifications-item__actions .admin-notifications-action-btn--primary:focus {
+  color: #fff !important;
+  background: #0c4d3a !important;
+  border-color: #0c4d3a !important;
 }
 
 .admin-layout.admin-layout--sidebar-collapsed .main-body {
@@ -2979,6 +3025,17 @@
 .delivery-records-list li:last-child {
   border-bottom: none;
 }
+.delivery-records-kind-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  vertical-align: middle;
+  background: rgba(217, 119, 6, 0.14);
+  color: #b45309;
+}
 .delivery-records-ymd-muted {
   font-weight: 500;
   font-size: 12px;
@@ -3033,25 +3090,28 @@
 }
 .operation-logs-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 13px;
 }
 .operation-logs-table thead th {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
   text-align: left;
   padding: 0.55rem 0.75rem;
-  background: rgba(14, 90, 68, 0.12);
+  background-color: #e8f2ec;
   color: #0e3d2f;
   font-weight: 800;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(14, 90, 68, 0.2);
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.06);
   white-space: nowrap;
 }
 .operation-logs-table tbody td {
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   vertical-align: top;
+  background-color: #fff;
 }
 .operation-logs-table tbody tr:last-child td {
   border-bottom: none;

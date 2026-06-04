@@ -608,7 +608,9 @@ async function openMemberDeliveryRecords(u) {
         const ymd = String(row.delivery_date).slice(0, 10)
         if (!ymd) return null
         const mealUnits = Math.max(1, Number(row.meal_units) || 1)
-        return { delivery_date: ymd, meal_units: mealUnits }
+        const kind =
+          row.deduction_kind === 'single_meal' ? 'single_meal' : 'subscription'
+        return { delivery_date: ymd, meal_units: mealUnits, deduction_kind: kind }
       })
       .filter(Boolean)
     deliveryRecordTotal.value = Number(data?.total) || deliveryRecordDates.value.length
@@ -1292,7 +1294,7 @@ onUnmounted(() => {
         <div class="modal-header">
           <div class="header-info">
             <h3>消费记录</h3>
-            <p>已送达配送日</p>
+            <p>套餐送达 · 单次购买</p>
           </div>
           <div
             v-if="!deliveryRecordLoading"
@@ -1309,25 +1311,34 @@ onUnmounted(() => {
             {{ deliveryRecordTarget.name || '—' }} · {{ deliveryRecordTarget.phone || '' }}
           </p>
           <p class="modal-hint delivery-records-caption">
-            下列为订阅套餐在骑手确认送达后扣次的业务日，按新到旧排列。
+            下列包含订阅套餐确认送达扣次，以及单次购买使用会员卡扣次的供餐日，按新到旧排列。
           </p>
           <div v-if="deliveryRecordLoading" class="delivery-records-loading">加载中…</div>
           <template v-else>
             <p class="delivery-records-summary">
-              共 <strong>{{ deliveryRecordTotal }}</strong> 个配送日
+              共 <strong>{{ deliveryRecordTotal }}</strong> 条记录
               <span v-if="deliveryRecordTruncated" class="delivery-records-truncated">（仅显示最近部分，可联系技术导出全量）</span>
             </p>
             <ul v-if="deliveryRecordDates.length" class="delivery-records-list">
-              <li v-for="(row, idx) in deliveryRecordDates" :key="`${row.delivery_date}-${idx}`">
+              <li
+                v-for="(row, idx) in deliveryRecordDates"
+                :key="`${row.delivery_date}-${row.deduction_kind}-${idx}`"
+              >
                 <span class="delivery-records-idx">{{ idx + 1 }}</span>
                 <span class="delivery-records-line">
                   {{ formatDeliveryBizYmdLabel(row.delivery_date) }}
                   <span class="delivery-records-ymd-muted">（{{ row.delivery_date }}）</span>
+                  <span
+                    v-if="row.deduction_kind === 'single_meal'"
+                    class="delivery-records-kind-badge"
+                  >单次购买</span>
                 </span>
                 <span class="delivery-records-units">{{ row.meal_units }} 份</span>
               </li>
             </ul>
-            <p v-else class="delivery-records-empty">暂无记录。未产生「确认送达」或无套餐扣次时为空。</p>
+            <p v-else class="delivery-records-empty">
+              暂无消费记录。套餐确认送达扣次或单次购买（会员卡）扣次后将显示在此。
+            </p>
           </template>
         </div>
       </div>

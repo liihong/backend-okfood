@@ -38,6 +38,7 @@ import {
 import { useAdminSystemNotifications } from '../composables/useAdminSystemNotifications.js'
 import { useShanghaiLiveClock } from '../composables/useShanghaiLiveClock.js'
 import { useToast } from '../composables/useToast.js'
+import { resolveNotificationDeliveryDate } from '../utils/systemNotificationNav.js'
 
 /** 桌面侧栏收起状态本地持久化键 */
 const SIDEBAR_COLLAPSED_KEY = 'okfood-admin-sidebar-collapsed'
@@ -87,14 +88,14 @@ async function onAcknowledgeNotification(item) {
 }
 
 function goSfMonitor(item) {
-  const d = String(item?.business_date || '').trim()
+  const d = resolveNotificationDeliveryDate(item)
   notificationPopoverVisible.value = false
   const query = d ? { delivery_date: d } : {}
   router.push({ path: '/delivery-sf-orders', query })
 }
 
 function goOrdersManage(item) {
-  const d = String(item?.business_date || '').trim()
+  const d = resolveNotificationDeliveryDate(item)
   notificationPopoverVisible.value = false
   const query = d ? { delivery_date: d, tab: 'single' } : { tab: 'single' }
   router.push({ path: '/orders', query })
@@ -511,8 +512,7 @@ function onTabClose(tab) {
                     <el-button
                       v-if="item.kind === 'sf_nightly_push' && !item.skip_reason"
                       size="small"
-                      text
-                      type="primary"
+                      class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
                       @click="goSfMonitor(item)"
                     >
                       查看详情
@@ -520,8 +520,7 @@ function onTabClose(tab) {
                     <el-button
                       v-if="item.kind === 'single_meal_order_paid'"
                       size="small"
-                      text
-                      type="primary"
+                      class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
                       @click="goOrdersManage(item)"
                     >
                       去订单管理
@@ -529,15 +528,14 @@ function onTabClose(tab) {
                     <el-button
                       v-if="item.kind === 'miniprogram_card_order_pending'"
                       size="small"
-                      text
-                      type="primary"
+                      class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
                       @click="goCardOrders(item)"
                     >
                       去开卡工单审批
                     </el-button>
                     <el-button
                       size="small"
-                      type="primary"
+                      class="admin-notifications-action-btn admin-notifications-action-btn--primary"
                       :loading="acknowledgingId === item.id"
                       @click="onAcknowledgeNotification(item)"
                     >
