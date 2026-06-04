@@ -648,6 +648,22 @@ def _weekly_slots_raw(rows: list) -> list[dict]:
     ]
 
 
+def _weekly_menu_day_stats_by_dates(
+    db: Session, dates: list[date], *, store_id: int
+) -> tuple[dict[date, int], dict[date, int]]:
+    """本周菜单统计：与单次卡库存、dashboard-summary 共用 menu_day_stock 聚合。"""
+    from app.services.menu_day_stock_service import (
+        dashboard_meal_totals_by_dates,
+        paid_single_retail_portions_by_dates,
+    )
+
+    uniq = list(dict.fromkeys(dates))
+    return (
+        dashboard_meal_totals_by_dates(db, uniq, store_id=int(store_id)),
+        paid_single_retail_portions_by_dates(db, uniq, store_id=int(store_id)),
+    )
+
+
 def _weekly_slots_payload(db: Session, anchor: date, store_id: int) -> list[dict]:
     sid = int(store_id)
     rows = db.execute(
@@ -658,7 +674,16 @@ def _weekly_slots_payload(db: Session, anchor: date, store_id: int) -> list[dict
     ).all()
     from app.services.menu_day_stock_service import weekly_slot_stock_extras
 
-    return weekly_slot_stock_extras(db, anchor, _weekly_slots_raw(rows), store_id=sid)
+    dates = [anchor + timedelta(days=i) for i in range(7)]
+    sub_by_date, paid_by_date = _weekly_menu_day_stats_by_dates(db, dates, store_id=sid)
+    return weekly_slot_stock_extras(
+        db,
+        anchor,
+        _weekly_slots_raw(rows),
+        store_id=sid,
+        sub_by_date=sub_by_date,
+        paid_by_date=paid_by_date,
+    )
 
 
 def _weekly_dual_preview(db: Session, this_a: date, next_a: date, *, store_id: int) -> dict[str, list[dict]]:
@@ -666,15 +691,9 @@ def _weekly_dual_preview(db: Session, this_a: date, next_a: date, *, store_id: i
     sid = int(store_id)
     anchors = [this_a, next_a]
     this_dates = [this_a + timedelta(days=i) for i in range(7)]
-    from app.services.menu_day_stock_service import (
-        _paid_sums_for_dates_dishes,
-        resolve_dishes_for_dates_batch,
-        subscription_total_meals_by_dates,
-        weekly_slot_stock_extras,
-    )
+    from app.services.menu_day_stock_service import weekly_slot_stock_extras
 
-    sub_by_date = subscription_total_meals_by_dates(db, this_dates, store_id=sid)
-    scheduled_by_date = resolve_dishes_for_dates_batch(db, this_dates, store_id=sid)
+    sub_by_date, paid_by_date = _weekly_menu_day_stats_by_dates(db, this_dates, store_id=sid)
     rows = db.execute(
         select(WeeklyMenuSlot, MenuDish)
         .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
@@ -682,12 +701,8 @@ def _weekly_dual_preview(db: Session, this_a: date, next_a: date, *, store_id: i
         .order_by(WeeklyMenuSlot.week_start, WeeklyMenuSlot.slot)
     ).all()
     by_anchor: dict[date, list] = {this_a: [], next_a: []}
-    this_dish_ids: set[int] = set()
     for w, d in rows:
         by_anchor.setdefault(w.week_start, []).append((w, d))
-        if w.week_start == this_a:
-            this_dish_ids.add(int(d.id))
-    paid = _paid_sums_for_dates_dishes(db, this_dates, this_dish_ids, store_id=sid)
     return {
         "this_week": weekly_slot_stock_extras(
             db,
@@ -695,8 +710,7 @@ def _weekly_dual_preview(db: Session, this_a: date, next_a: date, *, store_id: i
             _weekly_slots_raw(by_anchor.get(this_a, [])),
             store_id=sid,
             sub_by_date=sub_by_date,
-            scheduled_by_date=scheduled_by_date,
-            paid=paid,
+            paid_by_date=paid_by_date,
         ),
         "next_week": weekly_slot_stock_extras(
             db,
@@ -851,27 +865,9 @@ def _paid_single_retail_portions_by_dates(
     db: Session, dates: list[date], *, store_id: int
 ) -> dict[date, int]:
     """批量查询多日已支付单次零售份数，减少 dashboard 重复扫描 single_meal_orders。"""
-    uniq = list(dict.fromkeys(dates))
-    if not uniq:
-        return {}
-    sid = int(store_id)
-    rows = db.execute(
-        select(
-            SingleMealOrder.delivery_date,
-            func.coalesce(func.sum(SingleMealOrder.quantity), 0),
-        )
-        .where(
-            SingleMealOrder.delivery_date.in_(uniq),
-            SingleMealOrder.pay_status == "已支付",
-            SingleMealOrder.store_id == sid,
-        )
-        .group_by(SingleMealOrder.delivery_date)
-    ).all()
-    out = {d: 0 for d in uniq}
-    for d, qty in rows:
-        if d is not None:
-            out[d] = int(qty or 0)
-    return out
+    from app.services.menu_day_stock_service import paid_single_retail_portions_by_dates
+
+    return paid_single_retail_portions_by_dates(db, dates, store_id=int(store_id))
 
 
 def _dashboard_day_prep_metrics_out(m: DeliverySheetDayMetrics) -> DashboardDayPrepMetricsOut:

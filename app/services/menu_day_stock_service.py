@@ -11,12 +11,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.delivery_calendar import is_subscription_delivery_day
+from app.core.timeutil import today_shanghai
 from app.models.menu_dish import MenuDish
 from app.models.menu_schedule import MenuSchedule
 from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.services.delivery_sheet_service import (
+    DeliverySheetDayMetrics,
     _total_meal_units_locked_date_sql,
+    delivery_sheet_metrics_for_date,
+    delivery_sheet_metrics_pending_sql_for_future_date,
+    delivery_sheet_metrics_via_sql_for_unlocked_date,
     meal_units_totals_for_delivery_dates,
     total_meal_units_sql_sum_only,
 )
@@ -96,6 +101,72 @@ def subscription_total_meals_by_dates(
 ) -> dict[date, int]:
     """批量计算多日应配送份数；与配送大表 ``meal_units_totals_for_delivery_dates`` 同源。"""
     return meal_units_totals_for_delivery_dates(db, dates=dates, store_id=int(store_id))
+
+
+def dashboard_meal_totals_by_dates(
+    db: Session, dates: Iterable[date], *, store_id: int
+) -> dict[date, int]:
+    """与营业概览 ``dashboard-summary`` 备餐份数（``meal_total``）同源，供单次卡剩余库存与本周菜单统计共用。"""
+    sid = int(store_id)
+    uniq = list(dict.fromkeys(dates))
+    if not uniq:
+        return {}
+    cal_today = today_shanghai()
+    metrics_cache: dict[date, DeliverySheetDayMetrics] = {}
+    out: dict[date, int] = {}
+    for d in uniq:
+        if d not in metrics_cache:
+            if d > cal_today:
+                metrics_cache[d] = delivery_sheet_metrics_pending_sql_for_future_date(
+                    db, delivery_date=d, store_id=sid
+                )
+            else:
+                from app.services.delivery_day_lock_service import (
+                    is_delivery_day_sheet_frozen_after_sf_push,
+                )
+
+                if is_delivery_day_sheet_frozen_after_sf_push(
+                    db, store_id=sid, delivery_date=d
+                ):
+                    metrics_cache[d] = delivery_sheet_metrics_for_date(
+                        db,
+                        delivery_date=d,
+                        store_id=sid,
+                        metrics_cache=metrics_cache,
+                    )
+                else:
+                    metrics_cache[d] = delivery_sheet_metrics_via_sql_for_unlocked_date(
+                        db, delivery_date=d, store_id=sid
+                    )
+        out[d] = int(metrics_cache[d].meal_total)
+    return out
+
+
+def paid_single_retail_portions_by_dates(
+    db: Session, dates: Iterable[date], *, store_id: int
+) -> dict[date, int]:
+    """供餐日已支付单次零售份数合计（与营业概览、本周菜单「单次零售」列同源）。"""
+    uniq = list(dict.fromkeys(dates))
+    if not uniq:
+        return {}
+    sid = int(store_id)
+    rows = db.execute(
+        select(
+            SingleMealOrder.delivery_date,
+            func.coalesce(func.sum(SingleMealOrder.quantity), 0),
+        )
+        .where(
+            SingleMealOrder.delivery_date.in_(uniq),
+            SingleMealOrder.pay_status == "已支付",
+            SingleMealOrder.store_id == sid,
+        )
+        .group_by(SingleMealOrder.delivery_date)
+    ).all()
+    out = {d: 0 for d in uniq}
+    for d, qty in rows:
+        if d is not None:
+            out[d] = int(qty or 0)
+    return out
 
 
 def resolve_dishes_for_dates_batch(
@@ -211,14 +282,8 @@ def single_order_stock_for_dish_date(
     sid = int(store_id)
     did = int(dish_id)
     w = weekly_slot_row_for_dish_date(db, did, menu_date, store_id=sid)
-    scheduled_id = scheduled_dish_id_for_calendar_date(db, menu_date, store_id=sid)
-    # 仅当该日为当前菜品供餐时才统计订阅占用（避免无关日触发配送大表级聚合）
-    sub = (
-        subscription_total_meals_on_date(db, menu_date, store_id=sid)
-        if scheduled_id is not None and scheduled_id == did
-        else 0
-    )
-    paid = paid_single_portions_sum(db, did, menu_date, store_id=sid)
+    sub = dashboard_meal_totals_by_dates(db, [menu_date], store_id=sid).get(menu_date, 0)
+    paid = paid_single_retail_portions_by_dates(db, [menu_date], store_id=sid).get(menu_date, 0)
     if w is None or w.total_stock is None:
         return SingleOrderStockInfo(
             limited=True, total_stock=None, subscription_meals=sub, paid_single_portions=paid, remaining=0
@@ -241,12 +306,12 @@ def single_order_stock_by_date_for_week(
     store_id: int,
     subscription_floor_date: date | None,
 ) -> dict[date, SingleOrderStockInfo]:
-    """与逐日调用 `single_order_stock_for_dish_date` 结果一致：预取订阅份数 / 已付单次，避免一周内重复查库与子查询。
+    """与逐日调用 `single_order_stock_for_dish_date` 结果一致：预取营业概览同源备餐份数 / 当日已付单次零售合计。
 
     `dishes_by_date` 必须与 `GET /api/menu/weekly` 的周槽+按日补全合并结果一致；
     `weekly_slot_rows` 须为当周 `WeeklyMenuSlot` JOIN `MenuDish` 的原始行。
 
-    ``subscription_floor_date``：早于该日历日的供餐日将 ``subscription_meals`` 视为 0（不跑会员履约统计），列表页加速用；当日及之后与全量计算一致。精确库存以下单/详情接口为准。
+    ``subscription_floor_date``：早于该日历日的供餐日将 ``subscription_meals`` 视为 0（不跑大表统计），列表页加速用；当日及之后与详情/下单校验一致。
     """
 
     sid = int(store_id)
@@ -262,12 +327,11 @@ def single_order_stock_by_date_for_week(
         ws_by_day_dish[(day, int(od.id))] = ws
 
     dates_needing_sub = [d for d in dates if subscription_floor is None or d >= subscription_floor]
-    sub_by_date = subscription_total_meals_by_dates(db, dates_needing_sub, store_id=sid)
+    sub_by_date = dashboard_meal_totals_by_dates(db, dates_needing_sub, store_id=sid)
     for d in dates:
         if subscription_floor is not None and d < subscription_floor:
             sub_by_date[d] = 0
-    dish_ids: set[int] = {int(dis.id) for dis in dishes_by_date.values() if dis is not None}
-    paid = _paid_sums_for_dates_dishes(db, dates, dish_ids, store_id=sid)
+    paid_by_date = paid_single_retail_portions_by_dates(db, dates, store_id=sid)
 
     out: dict[date, SingleOrderStockInfo] = {}
     for d in dates:
@@ -277,7 +341,7 @@ def single_order_stock_by_date_for_week(
         did = int(dish.id)
         w = ws_by_day_dish.get((d, did))
         sub = int(sub_by_date.get(d, 0))
-        paid_n = int(paid.get((d, did), 0))
+        paid_n = int(paid_by_date.get(d, 0))
         if w is None or w.total_stock is None:
             out[d] = SingleOrderStockInfo(
                 limited=True, total_stock=None, subscription_meals=sub, paid_single_portions=paid_n, remaining=0
@@ -390,9 +454,12 @@ def weekly_slot_stock_extras(
     sub_by_date: dict[date, int] | None = None,
     scheduled_by_date: dict[date, MenuDish | None] | None = None,
     paid: dict[tuple[date, int], int] | None = None,
+    paid_by_date: dict[date, int] | None = None,
     skip_subscription_stats: bool = False,
 ) -> list[dict[str, Any]]:
     """为每槽位附加 subscription_meals_for_day、single_retail_paid_portions、single_stock_remaining；total_stock 由调用方自 payload 已带明。
+
+    管理端本周菜单应传入 ``sub_by_date`` / ``paid_by_date``（与营业概览同源）；未传时回退旧聚合逻辑。
 
     ``skip_subscription_stats=True`` 时不查会员履约/已付单次（下周预告维护用，显著减库压）。
     """
@@ -404,17 +471,19 @@ def weekly_slot_stock_extras(
         sub_by_date = {}
         scheduled_by_date = {}
         paid = {}
+        paid_by_date = {}
     else:
         if sub_by_date is None:
             sub_by_date = subscription_total_meals_by_dates(db, dates, store_id=sid)
-        if scheduled_by_date is None:
-            scheduled_by_date = resolve_dishes_for_dates_batch(db, dates, store_id=sid)
-        dish_ids: set[int] = set()
-        for s in slot_payload:
-            if s.get("dish_id") is not None:
-                dish_ids.add(int(s["dish_id"]))
-        if paid is None:
-            paid = _paid_sums_for_dates_dishes(db, dates, dish_ids, store_id=sid)
+        if paid_by_date is None:
+            if scheduled_by_date is None:
+                scheduled_by_date = resolve_dishes_for_dates_batch(db, dates, store_id=sid)
+            dish_ids: set[int] = set()
+            for s in slot_payload:
+                if s.get("dish_id") is not None:
+                    dish_ids.add(int(s["dish_id"]))
+            if paid is None:
+                paid = _paid_sums_for_dates_dishes(db, dates, dish_ids, store_id=sid)
     out: list[dict[str, Any]] = []
     for s in slot_payload:
         sl = int(s.get("slot", 0) or 0)
@@ -435,9 +504,13 @@ def weekly_slot_stock_extras(
             out.append(base)
             continue
         did_i = int(did)
-        scheduled = scheduled_by_date.get(menu_date)
-        sub = sub_by_date.get(menu_date, 0) if scheduled and int(scheduled.id) == did_i else 0
-        paid_n = paid.get((menu_date, did_i), 0)
+        if paid_by_date is not None:
+            sub = sub_by_date.get(menu_date, 0)
+            paid_n = paid_by_date.get(menu_date, 0)
+        else:
+            scheduled = (scheduled_by_date or {}).get(menu_date)
+            sub = sub_by_date.get(menu_date, 0) if scheduled and int(scheduled.id) == did_i else 0
+            paid_n = (paid or {}).get((menu_date, did_i), 0)
         base["subscription_meals_for_day"] = sub
         base["single_retail_paid_portions"] = paid_n
         cap_raw = s.get("total_stock")
