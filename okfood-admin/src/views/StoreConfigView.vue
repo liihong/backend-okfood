@@ -616,7 +616,7 @@ onMounted(() => {
   min-width: 200px;
 }
 .sc-coord-line {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--okfood-font-number);
   font-size: 13px;
   color: #0f172a;
 }
@@ -680,14 +680,14 @@ onMounted(() => {
   font-family: inherit;
 }
 .sc-input--mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--okfood-font-number);
   font-size: 13px;
 }
 .sc-input-el {
   width: 100%;
 }
 .sc-input-el--mono :deep(.el-input__inner) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--okfood-font-number);
   font-size: 13px;
 }
 .sc-file {

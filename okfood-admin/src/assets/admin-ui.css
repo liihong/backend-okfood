@@ -414,11 +414,7 @@
   display: flex;
   min-height: 100vh;
   background-color: #f8fafc;
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    'PingFang SC',
-    sans-serif;
+  font-family: var(--okfood-font-sans);
   color: #1e293b;
 }
 
@@ -778,13 +774,8 @@
   flex-direction: column;
   align-items: flex-end;
   justify-content: center;
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    monospace;
+  font-family: var(--okfood-font-number);
+  font-variant-numeric: tabular-nums;
   font-style: normal;
   line-height: 1.15;
   padding: 0 4px;
@@ -1550,7 +1541,8 @@
 }
 
 .td-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--okfood-font-number);
+  font-variant-numeric: tabular-nums;
   font-size: 13px;
 }
 
@@ -3565,4 +3557,35 @@
 .admin-page-tab__close:hover {
   background: rgba(15, 23, 42, 0.08);
   color: rgba(15, 23, 42, 0.85);
+}
+
+/**
+ * 全局数字体：与财务明细「交易时间」列一致（Plus Jakarta Sans + tabular-nums）
+ * 覆盖各页 scoped 内残留的 ui-monospace 类名选择器
+ */
+.admin-layout :is(
+  .td-mono,
+  .finance-metric,
+  .finance-hero-currency,
+  .finance-metric--hero-num,
+  .finance-detail-amt,
+  .finance-detail-datetime,
+  .finance-month-picker-input,
+  .finance-day-picker-input,
+  .members-overview-stat__value,
+  .dro-map-ring__pct,
+  .dro-rank-pct,
+  .admin-header-live-clock
+) {
+  font-family: var(--okfood-font-number) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-layout input[type='number'],
+.admin-layout input[type='date'],
+.admin-layout input[type='month'],
+.admin-layout input[type='time'],
+.admin-layout input[type='datetime-local'] {
+  font-family: var(--okfood-font-number);
+  font-variant-numeric: tabular-nums;
 }

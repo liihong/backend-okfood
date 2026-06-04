@@ -980,7 +980,7 @@ onMounted(async () => {
   margin-bottom: 16px;
 }
 .tip-code {
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
   font-size: 0.8rem;
   color: #fde047;
 }

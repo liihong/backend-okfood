@@ -260,7 +260,7 @@ onMounted(() => {
   font-weight: 900;
   color: #94a3b8;
   font-variant-numeric: tabular-nums;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--okfood-font-number);
 }
 
 .dgm-dot {

@@ -1571,7 +1571,7 @@ button.dro-dash-pill--interactive:focus-visible {
 
 .dro-map-ring__pct {
   position: absolute;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--okfood-font-number);
   font-size: 15px;
   font-weight: 900;
   color: #0f172a;
@@ -2989,13 +2989,7 @@ button.dro-dash-pill--interactive:focus-visible {
   font-weight: 900;
   color: #059669;
   font-variant-numeric: tabular-nums;
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    monospace;
+  font-family: var(--okfood-font-number);
 }
 
 .dro-rank-bar {

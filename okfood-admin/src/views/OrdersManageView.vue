@@ -1353,7 +1353,7 @@ onMounted(() => {
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="会员" min-width="120" class-name="orders-member-col">
+            <el-table-column label="会员" min-width="132" class-name="orders-member-col">
               <template #default="{ row }">
                 <div class="orders-m-cell">
                   <span
@@ -2080,6 +2080,11 @@ onMounted(() => {
   color: #64748b;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
+  /* 11 位手机号完整展示，不与姓名共用省略号规则 */
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 .orders-cell-pill--dish {
@@ -2129,7 +2134,16 @@ onMounted(() => {
   border: 1px solid #e2e8f0;
 }
 
-.orders-manage-page :deep(td.orders-member-col .cell),
+.orders-manage-page :deep(td.orders-member-col.el-table__cell) {
+  min-width: 132px;
+}
+
+.orders-manage-page :deep(td.orders-member-col .cell) {
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+}
+
 .orders-manage-page :deep(td.orders-dish-col .cell),
 .orders-manage-page :deep(td.orders-qty-col .cell),
 .orders-manage-page :deep(td.orders-meal-date-col .cell),
@@ -2146,7 +2160,7 @@ onMounted(() => {
   line-height: 1.25;
 }
 
-.orders-m-cell .orders-cell-pill {
+.orders-m-cell .orders-cell-pill--member-name {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;

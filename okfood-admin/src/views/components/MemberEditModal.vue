@@ -378,7 +378,7 @@ async function submitEditMember() {
 
 <style scoped>
 .font-mono {
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
 }
 
 /* 弹窗本体：单列、接近参考稿「整页中间容器」宽度 */

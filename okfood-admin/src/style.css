@@ -1,3 +1,17 @@
+:root {
+  /* 与高质感财务明细「交易时间」列同源；全局数字统一此族，不再用系统等宽字 */
+  --okfood-font-sans:
+    'Plus Jakarta Sans',
+    'Noto Sans SC',
+    -apple-system,
+    BlinkMacSystemFont,
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'Microsoft YaHei',
+    sans-serif;
+  --okfood-font-number: var(--okfood-font-sans);
+}
+
 *,
 *::before,
 *::after {
@@ -6,6 +20,7 @@
 
 body {
   margin: 0;
+  font-family: var(--okfood-font-sans);
 }
 
 #app {

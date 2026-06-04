@@ -555,13 +555,13 @@ watch(
 }
 
 .dpk-td-phone {
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
   font-weight: 700;
   color: #64748b;
 }
 
 .dpk-quota {
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
   font-weight: 900;
   color: #0d5c46;
 }

@@ -714,7 +714,15 @@ class FinanceReceivedWindowOut(BaseModel):
 
     total_amount_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="已收毛额")
     total_count: int = Field(..., ge=0, description="已收笔数合计")
-    card_orders: FinanceReceivedBucketOut = Field(..., description="开卡工单 pay_status=已缴")
+    card_orders: FinanceReceivedBucketOut = Field(..., description="开卡工单 pay_status=已缴（含全部卡型）")
+    card_orders_weekly: FinanceReceivedBucketOut = Field(
+        ...,
+        description="开卡工单中卡型为周卡的笔数与实收",
+    )
+    card_orders_monthly: FinanceReceivedBucketOut = Field(
+        ...,
+        description="开卡工单中卡型为月卡的笔数与实收",
+    )
     single_meal_orders: FinanceReceivedBucketOut = Field(..., description="单次点餐 pay_status=已支付")
     membership_refunds: FinanceReceivedBucketOut = Field(
         ...,
@@ -737,6 +745,22 @@ class FinanceReceivedSummaryOut(BaseModel):
     cumulative: FinanceReceivedWindowOut = Field(..., description="历史全部已标记已收")
     this_month: FinanceReceivedWindowOut = Field(..., description="本月内（按 updated_at 落入上海月界）")
     today: FinanceReceivedWindowOut = Field(..., description="今日内（按 updated_at 落入上海日界）")
+
+
+class FinanceReceivedMonthOut(BaseModel):
+    """财务中心：指定上海自然月已收汇总（与 received-summary 月窗口口径一致）。"""
+
+    calendar_month: str = Field(..., description="查询月份 YYYY-MM（上海自然月）")
+    timezone_label: str = Field(default="Asia/Shanghai", description="日历与日界口径")
+    window: FinanceReceivedWindowOut = Field(..., description="该月内已收窗口统计")
+
+
+class FinanceReceivedDayOut(BaseModel):
+    """财务中心：指定上海自然日已收汇总（与 received-summary 的 today 口径一致）。"""
+
+    calendar_date: date = Field(..., description="查询日期（上海日历日）")
+    timezone_label: str = Field(default="Asia/Shanghai", description="日历与日界口径")
+    window: FinanceReceivedWindowOut = Field(..., description="该日内已收窗口统计")
 
 
 class FinanceTodayPaidCardOrderRowOut(BaseModel):

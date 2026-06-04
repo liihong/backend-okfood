@@ -45,8 +45,7 @@
   --el-color-error-light-9: #fff1f2;
   --el-color-error-dark-2: #be123c;
 
-  --el-font-family:
-    -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --el-font-family: var(--okfood-font-sans);
 
   --el-border-radius-base: 12px;
   --el-border-radius-small: 8px;

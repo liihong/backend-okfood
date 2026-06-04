@@ -137,7 +137,13 @@ from app.services.member_card_pay_service import (
     admin_wechat_refund_member_card_order,
     sync_member_card_from_wechat_admin_or_raise,
 )
-from app.services.finance_received_service import finance_received_summary, finance_today_paid_card_orders
+from app.services.finance_received_service import (
+    _parse_calendar_date,
+    finance_paid_card_orders_for_day,
+    finance_received_day_window,
+    finance_received_month_window,
+    finance_received_summary,
+)
 from app.services.member_membership_refund_service import (
     member_membership_refund_confirm,
     member_membership_refund_preview,
@@ -271,15 +277,55 @@ def finance_received_summary_route(
     return success(data=dump_model(summary), msg="获取成功")
 
 
-@router.get("/finance/today-paid-card-orders")
-def finance_today_paid_card_orders_route(
+@router.get("/finance/received-month")
+def finance_received_month_route(
     db: SessionDep,
+    calendar_month: Annotated[str, Query(description="上海自然月 YYYY-MM")],
     admin_username: str = Depends(admin_full_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """今日（上海日界）已缴开卡工单明细：时刻（HH:MM）、卡型、实收；归属日与 `received-summary` 开卡笔数口径一致（updated_at）。"""
+    """指定月份已收账款（与 received-summary 的 this_month 口径一致）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    payload = finance_today_paid_card_orders(db, store_id=store_id)
+    try:
+        payload = finance_received_month_window(db, calendar_month=calendar_month, store_id=store_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=dump_model(payload), msg="获取成功")
+
+
+@router.get("/finance/received-day")
+def finance_received_day_route(
+    db: SessionDep,
+    calendar_date: Annotated[str, Query(description="上海日历日 YYYY-MM-DD")],
+    admin_username: str = Depends(admin_full_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """指定日期已收账款（与 received-summary 的 today 口径一致）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        payload = finance_received_day_window(db, calendar_date=calendar_date, store_id=store_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=dump_model(payload), msg="获取成功")
+
+
+@router.get("/finance/today-paid-card-orders")
+def finance_today_paid_card_orders_route(
+    db: SessionDep,
+    calendar_date: Annotated[
+        str | None,
+        Query(description="上海日历日 YYYY-MM-DD，默认当日"),
+    ] = None,
+    admin_username: str = Depends(admin_full_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """已缴开卡工单明细：时刻（HH:MM）、卡型、实收；归属日与当日汇总开卡笔数口径一致（updated_at）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        day = _parse_calendar_date(calendar_date) if calendar_date else None
+        payload = finance_paid_card_orders_for_day(db, calendar_date=day, store_id=store_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return success(data=dump_model(payload), msg="获取成功")
 
 

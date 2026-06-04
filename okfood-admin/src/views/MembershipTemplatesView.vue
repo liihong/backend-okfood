@@ -820,7 +820,7 @@ onMounted(fetchList)
   font-size: 10px;
   font-weight: 900;
   text-align: right;
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
   position: relative;
   z-index: 1;
 }
@@ -887,7 +887,7 @@ onMounted(fetchList)
   justify-content: center;
   font-size: 13px;
   font-weight: 900;
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
 }
 
 .mcard-price-stack {
@@ -900,14 +900,14 @@ onMounted(fetchList)
   font-size: 11px;
   color: var(--mcard-muted);
   text-decoration: line-through;
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
 }
 
 .mcard-discount-price {
   font-size: 15px;
   font-weight: 800;
   color: var(--mcard-primary);
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
 }
 
 .mcard-discount-price--empty,

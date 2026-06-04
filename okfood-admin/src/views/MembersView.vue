@@ -1553,7 +1553,7 @@ onUnmounted(() => {
   font-size: 16px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-  font-family: ui-monospace, 'SFMono-Regular', 'Menlo', 'Consolas', monospace;
+  font-family: var(--okfood-font-number);
 }
 .members-overview-stat__value--neutral {
   color: #0f172a;

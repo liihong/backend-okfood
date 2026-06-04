@@ -916,7 +916,7 @@ onMounted(reloadAll)
 }
 
 .retail-sku-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--okfood-font-number);
   font-size: 13px;
   color: var(--retail-muted);
 }
@@ -959,7 +959,7 @@ onMounted(reloadAll)
   font-size: 14px;
   font-weight: 800;
   color: var(--retail-primary);
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
 }
 
 .retail-sales-price--empty {
@@ -971,7 +971,7 @@ onMounted(reloadAll)
   font-size: 11px;
   color: var(--retail-muted);
   text-decoration: line-through;
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
 }
 
 .retail-sort-readonly {

@@ -832,7 +832,7 @@ onMounted(() => {
 }
 
 .wmenu-price {
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
   font-size: 13.5px;
   font-weight: 700;
 }
@@ -876,7 +876,7 @@ onMounted(() => {
 .wmenu-deliver-badge {
   background: #f1f5f9;
   color: #0f172a;
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
   font-weight: 700;
   padding: 6px 12px;
   border-radius: 8px;
@@ -886,7 +886,7 @@ onMounted(() => {
 }
 
 .wmenu-retail-badge {
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
   font-weight: 800;
   padding: 6px 12px;
   border-radius: 8px;
@@ -913,7 +913,7 @@ onMounted(() => {
 }
 
 .wmenu-remain-badge {
-  font-family: ui-monospace, monospace;
+  font-family: var(--okfood-font-number);
   font-weight: 800;
   padding: 6px 12px;
   border-radius: 8px;
