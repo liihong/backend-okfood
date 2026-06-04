@@ -149,17 +149,20 @@
             </template>
           </text>
         </view>
-
-        <button
-          class="btn-pay"
-          :disabled="!canPay || paying"
-          :class="{ 'btn-pay--disabled': !canPay || paying }"
-          @tap="handlePay"
-        >
-          {{ payButtonText }}
-        </button>
       </view>
     </scroll-view>
+
+    <!-- 底栏固定在 scroll-view 外，避免真机上滚动区域吞掉「去支付」点击 -->
+    <view v-if="!loading && !loadError && dish" class="pay-footer">
+      <button
+        class="btn-pay"
+        hover-class="none"
+        :class="{ 'btn-pay--disabled': !canPay || paying }"
+        @tap="onPayButtonTap"
+      >
+        {{ payButtonText }}
+      </button>
+    </view>
   </view>
 </template>
 
@@ -168,14 +171,17 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { onLoad, onShow, onReady } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import {
-  canSubmitSingleOrder,
   fetchMenuDetail,
   formatMenuPrice,
   formatServiceDateYmdWithWeekday,
   invalidateWeeklyMenuCache,
   singleOrderBlockReason,
 } from '@/utils/menuApi.js'
-import { getPageScrollStyle, schedulePageScrollLayout } from '@/utils/navbar.js'
+import {
+  getPageScrollStyle,
+  schedulePageScrollLayout,
+  FIXED_FOOTER_RESERVE_PX,
+} from '@/utils/navbar.js'
 import { getMemberToken, request } from '@/utils/api.js'
 import {
   normalizeAddressList,
@@ -329,19 +335,38 @@ const payButtonText = computed(() => {
   return '去支付'
 })
 
-const canPay = computed(() => {
-  if (!canSubmitSingleOrder(dish.value, serviceDateYmd.value)) return false
-  if (unitPrice.value == null) return false
+/** 不可支付时的原因（空串表示可支付）；用于底栏点击提示，避免 disabled 静默无反应 */
+const payBlockReason = computed(() => {
+  if (paying.value) return ''
+  if (!dish.value) return '餐品加载中，请稍候'
+  const stockMsg = singleOrderBlockReason(dish.value, serviceDateYmd.value)
+  if (stockMsg) return stockMsg
+  if (unitPrice.value == null) return '单点价格待公布'
   const q = Math.max(1, Math.min(qtyMaxEffective.value, quantity.value))
-  if (q < 1) return false
-  if (payMethod.value === 'balance' && !balancePayEligible.value) return false
-  if (fulfillMode.value === 'delivery') {
-    if (!addressRows.value.length) return false
-    const row = addressRows.value[selectedIndex.value]
-    return !!(row && row.id)
+  if (q < 1) return '请选择购买份数'
+  if (payMethod.value === 'balance' && !balancePayEligible.value) {
+    return balancePayHint.value || '当前无法使用次数支付'
   }
-  return true
+  if (fulfillMode.value === 'delivery') {
+    if (!addressRows.value.length) return '请先添加配送地址'
+    const item = rawAddresses.value[selectedIndex.value]
+    if (!getAddressRecordId(item)) return '请选择有效配送地址'
+  }
+  return ''
 })
+
+const canPay = computed(() => !payBlockReason.value)
+
+/** 微信小程序对 async 的 @tap 偶发不触发；用具名同步入口再调 handlePay */
+function onPayButtonTap() {
+  const reason = payBlockReason.value
+  if (reason) {
+    uni.showToast({ title: reason, icon: 'none', duration: 2800 })
+    return
+  }
+  if (paying.value || !dish.value) return
+  void handlePay()
+}
 
 function onFulfillModeChange(e) {
   const v = e?.detail?.value
@@ -512,7 +537,7 @@ watch(fulfillMode, () => {
 function applyScrollLayout() {
   schedulePageScrollLayout((style) => {
     scrollStyle.value = style
-  })
+  }, FIXED_FOOTER_RESERVE_PX)
 }
 
 onReady(() => {
@@ -650,7 +675,12 @@ function goAddressList() {
 }
 
 async function handlePay() {
-  if (!canPay.value || paying.value || !dish.value) return
+  const block = payBlockReason.value
+  if (block) {
+    uni.showToast({ title: block, icon: 'none', duration: 2800 })
+    return
+  }
+  if (paying.value || !dish.value) return
   const isPickup = fulfillMode.value === 'pickup'
   let addressId = null
   if (!isPickup) {
@@ -766,7 +796,16 @@ async function handlePay() {
 }
 
 .body {
-  padding: 24rpx 40rpx 80rpx;
+  padding: 24rpx 40rpx 32rpx;
+}
+
+.pay-footer {
+  flex-shrink: 0;
+  padding: 16rpx 40rpx;
+  padding-bottom: calc(16rpx + env(safe-area-inset-bottom));
+  background: #fff;
+  box-shadow: 0 -8rpx 24rpx rgba(15, 23, 42, 0.06);
+  box-sizing: border-box;
 }
 
 .card {
