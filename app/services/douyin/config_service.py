@@ -6,9 +6,11 @@ import json
 from dataclasses import dataclass
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.models.tenant_integration_settings import TenantIntegrationSettings
 from app.integrations.douyin_life import fetch_client_token
 from app.models.store import Store
 from app.services.tenant_integration_service import get_tenant_integration_row
@@ -70,3 +72,31 @@ def get_douyin_store_config(db: Session, store_id: int) -> DouyinStoreConfig:
 def get_douyin_access_token(db: Session, tenant_id: int) -> str:
     cred = get_douyin_tenant_credentials(db, int(tenant_id))
     return fetch_client_token(client_key=cred.client_key, client_secret=cred.client_secret)
+
+
+def resolve_douyin_client_secret_by_client_key(db: Session, client_key: str) -> str | None:
+    """SPI 回调验签：按 URL 中的 client_key 匹配租户凭证，回退全局配置。"""
+    ck = _s(client_key)
+    if not ck:
+        return None
+    rows = db.scalars(select(TenantIntegrationSettings)).all()
+    for row in rows:
+        if not row.extra_json:
+            continue
+        try:
+            obj = json.loads(row.extra_json)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        if _s(obj.get("douyin_client_key")) != ck:
+            continue
+        secret = _s(obj.get("douyin_client_secret"))
+        if secret:
+            return secret
+    base = get_settings()
+    if _s(getattr(base, "DOUYIN_CLIENT_KEY", None)) == ck:
+        secret = _s(getattr(base, "DOUYIN_CLIENT_SECRET", None))
+        if secret:
+            return secret
+    return None

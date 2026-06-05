@@ -57,6 +57,8 @@
 
 - 微信支付：`POST /api/pay/wechat/notify`
 - 顺丰同城：`/api/sf/callback/*`、`/api/sf/oauth/*`（验签）
+- 抖音团购 SPI：`POST /api/douyin/spi/async-cancel-fulfil`（撤销核销异步回调，验签）
+- 抖音 Webhooks：`POST /api/douyin/webhook`（平台事件订阅；保存 URL 时回显 challenge）
 
 ### 多门店
 

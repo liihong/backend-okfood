@@ -67,6 +67,7 @@ class DouyinRedemptionStatus(str, Enum):
     SUCCESS = "success"
     FAILED = "failed"
     GRANT_FAILED = "grant_failed"
+    CANCELLED = "cancelled"
 
 
 class CardOrderPayStatus(str, Enum):

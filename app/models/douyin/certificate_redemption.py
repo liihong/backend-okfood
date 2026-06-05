@@ -50,5 +50,6 @@ class DouyinCertificateRedemption(Base):
     status: Mapped[str] = mapped_column(String(16), default="success", nullable=False)
     error_msg: Mapped[str | None] = mapped_column(String(512), nullable=True)
     verify_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    douyin_verify_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     amount_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, index=True)

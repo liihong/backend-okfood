@@ -41,6 +41,19 @@ def _amount_from_cert_fen(fen: int | None) -> Decimal | None:
     return (Decimal(fen) / Decimal("100")).quantize(Decimal("0.01"))
 
 
+def _extract_verify_id(verify_data: dict) -> str | None:
+    results = verify_data.get("verify_results")
+    if not isinstance(results, list):
+        return None
+    for row in results:
+        if not isinstance(row, dict):
+            continue
+        vid = str(row.get("verify_id") or "").strip()
+        if vid:
+            return vid
+    return None
+
+
 def _save_redemption_row(
     db: Session,
     *,
@@ -57,6 +70,7 @@ def _save_redemption_row(
     error_msg: str | None = None,
     grant_result_kind: str | None = None,
     grant_result_id: int | None = None,
+    douyin_verify_id: str | None = None,
     amount_yuan: Decimal | None = None,
 ) -> DouyinCertificateRedemption:
     row = DouyinCertificateRedemption(
@@ -77,6 +91,7 @@ def _save_redemption_row(
         status=status,
         error_msg=(error_msg or "")[:512] or None,
         verify_token=verify_token,
+        douyin_verify_id=douyin_verify_id,
         amount_yuan=amount_yuan,
     )
     db.add(row)
@@ -198,7 +213,7 @@ def redeem_douyin_certificate(
     amount_yuan = _amount_from_cert_fen(cert.pay_amount_fen)
 
     try:
-        certificate_verify(
+        verify_data = certificate_verify(
             access_token=access_token,
             verify_token=prepared.verify_token,
             poi_id=store_cfg.poi_id,
@@ -224,6 +239,8 @@ def redeem_douyin_certificate(
         db.commit()
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
+    douyin_verify_id = _extract_verify_id(verify_data)
+
     try:
         grant_kind, grant_id, grant_label = _apply_local_grant(
             db,
@@ -247,6 +264,7 @@ def redeem_douyin_certificate(
             verify_token=prepared.verify_token,
             status=DouyinRedemptionStatus.GRANT_FAILED.value,
             error_msg=str(exc.detail),
+            douyin_verify_id=douyin_verify_id,
             amount_yuan=amount_yuan,
         )
         db.commit()
@@ -266,6 +284,7 @@ def redeem_douyin_certificate(
         status=DouyinRedemptionStatus.SUCCESS.value,
         grant_result_kind=grant_kind,
         grant_result_id=grant_id,
+        douyin_verify_id=douyin_verify_id,
         amount_yuan=amount_yuan,
     )
     db.commit()
