@@ -33,6 +33,7 @@ from app.schemas.admin import (
     CardOrderCreateIn,
     CardOrderPatchIn,
     CategoryCreateIn,
+    CategoryPatchIn,
     DishUpsertIn,
     MenuScheduleAssignIn,
     RechargeIn,
@@ -69,6 +70,8 @@ from app.services.admin_service import (
     assign_weekly_menu_slot,
     set_weekly_slot_menu_total_stock,
     create_category_admin,
+    delete_category_admin,
+    patch_category_admin,
     dashboard_meal_summary,
     delete_dish,
     get_dish_admin,
@@ -1532,6 +1535,10 @@ def dishes(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     enabled_only: bool = False,
     q: Annotated[str | None, Query(description="按名称模糊筛选")] = None,
+    category_id: Annotated[
+        int | None,
+        Query(description="按菜品分类筛选；传 0 表示仅未分类"),
+    ] = None,
     lite: Annotated[
         bool,
         Query(description="精简列表：不返回 description/image_url/internal_view_sop，下拉选菜等场景更快"),
@@ -1539,7 +1546,9 @@ def dishes(
 ):
     """菜品库列表，排期时可从中选 `dish_id`。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    items = list_dishes_admin(db, enabled_only=enabled_only, q=q, store_id=store_id, lite=lite)
+    items = list_dishes_admin(
+        db, enabled_only=enabled_only, q=q, category_id=category_id, store_id=store_id, lite=lite
+    )
     return success(data=[i.model_dump(mode="json") for i in items], msg="获取成功")
 
 
@@ -1615,6 +1624,31 @@ def category_create(
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     out = create_category_admin(db, body, store_id=store_id)
     return success(data=dump_model(out), msg="分类已创建")
+
+
+@router.patch("/category/{category_id}")
+def category_patch(
+    category_id: int,
+    body: CategoryPatchIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = patch_category_admin(db, category_id=category_id, body=body, store_id=store_id)
+    return success(data=dump_model(out), msg="分类已保存")
+
+
+@router.delete("/category/{category_id}")
+def category_delete(
+    category_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    delete_category_admin(db, category_id=category_id, store_id=store_id)
+    return success(msg="分类已删除")
 
 
 @router.get("/menu/weekly-slots")

@@ -11,6 +11,7 @@ import {
   adminKind,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import { PASSWORD_POLICY_MSG } from '../utils/passwordPolicy.js'
 
 const router = useRouter()
 
@@ -146,6 +147,7 @@ const handleAdminLogin = async () => {
                   </template>
                 </el-input>
               </div>
+              <p class="password-policy-hint">{{ PASSWORD_POLICY_MSG }}</p>
             </div>
 
             <div class="form-extras">

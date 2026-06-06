@@ -4,6 +4,7 @@ import { ref, onMounted, computed } from 'vue'
 import { Plug } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import { PASSWORD_POLICY_MSG, isPasswordStrongEnough } from '../utils/passwordPolicy.js'
 
 const loading = ref(false)
 const overview = ref(null)
@@ -485,8 +486,14 @@ async function saveAdmin() {
       showToast('请填写用户名', 'error')
       return
     }
-    if (pwd.length < 6) {
-      showToast('密码至少 6 位', 'error')
+    if (!isPasswordStrongEnough(pwd)) {
+      showToast(PASSWORD_POLICY_MSG, 'error')
+      return
+    }
+  } else {
+    const pwd = String(adminForm.value.password || '').trim()
+    if (pwd && !isPasswordStrongEnough(pwd)) {
+      showToast(PASSWORD_POLICY_MSG, 'error')
       return
     }
   }
@@ -897,6 +904,7 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item :label="adminEdit ? '新密码（留空不改）' : '密码'">
           <el-input v-model="adminForm.password" type="password" show-password autocomplete="new-password" />
+          <p class="admin-password-hint">{{ PASSWORD_POLICY_MSG }}</p>
         </el-form-item>
         <el-form-item label="角色">
           <el-select v-model="adminForm.role" style="width: 100%">
@@ -1034,6 +1042,12 @@ onMounted(async () => {
   gap: 8px;
 }
 .store-nightly-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.45;
+}
+.admin-password-hint {
+  margin: 6px 0 0;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.55);
   line-height: 1.45;

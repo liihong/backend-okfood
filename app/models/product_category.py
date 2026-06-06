@@ -17,6 +17,12 @@ class ProductCategory(Base):
     store_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("stores.id", onupdate="CASCADE"), nullable=False, index=True
     )
+    parent_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("product_category.id", onupdate="CASCADE", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     code: Mapped[str] = mapped_column(String(32))
     name: Mapped[str] = mapped_column(String(64))
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

@@ -208,6 +208,7 @@ CREATE TABLE IF NOT EXISTS `product_category` (
   KEY `idx_product_category_active_sort` (`is_active`, `sort_order`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商品分类';
 
+-- 完整二级分类树见 migration_041_dish_category_hierarchy_seed.sql
 INSERT INTO `product_category` (`code`, `name`, `sort_order`, `is_active`)
 VALUES ('weekly', '每周餐品', 0, 1)
 ON DUPLICATE KEY UPDATE `id` = `id`;

@@ -620,11 +620,13 @@ async function onChooseAvatar(e) {
   }
 }
 
-/** 会员资料区展示手机号（完整显示，登录即本人可见） */
+/** 会员资料区展示手机号（中间四位脱敏，如 132****6633） */
 function formatDisplayPhone(raw) {
   const digits = String(raw || '').replace(/\D/g, '')
+  if (!digits) return '未绑定手机'
+  if (digits.length === 11) return `${digits.slice(0, 3)}****${digits.slice(7)}`
   if (digits.length < 7) return raw && String(raw).trim() ? String(raw).trim() : '未绑定手机'
-  return digits
+  return `${digits.slice(0, 3)}****${digits.slice(-4)}`
 }
 
 const displayPhone = computed(() => {

@@ -10,12 +10,14 @@ import {
   handleAdminLogout,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import { buildCategoryTree, categoryPathLabel, toCascaderOptions } from '../utils/categoryTree.js'
 
 const dishList = ref([])
 const categoriesList = ref([])
 const dishesLoading = ref(false)
 const dishModalSaving = ref(false)
 const dishSearchQuery = ref('')
+const dishCategoryFilter = ref(null)
 
 const MENU_IMG_FALLBACK =
   'https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&q=80&w=400'
@@ -27,10 +29,23 @@ const filteredDishes = computed(() => {
   return list.filter((d) => (d.name || '').toLowerCase().includes(q))
 })
 
+const activeCategories = computed(() =>
+  categoriesList.value.filter((x) => x.is_active !== false),
+)
+
+const categoryTree = computed(() => buildCategoryTree(activeCategories.value))
+
+const dishCategoryCascaderOptions = computed(() =>
+  toCascaderOptions(categoryTree.value, { leafOnly: true }),
+)
+
+const dishFilterCascaderOptions = computed(() => {
+  const uncategorized = { value: 0, label: '未分类' }
+  return [uncategorized, ...toCascaderOptions(categoryTree.value, { leafOnly: false })]
+})
+
 function categoryLabel(categoryId) {
-  if (categoryId == null || categoryId === '') return '未分类'
-  const c = categoriesList.value.find((x) => x.id === categoryId)
-  return c ? c.name : '未知分类'
+  return categoryPathLabel(categoryId, categoriesList.value)
 }
 
 const onDishImgError = (e) => {
@@ -47,7 +62,7 @@ const dishForm = reactive({
   single_order_price_yuan: '',
   image_url: '',
   is_enabled: true,
-  category_id: '',
+  category_id: null,
   spice_level: '',
   internal_view_sop: '',
 })
@@ -87,7 +102,13 @@ async function fetchDishes() {
   if (!adminAccessToken.value) return
   dishesLoading.value = true
   try {
-    const data = await apiJson('/api/admin/dishes', {}, { auth: true })
+    const params = new URLSearchParams()
+    if (dishCategoryFilter.value != null && dishCategoryFilter.value !== '') {
+      params.set('category_id', String(dishCategoryFilter.value))
+    }
+    const qs = params.toString()
+    const path = qs ? `/api/admin/dishes?${qs}` : '/api/admin/dishes'
+    const data = await apiJson(path, {}, { auth: true })
     dishList.value = Array.isArray(data) ? data : []
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
@@ -110,7 +131,7 @@ function resetDishForm() {
   dishForm.single_order_price_yuan = ''
   dishForm.image_url = ''
   dishForm.is_enabled = true
-  dishForm.category_id = ''
+  dishForm.category_id = null
   dishForm.spice_level = ''
   dishForm.internal_view_sop = ''
 }
@@ -132,7 +153,7 @@ const openDishEditorEdit = async (row) => {
       : ''
   dishForm.image_url = row.image_url || ''
   dishForm.is_enabled = row.is_enabled !== false
-  dishForm.category_id = row.category_id != null ? String(row.category_id) : ''
+  dishForm.category_id = row.category_id != null ? row.category_id : null
   dishForm.spice_level = row.spice_level != null ? String(row.spice_level).trim().toLowerCase() : ''
   dishForm.internal_view_sop = ''
   showDishModal.value = true
@@ -282,14 +303,25 @@ onMounted(() => {
 <template>
   <section class="tab-content animate-up menu-section">
     <div class="dish-toolbar">
-      <div class="dish-toolbar-search">
-        <Search :size="18" />
-        <el-input
-          v-model="dishSearchQuery"
-          type="search"
+      <div class="dish-toolbar-filters">
+        <div class="dish-toolbar-search">
+          <Search :size="18" />
+          <el-input
+            v-model="dishSearchQuery"
+            type="search"
+            clearable
+            placeholder="按菜品名称筛选…"
+            class="dish-toolbar-search-input"
+          />
+        </div>
+        <el-cascader
+          v-model="dishCategoryFilter"
+          :options="dishFilterCascaderOptions"
+          :props="{ emitPath: false, checkStrictly: true }"
           clearable
-          placeholder="按菜品名称筛选…"
-          class="dish-toolbar-search-input"
+          placeholder="全部分类"
+          class="dish-toolbar-category"
+          @change="fetchDishes"
         />
       </div>
       <p v-if="dishesLoading" class="dish-toolbar-status">正在加载菜品库…</p>
@@ -401,15 +433,15 @@ onMounted(() => {
           <div class="menu-editor-row">
             <div class="menu-editor-field menu-editor-field-grow">
               <label class="menu-editor-label" for="dish-category">分类</label>
-              <el-select id="dish-category" v-model="dishForm.category_id" class="menu-editor-input-el" clearable placeholder="未分类">
-                <el-option label="未分类" value="" />
-                <el-option
-                  v-for="c in categoriesList"
-                  :key="c.id"
-                  :label="`${c.name} (${c.code})`"
-                  :value="String(c.id)"
-                />
-              </el-select>
+              <el-cascader
+                id="dish-category"
+                v-model="dishForm.category_id"
+                :options="dishCategoryCascaderOptions"
+                :props="{ emitPath: false }"
+                class="menu-editor-input-el dish-category-cascader"
+                clearable
+                placeholder="请选择二级分类"
+              />
             </div>
             <div class="menu-editor-field dish-enabled-field">
               <label class="menu-editor-label" for="dish-enabled">状态</label>
@@ -476,6 +508,21 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.dish-toolbar-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+}
+.dish-toolbar-category {
+  width: 200px;
+  min-width: 160px;
+}
+.dish-category-cascader {
+  width: 100%;
+}
 .dish-toolbar-search-input {
   flex: 1;
   min-width: 0;

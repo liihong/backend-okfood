@@ -281,6 +281,15 @@
   color: var(--forest-green);
 }
 
+.login-page .password-policy-hint {
+  margin: 0.5rem 0 0;
+  padding: 0 0.5rem;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--slate-400);
+}
+
 .login-page .form-extras {
   display: flex;
   justify-content: space-between;

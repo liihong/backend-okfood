@@ -24,6 +24,7 @@ const DeliveryGeoMapView = () => import('../views/DeliveryGeoMapView.vue')
 const TenantsView = () => import('../views/TenantsView.vue')
 const MembershipTemplatesView = () => import('../views/MembershipTemplatesView.vue')
 const RetailCatalogView = () => import('../views/RetailCatalogView.vue')
+const DishCategoriesView = () => import('../views/DishCategoriesView.vue')
 const DeliveryRangeCheckView = () => import('../views/DeliveryRangeCheckView.vue')
 const CouponTemplatesView = () => import('../views/marketing/CouponTemplatesView.vue')
 const MemberCouponGrantsView = () => import('../views/marketing/MemberCouponGrantsView.vue')
@@ -213,6 +214,12 @@ const router = createRouter({
           name: 'system-retail-catalog',
           component: RetailCatalogView,
           meta: { title: '普通商品管理', ownerAdminOnly: true, hidePageTitle: true },
+        },
+        {
+          path: 'system/dish-categories',
+          name: 'system-dish-categories',
+          component: DishCategoriesView,
+          meta: { title: '菜品分类', ownerAdminOnly: true, hidePageTitle: true },
         },
       ],
     },

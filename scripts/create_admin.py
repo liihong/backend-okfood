@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import select
 
+from app.core.password_policy import PASSWORD_POLICY_MSG, validate_password_strength
 from app.core.security import hash_password
 from app.db.session import SessionLocal
 from app.models.admin_user import AdminUser
@@ -37,6 +38,12 @@ def main() -> None:
         help="租户 id（默认 1）",
     )
     args = parser.parse_args()
+
+    try:
+        validate_password_strength(args.password)
+    except ValueError as e:
+        print(e or PASSWORD_POLICY_MSG)
+        return
 
     db = SessionLocal()
     try:

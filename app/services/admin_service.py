@@ -30,6 +30,7 @@ from app.utils.sql_like import escape_like_fragment
 from app.schemas.admin import (
     CategoryAdminOut,
     CategoryCreateIn,
+    CategoryPatchIn,
     DashboardDayPrepMetricsOut,
     DashboardMealSummaryOut,
     DishAdminOut,
@@ -491,6 +492,10 @@ def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminO
         cat = db.get(ProductCategory, body.category_id)
         if cat is None or int(cat.store_id) != sid:
             raise HTTPException(status_code=400, detail="分类不存在")
+        if not cat.is_active:
+            raise HTTPException(status_code=400, detail="分类已停用")
+        if _category_has_children(db, category_id=int(cat.id), store_id=sid):
+            raise HTTPException(status_code=400, detail="请选择二级分类（一级分类下仍有子类）")
     if body.id is not None:
         row = db.get(MenuDish, body.id)
         if not row:
@@ -528,6 +533,7 @@ def list_dishes_admin(
     *,
     enabled_only: bool,
     q: str | None = None,
+    category_id: int | None = None,
     store_id: int,
     lite: bool = False,
 ) -> list[DishAdminOut]:
@@ -553,6 +559,12 @@ def list_dishes_admin(
         stmt = stmt.where(MenuDish.is_enabled.is_(True))
     if q and q.strip():
         stmt = stmt.where(MenuDish.name.contains(q.strip()))
+    if category_id is not None:
+        if int(category_id) == 0:
+            stmt = stmt.where(MenuDish.category_id.is_(None))
+        else:
+            ids = _category_descendant_ids(db, category_id=int(category_id), store_id=sid)
+            stmt = stmt.where(MenuDish.category_id.in_(ids))
     rows = db.scalars(stmt).all()
     return [_dish_admin_out_from_row(r, include_sop=False, lite=lite) for r in rows]
 
@@ -595,27 +607,91 @@ def assign_menu_schedule(db: Session, body: MenuScheduleAssignIn, *, store_id: i
         )
 
 
+def _category_admin_out(row: ProductCategory) -> CategoryAdminOut:
+    return CategoryAdminOut(
+        id=row.id,
+        parent_id=row.parent_id,
+        code=row.code,
+        name=row.name,
+        sort_order=row.sort_order,
+        is_active=row.is_active,
+    )
+
+
+def _category_has_children(db: Session, *, category_id: int, store_id: int) -> bool:
+    cnt = db.scalar(
+        select(func.count())
+        .select_from(ProductCategory)
+        .where(ProductCategory.store_id == int(store_id), ProductCategory.parent_id == int(category_id))
+    )
+    return int(cnt or 0) > 0
+
+
+def _category_descendant_ids(db: Session, *, category_id: int, store_id: int) -> list[int]:
+    """含自身及全部下级分类 id（当前为二级树，一层子级即可）。"""
+    sid = int(store_id)
+    cid = int(category_id)
+    root = db.get(ProductCategory, cid)
+    if not root or int(root.store_id) != sid:
+        return [cid]
+    child_ids = list(
+        db.scalars(
+            select(ProductCategory.id).where(ProductCategory.store_id == sid, ProductCategory.parent_id == cid)
+        ).all()
+    )
+    return [cid, *[int(x) for x in child_ids]]
+
+
+def _validate_category_parent(
+    db: Session,
+    *,
+    store_id: int,
+    parent_id: int | None,
+    category_id: int | None = None,
+) -> int | None:
+    if parent_id is None:
+        return None
+    pid = int(parent_id)
+    if category_id is not None and pid == int(category_id):
+        raise HTTPException(status_code=400, detail="上级分类不能为自身")
+    parent = db.get(ProductCategory, pid)
+    if parent is None or int(parent.store_id) != int(store_id):
+        raise HTTPException(status_code=400, detail="上级分类不存在")
+    if parent.parent_id is not None:
+        raise HTTPException(status_code=400, detail="仅支持二级分类，请选择一级分类作为上级")
+    if category_id is not None:
+        child_cnt = db.scalar(
+            select(func.count())
+            .select_from(ProductCategory)
+            .where(ProductCategory.store_id == int(store_id), ProductCategory.parent_id == int(category_id))
+        )
+        if int(child_cnt or 0) > 0 and pid != int(category_id):
+            raise HTTPException(status_code=400, detail="该分类下仍有子分类，请先调整子分类后再变更上级")
+    return pid
+
+
 def list_categories_admin(db: Session, *, store_id: int) -> list[CategoryAdminOut]:
     sid = int(store_id)
     rows = db.scalars(
         select(ProductCategory).where(ProductCategory.store_id == sid).order_by(ProductCategory.sort_order, ProductCategory.id)
     ).all()
-    return [
-        CategoryAdminOut(
-            id=r.id,
-            code=r.code,
-            name=r.name,
-            sort_order=r.sort_order,
-            is_active=r.is_active,
-        )
-        for r in rows
-    ]
+    return [_category_admin_out(r) for r in rows]
 
 
 def create_category_admin(db: Session, body: CategoryCreateIn, *, store_id: int) -> CategoryAdminOut:
     sid = int(store_id)
+    code = body.code.strip()
+    name = body.name.strip()
+    if not code or not name:
+        raise HTTPException(status_code=400, detail="分类编码与名称不能为空")
+    parent_id = _validate_category_parent(db, store_id=sid, parent_id=body.parent_id)
     row = ProductCategory(
-        store_id=sid, code=body.code, name=body.name, sort_order=body.sort_order, is_active=True
+        store_id=sid,
+        parent_id=parent_id,
+        code=code,
+        name=name,
+        sort_order=body.sort_order,
+        is_active=True,
     )
     db.add(row)
     try:
@@ -624,13 +700,60 @@ def create_category_admin(db: Session, body: CategoryCreateIn, *, store_id: int)
         db.rollback()
         raise HTTPException(status_code=409, detail="分类编码已存在")
     db.refresh(row)
-    return CategoryAdminOut(
-        id=row.id,
-        code=row.code,
-        name=row.name,
-        sort_order=row.sort_order,
-        is_active=row.is_active,
+    return _category_admin_out(row)
+
+
+def _get_category_for_store(db: Session, *, category_id: int, store_id: int) -> ProductCategory:
+    row = db.get(ProductCategory, int(category_id))
+    if not row or int(row.store_id) != int(store_id):
+        raise HTTPException(status_code=404, detail="分类不存在")
+    return row
+
+
+def patch_category_admin(
+    db: Session, *, category_id: int, body: CategoryPatchIn, store_id: int
+) -> CategoryAdminOut:
+    row = _get_category_for_store(db, category_id=category_id, store_id=store_id)
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="分类名称不能为空")
+        row.name = name
+    if body.sort_order is not None:
+        row.sort_order = int(body.sort_order)
+    if body.is_active is not None:
+        row.is_active = bool(body.is_active)
+    if "parent_id" in body.model_fields_set:
+        row.parent_id = _validate_category_parent(
+            db, store_id=int(store_id), parent_id=body.parent_id, category_id=int(category_id)
+        )
+    db.commit()
+    db.refresh(row)
+    return _category_admin_out(row)
+
+
+def delete_category_admin(db: Session, *, category_id: int, store_id: int) -> None:
+    row = _get_category_for_store(db, category_id=category_id, store_id=store_id)
+    child_cnt = db.scalar(
+        select(func.count())
+        .select_from(ProductCategory)
+        .where(ProductCategory.store_id == int(store_id), ProductCategory.parent_id == int(category_id))
     )
+    if int(child_cnt or 0) > 0:
+        raise HTTPException(status_code=400, detail="该分类下仍有子分类，无法删除")
+    cnt = db.scalar(
+        select(func.count())
+        .select_from(MenuDish)
+        .where(MenuDish.store_id == int(store_id), MenuDish.category_id == int(category_id))
+    )
+    if int(cnt or 0) > 0:
+        raise HTTPException(status_code=400, detail="该分类下仍有菜品，无法删除")
+    db.delete(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="分类仍被引用，无法删除")
 
 
 def _weekly_slots_raw(rows: list) -> list[dict]:

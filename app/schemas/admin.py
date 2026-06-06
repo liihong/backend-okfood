@@ -7,6 +7,7 @@ from typing import Any, Literal, Self
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
+from app.core.password_policy import validate_password_strength
 from app.models.enums import (
     CardOpenMode,
     CardOrderKind,
@@ -80,6 +81,7 @@ class FileUploadOut(BaseModel):
 
 class CategoryAdminOut(BaseModel):
     id: int
+    parent_id: int | None = None
     code: str
     name: str
     sort_order: int
@@ -90,6 +92,14 @@ class CategoryCreateIn(BaseModel):
     code: str = Field(..., max_length=32)
     name: str = Field(..., max_length=64)
     sort_order: int = 0
+    parent_id: int | None = Field(None, ge=1, description="上级分类 id，空为一级")
+
+
+class CategoryPatchIn(BaseModel):
+    name: str | None = Field(None, max_length=64)
+    sort_order: int | None = None
+    is_active: bool | None = None
+    parent_id: int | None = Field(None, ge=1, description="调整上级；不可设为自身或子级")
 
 
 class WeeklySlotAssignIn(BaseModel):
@@ -1216,14 +1226,27 @@ class PlatformTenantAdminOut(BaseModel):
 
 class PlatformTenantAdminCreateIn(BaseModel):
     username: str = Field(..., max_length=64)
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
     role: TenantManagedAdminRole = "full"
+
+    @field_validator("password")
+    @classmethod
+    def _validate_password(cls, v: str) -> str:
+        validate_password_strength(v)
+        return v
 
 
 class PlatformTenantAdminPatchIn(BaseModel):
-    password: str | None = Field(None, min_length=6, max_length=128)
+    password: str | None = Field(None, min_length=8, max_length=128)
     role: TenantManagedAdminRole | None = None
     is_active: bool | None = None
+
+    @field_validator("password")
+    @classmethod
+    def _validate_password(cls, v: str | None) -> str | None:
+        if v is not None:
+            validate_password_strength(v)
+        return v
 
 
 class PlatformSystemOverviewOut(BaseModel):

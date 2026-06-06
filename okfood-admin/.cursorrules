@@ -1,0 +1,97 @@
+# okfood-admin 前端开发规范
+
+## 技术栈与范围
+
+- Vue 3 + Composition API + `<script setup>`
+- UI 组件库：**Element Plus**（已通过 `unplugin-vue-components` 按需自动引入）
+- 路由：Vue Router；状态：Pinia（按需）
+- 构建：Vite；样式：全局 `src/assets/admin-ui.css` + 页面 `scoped` 补充
+
+本规范适用于 `okfood-admin/src/**` 下所有页面、组件与工具代码。
+
+## UI 组件约束（强制）
+
+新建或重构管理端页面时，**交互与数据展示须优先使用 Element Plus**，禁止用原生 HTML 替代已有 EP 能力：
+
+| 场景 | 使用组件 |
+|------|----------|
+| 列表 / CRUD 表格 | `el-table` + `el-table-column` |
+| 表单 | `el-form` + `el-form-item` + `el-input` / `el-select` / `el-switch` 等 |
+| 弹窗 / 抽屉 | `el-dialog` / `el-drawer` |
+| 主操作按钮 | `el-button`（`type="primary"` / `link` / `danger`） |
+| 状态标签 | `el-tag` |
+| 提示条 | `el-alert` |
+| 加载态 | `v-loading` 或 `:loading` |
+| 二次确认 | `ElMessageBox.confirm`（勿用 `window.confirm`） |
+| 卡片分区 | `el-card`（`shadow="never"`） |
+
+**例外（允许保留）：**
+
+- 侧栏、顶栏等壳层布局（`AdminLayout.vue`）可沿用现有自定义样式与 lucide 图标
+- 复杂业务页（配送大表、地图等）在渐进重构前可保留 legacy 样式，但新增子模块须符合上表
+
+**禁止：**
+
+- 新页面用原生 `<table>`、`<button>` 做 CRUD 主界面
+- 新页面复制 `retail-*` 等旧页面临时样式类来拼表格/按钮（应改用 EP）
+- 在业务页内引入与 EP 重复的第三方 UI 库
+
+## 页面结构约定
+
+```vue
+<script setup>
+defineOptions({ name: 'XxxView' })  // 必须与 adminTabComponents.js 中 KeepAlive 名一致
+// ...
+</script>
+
+<template>
+  <div class="xxx-page tab-content animate-up page-content-shell">
+    <!-- 可选：工具条 el-card + el-form inline -->
+    <!-- 可选：el-alert 说明 -->
+    <el-card shadow="never" class="table-card">
+      <template #header>...</template>
+      <el-table v-loading="loading" :data="rows" empty-text="暂无数据">...</el-table>
+    </el-card>
+    <el-dialog>...</el-dialog>
+  </div>
+</template>
+```
+
+- 页面根节点保留 `tab-content animate-up page-content-shell`，与全局布局一致
+- 表格数据为空时使用 `el-table` 的 `empty-text`，勿手写空态行
+- 弹窗表单使用 `label-position="top"`，底部按钮放 `#footer` 插槽
+
+## 数据与接口
+
+- HTTP 统一走 `apiJson` / `apiForm`（`src/admin/core.js`），`{ auth: true }` 携带管理员 Token
+- 响应格式约定：`{ code, data, msg }`；列表取 `data` 数组，错误文案用 `e.message`
+- `401` 须 `alert` + `handleAdminLogout()`，与现有页面保持一致
+- 用户可见反馈优先 `showToast`（`composables/useToast.js`）；必要时配合 `ElMessageBox`
+- 多门店接口带 `store_id` 查询参数（默认 `1`），与后端 `require_admin_tenant_store` 对齐
+
+## 编码规范
+
+- 使用 `ref` / `computed`；异步加载须有 `loading` 状态
+- 表单提交前做校验：`el-form` `rules` + `validate()`，或显式 trim/范围检查
+- 避免 `any`；复杂 API 数据用 JSDoc `@type` 或拆分类型文件
+- **最小改动**：不重写无关文件；新功能对齐邻近页面（如 `TenantsView.vue`）的 EP 写法
+- 注释仅写非显而易见的业务逻辑，使用中文
+- 样式：布局/间距用页面 `scoped`；颜色与表格卡片优先复用 `admin-ui.css` 已有类（如 `table-card`）
+
+## 路由与导航
+
+- 新页面在 `src/router/index.js` 注册，并设置 `meta.title`
+- 需缓存时在 `src/constants/adminTabComponents.js` 增加 `defineOptions.name` 映射
+- 侧栏入口在 `src/layouts/AdminLayout.vue` 添加 `el-menu-item`；权限用 `ownerAdminOnly` / `fullAdminOnly` 等 meta
+
+## 图标
+
+- 管理页内 EP 按钮优先纯文字或 Element Plus 图标
+- 壳层导航、特殊装饰可用 `lucide-vue-next`，勿在 CRUD 表格操作列混用多套图标风格
+
+## 提交前自检
+
+- [ ] 列表、表单、弹窗、确认框均为 Element Plus
+- [ ] `defineOptions({ name })` 与路由 name 映射正确
+- [ ] 加载中、空数据、错误 Toast 已覆盖
+- [ ] 未引入与任务无关的样式或依赖

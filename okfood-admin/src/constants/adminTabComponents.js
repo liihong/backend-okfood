@@ -27,6 +27,7 @@ export const ADMIN_TAB_COMPONENT_NAMES = {
   'system-tenants': 'TenantsView',
   'system-membership-templates': 'MembershipTemplatesView',
   'system-retail-catalog': 'RetailCatalogView',
+  'system-dish-categories': 'DishCategoriesView',
   'marketing-coupon-templates': 'CouponTemplatesView',
   'marketing-member-coupons': 'MemberCouponGrantsView',
   'marketing-douyin-products': 'DouyinProductMappingsView',
