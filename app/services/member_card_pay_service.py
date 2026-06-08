@@ -596,7 +596,8 @@ def create_miniprogram_member_card_order(
             raise HTTPException(status_code=400, detail="该卡包未设置有效售价")
         amt = Decimal(price).quantize(Decimal("0.01"))
         ck = enum_card_kind_for_template(tpl)
-        d0 = delivery_start_date
+        # 老会员续卡：购卡时不校验/不改起送日，入账时沿用会员既有起送日
+        d0 = None if is_renewal else delivery_start_date
         if d0 is not None and d0 < min_member_delivery_start_shanghai():
             raise HTTPException(
                 status_code=400,
@@ -626,9 +627,10 @@ def create_miniprogram_member_card_order(
         k = (card_kind or "").strip()
         if k not in (CardOrderKind.WEEK.value, CardOrderKind.MONTH.value):
             raise HTTPException(status_code=400, detail="无效开卡类型")
-        if delivery_start_date is None:
+        d0 = None if is_renewal else delivery_start_date
+        if d0 is None and not is_renewal:
             raise HTTPException(status_code=400, detail="请选择起送日期")
-        if delivery_start_date < min_member_delivery_start_shanghai():
+        if d0 is not None and d0 < min_member_delivery_start_shanghai():
             raise HTTPException(
                 status_code=400,
                 detail="起送日期须不早于明日（上海业务日）",
@@ -645,7 +647,7 @@ def create_miniprogram_member_card_order(
             pay_status=CardOrderPayStatus.UNPAID.value,
             amount_yuan=amt,
             remark=rmk,
-            delivery_start_date=delivery_start_date,
+            delivery_start_date=d0,
             applied_to_member=False,
             out_trade_no=_new_temp_out_trade_no(),
             wx_transaction_id=None,

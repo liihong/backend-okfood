@@ -1096,101 +1096,68 @@ def _by_date_from_weekly_rows(rows: list[tuple[WeeklyMenuSlot, MenuDish]]) -> di
 
 
 
-def get_tomorrow_menu(db: Session, *, store_id: int) -> dict:
-
-    d = tomorrow_shanghai()
-
+def _get_menu_for_date(db: Session, *, d: date, store_id: int) -> dict:
     ws, slot = _week_start_and_slot(d)
-
     sid = int(store_id)
 
     row = db.execute(
-
         select(WeeklyMenuSlot, MenuDish)
-
         .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
-
         .where(
             WeeklyMenuSlot.store_id == sid,
             WeeklyMenuSlot.week_start == ws,
             WeeklyMenuSlot.slot == slot,
         )
-
     ).first()
 
     if row:
-
         _, dish = row
-
         out = {
-
             "date": d.isoformat(),
-
             "dish_id": dish.id,
-
             "title": dish.name,
-
             "desc": dish.description,
-
             "pic": dish.image_url,
-
             "price": _member_menu_price(dish),
-
         }
-
         out.update(_member_spice_public_fields(dish))
-
         return out
 
     row2 = db.execute(
-
         select(MenuSchedule, MenuDish)
-
         .join(MenuDish, MenuSchedule.dish_id == MenuDish.id)
-
         .where(MenuSchedule.menu_date == d, MenuSchedule.store_id == sid)
-
     ).first()
 
     if not row2:
-
         return {
-
             "date": d.isoformat(),
-
             "dish_id": None,
-
             "title": None,
-
             "desc": None,
-
             "pic": None,
-
             "price": None,
-
         }
 
     _, dish = row2
-
     out = {
-
         "date": d.isoformat(),
-
         "dish_id": dish.id,
-
         "title": dish.name,
-
         "desc": dish.description,
-
         "pic": dish.image_url,
-
         "price": _member_menu_price(dish),
-
     }
-
     out.update(_member_spice_public_fields(dish))
-
     return out
+
+
+def get_today_menu(db: Session, *, store_id: int) -> dict:
+    return _get_menu_for_date(db, d=today_shanghai(), store_id=store_id)
+
+
+def get_tomorrow_menu(db: Session, *, store_id: int) -> dict:
+    return _get_menu_for_date(db, d=tomorrow_shanghai(), store_id=store_id)
 
 
 
@@ -1363,6 +1330,10 @@ def get_menu_detail_by_dish_id(
         "is_enabled": dish.is_enabled,
 
         "category_id": dish.category_id,
+
+        "meat_category_id": dish.meat_category_id,
+
+        "dish_type_category_id": dish.dish_type_category_id,
 
         "price": _member_menu_price(dish),
 

@@ -36,21 +36,15 @@ def _public_url_for_key(key: str) -> str:
     return f"https://{b}.{ep}/{key}"
 
 
-def upload_member_avatar_bytes(data: bytes, content_type: str | None, filename: str | None) -> str:
-    """会员头像：优先 OSS，否则与菜品图相同写入本地 UPLOAD_DIR。"""
-    ct, ext = validate_image_bytes(data, content_type, filename)
-
-    if not oss_configured():
-        return save_image_bytes(data, content_type, filename)
-
-    now = datetime.now()
+def _build_object_key(*segments: str) -> str:
     prefix = settings.OSS_KEY_PREFIX.strip().strip("/")
-    parts = ["avatars", f"{now:%Y}", f"{now:%m}", f"{uuid.uuid4().hex}{ext}"]
+    parts = [s.strip("/") for s in segments if s]
     if prefix:
-        object_key = f"{prefix}/" + "/".join(parts)
-    else:
-        object_key = "/".join(parts)
+        return f"{prefix}/" + "/".join(parts)
+    return "/".join(parts)
 
+
+def _put_object_to_oss(data: bytes, content_type: str, object_key: str) -> str:
     endpoint = settings.OSS_ENDPOINT.strip()
     if not endpoint.startswith("http://") and not endpoint.startswith("https://"):
         endpoint = f"https://{endpoint}"
@@ -61,7 +55,7 @@ def upload_member_avatar_bytes(data: bytes, content_type: str | None, filename: 
             settings.OSS_ACCESS_KEY_SECRET.strip(),
         )
         bucket = oss2.Bucket(auth, endpoint, settings.OSS_BUCKET.strip())
-        headers = {"Content-Type": ct}
+        headers = {"Content-Type": content_type}
         bucket.put_object(object_key, data, headers=headers)
     except oss2.exceptions.OssError as e:
         msg = getattr(getattr(e, "result", None), "message", None) or str(e)
@@ -70,3 +64,27 @@ def upload_member_avatar_bytes(data: bytes, content_type: str | None, filename: 
         raise HTTPException(status_code=502, detail="对象存储上传失败，请稍后重试") from e
 
     return _public_url_for_key(object_key)
+
+
+def upload_image_bytes(data: bytes, content_type: str | None, filename: str | None) -> str:
+    """管理端通用图片（菜品、Banner 等）：优先 OSS，否则写入本地 UPLOAD_DIR。"""
+    ct, ext = validate_image_bytes(data, content_type, filename)
+
+    if not oss_configured():
+        return save_image_bytes(data, content_type, filename)
+
+    now = datetime.now()
+    object_key = _build_object_key("images", f"{now:%Y}", f"{now:%m}", f"{uuid.uuid4().hex}{ext}")
+    return _put_object_to_oss(data, ct, object_key)
+
+
+def upload_member_avatar_bytes(data: bytes, content_type: str | None, filename: str | None) -> str:
+    """会员头像：优先 OSS，否则与菜品图相同写入本地 UPLOAD_DIR。"""
+    ct, ext = validate_image_bytes(data, content_type, filename)
+
+    if not oss_configured():
+        return save_image_bytes(data, content_type, filename)
+
+    now = datetime.now()
+    object_key = _build_object_key("avatars", f"{now:%Y}", f"{now:%m}", f"{uuid.uuid4().hex}{ext}")
+    return _put_object_to_oss(data, ct, object_key)

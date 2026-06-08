@@ -1,6 +1,14 @@
 {
   "pages": [
     {
+      "path": "pages/home/index",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#f8fafc",
+        "disableScroll": true
+      }
+    },
+    {
       "path": "pages/order/index",
       "style": {
         "navigationStyle": "custom",
@@ -65,9 +73,20 @@
         "navigationStyle": "custom",
         "backgroundColor": "#ffffff"
       }
+    },
+    {
+      "path": "pages/webview/index",
+      "style": {
+        "navigationBarTitleText": "详情",
+        "backgroundColor": "#ffffff"
+      }
     }
   ],
   "preloadRule": {
+    "pages/home/index": {
+      "network": "all",
+      "packages": ["packageOrder"]
+    },
     "pages/mine/index": {
       "network": "all",
       "packages": ["packageUser", "packageOrder"]
@@ -218,6 +237,12 @@
     "borderStyle": "black",
     "backgroundColor": "#ffffff",
     "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "首页",
+        "iconPath": "static/home-nor.png",
+        "selectedIconPath": "static/home-sel.png"
+      },
       {
         "pagePath": "pages/order/index",
         "text": "菜单",

@@ -33,12 +33,15 @@ export function useAdminSystemNotifications() {
     if (!silent) loading.value = true
     try {
       const data = await apiJson(
-        '/api/admin/system-notifications?unacknowledged_only=false&limit=10',
+        '/api/admin/system-notifications?unacknowledged_only=true&limit=50',
         {},
         { auth: true },
       )
-      notifications.value = Array.isArray(data?.items) ? data.items : []
-      unacknowledgedCount.value = Number(data?.unacknowledged_count) || 0
+      const items = Array.isArray(data?.items) ? data.items : []
+      notifications.value = items
+      unacknowledgedCount.value =
+        Number(data?.unacknowledged_count) || items.length
+      handleRetailOrderNotifications(items)
     } catch {
       if (!silent) {
         notifications.value = []

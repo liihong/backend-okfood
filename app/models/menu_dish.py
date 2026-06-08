@@ -24,6 +24,12 @@ class MenuDish(Base):
     category_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("product_category.id", onupdate="CASCADE", ondelete="SET NULL"), nullable=True
     )
+    meat_category_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("product_category.id", onupdate="CASCADE", ondelete="SET NULL"), nullable=True
+    )
+    dish_type_category_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("product_category.id", onupdate="CASCADE", ondelete="SET NULL"), nullable=True
+    )
     single_order_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     spice_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     internal_view_sop: Mapped[str | None] = mapped_column(Text, nullable=True)

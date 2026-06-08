@@ -1,11 +1,11 @@
-"""管理端：通用图片上传（菜品图等）。"""
+"""管理端：通用图片上传（菜品图、Banner 等）。"""
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 
 from app.core.deps import admin_staff_subject
 from app.core.limiter import limiter
 from app.schemas.admin import FileUploadOut
-from app.services.upload_service import save_image_bytes
+from app.services.oss_upload_service import upload_image_bytes
 from app.utils.response import dump_model, success
 
 router = APIRouter(prefix="/admin", tags=["管理端"])
@@ -21,5 +21,5 @@ async def admin_upload_image(
     _ = request
     _ = admin_username
     data = await file.read()
-    url = save_image_bytes(data, file.content_type, file.filename)
+    url = upload_image_bytes(data, file.content_type, file.filename)
     return success(data=dump_model(FileUploadOut(url=url)), msg="上传成功")

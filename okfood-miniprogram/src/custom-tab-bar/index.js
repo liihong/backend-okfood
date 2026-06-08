@@ -1,5 +1,11 @@
 const MEMBER_LIST = [
   {
+    pagePath: '/pages/home/index',
+    text: '首页',
+    iconPath: '/static/home-nor.png',
+    selectedIconPath: '/static/home-sel.png',
+  },
+  {
     pagePath: '/pages/order/index',
     text: '菜单',
     iconPath: '/static/caidan-nor.png',

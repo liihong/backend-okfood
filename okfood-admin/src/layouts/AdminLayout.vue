@@ -405,6 +405,7 @@ function onTabClose(tab) {
               <span class="menu-item-label">小程序营销</span>
             </div>
           </template>
+          <el-menu-item index="/marketing/home-banners">首页 Banner</el-menu-item>
           <el-menu-item index="/marketing/coupon-templates">优惠券管理</el-menu-item>
           <el-menu-item index="/marketing/member-coupons">优惠券发放</el-menu-item>
           <el-menu-item index="/marketing/douyin-products">抖音商品设置</el-menu-item>

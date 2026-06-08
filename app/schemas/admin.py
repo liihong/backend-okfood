@@ -44,7 +44,9 @@ class DishUpsertIn(BaseModel):
     description: str | None = Field(None, max_length=1000)
     image_url: str | None = Field(None, max_length=2_000_000)
     is_enabled: bool = True
-    category_id: int | None = Field(default=None, description="商品分类主键，可空")
+    category_id: int | None = Field(default=None, description="已废弃，请使用 meat_category_id / dish_type_category_id")
+    meat_category_id: int | None = Field(default=None, description="肉类二级分类，可空")
+    dish_type_category_id: int | None = Field(default=None, description="菜品分类二级分类，可空")
     single_order_price_yuan: Decimal | None = Field(
         None,
         ge=0,
@@ -66,7 +68,9 @@ class DishAdminOut(BaseModel):
     description: str | None
     image_url: str | None
     is_enabled: bool
-    category_id: int | None
+    category_id: int | None = None
+    meat_category_id: int | None = None
+    dish_type_category_id: int | None = None
     single_order_price_yuan: str | None = Field(None, description="单点售价(元)，字符串保留两位小数")
     spice_level: DishSpiceLevelCode | None = None
     internal_view_sop: str | None = None
@@ -74,9 +78,9 @@ class DishAdminOut(BaseModel):
 
 
 class FileUploadOut(BaseModel):
-    """本地上传成功后的地址，可直接写入菜品的 image_url。"""
+    """上传成功后的地址，可直接写入 image_url 等字段。"""
 
-    url: str = Field(..., description="图片绝对或相对 URL（由 BASE_URL 与路径拼接）")
+    url: str = Field(..., description="图片 URL（OSS 自定义域名或本地 BASE_URL 拼接路径）")
 
 
 class CategoryAdminOut(BaseModel):

@@ -471,6 +471,8 @@ def _dish_admin_out_from_row(
         image_url=None if lite else row.image_url,
         is_enabled=row.is_enabled,
         category_id=row.category_id,
+        meat_category_id=row.meat_category_id,
+        dish_type_category_id=row.dish_type_category_id,
         single_order_price_yuan=_dish_price_yuan_str(row.single_order_price_yuan),
         spice_level=_dish_spice_level_out(row.spice_level),
         internal_view_sop=row.internal_view_sop if include_sop else None,
@@ -486,16 +488,44 @@ def get_dish_admin(db: Session, dish_id: int, *, store_id: int) -> DishAdminOut:
     return _dish_admin_out_from_row(row, include_sop=True)
 
 
+def _validate_dish_leaf_category(
+    db: Session,
+    *,
+    category_id: int | None,
+    store_id: int,
+    parent_code: str,
+    field_label: str,
+) -> int | None:
+    if category_id is None:
+        return None
+    cat = db.get(ProductCategory, int(category_id))
+    sid = int(store_id)
+    if cat is None or int(cat.store_id) != sid:
+        raise HTTPException(status_code=400, detail=f"{field_label}不存在")
+    if not cat.is_active:
+        raise HTTPException(status_code=400, detail=f"{field_label}已停用")
+    if _category_has_children(db, category_id=int(cat.id), store_id=sid):
+        raise HTTPException(status_code=400, detail=f"请选择{field_label}下的具体子类")
+    if cat.parent_id is None:
+        raise HTTPException(status_code=400, detail=f"请选择{field_label}下的具体子类")
+    parent = db.get(ProductCategory, int(cat.parent_id))
+    if parent is None or parent.code != parent_code:
+        raise HTTPException(status_code=400, detail=f"{field_label}类型不匹配")
+    return int(cat.id)
+
+
 def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminOut:
     sid = int(store_id)
-    if body.category_id is not None:
-        cat = db.get(ProductCategory, body.category_id)
-        if cat is None or int(cat.store_id) != sid:
-            raise HTTPException(status_code=400, detail="分类不存在")
-        if not cat.is_active:
-            raise HTTPException(status_code=400, detail="分类已停用")
-        if _category_has_children(db, category_id=int(cat.id), store_id=sid):
-            raise HTTPException(status_code=400, detail="请选择二级分类（一级分类下仍有子类）")
+    meat_category_id = _validate_dish_leaf_category(
+        db, category_id=body.meat_category_id, store_id=sid, parent_code="meat", field_label="肉类分类"
+    )
+    dish_type_category_id = _validate_dish_leaf_category(
+        db,
+        category_id=body.dish_type_category_id,
+        store_id=sid,
+        parent_code="dish_type",
+        field_label="菜品分类",
+    )
     if body.id is not None:
         row = db.get(MenuDish, body.id)
         if not row:
@@ -506,7 +536,9 @@ def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminO
         row.description = body.description
         row.image_url = body.image_url
         row.is_enabled = body.is_enabled
-        row.category_id = body.category_id
+        row.category_id = None
+        row.meat_category_id = meat_category_id
+        row.dish_type_category_id = dish_type_category_id
         row.single_order_price_yuan = body.single_order_price_yuan
         row.spice_level = body.spice_level
         row.internal_view_sop = body.internal_view_sop
@@ -517,7 +549,9 @@ def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminO
             description=body.description,
             image_url=body.image_url,
             is_enabled=body.is_enabled,
-            category_id=body.category_id,
+            category_id=None,
+            meat_category_id=meat_category_id,
+            dish_type_category_id=dish_type_category_id,
             single_order_price_yuan=body.single_order_price_yuan,
             spice_level=body.spice_level,
             internal_view_sop=body.internal_view_sop,
@@ -543,6 +577,8 @@ def list_dishes_admin(
         MenuDish.name,
         MenuDish.is_enabled,
         MenuDish.category_id,
+        MenuDish.meat_category_id,
+        MenuDish.dish_type_category_id,
         MenuDish.single_order_price_yuan,
         MenuDish.spice_level,
         MenuDish.created_at,
@@ -561,10 +597,15 @@ def list_dishes_admin(
         stmt = stmt.where(MenuDish.name.contains(q.strip()))
     if category_id is not None:
         if int(category_id) == 0:
-            stmt = stmt.where(MenuDish.category_id.is_(None))
+            stmt = stmt.where(
+                MenuDish.meat_category_id.is_(None),
+                MenuDish.dish_type_category_id.is_(None),
+            )
         else:
             ids = _category_descendant_ids(db, category_id=int(category_id), store_id=sid)
-            stmt = stmt.where(MenuDish.category_id.in_(ids))
+            stmt = stmt.where(
+                or_(MenuDish.meat_category_id.in_(ids), MenuDish.dish_type_category_id.in_(ids))
+            )
     rows = db.scalars(stmt).all()
     return [_dish_admin_out_from_row(r, include_sop=False, lite=lite) for r in rows]
 
@@ -744,7 +785,14 @@ def delete_category_admin(db: Session, *, category_id: int, store_id: int) -> No
     cnt = db.scalar(
         select(func.count())
         .select_from(MenuDish)
-        .where(MenuDish.store_id == int(store_id), MenuDish.category_id == int(category_id))
+        .where(
+            MenuDish.store_id == int(store_id),
+            or_(
+                MenuDish.category_id == int(category_id),
+                MenuDish.meat_category_id == int(category_id),
+                MenuDish.dish_type_category_id == int(category_id),
+            ),
+        )
     )
     if int(cnt or 0) > 0:
         raise HTTPException(status_code=400, detail="该分类下仍有菜品，无法删除")
@@ -764,6 +812,8 @@ def _weekly_slots_raw(rows: list) -> list[dict]:
             "name": d.name,
             "is_enabled": d.is_enabled,
             "category_id": d.category_id,
+            "meat_category_id": d.meat_category_id,
+            "dish_type_category_id": d.dish_type_category_id,
             "single_order_price_yuan": _dish_price_yuan_str(d.single_order_price_yuan),
             "total_stock": int(w.total_stock) if w.total_stock is not None else None,
         }

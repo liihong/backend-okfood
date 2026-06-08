@@ -9,6 +9,12 @@ const CUSTOM_TAB_BAR_HEIGHT_PX = 48
  */
 const TAB_BAR_MEMBER_LIST = [
   {
+    pagePath: '/pages/home/index',
+    text: '首页',
+    iconPath: '/static/home-nor.png',
+    selectedIconPath: '/static/home-sel.png',
+  },
+  {
     pagePath: '/pages/order/index',
     text: '菜单',
     iconPath: '/static/caidan-nor.png',
@@ -87,8 +93,9 @@ export function syncCustomTabBar() {
     selected = route.includes('profile') ? 1 : 0
   } else {
     role = 'member'
-    if (route.includes('orders')) selected = 1
-    else if (route.includes('mine')) selected = 2
+    if (route.includes('orders')) selected = 2
+    else if (route.includes('mine')) selected = 3
+    else if (route.includes('order')) selected = 1
     else selected = 0
   }
   const list = role === 'rider' ? TAB_BAR_RIDER_LIST : TAB_BAR_MEMBER_LIST

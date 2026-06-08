@@ -266,8 +266,7 @@ import {
 } from '@/utils/addressApi.js'
 import { consumeMinePageNeedsRefresh, markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 
-/** 抖音验券入口：下一版再开放 */
-const showDouyinRedeemMenu = false
+const showDouyinRedeemMenu = true
 import { guardMemberDeliverySelfService } from '@/utils/memberSelfServiceGuard.js'
 import { ymdTodayShanghai } from '@/utils/memberDeliveryDate.js'
 import {

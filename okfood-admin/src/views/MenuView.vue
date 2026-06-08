@@ -10,7 +10,7 @@ import {
   handleAdminLogout,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
-import { buildCategoryTree, categoryPathLabel, toCascaderOptions } from '../utils/categoryTree.js'
+import { buildCategoryTree, categoryChildrenByParentCode, toCascaderOptions } from '../utils/categoryTree.js'
 
 const dishList = ref([])
 const categoriesList = ref([])
@@ -35,18 +35,52 @@ const activeCategories = computed(() =>
 
 const categoryTree = computed(() => buildCategoryTree(activeCategories.value))
 
-const dishCategoryCascaderOptions = computed(() =>
-  toCascaderOptions(categoryTree.value, { leafOnly: true }),
-)
+const meatCategoryOptions = computed(() => categoryChildrenByParentCode(activeCategories.value, 'meat'))
+
+const dishTypeCategoryOptions = computed(() => categoryChildrenByParentCode(activeCategories.value, 'dish_type'))
 
 const dishFilterCascaderOptions = computed(() => {
   const uncategorized = { value: 0, label: '未分类' }
   return [uncategorized, ...toCascaderOptions(categoryTree.value, { leafOnly: false })]
 })
 
-function categoryLabel(categoryId) {
-  return categoryPathLabel(categoryId, categoriesList.value)
+function dishTypeLabel(d) {
+  if (d.dish_type_category_id == null) return '未分类'
+  const cat = categoriesList.value.find((c) => c.id === d.dish_type_category_id)
+  return cat?.name || '未知'
 }
+
+const UNCategorized_MEAT_KEY = '__none__'
+
+const dishesByMeatGroup = computed(() => {
+  const byKey = new Map()
+  const ordered = []
+
+  for (const c of meatCategoryOptions.value) {
+    const group = { key: c.id, label: c.name, dishes: [] }
+    byKey.set(c.id, group)
+    ordered.push(group)
+  }
+
+  const unassigned = { key: UNCategorized_MEAT_KEY, label: '未设置肉类', dishes: [] }
+
+  for (const d of filteredDishes.value) {
+    const key = d.meat_category_id ?? UNCategorized_MEAT_KEY
+    if (key === UNCategorized_MEAT_KEY) {
+      unassigned.dishes.push(d)
+    } else if (byKey.has(key)) {
+      byKey.get(key).dishes.push(d)
+    } else {
+      unassigned.dishes.push(d)
+    }
+  }
+
+  const result = ordered.filter((g) => g.dishes.length > 0)
+  if (unassigned.dishes.length > 0) result.push(unassigned)
+  return result
+})
+
+const hasVisibleDishes = computed(() => dishesByMeatGroup.value.length > 0)
 
 const onDishImgError = (e) => {
   const el = e.target
@@ -62,7 +96,8 @@ const dishForm = reactive({
   single_order_price_yuan: '',
   image_url: '',
   is_enabled: true,
-  category_id: null,
+  meat_category_id: null,
+  dish_type_category_id: null,
   spice_level: '',
   internal_view_sop: '',
 })
@@ -131,7 +166,8 @@ function resetDishForm() {
   dishForm.single_order_price_yuan = ''
   dishForm.image_url = ''
   dishForm.is_enabled = true
-  dishForm.category_id = null
+  dishForm.meat_category_id = null
+  dishForm.dish_type_category_id = null
   dishForm.spice_level = ''
   dishForm.internal_view_sop = ''
 }
@@ -153,7 +189,8 @@ const openDishEditorEdit = async (row) => {
       : ''
   dishForm.image_url = row.image_url || ''
   dishForm.is_enabled = row.is_enabled !== false
-  dishForm.category_id = row.category_id != null ? row.category_id : null
+  dishForm.meat_category_id = row.meat_category_id != null ? row.meat_category_id : null
+  dishForm.dish_type_category_id = row.dish_type_category_id != null ? row.dish_type_category_id : null
   dishForm.spice_level = row.spice_level != null ? String(row.spice_level).trim().toLowerCase() : ''
   dishForm.internal_view_sop = ''
   showDishModal.value = true
@@ -170,6 +207,12 @@ const openDishEditorEdit = async (row) => {
       }
       if (detail.single_order_price_yuan != null && String(detail.single_order_price_yuan).trim() !== '') {
         dishForm.single_order_price_yuan = String(detail.single_order_price_yuan).trim()
+      }
+      if (detail.meat_category_id != null) {
+        dishForm.meat_category_id = detail.meat_category_id
+      }
+      if (detail.dish_type_category_id != null) {
+        dishForm.dish_type_category_id = detail.dish_type_category_id
       }
     }
   } catch (e) {
@@ -231,10 +274,14 @@ async function saveDish() {
     showToast('请先登录', 'error')
     return
   }
-  const categoryId =
-    dishForm.category_id === '' || dishForm.category_id == null
+  const meatCategoryId =
+    dishForm.meat_category_id === '' || dishForm.meat_category_id == null
       ? null
-      : parseInt(String(dishForm.category_id), 10)
+      : parseInt(String(dishForm.meat_category_id), 10)
+  const dishTypeCategoryId =
+    dishForm.dish_type_category_id === '' || dishForm.dish_type_category_id == null
+      ? null
+      : parseInt(String(dishForm.dish_type_category_id), 10)
   const priceStr = String(dishForm.single_order_price_yuan ?? '').trim()
   let single_order_price_yuan = null
   if (priceStr !== '') {
@@ -251,7 +298,8 @@ async function saveDish() {
     description: (dishForm.description || '').trim() || null,
     image_url: (dishForm.image_url || '').trim() || null,
     is_enabled: Boolean(dishForm.is_enabled),
-    category_id: Number.isFinite(categoryId) ? categoryId : null,
+    meat_category_id: Number.isFinite(meatCategoryId) ? meatCategoryId : null,
+    dish_type_category_id: Number.isFinite(dishTypeCategoryId) ? dishTypeCategoryId : null,
     single_order_price_yuan,
     spice_level: spiceRaw === '' ? null : spiceRaw,
     internal_view_sop: (dishForm.internal_view_sop || '').trim() || null,
@@ -324,45 +372,80 @@ onMounted(() => {
           @change="fetchDishes"
         />
       </div>
-      <p v-if="dishesLoading" class="dish-toolbar-status">正在加载菜品库…</p>
-      <p v-else class="dish-toolbar-status">共 {{ filteredDishes.length }} 道</p>
-    </div>
-    <div class="menu-grid">
-      <div v-for="d in filteredDishes" :key="d.id" class="menu-card">
-        <div class="menu-card-img">
-          <img
-            :src="dishImageDisplayUrl(d.image_url) || MENU_IMG_FALLBACK"
-            :alt="d.name"
-            loading="lazy"
-            @error="onDishImgError"
-          />
-          <div class="menu-date-tag">#{{ d.id }}</div>
-          <div class="menu-sync-badge" :class="{ 'menu-sync-badge--off': d.is_enabled === false }">
-            {{ d.is_enabled !== false ? '上架' : '停用' }}
-          </div>
-        </div>
-        <p class="menu-card-meta">{{ categoryLabel(d.category_id) }} · 辣度 {{ dishSpiceBadge(d) }}</p>
-        <div class="menu-card-body">
-          <h4 class="menu-dish-title">【 {{ d.name }} 】</h4>
-          <p class="menu-dish-desc">{{ d.description || '—' }}</p>
-          <p
-            v-if="d.single_order_price_yuan != null && String(d.single_order_price_yuan).trim() !== ''"
-            class="menu-dish-price"
-          >
-            单点 {{ '\u00a5' }}{{ d.single_order_price_yuan }}
-          </p>
-          <div class="menu-card-actions menu-card-actions--spread">
-            <button type="button" class="menu-btn-ghost" @click="openDishEditorEdit(d)">编辑</button>
-            <button type="button" class="menu-btn-danger" @click="deleteDish(d)">
-              <Trash2 :size="16" stroke-width="2" /> 删除
-            </button>
-          </div>
-        </div>
+      <div class="dish-toolbar-actions">
+        <p v-if="dishesLoading" class="dish-toolbar-status">正在加载…</p>
+        <p v-else class="dish-toolbar-status">共 {{ filteredDishes.length }} 道</p>
+        <button type="button" class="dish-toolbar-add-btn" @click="openDishEditorAdd">+ 新建菜品</button>
       </div>
-      <button type="button" class="menu-card menu-add-card" @click="openDishEditorAdd">
-        <span class="menu-add-plus">+</span>
-        <span class="menu-add-label">新建菜品</span>
-      </button>
+    </div>
+
+    <div v-if="dishesLoading && !dishList.length" class="dish-catalog-empty">正在加载菜品库…</div>
+    <div v-else-if="!hasVisibleDishes" class="dish-catalog-empty">
+      <p>暂无菜品</p>
+      <button type="button" class="dish-toolbar-add-btn" @click="openDishEditorAdd">新建第一道菜品</button>
+    </div>
+
+    <div v-else class="dish-catalog">
+      <section
+        v-for="group in dishesByMeatGroup"
+        :key="group.key"
+        class="dish-meat-section"
+      >
+        <header class="dish-meat-section__head">
+          <h3 class="dish-meat-section__title">{{ group.label }}</h3>
+          <span class="dish-meat-section__count">{{ group.dishes.length }} 道</span>
+        </header>
+
+        <div class="dish-compact-grid">
+          <article
+            v-for="d in group.dishes"
+            :key="d.id"
+            class="dish-compact-card"
+            :class="{ 'dish-compact-card--off': d.is_enabled === false }"
+          >
+            <div class="dish-compact-card__img">
+              <img
+                :src="dishImageDisplayUrl(d.image_url) || MENU_IMG_FALLBACK"
+                :alt="d.name"
+                loading="lazy"
+                @error="onDishImgError"
+              />
+            </div>
+            <div class="dish-compact-card__body">
+              <div class="dish-compact-card__head">
+                <h4 class="dish-compact-card__name" :title="d.name">{{ d.name }}</h4>
+                <span
+                  class="dish-compact-card__status"
+                  :class="{ 'dish-compact-card__status--off': d.is_enabled === false }"
+                >
+                  {{ d.is_enabled !== false ? '上架' : '停用' }}
+                </span>
+              </div>
+              <p class="dish-compact-card__meta">
+                <span>{{ dishTypeLabel(d) }}</span>
+                <span class="dish-compact-card__dot">·</span>
+                <span>辣度 {{ dishSpiceBadge(d) }}</span>
+                <span v-if="d.single_order_price_yuan != null && String(d.single_order_price_yuan).trim() !== ''" class="dish-compact-card__dot">·</span>
+                <span
+                  v-if="d.single_order_price_yuan != null && String(d.single_order_price_yuan).trim() !== ''"
+                  class="dish-compact-card__price"
+                >
+                  ¥{{ d.single_order_price_yuan }}
+                </span>
+              </p>
+              <p v-if="d.description" class="dish-compact-card__desc">{{ d.description }}</p>
+              <div class="dish-compact-card__actions">
+                <button type="button" class="dish-compact-btn dish-compact-btn--edit" @click="openDishEditorEdit(d)">
+                  编辑
+                </button>
+                <button type="button" class="dish-compact-btn dish-compact-btn--delete" @click="deleteDish(d)">
+                  <Trash2 :size="14" stroke-width="2" />
+                </button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
     </div>
 
     <div
@@ -432,16 +515,38 @@ onMounted(() => {
 
           <div class="menu-editor-row">
             <div class="menu-editor-field menu-editor-field-grow">
-              <label class="menu-editor-label" for="dish-category">分类</label>
-              <el-cascader
-                id="dish-category"
-                v-model="dishForm.category_id"
-                :options="dishCategoryCascaderOptions"
-                :props="{ emitPath: false }"
-                class="menu-editor-input-el dish-category-cascader"
+              <label class="menu-editor-label" for="dish-meat-category">肉类</label>
+              <el-select
+                id="dish-meat-category"
+                v-model="dishForm.meat_category_id"
+                class="menu-editor-input-el"
                 clearable
-                placeholder="请选择二级分类"
-              />
+                placeholder="请选择肉类"
+              >
+                <el-option
+                  v-for="c in meatCategoryOptions"
+                  :key="c.id"
+                  :label="c.name"
+                  :value="c.id"
+                />
+              </el-select>
+            </div>
+            <div class="menu-editor-field menu-editor-field-grow">
+              <label class="menu-editor-label" for="dish-type-category">菜品分类</label>
+              <el-select
+                id="dish-type-category"
+                v-model="dishForm.dish_type_category_id"
+                class="menu-editor-input-el"
+                clearable
+                placeholder="请选择菜品分类"
+              >
+                <el-option
+                  v-for="c in dishTypeCategoryOptions"
+                  :key="c.id"
+                  :label="c.name"
+                  :value="c.id"
+                />
+              </el-select>
             </div>
             <div class="menu-editor-field dish-enabled-field">
               <label class="menu-editor-label" for="dish-enabled">状态</label>
@@ -516,17 +621,216 @@ onMounted(() => {
   flex: 1;
   min-width: 0;
 }
+.dish-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+.dish-toolbar-add-btn {
+  padding: 0.45rem 0.9rem;
+  border: none;
+  border-radius: 0.55rem;
+  background: #0e5a44;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: filter 0.2s;
+}
+.dish-toolbar-add-btn:hover {
+  filter: brightness(1.06);
+}
 .dish-toolbar-category {
   width: 200px;
   min-width: 160px;
-}
-.dish-category-cascader {
-  width: 100%;
 }
 .dish-toolbar-search-input {
   flex: 1;
   min-width: 0;
 }
+
+.dish-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.dish-catalog-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem 1rem;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 700;
+}
+.dish-catalog-empty p {
+  margin: 0;
+}
+
+.dish-meat-section__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 2px solid #e2e8f0;
+}
+.dish-meat-section__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 900;
+  color: #0e5a44;
+  letter-spacing: 0.02em;
+}
+.dish-meat-section__count {
+  font-size: 11px;
+  font-weight: 800;
+  color: #94a3b8;
+}
+
+.dish-compact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 0.55rem;
+}
+
+.dish-compact-card {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.55rem 0.6rem;
+  background: #fff;
+  border: 1px solid #eef2f6;
+  border-radius: 0.65rem;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.dish-compact-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+.dish-compact-card--off {
+  opacity: 0.72;
+}
+
+.dish-compact-card__img {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 0.45rem;
+  overflow: hidden;
+  background: #f1f5f9;
+}
+.dish-compact-card__img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dish-compact-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.dish-compact-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.dish-compact-card__name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 900;
+  color: #1e293b;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.dish-compact-card__status {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 99px;
+  font-size: 9px;
+  font-weight: 900;
+  background: #fef9c3;
+  color: #0e5a44;
+}
+.dish-compact-card__status--off {
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+.dish-compact-card__meta {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  line-height: 1.4;
+}
+.dish-compact-card__dot {
+  margin: 0 0.15rem;
+  color: #cbd5e1;
+}
+.dish-compact-card__price {
+  color: #0f766e;
+  font-weight: 800;
+}
+
+.dish-compact-card__desc {
+  margin: 0;
+  font-size: 10px;
+  color: #94a3b8;
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+}
+
+.dish-compact-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+}
+.dish-compact-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+.dish-compact-btn--edit {
+  padding: 0.2rem 0.55rem;
+  font-size: 10px;
+  font-weight: 800;
+  background: #f8fafc;
+  color: #475569;
+}
+.dish-compact-btn--edit:hover {
+  background: #e2e8f0;
+}
+.dish-compact-btn--delete {
+  padding: 0.2rem 0.35rem;
+  background: #fff1f2;
+  color: #e11d48;
+}
+.dish-compact-btn--delete:hover {
+  background: #ffe4e6;
+}
+
 .menu-dish-photo-upload {
   display: block;
   width: 100%;

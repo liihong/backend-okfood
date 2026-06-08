@@ -4,10 +4,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app.core.deps import SessionDep, public_store_dep, PublicStoreContext
-from app.services.member_service import get_menu_detail_by_dish_id, get_tomorrow_menu, get_weekly_menu
+from app.services.member_service import get_menu_detail_by_dish_id, get_today_menu, get_tomorrow_menu, get_weekly_menu
 from app.utils.response import success
 
 router = APIRouter(prefix="/menu", tags=["菜单"])
+
+
+@router.get("/today")
+def today_menu(db: SessionDep, store_ctx: PublicStoreContext = Depends(public_store_dep)):
+    """查询今日餐谱（上海业务日）。"""
+    return success(data=get_today_menu(db, store_id=int(store_ctx.store_id)), msg="获取成功")
 
 
 @router.get("/tomorrow")

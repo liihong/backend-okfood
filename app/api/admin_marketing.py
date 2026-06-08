@@ -26,6 +26,18 @@ from app.services.marketing.member_coupon_service import (
     list_member_coupons_paged,
     revoke_member_coupon,
 )
+from app.schemas.marketing.home_banner import (
+    HomeBannerActiveIn,
+    HomeBannerCreateIn,
+    HomeBannerPatchIn,
+)
+from app.services.home_banner_service import (
+    create_home_banner,
+    delete_home_banner,
+    list_home_banners_admin,
+    patch_home_banner,
+    set_home_banner_active,
+)
 from app.utils.response import dump_model, page_response, success
 
 router = APIRouter(prefix="/admin/marketing", tags=["管理端-小程序营销"])
@@ -183,3 +195,74 @@ def marketing_revoke_member_coupon(
     _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     out = revoke_member_coupon(db, coupon_id=int(coupon_id), store_id=sid)
     return success(data=dump_model(out), msg="优惠券已作废")
+
+
+@router.get("/home-banners")
+def marketing_list_home_banners(
+    db: SessionDep,
+    admin_username: Annotated[str, Depends(admin_staff_subject)],
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """首页 Banner 列表（含未启用）。"""
+    _ = admin_username
+    _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    items = list_home_banners_admin(db, store_id=sid)
+    return success(data=[dump_model(x) for x in items], msg="获取成功")
+
+
+@router.post("/home-banners")
+def marketing_create_home_banner(
+    db: SessionDep,
+    admin_username: Annotated[str, Depends(admin_staff_subject)],
+    body: HomeBannerCreateIn,
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """创建首页 Banner。"""
+    _ = admin_username
+    _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = create_home_banner(db, store_id=sid, body=body)
+    return success(data=dump_model(out), msg="Banner 已创建")
+
+
+@router.patch("/home-banners/{banner_id}")
+def marketing_patch_home_banner(
+    banner_id: int,
+    db: SessionDep,
+    admin_username: Annotated[str, Depends(admin_staff_subject)],
+    body: HomeBannerPatchIn,
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """编辑首页 Banner。"""
+    _ = admin_username
+    _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = patch_home_banner(db, banner_id=int(banner_id), store_id=sid, body=body)
+    return success(data=dump_model(out), msg="Banner 已更新")
+
+
+@router.delete("/home-banners/{banner_id}")
+def marketing_delete_home_banner(
+    banner_id: int,
+    db: SessionDep,
+    admin_username: Annotated[str, Depends(admin_staff_subject)],
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """删除首页 Banner。"""
+    _ = admin_username
+    _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    delete_home_banner(db, banner_id=int(banner_id), store_id=sid)
+    return success(msg="Banner 已删除")
+
+
+@router.patch("/home-banners/{banner_id}/active")
+def marketing_set_home_banner_active(
+    banner_id: int,
+    db: SessionDep,
+    admin_username: Annotated[str, Depends(admin_staff_subject)],
+    body: HomeBannerActiveIn,
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """首页 Banner 上下架。"""
+    _ = admin_username
+    _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = set_home_banner_active(db, banner_id=int(banner_id), store_id=sid, is_active=bool(body.is_active))
+    return success(data=dump_model(out), msg="状态已更新")

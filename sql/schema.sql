@@ -219,7 +219,9 @@ CREATE TABLE IF NOT EXISTS `menu_dish` (
   `description` VARCHAR(1000) NULL,
   `image_url` TEXT NULL,
   `is_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
-  `category_id` BIGINT UNSIGNED NULL COMMENT '所属分类（商品库）',
+  `category_id` BIGINT UNSIGNED NULL COMMENT '所属分类（商品库，已废弃）',
+  `meat_category_id` BIGINT UNSIGNED NULL COMMENT '肉类二级分类',
+  `dish_type_category_id` BIGINT UNSIGNED NULL COMMENT '菜品分类二级分类',
   `single_order_price_yuan` DECIMAL(12, 2) NULL COMMENT '单点售价(元)',
   `spice_level` VARCHAR(16) NULL DEFAULT NULL COMMENT '辣度代码：none/mild/medium/hot',
   `internal_view_sop` TEXT NULL COMMENT '内部查看操作说明，不对会员展示',
@@ -228,7 +230,13 @@ CREATE TABLE IF NOT EXISTS `menu_dish` (
   PRIMARY KEY (`id`),
   KEY `idx_menu_dish_enabled` (`is_enabled`),
   KEY `idx_menu_dish_category` (`category_id`),
+  KEY `idx_menu_dish_meat_category` (`meat_category_id`),
+  KEY `idx_menu_dish_dish_type_category` (`dish_type_category_id`),
   CONSTRAINT `fk_menu_dish_category` FOREIGN KEY (`category_id`) REFERENCES `product_category` (`id`)
+    ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_menu_dish_meat_category` FOREIGN KEY (`meat_category_id`) REFERENCES `product_category` (`id`)
+    ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_menu_dish_dish_type_category` FOREIGN KEY (`dish_type_category_id`) REFERENCES `product_category` (`id`)
     ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='菜品/商品库';
 
@@ -335,4 +343,20 @@ CREATE TABLE IF NOT EXISTS `admin_dashboard_biz_day_snapshots` (
   `recorded_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '首次落库或管理员强制重算覆盖时间',
   PRIMARY KEY (`business_anchor_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='营业概览与配送大表对齐的按日归档（过去日首读落库后默认不变）';
+
+CREATE TABLE IF NOT EXISTS `home_banner` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `store_id` BIGINT UNSIGNED NOT NULL,
+  `title` VARCHAR(128) NULL DEFAULT NULL COMMENT '管理端备注，小程序不展示',
+  `image_url` TEXT NOT NULL COMMENT 'Banner 图片 URL',
+  `link_type` VARCHAR(32) NOT NULL DEFAULT 'none' COMMENT 'none/dish/tab/webview',
+  `link_target` VARCHAR(512) NULL DEFAULT NULL COMMENT 'dish_id / tab pagePath / 外链 URL',
+  `sort_order` INT NOT NULL DEFAULT 0,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_home_banner_store_active_sort` (`store_id`, `is_active`, `sort_order`),
+  CONSTRAINT `fk_home_banner_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='小程序首页 Banner';
 

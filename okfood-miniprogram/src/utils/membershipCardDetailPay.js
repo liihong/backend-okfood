@@ -112,16 +112,9 @@ export function runMembershipCardDetailPay(opts) {
       preProfile &&
       typeof preProfile === 'object' &&
       !shouldOpenMemberSetup(preProfile)
-    const profileStartYmd =
-      preProfile && preProfile.delivery_start_date != null
-        ? String(preProfile.delivery_start_date).trim().slice(0, 10)
-        : ''
     const payOpts = {
       membershipTemplateId: membershipTemplateId,
       memberCouponId: memberCouponId,
-    }
-    if (activeRenewal && profileStartYmd) {
-      payOpts.deliveryStartYmd = profileStartYmd
     }
     return runMembershipTemplateWechatPay(payOpts).then(function (payOut) {
       const paySynced = payOut && payOut.paySynced !== false

@@ -34,6 +34,16 @@ export function toCascaderOptions(nodes, { leafOnly = false } = {}) {
   })
 }
 
+/** 某一级分类（按 code）下的二级子类，供下拉选择 */
+export function categoryChildrenByParentCode(flat, parentCode) {
+  const list = Array.isArray(flat) ? flat : []
+  const parent = list.find((c) => c.code === parentCode)
+  if (!parent) return []
+  return list
+    .filter((c) => c.parent_id === parent.id && c.is_active !== false)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id)
+}
+
 /** 分类完整路径，如「肉类 / 鸡肉」 */
 export function categoryPathLabel(categoryId, flat) {
   if (categoryId == null || categoryId === '') return '未分类'

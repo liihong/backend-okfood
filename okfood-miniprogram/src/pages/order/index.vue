@@ -39,32 +39,13 @@
           {{ activeWeekTab === 'this' ? '本周暂无排餐' : '下周暂无排餐' }}
         </view>
         <view v-else class="menu-grid">
-          <view v-for="m in menu" :key="m.rowKey" class="dish-card" @click="goDetail(m)">
-            <view class="dish-img-wrap">
-              <text class="day-label-tag">{{ m.day }}</text>
-              <image
-                class="dish-img"
-                :src="m.img"
-                mode="aspectFill"
-                @error="() => onImgErr(m)"
-              />
-            </view>
-            <view class="dish-body">
-              <view class="dish-title-row">
-                <text class="dish-name">{{ m.name }}</text>
-                <text v-if="m.spiceLabel" class="dish-spice-pill">{{ m.spiceLabel }}</text>
-              </view>
-              <view class="price-row">
-                <text class="price-label">自律体验价</text>
-                <text
-                  v-if="formatMenuPrice(m.price) != null"
-                  class="price-val"
-                >¥{{ formatMenuPrice(m.price) }}</text>
-                <text v-else class="price-val price-val--pending">待公布</text>
-              </view>
-              <text class="dish-ingredients">配料：{{ m.ingredients }}</text>
-            </view>
-          </view>
+          <MenuDishCard
+            v-for="m in menu"
+            :key="m.rowKey"
+            layout="grid"
+            :item="m"
+            @tap="goDetail"
+          />
         </view>
       </view>
     </scroll-view>
@@ -76,6 +57,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import MenuDishCard from '@/components/MenuDishCard/MenuDishCard.vue'
 import MemberCouponReminderHost from '@/components/MemberCouponReminderHost/MemberCouponReminderHost.vue'
 
 /** 首屏渲染后再挂载券提醒，避免与 App 启动竞态 */
@@ -83,7 +65,6 @@ const couponHostReady = ref(false)
 import {
   addDaysIso,
   fetchWeeklyMenu,
-  formatMenuPrice,
   mondayOfWeekShanghai,
   prefetchWeeklyMenu,
 } from '@/utils/menuApi.js'
@@ -253,13 +234,6 @@ function goDetail(m) {
     url: `/packageOrder/pages/detail/detail?${q.join('&')}`,
   })
 }
-
-const fallbackImg =
-  'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400'
-
-function onImgErr(item) {
-  if (item) item.img = fallbackImg
-}
 </script>
 
 <style lang="scss" scoped>
@@ -348,118 +322,6 @@ function onImgErr(item) {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 30rpx;
-}
-
-.dish-card {
-  background: #fff;
-  border-radius: 48rpx;
-  overflow: hidden;
-  border: 1px solid $ok-slate-100;
-  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.03);
-  display: flex;
-  flex-direction: column;
-}
-
-.dish-img-wrap {
-  width: 100%;
-  aspect-ratio: 1;
-  background: $ok-slate-50;
-  position: relative;
-  overflow: hidden;
-}
-
-.dish-img {
-  width: 100%;
-  height: 100%;
-}
-
-.day-label-tag {
-  position: absolute;
-  top: 20rpx;
-  left: 20rpx;
-  background: $ok-forest-green;
-  color: #fff;
-  font-size: 24rpx;
-  font-weight: 900;
-  padding: 6rpx 16rpx;
-  border-radius: 16rpx;
-  z-index: 10;
-}
-
-.dish-body {
-  padding: 24rpx;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.dish-title-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12rpx;
-  margin-bottom: 4rpx;
-}
-
-.dish-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 26rpx;
-  font-weight: 950;
-  color: #333;
-}
-
-.dish-spice-pill {
-  flex-shrink: 0;
-  font-size: 18rpx;
-  font-weight: 900;
-  color: #9a3412;
-  background: #fff7ed;
-  border: 1rpx solid #fed7aa;
-  padding: 4rpx 12rpx;
-  border-radius: 12rpx;
-  line-height: 1.3;
-}
-
-.price-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8rpx;
-  margin-bottom: 12rpx;
-}
-
-.price-label {
-  font-size: 16rpx;
-  color: $ok-slate-400;
-  font-weight: 900;
-}
-
-.price-val {
-  font-size: 32rpx;
-  font-weight: 1000;
-  font-style: italic;
-  color: $ok-forest-green;
-}
-
-.price-val--pending {
-  font-size: 26rpx;
-  font-style: normal;
-  font-weight: 800;
-  color: $ok-slate-400;
-}
-
-.dish-ingredients {
-  font-size: 18rpx;
-  color: $ok-slate-400;
-  line-height: 1.4;
-  font-weight: 700;
-  margin-bottom: 24rpx;
-  max-height: 2.8em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
 }
 
 </style>

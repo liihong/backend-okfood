@@ -391,6 +391,23 @@ export async function fetchMenuDetail(dishId, serviceDateYmd) {
   return mapMenuDetail(raw)
 }
 
+/** @param {Record<string, unknown>} raw */
+export function mapTodayMenuItem(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const mapped = mapWeeklyListItem(raw, 0)
+  if (!mapped.dishId) return null
+  return mapped
+}
+
+/**
+ * 今日餐谱（上海业务日）。
+ * @returns {Promise<ReturnType<typeof mapTodayMenuItem>>}
+ */
+export async function fetchTodayMenu() {
+  const raw = await request('/api/menu/today', { method: 'GET', retry: 1 })
+  return mapTodayMenuItem(raw)
+}
+
 /** @param {unknown} price */
 export function formatMenuPrice(price) {
   if (price == null || price === '') return null
