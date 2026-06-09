@@ -58,18 +58,3 @@ def home_store_info(db: SessionDep, store_ctx: PublicStoreContext = Depends(publ
         },
         msg="获取成功",
     )
-
-
-@router.get("/store-info")
-def home_store_info(db: SessionDep, store_ctx: PublicStoreContext = Depends(public_store_dep)):
-    """小程序菜单页门店信息（无需登录）。"""
-    cfg = get_store_config(db, store_id=int(store_ctx.store_id))
-    return success(
-        data={
-            "store_id": int(cfg.store_id),
-            "store_name": cfg.store_name,
-            "store_logo_url": cfg.store_logo_url,
-            "store_contact_phone": cfg.store_contact_phone,
-        },
-        msg="获取成功",
-    )

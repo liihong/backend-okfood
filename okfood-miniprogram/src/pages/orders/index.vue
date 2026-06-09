@@ -153,9 +153,9 @@ const statusOptions = computed(() =>
 
 const emptyHint = computed(() => {
   if (mainTab.value === MAIN_SINGLE) {
-    return '暂无订单。在周菜单中选餐并完成支付后会显示于此。'
+    return '暂无订单。'
   }
-  return '暂无商城订单。购买周卡/月卡或卡包并完成支付后会显示于此。'
+  return '暂无商城订单。'
 })
 
 const items = ref([])

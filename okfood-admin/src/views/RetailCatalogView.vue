@@ -1,8 +1,8 @@
 <script setup>
 defineOptions({ name: 'RetailCatalogView' })
 import { ref, computed, onMounted } from 'vue'
-import { Info, LayoutGrid, List, Plus, X } from 'lucide-vue-next'
-import { apiJson, adminAccessToken, handleAdminLogout, dishImageDisplayUrl } from '../admin/core.js'
+import { Camera, Info, LayoutGrid, List, Plus, X } from 'lucide-vue-next'
+import { apiForm, apiJson, adminAccessToken, handleAdminLogout, dishImageDisplayUrl } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
 const storeId = ref(1)
@@ -146,6 +146,8 @@ async function removeCategory(row) {
 const prodDialog = ref(false)
 const prodSaving = ref(false)
 const prodEditingId = ref(null)
+const prodCoverUploading = ref(false)
+const prodCoverUploadKey = ref(0)
 const prodForm = ref({
   category_id: null,
   sku_code: '',
@@ -188,6 +190,39 @@ function openProdEdit(row) {
     is_on_shelf: row.is_on_shelf,
   }
   prodDialog.value = true
+}
+
+async function onProdCoverUploadChange(uploadFile) {
+  const file = uploadFile?.raw
+  if (!file || !file.type.startsWith('image/')) return
+  if (!adminAccessToken.value) {
+    showToast('请先登录', 'error')
+    return
+  }
+  prodCoverUploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    const data = await apiForm('/api/admin/upload', fd, { auth: true })
+    const url = data && typeof data.url === 'string' ? data.url.trim() : ''
+    if (url) {
+      prodForm.value.cover_image_url = url
+      showToast('封面图已上传', 'success')
+    } else {
+      showToast('上传成功但未返回地址', 'error')
+    }
+  } catch (err) {
+    const status = err && typeof err.status === 'number' ? err.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(err instanceof Error ? err.message : '上传失败', 'error')
+  } finally {
+    prodCoverUploading.value = false
+    prodCoverUploadKey.value += 1
+  }
 }
 
 async function saveProduct() {
@@ -558,6 +593,48 @@ onMounted(reloadAll)
         </div>
       </template>
       <div class="retail-modal-body">
+        <div class="retail-cover-top">
+          <el-upload
+            :key="prodCoverUploadKey"
+            class="retail-cover-photo-upload"
+            :show-file-list="false"
+            :auto-upload="false"
+            accept="image/*"
+            @change="onProdCoverUploadChange"
+          >
+            <button
+              type="button"
+              class="menu-upload-sim retail-cover-upload-btn"
+              :disabled="prodCoverUploading"
+            >
+              <img
+                v-if="prodForm.cover_image_url"
+                :src="dishImageDisplayUrl(prodForm.cover_image_url)"
+                alt=""
+                class="menu-upload-preview"
+              />
+              <div v-else class="menu-upload-inner">
+                <Camera :size="32" stroke-width="1.75" class="menu-upload-icon" />
+                <p class="menu-upload-text">
+                  {{ prodCoverUploading ? '正在上传…' : '点击上传封面图至 OSS' }}
+                </p>
+              </div>
+              <span
+                v-if="prodForm.cover_image_url && !prodCoverUploading"
+                class="menu-upload-change-hint"
+              >点击更换</span>
+            </button>
+          </el-upload>
+          <div class="retail-form-row retail-form-row--center">
+            <label class="retail-form-label">封面链接</label>
+            <el-input
+              v-model="prodForm.cover_image_url"
+              class="retail-form-control"
+              placeholder="上传后自动填入，或粘贴 https 外链"
+              clearable
+            />
+          </div>
+        </div>
         <div class="retail-form-row retail-form-row--center">
           <label class="retail-form-label">所属分类</label>
           <el-select v-model="prodForm.category_id" clearable placeholder="可选" class="retail-form-control">
@@ -593,12 +670,6 @@ onMounted(reloadAll)
         <div class="retail-form-row retail-form-row--center">
           <label class="retail-form-label">划线价</label>
           <el-input v-model="prodForm.list_price_yuan" class="retail-form-control" placeholder="可空" />
-        </div>
-        <div class="retail-form-row retail-form-row--center">
-          <label class="retail-form-label">封面 URL</label>
-          <div class="retail-upload-inline">
-            <el-input v-model="prodForm.cover_image_url" class="retail-form-control" placeholder="/static/uploads/..." />
-          </div>
         </div>
         <div class="retail-form-row retail-form-row--center">
           <label class="retail-form-label">排序</label>
@@ -1168,9 +1239,28 @@ onMounted(reloadAll)
   padding: 8px 12px;
 }
 
-.retail-upload-inline {
+.retail-cover-top {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--retail-border);
+  margin-bottom: 2px;
+}
+
+.retail-cover-photo-upload {
+  display: block;
   width: 100%;
-  min-width: 0;
+}
+
+.retail-cover-photo-upload :deep(.el-upload) {
+  display: block;
+  width: 100%;
+}
+
+.retail-cover-upload-btn {
+  margin-bottom: 0;
+  min-height: 140px;
 }
 
 .retail-form-switch.is-checked :deep(.el-switch__core) {

@@ -39,6 +39,38 @@
   </view>
 
   <view
+    v-else-if="layout === 'list'"
+    class="menu-dish-card menu-dish-card--list"
+    @click="emit('tap', item)"
+  >
+    <image
+      class="menu-dish-card__list-img"
+      :src="displayImg"
+      mode="aspectFill"
+      @error="onImgErr"
+    />
+    <view class="menu-dish-card__list-body">
+      <view class="menu-dish-card__title-row">
+        <text class="menu-dish-card__name menu-dish-card__name--list">{{ item.name }}</text>
+        <text v-if="item.spiceLabel" class="menu-dish-card__spice">{{ item.spiceLabel }}</text>
+      </view>
+      <text v-if="showIngredients && item.ingredients" class="menu-dish-card__list-desc">
+        {{ item.ingredients }}
+      </text>
+      <view class="menu-dish-card__list-footer">
+        <view class="menu-dish-card__price-group">
+          <text v-if="priceText != null" class="menu-dish-card__price menu-dish-card__price--list">¥{{ priceText }}</text>
+          <text v-else class="menu-dish-card__price menu-dish-card__price--pending">待公布</text>
+          <text v-if="showListPrice" class="menu-dish-card__list-price">¥{{ listPriceText }}</text>
+        </view>
+        <view class="menu-dish-card__list-action">
+          <text class="menu-dish-card__list-action-txt">{{ item.isRetail ? '去购买' : '选餐' }}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view
     v-else
     class="menu-dish-card menu-dish-card--grid"
     @click="emit('tap', item)"
@@ -81,6 +113,17 @@ const props = defineProps({
 const emit = defineEmits(['tap'])
 
 const priceText = computed(() => formatMenuPrice(props.item?.price))
+
+const listPriceText = computed(() =>
+  formatMenuPrice(props.item?.listPrice ?? props.item?.list_price_yuan),
+)
+
+const showListPrice = computed(() => {
+  const sale = priceText.value
+  const list = listPriceText.value
+  if (sale == null || list == null) return false
+  return Number(list) > Number(sale)
+})
 
 const kcalText = computed(() => {
   const raw = props.item?.kcal ?? props.item?.calories ?? props.item?.calorie_kcal
@@ -377,5 +420,87 @@ function onImgErr() {
   max-height: 2.8em;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.menu-dish-card--list {
+  flex-direction: row;
+  align-items: stretch;
+  border-radius: 24rpx;
+  padding: 20rpx;
+  gap: 20rpx;
+  margin-bottom: 20rpx;
+}
+
+.menu-dish-card__list-img {
+  width: 160rpx;
+  height: 160rpx;
+  border-radius: 16rpx;
+  flex-shrink: 0;
+  background: $ok-slate-50;
+}
+
+.menu-dish-card__list-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-dish-card__name--list {
+  font-size: 28rpx;
+}
+
+.menu-dish-card__list-desc {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: $ok-slate-400;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.menu-dish-card__list-footer {
+  margin-top: auto;
+  padding-top: 12rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.menu-dish-card__price-group {
+  display: flex;
+  align-items: baseline;
+  gap: 10rpx;
+  min-width: 0;
+}
+
+.menu-dish-card__price--list {
+  font-size: 34rpx;
+  font-style: normal;
+}
+
+.menu-dish-card__list-price {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: $ok-slate-400;
+  text-decoration: line-through;
+  line-height: 1.2;
+}
+
+.menu-dish-card__list-action {
+  flex-shrink: 0;
+  padding: 10rpx 24rpx;
+  border-radius: 999rpx;
+  background: $ok-forest-green;
+}
+
+.menu-dish-card__list-action-txt {
+  font-size: 22rpx;
+  font-weight: 900;
+  color: #fff;
+  line-height: 1.2;
 }
 </style>
