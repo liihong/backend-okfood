@@ -1216,7 +1216,7 @@ function onPauseDeliveryTap() {
       '确认后暂停会员卡配送（剩余餐次保留）。恢复时需重新选择开始的业务日期。是否暂停？',
     confirmText: '暂停配送',
     cancelText: '取消',
-    confirmColor: '#0e5a44',
+    confirmColor: '#73B054',
     success: async (res) => {
       if (!res.confirm) return
       uni.showLoading({ title: '提交中', mask: true })
@@ -1347,7 +1347,7 @@ function onPauseDeliveryTap() {
 
 .hero-avatar-row .avatar-ring {
   border-width: 4rpx;
-  box-shadow: 0 10rpx 28rpx rgba(14, 90, 68, 0.14);
+  box-shadow: 0 10rpx 28rpx rgba(115, 176, 84, 0.14);
 }
 
 .avatar-ring {
@@ -1356,7 +1356,7 @@ function onPauseDeliveryTap() {
   border-radius: 50%;
   background: linear-gradient(145deg, $ok-forest-green 0%, $ok-forest-green-dark 100%);
   border: 8rpx solid #fff;
-  box-shadow: 0 16rpx 40rpx rgba(14, 90, 68, 0.22);
+  box-shadow: 0 16rpx 40rpx rgba(115, 176, 84, 0.22);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -1533,7 +1533,7 @@ function onPauseDeliveryTap() {
 .hero-gear {
   padding: 6rpx 10rpx;
   border-radius: 12rpx;
-  background: rgba(14, 90, 68, 0.08);
+  background: rgba(115, 176, 84, 0.08);
 }
 
 .hero-gear-icon {
@@ -1597,7 +1597,7 @@ function onPauseDeliveryTap() {
   width: 96rpx;
   height: 96rpx;
   border-radius: 22rpx;
-  background: rgba(14, 90, 68, 0.08);
+  background: rgba(115, 176, 84, 0.08);
   border: 2rpx solid rgba(167, 243, 208, 0.35);
   box-shadow: 0 4rpx 14rpx rgba(15, 23, 42, 0.05);
   display: flex;
@@ -1655,7 +1655,7 @@ function onPauseDeliveryTap() {
   border: none;
   border-radius: 999rpx;
   line-height: 1.35;
-  box-shadow: 0 8rpx 22rpx rgba(14, 90, 68, 0.3);
+  box-shadow: 0 8rpx 22rpx rgba(115, 176, 84, 0.3);
 }
 
 .wx-login-btn::after {

@@ -194,7 +194,7 @@ onShow(() => {
 }
 
 .mcard--a {
-  background: linear-gradient(135deg, #0e5a44 0%, #0b4334 55%, #052e24 100%);
+  background: linear-gradient(135deg, #73B054 0%, #456D32 55%, #365628 100%);
 }
 .mcard--b {
   background: linear-gradient(135deg, #b8860b 0%, #d97706 45%, #92400e 100%);

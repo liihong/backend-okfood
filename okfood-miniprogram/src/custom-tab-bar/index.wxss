@@ -42,6 +42,6 @@
 }
 
 .tab-bar-item--on .tab-bar-text {
-  color: #0e5a44;
+  color: #73B054;
   font-weight: 800;
 }

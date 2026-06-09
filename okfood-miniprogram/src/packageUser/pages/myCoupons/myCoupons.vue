@@ -108,7 +108,7 @@ onShow(() => {
   font-size: 26rpx;
 }
 .tab--on {
-  background: #0e5a44;
+  background: #73B054;
   color: #fff;
 }
 .state {

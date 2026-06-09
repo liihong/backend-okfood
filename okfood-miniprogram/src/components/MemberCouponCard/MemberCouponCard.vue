@@ -98,8 +98,8 @@ function onTap() {
   min-height: 168rpx;
   border-radius: 20rpx;
   overflow: hidden;
-  background: linear-gradient(135deg, #0e5a44 0%, #084232 58%, #0a4a38 100%);
-  box-shadow: 0 12rpx 32rpx rgba(8, 66, 50, 0.22);
+  background: linear-gradient(135deg, #73B054 0%, #53833D 58%, #456D32 100%);
+  box-shadow: 0 12rpx 32rpx rgba(83, 131, 61, 0.22);
 }
 
 .coupon-card--compact {
@@ -135,7 +135,7 @@ function onTap() {
 .coupon-card--selected {
   box-shadow:
     0 0 0 3rpx rgba(250, 204, 21, 0.85),
-    0 12rpx 32rpx rgba(8, 66, 50, 0.28);
+    0 12rpx 32rpx rgba(83, 131, 61, 0.28);
 }
 
 .coupon-card--disabled {

@@ -126,8 +126,8 @@ const vipRibbonClass = computed(() => {
 }
 
 .plan-card--week {
-  background: linear-gradient(145deg, $ok-forest-green-dark 0%, $ok-forest-green 48%, #0a4d3a 100%);
-  box-shadow: 0 20rpx 48rpx rgba(14, 90, 68, 0.38);
+  background: linear-gradient(145deg, $ok-forest-green-dark 0%, $ok-forest-green 48%, $ok-forest-green-darker 100%);
+  box-shadow: 0 20rpx 48rpx rgba(115, 176, 84, 0.38);
 }
 
 .plan-card--month {

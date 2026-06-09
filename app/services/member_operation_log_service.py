@@ -35,6 +35,7 @@ OP_LEAVE_RANGE = "leave_range"                  # 区间请假
 OP_LEAVE_CLEAR_TOMORROW = "leave_clear_tomorrow"  # 仅取消明天请假
 OP_LEAVE_CANCEL = "leave_cancel"                # 取消全部请假标记
 OP_MEMBERSHIP_REFUND = "membership_refund"      # 退卡退款（管理端）
+OP_MEAL_COMPENSATION = "meal_compensation"      # 补餐赔付（管理端）
 OP_ADMIN_UPDATE_NAME = "admin_update_name"                    # 后台修改姓名
 OP_ADMIN_UPDATE_REMARKS = "admin_update_remarks"              # 后台修改备注
 OP_ADMIN_UPDATE_ADDRESS = "admin_update_address"              # 后台修改默认配送地址
@@ -58,6 +59,7 @@ _OPERATION_LABELS: dict[str, str] = {
     OP_LEAVE_CLEAR_TOMORROW: "取消明天请假",
     OP_LEAVE_CANCEL: "取消请假",
     OP_MEMBERSHIP_REFUND: "退卡退款",
+    OP_MEAL_COMPENSATION: "补餐赔付",
     OP_ADMIN_UPDATE_NAME: "后台修改姓名",
     OP_ADMIN_UPDATE_REMARKS: "后台修改备注",
     OP_ADMIN_UPDATE_ADDRESS: "后台修改配送地址",

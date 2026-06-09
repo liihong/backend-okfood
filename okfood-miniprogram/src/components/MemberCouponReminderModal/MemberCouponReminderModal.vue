@@ -118,7 +118,7 @@ function onConfirm() {
   font-size: 22rpx;
   font-weight: 700;
   letter-spacing: 0.12em;
-  color: #0e5a44;
+  color: #73B054;
   margin-bottom: 12rpx;
 }
 
@@ -139,7 +139,7 @@ function onConfirm() {
 }
 
 .reminder-desc--hl {
-  color: #0e5a44;
+  color: #73B054;
   font-weight: 800;
 }
 
@@ -191,8 +191,8 @@ function onConfirm() {
 }
 
 .reminder-btn--primary {
-  background: linear-gradient(135deg, #0e5a44, #084232);
+  background: linear-gradient(135deg, #73B054, #53833D);
   color: #fff;
-  box-shadow: 0 10rpx 24rpx rgba(8, 66, 50, 0.28);
+  box-shadow: 0 10rpx 24rpx rgba(83, 131, 61, 0.28);
 }
 </style>

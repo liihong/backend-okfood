@@ -460,7 +460,7 @@ onLoad((opts) => {
   border-radius: 28rpx;
   padding: 28rpx 28rpx 24rpx;
   overflow: hidden;
-  background: linear-gradient(135deg, #0e5a44 0%, #052e24 100%);
+  background: linear-gradient(135deg, #73B054 0%, #365628 100%);
   box-shadow: 0 16rpx 40rpx rgba(15, 23, 42, 0.14);
   margin-bottom: 28rpx;
 }

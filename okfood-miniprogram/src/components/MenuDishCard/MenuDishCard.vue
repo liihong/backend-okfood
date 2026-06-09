@@ -1,9 +1,46 @@
 <template>
   <view
-    class="menu-dish-card"
-    :class="[
-      layout === 'featured' ? 'menu-dish-card--featured' : 'menu-dish-card--grid',
-    ]"
+    v-if="layout === 'featured'"
+    class="featured-dish-card"
+    @click="emit('tap', item)"
+  >
+    <view class="featured-dish-card__img-wrap">
+      <text class="featured-dish-card__hot">HOT</text>
+      <image
+        class="featured-dish-card__img"
+        :src="item.img"
+        mode="aspectFill"
+        @error="onImgErr"
+      />
+    </view>
+    <view class="featured-dish-card__body">
+      <view class="featured-dish-card__title-row">
+        <text class="featured-dish-card__name">{{ item.name }}</text>
+        <text v-if="item.spiceLabel" class="featured-dish-card__spice">{{ item.spiceLabel }}</text>
+      </view>
+      <text v-if="showIngredients && item.ingredients" class="featured-dish-card__ingredients">
+        配料：{{ item.ingredients }}
+      </text>
+      <view v-if="kcalText" class="featured-dish-card__kcal">
+        <text class="featured-dish-card__kcal-icon">🔥</text>
+        <text class="featured-dish-card__kcal-txt">仅 {{ kcalText }} kcal</text>
+      </view>
+      <view class="featured-dish-card__footer">
+        <view class="featured-dish-card__price-block">
+          <text class="featured-dish-card__price-label">自律体验价</text>
+          <text v-if="priceText != null" class="featured-dish-card__price">¥{{ priceText }}</text>
+          <text v-else class="featured-dish-card__price featured-dish-card__price--pending">待公布</text>
+        </view>
+        <view class="featured-dish-card__cta">
+          <text class="featured-dish-card__cta-txt">立即购买 ›</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view
+    v-else
+    class="menu-dish-card menu-dish-card--grid"
     @click="emit('tap', item)"
   >
     <view class="menu-dish-card__img-wrap">
@@ -25,7 +62,6 @@
         <text v-if="priceText != null" class="menu-dish-card__price">¥{{ priceText }}</text>
         <text v-else class="menu-dish-card__price menu-dish-card__price--pending">待公布</text>
       </view>
-      <text v-if="layout === 'featured'" class="menu-dish-card__cta">立即购买 ›</text>
       <text v-if="showIngredients" class="menu-dish-card__ingredients">配料：{{ item.ingredients }}</text>
     </view>
   </view>
@@ -46,6 +82,13 @@ const emit = defineEmits(['tap'])
 
 const priceText = computed(() => formatMenuPrice(props.item?.price))
 
+const kcalText = computed(() => {
+  const raw = props.item?.kcal ?? props.item?.calories ?? props.item?.calorie_kcal
+  if (raw == null || raw === '') return ''
+  const n = Math.floor(Number(raw))
+  return Number.isFinite(n) && n > 0 ? String(n) : ''
+})
+
 const fallbackImg =
   'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400'
 
@@ -57,6 +100,163 @@ function onImgErr() {
 </script>
 
 <style lang="scss" scoped>
+.featured-dish-card {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 24rpx;
+  padding: 24rpx;
+  background: #fff;
+  border-radius: 32rpx;
+  box-shadow: 0 8rpx 32rpx rgba(15, 23, 42, 0.06);
+}
+
+.featured-dish-card__img-wrap {
+  position: relative;
+  width: 200rpx;
+  min-width: 200rpx;
+  height: 200rpx;
+  border-radius: 24rpx;
+  overflow: hidden;
+  background: $ok-slate-50;
+  flex-shrink: 0;
+}
+
+.featured-dish-card__hot {
+  position: absolute;
+  top: 12rpx;
+  left: 12rpx;
+  z-index: 2;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  background: #ef4444;
+  color: #fff;
+  font-size: 18rpx;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+}
+
+.featured-dish-card__img {
+  width: 100%;
+  height: 100%;
+}
+
+.featured-dish-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.featured-dish-card__title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12rpx;
+  margin-bottom: 8rpx;
+}
+
+.featured-dish-card__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 32rpx;
+  font-weight: 900;
+  color: #1e293b;
+  line-height: 1.35;
+}
+
+.featured-dish-card__spice {
+  flex-shrink: 0;
+  font-size: 20rpx;
+  font-weight: 700;
+  color: $ok-slate-500;
+  background: $ok-slate-100;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  line-height: 1.4;
+}
+
+.featured-dish-card__ingredients {
+  font-size: 22rpx;
+  color: $ok-slate-500;
+  line-height: 1.45;
+  margin-bottom: 12rpx;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.featured-dish-card__kcal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6rpx;
+  align-self: flex-start;
+  padding: 6rpx 16rpx;
+  border-radius: 999rpx;
+  background: #ecfdf5;
+  margin-bottom: 16rpx;
+}
+
+.featured-dish-card__kcal-icon {
+  font-size: 20rpx;
+  line-height: 1;
+}
+
+.featured-dish-card__kcal-txt {
+  font-size: 20rpx;
+  font-weight: 800;
+  color: #166534;
+  line-height: 1.3;
+}
+
+.featured-dish-card__footer {
+  margin-top: auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.featured-dish-card__price-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+}
+
+.featured-dish-card__price-label {
+  font-size: 20rpx;
+  color: $ok-slate-400;
+  font-weight: 600;
+}
+
+.featured-dish-card__price {
+  font-size: 40rpx;
+  font-weight: 900;
+  color: $ok-forest-green;
+  line-height: 1.1;
+}
+
+.featured-dish-card__price--pending {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: $ok-slate-400;
+}
+
+.featured-dish-card__cta {
+  flex-shrink: 0;
+  padding: 14rpx 28rpx;
+  border-radius: 999rpx;
+  background: $ok-forest-green;
+}
+
+.featured-dish-card__cta-txt {
+  font-size: 24rpx;
+  font-weight: 900;
+  color: #fff;
+  line-height: 1.2;
+}
+
 .menu-dish-card {
   background: #fff;
   border-radius: 48rpx;
@@ -65,25 +265,6 @@ function onImgErr() {
   box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.03);
   display: flex;
   flex-direction: column;
-}
-
-.menu-dish-card--featured {
-  flex-direction: row;
-  align-items: stretch;
-  min-height: 220rpx;
-}
-
-.menu-dish-card--featured .menu-dish-card__img-wrap {
-  width: 220rpx;
-  min-width: 220rpx;
-  aspect-ratio: auto;
-  height: auto;
-  min-height: 220rpx;
-}
-
-.menu-dish-card--featured .menu-dish-card__body {
-  flex: 1;
-  justify-content: center;
 }
 
 .menu-dish-card__img-wrap {
@@ -130,13 +311,9 @@ function onImgErr() {
 .menu-dish-card__name {
   flex: 1;
   min-width: 0;
-  font-size: 28rpx;
+  font-size: 26rpx;
   font-weight: 950;
   color: #333;
-}
-
-.menu-dish-card--grid .menu-dish-card__name {
-  font-size: 26rpx;
 }
 
 .menu-dish-card__spice {
@@ -176,13 +353,6 @@ function onImgErr() {
   font-style: normal;
   font-weight: 800;
   color: $ok-slate-400;
-}
-
-.menu-dish-card__cta {
-  font-size: 24rpx;
-  font-weight: 900;
-  color: $ok-forest-green;
-  margin-bottom: 8rpx;
 }
 
 .menu-dish-card__ingredients {

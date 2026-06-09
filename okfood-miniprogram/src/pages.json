@@ -4,7 +4,7 @@
       "path": "pages/home/index",
       "style": {
         "navigationStyle": "custom",
-        "backgroundColor": "#f8fafc",
+        "backgroundColor": "#f7f5f0",
         "disableScroll": true
       }
     },
@@ -233,7 +233,7 @@
   "tabBar": {
     "custom": true,
     "color": "#999999",
-    "selectedColor": "#0e5a44",
+    "selectedColor": "#73B054",
     "borderStyle": "black",
     "backgroundColor": "#ffffff",
     "list": [

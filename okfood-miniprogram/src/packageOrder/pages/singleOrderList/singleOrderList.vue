@@ -166,11 +166,11 @@ onShow(() => {
 }
 
 .summary-card {
-  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
+  background: linear-gradient(135deg, #F4F9F1 0%, #F8FBF6 100%);
   border-radius: 36rpx;
   padding: 32rpx 36rpx;
   margin-bottom: 24rpx;
-  border: 1px solid rgba(14, 90, 68, 0.12);
+  border: 1px solid rgba(115, 176, 84, 0.12);
 }
 
 .summary-title {
@@ -235,8 +235,8 @@ onShow(() => {
 .record-kind-tag {
   font-size: 22rpx;
   font-weight: 800;
-  color: #0e5a44;
-  background: rgba(14, 90, 68, 0.1);
+  color: #73B054;
+  background: rgba(115, 176, 84, 0.1);
   padding: 4rpx 14rpx;
   border-radius: 8rpx;
 }

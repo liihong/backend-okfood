@@ -28,7 +28,7 @@ function showNativeModal(options = {}) {
       showCancel: !!showCancel,
       cancelText: cancelText || '取消',
       confirmText: confirmText || '确定',
-      confirmColor: confirmColor || (showCancel ? '#0e5a44' : undefined),
+      confirmColor: confirmColor || (showCancel ? '#73B054' : undefined),
       success: (res) => {
         const out = { confirm: !!res.confirm, cancel: !!res.cancel }
         if (typeof success === 'function') success(out)

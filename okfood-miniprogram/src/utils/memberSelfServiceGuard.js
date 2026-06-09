@@ -33,7 +33,7 @@ function promptBuyMemberCard() {
     content: '请假、暂停配送等功能需先购买自律卡包并开通计划。',
     confirmText: '去购卡',
     cancelText: '知道了',
-    confirmColor: '#0e5a44',
+    confirmColor: '#73B054',
     success: (res) => {
       if (!res.confirm) return
       uni.navigateTo({ url: CARD_LIST_URL })
@@ -47,7 +47,7 @@ function promptCompleteMemberSetup() {
     content: '您已购卡，请先完善配送信息后再使用请假、暂停配送等功能。',
     confirmText: '去设置',
     cancelText: '知道了',
-    confirmColor: '#0e5a44',
+    confirmColor: '#73B054',
     success: (res) => {
       if (!res.confirm) return
       uni.navigateTo({ url: MEMBER_SETUP_PAY_URL })

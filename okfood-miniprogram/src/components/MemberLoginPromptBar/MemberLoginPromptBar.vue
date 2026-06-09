@@ -64,8 +64,8 @@ onShow(syncVisible)
   padding: 16rpx 24rpx;
   box-sizing: border-box;
   border-radius: 999rpx;
-  background: #ecfdf5;
-  border: 1rpx solid #bbf7d0;
+  background: #F4F9F1;
+  border: 1rpx solid #C8DEB8;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -77,7 +77,7 @@ onShow(syncVisible)
   min-width: 0;
   font-size: 26rpx;
   font-weight: 700;
-  color: #166534;
+  color: #456D32;
 }
 
 .member-login-bar__btn {

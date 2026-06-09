@@ -452,7 +452,7 @@ def list_delivery_deductions_me(
     page: int = 1,
     page_size: int = 20,
 ):
-    """消费记录：套餐送达扣次与单次购买（会员卡）扣次，按供餐/配送业务日倒序。"""
+    """消费记录：套餐送达扣次、单次购买（会员卡）扣次与补餐赔付，按业务日倒序。"""
     items, total, total_meal_units = list_member_delivery_deductions(
         db, member_id, page=page, page_size=page_size
     )

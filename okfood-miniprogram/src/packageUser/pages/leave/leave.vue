@@ -717,7 +717,7 @@ async function submitRange() {
 
 .leave-block--active {
   border-color: rgba(34, 197, 94, 0.35);
-  background: linear-gradient(165deg, #f0fdf4 0%, #fff 55%);
+  background: linear-gradient(165deg, #F8FBF6 0%, #fff 55%);
 }
 
 .leave-block--deadline {

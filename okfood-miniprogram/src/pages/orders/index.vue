@@ -418,8 +418,8 @@ onShow(() => {
 }
 
 .status-chip--active {
-  background: #ecfdf5;
-  border-color: rgba(14, 90, 68, 0.35);
+  background: #F4F9F1;
+  border-color: rgba(115, 176, 84, 0.35);
 }
 
 .status-chip-text {
@@ -496,7 +496,7 @@ onShow(() => {
 .order-foot {
   margin-top: 16rpx;
   padding-top: 16rpx;
-  border-top: 1px dashed rgba(14, 90, 68, 0.15);
+  border-top: 1px dashed rgba(115, 176, 84, 0.15);
   display: flex;
   align-items: center;
   justify-content: space-between;

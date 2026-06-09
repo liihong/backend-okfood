@@ -19,6 +19,7 @@ class BalanceReason(str, Enum):
     REFUND = "refund"
     ADMIN_ADJUST = "admin_adjust"
     SINGLE_MEAL = "single_meal"
+    MEAL_COMPENSATION = "meal_compensation"
 
 
 class LeaveType(str, Enum):

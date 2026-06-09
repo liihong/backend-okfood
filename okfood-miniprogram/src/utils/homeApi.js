@@ -9,6 +9,14 @@ export async function fetchHomeBanners() {
 }
 
 /**
+ * @returns {Promise<Array<{ id: number, name: string, meals_grant: number, sale_price_yuan?: string | null }>>}
+ */
+export async function fetchHomeMembershipCards() {
+  const raw = await request('/api/home/membership-card-templates', { method: 'GET', retry: 1 })
+  return Array.isArray(raw) ? raw : []
+}
+
+/**
  * @param {{ link_type?: string, link_target?: string | null }} banner
  * @param {string} [todayYmd] 供餐日，dish 跳转时使用
  */

@@ -60,11 +60,11 @@
           <text class="card-label">取餐方式</text>
           <radio-group class="mode-group mode-group--row" @change="onFulfillModeChange">
             <label class="mode-row">
-              <radio value="delivery" :checked="fulfillMode === 'delivery'" color="#0e5a44" />
+              <radio value="delivery" :checked="fulfillMode === 'delivery'" color="#73B054" />
               <text class="mode-label">配送到家</text>
             </label>
             <label class="mode-row">
-              <radio value="pickup" :checked="fulfillMode === 'pickup'" color="#0e5a44" />
+              <radio value="pickup" :checked="fulfillMode === 'pickup'" color="#73B054" />
               <text class="mode-label">门店自提</text>
             </label>
           </radio-group>
@@ -74,11 +74,11 @@
           <text class="card-label">支付方式</text>
           <radio-group class="mode-group mode-group--row" @change="onPayMethodChange">
             <label class="mode-row">
-              <radio value="wechat" :checked="payMethod === 'wechat'" color="#0e5a44" />
+              <radio value="wechat" :checked="payMethod === 'wechat'" color="#73B054" />
               <text class="mode-label">微信支付</text>
             </label>
             <label class="mode-row" @tap="onBalancePayLabelTap">
-              <radio value="balance" :checked="payMethod === 'balance'" color="#0e5a44" />
+              <radio value="balance" :checked="payMethod === 'balance'" color="#73B054" />
               <text class="mode-label" :class="{ 'mode-label--muted': !balancePayEligible }">会员卡支付</text>
             </label>
           </radio-group>
@@ -870,7 +870,7 @@ async function handlePay() {
   font-size: 22rpx;
   color: $ok-forest-green;
   font-weight: 800;
-  background: rgba(14, 90, 68, 0.12);
+  background: rgba(115, 176, 84, 0.12);
   padding: 8rpx 20rpx;
   border-radius: 16rpx;
 }
@@ -901,7 +901,7 @@ async function handlePay() {
 .dish-total-row {
   margin-top: 20rpx;
   padding-top: 20rpx;
-  border-top: 2rpx dashed rgba(14, 90, 68, 0.2);
+  border-top: 2rpx dashed rgba(115, 176, 84, 0.2);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -984,7 +984,7 @@ async function handlePay() {
 .pay-balance-hint {
   margin-top: 20rpx;
   padding: 20rpx 24rpx;
-  background: rgba(14, 90, 68, 0.08);
+  background: rgba(115, 176, 84, 0.08);
   border-radius: 20rpx;
 }
 
@@ -1105,7 +1105,7 @@ async function handlePay() {
 
 .addr-row--on {
   border-color: $ok-forest-green;
-  background: rgba(14, 90, 68, 0.06);
+  background: rgba(115, 176, 84, 0.06);
 }
 
 .addr-radio {
@@ -1163,7 +1163,7 @@ async function handlePay() {
   font-size: 20rpx;
   color: $ok-forest-green;
   font-weight: 800;
-  border: 1rpx solid rgba(14, 90, 68, 0.35);
+  border: 1rpx solid rgba(115, 176, 84, 0.35);
   padding: 4rpx 12rpx;
   border-radius: 12rpx;
 }
@@ -1205,7 +1205,7 @@ async function handlePay() {
   font-weight: 900;
   line-height: 1.35;
   margin-top: 16rpx;
-  box-shadow: 0 16rpx 32rpx rgba(14, 90, 68, 0.18);
+  box-shadow: 0 16rpx 32rpx rgba(115, 176, 84, 0.18);
 }
 
 .btn-pay::after {

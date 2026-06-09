@@ -70,7 +70,7 @@ class DeliveryDeductionOut(BaseModel):
     meal_units: int = Field(1, ge=1, description="本条扣减份数")
     deduction_kind: str = Field(
         default="subscription",
-        description="subscription=套餐确认送达扣次；single_meal=单次购买会员卡扣次",
+        description="subscription=套餐确认送达扣次；single_meal=单次购买会员卡扣次；meal_compensation=补餐赔付",
     )
 
 

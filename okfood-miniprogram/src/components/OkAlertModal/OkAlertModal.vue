@@ -156,7 +156,7 @@ function onMaskTouchMove() {}
 }
 
 .ok-alert-icon--success {
-  background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+  background: linear-gradient(135deg, #F4F9F1, #E0EDD6);
   border: 2rpx solid rgba(16, 185, 129, 0.35);
 }
 
@@ -172,7 +172,7 @@ function onMaskTouchMove() {}
 }
 
 .ok-alert-icon--success .ok-alert-icon-txt {
-  color: #059669;
+  color: #53833D;
 }
 
 .ok-alert-icon--warning .ok-alert-icon-txt {
@@ -253,7 +253,7 @@ function onMaskTouchMove() {}
 .ok-alert-btn--primary {
   background: linear-gradient(135deg, $ok-forest-green, $ok-forest-green-dark);
   color: #fff;
-  box-shadow: 0 10rpx 24rpx rgba(8, 66, 50, 0.26);
+  box-shadow: 0 10rpx 24rpx rgba(83, 131, 61, 0.26);
 }
 
 .ok-alert-btn--danger {

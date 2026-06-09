@@ -14,6 +14,7 @@ import {
   ChevronDown,
   History,
   Banknote,
+  UtensilsCrossed,
 } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import {
@@ -27,6 +28,7 @@ import { showToast } from '../composables/useToast.js'
 import { parseApiDateTimeBeijing } from '../utils/beijingDateTime.js'
 import MemberEditModal from './components/MemberEditModal.vue'
 import MemberAddressesModal from './components/MemberAddressesModal.vue'
+import MemberMealCompensationModal from './components/MemberMealCompensationModal.vue'
 
 /** 本页表格数据（本地 ref；同步写入 memberList 供登出清空等兼容） */
 const membersRows = ref([])
@@ -206,6 +208,10 @@ function onMembersActionDropdown(command, row) {
   }
   if (command === 'operation_logs') {
     void openMemberOperationLogs(row)
+    return
+  }
+  if (command === 'meal_compensation') {
+    openMemberMealCompensation(row)
     return
   }
   if (command === 'refund') {
@@ -608,8 +614,13 @@ async function openMemberDeliveryRecords(u) {
         const ymd = String(row.delivery_date).slice(0, 10)
         if (!ymd) return null
         const mealUnits = Math.max(1, Number(row.meal_units) || 1)
+        const kindRaw = row.deduction_kind
         const kind =
-          row.deduction_kind === 'single_meal' ? 'single_meal' : 'subscription'
+          kindRaw === 'single_meal'
+            ? 'single_meal'
+            : kindRaw === 'meal_compensation'
+              ? 'meal_compensation'
+              : 'subscription'
         return { delivery_date: ymd, meal_units: mealUnits, deduction_kind: kind }
       })
       .filter(Boolean)
@@ -749,6 +760,25 @@ watch(showOperationLogModal, (v) => {
     operationLogPage.value = 1
   }
 })
+
+/** --- 补餐赔付：餐品问题补回已消费次数 --- */
+const showMealCompensationModal = ref(false)
+const mealCompensationTarget = ref(null)
+
+watch(showMealCompensationModal, (v) => {
+  if (!v) mealCompensationTarget.value = null
+})
+
+function openMemberMealCompensation(u) {
+  if (!u?.id) return
+  mealCompensationTarget.value = u
+  showMealCompensationModal.value = true
+}
+
+async function onMemberMealCompensationSaved() {
+  await fetchMembers()
+  await fetchMemberStats()
+}
 
 /** --- 退卡退款：按消费日菜单单价扣款后退还余款 --- */
 const showRefundModal = ref(false)
@@ -1170,7 +1200,16 @@ onUnmounted(() => {
                         操作记录
                       </span>
                     </el-dropdown-item>
-                    <el-dropdown-item command="refund" :disabled="!canMemberRefund(u)" divided>
+                    <el-dropdown-item command="meal_compensation" divided>
+                      <span
+                        class="members-dropdown-item-inner"
+                        title="餐品问题赔付：将已消费次数补回余额，并写入操作审计"
+                      >
+                        <UtensilsCrossed :size="14" aria-hidden="true" />
+                        补餐赔付
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="refund" :disabled="!canMemberRefund(u)">
                       <span
                         class="members-dropdown-item-inner"
                         title="按已消费/剩余次数计算应退金额，确认后写入财务扣减"
@@ -1284,6 +1323,12 @@ onUnmounted(() => {
       @saved="onMemberAddressesSaved"
     />
 
+    <MemberMealCompensationModal
+      v-model:open="showMealCompensationModal"
+      :member="mealCompensationTarget"
+      @saved="onMemberMealCompensationSaved"
+    />
+
     <div
       v-if="showDeliveryRecordModal"
       class="modal-overlay"
@@ -1311,7 +1356,7 @@ onUnmounted(() => {
             {{ deliveryRecordTarget.name || '—' }} · {{ deliveryRecordTarget.phone || '' }}
           </p>
           <p class="modal-hint delivery-records-caption">
-            下列包含订阅套餐确认送达扣次，以及单次购买使用会员卡扣次的供餐日，按新到旧排列。
+            下列包含订阅套餐确认送达扣次、单次购买使用会员卡扣次的供餐日，以及补餐赔付记录，按新到旧排列。
           </p>
           <div v-if="deliveryRecordLoading" class="delivery-records-loading">加载中…</div>
           <template v-else>
@@ -1332,8 +1377,17 @@ onUnmounted(() => {
                     v-if="row.deduction_kind === 'single_meal'"
                     class="delivery-records-kind-badge"
                   >单次购买</span>
+                  <span
+                    v-else-if="row.deduction_kind === 'meal_compensation'"
+                    class="delivery-records-kind-badge delivery-records-kind-badge--compensation"
+                  >补餐</span>
                 </span>
-                <span class="delivery-records-units">{{ row.meal_units }} 份</span>
+                <span
+                  class="delivery-records-units"
+                  :class="{ 'delivery-records-units--compensation': row.deduction_kind === 'meal_compensation' }"
+                >
+                  {{ row.deduction_kind === 'meal_compensation' ? '+' : '' }}{{ row.meal_units }} 份
+                </span>
               </li>
             </ul>
             <p v-else class="delivery-records-empty">

@@ -12,7 +12,7 @@
       indicator-active-color="#ffffff"
     >
       <swiper-item v-for="item in banners" :key="item.id" class="home-banner-swiper__item" @click="onTap(item)">
-        <image class="home-banner-swiper__img" :src="item.image_url" mode="aspectFit" />
+        <image class="home-banner-swiper__img" :src="item.image_url" mode="aspectFill" />
       </swiper-item>
     </swiper>
   </view>
@@ -53,20 +53,20 @@ function onTap(item) {
 
 <style lang="scss" scoped>
 .home-banner-swiper {
+  width: 100%;
   margin-bottom: 24rpx;
 }
 
 .home-banner-swiper__track {
   width: 100%;
   overflow: hidden;
-  background: $ok-slate-100;
+  background: transparent;
 }
 
 .home-banner-swiper__item {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: $ok-slate-100;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 .home-banner-swiper__img {

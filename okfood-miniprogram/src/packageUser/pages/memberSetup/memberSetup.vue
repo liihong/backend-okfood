@@ -130,7 +130,7 @@ import { requestRenewRemindSubscribeAndGrant } from '@/utils/renewSubscribeMsg.j
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 
 /** 与 uni.scss $ok-forest-green 一致 */
-const payRadioColor = '#0e5a44'
+const payRadioColor = '#73B054'
 
 const MIN_DAILY_UNITS = 1
 const MAX_DAILY_UNITS = 10
@@ -618,9 +618,9 @@ async function onSubmit() {
 
 .store-card {
   padding: 24rpx 28rpx;
-  background: linear-gradient(145deg, rgba(14, 90, 68, 0.08) 0%, #fff 100%);
+  background: linear-gradient(145deg, rgba(115, 176, 84, 0.08) 0%, #fff 100%);
   border-radius: 20rpx;
-  border: 2rpx solid rgba(14, 90, 68, 0.18);
+  border: 2rpx solid rgba(115, 176, 84, 0.18);
   margin-bottom: 20rpx;
 }
 

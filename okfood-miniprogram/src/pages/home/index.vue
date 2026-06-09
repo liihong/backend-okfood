@@ -1,5 +1,5 @@
 <template>
-  <view class="page" :style="pageStyle">
+  <view class="page paper-background" :style="pageStyle">
     <scroll-view
       scroll-y
       class="scroll"
@@ -10,8 +10,13 @@
       @refresherrefresh="onRefresherRefresh"
     >
       <view class="home-page">
-        <HomeBannerSwiper :banners="banners" :today-ymd="todayYmd" />
-        <MemberLoginPromptBar @logged-in="onLoggedIn" />
+        <view class="home-hero">
+          <HomeBannerSwiper :banners="banners" :today-ymd="todayYmd" />
+          <view class="home-hero__member">
+            <MemberLoginPromptBar @logged-in="onLoggedIn" />
+          </view>
+        </view>
+        <HomeMembershipCardStrip :templates="cardTemplates" />
         <HomeFeaturedSection :dish="todayDish" :loading="loading" @tap="goDetail" />
       </view>
     </scroll-view>
@@ -25,8 +30,9 @@ import { onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import HomeBannerSwiper from '@/components/HomeBannerSwiper/HomeBannerSwiper.vue'
 import MemberLoginPromptBar from '@/components/MemberLoginPromptBar/MemberLoginPromptBar.vue'
 import HomeFeaturedSection from '@/components/HomeFeaturedSection/HomeFeaturedSection.vue'
+import HomeMembershipCardStrip from '@/components/HomeMembershipCardStrip/HomeMembershipCardStrip.vue'
 import MemberCouponReminderHost from '@/components/MemberCouponReminderHost/MemberCouponReminderHost.vue'
-import { fetchHomeBanners } from '@/utils/homeApi.js'
+import { fetchHomeBanners, fetchHomeMembershipCards } from '@/utils/homeApi.js'
 import { fetchTodayMenu, ymdTodayShanghai } from '@/utils/menuApi.js'
 import { getTabPageLayoutStyles } from '@/utils/tabPageLayout.js'
 import { syncCustomTabBar } from '@/utils/customTabBar.js'
@@ -39,6 +45,7 @@ const scrollStyle = ref({})
 const loading = ref(true)
 const refresherTriggered = ref(false)
 const banners = ref([])
+const cardTemplates = ref([])
 const todayDish = ref(null)
 const todayYmd = ref(ymdTodayShanghai())
 let loadSeq = 0
@@ -54,13 +61,15 @@ async function loadHomeData() {
   todayYmd.value = ymdTodayShanghai()
   loading.value = true
   try {
-    const [bannerList, dish] = await Promise.all([
+    const [bannerList, dish, cardList] = await Promise.all([
       fetchHomeBanners().catch(() => []),
       fetchTodayMenu().catch(() => null),
+      fetchHomeMembershipCards().catch(() => []),
     ])
     if (seq !== loadSeq) return
     banners.value = bannerList
     todayDish.value = dish
+    cardTemplates.value = Array.isArray(cardList) ? cardList : []
   } finally {
     if (seq === loadSeq) loading.value = false
   }
@@ -94,6 +103,7 @@ function goDetail(m) {
 
 function onLoggedIn() {
   couponHostReady.value = true
+  void loadHomeData()
 }
 
 onShareAppMessage(() => ({
@@ -125,8 +135,16 @@ onMounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: $ok-slate-50;
   box-sizing: border-box;
+  overflow: hidden;
+}
+
+.paper-background {
+  background-color: #f7f5f0;
+  background-image:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.65), rgba(185, 184, 180, 0)),
+    url("data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMjAwIDIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZmlsdGVyIGlkPSJub2lzZSI+PGZlVHVyYnVsZW5jZSB0eXBlPSJmcmFjdGFsTm9pc2UiIGJhc2VGcmVxdWVuY3k9IjAuMzUiIG51bU9jdGF2ZXM9IjMiIHN0aXRjaFRpbGVzPSJzdGl0Y2giLz48ZmVDb2xvck1hdHJpeCB0eXBlPSJtYXRyaXgiIHZhbHVlcz0iMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMC4wMyAwIDAgMCAwIi8+PC9maWx0ZXI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsdGVyPSJ1cmwoI25vaXNlKSIvPjwvc3ZnPg==");
+  background-blend-mode: multiply;
 }
 
 .scroll {
@@ -134,10 +152,25 @@ onMounted(() => {
   min-height: 0;
   width: 100%;
   box-sizing: border-box;
-  background: $ok-slate-50;
+  background: transparent;
 }
 
 .home-page {
   padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
+}
+
+.home-hero {
+  position: relative;
+}
+
+.home-hero :deep(.home-banner-swiper) {
+  margin-bottom: 0;
+}
+
+.home-hero__member {
+  position: relative;
+  z-index: 2;
+  margin-top: -52rpx;
+  margin-bottom: 24rpx;
 }
 </style>

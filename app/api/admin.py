@@ -60,6 +60,7 @@ from app.schemas.admin import (
     AdminSystemNotificationListOut,
     AdminSystemNotificationOut,
     MemberMembershipRefundConfirmIn,
+    MemberMealCompensationIn,
 )
 from app.schemas.common import AdminLoginTokenOut
 from app.services.admin_service import (
@@ -151,6 +152,7 @@ from app.services.member_membership_refund_service import (
     member_membership_refund_confirm,
     member_membership_refund_preview,
 )
+from app.services.member_meal_compensation_service import admin_member_meal_compensation
 from app.services.admin_system_notification_service import (
     acknowledge_admin_system_notification,
     admin_system_notification_to_dict,
@@ -1526,6 +1528,30 @@ def admin_member_membership_refund_confirm(
         ip_address=ip,
     )
     return success(data=dump_model(preview), msg="退卡退款已确认，请按应退金额线下/原路退款给用户")
+
+
+@router.post("/users/{member_id}/meal-compensation")
+def admin_member_meal_compensation_endpoint(
+    request: Request,
+    member_id: int,
+    body: MemberMealCompensationIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """会员档案：补餐赔付；将已消费次数补回余额并写入操作审计。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    xf = request.headers.get("x-forwarded-for")
+    ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
+    out = admin_member_meal_compensation(
+        db,
+        member_id=int(member_id),
+        store_id=store_id,
+        body=body,
+        operator=f"admin:{admin_username}"[:100],
+        ip_address=ip,
+    )
+    return success(data=dump_model(out), msg="补餐已入账")
 
 
 @router.get("/dishes")

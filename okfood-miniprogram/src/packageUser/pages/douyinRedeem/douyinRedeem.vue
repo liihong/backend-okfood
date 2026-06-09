@@ -126,7 +126,7 @@ onShow(() => {
 }
 .submit-btn {
   margin-top: 8rpx;
-  background: #0e5a44;
+  background: #73B054;
   color: #fff;
   border-radius: 999rpx;
   font-size: 30rpx;

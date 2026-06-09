@@ -278,7 +278,7 @@ function handleBuy() {
 .detail-float-back-ico {
   font-size: 56rpx;
   font-weight: 950;
-  color: #0e5a44;
+  color: #73B054;
   line-height: 1;
   padding-right: 4rpx;
 }
@@ -497,7 +497,7 @@ function handleBuy() {
   font-weight: 900;
   line-height: 1.35;
   margin-top: 48rpx;
-  box-shadow: 0 16rpx 32rpx rgba(14, 90, 68, 0.18);
+  box-shadow: 0 16rpx 32rpx rgba(115, 176, 84, 0.18);
 }
 
 .btn-order-confirm::after {

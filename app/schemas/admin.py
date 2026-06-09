@@ -723,6 +723,23 @@ class MemberMembershipRefundConfirmIn(BaseModel):
     remark: str | None = Field(None, max_length=500, description="退卡备注（线下退款说明等）")
 
 
+class MemberMealCompensationIn(BaseModel):
+    """会员补餐赔付：因餐品问题将已消费次数补回余额。"""
+
+    meal_units: int = Field(1, ge=1, le=50, description="补餐份数，默认 1")
+    remark: str | None = Field(None, max_length=500, description="赔付说明（如餐品问题描述）")
+
+
+class MemberMealCompensationOut(BaseModel):
+    """补餐赔付结果。"""
+
+    member_id: int = Field(..., ge=1)
+    balance_before: int = Field(..., ge=0)
+    balance_after: int = Field(..., ge=0)
+    meal_units: int = Field(..., ge=1, description="本次补回份数")
+    created_at: str = Field(..., description="操作时间（北京时间 ISO）")
+
+
 class FinanceReceivedWindowOut(BaseModel):
     """某一统计窗口内：开卡工单已缴 + 单次点餐已支付 − 会员退卡退款。"""
 
