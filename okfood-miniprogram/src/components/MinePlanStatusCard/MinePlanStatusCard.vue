@@ -351,7 +351,7 @@ const vipRibbonClass = computed(() => {
   margin-top: 12rpx;
   font-size: 22rpx;
   font-weight: 800;
-  color: rgba(180, 245, 200, 0.95);
+  color: rgba(2, 100, 31, 0.95);
   line-height: 1.45;
   word-break: break-all;
   white-space: normal;
@@ -377,7 +377,7 @@ const vipRibbonClass = computed(() => {
   min-width: 0;
   font-size: 22rpx;
   font-weight: 800;
-  color: rgba(180, 245, 200, 0.95);
+  color: rgba(5, 91, 30, 0.95);
   line-height: 1.45;
 }
 
