@@ -8,7 +8,7 @@
       <text class="featured-dish-card__hot">HOT</text>
       <image
         class="featured-dish-card__img"
-        :src="item.img"
+        :src="displayImg"
         mode="aspectFill"
         @error="onImgErr"
       />
@@ -47,7 +47,7 @@
       <text v-if="showDayLabel && item.day" class="menu-dish-card__day-tag">{{ item.day }}</text>
       <image
         class="menu-dish-card__img"
-        :src="item.img"
+        :src="displayImg"
         mode="aspectFill"
         @error="onImgErr"
       />
@@ -68,7 +68,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { formatMenuPrice } from '@/utils/menuApi.js'
 
 const props = defineProps({
@@ -92,10 +92,19 @@ const kcalText = computed(() => {
 const fallbackImg =
   'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400'
 
+const displayImg = ref('')
+
+watch(
+  () => props.item?.img,
+  (src) => {
+    displayImg.value =
+      typeof src === 'string' && src.trim() ? src.trim() : fallbackImg
+  },
+  { immediate: true },
+)
+
 function onImgErr() {
-  if (props.item && typeof props.item === 'object') {
-    props.item.img = fallbackImg
-  }
+  if (displayImg.value !== fallbackImg) displayImg.value = fallbackImg
 }
 </script>
 
@@ -269,15 +278,20 @@ function onImgErr() {
 
 .menu-dish-card__img-wrap {
   width: 100%;
-  aspect-ratio: 1;
+  height: 0;
+  padding-bottom: 100%;
   background: $ok-slate-50;
   position: relative;
   overflow: hidden;
 }
 
 .menu-dish-card__img {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
+  display: block;
 }
 
 .menu-dish-card__day-tag {

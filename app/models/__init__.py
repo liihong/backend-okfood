@@ -30,6 +30,7 @@ from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store_kitchen_plan import StoreKitchenPlan
 from app.models.douyin import DouyinCertificateRedemption, DouyinProductMapping
 from app.models.home_banner import HomeBanner
+from app.models.home_entry_poster import HomeEntryPoster
 
 __all__ = [
     "AdminDashboardBizDaySnapshot",
@@ -63,6 +64,7 @@ __all__ = [
     "DouyinCertificateRedemption",
     "DouyinProductMapping",
     "HomeBanner",
+    "HomeEntryPoster",
     "SfSameCityCallback",
     "SfSameCityPush",
 ]

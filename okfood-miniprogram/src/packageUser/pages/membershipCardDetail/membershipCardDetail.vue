@@ -5,7 +5,7 @@
       <view class="wrap">
         <view v-if="loading" class="hint">加载中…</view>
         <template v-else-if="tpl">
-          <view class="hero-card">
+          <view :class="['hero-card', heroCardClass]">
             <view class="hero-water">OK</view>
             <view class="hero-top">
               <view>
@@ -238,6 +238,21 @@ const privilegeLines = computed(() => {
   return DEFAULT_PRIV
 })
 
+/** 周卡绿 / 月卡金 / 次卡蓝，与首页卡包、我的页方案卡配色一致 */
+const heroCardClass = computed(() => {
+  const t = tpl.value
+  if (!t) return 'hero-card--week'
+  const kl = String(t.kind_label || '').trim()
+  const name = String(t.name || '').trim()
+  if (kl.includes('月') || name.includes('月卡') || name.includes('月')) return 'hero-card--month'
+  if (kl.includes('周') || name.includes('周卡') || name.includes('周')) return 'hero-card--week'
+  if (kl.includes('次') || name.includes('次卡') || name.includes('次')) return 'hero-card--times'
+  const mg = Number(t.meals_grant)
+  if (Number.isFinite(mg) && mg >= 18) return 'hero-card--month'
+  if (Number.isFinite(mg) && mg >= 6) return 'hero-card--week'
+  return 'hero-card--times'
+})
+
 function toggleAgree() {
   agreed.value = !agreed.value
 }
@@ -460,9 +475,22 @@ onLoad((opts) => {
   border-radius: 28rpx;
   padding: 28rpx 28rpx 24rpx;
   overflow: hidden;
-  background: linear-gradient(135deg, #73B054 0%, #365628 100%);
-  box-shadow: 0 16rpx 40rpx rgba(15, 23, 42, 0.14);
   margin-bottom: 28rpx;
+}
+
+.hero-card--week {
+  background: linear-gradient(135deg, #73b054 0%, #365628 100%);
+  box-shadow: 0 16rpx 40rpx rgba(15, 23, 42, 0.14);
+}
+
+.hero-card--month {
+  background: linear-gradient(135deg, #b8860b 0%, #d97706 45%, #92400e 100%);
+  box-shadow: 0 16rpx 40rpx rgba(146, 64, 14, 0.28);
+}
+
+.hero-card--times {
+  background: linear-gradient(135deg, #1e3a5f 0%, #1d4ed8 50%, #312e81 100%);
+  box-shadow: 0 16rpx 40rpx rgba(30, 58, 95, 0.28);
 }
 
 .hero-water {

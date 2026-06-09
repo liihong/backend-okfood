@@ -50,6 +50,7 @@
       </view>
     </scroll-view>
     <MemberCouponReminderHost v-if="couponHostReady" />
+    <EntryPosterHost />
   </view>
 </template>
 
@@ -59,6 +60,7 @@ import { onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import MenuDishCard from '@/components/MenuDishCard/MenuDishCard.vue'
 import MemberCouponReminderHost from '@/components/MemberCouponReminderHost/MemberCouponReminderHost.vue'
+import EntryPosterHost from '@/components/EntryPosterHost/EntryPosterHost.vue'
 
 /** 首屏渲染后再挂载券提醒，避免与 App 启动竞态 */
 const couponHostReady = ref(false)

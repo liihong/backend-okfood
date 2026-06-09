@@ -100,12 +100,14 @@
       </view>
     </scroll-view>
   </view>
+  <EntryPosterHost />
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import EntryPosterHost from '@/components/EntryPosterHost/EntryPosterHost.vue'
 import { showOkAlert } from '@/utils/okAlert.js'
 import { getMemberToken, reLaunchIfCourierModePreferred } from '@/utils/api.js'
 import { listSingleMealOrders, singleOrderStatusMeta } from '@/utils/singleOrderApi.js'

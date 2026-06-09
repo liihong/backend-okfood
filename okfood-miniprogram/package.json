@@ -13,6 +13,7 @@
     "dev:mp-qq": "uni -p mp-qq",
     "dev:mp-toutiao": "uni -p mp-toutiao",
     "dev:mp-harmony": "uni -p mp-harmony",
+    "fix:utf8-components": "python scripts/restore_utf8_components.py",
     "clean:mp-weixin": "node -e \"require('fs').rmSync('dist/dev/mp-weixin',{recursive:true,force:true});\"",
     "dev:mp-weixin": "uni -p mp-weixin",
     "dev:mp-xhs": "uni -p mp-xhs",

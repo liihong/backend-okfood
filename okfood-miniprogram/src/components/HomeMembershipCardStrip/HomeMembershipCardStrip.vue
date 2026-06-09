@@ -2,10 +2,9 @@
   <view v-if="templates.length" class="home-card-strip">
     <view class="home-card-strip__head">
       <view class="home-card-strip__title-wrap">
-        <text class="home-card-strip__star">?</text>
-        <text class="home-card-strip__title">??????</text>
+        <text class="home-card-strip__star">✦</text>
+        <text class="home-card-strip__title">自律膳食卡包</text>
       </view>
-      <text class="home-card-strip__more" @tap="goList">???? ?</text>
     </view>
 
     <view
@@ -24,8 +23,8 @@
         <text class="home-card-strip__cap">MEMBER CARD</text>
         <text class="home-card-strip__name">{{ t.name }}</text>
         <view class="home-card-strip__foot">
-          <text class="home-card-strip__meals">{{ t.meals_grant }} ??</text>
-          <text class="home-card-strip__price">�{{ priceOrDash(t.sale_price_yuan) }}</text>
+          <text class="home-card-strip__meals">{{ t.meals_grant }} 次餐</text>
+          <text class="home-card-strip__price">¥{{ priceOrDash(t.sale_price_yuan) }}</text>
         </view>
       </view>
     </view>
@@ -48,8 +47,8 @@
           <text class="home-card-strip__cap">MEMBER CARD</text>
           <text class="home-card-strip__name">{{ t.name }}</text>
           <view class="home-card-strip__foot">
-            <text class="home-card-strip__meals">{{ t.meals_grant }} ??</text>
-            <text class="home-card-strip__price">�{{ priceOrDash(t.sale_price_yuan) }}</text>
+            <text class="home-card-strip__meals">{{ t.meals_grant }} 次餐</text>
+            <text class="home-card-strip__price">¥{{ priceOrDash(t.sale_price_yuan) }}</text>
           </view>
         </view>
       </view>
@@ -70,7 +69,7 @@ function paletteClass(i) {
 }
 
 function priceOrDash(v) {
-  if (v == null || v === '') return '?'
+  if (v == null || v === '') return '—'
   return String(v)
 }
 
@@ -117,7 +116,7 @@ function goList() {
 }
 
 .home-card-strip__title {
-  font-size: 34rpx;
+  font-size: 30rpx;
   font-weight: 1000;
   color: #1e293b;
   line-height: 1.3;

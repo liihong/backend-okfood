@@ -225,11 +225,13 @@
     </view>
   </view>
   <OkAlertHost />
+  <EntryPosterHost />
   </view>
 </template>
 
 <script setup>
 import OkAlertHost from '@/components/OkAlertHost/OkAlertHost.vue'
+import EntryPosterHost from '@/components/EntryPosterHost/EntryPosterHost.vue'
 import { showOkAlert } from '@/utils/okAlert.js'
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { onShow } from '@dcloudio/uni-app'

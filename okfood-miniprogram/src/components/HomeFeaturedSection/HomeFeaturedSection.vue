@@ -3,7 +3,7 @@
     <view class="home-featured__head">
       <view class="home-featured__title-wrap">
         <text class="home-featured__star">✦</text>
-        <text class="home-featured__title">今日主推 · 控卡美味</text>
+       <text class="home-featured__title">今日小吴推荐菜</text>
       </view>
       <text class="home-featured__more" @tap="goMenu">查看更多菜品 ›</text>
     </view>
@@ -63,7 +63,7 @@ function goMenu() {
 }
 
 .home-featured__title {
-  font-size: 34rpx;
+  font-size: 30rpx;
   font-weight: 1000;
   color: #1e293b;
   line-height: 1.3;

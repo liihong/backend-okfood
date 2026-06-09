@@ -28,6 +28,7 @@ const DishCategoriesView = () => import('../views/DishCategoriesView.vue')
 const DeliveryRangeCheckView = () => import('../views/DeliveryRangeCheckView.vue')
 const CouponTemplatesView = () => import('../views/marketing/CouponTemplatesView.vue')
 const HomeBannersView = () => import('../views/marketing/HomeBannersView.vue')
+const EntryPosterView = () => import('../views/marketing/EntryPosterView.vue')
 const MemberCouponGrantsView = () => import('../views/marketing/MemberCouponGrantsView.vue')
 const DouyinProductMappingsView = () => import('../views/marketing/douyin/DouyinProductMappingsView.vue')
 const DouyinRedemptionsView = () => import('../views/marketing/douyin/DouyinRedemptionsView.vue')
@@ -159,6 +160,16 @@ const router = createRouter({
           meta: {
             title: '首页 Banner',
             pageSubtitle: '配置小程序首页轮播广告与跳转',
+            supportMarketing: true,
+          },
+        },
+        {
+          path: 'marketing/entry-poster',
+          name: 'marketing-entry-poster',
+          component: EntryPosterView,
+          meta: {
+            title: '进入弹窗海报',
+            pageSubtitle: '配置用户进入小程序时的提示海报',
             supportMarketing: true,
           },
         },

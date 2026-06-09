@@ -23,6 +23,7 @@
       </view>
     </scroll-view>
     <MemberCouponReminderHost v-if="couponHostReady" />
+    <EntryPosterHost />
   </view>
 </template>
 
@@ -34,6 +35,7 @@ import MemberLoginPromptBar from '@/components/MemberLoginPromptBar/MemberLoginP
 import HomeFeaturedSection from '@/components/HomeFeaturedSection/HomeFeaturedSection.vue'
 import HomeMembershipCardStrip from '@/components/HomeMembershipCardStrip/HomeMembershipCardStrip.vue'
 import MemberCouponReminderHost from '@/components/MemberCouponReminderHost/MemberCouponReminderHost.vue'
+import EntryPosterHost from '@/components/EntryPosterHost/EntryPosterHost.vue'
 import { fetchHomeBanners, fetchHomeMembershipCards } from '@/utils/homeApi.js'
 import { fetchTodayMenu, ymdTodayShanghai } from '@/utils/menuApi.js'
 import { getTabPageLayoutStyles } from '@/utils/tabPageLayout.js'
@@ -172,7 +174,7 @@ onMounted(() => {
 .home-hero__member {
   position: relative;
   z-index: 2;
-  margin-top: -44rpx;
+  margin-top: 10rpx;
 }
 
 .home-cards {

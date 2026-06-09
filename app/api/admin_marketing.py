@@ -38,6 +38,8 @@ from app.services.home_banner_service import (
     patch_home_banner,
     set_home_banner_active,
 )
+from app.schemas.marketing.home_entry_poster import HomeEntryPosterUpsertIn
+from app.services.home_entry_poster_service import get_entry_poster_admin, upsert_entry_poster
 from app.utils.response import dump_model, page_response, success
 
 router = APIRouter(prefix="/admin/marketing", tags=["管理端-小程序营销"])
@@ -266,3 +268,30 @@ def marketing_set_home_banner_active(
     _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     out = set_home_banner_active(db, banner_id=int(banner_id), store_id=sid, is_active=bool(body.is_active))
     return success(data=dump_model(out), msg="状态已更新")
+
+
+@router.get("/entry-poster")
+def marketing_get_entry_poster(
+    db: SessionDep,
+    admin_username: Annotated[str, Depends(admin_staff_subject)],
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """进入弹窗海报配置（每门店一条）。"""
+    _ = admin_username
+    _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = get_entry_poster_admin(db, store_id=sid)
+    return success(data=dump_model(out) if out else None, msg="获取成功")
+
+
+@router.put("/entry-poster")
+def marketing_upsert_entry_poster(
+    db: SessionDep,
+    admin_username: Annotated[str, Depends(admin_staff_subject)],
+    body: HomeEntryPosterUpsertIn,
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """保存进入弹窗海报配置。"""
+    _ = admin_username
+    _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = upsert_entry_poster(db, store_id=sid, body=body)
+    return success(data=dump_model(out), msg="保存成功")
