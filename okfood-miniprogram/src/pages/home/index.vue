@@ -16,7 +16,9 @@
             <MemberLoginPromptBar @logged-in="onLoggedIn" />
           </view>
         </view>
-        <HomeMembershipCardStrip :templates="cardTemplates" />
+        <view class="home-cards">
+          <HomeMembershipCardStrip :templates="cardTemplates" />
+        </view>
         <HomeFeaturedSection :dish="todayDish" :loading="loading" @tap="goDetail" />
       </view>
     </scroll-view>
@@ -170,7 +172,12 @@ onMounted(() => {
 .home-hero__member {
   position: relative;
   z-index: 2;
-  margin-top: -52rpx;
-  margin-bottom: 24rpx;
+  margin-top: -44rpx;
+}
+
+.home-cards {
+  position: relative;
+  z-index: 1;
+  margin-top: 24rpx;
 }
 </style>

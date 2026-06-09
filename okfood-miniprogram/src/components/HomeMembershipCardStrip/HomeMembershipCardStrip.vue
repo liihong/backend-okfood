@@ -1,5 +1,13 @@
 <template>
   <view v-if="templates.length" class="home-card-strip">
+    <view class="home-card-strip__head">
+      <view class="home-card-strip__title-wrap">
+        <text class="home-card-strip__star">?</text>
+        <text class="home-card-strip__title">??????</text>
+      </view>
+      <text class="home-card-strip__more" @tap="goList">???? ?</text>
+    </view>
+
     <view
       v-if="templates.length <= 2"
       class="home-card-strip__row"
@@ -16,8 +24,8 @@
         <text class="home-card-strip__cap">MEMBER CARD</text>
         <text class="home-card-strip__name">{{ t.name }}</text>
         <view class="home-card-strip__foot">
-          <text class="home-card-strip__meals">{{ t.meals_grant }} 次餐</text>
-          <text class="home-card-strip__price">¥{{ priceOrDash(t.sale_price_yuan) }}</text>
+          <text class="home-card-strip__meals">{{ t.meals_grant }} ??</text>
+          <text class="home-card-strip__price">�{{ priceOrDash(t.sale_price_yuan) }}</text>
         </view>
       </view>
     </view>
@@ -40,8 +48,8 @@
           <text class="home-card-strip__cap">MEMBER CARD</text>
           <text class="home-card-strip__name">{{ t.name }}</text>
           <view class="home-card-strip__foot">
-            <text class="home-card-strip__meals">{{ t.meals_grant }} 次餐</text>
-            <text class="home-card-strip__price">¥{{ priceOrDash(t.sale_price_yuan) }}</text>
+            <text class="home-card-strip__meals">{{ t.meals_grant }} ??</text>
+            <text class="home-card-strip__price">�{{ priceOrDash(t.sale_price_yuan) }}</text>
           </view>
         </view>
       </view>
@@ -62,7 +70,7 @@ function paletteClass(i) {
 }
 
 function priceOrDash(v) {
-  if (v == null || v === '') return '—'
+  if (v == null || v === '') return '?'
   return String(v)
 }
 
@@ -71,6 +79,10 @@ function goDetail(id) {
     url: `/packageUser/pages/membershipCardDetail/membershipCardDetail?templateId=${encodeURIComponent(String(id))}`,
   })
 }
+
+function goList() {
+  uni.navigateTo({ url: '/packageUser/pages/membershipCardList/membershipCardList' })
+}
 </script>
 
 <style lang="scss" scoped>
@@ -78,6 +90,45 @@ function goDetail(id) {
   width: 100%;
   margin-bottom: 32rpx;
   box-sizing: border-box;
+}
+
+.home-card-strip__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 0 32rpx;
+  margin-bottom: 20rpx;
+  box-sizing: border-box;
+}
+
+.home-card-strip__title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  min-width: 0;
+}
+
+.home-card-strip__star {
+  flex-shrink: 0;
+  font-size: 28rpx;
+  color: #f97316;
+  line-height: 1;
+}
+
+.home-card-strip__title {
+  font-size: 34rpx;
+  font-weight: 1000;
+  color: #1e293b;
+  line-height: 1.3;
+}
+
+.home-card-strip__more {
+  flex-shrink: 0;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: $ok-slate-400;
+  line-height: 1.3;
 }
 
 .home-card-strip__row {
@@ -127,7 +178,7 @@ function goDetail(id) {
 }
 
 .home-card-strip__card--a {
-  background: linear-gradient(135deg, #73B054 0%, #456D32 55%, #365628 100%);
+  background: linear-gradient(135deg, #73b054 0%, #456d32 55%, #365628 100%);
 }
 
 .home-card-strip__card--b {

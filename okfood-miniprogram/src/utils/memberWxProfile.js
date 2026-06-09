@@ -1,5 +1,5 @@
 import { request, getMemberToken } from '@/utils/api.js'
-import { WX_DEFAULT_NICK } from '@/utils/memberProfile.js'
+import { MEMBER_STUB_NAME, WX_DEFAULT_NICK } from '@/utils/memberProfile.js'
 
 /** 微信头像昵称本地缓存前缀（按手机号分 key） */
 export const WX_PROFILE_PREFIX = 'okfood_wx_profile'
@@ -85,4 +85,46 @@ export async function pushWechatProfileToServer(partial, options = {}) {
 export function isValidWxNick(nick) {
   const n = String(nick || '').trim()
   return n !== '' && n !== WX_DEFAULT_NICK
+}
+
+/**
+ * 解析会员展示名：本地微信昵称 → 服务端 wechat_name / 真实姓名 → 手机号 → 默认
+ * @param {{ wxProfile?: { nickName?: string } | null, serverProfile?: object | null, phone?: string }} ctx
+ */
+export function resolveMemberDisplayName(ctx = {}) {
+  const { wxProfile, serverProfile, phone } = ctx
+  const wxNick = wxProfile?.nickName != null ? String(wxProfile.nickName).trim() : ''
+  if (wxNick && wxNick !== WX_DEFAULT_NICK) return wxNick
+
+  const wnRaw =
+    serverProfile?.wechat_name != null ? String(serverProfile.wechat_name).trim() : ''
+  if (wnRaw && wnRaw !== WX_DEFAULT_NICK) return wnRaw
+
+  const nm = serverProfile?.name != null ? String(serverProfile.name).trim() : ''
+  if (nm && nm !== MEMBER_STUB_NAME) return nm
+
+  const p = String(phone || '').trim()
+  if (p) return p
+  return '会员'
+}
+
+/**
+ * 解析会员头像 URL：本地微信头像 → 服务端 avatar_url
+ * @param {{ wxProfile?: { avatarUrl?: string } | null, serverProfile?: object | null }} ctx
+ */
+export function resolveMemberAvatarUrl(ctx = {}) {
+  const { wxProfile, serverProfile } = ctx
+  const local = wxProfile?.avatarUrl != null ? String(wxProfile.avatarUrl).trim() : ''
+  if (local) return local
+  const remote =
+    serverProfile?.avatar_url != null ? String(serverProfile.avatar_url).trim() : ''
+  return remote || ''
+}
+
+/** 无头像时展示的首字（与「我的」页 avatarChar 一致） */
+export function memberAvatarFallbackChar(displayName) {
+  const n = String(displayName || '').trim()
+  if (!n) return '员'
+  const ch = n[0]
+  return /[\u4e00-\u9fa5]/.test(ch) ? ch : (ch || 'O').toUpperCase()
 }
