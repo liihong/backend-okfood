@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { Users, TrendingUp, UtensilsCrossed } from 'lucide-vue-next'
+import { Users, TrendingUp, RefreshCw } from 'lucide-vue-next'
 import { useDeliveryRegionMapOverview } from '../../composables/useDeliveryRegionMapOverview.js'
 import { UNASSIGNED_AREA_LABEL } from '../../utils/regionAssignment.js'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
@@ -196,39 +196,44 @@ const businessAnchorIsoNormalized = computed(() => {
 
 /** ISO 日历日 YYYY-MM-DD 的次日（UTC，与业务日一致） */
 function addOneDayIso(iso) {
+  return shiftIsoYmd(iso, 1)
+}
+
+/** 上海今日（概览锚定日上限），YYYY-MM-DD */
+const shanghaiTodayIso = computed(() => {
+  const raw = summaryMeta.value?.shanghai_today
+  if (raw == null || String(raw).trim() === '') return ''
+  const s = String(raw).trim().slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ''
+})
+
+/** ISO 日历日 YYYY-MM-DD 加减天数（UTC，与业务日一致） */
+function shiftIsoYmd(iso, deltaDays) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso).trim().slice(0, 10))
   if (!m) return ''
   const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
-  dt.setUTCDate(dt.getUTCDate() + 1)
+  dt.setUTCDate(dt.getUTCDate() + deltaDays)
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(
     dt.getUTCDate(),
   ).padStart(2, '0')}`
 }
 
-/** 锚定营业日日历：与 dashboard-summary.business_date 一致；空串表示走服务端默认（上海当日） */
-const dashDatePickerValue = ref('')
-const dashDatePopoverVisible = ref(false)
+const dashboardDayNavBusy = computed(() => dashboardStatsLoading.value)
 
-function syncDashDatePickerFromSummary() {
-  const raw =
-    summaryMeta.value?.business_anchor_date != null &&
-    String(summaryMeta.value.business_anchor_date).trim() !== ''
-      ? String(summaryMeta.value.business_anchor_date).trim().slice(0, 10)
-      : summaryAnchorDate.value.trim().slice(0, 10)
-  dashDatePickerValue.value = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : ''
+/** 上一日 / 下一日快捷切换营业锚定日（含未来日，与 dashboard-summary 口径一致） */
+async function shiftDashboardAnchorDay(delta) {
+  const base =
+    businessAnchorIsoNormalized.value ||
+    shanghaiTodayIso.value ||
+    summaryAnchorDate.value.trim().slice(0, 10)
+  const next = shiftIsoYmd(base, delta)
+  if (!next) return
+  summaryAnchorDate.value = next
+  await fetchDashboardSummary()
 }
 
-function onDashDatePopoverShow() {
-  syncDashDatePickerFromSummary()
-}
-
-/**
- * el-date-picker 选中或清空后立即拉取 dashboard-summary；
- * 「当日」语义随锚定日与上海今日比较（summaryIsLiveToday）。
- */
-function onDashboardAnchorDateChange(val) {
-  summaryAnchorDate.value = val && typeof val === 'string' ? val.slice(0, 10).trim() : ''
-  dashDatePopoverVisible.value = false
+/** 刷新营业概览顶卡数据（保持当前锚定日） */
+function refreshDashboardOverview() {
   void fetchDashboardSummary()
 }
 
@@ -273,7 +278,6 @@ async function fetchDashboardSummary() {
       { label: '明日需准备餐品', value: np, unit: '份', mapFilter: 'tomorrow_prep' },
       { label: '当日过期份数', value: te, unit: '份', mapFilter: null },
     ]
-    syncDashDatePickerFromSummary()
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -640,49 +644,45 @@ onMounted(async () => {
       <article class="dro-dash-kpi" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
         <div class="dro-dash-kpi__head">
           <div class="dro-dash-kpi__tags">
-            <el-popover
-              v-model:visible="dashDatePopoverVisible"
-              trigger="click"
-              placement="bottom-start"
-              :width="286"
-              @show="onDashDatePopoverShow"
-            >
-              <template #reference>
-                <button
-                  type="button"
-                  class="dro-dash-pill dro-dash-pill--emerald dro-dash-pill--interactive"
-                  :aria-expanded="dashDatePopoverVisible ? 'true' : 'false'"
-                  aria-haspopup="dialog"
-                  aria-label="选择营业日，查看该日总盘数据"
-                >
-                  {{ summaryIsLiveToday ? '今日总盘' : '当日' }} · {{ businessAnchorMdDisplay || '—'
-                  }}<template v-if="businessAnchorWeekdayDisplay">
-                    {{ businessAnchorWeekdayDisplay }}</template
-                  >
-                </button>
-              </template>
-              <div class="dro-dash-date-picker-wrap">
-                <el-date-picker
-                  v-model="dashDatePickerValue"
-                  type="date"
-                  value-format="YYYY-MM-DD"
-                  placeholder="营业日"
-                  clearable
-                  class="dro-dash-date-picker"
-                  @change="onDashboardAnchorDateChange"
-                />
-                <p class="dro-dash-date-picker-hint">清空则按服务端默认（上海当日）</p>
-              </div>
-            </el-popover>
+            <span class="dro-dash-pill dro-dash-pill--emerald">
+              {{ summaryIsLiveToday ? '今日总盘' : '当日' }} · {{ businessAnchorMdDisplay || '—'
+              }}<template v-if="businessAnchorWeekdayDisplay">
+                {{ businessAnchorWeekdayDisplay }}</template
+              >
+            </span>
+            <nav class="dro-dash-day-nav" aria-label="切换营业日">
+              <button
+                type="button"
+                class="dro-dash-day-nav-btn"
+                :disabled="dashboardDayNavBusy"
+                @click="shiftDashboardAnchorDay(-1)"
+              >
+                上一日
+              </button>
+              <button
+                type="button"
+                class="dro-dash-day-nav-btn"
+                :disabled="dashboardDayNavBusy"
+                @click="shiftDashboardAnchorDay(1)"
+              >
+                下一日
+              </button>
+            </nav>
           </div>
-          <span
-            class="dro-dash-kpi__ico-badge dro-dash-kpi__ico-badge--emerald"
-            role="status"
-            :title="formatSellableGateLabel(todaySellableQuantity)"
-            :aria-label="formatSellableGateLabel(todaySellableQuantity)"
+          <button
+            type="button"
+            class="dro-dash-kpi__ico-badge dro-dash-kpi__ico-badge--emerald dro-dash-kpi__ico-badge--action"
+            :disabled="dashboardStatsLoading"
+            title="刷新营业概览"
+            aria-label="刷新营业概览"
+            @click="refreshDashboardOverview"
           >
-            <UtensilsCrossed :size="18" aria-hidden="true" />
-          </span>
+            <RefreshCw
+              :size="18"
+              :class="{ 'dro-dash-refresh-spin': dashboardStatsLoading }"
+              aria-hidden="true"
+            />
+          </button>
         </div>
         <div class="dro-dash-kpi__hero-metric">
           <span class="dro-dash-kpi__hero-metric-num">{{
@@ -1379,30 +1379,42 @@ onMounted(async () => {
   border-color: #d1fae5;
 }
 
-/* 今日总盘营业日：可点开日历；勿用 font:inherit，与右侧「明日预测」胶囊 typography 一致 */
-button.dro-dash-pill--interactive {
-  cursor: pointer;
-  margin: 0;
-  outline: none;
+/* 今日总盘：上一日 / 下一日快捷切换 */
+.dro-dash-day-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
-button.dro-dash-pill--interactive:focus-visible {
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.4);
-}
-
-.dro-dash-date-picker-wrap {
-  padding: 0.15rem 0;
-}
-
-.dro-dash-date-picker {
-  width: 100%;
-}
-
-.dro-dash-date-picker-hint {
-  margin: 0.5rem 0 0;
+.dro-dash-day-nav-btn {
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
   font-size: 11px;
-  line-height: 1.35;
-  color: #64748b;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.dro-dash-day-nav-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+.dro-dash-day-nav-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dro-dash-day-nav-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(100, 116, 139, 0.28);
 }
 
 .dro-dash-pill--blue {
@@ -1445,6 +1457,40 @@ button.dro-dash-pill--interactive:focus-visible {
   background: rgba(236, 253, 245, 0.92);
   border: 1px solid rgba(167, 243, 208, 0.85);
   color: #059669;
+}
+
+button.dro-dash-kpi__ico-badge--action {
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  outline: none;
+}
+
+button.dro-dash-kpi__ico-badge--action:hover:not(:disabled) {
+  background: rgba(209, 250, 229, 0.95);
+  border-color: rgba(110, 231, 183, 0.9);
+}
+
+button.dro-dash-kpi__ico-badge--action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button.dro-dash-kpi__ico-badge--action:focus-visible {
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.35);
+}
+
+.dro-dash-refresh-spin {
+  animation: dro-dash-refresh-spin 0.85s linear infinite;
+}
+
+@keyframes dro-dash-refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .dro-dash-kpi__ico-badge--blue {

@@ -10,6 +10,11 @@ const storeId = ref(1)
 const list = ref([])
 const loading = ref(false)
 const grantVisible = ref(false)
+/** 分页：与接口 page / page_size 一致 */
+const page = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
+const pageSizeOptions = [10, 20, 50, 100]
 
 const STATUS_LABEL = {
   available: '待使用',
@@ -22,18 +27,42 @@ const STATUS_LABEL = {
 async function loadList() {
   loading.value = true
   try {
-    const data = await apiJson(
-      `/api/admin/marketing/member-coupons?store_id=${storeId.value}&page=1&page_size=100`,
-      {},
-      { auth: true },
-    )
+    const q = new URLSearchParams()
+    q.set('store_id', String(storeId.value))
+    q.set('page', String(page.value))
+    q.set('page_size', String(pageSize.value))
+    const data = await apiJson(`/api/admin/marketing/member-coupons?${q.toString()}`, {}, { auth: true })
     list.value = Array.isArray(data?.items) ? data.items : []
+    total.value = Number(data?.total) || 0
+    // 作废等操作后，当前页可能已无数据，自动回退一页
+    if (list.value.length === 0 && page.value > 1) {
+      page.value -= 1
+      return await loadList()
+    }
   } catch (e) {
     if (handleAdminLogout(e)) return
     showToast(e instanceof Error ? e.message : '加载失败', 'error')
+    list.value = []
+    total.value = 0
   } finally {
     loading.value = false
   }
+}
+
+function onPageChange(nextPage) {
+  page.value = nextPage
+  void loadList()
+}
+
+function onPageSizeChange(nextSize) {
+  pageSize.value = nextSize
+  page.value = 1
+  void loadList()
+}
+
+function onGrantSaved() {
+  page.value = 1
+  void loadList()
 }
 
 async function revokeRow(row) {
@@ -68,8 +97,13 @@ onMounted(() => {
           <Plus :size="18" /> 发放优惠券
         </button>
       </div>
-      <p v-if="loading" class="hint">加载中…</p>
-      <el-table v-else :data="list" stripe class="admin-table">
+      <el-table
+        v-loading="loading"
+        :data="list"
+        stripe
+        class="admin-table"
+        empty-text="暂无发放记录"
+      >
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="template_name" label="券种" min-width="120" />
         <el-table-column label="会员" min-width="140">
@@ -96,15 +130,31 @@ onMounted(() => {
           </template>
         </el-table-column>
       </el-table>
+      <div v-if="adminAccessToken" class="coupon-grants-pagination">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :total="total"
+          :page-sizes="pageSizeOptions"
+          :disabled="loading"
+          layout="total, sizes, prev, pager, next, jumper"
+          background
+          @current-change="onPageChange"
+          @size-change="onPageSizeChange"
+        />
+      </div>
     </div>
-    <GrantCouponModal v-model:visible="grantVisible" :store-id="storeId" @saved="loadList" />
+    <GrantCouponModal v-model:visible="grantVisible" :store-id="storeId" @saved="onGrantSaved" />
   </section>
 </template>
 
 <style scoped>
-.hint {
-  padding: 24px;
-  color: var(--admin-muted, #64748b);
+.coupon-grants-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding: 1.25rem 2rem;
+  border-top: 1px solid #f8fafc;
+  background: #fafafa;
 }
 .btn-link {
   background: none;
