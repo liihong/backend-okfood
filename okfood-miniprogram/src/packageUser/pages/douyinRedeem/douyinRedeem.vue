@@ -37,6 +37,7 @@ import { getPageScrollStyle } from '@/utils/navbar.js'
 import { getMemberToken, clearMemberSession } from '@/utils/api.js'
 import { redeemDouyinCertificate } from '@/utils/douyinApi.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
+import { showOkAlert } from '@/utils/okAlert.js'
 
 const scrollStyle = ref({})
 const code = ref('')
@@ -53,11 +54,13 @@ async function onSubmit() {
   try {
     const data = await redeemDouyinCertificate({ code: c })
     markMinePageNeedsRefresh()
-    uni.showModal({
+    showOkAlert({
       title: '兑换成功',
       content: data?.message || '兑换成功',
       showCancel: false,
-      success: () => {
+      tone: 'success',
+      success: (r) => {
+        if (!r.confirm) return
         if (data?.grant_type === 'coupon_template') {
           uni.navigateTo({ url: '/packageUser/pages/myCoupons/myCoupons' })
         } else {
