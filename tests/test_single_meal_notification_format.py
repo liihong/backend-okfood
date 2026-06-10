@@ -26,7 +26,8 @@ def test_build_new_format_includes_member_card_note() -> None:
     )
     assert title == "单次零售新订单 · #199"
     assert "用户：隔壁老陈" in body
-    assert "手机号：18637369306" in body
+    assert "手机号：186****9306" in body
+    assert "18637369306" not in body
     assert "餐品：泰式酸辣虾拌蕨根粉×1（会员卡支付）" in body
     assert "供餐日：2026-06-05（配送到家）" in body
     assert "trace=" not in body

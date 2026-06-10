@@ -1094,6 +1094,17 @@ onUnmounted(() => {
             <span class="t-plan" :class="planTagClass(u.plan)">{{ u.plan }}</span>
           </template>
         </el-table-column>
+        <el-table-column
+          label="起送日期"
+          align="center"
+          min-width="104"
+          class-name="td-delivery-start"
+          label-class-name="td-delivery-start"
+        >
+          <template #default="{ row: u }">
+            <span class="members-delivery-start-date">{{ u.delivery_start_date || '—' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="配送地址" min-width="300" class-name="td-col-delivery-address">
           <template #default="{ row: u }">
             <el-tooltip

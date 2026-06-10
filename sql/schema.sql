@@ -27,6 +27,7 @@
 --  23) members.store_pickup 门店自提（见 migrations/20260424_members_store_pickup.sql）
 --  24) members.skip_subscription_saturday 固定周六不履约（见 migrations/20260506_members_skip_subscription_saturday.sql）
 --  25) balance_logs.reason 增加 single_meal 单点扣次（见 migration_036_balance_logs_single_meal_reason.sql）
+--  26) balance_logs.reason 增加 meal_compensation 补餐赔付（见 migration_042_balance_logs_meal_compensation_reason.sql）
 
 SET NAMES utf8mb4;
 
@@ -162,7 +163,7 @@ CREATE TABLE IF NOT EXISTS `balance_logs` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `member_id` BIGINT UNSIGNED NOT NULL,
   `change` INT NOT NULL COMMENT '正数充值/退款增加，负数扣减',
-  `reason` ENUM('recharge','delivery','refund','admin_adjust','single_meal') NOT NULL COMMENT 'admin_adjust=后台改次; single_meal=单点会员卡扣次',
+  `reason` ENUM('recharge','delivery','refund','admin_adjust','single_meal','meal_compensation') NOT NULL COMMENT 'admin_adjust=后台改次; single_meal=单点会员卡扣次; meal_compensation=补餐赔付',
   `operator` VARCHAR(50) NOT NULL COMMENT 'admin 用户名、courier_id或 system',
   `detail` VARCHAR(500) NULL COMMENT '业务说明：如开卡工单号、备注摘要等',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

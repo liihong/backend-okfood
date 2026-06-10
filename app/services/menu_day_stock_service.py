@@ -311,7 +311,7 @@ def single_order_stock_by_date_for_week(
     `dishes_by_date` 必须与 `GET /api/menu/weekly` 的周槽+按日补全合并结果一致；
     `weekly_slot_rows` 须为当周 `WeeklyMenuSlot` JOIN `MenuDish` 的原始行。
 
-    ``subscription_floor_date``：早于该日历日的供餐日将 ``subscription_meals`` 视为 0（不跑大表统计），列表页加速用；当日及之后与详情/下单校验一致。
+    ``subscription_floor_date``：早于该日历日的供餐日不扫会员履约份数，且 ``remaining`` 固定为 0（已过日不可下单；若仍按 sub=0 计算会虚高）。
     """
 
     sid = int(store_id)
@@ -350,6 +350,9 @@ def single_order_stock_by_date_for_week(
             cap = int(w.total_stock or 0)
             single_cap = max(0, cap - sub)
             rem = max(0, single_cap - paid_n)
+            # 已过供餐日不可下单；省略订阅统计时 sub=0 会导致 remaining 虚高（如 cap-paid）
+            if subscription_floor is not None and d < subscription_floor:
+                rem = 0
             out[d] = SingleOrderStockInfo(
                 limited=True, total_stock=cap, subscription_meals=sub, paid_single_portions=paid_n, remaining=rem
             )

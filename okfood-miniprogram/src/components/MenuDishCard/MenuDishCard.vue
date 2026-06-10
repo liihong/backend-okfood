@@ -31,9 +31,10 @@
           <text v-if="priceText != null" class="featured-dish-card__price">¥{{ priceText }}</text>
           <text v-else class="featured-dish-card__price featured-dish-card__price--pending">待公布</text>
         </view>
-        <view class="featured-dish-card__cta">
+        <view v-if="showFeaturedSelectAction" class="featured-dish-card__cta">
           <text class="featured-dish-card__cta-txt">立即购买 ›</text>
         </view>
+        <text v-else-if="showFeaturedSoldOut" class="featured-dish-card__soldout">售罄</text>
       </view>
     </view>
   </view>
@@ -63,8 +64,14 @@
           <text v-else class="menu-dish-card__price menu-dish-card__price--pending">待公布</text>
           <text v-if="showListPrice" class="menu-dish-card__list-price">¥{{ listPriceText }}</text>
         </view>
-        <view class="menu-dish-card__list-action">
-          <text class="menu-dish-card__list-action-txt">{{ item.isRetail ? '去购买' : '选餐' }}</text>
+        <view class="menu-dish-card__list-actions">
+          <view v-if="showListStockRemaining" class="menu-dish-card__stock-badge">
+            <text class="menu-dish-card__stock-badge-txt">剩 {{ item.singleStockRemaining ?? 0 }} 份</text>
+          </view>
+          <view v-if="showListSelectAction" class="menu-dish-card__add-btn">
+            <text class="menu-dish-card__add-icon">+</text>
+          </view>
+          <text v-else-if="showListSoldOut" class="menu-dish-card__list-soldout">售罄</text>
         </view>
       </view>
     </view>
@@ -101,7 +108,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { formatMenuPrice } from '@/utils/menuApi.js'
+import { formatMenuPrice, isSingleOrderStockAvailable } from '@/utils/menuApi.js'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -123,6 +130,46 @@ const showListPrice = computed(() => {
   const list = listPriceText.value
   if (sale == null || list == null) return false
   return Number(list) > Number(sale)
+})
+
+/** 排餐项且已拉取库存（首页推荐 / 周菜单列表） */
+const showMenuStockInfo = computed(
+  () => props.item?.stockLoaded === true && !props.item?.isRetail,
+)
+
+const menuStockAvailable = computed(() => isSingleOrderStockAvailable(props.item))
+
+/** 首页推荐：有库存时展示购买按钮 */
+const showFeaturedSelectAction = computed(() => {
+  if (!showMenuStockInfo.value) return true
+  return menuStockAvailable.value
+})
+
+/** 首页推荐：无库存时展示售罄 */
+const showFeaturedSoldOut = computed(
+  () => showMenuStockInfo.value && !menuStockAvailable.value,
+)
+
+/** 周菜单列表：已拉取库存且为排餐项（非零售） */
+const showListStockInfo = computed(() => showMenuStockInfo.value)
+
+const listStockAvailable = computed(() => menuStockAvailable.value)
+
+/** 有剩余库存时展示份数 */
+const showListStockRemaining = computed(
+  () => showListStockInfo.value && listStockAvailable.value,
+)
+
+/** 库存为 0 时展示售罄文案 */
+const showListSoldOut = computed(
+  () => showListStockInfo.value && !listStockAvailable.value,
+)
+
+/** 零售仍展示按钮；排餐项库存为 0 时隐藏选餐 */
+const showListSelectAction = computed(() => {
+  if (props.item?.isRetail) return true
+  if (!showListStockInfo.value) return true
+  return listStockAvailable.value
 })
 
 const kcalText = computed(() => {
@@ -309,6 +356,16 @@ function onImgErr() {
   line-height: 1.2;
 }
 
+.featured-dish-card__soldout {
+  flex-shrink: 0;
+  font-size: 26rpx;
+  font-weight: 900;
+  color: $ok-slate-400;
+  letter-spacing: 2rpx;
+  line-height: 1.2;
+  padding: 14rpx 8rpx;
+}
+
 .menu-dish-card {
   background: #fff;
   border-radius: 48rpx;
@@ -429,6 +486,8 @@ function onImgErr() {
   padding: 20rpx;
   gap: 20rpx;
   margin-bottom: 20rpx;
+  border: 1rpx solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 4rpx 20rpx rgba(15, 23, 42, 0.04);
 }
 
 .menu-dish-card__list-img {
@@ -463,11 +522,42 @@ function onImgErr() {
 
 .menu-dish-card__list-footer {
   margin-top: auto;
-  padding-top: 12rpx;
+  padding-top: 16rpx;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 12rpx;
+  gap: 16rpx;
+}
+
+.menu-dish-card__list-actions {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6rpx;
+  min-width: 56rpx;
+}
+
+.menu-dish-card__stock-badge {
+  padding: 2rpx 0;
+  white-space: nowrap;
+}
+
+.menu-dish-card__stock-badge-txt {
+  font-size: 20rpx;
+  font-weight: 800;
+  color: $ok-forest-green;
+  line-height: 1.2;
+}
+
+.menu-dish-card__list-soldout {
+  font-size: 24rpx;
+  font-weight: 900;
+  color: $ok-slate-400;
+  letter-spacing: 2rpx;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .menu-dish-card__price-group {
@@ -490,17 +580,24 @@ function onImgErr() {
   line-height: 1.2;
 }
 
-.menu-dish-card__list-action {
+/** 右下角加购：圆角方块 + 号 */
+.menu-dish-card__add-btn {
   flex-shrink: 0;
-  padding: 10rpx 24rpx;
-  border-radius: 999rpx;
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 16rpx;
   background: $ok-forest-green;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8rpx 20rpx rgba(115, 176, 84, 0.28);
 }
 
-.menu-dish-card__list-action-txt {
-  font-size: 22rpx;
-  font-weight: 900;
+.menu-dish-card__add-icon {
+  font-size: 40rpx;
+  font-weight: 300;
   color: #fff;
-  line-height: 1.2;
+  line-height: 1;
+  margin-top: -4rpx;
 }
 </style>

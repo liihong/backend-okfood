@@ -51,6 +51,7 @@ import {
   fetchWeeklyMenu,
   mondayOfWeekShanghai,
   prefetchWeeklyMenu,
+  weeklyMenuItemsHaveStock,
 } from '@/utils/menuApi.js'
 import { peekWeeklyMenuCache } from '@/utils/weeklyMenuCache.js'
 import { getTabPageLayoutStyles } from '@/utils/tabPageLayout.js'
@@ -202,13 +203,14 @@ async function loadThisWeek(opts = {}) {
   const forceRefresh = opts.forceRefresh === true
   const seq = ++loadWeeklySeq
   const cached = peekWeeklyMenuCache({})
+  const cacheHasStock = cached ? weeklyMenuItemsHaveStock(cached.items) : false
 
   if (cached && !forceRefresh) {
     if (seq !== loadWeeklySeq) return
     menu.value = cached.items
     if (cached.weekStart) cachedThisWeekMonday.value = cached.weekStart
     loading.value = false
-    if (!cached.stale) {
+    if (!cached.stale && cacheHasStock) {
       if (cached.weekStart) prefetchWeeklyMenu({ weekStart: addDaysIso(cached.weekStart, 7) })
       return
     }
@@ -218,7 +220,8 @@ async function loadThisWeek(opts = {}) {
 
   try {
     const fresh = await fetchWeeklyMenu({
-      forceRefresh: forceRefresh || !!cached?.stale,
+      includeStock: true,
+      forceRefresh: forceRefresh || !!cached?.stale || !cacheHasStock,
     })
     if (seq !== loadWeeklySeq) return
     if (fresh.weekStart) cachedThisWeekMonday.value = fresh.weekStart
@@ -248,15 +251,17 @@ async function loadNextWeek(opts = {}) {
   const requestWeekStart = mon ? addDaysIso(mon, 7) : ''
   const cacheOpts = requestWeekStart ? { weekStart: requestWeekStart } : {}
   const cached = peekWeeklyMenuCache(cacheOpts)
+  const cacheHasStock = cached ? weeklyMenuItemsHaveStock(cached.items) : false
 
   try {
-    if (cached && !forceRefresh && !cached.stale) {
+    if (cached && !forceRefresh && !cached.stale && cacheHasStock) {
       nextWeekMenu.value = cached.items
       return
     }
     const fresh = await fetchWeeklyMenu({
       ...cacheOpts,
-      forceRefresh: forceRefresh || !!cached?.stale,
+      includeStock: true,
+      forceRefresh: forceRefresh || !!cached?.stale || !cacheHasStock,
     })
     nextWeekMenu.value = fresh.items
   } catch (e) {

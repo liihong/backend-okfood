@@ -1096,6 +1096,24 @@ def _by_date_from_weekly_rows(rows: list[tuple[WeeklyMenuSlot, MenuDish]]) -> di
 
 
 
+def _attach_single_order_stock_for_menu_date(
+    db: Session,
+    out: dict,
+    *,
+    dish_id: int,
+    menu_date: date,
+    store_id: int,
+) -> None:
+    """今日/明日餐谱附带单次卡剩余库存，供首页推荐展示售罄。"""
+    from app.services.menu_day_stock_service import single_order_stock_for_dish_date
+
+    out.update(
+        single_order_stock_for_dish_date(
+            db, int(dish_id), menu_date, store_id=int(store_id)
+        ).to_detail_dict()
+    )
+
+
 def _get_menu_for_date(db: Session, *, d: date, store_id: int) -> dict:
     ws, slot = _week_start_and_slot(d)
     sid = int(store_id)
@@ -1121,6 +1139,9 @@ def _get_menu_for_date(db: Session, *, d: date, store_id: int) -> dict:
             "price": _member_menu_price(dish),
         }
         out.update(_member_spice_public_fields(dish))
+        _attach_single_order_stock_for_menu_date(
+            db, out, dish_id=int(dish.id), menu_date=d, store_id=sid
+        )
         return out
 
     row2 = db.execute(
@@ -1149,6 +1170,9 @@ def _get_menu_for_date(db: Session, *, d: date, store_id: int) -> dict:
         "price": _member_menu_price(dish),
     }
     out.update(_member_spice_public_fields(dish))
+    _attach_single_order_stock_for_menu_date(
+        db, out, dish_id=int(dish.id), menu_date=d, store_id=sid
+    )
     return out
 
 

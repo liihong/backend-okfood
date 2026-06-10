@@ -31,6 +31,29 @@ KIND_MEMBER_INSUFFICIENT_BALANCE_FOR_DELIVERY = "member_insufficient_balance_for
 logger = logging.getLogger(__name__)
 
 
+def _mask_phone_middle_four(phone: str | None) -> str:
+    """系统消息展示用手机号：中间四位脱敏（如 138****8000）。"""
+    raw = str(phone or "").strip()
+    if not raw:
+        return "无手机号"
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) >= 7:
+        return f"{digits[:3]}****{digits[-4:]}"
+    return raw[:20]
+
+
+def _system_notification_message_phone_unmasked(message: str | None) -> bool:
+    """多行正文中「手机号：」行未含 **** 时视为需重新生成（补脱敏）。"""
+    for line in str(message or "").splitlines():
+        if not line.startswith("手机号："):
+            continue
+        val = line[len("手机号：") :].strip()
+        if not val or val == "无手机号":
+            return False
+        return "****" not in val
+    return False
+
+
 def _sf_nightly_push_message(*, total: int, success: int, failed: int, skip_reason: str | None) -> str:
     if skip_reason:
         return f"今日自动推单未执行：{skip_reason}"
@@ -235,6 +258,27 @@ def _miniprogram_card_order_pending_business_date(order_id: int) -> date:
     return date(2000, 1, 1) + timedelta(days=int(order_id))
 
 
+_MINIPROGRAM_CARD_ORDER_ID_MARKER_RE = re.compile(r"^card_order_id:(\d+)$")
+
+
+def _order_id_from_miniprogram_card_pending_skip_reason(skip_reason: str | None) -> int | None:
+    m = _MINIPROGRAM_CARD_ORDER_ID_MARKER_RE.match(str(skip_reason or "").strip())
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_legacy_miniprogram_card_order_pending_notification_message(message: str | None) -> bool:
+    """旧版单行 mid= 文案；新版以「用户：」「会员UID：」分行展示。"""
+    msg = str(message or "")
+    if "用户：" in msg and "会员UID：" in msg:
+        return False
+    return "mid=" in msg or "已微信支付购买" in msg
+
+
 def _miniprogram_card_order_pending_message(
     *,
     order_id: int,
@@ -244,22 +288,65 @@ def _miniprogram_card_order_pending_message(
     member_name: str | None,
     delivery_start_date: date | None,
 ) -> tuple[str, str]:
-    phones = str(member_phone or "").strip()[:32] or "(无手机号)"
+    """生成小程序自助购卡待核对消息（多行，pre-line 展示）。"""
+    phone = _mask_phone_middle_four(member_phone)
     naming = str(member_name or "").strip()
-    naming = naming[:40] + ("…" if len(naming) > 40 else "")
+    naming = (naming[:24] + "…") if len(naming) > 24 else (naming or "会员")
 
     kind_label = str(card_kind or "").strip() or "会员卡"
     ds_text = delivery_start_date.isoformat() if delivery_start_date else "未填写"
     title = f"小程序自助购卡待核对 · 工单#{int(order_id)}"
-    body = (
-        f"会员 mid={int(member_id)} {phones} "
-        f"{('「' + naming + '」') if naming else ''}"
-        f"已微信支付购买{kind_label}，餐次已入账；起送日 {ds_text}。"
-        "请在「开卡工单」核对配送方式与起送日，完善后用户即可参与派单。"
-    )
+    body_lines = [
+        f"用户：{naming}",
+        f"会员UID：{int(member_id)}",
+        f"手机号：{phone}",
+        f"卡型：{kind_label}",
+        "支付方式：微信支付",
+        "入账状态：餐次已入账",
+        f"起送日：{ds_text}",
+        "",
+        "请在「开卡工单」核对配送方式与起送日，完善后用户即可参与派单。",
+    ]
+    body = "\n".join(body_lines)
     if len(body) > 500:
         body = body[:497] + "…"
     return title[:200], body
+
+
+def try_refresh_legacy_miniprogram_card_order_pending_notification(
+    db: Session,
+    row: AdminSystemNotification,
+) -> bool:
+    """将库内旧版单行购卡待核对消息升级为最新多行格式（列表拉取时懒修复）。"""
+    if row.kind != KIND_MINIPROGRAM_CARD_ORDER_PENDING:
+        return False
+    needs_legacy = _is_legacy_miniprogram_card_order_pending_notification_message(row.message)
+    needs_mask = _system_notification_message_phone_unmasked(row.message)
+    if not needs_legacy and not needs_mask:
+        return False
+    oid = _order_id_from_miniprogram_card_pending_skip_reason(row.skip_reason)
+    if oid is None:
+        return False
+
+    from app.models.member import Member
+    from app.models.member_card_order import MemberCardOrder
+
+    order = db.get(MemberCardOrder, oid)
+    if not order or int(order.store_id) != int(row.store_id):
+        return False
+    member = db.get(Member, int(order.member_id))
+    title, body = _miniprogram_card_order_pending_message(
+        order_id=oid,
+        card_kind=(order.card_kind or "").strip(),
+        member_id=int(order.member_id),
+        member_phone=(member.phone if member else None),
+        member_name=(member.name if member else None),
+        delivery_start_date=order.delivery_start_date,
+    )
+    row.title = title
+    row.message = body
+    db.add(row)
+    return True
 
 
 def _miniprogram_card_order_pending_notification_row(
@@ -454,7 +541,7 @@ def _build_single_meal_order_paid_notification_text(
 ) -> tuple[str, str]:
     """生成单次零售系统消息标题与正文（多行，pre-line 展示）。"""
     oid = int(order_id)
-    phone = str(member_phone or "").strip()[:20] or "无手机号"
+    phone = _mask_phone_middle_four(member_phone)
     naming = str(member_name or "").strip()
     naming = (naming[:24] + "…") if len(naming) > 24 else (naming or "会员")
 
@@ -495,7 +582,9 @@ def try_refresh_legacy_single_meal_order_paid_notification(
     """将库内旧版单行消息升级为最新多行格式（列表拉取时懒修复）。"""
     if row.kind != KIND_SINGLE_MEAL_ORDER_PAID:
         return False
-    if not _is_legacy_single_meal_paid_notification_message(row.message):
+    needs_legacy = _is_legacy_single_meal_paid_notification_message(row.message)
+    needs_mask = _system_notification_message_phone_unmasked(row.message)
+    if not needs_legacy and not needs_mask:
         return False
     oid = _order_id_from_single_meal_paid_skip_reason(row.skip_reason)
     if oid is None:
@@ -772,6 +861,8 @@ def list_admin_system_notifications(
     changed = False
     for row in rows:
         if try_refresh_legacy_single_meal_order_paid_notification(db, row):
+            changed = True
+        elif try_refresh_legacy_miniprogram_card_order_pending_notification(db, row):
             changed = True
     if changed:
         db.commit()
