@@ -152,11 +152,11 @@ const TAB_ROUTE_ICONS = {
   finance: DollarSign,
   menu: Utensils,
   'weekly-menu': Utensils,
+  'menu-retail-catalog': Boxes,
   'store-config': Settings,
   'system-tenants': Building2,
   'system-membership-templates': CreditCard,
   'system-dish-categories': Tags,
-  'system-retail-catalog': Boxes,
   'marketing-coupon-templates': Megaphone,
   'marketing-member-coupons': Megaphone,
 }
@@ -396,6 +396,7 @@ function onTabClose(tab) {
           </template>
           <el-menu-item index="/menu">菜品管理</el-menu-item>
           <el-menu-item index="/weekly-menu">本周菜单</el-menu-item>
+          <el-menu-item index="/menu/retail-catalog">普通商品管理</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu v-if="showFullAdminMenus" index="sub-marketing">
@@ -424,7 +425,6 @@ function onTabClose(tab) {
           <el-menu-item v-if="showOwnerAdminMenus" index="/store-config">门店配置</el-menu-item>
           <el-menu-item v-if="showOwnerAdminMenus" index="/system/membership-templates">会员卡管理</el-menu-item>
           <el-menu-item v-if="showOwnerAdminMenus" index="/system/dish-categories">菜品分类</el-menu-item>
-          <el-menu-item v-if="showOwnerAdminMenus" index="/system/retail-catalog">普通商品管理</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </aside>

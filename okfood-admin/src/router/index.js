@@ -154,6 +154,12 @@ const router = createRouter({
           meta: { title: '本周菜单', fullAdminOnly: true, hidePageTitle: true },
         },
         {
+          path: 'menu/retail-catalog',
+          name: 'menu-retail-catalog',
+          component: RetailCatalogView,
+          meta: { title: '普通商品管理', fullAdminOnly: true, hidePageTitle: true },
+        },
+        {
           path: 'marketing/home-banners',
           name: 'marketing-home-banners',
           component: HomeBannersView,
@@ -230,12 +236,6 @@ const router = createRouter({
           name: 'system-membership-templates',
           component: MembershipTemplatesView,
           meta: { title: '会员卡管理', ownerAdminOnly: true, hidePageTitle: true },
-        },
-        {
-          path: 'system/retail-catalog',
-          name: 'system-retail-catalog',
-          component: RetailCatalogView,
-          meta: { title: '普通商品管理', ownerAdminOnly: true, hidePageTitle: true },
         },
         {
           path: 'system/dish-categories',

@@ -29,7 +29,7 @@ export async function getRetailOrder(orderId) {
 export async function createRetailOrder(payload) {
   return request('/api/user/retail-orders', {
     method: 'POST',
-    body: payload,
+    data: payload,
     retry: 0,
   })
 }

@@ -7,7 +7,7 @@ const MEMBER_LIST = [
   },
   {
     pagePath: '/pages/order/index',
-    text: '菜单',
+    text: '点单',
     iconPath: '/static/caidan-nor.png',
     selectedIconPath: '/static/caidan-sel.png',
   },

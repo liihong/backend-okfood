@@ -65,6 +65,7 @@ import { syncCustomTabBar } from '@/utils/customTabBar.js'
 import { reLaunchIfCourierModePreferred } from '@/utils/api.js'
 import { readMenuFulfillMode, writeMenuFulfillMode } from '@/utils/menuFulfillMode.js'
 import { requestDeliverySubscribeOncePerDay } from '@/utils/subscribeMsg.js'
+import { RETAIL_ORDER_ENABLED, showRetailComingSoon } from '@/utils/retailFeature.js'
 
 const couponHostReady = ref(false)
 const pageStyle = ref({})
@@ -355,6 +356,10 @@ function onFulfillModeChange(mode) {
 
 function onItemTap(m) {
   if (m?.isRetail) {
+    if (!RETAIL_ORDER_ENABLED) {
+      showRetailComingSoon()
+      return
+    }
     const pid = m?.retailProductId != null ? Number(m.retailProductId) : 0
     if (!Number.isFinite(pid) || pid < 1) {
       uni.showToast({ title: '商品无效', icon: 'none' })

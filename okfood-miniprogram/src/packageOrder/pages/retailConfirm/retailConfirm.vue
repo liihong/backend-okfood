@@ -214,6 +214,7 @@ import { readMenuFulfillMode, writeMenuFulfillMode } from '@/utils/menuFulfillMo
 import { promptUnpaidOrderConflict } from '@/utils/unpaidOrderPrompt.js'
 import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
 import { showOkAlert } from '@/utils/okAlert.js'
+import { RETAIL_ORDER_ENABLED, showRetailComingSoon } from '@/utils/retailFeature.js'
 
 const scrollStyle = ref(getPageScrollStyle(0, FIXED_FOOTER_RESERVE_PX))
 const productId = ref(0)
@@ -527,6 +528,11 @@ onReady(() => {
 
 onLoad((options) => {
   applyScrollLayout()
+  if (!RETAIL_ORDER_ENABLED) {
+    showRetailComingSoon()
+    setTimeout(() => uni.navigateBack(), 300)
+    return
+  }
   const raw = options?.retail_product_id || options?.product_id || ''
   const id = Math.floor(Number(decodeURIComponent(String(raw || ''))))
   if (!Number.isFinite(id) || id < 1) {

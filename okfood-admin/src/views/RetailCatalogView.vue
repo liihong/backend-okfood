@@ -1,7 +1,7 @@
 <script setup>
 defineOptions({ name: 'RetailCatalogView' })
 import { ref, computed, onMounted } from 'vue'
-import { Camera, Info, LayoutGrid, List, Plus, X } from 'lucide-vue-next'
+import { Camera, LayoutGrid, List, Plus } from 'lucide-vue-next'
 import { apiForm, apiJson, adminAccessToken, handleAdminLogout, dishImageDisplayUrl } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
@@ -11,8 +11,6 @@ const products = ref([])
 const loadingCat = ref(false)
 const loadingProd = ref(false)
 const filterCatId = ref(null)
-/** 顶部说明横条是否展示 */
-const bannerVisible = ref(true)
 
 const qs = computed(() => new URLSearchParams({ store_id: String(storeId.value || 1) }).toString())
 
@@ -319,32 +317,6 @@ onMounted(reloadAll)
 
 <template>
   <div class="retail-page tab-content animate-up page-content-shell">
-    <!-- 页眉 -->
-    <header class="retail-header retail-header--actions-only">
-      <div class="retail-store-selector">
-        <label for="retail-store-id">门店 ID</label>
-        <el-input-number
-          id="retail-store-id"
-          v-model="storeId"
-          :min="1"
-          controls-position="right"
-          class="retail-store-input"
-          @change="reloadAll"
-        />
-      </div>
-    </header>
-
-    <!-- 提示横条 -->
-    <div v-show="bannerVisible" class="retail-alert">
-      <div class="retail-alert-content">
-        <Info :size="18" stroke-width="2.5" aria-hidden="true" />
-        <span>本期仅上架目录：不产生订单、不参加配送与小程序展示；为多 SKU（多条商品记录）备货配置。</span>
-      </div>
-      <button type="button" class="retail-alert-close" aria-label="关闭提示" @click="bannerVisible = false">
-        <X :size="16" stroke-width="2.5" />
-      </button>
-    </div>
-
     <!-- 商品分类 -->
     <section class="retail-section">
       <div class="retail-section-bar">
@@ -718,96 +690,7 @@ onMounted(reloadAll)
   gap: 24px;
 }
 
-/* 页眉白卡片（参考稿 header-section） */
-.retail-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  padding: 24px 32px;
-  background: #fff;
-  border-radius: 28px;
-  border: 1px solid var(--retail-border);
-  box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.05);
-}
-
-.retail-header--actions-only {
-  justify-content: flex-end;
-}
-
-.retail-store-selector {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: #f1f5f9;
-  padding: 6px 14px;
-  border-radius: 14px;
-  border: 1px solid var(--retail-border);
-}
-
-.retail-store-selector label {
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--retail-muted);
-  white-space: nowrap;
-}
-
-.retail-store-input {
-  width: 120px;
-}
-
-.retail-store-input :deep(.el-input__wrapper) {
-  background: transparent;
-  box-shadow: none;
-  padding: 0;
-}
-
-/* 提示横条 */
-.retail-alert {
-  background: var(--retail-info-bg);
-  border: 1px solid var(--retail-info-border);
-  border-radius: 20px;
-  padding: 16px 24px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-}
-
-.retail-alert-content {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--retail-info-text);
-  line-height: 1.5;
-}
-
-.retail-alert-content svg {
-  flex-shrink: 0;
-  color: var(--retail-primary);
-  margin-top: 2px;
-}
-
-.retail-alert-close {
-  background: transparent;
-  border: none;
-  color: var(--retail-muted);
-  cursor: pointer;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.5;
-  flex-shrink: 0;
-}
-
-.retail-alert-close:hover {
-  opacity: 1;
-}
-
+/* 区块白卡片（参考稿 header-section） */
 .retail-section {
   display: flex;
   flex-direction: column;

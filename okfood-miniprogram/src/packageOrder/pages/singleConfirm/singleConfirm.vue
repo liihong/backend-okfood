@@ -40,7 +40,7 @@
           </view>
         </view>
 
-        <view v-if="availableCoupons.length && payMethod !== 'balance'" class="card coupon-card">
+        <view v-if="availableCoupons.length" class="card coupon-card">
           <text class="card-label">优惠券</text>
           <picker
             mode="selector"
@@ -70,6 +70,7 @@
           </radio-group>
         </view>
 
+        <!-- 暂时关闭支付方式选择，固定微信支付
         <view v-if="showPaymentMethodCard" class="card pay-card">
           <text class="card-label">支付方式</text>
           <radio-group class="mode-group mode-group--row" @change="onPayMethodChange">
@@ -97,6 +98,7 @@
             </text>
           </view>
         </view>
+        -->
 
         <view v-if="fulfillMode === 'delivery'" class="card addr-card">
           <view class="addr-head">
@@ -138,10 +140,7 @@
         <view class="hint-box">
           <text class="hint-title">支付说明</text>
           <text class="hint-text">
-            <template v-if="payMethod === 'balance'">
-              将使用会员卡剩余次数支付，无需微信支付。支付成功后{{ fulfillMode === 'delivery' ? '将按配送片区派单' : '为待取货状态，请按供餐日到店取餐' }}。
-            </template>
-            <template v-else-if="fulfillMode === 'delivery'">
+            <template v-if="fulfillMode === 'delivery'">
              点击「去支付」将调起微信支付。支付成功后，后厨将安排出餐。
             </template>
             <template v-else>
@@ -223,7 +222,7 @@ const QTY_MAX = 50
 const availableCoupons = ref([])
 const selectedCouponId = ref(null)
 const couponsLoading = ref(false)
-/** wechat | balance */
+/** 固定微信支付（支付方式选择已暂时关闭） */
 const payMethod = ref('wechat')
 const balancePayInfo = ref(null)
 const balancePayLoading = ref(false)
@@ -298,7 +297,9 @@ const payablePriceText = computed(() => {
   return Math.max(0.01, orig - d).toFixed(2)
 })
 
-const showPaymentMethodCard = computed(() => BALANCE_PLAN_TYPES.has(resolveMemberPlanType()))
+// 暂时关闭支付方式选择，固定微信支付
+const showPaymentMethodCard = computed(() => false)
+// const showPaymentMethodCard = computed(() => BALANCE_PLAN_TYPES.has(resolveMemberPlanType()))
 
 const balanceDisplay = computed(() => {
   const info = balancePayInfo.value
@@ -525,7 +526,7 @@ function onCouponPick(e) {
 watch(quantity, () => {
   if (dish.value) {
     void loadCoupons()
-    void refreshBalancePayEligibility()
+    // void refreshBalancePayEligibility()
   }
 })
 
@@ -596,9 +597,9 @@ onLoad((options) => {
 onShow(() => {
   applyScrollLayout()
   if (!dishIdStr.value || !getMemberToken()) return
-  void refreshMemberProfile().then(() => {
-    if (dish.value) void refreshBalancePayEligibility()
-  })
+  // void refreshMemberProfile().then(() => {
+  //   if (dish.value) void refreshBalancePayEligibility()
+  // })
   refreshAddressesOnly()
 })
 
@@ -649,7 +650,8 @@ async function loadPage() {
     if (formatMenuPrice(dish.value.price) == null) {
       loadError.value = '该餐品单点价格待公布'
     } else {
-      await Promise.all([loadCoupons(), refreshBalancePayEligibility()])
+      await loadCoupons()
+      // await refreshBalancePayEligibility()
     }
   } catch (e) {
     const msg =
