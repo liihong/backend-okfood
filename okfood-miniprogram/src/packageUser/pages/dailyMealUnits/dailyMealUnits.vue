@@ -126,7 +126,7 @@ async function onSave() {
     })
     baselineUnits.value = units.value
     markMinePageNeedsRefresh()
-    uni.showToast({ title: '已保存', icon: 'success' })
+    uni.showToast({ title: '已预约，次日起生效', icon: 'success' })
     setTimeout(() => uni.navigateBack(), 400)
   } catch (err) {
     uni.showToast({ title: err?.message || '保存失败', icon: 'none', duration: 2800 })

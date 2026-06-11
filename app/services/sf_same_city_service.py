@@ -1100,11 +1100,13 @@ def _persist_sf_push_success(
     if is_delivery_sheet_push and first_sheet_push_today:
         from app.services.delivery_sheet_push_snapshot_service import (
             capture_delivery_sheet_absent_members_on_first_push,
+            capture_delivery_sheet_units_on_first_push,
         )
 
         capture_delivery_sheet_absent_members_on_first_push(
             db, store_id=sid, delivery_date=d
         )
+        capture_delivery_sheet_units_on_first_push(db, store_id=sid, delivery_date=d)
         db.commit()
     if ff_oids:
         from app.services.single_meal_order_service import link_single_meal_orders_to_sf_push_no_commit

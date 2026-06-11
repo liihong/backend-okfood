@@ -26,8 +26,13 @@
           </view>
          <view v-else class="menu-list">
             <MenuDishCard
-v-for="m in displayItems" :key="m.rowKey" layout="list" :item="m" :show-day-label="false"
-              :show-ingredients="true" @tap="onItemTap" />
+              v-for="m in displayItems"
+              :key="m.rowKey"
+              layout="list"
+              :item="m"
+              :show-ingredients="true"
+              @tap="onItemTap"
+            />
           </view>
         </view>
       </scroll-view>

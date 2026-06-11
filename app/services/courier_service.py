@@ -520,6 +520,7 @@ def extra_delivered_ineligible_subscribers(
     delivery_region_id: int | None,
     tenant_id: int | None = None,
     store_id: int | None = None,
+    day_delivered_member_ids: set[int] | None = None,
 ) -> tuple[list[Member], dict[int, MemberAddress | None], list[Member], dict[int, MemberAddress | None]]:
     """
     当日 delivery_logs 已为 DELIVERED，但会员不再满足「应配送/应自提」SQL（常见：扣次后 balance
@@ -529,19 +530,22 @@ def extra_delivered_ineligible_subscribers(
     if not is_subscription_delivery_day(delivery_date):
         return [], {}, [], {}
 
-    log_ids: set[int] = {
-        int(x)
-        for x in db.scalars(
-            select(DeliveryLog.member_id)
-            .distinct()
-            .join(Member, Member.id == DeliveryLog.member_id)
-            .where(
-                DeliveryLog.delivery_date == delivery_date,
-                DeliveryLog.status == DeliveryStatus.DELIVERED.value,
-                _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
-            )
-        ).all()
-    }
+    if day_delivered_member_ids is not None:
+        log_ids = set(day_delivered_member_ids)
+    else:
+        log_ids = {
+            int(x)
+            for x in db.scalars(
+                select(DeliveryLog.member_id)
+                .distinct()
+                .join(Member, Member.id == DeliveryLog.member_id)
+                .where(
+                    DeliveryLog.delivery_date == delivery_date,
+                    DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+                    _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
+                )
+            ).all()
+        }
     need = log_ids - already_home - already_pickup
     if not need:
         return [], {}, [], {}

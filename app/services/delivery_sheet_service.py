@@ -37,6 +37,8 @@ from app.services.courier_service import (
     post_push_first_day_whitelist_member_ids,
 )
 from app.services.member_address_service import delivery_region_name_map, full_address_line, load_default_address_map, routing_area_label
+from app.services.delivery_sheet_meal_units_service import DeliverySheetMealUnitsContext
+from app.services.delivery_sheet_push_snapshot_service import DeliverySheetDaySnapshots
 from app.services.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
 
 
@@ -47,6 +49,7 @@ def _merged_home_member_ids_when_sheet_frozen(
     store_id: int,
     delivery_region_id: int | None = None,
     frozen_ids: frozenset[int] | None = None,
+    absent_at_push: frozenset[int] | None = None,
 ) -> set[int]:
     """
     大表已推单：顺丰快照 frozen ∪ 推单后白名单（当日首餐新客）。
@@ -63,9 +66,10 @@ def _merged_home_member_ids_when_sheet_frozen(
             db, store_id=sid, delivery_date=delivery_date
         )
     )
-    absent_at_push = absent_member_ids_at_first_push(
-        db, store_id=sid, delivery_date=delivery_date
-    )
+    if absent_at_push is None:
+        absent_at_push = absent_member_ids_at_first_push(
+            db, store_id=sid, delivery_date=delivery_date
+        )
     merged = set(frozen)
     whitelist = post_push_first_day_whitelist_member_ids(
         db,
@@ -123,29 +127,27 @@ def _home_members_for_delivery_sheet(
     delivery_date: date,
     delivery_region_id: int | None,
     store_id: int,
+    day_snap: DeliverySheetDaySnapshots | None = None,
 ) -> tuple[list[Member], dict[int, MemberAddress | None]]:
     """
     到家应配送会员。大表顺丰推单后：快照 ∪ 当日首餐白名单；推单当日曾请假者取消请假不并入。
     """
-    from app.services.delivery_day_lock_service import (
-        has_delivery_sheet_sf_push_on_date,
-        sf_frozen_subscription_member_ids_for_delivery_date,
-    )
-
     sid = int(store_id)
     if not is_subscription_delivery_day(delivery_date):
         return [], {}
 
-    if has_delivery_sheet_sf_push_on_date(db, store_id=sid, delivery_date=delivery_date):
-        frozen_ids = sf_frozen_subscription_member_ids_for_delivery_date(
-            db, store_id=sid, delivery_date=delivery_date
-        )
+    snap = day_snap or DeliverySheetDaySnapshots.load(
+        db, store_id=sid, delivery_date=delivery_date
+    )
+    if snap.has_sf_push:
+        frozen_ids = snap.frozen_member_ids or frozenset()
         merged_ids = _merged_home_member_ids_when_sheet_frozen(
             db,
             delivery_date=delivery_date,
             store_id=sid,
             delivery_region_id=delivery_region_id,
             frozen_ids=frozen_ids,
+            absent_at_push=snap.absent_member_ids,
         )
         return _load_home_members_with_default_addresses(
             db,
@@ -413,8 +415,10 @@ def delivery_sheet_metrics_for_date(
 
     sid = int(store_id)
     d = delivery_date
+    day_snap = DeliverySheetDaySnapshots.load(db, store_id=sid, delivery_date=d)
+    day_delivered_ids = _store_delivered_member_ids_on_date(db, store_id=sid, delivery_date=d)
     members, default_by_id = _home_members_for_delivery_sheet(
-        db, delivery_date=d, delivery_region_id=None, store_id=sid
+        db, delivery_date=d, delivery_region_id=None, store_id=sid, day_snap=day_snap
     )
     mlist = list(members)
     pu_members, _pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d, store_id=sid)
@@ -425,18 +429,20 @@ def delivery_sheet_metrics_for_date(
         already_pickup={int(m.id) for m in pu_members},
         delivery_region_id=None,
         store_id=sid,
+        day_delivered_member_ids=day_delivered_ids,
     )
     sheet_members = mlist + list(ex_h)
     sheet_defaults: dict[int, MemberAddress | None] = dict(default_by_id)
     for mid, addr in ex_dh.items():
         sheet_defaults[int(mid)] = addr
 
-    home_mids = [int(m.id) for m in sheet_members]
-    home_delivered_set = _member_ids_delivered_on_date(db, d, home_mids) if home_mids else set()
+    home_mids = {int(m.id) for m in sheet_members}
+    home_delivered_set = day_delivered_ids & home_mids
+    units_ctx = DeliverySheetMealUnitsContext.from_day_snapshots(day_snap)
     home_pending = 0
     home_delivered = 0
     for m in sheet_members:
-        u = int(effective_daily_meal_units(m))
+        u = units_ctx.units_for(m)
         if int(m.id) in home_delivered_set:
             home_delivered += u
         else:
@@ -444,10 +450,18 @@ def delivery_sheet_metrics_for_date(
     home_stop_count = _count_home_delivery_stops(sheet_members, sheet_defaults, db)
 
     all_pu = list(pu_members) + list(ex_pu)
-    pu_mids = [int(m.id) for m in all_pu]
-    pu_delivered_set = _member_ids_delivered_on_date(db, d, pu_mids) if pu_mids else set()
-    pu_delivered = sum(int(effective_daily_meal_units(m)) for m in all_pu if int(m.id) in pu_delivered_set)
-    pu_pending = sum(int(effective_daily_meal_units(m)) for m in all_pu if int(m.id) not in pu_delivered_set)
+    pu_mids = {int(m.id) for m in all_pu}
+    pu_delivered_set = day_delivered_ids & pu_mids
+    pu_delivered = sum(
+        units_ctx.units_for(m)
+        for m in all_pu
+        if int(m.id) in pu_delivered_set
+    )
+    pu_pending = sum(
+        units_ctx.units_for(m)
+        for m in all_pu
+        if int(m.id) not in pu_delivered_set
+    )
 
     result = DeliverySheetDayMetrics(
         home_pending_meal_total=home_pending,
@@ -526,6 +540,26 @@ def _member_ids_delivered_on_date(db: Session, delivery_date: date, member_ids: 
             DeliveryLog.delivery_date == delivery_date,
             DeliveryLog.status == DeliveryStatus.DELIVERED.value,
             DeliveryLog.member_id.in_(member_ids),
+        )
+    ).all()
+    return {int(x) for x in rows}
+
+
+def _store_delivered_member_ids_on_date(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+) -> set[int]:
+    """门店当日全部已送达会员 id（一次索引扫描，供大表与 extra_delivered 复用）。"""
+    rows = db.scalars(
+        select(DeliveryLog.member_id)
+        .distinct()
+        .join(Member, Member.id == DeliveryLog.member_id)
+        .where(
+            DeliveryLog.delivery_date == delivery_date,
+            DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+            Member.store_id == int(store_id),
         )
     ).all()
     return {int(x) for x in rows}
@@ -662,20 +696,13 @@ def _total_meal_units_locked_date_sql(
     merged = _merged_home_member_ids_when_sheet_frozen(
         db, delivery_date=delivery_date, store_id=sid
     )
-    units_sql = sql_effective_daily_meal_units_column()
-    home_frozen = 0
-    if merged:
-        home_frozen = int(
-            db.scalar(
-                select(func.coalesce(func.sum(units_sql), 0)).where(
-                    Member.id.in_(merged),
-                    Member.deleted_at.is_(None),
-                    Member.store_pickup.is_(False),
-                    Member.store_id == sid,
-                )
-            )
-            or 0
-        )
+    from app.services.delivery_sheet_meal_units_service import (
+        sum_meal_units_for_member_ids_on_frozen_sheet,
+    )
+
+    home_frozen = sum_meal_units_for_member_ids_on_frozen_sheet(
+        db, merged, delivery_date=delivery_date, store_id=sid
+    )
     return (
         home_frozen
         + _sum_meal_units_pickup_eligible_on_date(db, delivery_date=delivery_date, store_id=sid)
@@ -928,8 +955,14 @@ def build_delivery_sheet(
             )
         region_filter_id = int(rid)
 
+    day_snap = DeliverySheetDaySnapshots.load(db, store_id=sid, delivery_date=d)
+    day_delivered_ids = _store_delivered_member_ids_on_date(db, store_id=sid, delivery_date=d)
     members, default_by_id = _home_members_for_delivery_sheet(
-        db, delivery_date=d, delivery_region_id=region_filter_id, store_id=sid
+        db,
+        delivery_date=d,
+        delivery_region_id=region_filter_id,
+        store_id=sid,
+        day_snap=day_snap,
     )
     # 与到家列表一并拉取自提会员，便于单次查询 delivery_logs（片区筛选不改变自提分组是否出现）
     pu_members, pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d, store_id=sid)
@@ -940,6 +973,7 @@ def build_delivery_sheet(
         already_pickup={int(m.id) for m in pu_members},
         delivery_region_id=region_filter_id,
         store_id=sid,
+        day_delivered_member_ids=day_delivered_ids,
     )
     for m in ex_h:
         members.append(m)
@@ -951,9 +985,9 @@ def build_delivery_sheet(
     if ph:
         members = _filter_members_by_phone_hint(members, ph)
         pu_members = _filter_members_by_phone_hint(pu_members, ph)
-    delivered_set = _member_ids_delivered_on_date(
-        db, d, [m.id for m in members] + [m.id for m in pu_members]
-    )
+    units_ctx = DeliverySheetMealUnitsContext.from_day_snapshots(day_snap)
+    all_member_ids = {int(m.id) for m in members} | {int(m.id) for m in pu_members}
+    delivered_set = day_delivered_ids & all_member_ids
 
     region_ids: set[int] = set()
     for m in members:
@@ -988,13 +1022,14 @@ def build_delivery_sheet(
                 addr = default_by_id.get(mem.id)
                 rmk = _member_line_remarks(mem, addr)
                 bal, quota = _member_balance_quota(mem)
+                mem_units = units_ctx.units_for(mem)
                 lines.append(
                     DeliverySheetMemberOut(
                         member_id=int(mem.id),
                         phone=mem.phone,
                         name=mem.name,
                         plan_type=(mem.plan_type or "").strip() or None,
-                        daily_meal_units=effective_daily_meal_units(mem),
+                        daily_meal_units=mem_units,
                         balance=bal,
                         meal_quota_total=quota,
                         remarks=rmk,
@@ -1015,10 +1050,8 @@ def build_delivery_sheet(
                 or _area_needs_attention(resolved.area, known_names)
                 or _area_needs_attention(area_name, known_names)
             )
-            stop_meals = sum(effective_daily_meal_units(mem) for mem in ms_sorted)
-            stop_delivered = sum(
-                effective_daily_meal_units(mem) for mem in ms_sorted if mem.id in delivered_set
-            )
+            stop_meals = sum(ln.daily_meal_units for ln in lines)
+            stop_delivered = sum(ln.daily_meal_units for ln in lines if ln.is_delivered)
             stop_pending = stop_meals - stop_delivered
             stops.append(
                 DeliverySheetStopOut(
@@ -1065,13 +1098,14 @@ def build_delivery_sheet(
             addr = pu_defaults.get(mem.id)
             rmk = _member_line_remarks(mem, addr)
             bal, quota = _member_balance_quota(mem)
+            mem_units = units_ctx.units_for(mem)
             lines.append(
                 DeliverySheetMemberOut(
                     member_id=int(mem.id),
                     phone=mem.phone,
                     name=mem.name,
                     plan_type=(mem.plan_type or "").strip() or None,
-                    daily_meal_units=effective_daily_meal_units(mem),
+                    daily_meal_units=mem_units,
                     balance=bal,
                     meal_quota_total=quota,
                     remarks=rmk,
@@ -1079,9 +1113,9 @@ def build_delivery_sheet(
                     is_delivered=mem.id in delivered_set,
                 )
             )
-        pu_meal_total = sum(effective_daily_meal_units(m) for m in pu_members)
+        pu_meal_total = sum(units_ctx.units_for(m) for m in pu_members)
         pu_delivered = sum(
-            effective_daily_meal_units(m) for m in pu_members if m.id in delivered_set
+            units_ctx.units_for(m) for m in pu_members if m.id in delivered_set
         )
         pu_pending = pu_meal_total - pu_delivered
         groups_out.append(

@@ -382,8 +382,8 @@ async function deleteAddress(addressId) {
 
 .btn-add-address {
   width: 100%;
-  background: $ok-sunshine-yellow;
-  color: $ok-forest-green;
+  background: #639949;
+    color: #FFFFFF;
   padding: 40rpx;
   border-radius: 60rpx;
   font-weight: 950;

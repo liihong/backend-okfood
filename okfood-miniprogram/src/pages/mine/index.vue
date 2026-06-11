@@ -81,7 +81,7 @@
             </view>
             <view class="hero-phone-row" @tap.stop>
               <text class="hero-phone">{{ displayPhone }}</text>
-              <view class="hero-gear" @tap.stop="goMemberSetup">
+              <view v-if="showMemberSetupGear" class="hero-gear" @tap.stop="goMemberSetup">
                 <text class="hero-gear-icon">⚙</text>
               </view>
             </view>
@@ -450,6 +450,15 @@ const showBuyCardChip = computed(() => {
 const showSetupDeliveryChip = computed(() => {
   if (!isLoggedIn.value) return false
   return needsMemberSetupPage.value
+})
+
+/** 已开卡会员（有余额或购卡待完善）：展示手机号旁配送设置齿轮 */
+const showMemberSetupGear = computed(() => {
+  if (!isLoggedIn.value) return false
+  const p = memberProfileRaw.value
+  if (p && typeof p === 'object') return !shouldPromptMemberCardPay(p)
+  // 档案尚未拉取完时暂不展示，避免非会员误点闪一下配送页
+  return serverBalance.value > 0
 })
 
 /** 有余额且暂停配送：计划卡上展示「恢复配送」（资料待完善也可点此进入资料页恢复） */
@@ -1163,6 +1172,16 @@ function goDailyMealUnits() {
 function goMemberSetup() {
   if (!getMemberToken()) {
     uni.showToast({ title: '请先登录', icon: 'none' })
+    return
+  }
+  const p = memberProfileRaw.value
+  if (p && typeof p === 'object') {
+    if (shouldPromptMemberCardPay(p)) {
+      uni.showToast({ title: '请先购买自律卡包', icon: 'none' })
+      return
+    }
+  } else if (serverBalance.value <= 0) {
+    uni.showToast({ title: '请先购买自律卡包', icon: 'none' })
     return
   }
   let from = ''

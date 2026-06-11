@@ -302,6 +302,8 @@ def _to_member_out(
 
     paid_card_awaiting_setup = member_paid_card_awaiting_setup(db, int(m.id))
 
+    from app.services.member_daily_meal_units_service import pending_daily_meal_units
+
     return MemberOut(
 
         id=m.id,
@@ -325,6 +327,8 @@ def _to_member_out(
         balance=m.balance,
 
         daily_meal_units=effective_daily_meal_units(m),
+
+        daily_meal_units_pending=pending_daily_meal_units(m),
 
         meal_quota_total=m.meal_quota_total,
 
@@ -573,6 +577,7 @@ def patch_member_profile(
     # 采集变更前关键字段，供操作日志 before/after 对比
     prev_snapshot = {
         "daily_meal_units": int(m.daily_meal_units or 1),
+        "daily_meal_units_pending": getattr(m, "daily_meal_units_pending", None),
         "delivery_deferred": bool(m.delivery_deferred),
         "store_pickup": bool(m.store_pickup),
         "delivery_start_date": m.delivery_start_date.isoformat() if m.delivery_start_date else None,
@@ -581,6 +586,7 @@ def patch_member_profile(
 
     if set_daily_meal_units and daily_meal_units is not None:
         from app.services.leave import guard_miniprogram_self_service_requires_balance
+        from app.services.member_daily_meal_units_service import queue_daily_meal_units_change
 
         guard_miniprogram_self_service_requires_balance(db, m)
 
@@ -590,7 +596,8 @@ def patch_member_profile(
 
             raise HTTPException(status_code=400, detail="每日送达数量须为 1～20")
 
-        m.daily_meal_units = u
+        # 方案 B：写入 pending，次日 00:01 落库；当日扣次/大表仍用 daily_meal_units
+        queue_daily_meal_units_change(m, u)
 
     if set_avatar:
 
@@ -738,22 +745,40 @@ def patch_member_profile(
     # 操作日志：仅记录「争议易扯皮」的字段变化（份数/暂停/自提/起送日）
     new_snapshot = {
         "daily_meal_units": int(m.daily_meal_units or 1),
+        "daily_meal_units_pending": getattr(m, "daily_meal_units_pending", None),
         "delivery_deferred": bool(m.delivery_deferred),
         "store_pickup": bool(m.store_pickup),
         "delivery_start_date": m.delivery_start_date.isoformat() if m.delivery_start_date else None,
         "is_active": bool(m.is_active),
     }
-    if set_daily_meal_units and prev_snapshot["daily_meal_units"] != new_snapshot["daily_meal_units"]:
+    if set_daily_meal_units and (
+        prev_snapshot["daily_meal_units_pending"] != new_snapshot["daily_meal_units_pending"]
+    ):
+        pending_after = new_snapshot["daily_meal_units_pending"]
+        if pending_after is None:
+            summary = (
+                f"取消预约每日送达份数（维持当日 {prev_snapshot['daily_meal_units']} 份）"
+            )
+            after_units: dict[str, int | None] = {"daily_meal_units_pending": None}
+        else:
+            summary = (
+                f"预约修改每日送达份数：当日 {prev_snapshot['daily_meal_units']} 份，"
+                f"次日起 {pending_after} 份"
+            )
+            after_units = {"daily_meal_units_pending": int(pending_after)}
         record_member_operation(
             db,
             member_id=member_id,
             operation_type=OP_UPDATE_DAILY_UNITS,
-            summary=(
-                f"修改每日送达份数 {prev_snapshot['daily_meal_units']}→"
-                f"{new_snapshot['daily_meal_units']}（次日生效）"
-            ),
-            before={"daily_meal_units": prev_snapshot["daily_meal_units"]},
-            after={"daily_meal_units": new_snapshot["daily_meal_units"]},
+            summary=summary,
+            before={
+                "daily_meal_units": prev_snapshot["daily_meal_units"],
+                "daily_meal_units_pending": prev_snapshot["daily_meal_units_pending"],
+            },
+            after={
+                "daily_meal_units": new_snapshot["daily_meal_units"],
+                **after_units,
+            },
             ip_address=ip_address,
         )
     if set_delivery_deferred and prev_snapshot["delivery_deferred"] != new_snapshot["delivery_deferred"]:
@@ -1557,6 +1582,7 @@ def admin_patch_member_profile(
             else None
         ),
         "daily_meal_units": int(m.daily_meal_units or 1),
+        "daily_meal_units_pending": getattr(m, "daily_meal_units_pending", None),
         "plan_type": m.plan_type,
         "balance": int(m.balance),
         "delivery_start_date": m.delivery_start_date.isoformat() if m.delivery_start_date else None,
@@ -1742,7 +1768,9 @@ def admin_patch_member_profile(
                 status_code=400,
                 detail=f"每配送日份数须在 1～{MAX_DAILY_MEAL_UNITS} 之间",
             )
-        m.daily_meal_units = daily_meal_units
+        from app.services.member_daily_meal_units_service import queue_daily_meal_units_change
+
+        queue_daily_meal_units_change(m, daily_meal_units)
 
     if plan_type is not None:
         m.plan_type = plan_type.value
@@ -1762,6 +1790,7 @@ def admin_patch_member_profile(
             else None
         ),
         "daily_meal_units": int(m.daily_meal_units or 1),
+        "daily_meal_units_pending": getattr(m, "daily_meal_units_pending", None),
         "plan_type": m.plan_type,
         "balance": int(m.balance),
         "delivery_start_date": m.delivery_start_date.isoformat() if m.delivery_start_date else None,
@@ -1831,18 +1860,32 @@ def admin_patch_member_profile(
             before={"plan_type": prev_snapshot["plan_type"]},
             after={"plan_type": new_snapshot["plan_type"]},
         )
-    if (
-        daily_meal_units is not None
-        and prev_snapshot["daily_meal_units"] != new_snapshot["daily_meal_units"]
+    if daily_meal_units is not None and (
+        prev_snapshot["daily_meal_units_pending"] != new_snapshot["daily_meal_units_pending"]
     ):
+        pending_after = new_snapshot["daily_meal_units_pending"]
+        if pending_after is None:
+            admin_summary = (
+                f"取消预约每日送达份数（维持当日 {prev_snapshot['daily_meal_units']} 份）"
+            )
+            admin_after_units: dict[str, int | None] = {"daily_meal_units_pending": None}
+        else:
+            admin_summary = (
+                f"预约修改每日送达份数：当日 {prev_snapshot['daily_meal_units']} 份，"
+                f"次日起 {pending_after} 份"
+            )
+            admin_after_units = {"daily_meal_units_pending": int(pending_after)}
         _admin_log(
             OP_UPDATE_DAILY_UNITS,
-            (
-                f"修改每日送达份数 {prev_snapshot['daily_meal_units']}→"
-                f"{new_snapshot['daily_meal_units']}"
-            ),
-            before={"daily_meal_units": prev_snapshot["daily_meal_units"]},
-            after={"daily_meal_units": new_snapshot["daily_meal_units"]},
+            admin_summary,
+            before={
+                "daily_meal_units": prev_snapshot["daily_meal_units"],
+                "daily_meal_units_pending": prev_snapshot["daily_meal_units_pending"],
+            },
+            after={
+                "daily_meal_units": new_snapshot["daily_meal_units"],
+                **admin_after_units,
+            },
         )
     if (
         set_delivery_deferred

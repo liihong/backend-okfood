@@ -51,13 +51,15 @@
       @error="onImgErr"
     />
     <view class="menu-dish-card__list-body">
-      <view class="menu-dish-card__title-row">
+     <view class="menu-dish-card__list-head">
         <text class="menu-dish-card__name menu-dish-card__name--list">{{ item.name }}</text>
-        <text v-if="item.spiceLabel" class="menu-dish-card__spice">{{ item.spiceLabel }}</text>
+       <text v-if="showDayLabel && item.day" class="menu-dish-card__list-day-tag">{{ item.day }}</text>
       </view>
       <text v-if="showIngredients && item.ingredients" class="menu-dish-card__list-desc">
         {{ item.ingredients }}
       </text>
+     <text v-if="item.spiceLabel" class="menu-dish-card__spice menu-dish-card__spice--list">{{ item.spiceLabel
+      }}</text>
       <view class="menu-dish-card__list-footer">
         <view class="menu-dish-card__price-group">
           <text v-if="priceText != null" class="menu-dish-card__price menu-dish-card__price--list">¥{{ priceText }}</text>
@@ -481,7 +483,7 @@ function onImgErr() {
 
 .menu-dish-card--list {
   flex-direction: row;
-  align-items: stretch;
+  align-items: flex-start;
   border-radius: 24rpx;
   padding: 20rpx;
   gap: 20rpx;
@@ -509,6 +511,24 @@ function onImgErr() {
   font-size: 28rpx;
 }
 
+.menu-dish-card__list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.menu-dish-card__list-day-tag {
+  flex-shrink: 0;
+  font-size: 22rpx;
+  font-weight: 700;
+  color: #5a9a4a;
+  background: rgba(115, 176, 84, 0.1);
+  border: 1rpx solid rgba(115, 176, 84, 0.22);
+  padding: 4rpx 14rpx;
+  border-radius: 12rpx;
+  line-height: 1.3;
+}
 .menu-dish-card__list-desc {
   margin-top: 8rpx;
   font-size: 22rpx;
@@ -520,9 +540,12 @@ function onImgErr() {
   overflow: hidden;
 }
 
+.menu-dish-card__spice--list {
+  align-self: flex-start;
+  margin-top: 8rpx;
+}
 .menu-dish-card__list-footer {
-  margin-top: auto;
-  padding-top: 16rpx;
+  margin-top: 12rpx;
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
@@ -535,8 +558,9 @@ function onImgErr() {
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  gap: 6rpx;
-  min-width: 56rpx;
+  gap: 4rpx;
+    min-width: 44rpx;
+    margin-top: -40rpx;
 }
 
 .menu-dish-card__stock-badge {
@@ -580,24 +604,24 @@ function onImgErr() {
   line-height: 1.2;
 }
 
-/** 右下角加购：圆角方块 + 号 */
+/** 右下角加购：小圆形 + 号 */
 .menu-dish-card__add-btn {
   flex-shrink: 0;
-  width: 56rpx;
-  height: 56rpx;
-  border-radius: 16rpx;
+  width: 44rpx;
+    height: 44rpx;
+    border-radius: 50%;
   background: $ok-forest-green;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 8rpx 20rpx rgba(115, 176, 84, 0.28);
+  box-shadow: 0 4rpx 12rpx rgba(115, 176, 84, 0.24);
 }
 
 .menu-dish-card__add-icon {
-  font-size: 40rpx;
+  font-size: 32rpx;
   font-weight: 300;
   color: #fff;
   line-height: 1;
-  margin-top: -4rpx;
+  margin-top: -2rpx;
 }
 </style>

@@ -23,6 +23,11 @@ class MemberOut(BaseModel):
     remarks: str | None
     balance: int
     daily_meal_units: int = Field(1, ge=1, description="每配送日份数（订阅）；确认送达时按此倍数扣次")
+    daily_meal_units_pending: int | None = Field(
+        None,
+        ge=1,
+        description="预约次日生效的每配送日份数；有值时表示已提交修改、次日起生效",
+    )
     meal_quota_total: int = Field(
         0,
         ge=0,

@@ -34,6 +34,8 @@ class Member(Base):
     balance: Mapped[int] = mapped_column(Integer, default=0)
     # 每配送日份数：确认送达一次按该倍数扣 balance（默认 1）
     daily_meal_units: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # 预约次日生效的份数；会员/管理端改份数时写入，00:01 任务落库到 daily_meal_units
+    daily_meal_units_pending: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 周卡/月卡累计「总次数」分母；入账时与 balance 同步按卡型 +6 / +24（剩余/总 展示）
     meal_quota_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # 与 MySQL ENUM 取值一致，业务校验在 Pydantic / Service

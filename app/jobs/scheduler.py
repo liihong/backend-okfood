@@ -58,8 +58,15 @@ def job_reset_leave_flags() -> None:
             if m.leave_range_end is not None and m.leave_range_end < today:
                 m.leave_range_start = None
                 m.leave_range_end = None
+        from app.services.member_daily_meal_units_service import apply_all_pending_daily_meal_units
+
+        applied_units = apply_all_pending_daily_meal_units(db)
         db.commit()
-        logger.info("请假标记重置任务完成: today=%s", today.isoformat())
+        logger.info(
+            "请假标记重置任务完成: today=%s, applied_daily_meal_units=%s",
+            today.isoformat(),
+            applied_units,
+        )
     except Exception:
         logger.exception("请假标记重置任务失败")
         db.rollback()
