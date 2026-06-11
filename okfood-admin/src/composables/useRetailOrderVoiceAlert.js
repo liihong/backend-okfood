@@ -1,7 +1,7 @@
 /** 单次零售新订单：浏览器语音播报（配合系统消息轮询） */
 
-const RETAIL_ORDER_KIND = 'single_meal_order_paid'
-const ALERT_TEXT = '您有新的零售订单，请及时处理。'
+const RETAIL_ORDER_KINDS = new Set(['single_meal_order_paid', 'store_retail_order_paid'])
+const ALERT_TEXT = '您有新的订单，请及时处理。'
 
 let baselineReady = false
 /** @type {Set<number>} */
@@ -59,7 +59,7 @@ export function handleRetailOrderNotifications(items) {
   if (typeof window === 'undefined' || !window.speechSynthesis) return
 
   const retailUnacked = (Array.isArray(items) ? items : []).filter(
-    (n) => n?.kind === RETAIL_ORDER_KIND && !n?.acknowledged_at,
+    (n) => RETAIL_ORDER_KINDS.has(n?.kind) && !n?.acknowledged_at,
   )
 
   if (!baselineReady) {

@@ -32,10 +32,13 @@ export function parsePendingOrderIdFromConflict(err) {
 }
 
 export const STORAGE_OPEN_ORDERS_PENDING_PAY = 'okfood_open_orders_pending_pay'
+export const STORAGE_OPEN_ORDERS_TAB = 'okfood_open_orders_tab'
+
+const RETAIL_ORDER_DETAIL_PAGE = '/packageOrder/pages/retailOrderDetail/retailOrderDetail'
 
 /**
  * @param {unknown} err
- * @param {{ kind: 'single' | 'mall' }} opts
+ * @param {{ kind: 'single' | 'card_pack' | 'mall' | 'retail' }} opts
  * @returns {boolean} 是否已弹出引导
  */
 export function promptUnpaidOrderConflict(err, { kind }) {
@@ -44,6 +47,8 @@ export function promptUnpaidOrderConflict(err, { kind }) {
     err instanceof Error ? err.message : '您有待支付订单，请先完成支付后再下单'
   const orderId = parsePendingOrderIdFromConflict(err)
   const isSingle = kind === 'single'
+  const isRetail = kind === 'retail'
+  const isCardPack = kind === 'card_pack' || kind === 'mall'
   showOkAlert({
     title: '待支付订单',
     content: msg,
@@ -59,12 +64,19 @@ export function promptUnpaidOrderConflict(err, { kind }) {
         })
         return
       }
-      if (!isSingle && orderId) {
+      if (isRetail && orderId) {
+        uni.navigateTo({
+          url: `${RETAIL_ORDER_DETAIL_PAGE}?id=${encodeURIComponent(String(orderId))}`,
+        })
+        return
+      }
+      if (isCardPack && orderId) {
         goMemberCardOrderDetail(orderId)
         return
       }
       try {
-        uni.setStorageSync(STORAGE_OPEN_ORDERS_PENDING_PAY, isSingle ? 'single' : 'mall')
+        const tabKey = isSingle ? 'single' : isRetail ? 'retail' : 'card_pack'
+        uni.setStorageSync(STORAGE_OPEN_ORDERS_PENDING_PAY, tabKey)
       } catch {
         /* ignore */
       }

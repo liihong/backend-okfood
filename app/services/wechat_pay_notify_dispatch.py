@@ -1,4 +1,4 @@
-"""微信支付结果通知：按商户单号分发至单笔点餐或会员开卡工单。"""
+"""微信支付结果通知：按商户单号分发至单笔点餐、会员开卡工单或商城零售订单。"""
 
 import logging
 
@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.integrations.wechat_pay_v2 import parse_wechat_pay_notify
 from app.services.member_card_pay_service import finalize_member_card_order_wechat_pay
 from app.services.single_meal_order_service import finalize_single_meal_order_wechat_pay
+from app.services.store_retail_order_service import finalize_store_retail_order_wechat_pay
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,12 @@ def apply_wechat_pay_notify(db: Session, data: dict[str, str]) -> tuple[bool, st
         return True, card_reason
     if card_reason != "order_not_found":
         return False, card_reason
+
+    retail_ok, retail_reason = finalize_store_retail_order_wechat_pay(db, parsed)
+    if retail_ok:
+        return True, retail_reason
+    if retail_reason != "order_not_found":
+        return False, retail_reason
 
     logger.warning("微信回调商户单号无匹配订单: %s", parsed.out_trade_no)
     return False, "order_not_found"

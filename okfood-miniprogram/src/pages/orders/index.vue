@@ -1,26 +1,37 @@
 <template>
   <view class="page">
     <OkNavbar title="订单" />
-    <view class="tabs-bar">
-      <view
-        class="main-tab"
-        :class="{ 'main-tab--active': mainTab === 'single' }"
-        role="tab"
-        :aria-selected="mainTab === 'single'"
-        @tap="selectMainTab('single')"
-      >
-        <text class="main-tab-text">单次点餐订单</text>
+    <scroll-view scroll-x class="tabs-scroll" :show-scrollbar="false" enable-flex>
+      <view class="tabs-bar">
+        <view
+          class="main-tab"
+          :class="{ 'main-tab--active': mainTab === 'single' }"
+          role="tab"
+          :aria-selected="mainTab === 'single'"
+          @tap="selectMainTab('single')"
+        >
+          <text class="main-tab-text">单次点餐</text>
+        </view>
+        <view
+          class="main-tab"
+          :class="{ 'main-tab--active': mainTab === 'retail' }"
+          role="tab"
+          :aria-selected="mainTab === 'retail'"
+          @tap="selectMainTab('retail')"
+        >
+          <text class="main-tab-text">商城订单</text>
+        </view>
+        <view
+          class="main-tab"
+          :class="{ 'main-tab--active': mainTab === 'card_pack' }"
+          role="tab"
+          :aria-selected="mainTab === 'card_pack'"
+          @tap="selectMainTab('card_pack')"
+        >
+          <text class="main-tab-text">卡包订单</text>
+        </view>
       </view>
-      <view
-        class="main-tab"
-        :class="{ 'main-tab--active': mainTab === 'mall' }"
-        role="tab"
-        :aria-selected="mainTab === 'mall'"
-        @tap="selectMainTab('mall')"
-      >
-        <text class="main-tab-text">商城订单</text>
-      </view>
-    </view>
+    </scroll-view>
     <scroll-view scroll-x class="status-scroll" :show-scrollbar="false" enable-flex>
       <view class="status-row">
         <view
@@ -73,16 +84,36 @@
               </view>
             </view>
           </template>
-          <template v-else>
-            <view v-for="row in items" :key="'m-' + row.id" class="order-row" @tap="openMallDetail(row)">
+          <template v-else-if="mainTab === 'retail'">
+            <view
+              v-for="row in items"
+              :key="'r-' + row.id"
+              class="order-row"
+              @tap="openRetailDetail(row.id)"
+            >
               <view class="order-row-head">
-                <text class="order-title">{{ mallTitle(row) }}</text>
+                <text class="order-title">{{ row.product_title || '商品' }}</text>
                 <text class="order-amt">¥ {{ row.amount_yuan || '0.00' }}</text>
               </view>
-              <text class="order-meta">{{ metaLineMall(row) }}</text>
+              <text class="order-meta">{{ metaLineRetail(row) }}</text>
               <view class="order-foot">
-                <text :class="['order-status', `order-status--${statusToneMall(row)}`]">
-                  {{ statusLineMall(row) }}
+                <text :class="['order-status', `order-status--${statusToneRetail(row)}`]">
+                  {{ statusLineRetail(row) }}
+                </text>
+                <text class="order-arr">&rsaquo;</text>
+              </view>
+            </view>
+          </template>
+          <template v-else>
+            <view v-for="row in items" :key="'c-' + row.id" class="order-row" @tap="openCardPackDetail(row)">
+              <view class="order-row-head">
+                <text class="order-title">{{ cardPackTitle(row) }}</text>
+                <text class="order-amt">¥ {{ row.amount_yuan || '0.00' }}</text>
+              </view>
+              <text class="order-meta">{{ metaLineCardPack(row) }}</text>
+              <view class="order-foot">
+                <text :class="['order-status', `order-status--${statusToneCardPack(row)}`]">
+                  {{ statusLineCardPack(row) }}
                 </text>
                 <text class="order-arr">&rsaquo;</text>
               </view>
@@ -113,12 +144,14 @@ import { getMemberToken, reLaunchIfCourierModePreferred } from '@/utils/api.js'
 import { listSingleMealOrders, singleOrderStatusMeta } from '@/utils/singleOrderApi.js'
 import { singleMealOrderAmountLabel } from '@/utils/singleOrderPayIntent.js'
 import { listMemberCardOrders } from '@/utils/memberCardOrderApi.js'
-import { STORAGE_OPEN_ORDERS_PENDING_PAY } from '@/utils/unpaidOrderPrompt.js'
+import { listRetailOrders, retailOrderStatusMeta } from '@/utils/retailOrder/retailOrderApi.js'
+import { STORAGE_OPEN_ORDERS_PENDING_PAY, STORAGE_OPEN_ORDERS_TAB } from '@/utils/unpaidOrderPrompt.js'
 import { syncCustomTabBar, getCustomTabBarBottomReservePx } from '@/utils/customTabBar.js'
 import { getPageScrollStyle, ORDERS_TAB_HEADER_CHROME_PX } from '@/utils/navbar.js'
 
 const MAIN_SINGLE = 'single'
-const MAIN_MALL = 'mall'
+const MAIN_RETAIL = 'retail'
+const MAIN_CARD_PACK = 'card_pack'
 
 const STATUS_SINGLE = [
   { id: 'all', label: '全部' },
@@ -127,7 +160,14 @@ const STATUS_SINGLE = [
   { id: 'completed', label: '已完成' },
 ]
 
-const STATUS_MALL = [
+const STATUS_RETAIL = [
+  { id: 'all', label: '全部' },
+  { id: 'pending_pay', label: '待支付' },
+  { id: 'pending_delivery', label: '待送达' },
+  { id: 'completed', label: '已完成' },
+]
+
+const STATUS_CARD_PACK = [
   { id: 'all', label: '全部' },
   { id: 'pending_pay', label: '待支付' },
   { id: 'completed', label: '已完成' },
@@ -147,15 +187,16 @@ const scrollTailStyle = computed(() => ({
 const mainTab = ref(MAIN_SINGLE)
 const listStatus = ref('all')
 
-const statusOptions = computed(() =>
-  mainTab.value === MAIN_SINGLE ? STATUS_SINGLE : STATUS_MALL,
-)
+const statusOptions = computed(() => {
+  if (mainTab.value === MAIN_SINGLE) return STATUS_SINGLE
+  if (mainTab.value === MAIN_RETAIL) return STATUS_RETAIL
+  return STATUS_CARD_PACK
+})
 
 const emptyHint = computed(() => {
-  if (mainTab.value === MAIN_SINGLE) {
-    return '暂无订单。'
-  }
-  return '暂无商城订单。'
+  if (mainTab.value === MAIN_SINGLE) return '暂无单次点餐订单。'
+  if (mainTab.value === MAIN_RETAIL) return '暂无商城订单。'
+  return '暂无卡包订单。'
 })
 
 const items = ref([])
@@ -193,7 +234,25 @@ function statusToneSingle(o) {
   return t === 'warn' || t === 'ok' || t === 'info' ? t : 'info'
 }
 
-function mallTitle(row) {
+function metaLineRetail(o) {
+  const ca = o?.created_at
+  const datePart = ca ? String(ca).slice(0, 10) : '—'
+  const qty = Number(o?.quantity)
+  const q = Number.isFinite(qty) && qty >= 1 ? `×${Math.floor(qty)}` : '×1'
+  const mode = o?.store_pickup ? '门店自提' : '配送到家'
+  return `${datePart} · ${q} · ${mode}`
+}
+
+function statusLineRetail(o) {
+  return retailOrderStatusMeta(o || {}).line1 || '—'
+}
+
+function statusToneRetail(o) {
+  const t = retailOrderStatusMeta(o || {}).tone
+  return t === 'warn' || t === 'ok' || t === 'info' ? t : 'info'
+}
+
+function cardPackTitle(row) {
   const r = row?.remark
   if (r && String(r).length > 0) {
     return String(r).replace(/^卡包模版#\d+·/, '卡包 · ')
@@ -202,7 +261,7 @@ function mallTitle(row) {
   return `${k} · 开卡订单`
 }
 
-function metaLineMall(row) {
+function metaLineCardPack(row) {
   const parts = []
   const ca = row?.created_at
   if (ca) {
@@ -215,7 +274,7 @@ function metaLineMall(row) {
   return parts.length ? parts.join(' · ') : '—'
 }
 
-function statusLineMall(row) {
+function statusLineCardPack(row) {
   const ps = String(row?.pay_status || '')
   if (ps === '未缴') return '待支付'
   if (ps === '已缴') return '已完成'
@@ -223,7 +282,7 @@ function statusLineMall(row) {
   return ps || '—'
 }
 
-function statusToneMall(row) {
+function statusToneCardPack(row) {
   const ps = String(row?.pay_status || '')
   if (ps === '未缴') return 'warn'
   if (ps === '已缴') return 'ok'
@@ -274,6 +333,8 @@ async function fetchPage(reset) {
     let data
     if (mainTab.value === MAIN_SINGLE) {
       data = await listSingleMealOrders({ page: p, page_size: pageSize, list_status: st })
+    } else if (mainTab.value === MAIN_RETAIL) {
+      data = await listRetailOrders({ page: p, page_size: pageSize, list_status: st })
     } else {
       data = await listMemberCardOrders({ page: p, page_size: pageSize, list_status: st })
     }
@@ -320,7 +381,15 @@ function openSingleDetail(orderId) {
   })
 }
 
-function openMallDetail(row) {
+function openRetailDetail(orderId) {
+  const id = Number(orderId)
+  if (!Number.isFinite(id) || id < 1) return
+  uni.navigateTo({
+    url: `/packageOrder/pages/retailOrderDetail/retailOrderDetail?id=${encodeURIComponent(String(id))}`,
+  })
+}
+
+function openCardPackDetail(row) {
   const id = Number(row?.id)
   if (!Number.isFinite(id) || id < 1) return
   uni.navigateTo({
@@ -328,15 +397,30 @@ function openMallDetail(row) {
   })
 }
 
+function resolveTabFromHint(hint) {
+  if (hint === 'single') return MAIN_SINGLE
+  if (hint === 'retail') return MAIN_RETAIL
+  if (hint === 'card_pack' || hint === 'mall') return MAIN_CARD_PACK
+  return null
+}
+
 onShow(() => {
   if (reLaunchIfCourierModePreferred()) return
   applyScrollLayout()
   syncCustomTabBar()
   try {
-    const hint = uni.getStorageSync(STORAGE_OPEN_ORDERS_PENDING_PAY)
-    if (hint === 'single' || hint === 'mall') {
+    const tabHint = uni.getStorageSync(STORAGE_OPEN_ORDERS_TAB)
+    const tab = resolveTabFromHint(tabHint)
+    if (tab) {
+      uni.removeStorageSync(STORAGE_OPEN_ORDERS_TAB)
+      mainTab.value = tab
+      listStatus.value = 'all'
+    }
+    const payHint = uni.getStorageSync(STORAGE_OPEN_ORDERS_PENDING_PAY)
+    const payTab = resolveTabFromHint(payHint)
+    if (payTab) {
       uni.removeStorageSync(STORAGE_OPEN_ORDERS_PENDING_PAY)
-      mainTab.value = hint === 'mall' ? MAIN_MALL : MAIN_SINGLE
+      mainTab.value = payTab
       listStatus.value = 'pending_pay'
     }
   } catch {
@@ -356,15 +440,23 @@ onShow(() => {
   overflow: hidden;
 }
 
-.tabs-bar {
-  display: flex;
-  gap: 16rpx;
-  padding: 16rpx 40rpx 12rpx;
+.tabs-scroll {
   flex-shrink: 0;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.tabs-bar {
+  display: inline-flex;
+  flex-direction: row;
+  gap: 12rpx;
+  padding: 16rpx 40rpx 12rpx;
+  box-sizing: border-box;
 }
 
 .main-tab {
-  flex: 1;
+  flex-shrink: 0;
+  min-width: 200rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -381,7 +473,7 @@ onShow(() => {
 }
 
 .main-tab-text {
-  font-size: 28rpx;
+  font-size: 24rpx;
   font-weight: 800;
   color: $ok-slate-600;
   text-align: center;

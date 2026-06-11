@@ -25,6 +25,7 @@ KIND_DELIVERY_SHEET_MANUAL_ATTENTION = "delivery_sheet_manual_attention"
 KIND_MINIPROGRAM_CARD_ORDER_PENDING = "miniprogram_card_order_pending"
 # 单次零售（单次点餐）微信支付成功，待客服在订单管理推送配送
 KIND_SINGLE_MEAL_ORDER_PAID = "single_meal_order_paid"
+KIND_STORE_RETAIL_ORDER_PAID = "store_retail_order_paid"
 # 每日多份但剩余次数不足当日份数，未进配送大表，待客服联系确认续卡
 KIND_MEMBER_INSUFFICIENT_BALANCE_FOR_DELIVERY = "member_insufficient_balance_for_delivery"
 
@@ -691,6 +692,121 @@ def create_single_meal_order_paid_notification(
         success_count=0,
         failed_count=0,
         skip_reason=_single_meal_order_paid_notification_marker(oid),
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _store_retail_order_paid_notification_marker(order_id: int) -> str:
+    return f"store_retail_order_id:{int(order_id)}"
+
+
+def _store_retail_order_paid_business_date_for_uk(order_id: int) -> date:
+    return date(2010, 1, 1) + timedelta(days=int(order_id))
+
+
+def _build_store_retail_order_paid_notification_text(
+    *,
+    order_id: int,
+    product_title: str | None,
+    quantity: int,
+    store_pickup: bool,
+    member_phone: str | None,
+    member_name: str | None,
+    order_created_at: datetime | None,
+    out_trade_no: str | None,
+    pay_channel: str | None,
+) -> tuple[str, str]:
+    phone = _mask_phone_middle_four(member_phone)
+    naming = str(member_name or "").strip() or "会员"
+    naming = (naming[:24] + "…") if len(naming) > 24 else naming
+    prod = str(product_title or "").strip() or "商品"
+    fulfill = "门店自提" if store_pickup else "配送到家"
+    time_text = (
+        _format_single_meal_order_paid_time_zh(order_created_at)
+        if order_created_at is not None
+        else "—"
+    )
+    order_no = str(out_trade_no or "").strip() or f"#{int(order_id)}"
+    pay_note = f"（{pay_channel}）" if (pay_channel or "").strip() else ""
+    title = f"商城订单支付成功 · 订单#{int(order_id)}"
+    body_lines = [
+        f"用户：{naming}",
+        f"手机号：{phone}",
+        f"下单时间：{time_text}",
+        f"商品：{prod}×{int(quantity)}{pay_note}",
+        f"配送方式：{fulfill}",
+        f"订单号：{order_no}",
+        "",
+        "请尽快在「订单管理」商城订单 Tab 推送配送或安排自提。",
+    ]
+    body = "\n".join(body_lines)
+    if len(body) > 500:
+        body = body[:497] + "…"
+    return title[:200], body
+
+
+def create_store_retail_order_paid_notification(
+    db: Session,
+    *,
+    store_id: int,
+    order_id: int,
+    product_title: str | None,
+    quantity: int,
+    amount_yuan: str | None,
+    store_pickup: bool,
+    member_id: int,
+    member_phone: str | None,
+    member_name: str | None,
+    order_created_at: datetime | None = None,
+    out_trade_no: str | None = None,
+    pay_channel: str | None = None,
+) -> AdminSystemNotification | None:
+    _ = amount_yuan, member_id
+    sid = int(store_id)
+    if sid <= 0:
+        return None
+    oid = int(order_id)
+    title, body = _build_store_retail_order_paid_notification_text(
+        order_id=oid,
+        product_title=product_title,
+        quantity=quantity,
+        store_pickup=store_pickup,
+        member_phone=member_phone,
+        member_name=member_name,
+        order_created_at=order_created_at,
+        out_trade_no=out_trade_no,
+        pay_channel=pay_channel,
+    )
+    marker = _store_retail_order_paid_notification_marker(oid)
+    existing = db.scalars(
+        select(AdminSystemNotification)
+        .where(
+            AdminSystemNotification.store_id == sid,
+            AdminSystemNotification.kind == KIND_STORE_RETAIL_ORDER_PAID,
+            AdminSystemNotification.skip_reason == marker,
+        )
+        .order_by(AdminSystemNotification.id.desc())
+        .limit(1)
+    ).first()
+    if existing is not None:
+        if existing.title != title or existing.message != body:
+            existing.title = title
+            existing.message = body
+            db.add(existing)
+            db.flush()
+        return existing
+    row = AdminSystemNotification(
+        store_id=sid,
+        kind=KIND_STORE_RETAIL_ORDER_PAID,
+        business_date=_store_retail_order_paid_business_date_for_uk(oid),
+        title=title,
+        message=body,
+        total_count=0,
+        success_count=0,
+        failed_count=0,
+        skip_reason=marker,
     )
     db.add(row)
     db.flush()

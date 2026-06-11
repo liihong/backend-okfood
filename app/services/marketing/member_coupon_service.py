@@ -296,6 +296,7 @@ def list_member_coupons_paged(
     page: int = 1,
     page_size: int = 20,
     member_id: int | None = None,
+    member_phone: str | None = None,
     template_id: int | None = None,
     status: str | None = None,
     biz_type: str | None = None,
@@ -303,6 +304,12 @@ def list_member_coupons_paged(
     q = select(MemberCoupon).where(MemberCoupon.store_id == int(store_id))
     if member_id is not None:
         q = q.where(MemberCoupon.member_id == int(member_id))
+    phone = (member_phone or "").strip()
+    if phone:
+        # 按会员手机号模糊搜索（与抖音核销记录等管理端列表一致）
+        q = q.join(Member, Member.id == MemberCoupon.member_id).where(
+            Member.phone.like(f"%{phone}%")
+        )
     if template_id is not None:
         q = q.where(MemberCoupon.template_id == int(template_id))
     if status:

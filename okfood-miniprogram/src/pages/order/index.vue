@@ -199,6 +199,10 @@ function selectCategory(key) {
   if (activeCategoryKey.value === key) return
   activeCategoryKey.value = key
   const meta = sidebarCategories.value.find((c) => c.key === key)
+  if (meta?.type === 'retail') {
+    void loadRetailCatalog({ forceRefresh: true })
+    return
+  }
   if (meta?.type === 'week' && meta.weekTab === 'next' && !nextWeekMenu.value.length) {
     loadNextWeek()
   }
@@ -351,7 +355,14 @@ function onFulfillModeChange(mode) {
 
 function onItemTap(m) {
   if (m?.isRetail) {
-    uni.showToast({ title: '该商品即将上线', icon: 'none' })
+    const pid = m?.retailProductId != null ? Number(m.retailProductId) : 0
+    if (!Number.isFinite(pid) || pid < 1) {
+      uni.showToast({ title: '商品无效', icon: 'none' })
+      return
+    }
+    uni.navigateTo({
+      url: `/packageOrder/pages/retailConfirm/retailConfirm?retail_product_id=${encodeURIComponent(String(pid))}`,
+    })
     return
   }
   goDetail(m)

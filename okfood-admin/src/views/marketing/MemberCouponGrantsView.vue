@@ -1,7 +1,7 @@
 <script setup>
 defineOptions({ name: 'MemberCouponGrantsView' })
 import { ref, onMounted } from 'vue'
-import { Plus } from 'lucide-vue-next'
+import { Plus, Search } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 import GrantCouponModal from './components/GrantCouponModal.vue'
@@ -15,6 +15,9 @@ const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const pageSizeOptions = [10, 20, 50, 100]
+const filters = ref({
+  member_phone: '',
+})
 
 const STATUS_LABEL = {
   available: '待使用',
@@ -31,6 +34,8 @@ async function loadList() {
     q.set('store_id', String(storeId.value))
     q.set('page', String(page.value))
     q.set('page_size', String(pageSize.value))
+    const ph = filters.value.member_phone.trim()
+    if (ph) q.set('member_phone', ph)
     const data = await apiJson(`/api/admin/marketing/member-coupons?${q.toString()}`, {}, { auth: true })
     list.value = Array.isArray(data?.items) ? data.items : []
     total.value = Number(data?.total) || 0
@@ -47,6 +52,17 @@ async function loadList() {
   } finally {
     loading.value = false
   }
+}
+
+function onSearch() {
+  page.value = 1
+  void loadList()
+}
+
+function onReset() {
+  filters.value.member_phone = ''
+  page.value = 1
+  void loadList()
 }
 
 function onPageChange(nextPage) {
@@ -93,10 +109,32 @@ onMounted(() => {
     <div class="table-container">
       <div class="table-header">
         <h2 class="table-title">优惠券发放记录</h2>
-        <button type="button" class="btn-primary" @click="grantVisible = true">
-          <Plus :size="18" /> 发放优惠券
+      </div>
+
+      <div class="coupon-grants-toolbar">
+        <el-form :inline="true" class="filter-form" @submit.prevent="onSearch">
+          <el-form-item label="手机号">
+            <el-input
+              v-model="filters.member_phone"
+              placeholder="会员手机号"
+              clearable
+              maxlength="20"
+              style="width: 160px"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="loading" @click="onSearch">
+              <Search :size="16" style="margin-right: 4px" />
+              查询
+            </el-button>
+            <el-button @click="onReset">重置</el-button>
+          </el-form-item>
+        </el-form>
+        <button type="button" class="btn-primary btn-primary--sm" @click="grantVisible = true">
+          <Plus :size="16" /> 发放优惠券
         </button>
       </div>
+
       <el-table
         v-loading="loading"
         :data="list"
@@ -149,6 +187,18 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.coupon-grants-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.filter-form {
+  margin-bottom: 0;
+  flex: 1;
+}
 .coupon-grants-pagination {
   display: flex;
   justify-content: flex-end;

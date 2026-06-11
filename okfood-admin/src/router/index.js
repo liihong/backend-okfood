@@ -17,7 +17,7 @@ const FinanceView = () => import('../views/FinanceView.vue')
 const MenuView = () => import('../views/MenuView.vue')
 const WeeklyMenuView = () => import('../views/WeeklyMenuView.vue')
 const CardOrdersView = () => import('../views/CardOrdersView.vue')
-const OrdersManageView = () => import('../views/OrdersManageView.vue')
+const OrdersManageView = () => import('../views/orders/OrdersManageView.vue')
 const StoreConfigView = () => import('../views/StoreConfigView.vue')
 const SfOrdersMonitorView = () => import('../views/SfOrdersMonitorView.vue')
 const DeliveryGeoMapView = () => import('../views/DeliveryGeoMapView.vue')
@@ -93,7 +93,7 @@ const router = createRouter({
           component: OrdersManageView,
           meta: {
             title: '订单管理',
-            pageSubtitle: '单次点餐按供餐日、商城卡包按下单日查看工单；零售 SKU 订单待业务接入后展示',
+            pageSubtitle: '单次点餐按供餐日；商城订单与卡包订单按下单日查看',
             fullAdminOnly: true,
           },
         },

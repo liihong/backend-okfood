@@ -140,6 +140,22 @@ def job_expire_unpaid_single_meal_orders() -> None:
         db.close()
 
 
+def job_expire_unpaid_store_retail_orders() -> None:
+    """每 2 分钟：商城零售未支付超过 30 分钟的订单自动取消。"""
+    from app.services.store_retail_order_service import expire_stale_unpaid_store_retail_orders
+
+    db = SessionLocal()
+    try:
+        n = expire_stale_unpaid_store_retail_orders(db)
+        if n:
+            logger.info("商城零售超时未支付自动取消: count=%s", n)
+    except Exception:
+        logger.exception("商城零售超时未支付自动取消任务失败")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def job_expire_stale_unpaid_miniprogram_card_orders() -> None:
     """每 2 分钟：购卡未支付超过 30 分钟则释放 locked 券并恢复原价。"""
     from app.services.member_card_pay_service import expire_stale_unpaid_miniprogram_card_orders
@@ -198,6 +214,15 @@ def add_cron_jobs(sched) -> None:
         "interval",
         minutes=2,
         id="expire_stale_unpaid_card_coupons",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
+        job_expire_unpaid_store_retail_orders,
+        "interval",
+        minutes=2,
+        id="expire_unpaid_store_retail_orders",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

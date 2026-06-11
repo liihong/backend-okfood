@@ -46,3 +46,7 @@ curl -sS -X POST "${BASE}/api/admin/marketing/member-coupons/grant-batch?store_i
 echo "== 发放记录 =="
 curl -sS "${BASE}/api/admin/marketing/member-coupons?store_id=${STORE_ID}&page=1" \
   -H "Authorization: Bearer ${TOKEN}" | python3 -m json.tool
+
+echo "== 按手机号搜索发放记录 phone=${MEMBER_PHONE} =="
+curl -sS "${BASE}/api/admin/marketing/member-coupons?store_id=${STORE_ID}&page=1&member_phone=${MEMBER_PHONE}" \
+  -H "Authorization: Bearer ${TOKEN}" | python3 -m json.tool

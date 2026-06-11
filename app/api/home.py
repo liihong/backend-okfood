@@ -6,6 +6,7 @@ from app.services.catalog_admin_service import list_membership_templates, member
 from app.services.home_banner_service import list_active_home_banners
 from app.services.home_entry_poster_service import get_active_entry_poster
 from app.services.store_config_service import get_store_config
+from app.services.tenant_integration_service import merged_sf_integration_namespace
 from app.utils.response import dump_model, success
 
 router = APIRouter(prefix="/home", tags=["首页"])
@@ -49,12 +50,17 @@ def home_entry_poster(db: SessionDep, store_ctx: PublicStoreContext = Depends(pu
 def home_store_info(db: SessionDep, store_ctx: PublicStoreContext = Depends(public_store_dep)):
     """小程序菜单页门店信息（无需登录）。"""
     cfg = get_store_config(db, store_id=int(store_ctx.store_id))
+    sf = merged_sf_integration_namespace(db, int(store_ctx.tenant_id))
+    pickup_addr = (sf.SF_PICKUP_ADDRESS or "").strip() or None
     return success(
         data={
             "store_id": int(cfg.store_id),
             "store_name": cfg.store_name,
             "store_logo_url": cfg.store_logo_url,
             "store_contact_phone": cfg.store_contact_phone,
+            "store_lng": cfg.store_lng,
+            "store_lat": cfg.store_lat,
+            "store_pickup_address": pickup_addr,
         },
         msg="获取成功",
     )

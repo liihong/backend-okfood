@@ -25,6 +25,7 @@ from app.models.member_operation_log import MemberOperationLog
 from app.models.membership_card_template import MembershipCardTemplate
 from app.models.single_meal_order import SingleMealOrder
 from app.models.store_retail_category import StoreRetailCategory
+from app.models.store_retail_order import StoreRetailOrder
 from app.models.store_retail_product import StoreRetailProduct
 from app.models.sf_same_city_callback import SfSameCityCallback
 from app.models.sf_same_city_push import SfSameCityPush
@@ -61,6 +62,7 @@ __all__ = [
     "MembershipCardTemplate",
     "SingleMealOrder",
     "StoreRetailCategory",
+    "StoreRetailOrder",
     "StoreRetailProduct",
     "StoreKitchenPlan",
     "DouyinCertificateRedemption",

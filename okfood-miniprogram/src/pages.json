@@ -141,6 +141,20 @@
             "navigationStyle": "custom",
             "backgroundColor": "#f8fafc"
           }
+        },
+        {
+          "path": "pages/retailConfirm/retailConfirm",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#ffffff"
+          }
+        },
+        {
+          "path": "pages/retailOrderDetail/retailOrderDetail",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
         }
       ]
     },

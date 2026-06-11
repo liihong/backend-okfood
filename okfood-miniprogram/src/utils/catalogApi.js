@@ -1,7 +1,15 @@
 import { request } from '@/utils/api.js'
 
 /**
- * @returns {Promise<{ store_id: number, store_name?: string | null, store_logo_url?: string | null, store_contact_phone?: string | null } | null>}
+ * @returns {Promise<{
+ *   store_id: number,
+ *   store_name?: string | null,
+ *   store_logo_url?: string | null,
+ *   store_contact_phone?: string | null,
+ *   store_lng?: number | null,
+ *   store_lat?: number | null,
+ *   store_pickup_address?: string | null,
+ * } | null>}
  */
 export async function fetchStoreInfo() {
   const raw = await request('/api/home/store-info', { method: 'GET', retry: 1 })
