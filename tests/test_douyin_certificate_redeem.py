@@ -37,42 +37,34 @@ def test_try_cancel_douyin_verify_success(mock_cancel):
         access_token="tok",
         verify_id="vid",
         certificate_id="cid",
-        shop_order_id="order-1",
-        account_id="acc-1",
     )
     assert ok is True
     assert err is None
     mock_cancel.assert_called_once()
 
 
-@patch("app.services.douyin.certificate_service.certificate_cancel")
+@patch("app.services.douyin.certificate_service._try_cancel_douyin_verify")
 def test_handle_grant_failure_cancel_ok_marks_cancelled(mock_cancel):
     mock_cancel.return_value = (True, None)
-    with patch(
-        "app.services.douyin.certificate_service._try_cancel_douyin_verify",
-        return_value=(True, None),
-    ):
-        db = MagicMock()
-        row = MagicMock()
-        row.status = DouyinRedemptionStatus.VERIFIED.value
-        db.get.return_value = row
+    db = MagicMock()
+    row = MagicMock()
+    row.status = DouyinRedemptionStatus.VERIFIED.value
+    db.get.return_value = row
 
-        with pytest.raises(HTTPException) as ei:
-            _handle_grant_failure(
-                db,
-                access_token="tok",
-                redemption_id=1,
-                certificate_id="cert-1",
-                douyin_verify_id="verify-1",
-                douyin_order_id="order-1",
-                account_id="acc-1",
-                grant_error="入账失败",
-            )
+    with pytest.raises(HTTPException) as ei:
+        _handle_grant_failure(
+            db,
+            access_token="tok",
+            redemption_id=1,
+            certificate_id="cert-1",
+            douyin_verify_id="verify-1",
+            grant_error="Data truncated for column pay_channel",
+        )
 
-        assert ei.value.status_code == 400
-        assert row.status == DouyinRedemptionStatus.CANCELLED.value
-        assert "撤销核销" in (row.error_msg or "")
-        db.commit.assert_called_once()
+    assert ei.value.status_code == 400
+    assert row.status == DouyinRedemptionStatus.CANCELLED.value
+    assert "撤销核销" in (row.error_msg or "")
+    db.commit.assert_called_once()
 
 
 @patch("app.services.douyin.certificate_service._try_cancel_douyin_verify")
@@ -89,9 +81,7 @@ def test_handle_grant_failure_cancel_fail_marks_grant_failed(mock_cancel):
             redemption_id=2,
             certificate_id="cert-2",
             douyin_verify_id="verify-2",
-            douyin_order_id="order-2",
-            account_id=None,
-            grant_error="次数入账异常",
+            grant_error="Data truncated for column pay_channel",
         )
 
     assert ei.value.status_code == 500

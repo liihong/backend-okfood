@@ -303,8 +303,6 @@ def certificate_cancel(
     access_token: str,
     verify_id: str,
     certificate_id: str,
-    shop_order_id: str | None = None,
-    account_id: str | None = None,
     cancel_token: str | None = None,
 ) -> dict[str, Any]:
     """撤销核销：发奖失败时回滚抖音侧「已使用」状态（核销后 1 小时内有效）。"""
@@ -320,10 +318,6 @@ def certificate_cancel(
     token = (cancel_token or new_cancel_token()).strip()
     if token:
         body["cancel_token"] = token
-    if shop_order_id and shop_order_id.strip():
-        body["shop_order_id"] = shop_order_id.strip()
-    if account_id and account_id.strip():
-        body["account_id"] = account_id.strip()
 
     resp = httpx.post(
         CANCEL_URL,

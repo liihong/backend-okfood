@@ -81,8 +81,6 @@ def _try_cancel_douyin_verify(
     access_token: str,
     verify_id: str | None,
     certificate_id: str,
-    shop_order_id: str | None = None,
-    account_id: str | None = None,
 ) -> tuple[bool, str | None]:
     """发奖失败后尝试撤销抖音核销，返回 (是否成功, 失败原因)。"""
     vid = (verify_id or "").strip()
@@ -94,16 +92,13 @@ def _try_cancel_douyin_verify(
             access_token=access_token,
             verify_id=vid,
             certificate_id=cid,
-            shop_order_id=shop_order_id,
-            account_id=account_id,
         )
         return True, None
     except DouyinLifeError as exc:
         logger.warning(
-            "抖音撤销核销失败 cert=%s verify=%s order=%s err=%s",
+            "抖音撤销核销失败 cert=%s verify=%s err=%s",
             cid,
             vid,
-            shop_order_id,
             exc,
         )
         return False, str(exc)
@@ -356,30 +351,34 @@ def _handle_grant_failure(
     redemption_id: int,
     certificate_id: str,
     douyin_verify_id: str | None,
-    douyin_order_id: str | None,
-    account_id: str | None,
     grant_error: str,
 ) -> None:
     """
     发奖失败：回滚本地未提交变更 → 尝试撤销抖音核销 → 更新流水。
-    撤销成功记 failed（用户可重新兑换）；撤销失败记 grant_failed（可断点续发奖）。
+    撤销成功记 cancelled（用户可重新兑换）；撤销失败记 grant_failed（可断点续发奖）。
     """
     db.rollback()
+    logger.error(
+        "抖音验券本地发奖失败 redemption_id=%s cert=%s verify=%s err=%s",
+        redemption_id,
+        certificate_id,
+        douyin_verify_id,
+        grant_error,
+    )
 
     cancel_ok, cancel_err = _try_cancel_douyin_verify(
         access_token=access_token,
         verify_id=douyin_verify_id,
         certificate_id=certificate_id,
-        shop_order_id=douyin_order_id,
-        account_id=account_id,
     )
 
     row = db.get(DouyinCertificateRedemption, int(redemption_id))
     if row is None:
         logger.error(
-            "发奖失败但找不到流水 redemption_id=%s cert=%s",
+            "发奖失败但找不到流水 redemption_id=%s cert=%s grant_error=%s",
             redemption_id,
             certificate_id,
+            grant_error,
         )
         raise HTTPException(status_code=500, detail="兑换异常，请联系客服")
 
@@ -411,7 +410,6 @@ def _retry_local_grant(
     member: Member,
     body: DouyinCertificateRedeemIn,
     access_token: str,
-    account_id: str | None = None,
 ) -> DouyinCertificateRedeemOut:
     """抖音已核销、本地未成功发奖：仅重试本地发奖，不再调用 verify。"""
     if int(existing.member_id) != int(member.id):
@@ -448,8 +446,6 @@ def _retry_local_grant(
             redemption_id=int(existing.id),
             certificate_id=cert_id,
             douyin_verify_id=existing.douyin_verify_id,
-            douyin_order_id=existing.douyin_order_id,
-            account_id=account_id,
             grant_error=_grant_error_message(exc),
         )
         raise  # pragma: no cover — _handle_grant_failure 必 raise
@@ -460,8 +456,6 @@ def _retry_local_grant(
             redemption_id=int(existing.id),
             certificate_id=cert_id,
             douyin_verify_id=existing.douyin_verify_id,
-            douyin_order_id=existing.douyin_order_id,
-            account_id=account_id,
             grant_error=_grant_error_message(exc),
         )
         raise  # pragma: no cover
@@ -501,7 +495,6 @@ def redeem_douyin_certificate(
                 member=member,
                 body=body,
                 access_token=access_token,
-                account_id=store_cfg.account_id,
             )
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
@@ -521,7 +514,6 @@ def redeem_douyin_certificate(
                 member=member,
                 body=body,
                 access_token=access_token,
-                account_id=store_cfg.account_id,
             )
         # failed / cancelled：允许重新走完整兑换，复用同一 certificate_id 流水行
 
@@ -627,16 +619,15 @@ def redeem_douyin_certificate(
             redemption_id=redemption_id,
             certificate_id=cert_id,
             douyin_verify_id=douyin_verify_id,
-            douyin_order_id=prepared.order_id,
-            account_id=store_cfg.account_id,
             grant_error=_grant_error_message(exc),
         )
         raise  # pragma: no cover
     except Exception as exc:
         logger.exception(
-            "抖音验券本地发奖未预期异常 redemption_id=%s cert=%s",
+            "抖音验券本地发奖未预期异常 redemption_id=%s cert=%s err=%s",
             redemption_id,
             cert_id,
+            exc,
         )
         _handle_grant_failure(
             db,
@@ -644,8 +635,6 @@ def redeem_douyin_certificate(
             redemption_id=redemption_id,
             certificate_id=cert_id,
             douyin_verify_id=douyin_verify_id,
-            douyin_order_id=prepared.order_id,
-            account_id=store_cfg.account_id,
             grant_error=_grant_error_message(exc),
         )
         raise  # pragma: no cover

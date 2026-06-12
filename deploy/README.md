@@ -259,6 +259,18 @@ sudo certbot --nginx -d ok.sourcefire.cn
 
 ## 五、常见问题
 
+### 抖音验券 500「兑换失败，请稍后重试」
+
+多为 **`member_card_orders.pay_channel` 仍为 ENUM，不支持「抖音」**，开卡工单 INSERT 失败。执行迁移后重启 API，让用户**再次提交同一券码**（`grant_failed` 状态会断点续发奖）：
+
+```bash
+cd /var/www/okfood/backend
+mysql -u root -p meal_delivery < sql/migration_045_member_card_orders_pay_channel_douyin.sql
+sudo systemctl restart okfine-api
+```
+
+管理端「抖音核销记录」可查看 `error_msg`（常见含 `Data truncated` / `pay_channel`）。
+
 ### 访问 `/api` 返回 502
 
 1. `sudo systemctl status okfine-api`
