@@ -270,6 +270,10 @@ import { consumeMinePageNeedsRefresh, markMinePageNeedsRefresh } from '@/utils/m
 
 const showDouyinRedeemMenu = true
 import { guardMemberDeliverySelfService } from '@/utils/memberSelfServiceGuard.js'
+import {
+  formatDailyMealUnitsHintLine,
+  guardSfSelfServiceLocked,
+} from '@/utils/memberDailyMealUnitsDisplay.js'
 import { ymdTodayShanghai } from '@/utils/memberDeliveryDate.js'
 import {
   ymdFromApi,
@@ -656,7 +660,12 @@ const planCardStatusAlert = computed(
 
 const planCardAddressLine = computed(() => {
   if (!isLoggedIn.value) return ''
-  return todayDeliveryAddressLine.value
+  const addr = todayDeliveryAddressLine.value
+  const p = memberProfileRaw.value
+  if (!p || showMemberCardModule.value || needsMemberSetupPage.value) return addr
+  const unitsHint = formatDailyMealUnitsHintLine(p)
+  if (!addr) return unitsHint
+  return `${addr}\n${unitsHint}`
 })
 
 function onMineHeroTap() {
@@ -1165,7 +1174,9 @@ function goDailyMealUnits() {
     uni.showToast({ title: '请先登录', icon: 'none' })
     return
   }
-  if (!guardMemberDeliverySelfService(memberProfileRaw.value)) return
+  const p = memberProfileRaw.value
+  if (!guardMemberDeliverySelfService(p)) return
+  if (!guardSfSelfServiceLocked(p)) return
   uni.navigateTo({ url: '/packageUser/pages/dailyMealUnits/dailyMealUnits' })
 }
 

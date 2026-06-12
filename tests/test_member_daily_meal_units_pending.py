@@ -14,6 +14,7 @@ from app.services.member_daily_meal_units_service import (
     apply_all_pending_daily_meal_units,
     pending_daily_meal_units,
     queue_daily_meal_units_change,
+    set_member_daily_meal_units_change,
 )
 from app.services.member_service import effective_daily_meal_units
 
@@ -83,3 +84,29 @@ def test_queue_same_as_current_clears_pending(pending_db: Session):
     queue_daily_meal_units_change(m, 2)
     pending_db.commit()
     assert pending_daily_meal_units(m) is None
+
+
+def test_set_change_immediate_when_sheet_not_pushed(pending_db: Session, monkeypatch):
+    m = _member(pending_db, units=1)
+    monkeypatch.setattr(
+        "app.services.member_daily_meal_units_service.delivery_sheet_pushed_today_for_store",
+        lambda db, store_id: False,
+    )
+    mode = set_member_daily_meal_units_change(pending_db, m, 2)
+    pending_db.commit()
+    assert mode == "immediate"
+    assert effective_daily_meal_units(m) == 2
+    assert pending_daily_meal_units(m) is None
+
+
+def test_set_change_scheduled_when_sheet_pushed(pending_db: Session, monkeypatch):
+    m = _member(pending_db, units=1)
+    monkeypatch.setattr(
+        "app.services.member_daily_meal_units_service.delivery_sheet_pushed_today_for_store",
+        lambda db, store_id: True,
+    )
+    mode = set_member_daily_meal_units_change(pending_db, m, 3)
+    pending_db.commit()
+    assert mode == "scheduled"
+    assert effective_daily_meal_units(m) == 1
+    assert pending_daily_meal_units(m) == 3

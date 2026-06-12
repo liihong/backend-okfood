@@ -1,12 +1,17 @@
-"""会员每配送日份数：次日生效队列与定时落库（方案 B）。"""
+"""会员每配送日份数：未推单立即生效；已大表推单则写 pending，由定时任务落库。"""
 
 from __future__ import annotations
+
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.timeutil import today_shanghai
 from app.models.member import Member
 from app.services.member_service import MAX_DAILY_MEAL_UNITS, effective_daily_meal_units
+
+DailyMealUnitsChangeMode = Literal["immediate", "scheduled", "unchanged"]
 
 
 def clamp_daily_meal_units(units: int) -> int:
@@ -30,6 +35,46 @@ def pending_daily_meal_units(member: Member) -> int | None:
     if u < 1 or u > MAX_DAILY_MEAL_UNITS:
         return None
     return u
+
+
+def delivery_sheet_pushed_today_for_store(db: Session, *, store_id: int) -> bool:
+    """当日该门店是否已有成功的智能配送大表（订阅合并）顺丰推单。"""
+    from app.services.delivery_day_lock_service import has_delivery_sheet_sf_push_on_date
+
+    return has_delivery_sheet_sf_push_on_date(
+        db,
+        store_id=int(store_id),
+        delivery_date=today_shanghai(),
+    )
+
+
+def set_member_daily_meal_units_change(
+    db: Session,
+    member: Member,
+    units: int,
+) -> DailyMealUnitsChangeMode:
+    """
+    写入份数变更：当日未大表推单则立即更新 ``daily_meal_units``；已推单则写 ``pending``。
+
+    与推单后冻结快照兼容：推单前改动能被当日大表/顺丰创单读到。
+    """
+    target = clamp_daily_meal_units(units)
+    current = effective_daily_meal_units(member)
+    if target == current:
+        changed = member.daily_meal_units_pending is not None
+        member.daily_meal_units_pending = None
+        return "immediate" if changed else "unchanged"
+
+    if delivery_sheet_pushed_today_for_store(db, store_id=int(member.store_id)):
+        prev_pending = member.daily_meal_units_pending
+        if prev_pending is not None and int(prev_pending) == target:
+            return "unchanged"
+        member.daily_meal_units_pending = target
+        return "scheduled"
+
+    member.daily_meal_units = target
+    member.daily_meal_units_pending = None
+    return "immediate"
 
 
 def queue_daily_meal_units_change(member: Member, units: int) -> bool:

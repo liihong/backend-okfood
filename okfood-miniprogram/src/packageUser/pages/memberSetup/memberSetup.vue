@@ -66,7 +66,9 @@
               </picker>
 
               <text class="sec-title sec-title--sp">每日配送份数</text>
-              <text class="sec-sub">每个配送日送达的份数，默认 1 份；确认送达时按份数扣减剩余餐次。</text>
+              <text class="sec-sub">
+                每个配送日送达的份数，默认 1 份。今日未推顺丰则保存后立即生效；已推单则预约下一配送日。
+              </text>
               <view class="units-stepper">
                 <button
                   class="units-stepper-btn"
@@ -185,7 +187,7 @@ const leadText = computed(() => {
     return '支付已成功，餐次已入账。请完善配送方式与收货信息并选择开始业务日期，完成后即可开始用餐。'
   }
   if (editDeliveryMode.value) {
-    return '可修改配送到家或门店自提、默认收货地址、每日份数与起送业务日；保存后立即生效。'
+    return '可修改配送到家或门店自提、默认收货地址、每日份数与起送业务日。份数：今日未向顺丰推单则立即生效，已推单则预约下一配送日。'
   }
   return '请确认用餐履约方式、每日份数与起送日期：配送到家需默认收货地址；门店自提请确认取餐门店与首日。'
 })

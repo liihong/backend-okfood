@@ -26,7 +26,11 @@ class MemberOut(BaseModel):
     daily_meal_units_pending: int | None = Field(
         None,
         ge=1,
-        description="预约次日生效的每配送日份数；有值时表示已提交修改、次日起生效",
+        description="已预约的每配送日份数；当日大表已推顺丰时写入，下一配送日 00:01 落库",
+    )
+    delivery_sheet_pushed_today: bool = Field(
+        False,
+        description="当日该门店配送大表是否已向顺丰推单；true 时小程序改份数为预约下一配送日生效",
     )
     meal_quota_total: int = Field(
         0,

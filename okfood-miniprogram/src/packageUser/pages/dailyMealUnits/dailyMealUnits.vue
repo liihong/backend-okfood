@@ -4,9 +4,23 @@
     <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="wrap">
         <text class="lead">
-          每个配送日需送达的份数；骑手确认送达时按该份数从剩余次数中扣减。此处仅可通过加减调整，范围为
-          1～10 份。
+          每个配送日需送达的份数；骑手确认送达时按该份数从剩余次数中扣减。范围为 1～10 份。
         </text>
+
+        <view v-if="sheetPushedToday" class="notice notice--info">
+          <text class="notice-txt">
+            今日配送大表已同步顺丰，修改将预约在下一配送日生效；今日仍为 {{ effectiveUnits }} 份。
+          </text>
+        </view>
+        <view v-else class="notice notice--info">
+          <text class="notice-txt">今日尚未向顺丰推单，保存后立即生效。</text>
+        </view>
+
+        <view v-if="hasPendingDiff" class="notice notice--warn">
+          <text class="notice-txt">
+            当前今日 {{ effectiveUnits }} 份，已预约改为 {{ pendingUnits }} 份（下一配送日起）。
+          </text>
+        </view>
 
         <view v-if="serverUnitsRaw > 10" class="notice">
           <text class="notice-txt">
@@ -19,7 +33,7 @@
           <view class="units-stepper">
             <button
               class="units-stepper-btn"
-              :disabled="units <= MIN_U || loading"
+              :disabled="units <= MIN_U || loading || sfLocked"
               @click="bump(-1)"
             >
               -
@@ -27,7 +41,7 @@
             <text class="units-stepper-value">{{ units }}</text>
             <button
               class="units-stepper-btn"
-              :disabled="units >= MAX_U || loading"
+              :disabled="units >= MAX_U || loading || sfLocked"
               @click="bump(1)"
             >
               +
@@ -38,7 +52,7 @@
         <button
           class="submit-btn"
           :loading="saving"
-          :disabled="loading || !dirty || saving"
+          :disabled="loading || !dirty || saving || sfLocked"
           @click="onSave"
         >
           保存
@@ -56,6 +70,13 @@ import { getPageScrollStyle } from '@/utils/navbar.js'
 import { request, getMemberToken, clearMemberSession, isUserMeNotFoundError } from '@/utils/api.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 import { guardMemberDeliverySelfService } from '@/utils/memberSelfServiceGuard.js'
+import {
+  dailyMealUnitsEditorValueFromProfile,
+  dailyMealUnitsSaveToastFromProfile,
+  effectiveDailyMealUnitsFromProfile,
+  guardSfSelfServiceLocked,
+  pendingDailyMealUnitsFromProfile,
+} from '@/utils/memberDailyMealUnitsDisplay.js'
 
 const MIN_U = 1
 const MAX_U = 10
@@ -63,11 +84,21 @@ const MAX_U = 10
 const scrollStyle = ref({})
 const loading = ref(true)
 const saving = ref(false)
-/** 服务端原始值（未截断），用于大于 10 时的提示 */
+const sfLocked = ref(false)
+const sheetPushedToday = ref(false)
+const effectiveUnits = ref(1)
+const pendingUnits = ref(null)
+/** 服务端原始生效值（未截断），用于大于 10 时的提示 */
 const serverUnitsRaw = ref(1)
-/** 进入本页时的可选范围内快照，用于判断是否修改 */
+/** 进入本页时的步进器快照，用于判断是否修改 */
 const baselineUnits = ref(1)
 const units = ref(1)
+
+const hasPendingDiff = computed(
+  () =>
+    pendingUnits.value != null &&
+    pendingUnits.value !== effectiveUnits.value,
+)
 
 const dirty = computed(() => !loading.value && units.value !== baselineUnits.value)
 
@@ -78,6 +109,18 @@ function clampUnits(n) {
 
 function bump(delta) {
   units.value = clampUnits(units.value + delta)
+}
+
+function applyProfileToForm(data) {
+  const raw = Math.floor(Number(data?.daily_meal_units) || 0)
+  const safeRaw = raw >= 1 && raw <= 50 ? raw : 1
+  serverUnitsRaw.value = safeRaw
+  effectiveUnits.value = effectiveDailyMealUnitsFromProfile(data)
+  pendingUnits.value = pendingDailyMealUnitsFromProfile(data)
+  sheetPushedToday.value = data?.delivery_sheet_pushed_today === true
+  const editorVal = clampUnits(dailyMealUnitsEditorValueFromProfile(data))
+  units.value = editorVal
+  baselineUnits.value = editorVal
 }
 
 async function loadMe() {
@@ -94,12 +137,12 @@ async function loadMe() {
       setTimeout(() => uni.navigateBack(), 400)
       return
     }
-    const raw = Math.floor(Number(data?.daily_meal_units) || 0)
-    const safeRaw = raw >= 1 && raw <= 50 ? raw : 1
-    serverUnitsRaw.value = safeRaw
-    const u = clampUnits(safeRaw)
-    units.value = u
-    baselineUnits.value = u
+    sfLocked.value = data?.sf_self_service_locked === true
+    if (!guardSfSelfServiceLocked(data)) {
+      setTimeout(() => uni.navigateBack(), 400)
+      return
+    }
+    applyProfileToForm(data)
   } catch (e) {
     if (isUserMeNotFoundError(e)) {
       clearMemberSession()
@@ -113,21 +156,25 @@ async function loadMe() {
 }
 
 async function onSave() {
-  if (!dirty.value || saving.value) return
+  if (!dirty.value || saving.value || sfLocked.value) return
   if (!getMemberToken()) {
     uni.showToast({ title: '登录已失效', icon: 'none' })
     return
   }
   saving.value = true
   try {
-    await request('/api/user/profile', {
+    const data = await request('/api/user/profile', {
       method: 'PATCH',
       data: { daily_meal_units: clampUnits(units.value) },
     })
-    baselineUnits.value = units.value
+    applyProfileToForm(data)
     markMinePageNeedsRefresh()
-    uni.showToast({ title: '已预约，次日起生效', icon: 'success' })
-    setTimeout(() => uni.navigateBack(), 400)
+    uni.showToast({
+      title: dailyMealUnitsSaveToastFromProfile(data),
+      icon: 'success',
+      duration: 2800,
+    })
+    setTimeout(() => uni.navigateBack(), 500)
   } catch (err) {
     uni.showToast({ title: err?.message || '保存失败', icon: 'none', duration: 2800 })
   } finally {
