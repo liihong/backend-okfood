@@ -968,6 +968,9 @@ export function useOrdersManage() {
           unpaid: Number(sm.unpaid) || 0,
           cancelled: Number(sm.cancelled) || 0,
           pending_ship: Number(sm.pending_ship) || 0,
+          retail_inventory_portions: Number(sm.retail_inventory_portions) || 0,
+          paid_portions: Number(sm.paid_portions) || 0,
+          pending_unpaid_portions: Number(sm.pending_unpaid_portions) || 0,
         }
       } else {
         singleOrderBucketSummary.value = null

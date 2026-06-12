@@ -162,8 +162,16 @@ const {
     <strong class="orders-manage-stats-line__num orders-manage-stats-line__num--cancelled">{{
       singleOrderBucketSummary.cancelled
     }}</strong>
+    <span class="orders-manage-stats-line__sep">·</span>
+    占用库存
+    <strong class="orders-manage-stats-line__num">{{
+      singleOrderBucketSummary.retail_inventory_portions
+    }}</strong>
+    份
     <span class="orders-manage-stats-line__hint"
-      >（与供餐日、搜索、配送筛选一致；不含支付 Tab；待发货含门店自提「待自提」）</span
+      >（与供餐日、搜索、配送筛选一致；不含支付 Tab；待发货含门店自提「待自提」；占用库存=已支付未取消
+      {{ singleOrderBucketSummary.paid_portions }} 份 + 待支付
+      {{ singleOrderBucketSummary.pending_unpaid_portions }} 份，已取消不计入）</span
     >
   </p>
   <AdminTable

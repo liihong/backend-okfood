@@ -94,6 +94,7 @@ from app.services.sf_same_city_service import (
     cancel_sf_same_city_push,
     preview_sf_same_city,
     push_sf_same_city,
+    push_sf_same_city_instant,
     push_single_meal_retail_to_sf,
     retry_sf_same_city_push_by_id,
 )
@@ -158,6 +159,7 @@ from app.services.admin_system_notification_service import (
     admin_system_notification_to_dict,
     count_unacknowledged_admin_system_notifications,
     list_admin_system_notifications,
+    upsert_sf_push_batch_notification,
 )
 from app.integrations.wechat_pay_v2 import WeChatPayV2Error, resolve_request_client_ip
 from app.utils.response import dump_model, page_response, success
@@ -394,6 +396,51 @@ def delivery_sf_push(
         out: SfSameCityPushOut = push_sf_same_city(db, body, store_id=store_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    total = len(out.results)
+    success = sum(1 for r in out.results if r.ok)
+    failed = total - success
+    upsert_sf_push_batch_notification(
+        db,
+        store_id=store_id,
+        business_date=body.delivery_date,
+        total=total,
+        success=success,
+        failed=failed,
+        title_prefix="顺丰手动推单",
+    )
+    db.commit()
+    return success(data=dump_model(out), msg="处理完成")
+
+
+@router.post("/delivery-sf/push-instant", response_model=None)
+def delivery_sf_push_instant(
+    body: SfSameCityPushIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """
+    配送大表：勾选停靠点推送到「及时单账号」（门店零售推顺丰店铺ID），全部按立即推单创单。
+    适用于当日部分订单需补推、来不及走预约 bulk 推单的场景；创单失败/已取消的记录可覆盖重推。
+    """
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        out: SfSameCityPushOut = push_sf_same_city_instant(db, body, store_id=store_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    total = len(out.results)
+    success = sum(1 for r in out.results if r.ok)
+    failed = total - success
+    upsert_sf_push_batch_notification(
+        db,
+        store_id=store_id,
+        business_date=body.delivery_date,
+        total=total,
+        success=success,
+        failed=failed,
+        title_prefix="顺丰及时单推单",
+    )
+    db.commit()
     return success(data=dump_model(out), msg="处理完成")
 
 
@@ -594,12 +641,28 @@ def delivery_sf_retry_push(
     db: SessionDep,
     admin_username: str = Depends(admin_or_delivery_staff_subject),
 ):
-    """创单失败记录：按当前配送大表数据对该停靠点重试推单（更新原记录；已成功创单不可重试）。"""
+    """创单失败或已取消的成功单：按当前配送大表数据重推该停靠点（更新原记录）。"""
+    from app.models.sf_same_city_push import SfSameCityPush
+
     _ = admin_username
+    push_row = db.get(SfSameCityPush, int(push_id))
+    if push_row is None:
+        raise HTTPException(status_code=404, detail="推单记录不存在")
     try:
         r = retry_sf_same_city_push_by_id(db, push_id=push_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    if push_row.delivery_date is not None:
+        upsert_sf_push_batch_notification(
+            db,
+            store_id=int(push_row.store_id),
+            business_date=push_row.delivery_date,
+            total=1,
+            success=1 if r.ok else 0,
+            failed=0 if r.ok else 1,
+            title_prefix="顺丰推单重试",
+        )
+        db.commit()
     out = SfSameCityPushRetryOut(
         stop_id=r.stop_id, ok=r.ok, message=r.message, sf_order_id=r.sf_order_id
     )

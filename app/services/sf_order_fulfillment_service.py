@@ -554,13 +554,13 @@ def member_subscription_delivered_on_delivery_date(
 
 
 def _active_sf_push_base_filter(*, store_id: int, delivery_date: date):
-    from app.services.sf_same_city_service import _sf_push_row_cancelled_predicate
+    from app.services.sf_same_city_service import _sf_push_row_active_predicate
 
     return and_(
         SfSameCityPush.store_id == int(store_id),
         SfSameCityPush.delivery_date == delivery_date,
         SfSameCityPush.error_code == 0,
-        ~_sf_push_row_cancelled_predicate(),
+        _sf_push_row_active_predicate(),
     )
 
 

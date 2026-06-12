@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { Search } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
+import { isSubscriptionDeliveryDayIso } from '../../utils/deliveryCalendar.js'
 
 const props = defineProps({
   /** 营业锚定日 YYYY-MM-DD，与 dashboard-summary 一致 */
@@ -181,44 +182,65 @@ async function saveKitchenPlanForDate(businessDate, plannedTotal) {
 
 const KITCHEN_SAVE_LABELS = ['今日', '明日', '后天']
 
+const dayAfterTomorrowIsBusinessDay = computed(() =>
+  isSubscriptionDeliveryDayIso(props.dayAfterTomorrowBusinessDate),
+)
+
 /** 保存今日/明日/后天日总份数，并通知顶卡刷新 dashboard-summary */
 async function saveKitchenPlan() {
   if (kitchenSaving.value) return
-  const dates = [
-    (props.businessDate || '').trim(),
-    (props.tomorrowBusinessDate || '').trim(),
-    (props.dayAfterTomorrowBusinessDate || '').trim(),
+  const entries = [
+    {
+      label: KITCHEN_SAVE_LABELS[0],
+      date: (props.businessDate || '').trim(),
+      value: Math.trunc(Number(kitchenInput.value)),
+    },
+    {
+      label: KITCHEN_SAVE_LABELS[1],
+      date: (props.tomorrowBusinessDate || '').trim(),
+      value: Math.trunc(Number(kitchenInputTomorrow.value)),
+    },
+    {
+      label: KITCHEN_SAVE_LABELS[2],
+      date: (props.dayAfterTomorrowBusinessDate || '').trim(),
+      value: Math.trunc(Number(kitchenInputDayAfterTomorrow.value)),
+    },
   ]
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dates[0])) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(entries[0].date)) {
     showToast('请先选择有效营业日', 'error')
     return
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dates[1])) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(entries[1].date)) {
     showToast('无法计算明日营业日，请刷新后重试', 'error')
     return
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dates[2])) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(entries[2].date)) {
     showToast('无法计算后天营业日，请刷新后重试', 'error')
     return
   }
-  const values = [
-    Math.trunc(Number(kitchenInput.value)),
-    Math.trunc(Number(kitchenInputTomorrow.value)),
-    Math.trunc(Number(kitchenInputDayAfterTomorrow.value)),
-  ]
-  if (values.some((v) => !Number.isFinite(v) || v < 0)) {
+  if (entries.some((e) => !Number.isFinite(e.value) || e.value < 0)) {
     showToast('请输入正确的日总份数', 'error')
+    return
+  }
+  const saveTargets = entries.filter((e) => isSubscriptionDeliveryDayIso(e.date))
+  if (!saveTargets.length) {
+    showToast('所选日期均为非营业日，无需保存日总份数', 'error')
     return
   }
   kitchenSaving.value = true
   try {
     const results = await Promise.allSettled(
-      dates.map((d, i) => saveKitchenPlanForDate(d, values[i])),
+      saveTargets.map((e) => saveKitchenPlanForDate(e.date, e.value)),
     )
     const failed = results
-      .map((r, i) => ({ r, i }))
+      .map((r, i) => ({ r, entry: saveTargets[i] }))
       .filter(({ r }) => r.status === 'rejected')
-    if (failed.length === dates.length) {
+    const payload = {
+      today: entries[0].value,
+      tomorrow: entries[1].value,
+      dayAfterTomorrow: entries[2].value,
+    }
+    if (failed.length === saveTargets.length) {
       const firstErr = failed[0].r.reason
       const status = firstErr && typeof firstErr.status === 'number' ? firstErr.status : 0
       if (status === 401) {
@@ -229,13 +251,8 @@ async function saveKitchenPlan() {
       showToast(firstErr instanceof Error ? firstErr.message : '保存后厨计划失败', 'error')
       return
     }
-    const payload = {
-      today: values[0],
-      tomorrow: values[1],
-      dayAfterTomorrow: values[2],
-    }
     if (failed.length > 0) {
-      const { r: failResult, i } = failed[0]
+      const { r: failResult, entry } = failed[0]
       const err = failResult.reason
       const status = err && typeof err.status === 'number' ? err.status : 0
       if (status === 401) {
@@ -244,16 +261,17 @@ async function saveKitchenPlan() {
         return
       }
       showToast(
-        `${KITCHEN_SAVE_LABELS[i]}保存失败：${err instanceof Error ? err.message : '未知错误'}`,
+        `${entry.label}保存失败：${err instanceof Error ? err.message : '未知错误'}`,
         'error',
       )
       emit('menu-day-stock-saved', payload)
       return
     }
-    showToast(
-      `今日 ${values[0]} 份、明日 ${values[1]} 份、后天 ${values[2]} 份已保存，本周菜单已同步`,
-      'success',
-    )
+    const savedText = saveTargets.map((e) => `${e.label} ${e.value} 份`).join('、')
+    const skipped = entries.filter((e) => !isSubscriptionDeliveryDayIso(e.date))
+    const skipHint =
+      skipped.length > 0 ? `（${skipped.map((e) => e.label).join('、')}为非营业日已跳过）` : ''
+    showToast(`${savedText}已保存，本周菜单已同步${skipHint}`, 'success')
     emit('menu-day-stock-saved', payload)
   } finally {
     kitchenSaving.value = false
@@ -308,7 +326,10 @@ watch(
           </div>
         </div>
         <div class="dpk-form-group">
-          <label class="dpk-form-label">后天日总份数</label>
+          <label class="dpk-form-label">
+            后天日总份数
+            <span v-if="!dayAfterTomorrowIsBusinessDay" class="dpk-nonbiz-hint">（非营业日）</span>
+          </label>
           <div class="dpk-input-row">
             <input
               v-model.number="kitchenInputDayAfterTomorrow"
@@ -317,6 +338,7 @@ watch(
               min="0"
               max="99999"
               inputmode="numeric"
+              :disabled="!dayAfterTomorrowIsBusinessDay"
             />
             <span class="dpk-unit">份</span>
           </div>
@@ -654,6 +676,13 @@ watch(
   color: #3b82f6;
   font-weight: 700;
   font-size: 12.5px;
+}
+
+.dpk-nonbiz-hint {
+  margin-left: 4px;
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 11px;
 }
 
 .dpk-input-row {

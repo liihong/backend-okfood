@@ -70,9 +70,10 @@ import { getPageScrollStyle } from '@/utils/navbar.js'
 import { request, getMemberToken, clearMemberSession, isUserMeNotFoundError } from '@/utils/api.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 import { guardMemberDeliverySelfService } from '@/utils/memberSelfServiceGuard.js'
+import { showOkAlert } from '@/utils/okAlert.js'
 import {
   dailyMealUnitsEditorValueFromProfile,
-  dailyMealUnitsSaveToastFromProfile,
+  dailyMealUnitsSaveAlertFromProfile,
   effectiveDailyMealUnitsFromProfile,
   guardSfSelfServiceLocked,
   pendingDailyMealUnitsFromProfile,
@@ -169,12 +170,15 @@ async function onSave() {
     })
     applyProfileToForm(data)
     markMinePageNeedsRefresh()
-    uni.showToast({
-      title: dailyMealUnitsSaveToastFromProfile(data),
-      icon: 'success',
-      duration: 2800,
+    const alertPayload = dailyMealUnitsSaveAlertFromProfile(data)
+    await showOkAlert({
+      title: alertPayload.title,
+      content: alertPayload.content,
+      showCancel: false,
+      confirmText: '确定',
+      tone: 'success',
     })
-    setTimeout(() => uni.navigateBack(), 500)
+    uni.navigateBack()
   } catch (err) {
     uni.showToast({ title: err?.message || '保存失败', icon: 'none', duration: 2800 })
   } finally {

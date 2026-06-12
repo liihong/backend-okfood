@@ -248,6 +248,38 @@ def is_delivery_day_sheet_locked(
     return True
 
 
+def sf_cancelled_sheet_member_ids_for_delivery_date(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+) -> frozenset[int]:
+    """
+    当日已取消的大表合并推单 ``fulfillment_member_ids`` 并集。
+
+    锁单日大表待送名单补全：取消后会员可能不在首次推单 frozen 快照内，仍须可见以便重推。
+    """
+    from app.services.sf_order_fulfillment_service import _ids_from_push_snapshot
+    from app.services.sf_same_city_service import (
+        _delivery_sheet_push_kind_predicate,
+        _sf_push_row_cancelled_predicate,
+    )
+
+    filt = (
+        SfSameCityPush.store_id == int(store_id),
+        SfSameCityPush.delivery_date == delivery_date,
+        SfSameCityPush.error_code == 0,
+        _sf_push_row_cancelled_predicate(),
+        _delivery_sheet_push_kind_predicate(),
+    )
+    seen: set[int] = set()
+    for snap in db.scalars(select(SfSameCityPush.request_snapshot).where(*filt)).all():
+        snap_mids, _ = _ids_from_push_snapshot(snap)
+        for mid in snap_mids:
+            seen.add(int(mid))
+    return frozenset(seen)
+
+
 def sf_frozen_subscription_member_ids_for_delivery_date(
     db: Session,
     *,

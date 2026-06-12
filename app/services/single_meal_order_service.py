@@ -609,6 +609,9 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
 
     db.commit()
     db.refresh(row)
+    from app.services.admin_service import invalidate_dashboard_live_summary_cache
+
+    invalidate_dashboard_live_summary_cache(int(mem.store_id))
 
     return _single_meal_order_row_to_out(db, row, dish_title=str(dish.name), address_summary=address_summary)
 
@@ -731,13 +734,49 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
             stmt = stmt.where(f)
         return int(db.scalar(stmt) or 0)
 
+    def _sum_qty(extra: list) -> int:
+        stmt = select(func.coalesce(func.sum(SingleMealOrder.quantity), 0)).select_from(
+            SingleMealOrder
+        ).join(Member, join_on)
+        for f in base + extra:
+            stmt = stmt.where(f)
+        return int(db.scalar(stmt) or 0)
+
+    from app.services.menu_day_stock_service import paid_single_retail_portions_by_dates
+
+    retail_inventory = int(
+        paid_single_retail_portions_by_dates(db, [delivery_day], store_id=int(store_id)).get(
+            delivery_day, 0
+        )
+    )
+
     return {
         "paid": _count([SingleMealOrder.pay_status == "已支付"]),
-        "unpaid": _count([SingleMealOrder.pay_status == "未支付"]),
+        # 仅待支付未取消（已取消未支付不再计入，避免与「已取消」重复误解）
+        "unpaid": _count(
+            [
+                SingleMealOrder.pay_status == "未支付",
+                SingleMealOrder.fulfillment_status == "pending",
+            ]
+        ),
         "cancelled": _count([SingleMealOrder.fulfillment_status == "cancelled"]),
         "pending_ship": _count(
             [
                 SingleMealOrder.pay_status == "已支付",
+                SingleMealOrder.fulfillment_status == "pending",
+            ]
+        ),
+        # 份数：与营业概览「单次零售 / 可卖余量」同源
+        "retail_inventory_portions": retail_inventory,
+        "paid_portions": _sum_qty(
+            [
+                SingleMealOrder.pay_status == "已支付",
+                SingleMealOrder.fulfillment_status.notin_(("cancelled", "sf_cancelled")),
+            ]
+        ),
+        "pending_unpaid_portions": _sum_qty(
+            [
+                SingleMealOrder.pay_status == "未支付",
                 SingleMealOrder.fulfillment_status == "pending",
             ]
         ),
@@ -933,6 +972,9 @@ def member_cancel_single_meal_order(db: Session, *, member_id: int, order_id: in
         )
     db.add(row)
     db.commit()
+    from app.services.admin_service import invalidate_dashboard_live_summary_cache
+
+    invalidate_dashboard_live_summary_cache(int(row.store_id))
 
     if pay == "未支付":
         return "订单已取消"
@@ -1070,6 +1112,9 @@ def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
         db, order_biz=CouponLockedOrderBiz.SINGLE_MEAL, order_id=int(order.id)
     )
     db.commit()
+    from app.services.admin_service import invalidate_dashboard_live_summary_cache
+
+    invalidate_dashboard_live_summary_cache(int(order.store_id))
     return True, "paid"
 
 
@@ -1905,6 +1950,9 @@ def admin_cancel_single_meal_order(
         )
     db.add(o)
     db.commit()
+    from app.services.admin_service import invalidate_dashboard_live_summary_cache
+
+    invalidate_dashboard_live_summary_cache(int(store_id))
     if sf_msg:
         return f"订单已取消（{sf_msg}）"
     if pay == "已支付" and (o.pay_channel or "").strip() == "会员卡":

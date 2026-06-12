@@ -1,5 +1,7 @@
 /** 份数展示与保存结果文案（与后端 daily_meal_units / pending / 推单冻结口径一致） */
 
+import { sfPushEffectiveSaveAlert } from '@/utils/memberSfPushEffectiveHint.js'
+
 /**
  * @param {object | null | undefined} profile GET /api/user/me 的 data
  * @returns {number}
@@ -44,6 +46,25 @@ export function dailyMealUnitsEditorValueFromProfile(profile) {
   const pending = pendingDailyMealUnitsFromProfile(profile)
   if (pending != null) return pending
   return effectiveDailyMealUnitsFromProfile(profile)
+}
+
+/**
+ * @param {object | null | undefined} profile PATCH /api/user/profile 返回的 data
+ * @returns {{ title: string, content: string }}
+ */
+export function dailyMealUnitsSaveAlertFromProfile(profile) {
+  const pending = pendingDailyMealUnitsFromProfile(profile)
+  const current = effectiveDailyMealUnitsFromProfile(profile)
+  if (pending != null && pending !== current) {
+    return {
+      title: '已预约',
+      content: `今日仍为 ${current} 份；自下一配送日起改为 ${pending} 份。`,
+    }
+  }
+  return sfPushEffectiveSaveAlert(profile, {
+    contentScheduled: '今日配送大表已同步顺丰，份数修改自下一配送日起生效；今日仍为原份数。',
+    contentImmediate: '今日尚未向顺丰推单，份数修改保存后立即生效。',
+  })
 }
 
 /**

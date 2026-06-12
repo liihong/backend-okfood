@@ -3,6 +3,9 @@
     <OkNavbar show-back :title="navbarTitle" />
     <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="page-address">
+        <view v-if="profileLoaded" class="notice notice--info">
+          <text class="notice-txt">{{ sfEffectiveNotice }}</text>
+        </view>
         <view class="form-box">
           <view class="form-field">
             <view class="field-label-row">
@@ -93,6 +96,10 @@ placeholder="备注"
 <script setup>
 import { computed, reactive, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
+import {
+  sfPushEffectiveEditNotice,
+  sfPushEffectiveSaveAlert,
+} from '@/utils/memberSfPushEffectiveHint.js'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { getPageScrollStyle, FIXED_FOOTER_RESERVE_PX } from '@/utils/navbar.js'
 import { showOkAlert } from '@/utils/okAlert.js'
@@ -123,6 +130,12 @@ const coords = ref(null)
 
 /** 当前编辑的地址 id；无则 POST 新增，有则 PATCH */
 const addressId = ref('')
+
+/** GET /api/user/me：顺丰推单状态，用于生效说明 */
+const memberProfile = ref(null)
+const profileLoaded = ref(false)
+
+const sfEffectiveNotice = computed(() => sfPushEffectiveEditNotice(memberProfile.value))
 
 const displayPhone = computed(() => {
   const d = String(form.phone || '').replace(/\D/g, '')
@@ -379,8 +392,24 @@ function buildAddressBody() {
   }
 }
 
+async function loadMemberProfile() {
+  if (!getMemberToken()) {
+    memberProfile.value = null
+    profileLoaded.value = false
+    return
+  }
+  try {
+    memberProfile.value = await request('/api/user/me', { method: 'GET' })
+    profileLoaded.value = true
+  } catch {
+    memberProfile.value = null
+    profileLoaded.value = false
+  }
+}
+
 onShow(() => {
   applyScrollLayout()
+  void loadMemberProfile()
 })
 
 onLoad((options) => {
@@ -465,12 +494,21 @@ async function save() {
       remarks: form.remarks,
       location: hasCoords ? { lat: coords.value.lat, lng: coords.value.lng } : null,
     })
-    const title = isNewAddress ? '地址添加成功' : '更新成功'
+    const alertPayload = sfPushEffectiveSaveAlert(memberProfile.value, {
+      titleScheduled: isNewAddress ? '地址已保存' : '已保存',
+      titleImmediate: isNewAddress ? '地址已保存' : '已保存',
+      contentScheduled: '今日配送大表已同步顺丰，地址修改自下一配送日起生效；今日配送仍按原地址。',
+      contentImmediate: '今日尚未向顺丰推单，地址修改保存后立即生效。',
+    })
     markMinePageNeedsRefresh()
-    uni.showToast({ title, icon: 'success', duration: 2000 })
-    setTimeout(() => {
-      uni.navigateBack()
-    }, 1800)
+    await showOkAlert({
+      title: alertPayload.title,
+      content: alertPayload.content,
+      showCancel: false,
+      confirmText: '确定',
+      tone: 'success',
+    })
+    uni.navigateBack()
   } catch (e) {
     uni.showToast({
       title: e instanceof Error ? e.message : '保存失败',
@@ -501,7 +539,7 @@ async function save() {
   padding: 48rpx 40rpx 0;
 }
 
-.addr-lock-banner {
+.notice {
   background: #fffbeb;
   border: 1rpx solid #fde68a;
   border-radius: 20rpx;
@@ -509,10 +547,18 @@ async function save() {
   margin-bottom: 28rpx;
 }
 
-.addr-lock-banner__txt {
+.notice--info {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.notice--info .notice-txt {
+  color: #1e40af;
+}
+
+.notice-txt {
   font-size: 26rpx;
   font-weight: 700;
-  color: #92400e;
   line-height: 1.45;
 }
 

@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from typing import Any, Iterable
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.delivery_calendar import is_subscription_delivery_day
@@ -142,10 +142,37 @@ def dashboard_meal_totals_by_dates(
     return out
 
 
+# 已取消/顺丰撤单的零售单不再占用库存（会员卡取消后 pay_status 可能仍为已支付）
+_SINGLE_RETAIL_EXCLUDED_FULFILLMENT = ("cancelled", "sf_cancelled")
+
+
+def _single_retail_inventory_scope_filters(*, store_id: int) -> list:
+    """单次零售占用库存口径：已支付未取消 + 未支付待支付；已取消/已退款不计入。"""
+    sid = int(store_id)
+    return [
+        or_(
+            and_(
+                SingleMealOrder.store_id == sid,
+                SingleMealOrder.pay_status == "已支付",
+                SingleMealOrder.fulfillment_status.notin_(_SINGLE_RETAIL_EXCLUDED_FULFILLMENT),
+            ),
+            and_(
+                SingleMealOrder.store_id == sid,
+                SingleMealOrder.pay_status == "未支付",
+                SingleMealOrder.fulfillment_status == "pending",
+            ),
+        )
+    ]
+
+
 def paid_single_retail_portions_by_dates(
     db: Session, dates: Iterable[date], *, store_id: int
 ) -> dict[date, int]:
-    """供餐日已支付单次零售份数合计（与营业概览、本周菜单「单次零售」列同源）。"""
+    """供餐日单次零售占用库存份数（与营业概览、本周菜单「单次零售」、可卖余量同源）。
+
+    - 计入：已支付且未取消/未顺丰撤单；或未支付且待支付（待支付单在取消/超时前占用库存）
+    - 不计入：已取消、已退款、未支付已取消
+    """
     uniq = list(dict.fromkeys(dates))
     if not uniq:
         return {}
@@ -157,8 +184,7 @@ def paid_single_retail_portions_by_dates(
         )
         .where(
             SingleMealOrder.delivery_date.in_(uniq),
-            SingleMealOrder.pay_status == "已支付",
-            SingleMealOrder.store_id == sid,
+            *_single_retail_inventory_scope_filters(store_id=sid),
         )
         .group_by(SingleMealOrder.delivery_date)
     ).all()
@@ -232,8 +258,7 @@ def paid_single_portions_sum(db: Session, dish_id: int, menu_date: date, *, stor
         select(func.coalesce(func.sum(SingleMealOrder.quantity), 0)).where(
             SingleMealOrder.delivery_date == menu_date,
             SingleMealOrder.dish_id == dish_id,
-            SingleMealOrder.pay_status == "已支付",
-            SingleMealOrder.store_id == sid,
+            *_single_retail_inventory_scope_filters(store_id=sid),
         )
     )
     return int(v or 0)
@@ -440,8 +465,7 @@ def _paid_sums_for_dates_dishes(
         .where(
             SingleMealOrder.delivery_date.in_(dates),
             SingleMealOrder.dish_id.in_(dish_ids),
-            SingleMealOrder.pay_status == "已支付",
-            SingleMealOrder.store_id == sid,
+            *_single_retail_inventory_scope_filters(store_id=sid),
         )
         .group_by(SingleMealOrder.delivery_date, SingleMealOrder.dish_id)
     ).all()

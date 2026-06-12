@@ -55,7 +55,10 @@ def _merged_home_member_ids_when_sheet_frozen(
     大表已推单：顺丰快照 frozen ∪ 推单后白名单（当日首餐新客）。
     推单当日曾请假的会员（首次推单快照）不因取消请假再并入；无快照行时仅 frozen（兼容历史日）。
     """
-    from app.services.delivery_day_lock_service import sf_frozen_subscription_member_ids_for_delivery_date
+    from app.services.delivery_day_lock_service import (
+        sf_cancelled_sheet_member_ids_for_delivery_date,
+        sf_frozen_subscription_member_ids_for_delivery_date,
+    )
     from app.services.delivery_sheet_push_snapshot_service import absent_member_ids_at_first_push
 
     sid = int(store_id)
@@ -71,6 +74,13 @@ def _merged_home_member_ids_when_sheet_frozen(
             db, store_id=sid, delivery_date=delivery_date
         )
     merged = set(frozen)
+    # 已取消推单中的订阅会员仍保留在大表待送名单（便于运营核对与重推）
+    for mid in sf_cancelled_sheet_member_ids_for_delivery_date(
+        db, store_id=sid, delivery_date=delivery_date
+    ):
+        if absent_at_push is not None and mid in absent_at_push:
+            continue
+        merged.add(int(mid))
     whitelist = post_push_first_day_whitelist_member_ids(
         db,
         delivery_date=delivery_date,

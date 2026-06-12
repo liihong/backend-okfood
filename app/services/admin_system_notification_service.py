@@ -61,6 +61,55 @@ def _sf_nightly_push_message(*, total: int, success: int, failed: int, skip_reas
     return f"今日共推送 {total} 单，成功 {success} 单，失败 {failed} 单"
 
 
+def _sf_push_batch_message(*, total: int, success: int, failed: int) -> str:
+    return f"本次推送 {int(total)} 单，成功 {int(success)} 单，失败 {int(failed)} 单"
+
+
+def upsert_sf_push_batch_notification(
+    db: Session,
+    *,
+    store_id: int,
+    business_date: date,
+    total: int,
+    success: int,
+    failed: int,
+    title_prefix: str = "顺丰推单",
+) -> AdminSystemNotification:
+    """手动/重试推单批次结束后写入或更新当日门店摘要（同店同日 kind 仅一条）。"""
+    kind = KIND_SF_NIGHTLY_PUSH
+    title = f"{title_prefix} · {business_date.isoformat()}"
+    message = _sf_push_batch_message(total=total, success=success, failed=failed)
+    row = db.scalar(
+        select(AdminSystemNotification).where(
+            AdminSystemNotification.store_id == int(store_id),
+            AdminSystemNotification.kind == kind,
+            AdminSystemNotification.business_date == business_date,
+        )
+    )
+    if row is None:
+        row = AdminSystemNotification(
+            store_id=int(store_id),
+            kind=kind,
+            business_date=business_date,
+            title=title,
+            message=message,
+            total_count=int(total),
+            success_count=int(success),
+            failed_count=int(failed),
+            skip_reason=None,
+        )
+        db.add(row)
+    else:
+        row.title = title
+        row.message = message
+        row.total_count = int(total)
+        row.success_count = int(success)
+        row.failed_count = int(failed)
+        row.skip_reason = None
+    db.flush()
+    return row
+
+
 def upsert_sf_nightly_push_notification(
     db: Session,
     *,

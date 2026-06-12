@@ -320,6 +320,21 @@ function canRetrySfRow(row) {
   return true
 }
 
+/** 大表合并：创单成功且已取消，可按当前配送大表重新推单 */
+function canRedispatchSfRow(row) {
+  const code = row?.error_code
+  if (code !== 0 && code !== '0') return false
+  const kind = String(row?.push_kind || '').trim()
+  if (kind && kind !== 'delivery_sheet') return false
+  if (row?.merchant_cancel_requested_at) return true
+  const stRaw = row?.sf_callback_order_status
+  if (stRaw !== undefined && stRaw !== null && stRaw !== '') {
+    const stNum = Number(stRaw)
+    if (!Number.isNaN(stNum) && [2, 22].includes(stNum)) return true
+  }
+  return false
+}
+
 /** 创单成功且顺丰回调已为妥投(17)，可补跑标记送达/扣次 */
 function canApplyFulfillmentSfRow(row) {
   const code = row?.error_code
@@ -332,12 +347,15 @@ function canApplyFulfillmentSfRow(row) {
 }
 
 async function onRetrySf(row) {
+  const isRedispatch = canRedispatchSfRow(row)
   try {
     await ElMessageBox.confirm(
-      '将按当前配送大表数据对该停靠点重新发起顺丰创单（仅适用于创单失败记录）。',
-      '重试推单',
+      isRedispatch
+        ? '该订单此前顺丰侧已取消，将按当前配送大表数据重新向顺丰创单。是否继续？'
+        : '将按当前配送大表数据对该停靠点重新发起顺丰创单（仅适用于创单失败记录）。',
+      isRedispatch ? '重新推单' : '重试推单',
       {
-        confirmButtonText: '确认重试',
+        confirmButtonText: isRedispatch ? '确认重新推单' : '确认重试',
         cancelButtonText: '关闭',
         type: 'warning',
         distinguishCancelAndClose: true,
@@ -666,8 +684,26 @@ onMounted(() => {
               >
                 补标送达
               </el-button>
-              <el-button v-if="canRetrySfRow(row)" type="primary" plain size="small" :loading="retryBusyId === row.id"
-                :disabled="loading" @click="onRetrySf(row)">
+              <el-button
+                v-if="canRedispatchSfRow(row)"
+                type="primary"
+                plain
+                size="small"
+                :loading="retryBusyId === row.id"
+                :disabled="loading"
+                @click="onRetrySf(row)"
+              >
+                重新推单
+              </el-button>
+              <el-button
+                v-else-if="canRetrySfRow(row)"
+                type="primary"
+                plain
+                size="small"
+                :loading="retryBusyId === row.id"
+                :disabled="loading"
+                @click="onRetrySf(row)"
+              >
                 重试推单
               </el-button>
               <el-button v-if="canCancelSfRow(row)" type="danger" plain size="small" :loading="cancelBusyId === row.id"
@@ -675,7 +711,7 @@ onMounted(() => {
                 取消配送
               </el-button>
               <span
-                v-if="!canApplyFulfillmentSfRow(row) && !canRetrySfRow(row) && !canCancelSfRow(row)"
+                v-if="!canApplyFulfillmentSfRow(row) && !canRetrySfRow(row) && !canRedispatchSfRow(row) && !canCancelSfRow(row)"
                 class="sf-monitor-op-muted"
               >—</span>
             </div>

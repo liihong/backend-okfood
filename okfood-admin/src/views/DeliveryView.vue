@@ -1,11 +1,19 @@
 <script setup>
 defineOptions({ name: 'DeliveryView' })
 import { ref, computed, watch, onMounted } from 'vue'
-import { RefreshCw, MapPin, Truck, FileDown, Search, Loader2 } from 'lucide-vue-next'
+import { RefreshCw, MapPin, Truck, Zap, FileDown, Search, Loader2 } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import { toastSfPushBatchOutcome, toastSfPushError } from '../utils/sfPushMessages.js'
+import {
+  SF_PUSH_MODE_SHEET,
+  SF_PUSH_MODE_INSTANT,
+  buildSfPushPayload,
+  getSfPushApiPath,
+  isSfPushConfigured,
+  validateSfSheetPushRows,
+} from '../composables/delivery/useDeliverySfPush.js'
 import { useAnimatedInteger } from '../composables/useAnimatedInteger.js'
 
 /** 与后端业务日一致：Asia/Shanghai 的日历日期 YYYY-MM-DD */
@@ -151,9 +159,17 @@ const selectedDeliveryStops = ref([])
 
 /** 顺丰同城：预览弹窗 */
 const sfDialogOpen = ref(false)
+const sfPushMode = ref(SF_PUSH_MODE_SHEET)
 const sfLoading = ref(false)
 const sfPushSubmitting = ref(false)
-const sfPreview = ref({ delivery_date: '', rows: [], sf_configured: false })
+const sfPreview = ref({ delivery_date: '', rows: [], sf_configured: false, instant_sf_configured: false })
+const sfPushHelpers = {
+  defaultSfExpectAt,
+  effectiveSfExpectDefaultYmd,
+  parseSfExpectAtShanghai,
+}
+const sfPushModeIsInstant = computed(() => sfPushMode.value === SF_PUSH_MODE_INSTANT)
+const sfDialogConfigured = computed(() => isSfPushConfigured(sfPreview.value, sfPushMode.value))
 /** 顺丰弹窗当前业务日是否早于今日（历史日查询） */
 const sfBizDayPast = computed(() => {
   const d = String(sfPreview.value.delivery_date || '').trim()
@@ -561,6 +577,7 @@ async function loadSfPreviewData() {
       delivery_date: d1,
       rows: normalizeSfPreviewRows(data?.rows, d1),
       sf_configured: Boolean(data?.sf_configured),
+      instant_sf_configured: Boolean(data?.instant_sf_configured),
     }
     sfSelectAll.value = true
     applySfSelectAll(true)
@@ -571,14 +588,15 @@ async function loadSfPreviewData() {
       return
     }
     showToast(e instanceof Error ? e.message : '加载顺丰预览失败', 'error')
-    sfPreview.value = { delivery_date: d0, rows: [], sf_configured: false }
+    sfPreview.value = { delivery_date: d0, rows: [], sf_configured: false, instant_sf_configured: false }
   } finally {
     sfLoading.value = false
   }
 }
 
-async function openSfDialog() {
+async function openSfDialog(mode = SF_PUSH_MODE_SHEET) {
   if (!adminAccessToken.value) return
+  sfPushMode.value = mode
   sfModalPhoneFilter.value = ''
   sfPreviewAllRegions.value = false
   sfDialogOpen.value = true
@@ -593,51 +611,27 @@ async function submitSfPush() {
     showToast('没有可推单的停靠点', 'error')
     return
   }
-  for (const r of rows) {
-    if (!r.selected || r.already_pushed || r.push_immediately) continue
-    const expectAt = r.expect_delivery_at || defaultSfExpectAt(effectiveSfExpectDefaultYmd(d0))
-    const t = parseSfExpectAtShanghai(expectAt)
-    if (!t || t.getTime() < Date.now()) {
-      showToast(
-        '存在未选「立即推单」的停靠点：期望送达须晚于当前时间。历史业务日请选今日及之后的日期时段。',
-        'error'
-      )
+  if (sfPushMode.value === SF_PUSH_MODE_SHEET) {
+    const err = validateSfSheetPushRows(rows, d0, sfPushHelpers)
+    if (err) {
+      showToast(err, 'error')
       return
     }
   }
   sfPushSubmitting.value = true
   try {
-    const payload = {
-      delivery_date: d0,
-      rows: rows.map((r) => {
-        const mapT = String(r.map_location_text ?? r.recv_address ?? '').trim()
-        const doorD = String(r.door_detail ?? r.recv_building ?? '').trim()
-        let expectAt = r.expect_delivery_at
-        if (!r.push_immediately) {
-          expectAt = expectAt || defaultSfExpectAt(d0)
-        } else {
-          expectAt = null
-        }
-        return {
-          ...r,
-          map_location_text: mapT,
-          door_detail: doorD,
-          recv_address: mapT,
-          recv_building: doorD,
-          goods_value_yuan: r.is_insured ? r.goods_value_yuan : null,
-          expect_delivery_at: expectAt,
-        }
-      }),
-    }
+    const payload = buildSfPushPayload(rows, d0, sfPushMode.value, sfPushHelpers)
     const data = await apiJson(
-      '/api/admin/delivery-sf/push',
+      getSfPushApiPath(sfPushMode.value),
       {
         method: 'POST',
         body: JSON.stringify(payload),
       },
       { auth: true }
     )
-    toastSfPushBatchOutcome(data, showToast)
+    toastSfPushBatchOutcome(data, showToast, {
+      successText: sfPushModeIsInstant.value ? '及时单已全部提交' : '已全部提交',
+    })
     sfDialogOpen.value = false
   } catch (e) {
     toastSfPushError(e instanceof Error ? e.message : '推单失败', showToast)
@@ -759,10 +753,20 @@ async function markDelivery(memberId, kind) {
           class="delivery-btn delivery-btn--sf"
           :disabled="loading"
           :title="!sfPreview.sf_configured ? '请在后端 .env 配置顺丰开发者参数' : ''"
-          @click="openSfDialog"
+          @click="openSfDialog(SF_PUSH_MODE_SHEET)"
         >
           <Truck :size="16" stroke-width="2.5" />
           顺丰推单
+        </button>
+        <button
+          type="button"
+          class="delivery-btn delivery-btn--sf-instant"
+          :disabled="loading"
+          :title="'勾选部分停靠点，推送到及时单账号（立即创单）；需先在门店设置配置「零售推顺丰店铺ID」'"
+          @click="openSfDialog(SF_PUSH_MODE_INSTANT)"
+        >
+          <Zap :size="16" stroke-width="2.5" />
+          推送及时单
         </button>
         </div>
       </div>
@@ -853,19 +857,27 @@ async function markDelivery(memberId, kind) {
 
     <el-dialog
       v-model="sfDialogOpen"
-      title="顺丰同城创单：核对后提交"
+      :title="sfPushModeIsInstant ? '推送及时单：核对后提交' : '顺丰同城创单：核对后提交'"
       width="min(1200px, 96vw)"
       class="sf-dialog"
       destroy-on-close
       :close-on-press-escape="true"
     >
-      <p v-if="!sfLoading && !sfPreview.sf_configured" class="sf-warn">
-        未配置顺丰账号：请在 API 的 .env 中设置 <code>SF_OPEN_DEV_ID</code>、<code>SF_OPEN_SHOP_ID</code>、<code>SF_OPEN_SECRET</code> 以及
-        <code>SF_PICKUP_PHONE</code>、<code>SF_PICKUP_ADDRESS</code>（取货电话与取货地址）。
+      <p v-if="!sfLoading && !sfDialogConfigured" class="sf-warn">
+        <template v-if="sfPushModeIsInstant">
+          未配置及时单账号：请在「门店设置」填写 <strong>零售推顺丰店铺ID</strong>，并确保租户对接或 .env 已配置顺丰开发者 ID、密钥及取件电话/地址。
+        </template>
+        <template v-else>
+          未配置顺丰账号：请在 API 的 .env 中设置 <code>SF_OPEN_DEV_ID</code>、<code>SF_OPEN_SHOP_ID</code>、<code>SF_OPEN_SECRET</code> 以及
+          <code>SF_PICKUP_PHONE</code>、<code>SF_PICKUP_ADDRESS</code>（取货电话与取货地址）。
+        </template>
+      </p>
+      <p v-if="sfPushModeIsInstant && !sfLoading && sfDialogConfigured" class="sf-hint sf-hint--instant">
+        将全部按<strong>立即推单</strong>创单，使用门店「零售推顺丰店铺ID」；适合当日部分停靠点补推，创单失败或已取消的记录可覆盖重推。
       </p>
       <p v-if="sfLoading" class="members-loading">加载推单清单…</p>
       <template v-else>
-        <p v-if="sfBizDayPast" class="sf-warn sf-warn--muted">
+        <p v-if="!sfPushModeIsInstant && sfBizDayPast" class="sf-warn sf-warn--muted">
           当前业务日早于今日：期望送达已按今日起算，日历不可选今日之前；预约时间须晚于当前时刻。
         </p>
         <div class="sf-bar">
@@ -956,10 +968,15 @@ async function markDelivery(memberId, kind) {
             </el-table-column>
             <el-table-column width="100" label="立即推单" align="center">
               <template #default="{ row }">
-                <el-switch v-model="row.push_immediately" @change="onSfPushImmediatelyChange(row)" />
+                <el-switch
+                  v-if="!sfPushModeIsInstant"
+                  v-model="row.push_immediately"
+                  @change="onSfPushImmediatelyChange(row)"
+                />
+                <span v-else class="sf-instant-yes">是</span>
               </template>
             </el-table-column>
-            <el-table-column min-width="160" label="期望送达">
+            <el-table-column v-if="!sfPushModeIsInstant" min-width="160" label="期望送达">
               <template #default="{ row }">
                 <el-date-picker
                   v-model="row.expect_delivery_at"
@@ -1028,7 +1045,7 @@ async function markDelivery(memberId, kind) {
           :disabled="sfLoading || !(sfPreview.rows || []).length"
           @click="submitSfPush"
         >
-          确认推送到顺丰
+          {{ sfPushModeIsInstant ? '确认推送到及时单' : '确认推送到顺丰' }}
         </el-button>
       </template>
     </el-dialog>
@@ -1271,6 +1288,16 @@ async function markDelivery(memberId, kind) {
 }
 .delivery-header-toolbar-card .delivery-btn--sf:hover:not(:disabled) {
   background: var(--dv-green-hover);
+  color: #fff;
+}
+.delivery-header-toolbar-card .delivery-btn--sf-instant {
+  color: #fff;
+  background: #c2410c;
+  border: 1px solid rgba(154, 52, 18, 0.35);
+  box-shadow: 0 2px 8px rgba(194, 65, 12, 0.22);
+}
+.delivery-header-toolbar-card .delivery-btn--sf-instant:hover:not(:disabled) {
+  background: #9a3412;
   color: #fff;
 }
 
@@ -1945,6 +1972,19 @@ async function markDelivery(memberId, kind) {
 }
 .sf-hint {
   color: #64748b;
+}
+.sf-hint--instant {
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.75rem;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  color: #9a3412;
+  font-size: 0.85rem;
+}
+.sf-instant-yes {
+  color: #c2410c;
+  font-weight: 700;
 }
 .sf-table-wrap {
   width: 100%;

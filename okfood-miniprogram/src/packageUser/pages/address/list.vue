@@ -3,6 +3,9 @@
     <OkNavbar show-back title="我的配送地址 👌" />
     <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="list-inner">
+        <view v-if="profileLoaded" class="notice notice--info">
+          <text class="notice-txt">{{ sfEffectiveNotice }}</text>
+        </view>
         <view v-if="loading" class="state-text">加载中…</view>
         <view v-else-if="!list.length" class="state-text state-text--muted">暂无收货地址，点击下方添加</view>
         <view
@@ -46,8 +49,12 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
+import {
+  sfPushEffectiveEditNotice,
+  sfPushEffectiveSaveAlert,
+} from '@/utils/memberSfPushEffectiveHint.js'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
 import { getPageScrollStyle, FIXED_FOOTER_RESERVE_PX } from '@/utils/navbar.js'
 import { showOkAlert } from '@/utils/okAlert.js'
@@ -63,12 +70,32 @@ import {
 const scrollStyle = ref({})
 const list = ref([])
 const loading = ref(true)
+const memberProfile = ref(null)
+const profileLoaded = ref(false)
+
+const sfEffectiveNotice = computed(() => sfPushEffectiveEditNotice(memberProfile.value))
 
 function applyScrollLayout() {
   scrollStyle.value = getPageScrollStyle(FIXED_FOOTER_RESERVE_PX)
 }
 /** 避免 onShow 重叠或返回列表时旧请求先结束，连续改状态/提示触发基础库 timeout */
 let fetchListSeq = 0
+
+async function loadMemberProfile() {
+  const token = getMemberToken()
+  if (!token) {
+    memberProfile.value = null
+    profileLoaded.value = false
+    return
+  }
+  try {
+    memberProfile.value = await request('/api/user/me', { method: 'GET' })
+    profileLoaded.value = true
+  } catch {
+    memberProfile.value = null
+    profileLoaded.value = false
+  }
+}
 
 async function fetchList() {
   const token = getMemberToken()
@@ -93,6 +120,7 @@ async function fetchList() {
 
 onShow(() => {
   applyScrollLayout()
+  void loadMemberProfile()
   fetchList()
 })
 
@@ -124,15 +152,22 @@ async function setAsDefault(item, index) {
     return
   }
   try {
-    const result = await request(
+    await request(
       `/api/user/me/addresses/${encodeURIComponent(row.id)}`,
       { method: 'PATCH', data: { is_default: true } },
     )
-    const tip =
-      result && typeof result === 'object' ? result.message || result.msg : ''
-    uni.showToast({
-      title: typeof tip === 'string' && tip.trim() ? tip.trim() : '已设为默认地址',
-      icon: 'success',
+    const alertPayload = sfPushEffectiveSaveAlert(memberProfile.value, {
+      titleScheduled: '已设为默认',
+      titleImmediate: '已设为默认',
+      contentScheduled: '今日配送大表已同步顺丰，默认地址自下一配送日起生效；今日配送仍按原地址。',
+      contentImmediate: '今日尚未向顺丰推单，默认地址修改保存后立即生效。',
+    })
+    await showOkAlert({
+      title: alertPayload.title,
+      content: alertPayload.content,
+      showCancel: false,
+      confirmText: '确定',
+      tone: 'success',
     })
     markMinePageNeedsRefresh()
     await fetchList()
@@ -228,6 +263,29 @@ async function deleteAddress(addressId) {
   font-size: 26rpx;
   font-weight: 700;
   color: #92400e;
+  line-height: 1.45;
+}
+
+.notice {
+  background: #fffbeb;
+  border: 1rpx solid #fde68a;
+  border-radius: 20rpx;
+  padding: 24rpx 28rpx;
+  margin-bottom: 24rpx;
+}
+
+.notice--info {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.notice--info .notice-txt {
+  color: #1e40af;
+}
+
+.notice-txt {
+  font-size: 26rpx;
+  font-weight: 700;
   line-height: 1.45;
 }
 

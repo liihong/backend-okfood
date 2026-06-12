@@ -565,12 +565,12 @@ class DashboardMealSummaryOut(BaseModel):
     today_single_retail_total_quantity: int = Field(
         ...,
         ge=0,
-        description="锚定日已支付单次零售订单份数合计（sum(single_meal_orders.quantity)）",
+        description="锚定日单次零售占用库存份数（已支付未取消 + 未支付待支付；已取消不计入）",
     )
     tomorrow_single_retail_total_quantity: int = Field(
         ...,
         ge=0,
-        description="锚定日次日（明日）已支付单次零售订单份数合计，口径与 today_single_retail_total_quantity 一致",
+        description="锚定日次日单次零售占用库存份数，口径与 today_single_retail_total_quantity 一致",
     )
     total_members: int = Field(
         ...,
@@ -1099,6 +1099,10 @@ class SfSameCityPreviewOut(BaseModel):
     delivery_date: str
     rows: list[SfSameCityPreviewRow] = Field(default_factory=list)
     sf_configured: bool = False
+    instant_sf_configured: bool = Field(
+        False,
+        description="门店「零售推顺丰店铺ID」及开发者/取件参数已配置，可用于大表推送及时单",
+    )
 
 
 class SfSameCityPushIn(BaseModel):
