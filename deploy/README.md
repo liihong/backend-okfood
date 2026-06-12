@@ -271,6 +271,23 @@ sudo systemctl restart okfine-api
 
 管理端「抖音核销记录」可查看 `error_msg`（常见含 `Data truncated` / `pay_channel`）。
 
+### 本地已发奖 success，但抖音 App 仍显示「未核销」
+
+多为 **旧版代码在 `prepare` 仍返回可用券时，误走「仅本地续发奖」、未再调抖音 `verify`**（并发撤销核销时尤易出现）。请：
+
+1. 部署含修复的最新后端（`prepare` 成功必走 `verify`，发奖失败撤销前检查流水是否已为 `success`）。
+2. 对已出问题订单做 **补偿核销**（不再重复发本地权益）：
+
+```bash
+cd /var/www/okfood/backend
+.venv/bin/python scripts/douyin_compensate_verify.py \
+  --order-id 121349085360194 \
+  --code '用户券码明文' \
+  --dry-run   # 确认后再去掉 --dry-run 执行
+```
+
+若补偿脚本报「券已核销」而本地也是 success，说明两侧已对齐，无需再操作。
+
 ### 访问 `/api` 返回 502
 
 1. `sudo systemctl status okfine-api`

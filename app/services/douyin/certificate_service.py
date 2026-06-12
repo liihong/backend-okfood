@@ -121,6 +121,7 @@ def _find_verified_row_for_code_retry(
         )
         .order_by(DouyinCertificateRedemption.id.desc())
         .limit(1)
+        .with_for_update()
     )
 
 
@@ -366,13 +367,12 @@ def _handle_grant_failure(
         grant_error,
     )
 
-    cancel_ok, cancel_err = _try_cancel_douyin_verify(
-        access_token=access_token,
-        verify_id=douyin_verify_id,
-        certificate_id=certificate_id,
+    # 行锁：避免与用户重试并发时，撤销核销把已成功/已续发奖的抖音券误改回未核销
+    row = db.scalar(
+        select(DouyinCertificateRedemption)
+        .where(DouyinCertificateRedemption.id == int(redemption_id))
+        .with_for_update()
     )
-
-    row = db.get(DouyinCertificateRedemption, int(redemption_id))
     if row is None:
         logger.error(
             "发奖失败但找不到流水 redemption_id=%s cert=%s grant_error=%s",
@@ -381,6 +381,20 @@ def _handle_grant_failure(
             grant_error,
         )
         raise HTTPException(status_code=500, detail="兑换异常，请联系客服")
+
+    if row.status == DouyinRedemptionStatus.SUCCESS.value:
+        logger.warning(
+            "发奖失败处理时流水已为 success，跳过撤销核销 redemption_id=%s cert=%s",
+            redemption_id,
+            certificate_id,
+        )
+        return
+
+    cancel_ok, cancel_err = _try_cancel_douyin_verify(
+        access_token=access_token,
+        verify_id=douyin_verify_id,
+        certificate_id=certificate_id,
+    )
 
     if cancel_ok:
         row.status = DouyinRedemptionStatus.CANCELLED.value
@@ -501,21 +515,25 @@ def redeem_douyin_certificate(
     cert = prepared.certificates[0]
     cert_id = str(cert.certificate_id)
 
+    # 行锁：避免「发奖失败撤销核销」与「用户重试兑换」并发导致本地成功但抖音未核销
     existing = db.scalar(
-        select(DouyinCertificateRedemption).where(DouyinCertificateRedemption.certificate_id == cert_id)
+        select(DouyinCertificateRedemption)
+        .where(DouyinCertificateRedemption.certificate_id == cert_id)
+        .with_for_update()
     )
     if existing:
         if existing.status == DouyinRedemptionStatus.SUCCESS.value:
             raise HTTPException(status_code=400, detail="该券已兑换，请勿重复提交")
+        # prepare 成功说明抖音侧券仍可用，必须重新 verify，不可仅续发本地权益。
+        # 仅当 prepare 失败（券已在抖音核销）时才走 _retry_local_grant。
         if existing.status in _GRANT_RETRY_STATUSES:
-            return _retry_local_grant(
-                db,
-                existing=existing,
-                member=member,
-                body=body,
-                access_token=access_token,
+            logger.warning(
+                "抖音验券本地流水待续发但 prepare 仍返回可用券，将重新核销 cert=%s status=%s order=%s",
+                cert_id,
+                existing.status,
+                prepared.order_id,
             )
-        # failed / cancelled：允许重新走完整兑换，复用同一 certificate_id 流水行
+        # failed / cancelled / verified / grant_failed：均重新走 verify → 发奖
 
     mapping = find_active_mapping_for_certificate(db, store_id=int(member.store_id), cert=cert)
     amount_yuan = _amount_from_cert_fen(cert.pay_amount_fen)
