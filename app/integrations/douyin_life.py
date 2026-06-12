@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 CLIENT_TOKEN_URL = "https://open.douyin.com/oauth/client_token/"
 PREPARE_URL = "https://open.douyin.com/goodlife/v1/fulfilment/certificate/prepare/"
 VERIFY_URL = "https://open.douyin.com/goodlife/v1/fulfilment/certificate/verify/"
+CANCEL_URL = "https://open.douyin.com/goodlife/v1/fulfilment/certificate/cancel/"
+CANCEL_URL = "https://open.douyin.com/goodlife/v1/fulfilment/certificate/cancel/"
 
 # client_key -> (token, expires_at_unix)
 _token_cache: dict[str, tuple[str, float]] = {}
@@ -53,6 +55,11 @@ class DouyinPrepareResult:
 
 def new_verify_token() -> str:
     """生成一次验券幂等标识。"""
+    return uuid.uuid4().hex
+
+
+def new_cancel_token() -> str:
+    """生成撤销核销幂等标识（有效期 1 小时）。"""
     return uuid.uuid4().hex
 
 
@@ -287,5 +294,62 @@ def certificate_verify(
                 result_code = -1
             if result_code != 0:
                 msg = _s(row.get("msg")) or "验券失败"
+                raise DouyinLifeError(msg)
+    return data
+
+
+def certificate_cancel(
+    *,
+    access_token: str,
+    verify_id: str,
+    certificate_id: str,
+    shop_order_id: str | None = None,
+    account_id: str | None = None,
+    cancel_token: str | None = None,
+) -> dict[str, Any]:
+    """撤销核销：发奖失败时回滚抖音侧「已使用」状态（核销后 1 小时内有效）。"""
+    cid = (certificate_id or "").strip()
+    vid = (verify_id or "").strip()
+    if not cid or not vid:
+        raise DouyinLifeError("撤销核销缺少 certificate_id 或 verify_id")
+
+    body: dict[str, Any] = {
+        "certificate_id": cid,
+        "verify_id": vid,
+    }
+    token = (cancel_token or new_cancel_token()).strip()
+    if token:
+        body["cancel_token"] = token
+    if shop_order_id and shop_order_id.strip():
+        body["shop_order_id"] = shop_order_id.strip()
+    if account_id and account_id.strip():
+        body["account_id"] = account_id.strip()
+
+    resp = httpx.post(
+        CANCEL_URL,
+        json=body,
+        headers={
+            "access-token": access_token,
+            "content-type": "application/json",
+        },
+        timeout=25.0,
+    )
+    try:
+        payload = resp.json()
+    except Exception as exc:
+        raise DouyinLifeError(f"撤销核销响应解析失败: {resp.text[:200]}", status_code=502) from exc
+
+    data = _ensure_ok(payload if isinstance(payload, dict) else {})
+    results = data.get("cancel_results")
+    if isinstance(results, list):
+        for row in results:
+            if not isinstance(row, dict):
+                continue
+            try:
+                result_code = int(row.get("result_code", 0))
+            except (TypeError, ValueError):
+                result_code = -1
+            if result_code != 0:
+                msg = _s(row.get("result_msg")) or "撤销核销失败"
                 raise DouyinLifeError(msg)
     return data

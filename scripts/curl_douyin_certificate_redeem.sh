@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # 抖音验券联调脚本（需替换 TOKEN、券码、门店配置）
+# 发奖失败时服务端会尝试撤销核销（1 小时内）；管理端可查 verified/grant_failed/cancelled 状态
 set -euo pipefail
 
 BASE="${API_BASE:-http://127.0.0.1:8001}"
@@ -18,7 +19,7 @@ curl -sS "${BASE}/api/user/member-coupons/wallet" \
   -H "Authorization: Bearer ${MEMBER_TOKEN}" | jq .
 
 if [[ -n "$DOUYIN_CODE" ]]; then
-  echo "== 抖音验券兑换 =="
+  echo "== 抖音验券兑换（失败时自动撤销核销；verified/grant_failed 可重试发奖）=="
   curl -sS "${BASE}/api/user/douyin-certificates/redeem" \
     -H "Authorization: Bearer ${MEMBER_TOKEN}" \
     -H "Content-Type: application/json" \

@@ -67,6 +67,8 @@ class DouyinRedemptionStatus(str, Enum):
 
     SUCCESS = "success"
     FAILED = "failed"
+    # 抖音已核销、本地发奖尚未完成（落库后防丢单，支持断点续发奖）
+    VERIFIED = "verified"
     GRANT_FAILED = "grant_failed"
     CANCELLED = "cancelled"
 

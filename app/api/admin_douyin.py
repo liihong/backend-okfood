@@ -89,7 +89,7 @@ def admin_list_douyin_redemptions(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     member_phone: Annotated[str | None, Query(max_length=20)] = None,
-    status: Annotated[str | None, Query(description="success/failed/grant_failed")] = None,
+    status: Annotated[str | None, Query(description="success/failed/verified/grant_failed/cancelled")] = None,
     date_from: Annotated[date | None, Query()] = None,
     date_to: Annotated[date | None, Query()] = None,
 ):
