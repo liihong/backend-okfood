@@ -42,6 +42,8 @@ from app.services.delivery_sheet_service import (
     home_delivery_stops_for_aggs,
 )
 from app.services.member_address_service import delivery_region_name_map, full_address_line, routing_area_label
+from app.services import amap
+from app.services.amap import RegeoSnapshot
 from app.services.member_service import effective_daily_meal_units
 from app.services.store_config_service import get_store_config
 from app.services.sf_open.client import SfOpenApiError, SfOpenClient
@@ -99,16 +101,51 @@ def _sf_push_request_snapshot(
     return snap
 
 
-def _sf_receive_city_name(row: SfSameCityRowBase, env_city: str) -> str:
-    """
-    顺丰 ``receive.city_name`` 一般使用地级市标准名（如「新乡市」）。
-    传入「河南省新乡市」等带省前缀的写法，线上常返回「获取城市信息失败」。
-    """
-    texts: list[str | None] = [
-        row.map_location_text,
-        row.recv_address,
-        getattr(row, "address_line", None),
-    ]
+def _row_regeo_snapshot(row: SfSameCityRowBase) -> RegeoSnapshot | None:
+    """按收货坐标逆地理；无坐标或解析失败时返回 None。"""
+    if row.recv_lng is None or row.recv_lat is None:
+        return None
+    try:
+        lg = float(row.recv_lng)
+        lt = float(row.recv_lat)
+        if not (math.isfinite(lg) and math.isfinite(lt)):
+            return None
+    except (TypeError, ValueError):
+        return None
+    return amap.fetch_regeo_snapshot(lg, lt)
+
+
+def _city_name_from_regeo_snap(snap: RegeoSnapshot) -> str | None:
+    """从高德逆地理结果提取顺丰 receive.city_name（地级市标准名）。"""
+    for muni in ("北京市", "上海市", "天津市", "重庆市"):
+        if muni in (snap.province or "")[:8] or (snap.city or "").startswith(muni):
+            return muni
+    city = (snap.city or "").strip()
+    if city:
+        return city[:32]
+    district = (snap.district or "").strip()
+    if district.endswith("市"):
+        return district[:32]
+    return None
+
+
+def _address_has_admin_prefix(text: str) -> bool:
+    """地址是否已含省/直辖市/地级市前缀，避免重复拼接逆地理前缀。"""
+    s = (text or "").strip()
+    if not s:
+        return False
+    for muni in ("北京市", "上海市", "天津市", "重庆市"):
+        if muni in s[:16]:
+            return True
+    if re.search(r"(?:省|自治区)", s[:24]):
+        return True
+    if re.match(r"^([\u4e00-\u9fff]{2,12}市)", s):
+        return True
+    return False
+
+
+def _parse_city_name_from_address_texts(texts: list[str | None]) -> str | None:
+    """从地址文案解析地级市名；无法解析时返回 None。"""
     for raw in texts:
         s = (raw or "").strip()
         if not s:
@@ -122,6 +159,30 @@ def _sf_receive_city_name(row: SfSameCityRowBase, env_city: str) -> str:
         rm = re.match(r"^([\u4e00-\u9fff]{2,12}市)", s)
         if rm:
             return rm.group(1)[:32]
+    return None
+
+
+def _sf_receive_city_name(
+    row: SfSameCityRowBase, env_city: str, *, snap: RegeoSnapshot | None = None
+) -> str:
+    """
+    顺丰 ``receive.city_name`` 一般使用地级市标准名（如「新乡市」）。
+    传入「河南省新乡市」等带省前缀的写法，线上常返回「获取城市信息失败」。
+    地址文案无市名时，优先按收货坐标逆地理解析，避免坐标在 A 市却回退租户默认 B 市（顺丰 1018）。
+    """
+    texts: list[str | None] = [
+        row.map_location_text,
+        row.recv_address,
+        getattr(row, "address_line", None),
+    ]
+    parsed = _parse_city_name_from_address_texts(texts)
+    if parsed:
+        return parsed
+    regeo_snap = snap if snap is not None else _row_regeo_snapshot(row)
+    if regeo_snap:
+        from_regeo = _city_name_from_regeo_snap(regeo_snap)
+        if from_regeo:
+            return from_regeo
     base = (env_city or "").strip()
     if base:
         rm = re.match(r"^.+省([\u4e00-\u9fff]{1,12}市)$", base)
@@ -129,6 +190,21 @@ def _sf_receive_city_name(row: SfSameCityRowBase, env_city: str) -> str:
             return rm.group(1)[:32]
         return base[:32]
     return "新乡市"
+
+
+def _sf_receive_full_address(row: SfSameCityRowBase, *, snap: RegeoSnapshot | None = None) -> str:
+    """顺丰 receive.user_address：缺省省市区前缀时按坐标逆地理补全。"""
+    line_map = (row.map_location_text or row.recv_address or "").strip()
+    line_door = (row.door_detail or row.recv_building or "").strip()
+    core = f"{line_map} {line_door}".strip() or (line_map or "")[:200]
+    if _address_has_admin_prefix(core):
+        return core[:1024]
+    regeo_snap = snap if snap is not None else _row_regeo_snapshot(row)
+    prefix = (regeo_snap.pca_prefix_line or "").strip() if regeo_snap else ""
+    if prefix and not core.startswith(prefix):
+        combined = f"{prefix} {core}".strip()
+        return combined[:1024]
+    return core[:1024]
 
 
 def _stop_key(d: date, group_area: str, address_line: str) -> str:
@@ -849,7 +925,7 @@ def _build_sf_same_city_preview_bundle(
     sf_configured = bool(
         gset.SF_OPEN_DEV_ID and gset.SF_OPEN_SHOP_ID and (gset.SF_OPEN_SECRET or "").strip()
     )
-    instant_sf_configured = _instant_sf_shop_configured(db, store_id=sid, tenant_id=tid)
+    instant_sf_configured = _instant_sf_shop_configured(db, store_id=int(store_id), tenant_id=tid)
     return rows, ags, sf_configured, instant_sf_configured
 
 
@@ -918,9 +994,9 @@ def _create_order_payload(
     p_phone = (gset.SF_PICKUP_PHONE or "").strip()
     p_addr = (gset.SF_PICKUP_ADDRESS or "").strip() or f"{(getattr(store, 'store_name', None) or '门店')}"
 
-    line_map = (row.map_location_text or row.recv_address or "").strip()
-    line_door = (row.door_detail or row.recv_building or "").strip()
-    rec_full = f"{line_map} {line_door}".strip() or (line_map or "")[:200]
+    regeo_snap = _row_regeo_snapshot(row)
+    rec_full = _sf_receive_full_address(row, snap=regeo_snap)
+    env_city = (gset.SF_CITY_NAME or "").strip()
 
     body: dict[str, Any] = {
         "dev_id": int(gset.SF_OPEN_DEV_ID),
@@ -955,8 +1031,8 @@ def _create_order_payload(
         "user_phone": (row.recv_phone or "")[:20],
         "user_lng": _coord_str(recv_lng),
         "user_lat": _coord_str(recv_lat),
-        "user_address": rec_full[:1024],
-        "city_name": _sf_receive_city_name(row, (gset.SF_CITY_NAME or "").strip()),
+        "user_address": rec_full,
+        "city_name": _sf_receive_city_name(row, env_city, snap=regeo_snap),
     }
     body["shop"] = {
         "shop_name": (getattr(store, "store_name", None) or "门店")[:128],
@@ -1272,6 +1348,27 @@ def _persist_sf_push_success(
         )
         capture_delivery_sheet_units_on_first_push(db, store_id=sid, delivery_date=d)
         db.commit()
+    elif is_delivery_sheet_push:
+        from app.services.delivery_sheet_push_snapshot_service import (
+            merge_delivery_sheet_push_into_units_snapshot,
+        )
+
+        raw_mids = snap.get("fulfillment_member_ids")
+        ff_mids: list[int] = []
+        if isinstance(raw_mids, list):
+            for x in raw_mids:
+                try:
+                    ff_mids.append(int(x))
+                except (TypeError, ValueError):
+                    pass
+        if ff_mids:
+            merge_delivery_sheet_push_into_units_snapshot(
+                db,
+                store_id=sid,
+                delivery_date=d,
+                fulfillment_member_ids=ff_mids,
+            )
+            db.commit()
     if ff_oids:
         from app.services.single_meal_order_service import link_single_meal_orders_to_sf_push_no_commit
 

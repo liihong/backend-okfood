@@ -155,12 +155,9 @@ def capture_delivery_sheet_units_on_first_push(
     if existing is not None:
         return
     units = _collect_member_meal_units_for_sf_push_sheet(db, store_id=sid, delivery_date=d)
-    from app.services.delivery_day_lock_service import sf_frozen_subscription_member_ids_for_delivery_date
-
     units_payload: dict[str, object] = dict(units)
-    units_payload[FROZEN_MEMBER_IDS_SNAPSHOT_KEY] = sorted(
-        sf_frozen_subscription_member_ids_for_delivery_date(db, store_id=sid, delivery_date=d)
-    )
+    # 冻结名单以首推时刻大表全体待送订阅会员为准，勿用当时已创单成功的推单行（避免首批局部推单锁死名单）
+    units_payload[FROZEN_MEMBER_IDS_SNAPSHOT_KEY] = sorted(int(k) for k in units.keys())
     try:
         db.add(
             DeliverySheetPushUnitsSnapshot(
@@ -276,6 +273,9 @@ class DeliverySheetDaySnapshots:
         sid = int(store_id)
         d = delivery_date
 
+        if reconcile_frozen_ids_with_sf_pushes_no_commit(db, store_id=sid, delivery_date=d):
+            db.commit()
+
         units_map: dict[int, int] | None = None
         frozen_from_row: frozenset[int] | None = None
         units_row = _get_units_snapshot_row(db, store_id=sid, delivery_date=d)
@@ -314,6 +314,83 @@ class DeliverySheetDaySnapshots:
         )
 
 
+def merge_delivery_sheet_push_into_units_snapshot(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    fulfillment_member_ids: list[int],
+) -> None:
+    """
+    大表推单成功后：将本次履约会员并入份数快照 frozen 并集及份数字典。
+    修复首次仅局部创单成功时 frozen 偏小、或大表与顺丰记录不一致。
+    """
+    mids = sorted({int(x) for x in fulfillment_member_ids if x is not None})
+    if not mids:
+        return
+    row = _get_units_snapshot_row(db, store_id=int(store_id), delivery_date=delivery_date)
+    if row is None:
+        return
+    raw = row.member_meal_units
+    payload: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
+    frozen_raw = payload.get(FROZEN_MEMBER_IDS_SNAPSHOT_KEY)
+    frozen_set: set[int] = set()
+    if isinstance(frozen_raw, list):
+        for x in frozen_raw:
+            try:
+                frozen_set.add(int(x))
+            except (TypeError, ValueError):
+                pass
+    changed = False
+    for mid in mids:
+        key = str(mid)
+        if mid not in frozen_set:
+            frozen_set.add(mid)
+            changed = True
+        if key not in payload:
+            m = db.get(Member, mid)
+            if m is not None:
+                payload[key] = effective_daily_meal_units(m)
+                changed = True
+    if not changed:
+        return
+    payload[FROZEN_MEMBER_IDS_SNAPSHOT_KEY] = sorted(frozen_set)
+    row.member_meal_units = payload
+    db.flush()
+
+
+def reconcile_frozen_ids_with_sf_pushes_no_commit(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+) -> bool:
+    """
+    份数快照 frozen 并集若小于当日有效大表推单 fulfillment 并集则自动补齐。
+    供读大表时自愈历史错误快照；返回是否写入了快照行。
+    """
+    row = _get_units_snapshot_row(db, store_id=int(store_id), delivery_date=delivery_date)
+    if row is None:
+        return False
+    from app.services.delivery_day_lock_service import sf_push_fulfillment_member_ids_live
+
+    live_ids = sf_push_fulfillment_member_ids_live(
+        db, store_id=int(store_id), delivery_date=delivery_date
+    )
+    if not live_ids:
+        return False
+    cached = _frozen_member_ids_from_units_json(row.member_meal_units) or frozenset()
+    if live_ids <= cached:
+        return False
+    merge_delivery_sheet_push_into_units_snapshot(
+        db,
+        store_id=int(store_id),
+        delivery_date=delivery_date,
+        fulfillment_member_ids=sorted(live_ids),
+    )
+    return True
+
+
 def patch_frozen_member_ids_on_units_snapshot_if_missing(
     db: Session,
     *,
@@ -329,9 +406,9 @@ def patch_frozen_member_ids_on_units_snapshot_if_missing(
         return False
     if _frozen_member_ids_from_units_json(row.member_meal_units) is not None:
         return False
-    from app.services.delivery_day_lock_service import sf_frozen_subscription_member_ids_for_delivery_date
+    from app.services.delivery_day_lock_service import sf_push_fulfillment_member_ids_live
 
-    frozen = sf_frozen_subscription_member_ids_for_delivery_date(
+    frozen = sf_push_fulfillment_member_ids_live(
         db, store_id=int(store_id), delivery_date=delivery_date
     )
     raw = row.member_meal_units

@@ -280,21 +280,13 @@ def sf_cancelled_sheet_member_ids_for_delivery_date(
     return frozenset(seen)
 
 
-def sf_frozen_subscription_member_ids_for_delivery_date(
+def sf_push_fulfillment_member_ids_live(
     db: Session,
     *,
     store_id: int,
     delivery_date: date,
 ) -> frozenset[int]:
-    """当日有效顺丰推单 ``fulfillment_member_ids`` 并集（与扣次快照同源）。"""
-    from app.services.delivery_sheet_push_snapshot_service import frozen_member_ids_from_units_snapshot
-
-    cached = frozen_member_ids_from_units_snapshot(
-        db, store_id=int(store_id), delivery_date=delivery_date
-    )
-    if cached is not None:
-        return cached
-
+    """当日有效大表推单 ``fulfillment_member_ids`` 并集（不读份数快照缓存）。"""
     import json
 
     from sqlalchemy import func
@@ -354,3 +346,23 @@ def sf_frozen_subscription_member_ids_for_delivery_date(
             for mid in _subscription_member_ids_for_push(db, row, None):
                 seen.add(int(mid))
     return frozenset(seen)
+
+
+def sf_frozen_subscription_member_ids_for_delivery_date(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+) -> frozenset[int]:
+    """当日有效顺丰推单 ``fulfillment_member_ids`` 并集（与扣次快照同源）。"""
+    from app.services.delivery_sheet_push_snapshot_service import frozen_member_ids_from_units_snapshot
+
+    cached = frozen_member_ids_from_units_snapshot(
+        db, store_id=int(store_id), delivery_date=delivery_date
+    )
+    if cached is not None:
+        return cached
+
+    return sf_push_fulfillment_member_ids_live(
+        db, store_id=int(store_id), delivery_date=delivery_date
+    )

@@ -96,6 +96,69 @@ def test_units_snapshot_captured_once(units_db: Session):
     assert snap == {1: 1}
 
 
+def test_capture_frozen_ids_use_full_sheet_not_first_push_only(units_db: Session):
+    """首推时 frozen 应为大表全体待送会员，而非仅当时已创单成功的推单行。"""
+    d = date(2026, 6, 13)
+    _add_member(units_db, mid=1, units=1)
+    _add_member(units_db, mid=2, units=1)
+    units_db.add(
+        SfSameCityPush(
+            store_id=1,
+            delivery_date=d,
+            stop_id="stop-a",
+            push_kind="delivery_sheet",
+            shop_order_id="shop-a",
+            error_code=0,
+            request_snapshot={"fulfillment_member_ids": [1]},
+        )
+    )
+    with patch(
+        "app.services.delivery_sheet_push_snapshot_service._collect_member_meal_units_for_sf_push_sheet",
+        return_value={"1": 1, "2": 1},
+    ):
+        capture_delivery_sheet_units_on_first_push(units_db, store_id=1, delivery_date=d)
+    units_db.commit()
+    cached = frozen_member_ids_from_units_snapshot(units_db, store_id=1, delivery_date=d)
+    assert cached == frozenset({1, 2})
+
+
+def test_reconcile_expands_stale_frozen_snapshot(units_db: Session):
+    """读大表时若快照 frozen 小于推单并集，应自动补齐。"""
+    from app.services.delivery_sheet_push_snapshot_service import (
+        reconcile_frozen_ids_with_sf_pushes_no_commit,
+    )
+
+    d = date(2026, 6, 13)
+    _add_member(units_db, mid=1, units=1)
+    _add_member(units_db, mid=2, units=1)
+    units_db.add(
+        DeliverySheetPushUnitsSnapshot(
+            store_id=1,
+            delivery_date=d,
+            member_meal_units={
+                "1": 1,
+                FROZEN_MEMBER_IDS_SNAPSHOT_KEY: [1],
+            },
+        )
+    )
+    units_db.add(
+        SfSameCityPush(
+            store_id=1,
+            delivery_date=d,
+            stop_id="stop-b",
+            push_kind="delivery_sheet",
+            shop_order_id="shop-b",
+            error_code=0,
+            request_snapshot={"fulfillment_member_ids": [1, 2]},
+        )
+    )
+    units_db.commit()
+    assert reconcile_frozen_ids_with_sf_pushes_no_commit(units_db, store_id=1, delivery_date=d)
+    units_db.commit()
+    cached = frozen_member_ids_from_units_snapshot(units_db, store_id=1, delivery_date=d)
+    assert cached == frozenset({1, 2})
+
+
 def test_frozen_ids_cached_in_units_snapshot(units_db: Session):
     d = date(2026, 6, 11)
     units_db.add(

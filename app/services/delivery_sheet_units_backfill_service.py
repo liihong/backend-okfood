@@ -288,9 +288,8 @@ def backfill_and_refreeze_delivery_sheet_units(
     member_units, stats = build_member_meal_units_from_sf_pushes(
         db, store_id=int(store_id), delivery_date=delivery_date
     )
-    frozen_ids = sf_frozen_subscription_member_ids_for_delivery_date(
-        db, store_id=int(store_id), delivery_date=delivery_date
-    )
+    # 回填时以推单并集为准，勿读可能偏小的快照 frozen 缓存
+    frozen_ids = frozenset(int(k) for k in member_units.keys())
     had_snapshot = (
         member_meal_units_snapshot_for_date(db, store_id=int(store_id), delivery_date=delivery_date)
         is not None

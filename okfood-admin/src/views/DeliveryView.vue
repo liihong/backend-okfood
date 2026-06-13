@@ -15,6 +15,9 @@ import {
   validateSfSheetPushRows,
 } from '../composables/delivery/useDeliverySfPush.js'
 import { useAnimatedInteger } from '../composables/useAnimatedInteger.js'
+import { useAdminSystemNotifications } from '../composables/useAdminSystemNotifications.js'
+
+const { fetchNotifications } = useAdminSystemNotifications()
 
 /** 与后端业务日一致：Asia/Shanghai 的日历日期 YYYY-MM-DD */
 function ymdInTimeZone(date, timeZone) {
@@ -633,8 +636,13 @@ async function submitSfPush() {
       successText: sfPushModeIsInstant.value ? '及时单已全部提交' : '已全部提交',
     })
     sfDialogOpen.value = false
+    await fetchSheet()
+    await fetchNotifications({ silent: true })
   } catch (e) {
     toastSfPushError(e instanceof Error ? e.message : '推单失败', showToast)
+    // 后端可能在 HTTP 500 前已落库推单与系统消息（如大批量推单末尾异常），仍刷新大表与通知
+    await fetchSheet()
+    await fetchNotifications({ silent: true })
   } finally {
     sfPushSubmitting.value = false
   }

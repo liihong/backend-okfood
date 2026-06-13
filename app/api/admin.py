@@ -397,14 +397,14 @@ def delivery_sf_push(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     total = len(out.results)
-    success = sum(1 for r in out.results if r.ok)
-    failed = total - success
+    success_count = sum(1 for r in out.results if r.ok)
+    failed = total - success_count
     upsert_sf_push_batch_notification(
         db,
         store_id=store_id,
         business_date=body.delivery_date,
         total=total,
-        success=success,
+        success=success_count,
         failed=failed,
         title_prefix="顺丰手动推单",
     )
@@ -429,14 +429,14 @@ def delivery_sf_push_instant(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     total = len(out.results)
-    success = sum(1 for r in out.results if r.ok)
-    failed = total - success
+    success_count = sum(1 for r in out.results if r.ok)
+    failed = total - success_count
     upsert_sf_push_batch_notification(
         db,
         store_id=store_id,
         business_date=body.delivery_date,
         total=total,
-        success=success,
+        success=success_count,
         failed=failed,
         title_prefix="顺丰及时单推单",
     )
