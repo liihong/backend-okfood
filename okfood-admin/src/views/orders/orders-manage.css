@@ -414,7 +414,7 @@
   vertical-align: middle;
 }
 .orders-manage-page .admin-table--members.el-table th.orders-single-addr-col.el-table__cell {
-  text-align: center;
+  text-align: left;
 }
 .orders-manage-page .admin-table--members.el-table td.orders-single-addr-col .cell {
   white-space: normal !important;
@@ -423,7 +423,7 @@
   overflow: visible !important;
   text-overflow: clip !important;
   line-height: 1.5;
-  text-align: center;
+  text-align: left;
   hyphens: auto;
 }
 .orders-addr-text {
@@ -435,7 +435,7 @@
   overflow: visible;
   word-break: break-word;
   overflow-wrap: anywhere;
-  text-align: center;
+  text-align: left;
 }
 .orders-more-chevron {
   display: inline-block;

@@ -262,8 +262,8 @@ const {
     </el-table-column>
     <el-table-column
       label="配送/自提"
-      header-align="center"
-      align="center"
+      header-align="left"
+      align="left"
       min-width="480"
       :show-overflow-tooltip="false"
       class-name="orders-single-addr-col"
