@@ -26,13 +26,16 @@ const props = defineProps({
 
 const emit = defineEmits(['menu-day-stock-saved'])
 
-/** @typedef {{ member_id: number, name: string, phone: string, balance: number, meal_quota_total: number, is_delivered: boolean }} PickupRow */
+/** @typedef {{ kind: 'subscription', member_id: number, name: string, phone: string, balance: number, meal_quota_total: number, is_delivered: boolean }} SubscriptionPickupRow */
+/** @typedef {{ kind: 'retail', order_id: number, name: string, phone: string, dish_title: string, quantity: number, is_delivered: boolean }} RetailPickupRow */
+/** @typedef {SubscriptionPickupRow | RetailPickupRow} PickupRow */
 
 const pickupSearch = ref('')
 const pickupLoading = ref(false)
 /** @type {import('vue').Ref<PickupRow[]>} */
 const pickupRows = ref([])
-const markingMemberId = ref(null)
+/** 核销中行的唯一键：订阅 sub:{member_id}，零售 retail:{order_id} */
+const markingKey = ref(null)
 
 const kitchenInput = ref(0)
 const kitchenInputTomorrow = ref(0)
@@ -92,6 +95,39 @@ function formatQuotaDisplay(row) {
   return { bal, total }
 }
 
+function pickupRowKey(row) {
+  return row.kind === 'retail' ? `retail:${row.order_id}` : `sub:${row.member_id}`
+}
+
+function pickupRowMarkKey(row) {
+  return pickupRowKey(row)
+}
+
+/** 将单次零售门店自提订单转为核销舱行 */
+function retailPickupRowsFromSingleMeals(items) {
+  /** @type {RetailPickupRow[]} */
+  const rows = []
+  for (const item of items) {
+    if (!item || item.store_pickup !== true) continue
+    const f = String(item.fulfillment_status || '').trim().toLowerCase()
+    if (f === 'cancelled' || f === 'sf_cancelled') continue
+    rows.push({
+      kind: 'retail',
+      order_id: Number(item.id),
+      name: String(item.member_name || item.recipient_contact_name || ''),
+      phone: String(item.member_phone || ''),
+      dish_title: String(item.dish_title || ''),
+      quantity: Math.max(1, Math.trunc(Number(item.quantity) || 1)),
+      is_delivered: f === 'delivered',
+    })
+  }
+  rows.sort((a, b) => {
+    if (a.is_delivered !== b.is_delivered) return a.is_delivered ? 1 : -1
+    return String(a.phone).localeCompare(String(b.phone), 'zh-CN')
+  })
+  return rows
+}
+
 async function fetchPickupList() {
   if (!adminAccessToken.value || props.summaryLoading) return
   const d0 = (props.businessDate || '').trim()
@@ -103,11 +139,18 @@ async function fetchPickupList() {
   }
   pickupLoading.value = true
   try {
-    const data = await apiJson(
-      `/api/admin/delivery-sheet?delivery_date=${encodeURIComponent(d0)}`,
-      {},
-      { auth: true },
-    )
+    const [sheetResult, retailResult] = await Promise.allSettled([
+      apiJson(`/api/admin/delivery-sheet?delivery_date=${encodeURIComponent(d0)}`, {}, { auth: true }),
+      apiJson(
+        `/api/admin/orders/daily/single-meals?delivery_date=${encodeURIComponent(d0)}&pay_status=${encodeURIComponent('已支付')}&page_size=100`,
+        {},
+        { auth: true },
+      ),
+    ])
+    if (sheetResult.status === 'rejected') {
+      throw sheetResult.reason
+    }
+    const data = sheetResult.value
     const groups = Array.isArray(data?.groups) ? data.groups : []
     const pickupGroup = groups.find((g) => g?.area === '门店自提')
     /** @type {PickupRow[]} */
@@ -116,6 +159,7 @@ async function fetchPickupList() {
       for (const st of pickupGroup.stops) {
         for (const m of st.members || []) {
           rows.push({
+            kind: 'subscription',
             member_id: Number(m.member_id),
             name: String(m.name ?? ''),
             phone: String(m.phone ?? ''),
@@ -125,6 +169,10 @@ async function fetchPickupList() {
           })
         }
       }
+    }
+    if (retailResult.status === 'fulfilled') {
+      const retailItems = Array.isArray(retailResult.value?.items) ? retailResult.value.items : []
+      rows.push(...retailPickupRowsFromSingleMeals(retailItems))
     }
     pickupRows.value = rows
   } catch (e) {
@@ -141,31 +189,43 @@ async function fetchPickupList() {
   }
 }
 
-/** 单行自提核销（与智能配送大表 delivery-mark kind=pickup 一致） */
+/** 单行自提核销：订阅走 delivery-mark；单次零售走 mark-delivered */
 async function verifyPickup(row) {
-  if (row.is_delivered || markingMemberId.value != null) return
+  if (row.is_delivered || markingKey.value != null) return
   const d0 = (props.businessDate || '').trim()
   if (!d0) return
-  markingMemberId.value = row.member_id
+  markingKey.value = pickupRowMarkKey(row)
   try {
-    await apiJson(
-      '/api/admin/delivery-mark',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          member_id: Number(row.member_id),
-          delivery_date: d0,
-          kind: 'pickup',
-        }),
-      },
-      { auth: true },
-    )
-    showToast(`客户 ${row.name}（${row.phone}）自提核销成功`, 'success')
+    if (row.kind === 'retail') {
+      await apiJson(
+        `/api/admin/orders/single-meals/${row.order_id}/mark-delivered`,
+        { method: 'POST' },
+        { auth: true },
+      )
+    } else {
+      await apiJson(
+        '/api/admin/delivery-mark',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            member_id: Number(row.member_id),
+            delivery_date: d0,
+            kind: 'pickup',
+          }),
+        },
+        { auth: true },
+      )
+    }
+    const label =
+      row.kind === 'retail'
+        ? `零售自提单 #${row.order_id}（${row.name || row.phone}）`
+        : `客户 ${row.name}（${row.phone}）`
+    showToast(`${label}核销成功`, 'success')
     await fetchPickupList()
   } catch (e) {
     showToast(e instanceof Error ? e.message : '核销失败', 'error')
   } finally {
-    markingMemberId.value = null
+    markingKey.value = null
   }
 }
 
@@ -374,27 +434,38 @@ watch(
 
       <div class="dpk-scroll-wrap">
         <p v-if="pickupLoading" class="dpk-hint">正在加载自提列表…</p>
-        <p v-else-if="!pickupRows.length" class="dpk-hint">当日暂无门店自提订阅会员</p>
+        <p v-else-if="!pickupRows.length" class="dpk-hint">当日暂无门店自提客户（含订阅与零售）</p>
         <table v-else class="dpk-table">
           <thead>
             <tr>
               <th>名称</th>
               <th>电话</th>
-              <th>次数</th>
+              <th>次数/菜品</th>
               <th>状态</th>
               <th class="dpk-th-action">操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in filteredPickupRows" :key="row.member_id">
-              <td class="dpk-td-name">{{ row.name || '—' }}</td>
+            <tr v-for="row in filteredPickupRows" :key="pickupRowKey(row)">
+              <td class="dpk-td-name">
+                {{ row.name || '—' }}
+                <span v-if="row.kind === 'retail'" class="dpk-retail-tag">零售</span>
+              </td>
               <td class="dpk-td-phone">{{ row.phone || '—' }}</td>
               <td>
                 <span
+                  v-if="row.kind === 'subscription'"
                   class="dpk-quota"
                   :class="{ 'dpk-quota--muted': row.is_delivered }"
                 >
                   {{ formatQuotaDisplay(row).bal }} 次 / 共 {{ formatQuotaDisplay(row).total }} 次
+                </span>
+                <span
+                  v-else
+                  class="dpk-quota"
+                  :class="{ 'dpk-quota--muted': row.is_delivered }"
+                >
+                  {{ row.dish_title || '—' }} × {{ row.quantity }}
                 </span>
               </td>
               <td>
@@ -409,10 +480,16 @@ watch(
                 <button
                   type="button"
                   class="dpk-btn-verify"
-                  :disabled="row.is_delivered || markingMemberId === row.member_id"
+                  :disabled="row.is_delivered || markingKey === pickupRowMarkKey(row)"
                   @click="verifyPickup(row)"
                 >
-                  {{ row.is_delivered ? '已核销' : markingMemberId === row.member_id ? '核销中…' : '核销完成' }}
+                  {{
+                    row.is_delivered
+                      ? '已核销'
+                      : markingKey === pickupRowMarkKey(row)
+                        ? '核销中…'
+                        : '核销完成'
+                  }}
                 </button>
               </td>
             </tr>
@@ -574,6 +651,18 @@ watch(
 .dpk-td-name {
   font-weight: 800;
   color: #0f172a;
+}
+
+.dpk-retail-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  color: #b45309;
+  background: #fffbeb;
+  vertical-align: middle;
 }
 
 .dpk-td-phone {

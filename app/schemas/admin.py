@@ -1200,6 +1200,7 @@ class CardOrderOut(BaseModel):
     member_phone: str
     member_name: str
     member_wechat_name: str | None = Field(None, description="会员微信昵称")
+    out_trade_no: str | None = Field(None, description="商户订单号（微信退款用）")
     delivery_start_date: str | None = Field(None, description="起送业务日 ISO")
     card_kind: str
     pay_channel: str

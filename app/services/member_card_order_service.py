@@ -267,12 +267,14 @@ def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
         tpl = db.get(MembershipCardTemplate, int(tpl_id))
         if tpl:
             tpl_label = f"{tpl.name}（{tpl.kind_label}）"
+    out_no = (order.out_trade_no or "").strip() or None
     return CardOrderOut(
         id=int(order.id),
         member_id=int(order.member_id),
         member_phone=phone,
         member_name=name,
         member_wechat_name=wn,
+        out_trade_no=out_no,
         delivery_start_date=ds,
         card_kind=order.card_kind,
         pay_channel=order.pay_channel,

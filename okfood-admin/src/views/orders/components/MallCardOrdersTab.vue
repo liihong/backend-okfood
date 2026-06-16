@@ -45,6 +45,13 @@ const {
         }}</span>
       </template>
     </el-table-column>
+    <el-table-column label="订单号" width="132" class-name="td-mono orders-trade-no-col" show-overflow-tooltip>
+      <template #default="{ row }">
+        <span class="orders-cell-pill orders-cell-pill--trade-no">{{
+          row.out_trade_no || '—'
+        }}</span>
+      </template>
+    </el-table-column>
     <el-table-column label="下单时间" width="132" class-name="orders-created-at-col">
       <template #default="{ row }">
         <div class="orders-created-at">
