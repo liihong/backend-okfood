@@ -100,6 +100,7 @@ from app.services.sf_same_city_service import (
 )
 from app.services.store_config_service import get_store_config, update_store_config
 from app.services.delivery_sheet_service import build_delivery_sheet
+from app.services.pickup_verification_service import list_pickup_verification_panel
 from app.services.admin_delivery_fulfillment_service import admin_mark_subscription_fulfilled
 from app.services.member_delivery_deduction_service import list_member_delivered_dates_admin
 from app.services.member_address_service import list_addresses, update_address
@@ -356,6 +357,20 @@ def delivery_sheet(
     payload = build_delivery_sheet(
         db, delivery_date=delivery_date, area=area_key, phone=phone_key, store_id=store_id
     )
+    return success(data=dump_model(payload), msg="获取成功")
+
+
+@router.get("/pickup-verification-list")
+def pickup_verification_list(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    delivery_date: Annotated[date | None, Query(description="供餐/业务日，默认上海当日")] = None,
+):
+    """首页门店自提快速核销舱：轻量列表（订阅自提 + 单次零售自提，不构建完整配送大表）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    day = delivery_date or today_shanghai()
+    payload = list_pickup_verification_panel(db, store_id=store_id, delivery_date=day)
     return success(data=dump_model(payload), msg="获取成功")
 
 

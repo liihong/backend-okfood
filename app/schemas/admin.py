@@ -845,6 +845,40 @@ class AdminDeliveryMarkIn(BaseModel):
     )
 
 
+class PickupVerificationSubscriptionRowOut(BaseModel):
+    """首页核销舱：订阅门店自提会员。"""
+
+    kind: Literal["subscription"] = "subscription"
+    member_id: int = Field(..., ge=1)
+    name: str = ""
+    phone: str = ""
+    balance: int = Field(0, ge=0, description="剩余次数")
+    meal_quota_total: int = Field(0, ge=0, description="展示用总次数")
+    is_delivered: bool = Field(False, description="当日是否已核销自提")
+
+
+class PickupVerificationRetailRowOut(BaseModel):
+    """首页核销舱：单次零售门店自提订单。"""
+
+    kind: Literal["retail"] = "retail"
+    order_id: int = Field(..., ge=1)
+    name: str = ""
+    phone: str = ""
+    dish_title: str = ""
+    quantity: int = Field(1, ge=1)
+    is_delivered: bool = Field(False, description="是否已标记取货完成")
+
+
+class PickupVerificationListOut(BaseModel):
+    """首页门店自提快速核销舱列表。"""
+
+    delivery_date: date
+    pending_count: int = Field(0, ge=0, description="待自提行数（订阅 + 零售）")
+    rows: list[PickupVerificationSubscriptionRowOut | PickupVerificationRetailRowOut] = Field(
+        default_factory=list
+    )
+
+
 class DeliverySheetStopOut(BaseModel):
     """同一收件地址聚合为一配送点；meal_count 为当日该址份数。"""
 

@@ -103,31 +103,6 @@ function pickupRowMarkKey(row) {
   return pickupRowKey(row)
 }
 
-/** 将单次零售门店自提订单转为核销舱行 */
-function retailPickupRowsFromSingleMeals(items) {
-  /** @type {RetailPickupRow[]} */
-  const rows = []
-  for (const item of items) {
-    if (!item || item.store_pickup !== true) continue
-    const f = String(item.fulfillment_status || '').trim().toLowerCase()
-    if (f === 'cancelled' || f === 'sf_cancelled') continue
-    rows.push({
-      kind: 'retail',
-      order_id: Number(item.id),
-      name: String(item.member_name || item.recipient_contact_name || ''),
-      phone: String(item.member_phone || ''),
-      dish_title: String(item.dish_title || ''),
-      quantity: Math.max(1, Math.trunc(Number(item.quantity) || 1)),
-      is_delivered: f === 'delivered',
-    })
-  }
-  rows.sort((a, b) => {
-    if (a.is_delivered !== b.is_delivered) return a.is_delivered ? 1 : -1
-    return String(a.phone).localeCompare(String(b.phone), 'zh-CN')
-  })
-  return rows
-}
-
 async function fetchPickupList() {
   if (!adminAccessToken.value || props.summaryLoading) return
   const d0 = (props.businessDate || '').trim()
@@ -139,42 +114,12 @@ async function fetchPickupList() {
   }
   pickupLoading.value = true
   try {
-    const [sheetResult, retailResult] = await Promise.allSettled([
-      apiJson(`/api/admin/delivery-sheet?delivery_date=${encodeURIComponent(d0)}`, {}, { auth: true }),
-      apiJson(
-        `/api/admin/orders/daily/single-meals?delivery_date=${encodeURIComponent(d0)}&pay_status=${encodeURIComponent('已支付')}&page_size=100`,
-        {},
-        { auth: true },
-      ),
-    ])
-    if (sheetResult.status === 'rejected') {
-      throw sheetResult.reason
-    }
-    const data = sheetResult.value
-    const groups = Array.isArray(data?.groups) ? data.groups : []
-    const pickupGroup = groups.find((g) => g?.area === '门店自提')
-    /** @type {PickupRow[]} */
-    const rows = []
-    if (pickupGroup && Array.isArray(pickupGroup.stops)) {
-      for (const st of pickupGroup.stops) {
-        for (const m of st.members || []) {
-          rows.push({
-            kind: 'subscription',
-            member_id: Number(m.member_id),
-            name: String(m.name ?? ''),
-            phone: String(m.phone ?? ''),
-            balance: Number(m.balance) || 0,
-            meal_quota_total: Number(m.meal_quota_total) || 0,
-            is_delivered: Boolean(m.is_delivered),
-          })
-        }
-      }
-    }
-    if (retailResult.status === 'fulfilled') {
-      const retailItems = Array.isArray(retailResult.value?.items) ? retailResult.value.items : []
-      rows.push(...retailPickupRowsFromSingleMeals(retailItems))
-    }
-    pickupRows.value = rows
+    const data = await apiJson(
+      `/api/admin/pickup-verification-list?delivery_date=${encodeURIComponent(d0)}`,
+      {},
+      { auth: true },
+    )
+    pickupRows.value = Array.isArray(data?.rows) ? data.rows : []
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
