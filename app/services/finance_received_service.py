@@ -76,14 +76,14 @@ def _window_paid(
     end: datetime | None,
     store_id: int | None = None,
 ) -> FinanceReceivedWindowOut:
-    """按库内北京时间 naive 的 ``updated_at`` 落在 [start, end) 统计已收（两端可空表示不限制）。"""
+    """按库内北京时间 naive 的 ``created_at`` 落在 [start, end) 统计已收（两端可空表示不限制）。"""
     card_conds = [MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value]
     if store_id is not None:
         card_conds.append(MemberCardOrder.store_id == int(store_id))
     if start is not None:
-        card_conds.append(MemberCardOrder.updated_at >= start)
+        card_conds.append(MemberCardOrder.created_at >= start)
     if end is not None:
-        card_conds.append(MemberCardOrder.updated_at < end)
+        card_conds.append(MemberCardOrder.created_at < end)
 
     card_weekly = _card_kind_bucket(db, base_conds=card_conds, card_kind="周卡")
     card_monthly = _card_kind_bucket(db, base_conds=card_conds, card_kind="月卡")
@@ -96,9 +96,9 @@ def _window_paid(
     if store_id is not None:
         sm_conds.append(SingleMealOrder.store_id == int(store_id))
     if start is not None:
-        sm_conds.append(SingleMealOrder.updated_at >= start)
+        sm_conds.append(SingleMealOrder.created_at >= start)
     if end is not None:
-        sm_conds.append(SingleMealOrder.updated_at < end)
+        sm_conds.append(SingleMealOrder.created_at < end)
 
     c_cnt, c_sum = db.execute(
         select(
@@ -161,13 +161,13 @@ def finance_paid_card_orders_for_day(
     calendar_date: date | None = None,
     store_id: int | None = None,
 ) -> FinanceTodayPaidCardOrdersOut:
-    """指定上海自然日（默认当日）已缴开卡工单明细，按收款时刻先后排序。"""
+    """指定上海自然日（默认当日）已缴开卡工单明细，按工单创建时刻先后排序。"""
     day = calendar_date or today_shanghai()
     d0, d1 = shanghai_naive_range_for_calendar_day(day)
     conds = [
         MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
-        MemberCardOrder.updated_at >= d0,
-        MemberCardOrder.updated_at < d1,
+        MemberCardOrder.created_at >= d0,
+        MemberCardOrder.created_at < d1,
     ]
     if store_id is not None:
         conds.append(MemberCardOrder.store_id == int(store_id))
@@ -176,7 +176,7 @@ def finance_paid_card_orders_for_day(
         db.execute(
             select(MemberCardOrder)
             .where(*conds)
-            .order_by(MemberCardOrder.updated_at.asc(), MemberCardOrder.id.asc())
+            .order_by(MemberCardOrder.created_at.asc(), MemberCardOrder.id.asc())
         )
         .scalars()
         .all()
@@ -184,7 +184,7 @@ def finance_paid_card_orders_for_day(
     items = [
         FinanceTodayPaidCardOrderRowOut(
             order_id=int(r.id),
-            time_hm=format_beijing_naive_hm(r.updated_at),
+            time_hm=format_beijing_naive_hm(r.created_at),
             card_kind=(r.card_kind or "").strip() or "—",
             amount_yuan=Decimal(r.amount_yuan) if r.amount_yuan is not None else Decimal(0),
         )
@@ -219,8 +219,8 @@ def finance_received_day_window(
 def finance_received_summary(db: Session, *, store_id: int | None = None) -> FinanceReceivedSummaryOut:
     """汇总已收：累计、本月（上海自然月）、今日（上海自然日）。
 
-    时间依据订单行的 ``updated_at``（北京时间 naive）；支付成功或后台改为已缴时会更新。
-    已缴工单若之后仅改备注等也可能刷新 ``updated_at``，属已知局限（无单独 paid_at 字段时）。
+    开卡工单与单次点餐按 ``created_at``（北京时间 naive）落入日界；退卡按 ``created_at``。
+    无单独 paid_at 字段时，以工单/订单创建时刻近似收款时刻。
     """
     day = today_shanghai()
     m0, m1 = shanghai_naive_range_for_calendar_month(day.year, day.month)

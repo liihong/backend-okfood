@@ -3,11 +3,42 @@
 export const SF_PUSH_MODE_SHEET = 'sheet'
 export const SF_PUSH_MODE_INSTANT = 'instant'
 
-/** @param {'sheet'|'instant'} mode */
-export function getSfPushApiPath(mode) {
+/** 大表视图：午餐 / 晚餐 / 午晚餐双餐段运维 */
+export const SHEET_VIEW_LUNCH = 'lunch'
+export const SHEET_VIEW_DINNER = 'dinner'
+export const SHEET_VIEW_LUNCH_DINNER = 'lunch_dinner'
+
+/** @param {'lunch'|'dinner'|'lunch_dinner'} sheetView */
+export function getDeliverySheetApiPath(sheetView) {
+  if (sheetView === SHEET_VIEW_DINNER) return '/api/admin/delivery-sheet/dinner'
+  if (sheetView === SHEET_VIEW_LUNCH_DINNER) return '/api/admin/delivery-sheet/lunch-dinner'
+  return '/api/admin/delivery-sheet'
+}
+
+/** @param {'lunch'|'dinner'|'lunch_dinner'} sheetView @param {'sheet'|'instant'} mode */
+export function getSfPushPreviewApiPath(sheetView, mode) {
+  if (sheetView === SHEET_VIEW_DINNER) return '/api/admin/delivery-sf/dinner/preview'
+  return mode === SF_PUSH_MODE_INSTANT
+    ? '/api/admin/delivery-sf/preview'
+    : '/api/admin/delivery-sf/preview'
+}
+
+/** @param {'lunch'|'dinner'|'lunch_dinner'} sheetView @param {'sheet'|'instant'} mode */
+export function getSfPushApiPath(mode, sheetView = SHEET_VIEW_LUNCH) {
+  if (sheetView === SHEET_VIEW_DINNER) return '/api/admin/delivery-sf/dinner/push'
   return mode === SF_PUSH_MODE_INSTANT
     ? '/api/admin/delivery-sf/push-instant'
     : '/api/admin/delivery-sf/push'
+}
+
+/** 午晚餐运维视图仅展示名单，推顺丰仍走午餐/晚餐独立入口 */
+export function sheetViewSupportsSfPush(sheetView) {
+  return sheetView === SHEET_VIEW_LUNCH || sheetView === SHEET_VIEW_DINNER
+}
+
+/** 人工标记送达时传给后端的 meal_period */
+export function deliveryMarkMealPeriod(sheetView) {
+  return sheetView === SHEET_VIEW_DINNER ? 'dinner' : 'lunch'
 }
 
 /**

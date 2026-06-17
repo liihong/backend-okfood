@@ -18,6 +18,12 @@ const props = defineProps({
   menuDayTotalStockTomorrow: { type: Number, default: null },
   /** 锚定日后天周菜单「日总份数」；null 表示未配置 */
   menuDayTotalStockDayAfterTomorrow: { type: Number, default: null },
+  /** 锚定日晚餐周菜单「日总份数」 */
+  menuDayTotalStockDinner: { type: Number, default: null },
+  /** 锚定日次日晚餐周菜单「日总份数」 */
+  menuDayTotalStockTomorrowDinner: { type: Number, default: null },
+  /** 锚定日后天晚餐周菜单「日总份数」 */
+  menuDayTotalStockDayAfterTomorrowDinner: { type: Number, default: null },
   /** 服务端上海当日 YYYY-MM-DD；未来营业日不拉配送大表 */
   shanghaiToday: { type: String, default: '' },
   /** 顶卡概览加载中：与 dashboard-summary 串行，避免同屏争抢 DB */
@@ -40,6 +46,9 @@ const markingKey = ref(null)
 const kitchenInput = ref(0)
 const kitchenInputTomorrow = ref(0)
 const kitchenInputDayAfterTomorrow = ref(0)
+const kitchenInputDinner = ref(0)
+const kitchenInputTomorrowDinner = ref(0)
+const kitchenInputDayAfterTomorrowDinner = ref(0)
 const kitchenSaving = ref(false)
 
 function syncKitchenInputFromStock(stock, targetRef) {
@@ -71,6 +80,33 @@ watch(
   () => [props.menuDayTotalStockDayAfterTomorrow, props.dayAfterTomorrowBusinessDate],
   () => {
     syncKitchenInputFromStock(props.menuDayTotalStockDayAfterTomorrow, kitchenInputDayAfterTomorrow)
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [props.menuDayTotalStockDinner, props.businessDate],
+  () => {
+    syncKitchenInputFromStock(props.menuDayTotalStockDinner, kitchenInputDinner)
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [props.menuDayTotalStockTomorrowDinner, props.tomorrowBusinessDate],
+  () => {
+    syncKitchenInputFromStock(props.menuDayTotalStockTomorrowDinner, kitchenInputTomorrowDinner)
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [props.menuDayTotalStockDayAfterTomorrowDinner, props.dayAfterTomorrowBusinessDate],
+  () => {
+    syncKitchenInputFromStock(
+      props.menuDayTotalStockDayAfterTomorrowDinner,
+      kitchenInputDayAfterTomorrowDinner,
+    )
   },
   { immediate: true },
 )
@@ -174,52 +210,77 @@ async function verifyPickup(row) {
   }
 }
 
-async function saveKitchenPlanForDate(businessDate, plannedTotal) {
+async function saveKitchenPlanForDate(businessDate, plannedTotal, mealPeriod = 'lunch') {
   await apiJson(
     '/api/admin/kitchen-plan',
     {
       method: 'PUT',
-      body: JSON.stringify({ business_date: businessDate, planned_total: plannedTotal }),
+      body: JSON.stringify({
+        business_date: businessDate,
+        planned_total: plannedTotal,
+        meal_period: mealPeriod,
+      }),
     },
     { auth: true },
   )
 }
 
-const KITCHEN_SAVE_LABELS = ['今日', '明日', '后天']
+const KITCHEN_DAY_LABELS = ['今日', '明日', '后天']
 
 const dayAfterTomorrowIsBusinessDay = computed(() =>
   isSubscriptionDeliveryDayIso(props.dayAfterTomorrowBusinessDate),
 )
 
-/** 保存今日/明日/后天日总份数，并通知顶卡刷新 dashboard-summary */
+/** 保存今日/明日/后天午餐+晚餐日总份数，并通知顶卡刷新 dashboard-summary */
 async function saveKitchenPlan() {
   if (kitchenSaving.value) return
   const entries = [
     {
-      label: KITCHEN_SAVE_LABELS[0],
+      label: '今日午餐',
       date: (props.businessDate || '').trim(),
       value: Math.trunc(Number(kitchenInput.value)),
+      mealPeriod: 'lunch',
     },
     {
-      label: KITCHEN_SAVE_LABELS[1],
+      label: '今日晚餐',
+      date: (props.businessDate || '').trim(),
+      value: Math.trunc(Number(kitchenInputDinner.value)),
+      mealPeriod: 'dinner',
+    },
+    {
+      label: '明日午餐',
       date: (props.tomorrowBusinessDate || '').trim(),
       value: Math.trunc(Number(kitchenInputTomorrow.value)),
+      mealPeriod: 'lunch',
     },
     {
-      label: KITCHEN_SAVE_LABELS[2],
+      label: '明日晚餐',
+      date: (props.tomorrowBusinessDate || '').trim(),
+      value: Math.trunc(Number(kitchenInputTomorrowDinner.value)),
+      mealPeriod: 'dinner',
+    },
+    {
+      label: '后天午餐',
       date: (props.dayAfterTomorrowBusinessDate || '').trim(),
       value: Math.trunc(Number(kitchenInputDayAfterTomorrow.value)),
+      mealPeriod: 'lunch',
+    },
+    {
+      label: '后天晚餐',
+      date: (props.dayAfterTomorrowBusinessDate || '').trim(),
+      value: Math.trunc(Number(kitchenInputDayAfterTomorrowDinner.value)),
+      mealPeriod: 'dinner',
     },
   ]
   if (!/^\d{4}-\d{2}-\d{2}$/.test(entries[0].date)) {
     showToast('请先选择有效营业日', 'error')
     return
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(entries[1].date)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(entries[2].date)) {
     showToast('无法计算明日营业日，请刷新后重试', 'error')
     return
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(entries[2].date)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(entries[4].date)) {
     showToast('无法计算后天营业日，请刷新后重试', 'error')
     return
   }
@@ -235,15 +296,18 @@ async function saveKitchenPlan() {
   kitchenSaving.value = true
   try {
     const results = await Promise.allSettled(
-      saveTargets.map((e) => saveKitchenPlanForDate(e.date, e.value)),
+      saveTargets.map((e) => saveKitchenPlanForDate(e.date, e.value, e.mealPeriod)),
     )
     const failed = results
       .map((r, i) => ({ r, entry: saveTargets[i] }))
       .filter(({ r }) => r.status === 'rejected')
     const payload = {
       today: entries[0].value,
-      tomorrow: entries[1].value,
-      dayAfterTomorrow: entries[2].value,
+      todayDinner: entries[1].value,
+      tomorrow: entries[2].value,
+      tomorrowDinner: entries[3].value,
+      dayAfterTomorrow: entries[4].value,
+      dayAfterTomorrowDinner: entries[5].value,
     }
     if (failed.length === saveTargets.length) {
       const firstErr = failed[0].r.reason
@@ -299,11 +363,16 @@ watch(
     <article class="dpk-card dpk-card--kitchen">
       <div class="dpk-card-title dpk-card-title--blue">🍳 后厨计划管理</div>
       <div class="dpk-formula">
-        保存后同步更新「本周菜单配置」与顶卡「后厨总生产 / 可卖数量」
+        保存后同步更新「本周菜单配置」与顶卡「后厨总生产 / 可卖数量」（午餐与晚餐分餐段）
       </div>
-      <div class="dpk-form-row">
-        <div class="dpk-form-group">
-          <label class="dpk-form-label">今日日总份数</label>
+      <div class="dpk-kitchen-grid">
+        <div class="dpk-kitchen-grid__head">
+          <span class="dpk-kitchen-grid__corner" />
+          <span class="dpk-kitchen-grid__col">午餐</span>
+          <span class="dpk-kitchen-grid__col dpk-kitchen-grid__col--dinner">晚餐</span>
+        </div>
+        <div class="dpk-kitchen-grid__row">
+          <label class="dpk-kitchen-grid__row-label">{{ KITCHEN_DAY_LABELS[0] }}日总份数</label>
           <div class="dpk-input-row">
             <input
               v-model.number="kitchenInput"
@@ -315,9 +384,20 @@ watch(
             />
             <span class="dpk-unit">份</span>
           </div>
+          <div class="dpk-input-row">
+            <input
+              v-model.number="kitchenInputDinner"
+              type="number"
+              class="dpk-form-control dpk-form-control--dinner"
+              min="0"
+              max="99999"
+              inputmode="numeric"
+            />
+            <span class="dpk-unit">份</span>
+          </div>
         </div>
-        <div class="dpk-form-group">
-          <label class="dpk-form-label">明日日总份数</label>
+        <div class="dpk-kitchen-grid__row">
+          <label class="dpk-kitchen-grid__row-label">{{ KITCHEN_DAY_LABELS[1] }}日总份数</label>
           <div class="dpk-input-row">
             <input
               v-model.number="kitchenInputTomorrow"
@@ -329,10 +409,21 @@ watch(
             />
             <span class="dpk-unit">份</span>
           </div>
+          <div class="dpk-input-row">
+            <input
+              v-model.number="kitchenInputTomorrowDinner"
+              type="number"
+              class="dpk-form-control dpk-form-control--dinner"
+              min="0"
+              max="99999"
+              inputmode="numeric"
+            />
+            <span class="dpk-unit">份</span>
+          </div>
         </div>
-        <div class="dpk-form-group">
-          <label class="dpk-form-label">
-            后天日总份数
+        <div class="dpk-kitchen-grid__row">
+          <label class="dpk-kitchen-grid__row-label">
+            {{ KITCHEN_DAY_LABELS[2] }}日总份数
             <span v-if="!dayAfterTomorrowIsBusinessDay" class="dpk-nonbiz-hint">（非营业日）</span>
           </label>
           <div class="dpk-input-row">
@@ -340,6 +431,18 @@ watch(
               v-model.number="kitchenInputDayAfterTomorrow"
               type="number"
               class="dpk-form-control"
+              min="0"
+              max="99999"
+              inputmode="numeric"
+              :disabled="!dayAfterTomorrowIsBusinessDay"
+            />
+            <span class="dpk-unit">份</span>
+          </div>
+          <div class="dpk-input-row">
+            <input
+              v-model.number="kitchenInputDayAfterTomorrowDinner"
+              type="number"
+              class="dpk-form-control dpk-form-control--dinner"
               min="0"
               max="99999"
               inputmode="numeric"
@@ -686,6 +789,42 @@ watch(
   text-align: center;
 }
 
+.dpk-kitchen-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.dpk-kitchen-grid__head,
+.dpk-kitchen-grid__row {
+  display: grid;
+  grid-template-columns: minmax(88px, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.dpk-kitchen-grid__head {
+  margin-bottom: 0.15rem;
+}
+
+.dpk-kitchen-grid__col {
+  font-size: 12px;
+  font-weight: 800;
+  color: #3b82f6;
+  text-align: center;
+}
+
+.dpk-kitchen-grid__col--dinner {
+  color: #7c3aed;
+}
+
+.dpk-kitchen-grid__row-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  line-height: 1.35;
+}
+
 .dpk-form-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -742,6 +881,10 @@ watch(
 .dpk-form-control:focus {
   border-color: #3b82f6;
   background: #fff;
+}
+
+.dpk-form-control--dinner:focus {
+  border-color: #7c3aed;
 }
 
 .dpk-unit {

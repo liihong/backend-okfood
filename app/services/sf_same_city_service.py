@@ -811,12 +811,32 @@ def _sf_retail_order_push_lock(db: Session, *, order_id: int):
         yield
 
 
-def aggs_for_delivery_date(db: Session, d: date, *, store_id: int | None = None) -> dict[str, _Agg]:
+def aggs_for_delivery_date(
+    db: Session,
+    d: date,
+    *,
+    store_id: int | None = None,
+    meal_period: str | None = None,
+) -> dict[str, _Agg]:
     """当日全部停靠点聚合（与同业务日顺丰预览/履约同源）。"""
+    from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
+    from app.services.meal_period.card_eligibility import filter_members_for_sheet_view
+    from app.models.enums import DeliverySheetView, MealPeriod
+
     sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
-    members, default_by_id = eligible_members_for_delivery(
-        db, delivery_date=d, delivery_region_id=None, store_id=sid
-    )
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    if period == MealPeriod.DINNER.value:
+        from app.services.dinner.eligibility import eligible_members_for_dinner_delivery
+
+        members, default_by_id = eligible_members_for_dinner_delivery(
+            db, delivery_date=d, delivery_region_id=None, store_id=sid
+        )
+    else:
+        members, default_by_id = eligible_members_for_delivery(
+            db, delivery_date=d, delivery_region_id=None, store_id=sid
+        )
+        members = filter_members_for_sheet_view(db, list(members), DeliverySheetView.LUNCH.value)
+        default_by_id = {m.id: default_by_id.get(m.id) for m in members}
     mlist = list(members)
     return _build_aggs(db, d, None, None, mlist, default_by_id, store_id=sid)
 
@@ -828,6 +848,7 @@ def load_agg_for_stop_id(
     *,
     store_id: int | None = None,
     ags_hint: dict[str, _Agg] | None = None,
+    meal_period: str | None = None,
 ) -> _Agg | None:
     """
     按业务日与停靠点 id 解析聚合行。
@@ -835,7 +856,7 @@ def load_agg_for_stop_id(
     """
     if ags_hint is not None:
         return ags_hint.get(stop_id)
-    return aggs_for_delivery_date(db, d, store_id=store_id).get(stop_id)
+    return aggs_for_delivery_date(db, d, store_id=store_id, meal_period=meal_period).get(stop_id)
 
 
 def _instant_sf_shop_configured(db: Session, *, store_id: int, tenant_id: int) -> bool:
@@ -876,8 +897,13 @@ def _build_sf_same_city_preview_bundle(
     store_id: int,
     area: str | None = None,
     phone: str | None = None,
+    meal_period: str | None = None,
 ) -> tuple[list[SfSameCityPreviewRow], dict[str, _Agg], bool, bool]:
     """单次构建停靠点聚合 + 预览行（预览页与定时自动推单共用）。"""
+    from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
+    from app.services.meal_period.card_eligibility import filter_members_for_sheet_view
+    from app.models.enums import DeliverySheetView, MealPeriod
+
     st = db.get(Store, int(store_id))
     if not st or not st.is_active:
         raise HTTPException(status_code=404, detail="门店不存在或已停用")
@@ -895,9 +921,19 @@ def _build_sf_same_city_preview_bundle(
         )
         if rid is not None:
             reg_id = int(rid)
-    members, default_by_id = eligible_members_for_delivery(
-        db, delivery_date=d, delivery_region_id=reg_id, store_id=int(store_id)
-    )
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    if period == MealPeriod.DINNER.value:
+        from app.services.dinner.eligibility import eligible_members_for_dinner_delivery
+
+        members, default_by_id = eligible_members_for_dinner_delivery(
+            db, delivery_date=d, delivery_region_id=reg_id, store_id=int(store_id)
+        )
+    else:
+        members, default_by_id = eligible_members_for_delivery(
+            db, delivery_date=d, delivery_region_id=reg_id, store_id=int(store_id)
+        )
+        members = filter_members_for_sheet_view(db, list(members), DeliverySheetView.LUNCH.value)
+        default_by_id = {m.id: default_by_id.get(m.id) for m in members}
     mlist = list(members)
     if pkey:
         mlist = _filter_members_by_phone_hint(mlist, pkey)
@@ -941,6 +977,35 @@ def preview_sf_same_city(
     d = delivery_date or today_shanghai()
     rows, _ags, sf_configured, instant_sf_configured = _build_sf_same_city_preview_bundle(
         db, delivery_date=d, store_id=sid, area=area, phone=phone
+    )
+    return SfSameCityPreviewOut(
+        delivery_date=d.isoformat(),
+        rows=rows,
+        sf_configured=sf_configured,
+        instant_sf_configured=instant_sf_configured,
+    )
+
+
+def preview_sf_dinner_same_city(
+    db: Session,
+    *,
+    delivery_date: date | None = None,
+    area: str | None = None,
+    phone: str | None = None,
+    store_id: int | None = None,
+) -> SfSameCityPreviewOut:
+    """晚餐配送大表顺丰预览（与午餐 preview 隔离，独立 push_kind）。"""
+    from app.models.enums import MealPeriod
+
+    sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
+    d = delivery_date or today_shanghai()
+    rows, _ags, sf_configured, instant_sf_configured = _build_sf_same_city_preview_bundle(
+        db,
+        delivery_date=d,
+        store_id=sid,
+        area=area,
+        phone=phone,
+        meal_period=MealPeriod.DINNER.value,
     )
     return SfSameCityPreviewOut(
         delivery_date=d.isoformat(),
@@ -1295,7 +1360,20 @@ def _persist_sf_push_success(
     prep: _PreparedSfPush,
     res: dict[str, Any],
     existing_push_id: int | None = None,
+    push_kind: str = "delivery_sheet",
+    meal_period: str | None = None,
 ) -> SfSameCityPushItemResult:
+    from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
+    from app.services.sf_order_fulfillment_service import (
+        SF_PUSH_KIND_DINNER_DELIVERY_SHEET,
+    )
+    from app.models.enums import MealPeriod
+
+    kind = (push_kind or "delivery_sheet").strip() or "delivery_sheet"
+    period = (
+        meal_period
+        or (MealPeriod.DINNER.value if kind == SF_PUSH_KIND_DINNER_DELIVERY_SHEET else DEFAULT_MEAL_PERIOD)
+    ).strip().lower()
     from app.services.single_meal_order_service import mark_single_meals_accepted_on_sf_push_no_commit
 
     r = res.get("result")
@@ -1315,11 +1393,18 @@ def _persist_sf_push_success(
         mark_single_meals_accepted_on_sf_push_no_commit(db, ff_oids)
     is_delivery_sheet_push = "fulfillment_member_ids" in snap
     if is_delivery_sheet_push:
-        from app.services.delivery_day_lock_service import has_delivery_sheet_sf_push_on_date
+        if period == MealPeriod.DINNER.value:
+            from app.services.delivery_day_lock_service import has_dinner_delivery_sheet_sf_push_on_date
 
-        first_sheet_push_today = not has_delivery_sheet_sf_push_on_date(
-            db, store_id=sid, delivery_date=d
-        )
+            first_sheet_push_today = not has_dinner_delivery_sheet_sf_push_on_date(
+                db, store_id=sid, delivery_date=d
+            )
+        else:
+            from app.services.delivery_day_lock_service import has_delivery_sheet_sf_push_on_date
+
+            first_sheet_push_today = not has_delivery_sheet_sf_push_on_date(
+                db, store_id=sid, delivery_date=d
+            )
     else:
         first_sheet_push_today = False
 
@@ -1336,6 +1421,7 @@ def _persist_sf_push_success(
         error_msg="",
         request_snapshot=prep.snap_db,
         response_json=res if isinstance(res, dict) else None,
+        push_kind=kind,
     )
     if is_delivery_sheet_push and first_sheet_push_today:
         from app.services.delivery_sheet_push_snapshot_service import (
@@ -1344,9 +1430,11 @@ def _persist_sf_push_success(
         )
 
         capture_delivery_sheet_absent_members_on_first_push(
-            db, store_id=sid, delivery_date=d
+            db, store_id=sid, delivery_date=d, meal_period=period
         )
-        capture_delivery_sheet_units_on_first_push(db, store_id=sid, delivery_date=d)
+        capture_delivery_sheet_units_on_first_push(
+            db, store_id=sid, delivery_date=d, meal_period=period
+        )
         db.commit()
     elif is_delivery_sheet_push:
         from app.services.delivery_sheet_push_snapshot_service import (
@@ -1367,6 +1455,7 @@ def _persist_sf_push_success(
                 store_id=sid,
                 delivery_date=d,
                 fulfillment_member_ids=ff_mids,
+                meal_period=period,
             )
             db.commit()
     if ff_oids:
@@ -1390,7 +1479,21 @@ def push_sf_same_city(
     ags_hint: dict[str, _Agg] | None = None,
     retry_push_id: int | None = None,
     use_instant_shop: bool = False,
+    push_kind: str | None = None,
+    meal_period: str | None = None,
 ) -> SfSameCityPushOut:
+    from app.services.sf_order_fulfillment_service import (
+        SF_PUSH_KIND_DELIVERY_SHEET,
+        SF_PUSH_KIND_DINNER_DELIVERY_SHEET,
+    )
+    from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
+    from app.models.enums import MealPeriod
+
+    kind = (push_kind or SF_PUSH_KIND_DELIVERY_SHEET).strip() or SF_PUSH_KIND_DELIVERY_SHEET
+    period = (
+        meal_period
+        or (MealPeriod.DINNER.value if kind == SF_PUSH_KIND_DINNER_DELIVERY_SHEET else DEFAULT_MEAL_PERIOD)
+    ).strip().lower()
     base = get_settings()
     d = body.delivery_date
     sid = int(store_id) if store_id is not None else int(base.DEFAULT_STORE_ID)
@@ -1418,7 +1521,9 @@ def push_sf_same_city(
     batch_hint: str | None = None
 
     with _sf_push_serial_lock(db, store_id=sid, d=d):
-        ags = ags_hint if ags_hint is not None else aggs_for_delivery_date(db, d, store_id=sid)
+        ags = ags_hint if ags_hint is not None else aggs_for_delivery_date(
+            db, d, store_id=sid, meal_period=period
+        )
         success_stop_ids = _active_success_push_stop_ids_set(db, store_id=sid, d=d)
         success_member_map = _success_stop_member_map(db, store_id=sid, d=d, ags_hint=ags)
         retry_stop_ids = {str(r.stop_id) for r in body.rows if r.selected}
@@ -1566,6 +1671,8 @@ def push_sf_same_city(
                         prep=prep,
                         res=raw,
                         existing_push_id=prep.existing_push_id,
+                        push_kind=kind,
+                        meal_period=period,
                     )
                     success_stop_ids.add(prep.stop_id)
                     if prep.agg_cur is not None:
@@ -1618,6 +1725,25 @@ def push_sf_same_city(
         batch_hint = MSG_BALANCE_INSUFFICIENT
 
     return SfSameCityPushOut(results=out, hint=batch_hint)
+
+
+def push_sf_dinner_same_city(
+    db: Session,
+    body: SfSameCityPushIn,
+    *,
+    store_id: int | None = None,
+) -> SfSameCityPushOut:
+    """晚餐配送大表推顺丰：独立 push_kind，与午餐推单互不影响。"""
+    from app.services.sf_order_fulfillment_service import SF_PUSH_KIND_DINNER_DELIVERY_SHEET
+    from app.models.enums import MealPeriod
+
+    return push_sf_same_city(
+        db,
+        body,
+        store_id=store_id,
+        push_kind=SF_PUSH_KIND_DINNER_DELIVERY_SHEET,
+        meal_period=MealPeriod.DINNER.value,
+    )
 
 
 def _persist_fail(

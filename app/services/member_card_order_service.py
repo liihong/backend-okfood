@@ -309,9 +309,15 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
         plan = _plan_for_membership_template(tpl)
         amt = int(tpl.meals_grant)
         kind_label = f"{tpl.name}（{tpl.kind_label}）"
+        from app.services.meal_period.template_periods import meal_periods_from_template
+
+        order.meal_periods_snapshot = meal_periods_from_template(tpl)
     else:
         plan, amt = _quota_for_card_kind(order.card_kind)
         kind_label = order.card_kind
+        from app.services.meal_period.template_periods import classic_card_meal_periods_snapshot
+
+        order.meal_periods_snapshot = classic_card_meal_periods_snapshot()
     parts = [
         f"开卡工单#{order.id}",
         f"{kind_label}",
@@ -353,6 +359,9 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
     elif int(m.balance) > 0 and m.delivery_start_date is not None and not m.delivery_deferred:
         # 续卡未改起送日：次数恢复后重新激活
         m.is_active = True
+    from app.services.meal_period.apply_side_effects import ensure_meal_period_states_after_card_apply
+
+    ensure_meal_period_states_after_card_apply(db, m, order.meal_periods_snapshot)
     order.applied_to_member = True
 
 

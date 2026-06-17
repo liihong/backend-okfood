@@ -3,17 +3,34 @@
     <OkNavbar show-back title="每日送达份数" />
     <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="wrap">
+        <view v-if="showMealPeriodTabs" class="period-tabs">
+          <view
+            class="period-tab"
+            :class="{ 'period-tab--active': mealPeriod === 'lunch' }"
+            @tap="switchMealPeriod('lunch')"
+          >
+            午餐
+          </view>
+          <view
+            class="period-tab"
+            :class="{ 'period-tab--active': mealPeriod === 'dinner' }"
+            @tap="switchMealPeriod('dinner')"
+          >
+            晚餐
+          </view>
+        </view>
+
         <text class="lead">
-          每个配送日需送达的份数；骑手确认送达时按该份数从剩余次数中扣减。范围为 1～10 份。
+          {{ periodLabel }}每个配送日需送达的份数；确认送达时按该份数从剩余次数中扣减。范围为 1～10 份。
         </text>
 
         <view v-if="sheetPushedToday" class="notice notice--info">
           <text class="notice-txt">
-            今日配送大表已同步顺丰，修改将预约在下一配送日生效；今日仍为 {{ effectiveUnits }} 份。
+            今日{{ periodLabel }}配送大表已同步顺丰，修改将预约在下一配送日生效；今日仍为 {{ effectiveUnits }} 份。
           </text>
         </view>
         <view v-else class="notice notice--info">
-          <text class="notice-txt">今日尚未向顺丰推单，保存后立即生效。</text>
+          <text class="notice-txt">今日{{ periodLabel }}尚未向顺丰推单，保存后立即生效。</text>
         </view>
 
         <view v-if="hasPendingDiff" class="notice notice--warn">
@@ -29,7 +46,7 @@
         </view>
 
         <view class="card">
-          <text class="card-label">每日送达份数</text>
+          <text class="card-label">{{ periodLabel }}每日送达份数</text>
           <view class="units-stepper">
             <button
               class="units-stepper-btn"
@@ -72,6 +89,11 @@ import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 import { guardMemberDeliverySelfService } from '@/utils/memberSelfServiceGuard.js'
 import { showOkAlert } from '@/utils/okAlert.js'
 import {
+  MEAL_PERIOD_LUNCH,
+  hasDinnerEntitlement,
+  mealPeriodLabel,
+} from '@/utils/memberMealPeriod.js'
+import {
   dailyMealUnitsEditorValueFromProfile,
   dailyMealUnitsSaveAlertFromProfile,
   effectiveDailyMealUnitsFromProfile,
@@ -89,11 +111,14 @@ const sfLocked = ref(false)
 const sheetPushedToday = ref(false)
 const effectiveUnits = ref(1)
 const pendingUnits = ref(null)
-/** 服务端原始生效值（未截断），用于大于 10 时的提示 */
 const serverUnitsRaw = ref(1)
-/** 进入本页时的步进器快照，用于判断是否修改 */
 const baselineUnits = ref(1)
 const units = ref(1)
+const mealPeriod = ref(MEAL_PERIOD_LUNCH)
+const memberProfileCache = ref(null)
+
+const showMealPeriodTabs = computed(() => hasDinnerEntitlement(memberProfileCache.value))
+const periodLabel = computed(() => (showMealPeriodTabs.value ? mealPeriodLabel(mealPeriod.value) : ''))
 
 const hasPendingDiff = computed(
   () =>
@@ -113,15 +138,31 @@ function bump(delta) {
 }
 
 function applyProfileToForm(data) {
-  const raw = Math.floor(Number(data?.daily_meal_units) || 0)
+  const period = mealPeriod.value
+  const rawField =
+    period === MEAL_PERIOD_LUNCH ? data?.daily_meal_units : data?.dinner_daily_meal_units
+  const raw = Math.floor(Number(rawField) || 0)
   const safeRaw = raw >= 1 && raw <= 50 ? raw : 1
   serverUnitsRaw.value = safeRaw
-  effectiveUnits.value = effectiveDailyMealUnitsFromProfile(data)
-  pendingUnits.value = pendingDailyMealUnitsFromProfile(data)
-  sheetPushedToday.value = data?.delivery_sheet_pushed_today === true
-  const editorVal = clampUnits(dailyMealUnitsEditorValueFromProfile(data))
+  effectiveUnits.value = effectiveDailyMealUnitsFromProfile(data, period)
+  pendingUnits.value = pendingDailyMealUnitsFromProfile(data, period)
+  sheetPushedToday.value =
+    period === MEAL_PERIOD_LUNCH
+      ? data?.delivery_sheet_pushed_today === true
+      : data?.dinner_delivery_sheet_pushed_today === true
+  sfLocked.value =
+    period === MEAL_PERIOD_LUNCH
+      ? data?.sf_self_service_locked === true
+      : data?.dinner_sf_self_service_locked === true
+  const editorVal = clampUnits(dailyMealUnitsEditorValueFromProfile(data, period))
   units.value = editorVal
   baselineUnits.value = editorVal
+}
+
+function switchMealPeriod(period) {
+  if (mealPeriod.value === period) return
+  mealPeriod.value = period
+  if (memberProfileCache.value) applyProfileToForm(memberProfileCache.value)
 }
 
 async function loadMe() {
@@ -138,8 +179,8 @@ async function loadMe() {
       setTimeout(() => uni.navigateBack(), 400)
       return
     }
-    sfLocked.value = data?.sf_self_service_locked === true
-    if (!guardSfSelfServiceLocked(data)) {
+    memberProfileCache.value = data
+    if (!guardSfSelfServiceLocked(data, mealPeriod.value)) {
       setTimeout(() => uni.navigateBack(), 400)
       return
     }
@@ -164,13 +205,18 @@ async function onSave() {
   }
   saving.value = true
   try {
+    const body =
+      mealPeriod.value === MEAL_PERIOD_LUNCH
+        ? { daily_meal_units: clampUnits(units.value) }
+        : { dinner_daily_meal_units: clampUnits(units.value) }
     const data = await request('/api/user/profile', {
       method: 'PATCH',
-      data: { daily_meal_units: clampUnits(units.value) },
+      data: body,
     })
+    memberProfileCache.value = data
     applyProfileToForm(data)
     markMinePageNeedsRefresh()
-    const alertPayload = dailyMealUnitsSaveAlertFromProfile(data)
+    const alertPayload = dailyMealUnitsSaveAlertFromProfile(data, mealPeriod.value)
     await showOkAlert({
       title: alertPayload.title,
       content: alertPayload.content,
@@ -210,6 +256,31 @@ onShow(() => {
 
 .wrap {
   padding: 32rpx 40rpx calc(48rpx + env(safe-area-inset-bottom));
+}
+
+.period-tabs {
+  display: flex;
+  flex-direction: row;
+  gap: 16rpx;
+  margin-bottom: 28rpx;
+}
+
+.period-tab {
+  flex: 1;
+  text-align: center;
+  padding: 20rpx 0;
+  border-radius: 999rpx;
+  font-size: 28rpx;
+  font-weight: 800;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 2rpx solid #e2e8f0;
+}
+
+.period-tab--active {
+  color: #fff;
+  background: $ok-forest-green;
+  border-color: $ok-forest-green;
 }
 
 .lead {

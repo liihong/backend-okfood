@@ -3,7 +3,7 @@ import { API_BASE } from '@/utils/api.js'
 /** @typedef {{ weekStart: string, asOf: string, fetchedAt: number, items: unknown[] }} WeeklyMenuCacheEntry */
 
 const STORAGE_KEY = 'okfood_weekly_menu_cache_v2'
-const CACHE_SCHEMA_VERSION = 2
+const CACHE_SCHEMA_VERSION = 3
 /** 超过该时长仍展示缓存，但会后台静默刷新 */
 export const WEEKLY_MENU_STALE_MS = 30 * 60 * 1000
 /** 超过该时长视为失效，必须重新拉取 */
@@ -79,15 +79,20 @@ function emptyStore() {
 }
 
 /**
- * @param {{ weekStart?: string }} [opts]
- * @returns {string} 缓存桶 key（当周周一）
+ * @param {{ weekStart?: string, mealPeriod?: string }} [opts]
+ * @returns {string} 缓存桶 key（当周周一 + 餐段）
  */
 export function resolveWeeklyMenuCacheKey(opts = {}) {
   const ws =
     typeof opts.weekStart === 'string' && opts.weekStart.trim()
       ? opts.weekStart.trim()
       : mondayOfWeekShanghai()
-  return ws || ''
+  if (!ws) return ''
+  const mp =
+    typeof opts.mealPeriod === 'string' && opts.mealPeriod.trim()
+      ? opts.mealPeriod.trim().toLowerCase()
+      : 'lunch'
+  return `${ws}:${mp}`
 }
 
 /**

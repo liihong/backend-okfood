@@ -282,6 +282,7 @@ import {
   isLeaveRangeActiveOrFuture,
   isTomorrowLeaveActive,
 } from '@/utils/memberLeaveDisplay.js'
+import { combinedLeaveStatusLine } from '@/utils/memberMealPeriod.js'
 
 const pageStyle = ref({})
 const scrollStyle = ref({})
@@ -762,6 +763,9 @@ async function confirmNickEdit() {
 const memberDeliveryStatus = computed(() => {
   if (!isLoggedIn.value) return '尚未开启计划'
   if (needsMemberSetupPage.value) return ''
+  const p = memberProfileRaw.value
+  const combined = combinedLeaveStatusLine(p)
+  if (combined) return combined
   if (
     isOnLeaveTodayShanghai(leaveRange.value) ||
     isTomorrowLeaveActive(isLeavedTomorrow.value, tomorrowLeaveTargetYmd.value) ||

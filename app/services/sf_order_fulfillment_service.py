@@ -34,7 +34,18 @@ SF_ORDER_STATUS_DELIVERED_TUOTOU = 17
 SF_ORDER_STATUS_CANCELLED = (2, 22)
 
 SF_PUSH_KIND_DELIVERY_SHEET = "delivery_sheet"
+SF_PUSH_KIND_DINNER_DELIVERY_SHEET = "dinner_delivery_sheet"
 SF_PUSH_KIND_SINGLE_MEAL_RETAIL = "single_meal_retail"
+
+
+def _meal_period_from_push_kind(kind: str | None) -> str:
+    """推单种类 → 履约餐段；午餐推单与历史默认同为 lunch。"""
+    from app.models.enums import MealPeriod
+
+    k = (kind or "").strip()
+    if k == SF_PUSH_KIND_DINNER_DELIVERY_SHEET:
+        return MealPeriod.DINNER.value
+    return MealPeriod.LUNCH.value
 
 
 @dataclass(frozen=True)
@@ -106,10 +117,11 @@ def sf_push_fulfilled_quick_check(
         return o is not None and str(getattr(o, "fulfillment_status", "") or "").strip().lower() == "delivered"
 
     snap_mids, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+    period = _meal_period_from_push_kind(kind)
     if snap_mids or snap_oids:
         for mid in snap_mids:
             if not member_subscription_delivered_on_delivery_date(
-                db, member_id=int(mid), delivery_date=pus.delivery_date
+                db, member_id=int(mid), delivery_date=pus.delivery_date, meal_period=period
             ):
                 return False
         for oid in snap_oids:
@@ -539,13 +551,19 @@ def member_subscription_delivered_on_delivery_date(
     *,
     member_id: int,
     delivery_date: date,
+    meal_period: str = "lunch",
 ) -> bool:
     """订阅会员在指定配送业务日是否已在 delivery_logs 标记送达（与骑手/顺丰自动履约同源）。"""
+    from app.models.enums import MealPeriod
+
+    p = (meal_period or MealPeriod.LUNCH.value).strip().lower()
+    period = MealPeriod.DINNER.value if p == MealPeriod.DINNER.value else MealPeriod.LUNCH.value
     row = db.scalar(
         select(DeliveryLog.id)
         .where(
             DeliveryLog.member_id == int(member_id),
             DeliveryLog.delivery_date == delivery_date,
+            DeliveryLog.meal_period == period,
             DeliveryLog.status == DeliveryStatus.DELIVERED.value,
         )
         .limit(1)
@@ -604,8 +622,9 @@ def sf_same_city_push_fully_fulfilled(
     snap_mids, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
     agg = None
     if not snap_mids and not snap_oids:
+        period = _meal_period_from_push_kind(kind)
         agg = load_agg_for_stop_id(
-            db, pus.delivery_date, pus.stop_id, store_id=sid, ags_hint=ags_hint
+            db, pus.delivery_date, pus.stop_id, store_id=sid, meal_period=period
         )
 
     mids = _subscription_member_ids_for_push(db, pus, agg)
@@ -613,9 +632,10 @@ def sf_same_city_push_fully_fulfilled(
     if not mids and not oids:
         return True
 
+    period = _meal_period_from_push_kind(kind)
     for mid in mids:
         if not member_subscription_delivered_on_delivery_date(
-            db, member_id=int(mid), delivery_date=pus.delivery_date
+            db, member_id=int(mid), delivery_date=pus.delivery_date, meal_period=period
         ):
             return False
     for oid in oids:
@@ -780,6 +800,27 @@ def _member_on_sf_push(
     return str(pr.get("recv_phone") or "").strip() == ph
 
 
+def _sf_push_matches_meal_period(pus: SfSameCityPush, meal_period: str | None) -> bool:
+    """按餐段过滤推单：None 表示不过滤（兼容旧逻辑）。"""
+    if not meal_period:
+        return True
+    from app.models.enums import MealPeriod
+    from app.services.sf_order_fulfillment_service import (
+        SF_PUSH_KIND_DELIVERY_SHEET,
+        SF_PUSH_KIND_DINNER_DELIVERY_SHEET,
+        SF_PUSH_KIND_SINGLE_MEAL_RETAIL,
+    )
+
+    period = (meal_period or MealPeriod.LUNCH.value).strip().lower()
+    kind = (getattr(pus, "push_kind", None) or "").strip()
+    if period == MealPeriod.DINNER.value:
+        return kind == SF_PUSH_KIND_DINNER_DELIVERY_SHEET
+    # 午餐：大表推单 + 单次零售（会员可能命中）
+    if kind == SF_PUSH_KIND_DINNER_DELIVERY_SHEET:
+        return False
+    return kind in ("", SF_PUSH_KIND_DELIVERY_SHEET, SF_PUSH_KIND_SINGLE_MEAL_RETAIL)
+
+
 def _member_active_sf_pushes_on_delivery_date(
     db: Session,
     *,
@@ -787,6 +828,7 @@ def _member_active_sf_pushes_on_delivery_date(
     store_id: int,
     delivery_date: date,
     member_phone: str | None = None,
+    meal_period: str | None = None,
 ) -> list[SfSameCityPush]:
     """仅返回与指定会员相关的当日有效顺丰推单（不重建配送大表）。"""
     mid = int(member_id)
@@ -831,6 +873,8 @@ def _member_active_sf_pushes_on_delivery_date(
             continue
         if not _member_on_sf_push(db, pus, member_id=mid, member_phone=phone):
             continue
+        if not _sf_push_matches_meal_period(pus, meal_period):
+            continue
         seen.add(pid)
         out.append(pus)
     return out
@@ -846,10 +890,11 @@ def _member_sf_push_fulfilled_for_lock(db: Session, pus: SfSameCityPush, *, memb
         return True
 
     mid = int(member_id)
+    period = _meal_period_from_push_kind((getattr(pus, "push_kind", None) or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET)
     snap_mids, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
     if mid in snap_mids:
         return member_subscription_delivered_on_delivery_date(
-            db, member_id=mid, delivery_date=pus.delivery_date
+            db, member_id=mid, delivery_date=pus.delivery_date, meal_period=period
         )
 
     oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
@@ -865,7 +910,7 @@ def _member_sf_push_fulfilled_for_lock(db: Session, pus: SfSameCityPush, *, memb
             return str(getattr(o, "fulfillment_status", "") or "").strip().lower() == "delivered"
 
     return member_subscription_delivered_on_delivery_date(
-        db, member_id=mid, delivery_date=pus.delivery_date
+        db, member_id=mid, delivery_date=pus.delivery_date, meal_period=period
     )
 
 
@@ -876,12 +921,12 @@ def member_sf_self_service_locked_on_delivery_date(
     store_id: int,
     delivery_date: date,
     member_phone: str | None = None,
+    meal_period: str | None = None,
 ) -> bool:
     """
     当前会员当日命中顺丰推单且其配送尚未完成：锁定小程序自助改地址/份数/请假等。
 
-    仅查与该会员相关的推单；门店其他会员的推单/履约状态不影响本会员。
-    调用方应传入 ``member_phone`` 与 ``delivery_date``，避免为查手机再读 members 且用 JSON 精确匹配快照。
+    meal_period 指定时仅检查该餐段推单，午/晚互不影响。
     """
     pushes = _member_active_sf_pushes_on_delivery_date(
         db,
@@ -889,6 +934,7 @@ def member_sf_self_service_locked_on_delivery_date(
         store_id=int(store_id),
         delivery_date=delivery_date,
         member_phone=member_phone,
+        meal_period=meal_period,
     )
     if not pushes:
         return False
@@ -1075,17 +1121,20 @@ def _apply_sf_same_city_stop_fulfillment(
 
     sid = int(pus.store_id) if getattr(pus, "store_id", None) is not None else int(get_settings().DEFAULT_STORE_ID)
     snap_mids, snap_oids = _ids_from_push_snapshot(pus.request_snapshot)
+    period = _meal_period_from_push_kind(kind)
     home_ok_ids = ok_ids_home
     if home_ok_ids is None:
         from app.services.admin_delivery_fulfillment_service import _eligible_ids_home
 
-        home_ok_ids = _eligible_ids_home(db, pus.delivery_date, store_id=sid)
+        home_ok_ids = _eligible_ids_home(db, pus.delivery_date, store_id=sid, meal_period=period)
     if snap_mids:
         home_ok_ids = set(home_ok_ids) | {int(x) for x in snap_mids}
 
     agg = None
     if not snap_mids and not snap_oids:
-        agg = load_agg_for_stop_id(db, pus.delivery_date, pus.stop_id, store_id=sid)
+        agg = load_agg_for_stop_id(
+            db, pus.delivery_date, pus.stop_id, store_id=sid, meal_period=period
+        )
         if agg is None:
             result["warnings"].append(
                 f"未解析到停靠点聚合 stop_id={pus.stop_id} date={pus.delivery_date}，将尝试快照/收件人回退"
@@ -1108,6 +1157,7 @@ def _apply_sf_same_city_stop_fulfillment(
                 operator_tag=operator_tag,
                 store_id=sid,
                 ok_ids=member_ok_ids,
+                meal_period=period,
             )
             if renew is not None and renew_pending is not None:
                 renew_pending.append(renew)

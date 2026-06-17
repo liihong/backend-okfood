@@ -14,6 +14,7 @@ from app.services.delivery_sheet_push_snapshot_service import (
     member_meal_units_snapshot_for_date,
 )
 from app.services.member_service import MAX_DAILY_MEAL_UNITS, effective_daily_meal_units
+from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
 
 
 def _clamp_units(units: int) -> int:
@@ -48,22 +49,29 @@ class DeliverySheetMealUnitsContext:
     delivery_date: date
     is_frozen: bool
     snapshot: dict[int, int] | None
+    meal_period: str = DEFAULT_MEAL_PERIOD
+    _db: Session | None = None
     _member_units_cache: dict[int, int] = field(default_factory=dict)
 
     @classmethod
     def load(cls, db: Session, *, store_id: int, delivery_date: date) -> DeliverySheetMealUnitsContext:
         return cls.from_day_snapshots(
-            DeliverySheetDaySnapshots.load(db, store_id=int(store_id), delivery_date=delivery_date)
+            DeliverySheetDaySnapshots.load(db, store_id=int(store_id), delivery_date=delivery_date),
+            db=db,
         )
 
     @classmethod
-    def from_day_snapshots(cls, day_snap: DeliverySheetDaySnapshots) -> DeliverySheetMealUnitsContext:
+    def from_day_snapshots(
+        cls, day_snap: DeliverySheetDaySnapshots, *, db: Session | None = None
+    ) -> DeliverySheetMealUnitsContext:
         """复用已加载的 ``DeliverySheetDaySnapshots``，避免重复查推单与份数快照。"""
         return cls(
             store_id=day_snap.store_id,
             delivery_date=day_snap.delivery_date,
             is_frozen=day_snap.has_sf_push,
             snapshot=day_snap.member_meal_units if day_snap.has_sf_push else None,
+            meal_period=getattr(day_snap, "meal_period", DEFAULT_MEAL_PERIOD),
+            _db=db,
         )
 
     def units_for(self, member: Member) -> int:
@@ -71,11 +79,38 @@ class DeliverySheetMealUnitsContext:
         cached = self._member_units_cache.get(mid)
         if cached is not None:
             return cached
-        units = _units_from_snapshot_or_member(
-            member,
-            is_frozen=self.is_frozen,
-            snapshot=self.snapshot,
-        )
+        period = (self.meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+        if (
+            self._db is not None
+            and period != DEFAULT_MEAL_PERIOD
+            and not (self.is_frozen and self.snapshot and mid in self.snapshot)
+        ):
+            from app.services.meal_period.units import effective_daily_meal_units_for_period
+
+            units = effective_daily_meal_units_for_period(self._db, member, period)
+        elif (
+            self.is_frozen
+            and self.snapshot
+            and mid in self.snapshot
+        ):
+            units = _clamp_units(self.snapshot[mid])
+        elif self.is_frozen and not self.snapshot:
+            if self._db is not None and period != DEFAULT_MEAL_PERIOD:
+                from app.services.meal_period.units import effective_daily_meal_units_for_period
+
+                units = effective_daily_meal_units_for_period(self._db, member, period)
+            else:
+                units = effective_daily_meal_units(member)
+        elif self._db is not None and period != DEFAULT_MEAL_PERIOD:
+            from app.services.meal_period.units import effective_daily_meal_units_for_period
+
+            units = effective_daily_meal_units_for_period(self._db, member, period)
+        else:
+            units = _units_from_snapshot_or_member(
+                member,
+                is_frozen=self.is_frozen,
+                snapshot=self.snapshot,
+            )
         self._member_units_cache[mid] = units
         return units
 

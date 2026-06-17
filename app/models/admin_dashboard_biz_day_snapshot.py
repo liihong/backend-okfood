@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer
+from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -22,11 +22,22 @@ class AdminDashboardBizDaySnapshot(Base):
         primary_key=True,
         comment="统计锚定业务日(上海)：「今日」指标对应该日；「明日」为日历次日",
     )
+    meal_period: Mapped[str] = mapped_column(
+        String(16),
+        primary_key=True,
+        default="lunch",
+        comment="lunch/dinner；午晚分轨归档",
+    )
     today_leave_members: Mapped[int] = mapped_column(Integer, nullable=False)
     today_meals_to_prepare: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
         comment="与当日配送大表各分组 meal_total 之和一致（到家+自提，含已送后扣次剔除仍并入大表者）",
+    )
+    kitchen_output_total: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="锚定日后厨出餐份数归档",
     )
     tomorrow_leave_members: Mapped[int] = mapped_column(Integer, nullable=False)
     tomorrow_meals_to_prepare: Mapped[int] = mapped_column(Integer, nullable=False)

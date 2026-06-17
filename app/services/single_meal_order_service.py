@@ -413,13 +413,17 @@ def _final_out_trade_no(order_id: int) -> str:
     return s
 
 
-def dish_planned_for_date(db: Session, dish_id: int, d: date, *, store_id: int) -> bool:
+def dish_planned_for_date(
+    db: Session, dish_id: int, d: date, *, store_id: int, meal_period: str = "lunch"
+) -> bool:
     sid = int(store_id)
+    period = (meal_period or "lunch").strip().lower()
     if db.scalar(
         select(MenuSchedule.id).where(
             MenuSchedule.menu_date == d,
             MenuSchedule.dish_id == dish_id,
             MenuSchedule.store_id == sid,
+            MenuSchedule.meal_period == period,
         )
     ):
         return True
@@ -427,6 +431,7 @@ def dish_planned_for_date(db: Session, dish_id: int, d: date, *, store_id: int) 
         select(WeeklyMenuSlot).where(
             WeeklyMenuSlot.dish_id == dish_id,
             WeeklyMenuSlot.store_id == sid,
+            WeeklyMenuSlot.meal_period == period,
         )
     ).all()
     for s in slots:
@@ -529,7 +534,10 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
         raise HTTPException(status_code=404, detail="餐品不存在或已停用")
     if dish.single_order_price_yuan is None:
         raise HTTPException(status_code=400, detail="该餐品暂未开放单点")
-    if not dish_planned_for_date(db, int(dish.id), body.delivery_date, store_id=int(mem.store_id)):
+    period = (getattr(body, "meal_period", None) or "lunch").strip().lower()
+    if not dish_planned_for_date(
+        db, int(dish.id), body.delivery_date, store_id=int(mem.store_id), meal_period=period
+    ):
         raise HTTPException(status_code=400, detail="所选日期未排该餐品")
 
     qty = int(body.quantity)
@@ -554,7 +562,12 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
     from app.services.menu_day_stock_service import assert_single_order_stock_available
 
     assert_single_order_stock_available(
-        db, int(dish.id), body.delivery_date, qty, store_id=int(mem.store_id)
+        db,
+        int(dish.id),
+        body.delivery_date,
+        qty,
+        store_id=int(mem.store_id),
+        meal_period=period,
     )
 
     unit = dish.single_order_price_yuan
@@ -576,6 +589,7 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
         store_pickup=bool(body.store_pickup),
         quantity=qty,
         delivery_date=body.delivery_date,
+        meal_period=period,
         routing_area=area,
         amount_yuan=amt,
         pay_status="未支付",

@@ -11,6 +11,7 @@ class SingleMealOrderCreateIn(BaseModel):
         description="配送到家时必填：会员已保存的配送地址 id；门店自提勿传",
     )
     delivery_date: date = Field(..., description="与周菜单该道菜对应的供餐日")
+    meal_period: str = Field("lunch", description="lunch=午餐单次；dinner=晚餐单次")
     store_pickup: bool = Field(False, description="门店自提：无需地址，支付后为待自提，门店确认取货后完成")
     quantity: int = Field(1, ge=1, le=50, description="份数，总价=单价×份数")
     member_coupon_id: int | None = Field(None, ge=1, description="可选：使用的用户优惠券 id")

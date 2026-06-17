@@ -31,6 +31,7 @@ const form = ref({
   kind_label: '',
   name: '',
   meals_grant: 6,
+  meal_periods: ['lunch'],
   list_price_yuan: '',
   sale_price_yuan: '',
   card_style_image_url: '',
@@ -53,6 +54,15 @@ function parseOptionalMoney(raw) {
 }
 
 /** 无上传图时：按种类/餐次选用迷你卡面渐变（仅展示） */
+function mealPeriodsLabel(row) {
+  const ps = Array.isArray(row.meal_periods) ? row.meal_periods : ['lunch']
+  const hasL = ps.includes('lunch')
+  const hasD = ps.includes('dinner')
+  if (hasL && hasD) return '午+晚'
+  if (hasD) return '晚餐'
+  return '午餐'
+}
+
 function cardPreviewClass(row) {
   const kind = String(row.kind_label || '')
   if (kind.includes('午晚餐') || kind.includes('晚餐')) {
@@ -145,6 +155,7 @@ function openCreate() {
     kind_label: '',
     name: '',
     meals_grant: 6,
+    meal_periods: ['lunch'],
     list_price_yuan: '',
     sale_price_yuan: '',
     card_style_image_url: '',
@@ -164,6 +175,7 @@ function openEdit(row) {
     kind_label: row.kind_label ?? '',
     name: row.name || '',
     meals_grant: row.meals_grant,
+    meal_periods: Array.isArray(row.meal_periods) && row.meal_periods.length ? [...row.meal_periods] : ['lunch'],
     list_price_yuan: row.list_price_yuan != null ? String(row.list_price_yuan).trim() : '',
     sale_price_yuan: row.sale_price_yuan != null ? String(row.sale_price_yuan).trim() : '',
     card_style_image_url: row.card_style_image_url || '',
@@ -189,6 +201,11 @@ async function saveForm() {
     showToast('请填写名称', 'error')
     return
   }
+  const periods = Array.isArray(form.value.meal_periods) ? form.value.meal_periods.filter(Boolean) : []
+  if (!periods.length) {
+    showToast('请至少选择一个覆盖餐段', 'error')
+    return
+  }
   const listPx = parseOptionalMoney(form.value.list_price_yuan)
   const salePx = parseOptionalMoney(form.value.sale_price_yuan)
   if (listPx === undefined || salePx === undefined) {
@@ -212,6 +229,7 @@ async function saveForm() {
       kind_label: kind,
       name,
       meals_grant: Number(form.value.meals_grant),
+      meal_periods: periods,
       list_price_yuan: listPx,
       sale_price_yuan: salePx,
       card_style_image_url: String(form.value.card_style_image_url || '').trim() || null,
@@ -334,6 +352,7 @@ onMounted(fetchList)
               </td>
               <td>
                 <span class="mcard-type-badge">{{ row.kind_label || '—' }}</span>
+                <span class="mcard-period-badge">{{ mealPeriodsLabel(row) }}</span>
               </td>
               <td>
                 <div class="mcard-identity">
@@ -434,6 +453,14 @@ onMounted(fetchList)
             class="mcard-form-control"
             placeholder="如：标准六餐 — 可作具体套餐名"
           />
+        </div>
+
+        <div class="mcard-form-row mcard-form-row--center">
+          <label class="mcard-form-label">覆盖餐段</label>
+          <el-checkbox-group v-model="form.meal_periods" class="mcard-form-control">
+            <el-checkbox label="lunch">午餐</el-checkbox>
+            <el-checkbox label="dinner">晚餐</el-checkbox>
+          </el-checkbox-group>
         </div>
 
         <div class="mcard-form-row mcard-form-row--center">
@@ -847,6 +874,17 @@ onMounted(fetchList)
   border-radius: 8px;
   font-size: 11px;
   font-weight: 800;
+  display: inline-block;
+}
+
+.mcard-period-badge {
+  margin-left: 6px;
+  background: #ecfdf5;
+  color: #047857;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
   display: inline-block;
 }
 

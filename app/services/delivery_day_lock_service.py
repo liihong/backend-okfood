@@ -39,6 +39,47 @@ def _delivery_sheet_push_kind_clause():
     )
 
 
+def _dinner_delivery_sheet_push_kind_clause():
+    from app.services.sf_order_fulfillment_service import SF_PUSH_KIND_DINNER_DELIVERY_SHEET
+
+    return SfSameCityPush.push_kind == SF_PUSH_KIND_DINNER_DELIVERY_SHEET
+
+
+def has_dinner_delivery_sheet_sf_push_on_date(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+) -> bool:
+    """当日是否存在创单成功的晚餐配送大表顺丰推单（与午餐 push_kind 隔离）。"""
+    row_id = db.scalar(
+        select(SfSameCityPush.id)
+        .where(
+            *_sf_push_lock_filter(int(store_id), delivery_date),
+            _dinner_delivery_sheet_push_kind_clause(),
+        )
+        .limit(1)
+    )
+    return row_id is not None
+
+
+def _sf_push_lock_filter_for_meal_period(
+    store_id: int,
+    delivery_date: date,
+    meal_period: str,
+) -> tuple:
+    """按餐段选择顺丰推单 push_kind 过滤条件。"""
+    from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
+
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    base = list(_sf_push_lock_filter(int(store_id), delivery_date))
+    if period == "dinner":
+        base.append(_dinner_delivery_sheet_push_kind_clause())
+    else:
+        base.append(_delivery_sheet_push_kind_clause())
+    return tuple(base)
+
+
 def _sf_push_lock_filter(store_id: int, delivery_date: date, *, delivery_sheet_only: bool = False) -> tuple:
     clauses: list = [
         SfSameCityPush.store_id == int(store_id),
@@ -204,6 +245,59 @@ def is_delivery_day_sheet_frozen_after_sf_push(
     )
 
 
+def is_delivery_day_sheet_locked_for_period(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    meal_period: str,
+) -> bool:
+    """按餐段判断当日推单是否已全部履约（用于取消请假是否通知运维）。"""
+    from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
+    from app.services.sf_order_fulfillment_service import (
+        SF_ORDER_STATUS_DELIVERED_TUOTOU,
+        SF_PUSH_KIND_DINNER_DELIVERY_SHEET,
+        SF_PUSH_KIND_DELIVERY_SHEET,
+        _sf_push_effective_order_status,
+    )
+
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    lite_rows = _sf_push_lock_lite_rows(db, store_id=int(store_id), delivery_date=delivery_date)
+    if period == "dinner":
+        lite_rows = [r for r in lite_rows if r.push_kind == SF_PUSH_KIND_DINNER_DELIVERY_SHEET]
+    else:
+        lite_rows = [r for r in lite_rows if r.push_kind != SF_PUSH_KIND_DINNER_DELIVERY_SHEET]
+    if not lite_rows:
+        return False
+
+    class _CallbackShim:
+        pass
+
+    pus = _CallbackShim()
+    pending: list[_SfPushLockLite] = []
+    for lite in lite_rows:
+        pus.sf_callback_order_status = lite.sf_callback_order_status
+        st = _sf_push_effective_order_status(pus)
+        if st == SF_ORDER_STATUS_DELIVERED_TUOTOU:
+            continue
+        if st is not None:
+            return False
+        pending.append(lite)
+
+    if not pending:
+        return True
+
+    from app.services.sf_order_fulfillment_service import sf_push_fulfilled_quick_check
+
+    for lite in pending:
+        full = db.get(SfSameCityPush, int(lite.id))
+        if full is None:
+            return False
+        if not sf_push_fulfilled_quick_check(db, full):
+            return False
+    return True
+
+
 def is_delivery_day_sheet_locked(
     db: Session,
     *,
@@ -285,19 +379,22 @@ def sf_push_fulfillment_member_ids_live(
     *,
     store_id: int,
     delivery_date: date,
+    meal_period: str | None = None,
 ) -> frozenset[int]:
     """当日有效大表推单 ``fulfillment_member_ids`` 并集（不读份数快照缓存）。"""
     import json
 
     from sqlalchemy import func
 
+    from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
     from app.services.sf_order_fulfillment_service import (
         _db_dialect_name,
         _ids_from_push_snapshot,
         _subscription_member_ids_for_push,
     )
 
-    filt = _sf_push_lock_filter(int(store_id), delivery_date, delivery_sheet_only=True)
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    filt = _sf_push_lock_filter_for_meal_period(int(store_id), delivery_date, period)
     seen: set[int] = set()
     need_fallback_ids: list[int] = []
 
@@ -353,16 +450,19 @@ def sf_frozen_subscription_member_ids_for_delivery_date(
     *,
     store_id: int,
     delivery_date: date,
+    meal_period: str | None = None,
 ) -> frozenset[int]:
     """当日有效顺丰推单 ``fulfillment_member_ids`` 并集（与扣次快照同源）。"""
     from app.services.delivery_sheet_push_snapshot_service import frozen_member_ids_from_units_snapshot
+    from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
 
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
     cached = frozen_member_ids_from_units_snapshot(
-        db, store_id=int(store_id), delivery_date=delivery_date
+        db, store_id=int(store_id), delivery_date=delivery_date, meal_period=period
     )
     if cached is not None:
         return cached
 
     return sf_push_fulfillment_member_ids_live(
-        db, store_id=int(store_id), delivery_date=delivery_date
+        db, store_id=int(store_id), delivery_date=delivery_date, meal_period=period
     )

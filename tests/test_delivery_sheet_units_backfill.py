@@ -102,7 +102,7 @@ def test_upsert_overwrites(backfill_db: Session):
     backfill_db.commit()
     row = backfill_db.get(
         DeliverySheetPushUnitsSnapshot,
-        {"store_id": 1, "delivery_date": date(2026, 6, 11)},
+        {"store_id": 1, "delivery_date": date(2026, 6, 11), "meal_period": "lunch"},
     )
     assert row is not None
     assert row.member_meal_units.get("7") == 2

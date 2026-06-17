@@ -278,13 +278,58 @@ def _to_member_out(
     leave_prep_locked = is_miniprogram_leave_prep_locked(deadline_time=ldt)
     pause_delivery_prep_locked = is_miniprogram_pause_delivery_prep_locked(db, m)
     biz_today = today_shanghai()
+    from app.models.enums import MealPeriod
+
     sf_self_service_locked = member_sf_self_service_locked_on_delivery_date(
         db,
         member_id=int(m.id),
         store_id=int(m.store_id),
         delivery_date=biz_today,
         member_phone=(m.phone or "").strip() or None,
+        meal_period=MealPeriod.LUNCH.value,
     )
+
+    from app.services.meal_period.card_eligibility import member_entitled_meal_periods
+    from app.services.meal_period.dinner_units import (
+        dinner_delivery_sheet_pushed_today,
+        pending_dinner_daily_meal_units,
+    )
+    from app.services.meal_period.units import effective_daily_meal_units_for_period
+    from app.models.member_meal_period_state import MemberMealPeriodState
+
+    entitled = sorted(member_entitled_meal_periods(db, int(m.id)))
+    if not entitled:
+        entitled = [MealPeriod.LUNCH.value]
+
+    dinner_units: int | None = None
+    dinner_pending: int | None = None
+    dinner_pushed: bool | None = None
+    dinner_is_leaved_tomorrow: bool | None = None
+    dinner_tomorrow_target: date | None = None
+    dinner_lr: dict | None = None
+    dinner_sf_locked: bool | None = None
+
+    if MealPeriod.DINNER.value in entitled:
+        drow = db.get(
+            MemberMealPeriodState,
+            {"member_id": int(m.id), "meal_period": MealPeriod.DINNER.value},
+        )
+        dinner_units = effective_daily_meal_units_for_period(db, m, MealPeriod.DINNER.value)
+        dinner_pending = pending_dinner_daily_meal_units(drow)
+        dinner_pushed = dinner_delivery_sheet_pushed_today(db, store_id=int(m.store_id))
+        dinner_sf_locked = member_sf_self_service_locked_on_delivery_date(
+            db,
+            member_id=int(m.id),
+            store_id=int(m.store_id),
+            delivery_date=biz_today,
+            member_phone=(m.phone or "").strip() or None,
+            meal_period=MealPeriod.DINNER.value,
+        )
+        if drow is not None:
+            dinner_is_leaved_tomorrow = bool(drow.is_leaved_tomorrow)
+            dinner_tomorrow_target = drow.tomorrow_leave_target_date
+            if drow.leave_range_start or drow.leave_range_end:
+                dinner_lr = {"start": drow.leave_range_start, "end": drow.leave_range_end}
 
     plan_out: PlanType | None = None
 
@@ -364,6 +409,22 @@ def _to_member_out(
         sf_self_service_locked=sf_self_service_locked,
 
         paid_card_awaiting_setup=paid_card_awaiting_setup,
+
+        entitled_meal_periods=entitled,
+
+        dinner_daily_meal_units=dinner_units,
+
+        dinner_daily_meal_units_pending=dinner_pending,
+
+        dinner_delivery_sheet_pushed_today=dinner_pushed,
+
+        dinner_is_leaved_tomorrow=dinner_is_leaved_tomorrow,
+
+        dinner_tomorrow_leave_target_date=dinner_tomorrow_target,
+
+        dinner_leave_range=dinner_lr,
+
+        dinner_sf_self_service_locked=dinner_sf_locked,
 
         created_at=m.created_at.isoformat() if m.created_at else "",
 
@@ -563,6 +624,10 @@ def patch_member_profile(
 
     daily_meal_units: int | None = None,
 
+    set_dinner_daily_meal_units: bool = False,
+
+    dinner_daily_meal_units: int | None = None,
+
     ip_address: str | None = None,
 
 ) -> MemberOut:
@@ -575,11 +640,19 @@ def patch_member_profile(
 
     if (
         (set_daily_meal_units and daily_meal_units is not None)
+        or (set_dinner_daily_meal_units and dinner_daily_meal_units is not None)
         or (set_delivery_deferred and delivery_deferred is not None)
         or set_delivery_start
         or (set_store_pickup and store_pickup is not None)
     ):
-        guard_member_self_service_during_sf_fulfillment(db, m)
+        from app.models.enums import MealPeriod
+
+        if set_daily_meal_units and daily_meal_units is not None:
+            guard_member_self_service_during_sf_fulfillment(db, m, meal_period=MealPeriod.LUNCH.value)
+        if set_dinner_daily_meal_units and dinner_daily_meal_units is not None:
+            guard_member_self_service_during_sf_fulfillment(db, m, meal_period=MealPeriod.DINNER.value)
+        if not set_daily_meal_units and not set_dinner_daily_meal_units:
+            guard_member_self_service_during_sf_fulfillment(db, m)
 
     # 采集变更前关键字段，供操作日志 before/after 对比
     prev_snapshot = {
@@ -606,6 +679,21 @@ def patch_member_profile(
 
         # 未大表推单：立即写入 daily_meal_units；已推单：写 pending，由 00:01 任务落库
         units_change_mode = set_member_daily_meal_units_change(db, m, u)
+
+    dinner_units_change_mode: str | None = None
+    if set_dinner_daily_meal_units and dinner_daily_meal_units is not None:
+        from app.models.enums import MealPeriod
+        from app.services.leave import guard_miniprogram_self_service_requires_balance
+        from app.services.meal_period.card_eligibility import member_entitled_meal_periods
+        from app.services.meal_period.dinner_units import set_dinner_daily_meal_units_change
+
+        if MealPeriod.DINNER.value not in member_entitled_meal_periods(db, int(m.id)):
+            raise HTTPException(status_code=400, detail="当前会员卡不含晚餐配送，无法修改晚餐份数")
+        guard_miniprogram_self_service_requires_balance(db, m)
+        du = int(dinner_daily_meal_units)
+        if du < 1 or du > 20:
+            raise HTTPException(status_code=400, detail="晚餐每日送达数量须为 1～20")
+        dinner_units_change_mode = set_dinner_daily_meal_units_change(db, m, du)
 
     if set_avatar:
 
@@ -934,7 +1022,26 @@ def leave_request(
     ip_address: str | None = None,
     source: str = "miniprogram",
     operator: str | None = None,
+    meal_period: str = "lunch",
 ) -> MemberOut:
+    """请假/取消；meal_period=dinner 时写入 member_meal_period_state，不影响午餐请假。"""
+    from app.models.enums import MealPeriod
+
+    period = (meal_period or MealPeriod.LUNCH.value).strip().lower()
+    if period == MealPeriod.DINNER.value:
+        from app.services.meal_period.dinner_leave import dinner_leave_request
+
+        return dinner_leave_request(
+            db,
+            member_id,
+            typ,
+            start,
+            end,
+            skip_leave_deadline=skip_leave_deadline,
+            ip_address=ip_address,
+            source=source,
+            operator=operator,
+        )
 
     m = db.get(Member, member_id)
 
@@ -960,7 +1067,7 @@ def leave_request(
     )
 
     if source == "miniprogram":
-        guard_member_self_leave_during_sf_fulfillment(db, m)
+        guard_member_self_leave_during_sf_fulfillment(db, m, meal_period="lunch")
         from app.services.leave import (
             guard_miniprogram_leave_prep_window,
             guard_miniprogram_self_service_requires_balance,
@@ -1307,6 +1414,7 @@ def get_weekly_menu(
     store_id: int,
     as_of_date: date | None = None,
     include_stock: bool = False,
+    meal_period: str = "lunch",
 ) -> dict:
 
     anchor = _monday_of_week(week_start) if week_start else _monday_of_week(today_shanghai())
@@ -1314,6 +1422,7 @@ def get_weekly_menu(
     dates = [anchor + timedelta(days=i) for i in range(7)]
 
     sid = int(store_id)
+    period = (meal_period or "lunch").strip().lower()
 
     as_of_eff = as_of_date if as_of_date is not None else today_shanghai()
 
@@ -1323,7 +1432,11 @@ def get_weekly_menu(
 
         .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
 
-        .where(WeeklyMenuSlot.week_start == anchor, WeeklyMenuSlot.store_id == sid)
+        .where(
+            WeeklyMenuSlot.week_start == anchor,
+            WeeklyMenuSlot.store_id == sid,
+            WeeklyMenuSlot.meal_period == period,
+        )
 
     ).all()
 
@@ -1339,7 +1452,11 @@ def get_weekly_menu(
 
             .join(MenuDish, MenuSchedule.dish_id == MenuDish.id)
 
-            .where(MenuSchedule.menu_date.in_(missing), MenuSchedule.store_id == sid)
+            .where(
+                MenuSchedule.menu_date.in_(missing),
+                MenuSchedule.store_id == sid,
+                MenuSchedule.meal_period == period,
+            )
 
         ).all()
 
@@ -1369,14 +1486,19 @@ def get_weekly_menu(
             card.update(stocks[d].to_detail_dict())
         items.append(card)
 
-    return {"week_start": anchor.isoformat(), "as_of": as_of_eff.isoformat(), "items": items}
+    return {"week_start": anchor.isoformat(), "as_of": as_of_eff.isoformat(), "meal_period": period, "items": items}
 
 
 
 
 
 def get_menu_detail_by_dish_id(
-    db: Session, dish_id: int, *, service_date: date | None = None, store_id: int
+    db: Session,
+    dish_id: int,
+    *,
+    service_date: date | None = None,
+    store_id: int,
+    meal_period: str = "lunch",
 ) -> dict:
 
     dish = db.get(MenuDish, dish_id)
@@ -1421,7 +1543,9 @@ def get_menu_detail_by_dish_id(
         from app.services.menu_day_stock_service import single_order_stock_for_dish_date
 
         out.update(
-            single_order_stock_for_dish_date(db, int(dish_id), service_date, store_id=int(store_id)).to_detail_dict()
+            single_order_stock_for_dish_date(
+                db, int(dish_id), service_date, store_id=int(store_id), meal_period=meal_period
+            ).to_detail_dict()
         )
 
     return out

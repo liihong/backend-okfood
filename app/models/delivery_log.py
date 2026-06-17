@@ -20,6 +20,8 @@ class DeliveryLog(Base):
         index=True,
     )
     delivery_date: Mapped[date] = mapped_column(Date)
+    #: 履约餐段：lunch=午餐（默认，与历史一致）；dinner=晚餐
+    meal_period: Mapped[str] = mapped_column(String(16), default="lunch", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default=DeliveryStatus.PENDING.value)
     courier_id: Mapped[str | None] = mapped_column(
         String(50), ForeignKey("couriers.courier_id", onupdate="CASCADE"), nullable=True

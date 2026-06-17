@@ -190,9 +190,11 @@ def guard_member_self_service_during_sf_fulfillment(
     member: Member,
     *,
     delivery_date: date | None = None,
+    meal_period: str | None = None,
 ) -> None:
     """
     当前会员当日命中顺丰推单且其配送尚未完成：禁止小程序自助改地址/份数等。
+    meal_period 指定时仅检查对应餐段推单（午餐/晚餐隔离）。
     管理端调用须自行跳过（勿传入本 guard）。
     """
     from app.core.timeutil import today_shanghai
@@ -205,13 +207,19 @@ def guard_member_self_service_during_sf_fulfillment(
         store_id=int(member.store_id),
         delivery_date=d,
         member_phone=(member.phone or "").strip() or None,
+        meal_period=meal_period,
     ):
         raise HTTPException(status_code=400, detail=SF_SELF_SERVICE_LOCK_DURING_FULFILLMENT_MSG)
 
 
-def guard_member_self_leave_during_sf_fulfillment(db: Session, member: Member) -> None:
+def guard_member_self_leave_during_sf_fulfillment(
+    db: Session,
+    member: Member,
+    *,
+    meal_period: str | None = None,
+) -> None:
     """当前会员当日顺丰推单配送未完成：禁止小程序自助请假相关操作。"""
     try:
-        guard_member_self_service_during_sf_fulfillment(db, member)
+        guard_member_self_service_during_sf_fulfillment(db, member, meal_period=meal_period)
     except HTTPException:
         raise HTTPException(status_code=400, detail=SF_SELF_SERVICE_LOCK_LEAVE_MSG) from None

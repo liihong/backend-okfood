@@ -9,9 +9,16 @@ import { toastSfPushBatchOutcome, toastSfPushError } from '../utils/sfPushMessag
 import {
   SF_PUSH_MODE_SHEET,
   SF_PUSH_MODE_INSTANT,
+  SHEET_VIEW_LUNCH,
+  SHEET_VIEW_DINNER,
+  SHEET_VIEW_LUNCH_DINNER,
   buildSfPushPayload,
+  deliveryMarkMealPeriod,
+  getDeliverySheetApiPath,
   getSfPushApiPath,
+  getSfPushPreviewApiPath,
   isSfPushConfigured,
+  sheetViewSupportsSfPush,
   validateSfSheetPushRows,
 } from '../composables/delivery/useDeliverySfPush.js'
 import { useAnimatedInteger } from '../composables/useAnimatedInteger.js'
@@ -144,6 +151,15 @@ const emptySheet = () => ({
   active_monthly_members: 0,
   expired_monthly_members: 0,
 })
+
+/** 大表视图 Tab：午餐 / 晚餐 / 午晚餐双餐段运维 */
+const sheetView = ref(SHEET_VIEW_LUNCH)
+const sheetViewLabel = computed(() => {
+  if (sheetView.value === SHEET_VIEW_DINNER) return '晚餐'
+  if (sheetView.value === SHEET_VIEW_LUNCH_DINNER) return '午晚餐'
+  return '午餐'
+})
+const sfPushEnabledForView = computed(() => sheetViewSupportsSfPush(sheetView.value))
 
 /** 按手机号筛选大表（与 GET delivery-sheet ?phone= 一致；可后几位或完整号码） */
 const phoneQuery = ref('')
@@ -352,7 +368,7 @@ async function fetchSheet() {
     const q0 = new URLSearchParams(base)
     q0.set('delivery_date', d0)
 
-    const data0 = await apiJson(`/api/admin/delivery-sheet?${q0.toString()}`, {}, { auth: true })
+    const data0 = await apiJson(`${getDeliverySheetApiPath(sheetView.value)}?${q0.toString()}`, {}, { auth: true })
 
     const regions0 = Array.isArray(data0?.active_regions) ? data0.active_regions : []
 
@@ -531,6 +547,7 @@ async function markSelectedStopsDelivered() {
   const stopCount = selectedDeliveryStops.value.length
   const tip = `即将批量标记 ${pendingIds.length} 位会员（${stopCount} 个配送点）。人数较多时服务器需逐条处理，反馈可能较慢，请勿关闭页面直至完成。确定继续？`
   if (!window.confirm(tip)) return
+  const mealPeriod = deliveryMarkMealPeriod(sheetView.value)
   batchMarking.value = true
   const d0 = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
   try {
@@ -539,7 +556,12 @@ async function markSelectedStopsDelivered() {
         '/api/admin/delivery-mark',
         {
           method: 'POST',
-          body: JSON.stringify({ member_id: Number(memberId), delivery_date: d0, kind }),
+          body: JSON.stringify({
+            member_id: Number(memberId),
+            delivery_date: d0,
+            kind,
+            meal_period: mealPeriod,
+          }),
         },
         { auth: true }
       )
@@ -574,7 +596,11 @@ async function loadSfPreviewData() {
   const ph = (phoneQuery.value || '').trim()
   if (ph) base.set('phone', ph)
   try {
-    const data = await apiJson(`/api/admin/delivery-sf/preview?${base.toString()}`, {}, { auth: true })
+    const data = await apiJson(
+      `${getSfPushPreviewApiPath(sheetView.value, sfPushMode.value)}?${base.toString()}`,
+      {},
+      { auth: true }
+    )
     const d1 = data?.delivery_date || d0
     sfPreview.value = {
       delivery_date: d1,
@@ -625,7 +651,7 @@ async function submitSfPush() {
   try {
     const payload = buildSfPushPayload(rows, d0, sfPushMode.value, sfPushHelpers)
     const data = await apiJson(
-      getSfPushApiPath(sfPushMode.value),
+      getSfPushApiPath(sfPushMode.value, sheetView.value),
       {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -651,13 +677,19 @@ async function submitSfPush() {
 async function markDelivery(memberId, kind) {
   if (batchMarking.value || markingMemberId.value != null) return
   const d0 = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
+  const mealPeriod = deliveryMarkMealPeriod(sheetView.value)
   markingMemberId.value = memberId
   try {
     await apiJson(
       '/api/admin/delivery-mark',
       {
         method: 'POST',
-        body: JSON.stringify({ member_id: Number(memberId), delivery_date: d0, kind }),
+        body: JSON.stringify({
+          member_id: Number(memberId),
+          delivery_date: d0,
+          kind,
+          meal_period: mealPeriod,
+        }),
       },
       { auth: true }
     )
@@ -759,18 +791,28 @@ async function markDelivery(memberId, kind) {
         <button
           type="button"
           class="delivery-btn delivery-btn--sf"
-          :disabled="loading"
-          :title="!sfPreview.sf_configured ? '请在后端 .env 配置顺丰开发者参数' : ''"
+          :disabled="loading || !sfPushEnabledForView"
+          :title="
+            !sfPushEnabledForView
+              ? '午晚餐视图仅运维双餐段会员；推顺丰请切换午餐或晚餐 Tab'
+              : !sfPreview.sf_configured
+                ? '请在后端 .env 配置顺丰开发者参数'
+                : ''
+          "
           @click="openSfDialog(SF_PUSH_MODE_SHEET)"
         >
           <Truck :size="16" stroke-width="2.5" />
-          顺丰推单
+          {{ sheetView === SHEET_VIEW_DINNER ? '顺丰晚餐推单' : '顺丰推单' }}
         </button>
         <button
           type="button"
           class="delivery-btn delivery-btn--sf-instant"
-          :disabled="loading"
-          :title="'勾选部分停靠点，推送到及时单账号（立即创单）；需先在门店设置配置「零售推顺丰店铺ID」'"
+          :disabled="loading || !sfPushEnabledForView || sheetView === SHEET_VIEW_DINNER"
+          :title="
+            sheetView === SHEET_VIEW_DINNER
+              ? '晚餐推单暂不支持及时单模式'
+              : '勾选部分停靠点，推送到及时单账号（立即创单）；需先在门店设置配置「零售推顺丰店铺ID」'
+          "
           @click="openSfDialog(SF_PUSH_MODE_INSTANT)"
         >
           <Zap :size="16" stroke-width="2.5" />
@@ -1062,6 +1104,18 @@ async function markDelivery(memberId, kind) {
 
     <template v-else>
       <div class="delivery-main delivery-page delivery-page--table no-print">
+        <el-tabs
+          v-model="sheetView"
+          class="delivery-sheet-view-tabs no-print"
+          @tab-change="fetchSheet"
+        >
+          <el-tab-pane label="午餐配送" :name="SHEET_VIEW_LUNCH" />
+          <el-tab-pane label="晚餐配送" :name="SHEET_VIEW_DINNER" />
+          <el-tab-pane label="午晚餐会员" :name="SHEET_VIEW_LUNCH_DINNER" />
+        </el-tabs>
+        <p v-if="sheetView === SHEET_VIEW_LUNCH_DINNER" class="delivery-sheet-view-hint">
+          双餐段会员运维视图；推顺丰请在「午餐」或「晚餐」Tab 分别推单。
+        </p>
         <section class="delivery-day-block">
           <p v-if="!sheetToday.groups?.length" class="members-loading">
             <template v-if="sheetToday.is_subscription_delivery_day === false">
@@ -1080,7 +1134,7 @@ async function markDelivery(memberId, kind) {
                 <header class="delivery-table-card__head">
                   <h3 class="delivery-table-card__title">
                     <MapPin :size="18" stroke-width="2" class="inline-icon" aria-hidden="true" />
-                    配送列表
+                    配送列表（{{ sheetViewLabel }}）
                     <span class="delivery-table-card__date">{{ sheetToday.delivery_date }}</span>
                   </h3>
                 </header>

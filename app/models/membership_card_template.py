@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -24,6 +24,8 @@ class MembershipCardTemplate(Base):
     )
     # 仅占位兼容旧数据或后续自动化路由；可为 NULL
     period_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    #: 覆盖餐段 JSON：["lunch"] / ["dinner"] / ["lunch","dinner"]，默认午餐
+    meal_periods: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     kind_label: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     meals_grant: Mapped[int] = mapped_column(Integer, nullable=False)

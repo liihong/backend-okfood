@@ -13,6 +13,10 @@ class MembershipCardTemplateOut(BaseModel):
     tenant_id: int
     kind_label: str = Field(..., description="种类：手填，如 周卡/季卡/午晚餐卡")
     period_kind: str | None = Field(None, description="可选占位 weekly|monthly，后续自动化可用")
+    meal_periods: list[str] = Field(
+        default_factory=lambda: ["lunch"],
+        description='覆盖餐段：["lunch"] / ["dinner"] / ["lunch","dinner"]',
+    )
     name: str
     meals_grant: int
     list_price_yuan: str | None = Field(None, description="原价（划线价），可为空")
@@ -43,6 +47,10 @@ class MembershipCardTemplateCreateIn(BaseModel):
     remark: str | None = Field(None, max_length=4096)
     sort_order: int = Field(default=0, ge=0)
     is_active: bool = True
+    meal_periods: list[str] = Field(
+        default_factory=lambda: ["lunch"],
+        description='覆盖餐段：["lunch"] / ["dinner"] / ["lunch","dinner"]',
+    )
 
 
 class MembershipCardTemplatePatchIn(BaseModel):
@@ -58,6 +66,7 @@ class MembershipCardTemplatePatchIn(BaseModel):
     remark: str | None = None
     sort_order: int | None = Field(None, ge=0)
     is_active: bool | None = None
+    meal_periods: list[str] | None = Field(None, description="覆盖餐段")
 
 
 class StoreRetailCategoryOut(BaseModel):

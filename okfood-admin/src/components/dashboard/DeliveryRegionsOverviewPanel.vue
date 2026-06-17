@@ -7,6 +7,8 @@ import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.j
 import { showToast } from '../../composables/useToast.js'
 import { useAnimatedInteger } from '../../composables/useAnimatedInteger.js'
 import DashboardPickupKitchenPanel from './DashboardPickupKitchenPanel.vue'
+import DayStockAdjustmentModal from './DayStockAdjustmentModal.vue'
+import { useDayStockAdjustments } from '../../composables/useDayStockAdjustments.js'
 
 /** 营业概览顶卡数字条（请假/备餐/当日过期份数）；与 dashboard-summary / 归档接口回填 */
 const dashboardStats = ref([])
@@ -250,6 +252,15 @@ function onMenuDayStockSaved(payload) {
     if (Number.isFinite(payload.dayAfterTomorrow) && payload.dayAfterTomorrow >= 0) {
       next.day_after_tomorrow_menu_day_total_stock = Math.trunc(payload.dayAfterTomorrow)
     }
+    if (Number.isFinite(payload.todayDinner) && payload.todayDinner >= 0) {
+      next.today_dinner_menu_day_total_stock = Math.trunc(payload.todayDinner)
+    }
+    if (Number.isFinite(payload.tomorrowDinner) && payload.tomorrowDinner >= 0) {
+      next.tomorrow_dinner_menu_day_total_stock = Math.trunc(payload.tomorrowDinner)
+    }
+    if (Number.isFinite(payload.dayAfterTomorrowDinner) && payload.dayAfterTomorrowDinner >= 0) {
+      next.day_after_tomorrow_dinner_menu_day_total_stock = Math.trunc(payload.dayAfterTomorrowDinner)
+    }
     summaryMeta.value = next
   }
   void fetchDashboardSummary()
@@ -356,6 +367,68 @@ const expireMealPortions = computed(() => Number(dashboardStats.value[4]?.value)
 const todaySingleRetailTotalCount = computed(
   () => Number(summaryMeta.value?.today_single_retail_total_quantity) || 0,
 )
+const todayLunchWasteTotal = computed(() => Number(summaryMeta.value?.today_lunch_waste_total) || 0)
+const todayLunchRemainingDisplay = computed(() => {
+  const v = summaryMeta.value?.today_lunch_remaining
+  if (v != null && v !== '') {
+    const n = Number(v)
+    if (Number.isFinite(n)) return Math.max(0, Math.trunc(n))
+  }
+  return todaySellableQuantity.value
+})
+const dinnerMenuDayTotalStock = computed(() => {
+  const v = summaryMeta.value?.today_dinner_menu_day_total_stock
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null
+})
+const todayDinnerPrepMetrics = computed(() => {
+  const m = summaryMeta.value?.today_dinner_prep_metrics
+  return m && typeof m === 'object' ? m : null
+})
+const todayDinnerDelivery = computed(() => {
+  const b = prepMetricsBreakdown(todayDinnerPrepMetrics.value)
+  return b != null ? b.delivery : null
+})
+const todayDinnerRetail = computed(
+  () => Number(summaryMeta.value?.today_dinner_single_retail_total_quantity) || 0,
+)
+const todayDinnerWasteTotal = computed(() => Number(summaryMeta.value?.today_dinner_waste_total) || 0)
+const todayDinnerRemaining = computed(() => {
+  const v = summaryMeta.value?.today_dinner_remaining
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : null
+})
+const todayDinnerSoldTotal = computed(() => {
+  if (todayDinnerDelivery.value == null) return null
+  return Math.trunc(Number(todayDinnerDelivery.value)) + todayDinnerRetail.value
+})
+
+const {
+  modalOpen: stockModalOpen,
+  modalMealPeriod: stockModalMealPeriod,
+  modalBusinessDate: stockModalBusinessDate,
+  modalDelta: stockModalDelta,
+  modalReason: stockModalReason,
+  modalRemark: stockModalRemark,
+  submitting: stockAdjustSubmitting,
+  openAdjustModal: openStockAdjustModal,
+  submitAdjustment: submitStockAdjustment,
+} = useDayStockAdjustments({ onSuccess: () => fetchDashboardSummary() })
+
+function openLunchStockAdjust() {
+  openStockAdjustModal({
+    businessDate: businessAnchorIsoNormalized.value || summaryAnchorDate.value,
+    mealPeriod: 'lunch',
+  })
+}
+function openDinnerStockAdjust() {
+  openStockAdjustModal({
+    businessDate: businessAnchorIsoNormalized.value || summaryAnchorDate.value,
+    mealPeriod: 'dinner',
+  })
+}
 
 /** 明日单次零售：锚定日次日已支付单次零售份数（dashboard-summary.tomorrow_single_retail_total_quantity） */
 const tomorrowSingleRetailTotalCount = computed(
@@ -381,6 +454,27 @@ const menuDayTotalStockTomorrow = computed(() => {
 /** 锚定日后天周菜单「日总份数」（供后厨计划面板读取） */
 const menuDayTotalStockDayAfterTomorrow = computed(() => {
   const v = summaryMeta.value?.day_after_tomorrow_menu_day_total_stock
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null
+})
+
+const menuDayTotalStockDinner = computed(() => {
+  const v = summaryMeta.value?.today_dinner_menu_day_total_stock
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null
+})
+
+const menuDayTotalStockTomorrowDinner = computed(() => {
+  const v = summaryMeta.value?.tomorrow_dinner_menu_day_total_stock
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null
+})
+
+const menuDayTotalStockDayAfterTomorrowDinner = computed(() => {
+  const v = summaryMeta.value?.day_after_tomorrow_dinner_menu_day_total_stock
   if (v == null || v === '') return null
   const n = Number(v)
   return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null
@@ -733,7 +827,7 @@ onMounted(async () => {
                       todaySellableQuantity != null && todaySellableQuantity <= 0,
                   }"
                   :style="{
-                    width: distributionStackWidth(todaySellableQuantity, menuDayTotalStock),
+                    width: distributionStackWidth(todayLunchRemainingDisplay, menuDayTotalStock),
                   }"
                 />
               </div>
@@ -762,16 +856,22 @@ onMounted(async () => {
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--waste" aria-hidden="true" />损耗</span
+                  >
+                  <span class="dro-dash-branch-pill__val">{{ todayLunchWasteTotal }}</span>
+                </div>
+                <div class="dro-dash-branch-pill">
+                  <span class="dro-dash-branch-pill__lbl"
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--sellable" aria-hidden="true" />剩余</span
                   >
                   <span
                     class="dro-dash-branch-pill__val dro-dash-branch-pill__val--sellable"
                     :class="{
                       'dro-dash-branch-pill__val--sellable-muted':
-                        todaySellableQuantity != null && todaySellableQuantity <= 0,
+                        todayLunchRemainingDisplay != null && todayLunchRemainingDisplay <= 0,
                     }"
                     >{{
-                      todaySellableQuantity == null ? '—' : `${todaySellableQuantity}`
+                      todayLunchRemainingDisplay == null ? '—' : `${todayLunchRemainingDisplay}`
                     }}</span
                   >
                 </div>
@@ -779,6 +879,9 @@ onMounted(async () => {
             </div>
           </div>
           <div class="dro-dash-kpi__mid-spacer" aria-hidden="true" />
+        </div>
+        <div class="dro-dash-kpi__foot-row">
+          <button type="button" class="dro-dash-adjust-btn" @click="openLunchStockAdjust">报损耗</button>
         </div>
         <div class="dro-dash-kpi__stat-row dro-dash-kpi__stat-row--chips-then-yoy">
           <div class="dro-dash-chip dro-dash-chip--amber">
@@ -827,6 +930,53 @@ onMounted(async () => {
               }}</span
             >
           </div>
+        </div>
+      </article>
+
+      <article class="dro-dash-kpi dro-dash-kpi--dinner" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
+        <div class="dro-dash-kpi__head">
+          <div class="dro-dash-kpi__tags">
+            <span class="dro-dash-pill dro-dash-pill--violet">晚餐总盘 · {{ businessAnchorMdDisplay || '—' }}</span>
+          </div>
+        </div>
+        <div class="dro-dash-kpi__hero-metric">
+          <span class="dro-dash-kpi__hero-metric-num">{{
+            dinnerMenuDayTotalStock != null ? dinnerMenuDayTotalStock : '—'
+          }}</span>
+          <small class="dro-dash-kpi__hero-metric-suffix">份-后厨产出量</small>
+        </div>
+        <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
+          <div class="dro-dash-chain-node-header">
+            <span class="dro-dash-chain-node-label">配额去向拆解线</span>
+            <span class="dro-dash-chain-node dro-dash-chain-node--main">
+              已售出 {{ todayDinnerSoldTotal != null ? `${todayDinnerSoldTotal}份` : '—' }}
+            </span>
+          </div>
+          <div class="dro-dash-branch-pill-grid">
+            <div class="dro-dash-branch-pill">
+              <span class="dro-dash-branch-pill__lbl">配送</span>
+              <span class="dro-dash-branch-pill__val">{{
+                todayDinnerDelivery == null ? '—' : `${Math.trunc(Number(todayDinnerDelivery))}`
+              }}</span>
+            </div>
+            <div class="dro-dash-branch-pill">
+              <span class="dro-dash-branch-pill__lbl">零售</span>
+              <span class="dro-dash-branch-pill__val">{{ todayDinnerRetail }}</span>
+            </div>
+            <div class="dro-dash-branch-pill">
+              <span class="dro-dash-branch-pill__lbl">损耗</span>
+              <span class="dro-dash-branch-pill__val">{{ todayDinnerWasteTotal }}</span>
+            </div>
+            <div class="dro-dash-branch-pill">
+              <span class="dro-dash-branch-pill__lbl">剩余</span>
+              <span class="dro-dash-branch-pill__val">{{
+                todayDinnerRemaining == null ? '—' : `${todayDinnerRemaining}`
+              }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="dro-dash-kpi__foot-row">
+          <button type="button" class="dro-dash-adjust-btn" @click="openDinnerStockAdjust">报损耗</button>
         </div>
       </article>
 
@@ -1176,6 +1326,9 @@ onMounted(async () => {
       :menu-day-total-stock="menuDayTotalStock"
       :menu-day-total-stock-tomorrow="menuDayTotalStockTomorrow"
       :menu-day-total-stock-day-after-tomorrow="menuDayTotalStockDayAfterTomorrow"
+      :menu-day-total-stock-dinner="menuDayTotalStockDinner"
+      :menu-day-total-stock-tomorrow-dinner="menuDayTotalStockTomorrowDinner"
+      :menu-day-total-stock-day-after-tomorrow-dinner="menuDayTotalStockDayAfterTomorrowDinner"
       :shanghai-today="String(summaryMeta?.shanghai_today || '')"
       :summary-loading="dashboardStatsLoading"
       @menu-day-stock-saved="onMenuDayStockSaved"
@@ -1211,6 +1364,21 @@ onMounted(async () => {
       </article>
     </div>
   </section>
+
+  <DayStockAdjustmentModal
+    :open="stockModalOpen"
+    :meal-period="stockModalMealPeriod"
+    :business-date="stockModalBusinessDate"
+    :delta="stockModalDelta"
+    :reason="stockModalReason"
+    :remark="stockModalRemark"
+    :submitting="stockAdjustSubmitting"
+    @update:open="(v) => (stockModalOpen = v)"
+    @update:delta="(v) => (stockModalDelta = v)"
+    @update:reason="(v) => (stockModalReason = v)"
+    @update:remark="(v) => (stockModalRemark = v)"
+    @submit="submitStockAdjustment"
+  />
 </template>
 
 <style scoped>
@@ -1267,7 +1435,7 @@ onMounted(async () => {
 
 @media (min-width: 1120px) {
   .dro-dash-stat-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1289,8 +1457,16 @@ onMounted(async () => {
     border-color 0.3s ease;
 }
 
-.dro-dash-kpi:not(.dro-dash-kpi--tomorrow):not(.dro-dash-kpi--maplib) {
+.dro-dash-kpi:not(.dro-dash-kpi--tomorrow):not(.dro-dash-kpi--maplib):not(.dro-dash-kpi--dinner) {
   border-top: 4px solid #0d5c46;
+}
+
+.dro-dash-kpi--dinner {
+  border-top: 4px solid #7c3aed;
+}
+
+.dro-dash-kpi--dinner:hover {
+  border-color: rgba(124, 58, 237, 0.25);
 }
 
 .dro-dash-kpi--tomorrow {
@@ -1316,6 +1492,40 @@ onMounted(async () => {
 
 .dro-dash-kpi--dim {
   opacity: 0.88;
+}
+
+.dro-dash-kpi__foot-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+  padding-top: 0.5rem;
+}
+
+.dro-dash-adjust-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #475569;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease,
+    background 0.2s ease;
+}
+
+.dro-dash-adjust-btn:hover {
+  border-color: #0d5c46;
+  color: #0d5c46;
+  background: #ecfdf5;
+}
+
+.dro-dash-kpi--dinner .dro-dash-adjust-btn:hover {
+  border-color: #7c3aed;
+  color: #7c3aed;
+  background: #f5f3ff;
 }
 
 .dro-dash-kpi__head {

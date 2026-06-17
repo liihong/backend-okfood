@@ -40,6 +40,9 @@ from app.services.member_address_service import delivery_region_name_map, full_a
 from app.services.delivery_sheet_meal_units_service import DeliverySheetMealUnitsContext
 from app.services.delivery_sheet_push_snapshot_service import DeliverySheetDaySnapshots
 from app.services.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
+from app.models.enums import DeliverySheetView, MealPeriod
+from app.services.meal_period.card_eligibility import filter_members_for_sheet_view
+from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
 
 
 def _merged_home_member_ids_when_sheet_frozen(
@@ -167,6 +170,49 @@ def _home_members_for_delivery_sheet(
         )
 
     return eligible_members_for_delivery(
+        db,
+        delivery_date=delivery_date,
+        delivery_region_id=delivery_region_id,
+        store_id=sid,
+    )
+
+
+def _home_members_for_dinner_delivery_sheet(
+    db: Session,
+    *,
+    delivery_date: date,
+    delivery_region_id: int | None,
+    store_id: int,
+    day_snap: DeliverySheetDaySnapshots | None = None,
+) -> tuple[list[Member], dict[int, MemberAddress | None]]:
+    """晚餐到家应配送会员；推单冻结逻辑与午餐平行，餐段为 dinner。"""
+    from app.services.dinner.eligibility import eligible_members_for_dinner_delivery
+
+    sid = int(store_id)
+    if not is_subscription_delivery_day(delivery_date):
+        return [], {}
+
+    snap = day_snap or DeliverySheetDaySnapshots.load(
+        db, store_id=sid, delivery_date=delivery_date, meal_period=MealPeriod.DINNER.value
+    )
+    if snap.has_sf_push:
+        frozen_ids = snap.frozen_member_ids or frozenset()
+        merged_ids = _merged_home_member_ids_when_sheet_frozen(
+            db,
+            delivery_date=delivery_date,
+            store_id=sid,
+            delivery_region_id=delivery_region_id,
+            frozen_ids=frozen_ids,
+            absent_at_push=snap.absent_member_ids,
+        )
+        return _load_home_members_with_default_addresses(
+            db,
+            member_ids=merged_ids,
+            store_id=sid,
+            delivery_region_id=delivery_region_id,
+        )
+
+    return eligible_members_for_dinner_delivery(
         db,
         delivery_date=delivery_date,
         delivery_region_id=delivery_region_id,
@@ -486,6 +532,121 @@ def delivery_sheet_metrics_for_date(
     return result
 
 
+def delivery_sheet_metrics_for_dinner_date(
+    db: Session,
+    *,
+    delivery_date: date,
+    store_id: int,
+    metrics_cache: dict[date, DeliverySheetDayMetrics] | None = None,
+) -> DeliverySheetDayMetrics:
+    """晚餐营业概览：仅到家配送，不含自提；餐段 delivery_logs / 推单快照为 dinner。"""
+    if metrics_cache is not None and delivery_date in metrics_cache:
+        return metrics_cache[delivery_date]
+    empty = DeliverySheetDayMetrics(0, 0, 0, 0, 0, 0)
+    if not is_subscription_delivery_day(delivery_date):
+        if metrics_cache is not None:
+            metrics_cache[delivery_date] = empty
+        return empty
+
+    sid = int(store_id)
+    d = delivery_date
+    day_snap = DeliverySheetDaySnapshots.load(
+        db, store_id=sid, delivery_date=d, meal_period=MealPeriod.DINNER.value
+    )
+    day_delivered_ids = _store_delivered_member_ids_on_date(
+        db, store_id=sid, delivery_date=d, meal_period=MealPeriod.DINNER.value
+    )
+    members, default_by_id = _home_members_for_dinner_delivery_sheet(
+        db, delivery_date=d, delivery_region_id=None, store_id=sid, day_snap=day_snap
+    )
+    sheet_members = list(members)
+    home_mids = {int(m.id) for m in sheet_members}
+    home_delivered_set = day_delivered_ids & home_mids
+    units_ctx = DeliverySheetMealUnitsContext.from_day_snapshots(day_snap, db=db)
+    home_pending = 0
+    home_delivered = 0
+    for m in sheet_members:
+        u = units_ctx.units_for(m)
+        if int(m.id) in home_delivered_set:
+            home_delivered += u
+        else:
+            home_pending += u
+    home_stop_count = _count_home_delivery_stops(sheet_members, default_by_id, db)
+
+    result = DeliverySheetDayMetrics(
+        home_pending_meal_total=home_pending,
+        home_delivered_meal_total=home_delivered,
+        pickup_meal_total=0,
+        pickup_pending_meal_total=0,
+        pickup_delivered_meal_total=0,
+        home_stop_count=home_stop_count,
+    )
+    if metrics_cache is not None:
+        metrics_cache[delivery_date] = result
+    return result
+
+
+def delivery_sheet_metrics_pending_sql_for_dinner_future_date(
+    db: Session, *, delivery_date: date, store_id: int
+) -> DeliverySheetDayMetrics:
+    """未来供餐日晚餐：SQL 聚合晚餐 eligible 到家份数（无自提）。"""
+    from app.services.dinner.eligibility import eligible_members_for_dinner_delivery
+    from app.services.meal_period.units import effective_daily_meal_units_for_period
+
+    empty = DeliverySheetDayMetrics(0, 0, 0, 0, 0, 0)
+    if not is_subscription_delivery_day(delivery_date):
+        return empty
+    members, _ = eligible_members_for_dinner_delivery(
+        db, delivery_date=delivery_date, delivery_region_id=None, store_id=int(store_id)
+    )
+    total = sum(
+        effective_daily_meal_units_for_period(db, m, MealPeriod.DINNER.value) for m in members
+    )
+    return DeliverySheetDayMetrics(
+        home_pending_meal_total=int(total),
+        home_delivered_meal_total=0,
+        pickup_meal_total=0,
+        pickup_pending_meal_total=0,
+        pickup_delivered_meal_total=0,
+        home_stop_count=0,
+    )
+
+
+def delivery_sheet_metrics_for_period(
+    db: Session,
+    *,
+    delivery_date: date,
+    store_id: int,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
+    metrics_cache: dict | None = None,
+) -> DeliverySheetDayMetrics:
+    """分餐段 metrics；metrics_cache 键为 (date, period) 或 date（仅 lunch 兼容旧调用）。"""
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    cache_key = (delivery_date, period)
+    if metrics_cache is not None and cache_key in metrics_cache:
+        return metrics_cache[cache_key]
+    if period == MealPeriod.DINNER.value:
+        result = delivery_sheet_metrics_for_dinner_date(
+            db, delivery_date=delivery_date, store_id=int(store_id)
+        )
+    else:
+        from app.core.timeutil import today_shanghai
+        from app.services.delivery_day_lock_service import is_delivery_day_sheet_frozen_after_sf_push
+
+        sid = int(store_id)
+        d = delivery_date
+        cal_today = today_shanghai()
+        if d > cal_today:
+            result = delivery_sheet_metrics_pending_sql_for_future_date(db, delivery_date=d, store_id=sid)
+        elif is_delivery_day_sheet_frozen_after_sf_push(db, store_id=sid, delivery_date=d):
+            result = delivery_sheet_metrics_for_date(db, delivery_date=d, store_id=sid)
+        else:
+            result = delivery_sheet_metrics_via_sql_for_unlocked_date(db, delivery_date=d, store_id=sid)
+    if metrics_cache is not None:
+        metrics_cache[cache_key] = result
+    return result
+
+
 def _sum_meal_units_home_eligible_on_date(db: Session, *, delivery_date: date, store_id: int) -> int:
     units_sql = sql_effective_daily_meal_units_column()
     q = select(func.coalesce(func.sum(units_sql), 0)).where(
@@ -560,8 +721,10 @@ def _store_delivered_member_ids_on_date(
     *,
     store_id: int,
     delivery_date: date,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
 ) -> set[int]:
-    """门店当日全部已送达会员 id（一次索引扫描，供大表与 extra_delivered 复用）。"""
+    """门店当日指定餐段已送达会员 id（一次索引扫描，供大表与 extra_delivered 复用）。"""
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
     rows = db.scalars(
         select(DeliveryLog.member_id)
         .distinct()
@@ -569,6 +732,7 @@ def _store_delivered_member_ids_on_date(
         .where(
             DeliveryLog.delivery_date == delivery_date,
             DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+            DeliveryLog.meal_period == period,
             Member.store_id == int(store_id),
         )
     ).all()
@@ -931,7 +1095,18 @@ def build_delivery_sheet(
     area: str | None = None,
     phone: str | None = None,
     store_id: int | None = None,
+    sheet_view: str = DeliverySheetView.LUNCH.value,
 ) -> DeliverySheetOut:
+    """
+    配送大表。sheet_view：lunch（默认，与原 /delivery-sheet 一致）/ dinner / lunch_dinner。
+    纯晚餐卡会员仅出现在 dinner 视图，不会出现在 lunch 视图。
+    """
+    view = (sheet_view or DeliverySheetView.LUNCH.value).strip().lower()
+    if view == DeliverySheetView.DINNER.value:
+        meal_period = MealPeriod.DINNER.value
+    else:
+        meal_period = MealPeriod.LUNCH.value
+
     cfg = get_settings()
     sid = int(store_id) if store_id is not None else int(cfg.DEFAULT_STORE_ID)
     st = db.get(Store, sid)
@@ -965,17 +1140,41 @@ def build_delivery_sheet(
             )
         region_filter_id = int(rid)
 
-    day_snap = DeliverySheetDaySnapshots.load(db, store_id=sid, delivery_date=d)
-    day_delivered_ids = _store_delivered_member_ids_on_date(db, store_id=sid, delivery_date=d)
-    members, default_by_id = _home_members_for_delivery_sheet(
-        db,
-        delivery_date=d,
-        delivery_region_id=region_filter_id,
-        store_id=sid,
-        day_snap=day_snap,
+    day_snap = DeliverySheetDaySnapshots.load(
+        db, store_id=sid, delivery_date=d, meal_period=meal_period
     )
-    # 与到家列表一并拉取自提会员，便于单次查询 delivery_logs（片区筛选不改变自提分组是否出现）
-    pu_members, pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d, store_id=sid)
+    day_delivered_ids = _store_delivered_member_ids_on_date(
+        db, store_id=sid, delivery_date=d, meal_period=meal_period
+    )
+    if view == DeliverySheetView.DINNER.value:
+        members, default_by_id = _home_members_for_dinner_delivery_sheet(
+            db,
+            delivery_date=d,
+            delivery_region_id=region_filter_id,
+            store_id=sid,
+            day_snap=day_snap,
+        )
+    else:
+        members, default_by_id = _home_members_for_delivery_sheet(
+            db,
+            delivery_date=d,
+            delivery_region_id=region_filter_id,
+            store_id=sid,
+            day_snap=day_snap,
+        )
+        if view == DeliverySheetView.LUNCH.value:
+            members = filter_members_for_sheet_view(db, members, DeliverySheetView.LUNCH.value)
+        elif view == DeliverySheetView.LUNCH_DINNER.value:
+            members = filter_members_for_sheet_view(db, members, DeliverySheetView.LUNCH_DINNER.value)
+    # 与到家列表一并拉取自提会员（晚餐视图不含自提）
+    if view == DeliverySheetView.DINNER.value:
+        pu_members, pu_defaults = [], {}
+    else:
+        pu_members, pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d, store_id=sid)
+        if view == DeliverySheetView.LUNCH.value:
+            pu_members = filter_members_for_sheet_view(db, pu_members, DeliverySheetView.LUNCH.value)
+        elif view == DeliverySheetView.LUNCH_DINNER.value:
+            pu_members = filter_members_for_sheet_view(db, pu_members, DeliverySheetView.LUNCH_DINNER.value)
     ex_h, ex_dh, ex_pu, ex_pud = extra_delivered_ineligible_subscribers(
         db,
         delivery_date=d,
@@ -995,7 +1194,7 @@ def build_delivery_sheet(
     if ph:
         members = _filter_members_by_phone_hint(members, ph)
         pu_members = _filter_members_by_phone_hint(pu_members, ph)
-    units_ctx = DeliverySheetMealUnitsContext.from_day_snapshots(day_snap)
+    units_ctx = DeliverySheetMealUnitsContext.from_day_snapshots(day_snap, db=db)
     all_member_ids = {int(m.id) for m in members} | {int(m.id) for m in pu_members}
     delivered_set = day_delivered_ids & all_member_ids
 

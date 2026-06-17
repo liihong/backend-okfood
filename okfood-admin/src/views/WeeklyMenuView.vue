@@ -1,9 +1,13 @@
 <script setup>
 defineOptions({ name: 'WeeklyMenuView' })
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { CornerDownRight, Info, X } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import { useDayStockAdjustments } from '../composables/useDayStockAdjustments.js'
+import DayStockAdjustmentModal from '../components/dashboard/DayStockAdjustmentModal.vue'
+
+const mealPeriodTab = ref(/** @type {'lunch'|'dinner'} */ ('lunch'))
 
 const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
@@ -75,6 +79,7 @@ function slotsToRows(slotList, weekStartIso) {
     subscription_meals_for_day: bySlot[slot]?.subscription_meals_for_day ?? null,
     single_retail_paid_portions: bySlot[slot]?.single_retail_paid_portions ?? null,
     single_stock_remaining: bySlot[slot]?.single_stock_remaining ?? null,
+    waste_total: bySlot[slot]?.waste_total ?? null,
   }))
 }
 
@@ -195,7 +200,8 @@ async function loadPreview() {
   if (!adminAccessToken.value) return
   loading.value = true
   try {
-    preview.value = await apiJson('/api/admin/menu/weekly-slots', {}, { auth: true })
+    const qs = `?meal_period=${encodeURIComponent(mealPeriodTab.value)}`
+    preview.value = await apiJson(`/api/admin/menu/weekly-slots${qs}`, {}, { auth: true })
     totalStockDraft.value = {}
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
@@ -232,6 +238,7 @@ async function onDishChange(row, dishId, opts = {}) {
           week_start: row.weekStart,
           slot: row.slot,
           dish_id: dishId == null || dishId === '' ? null : Number(dishId),
+          meal_period: mealPeriodTab.value,
         }),
       },
       { auth: true },
@@ -256,7 +263,7 @@ function buildTotalStockBody(row, opts = {}) {
     opts.stockOverride !== undefined
       ? String(opts.stockOverride ?? '').trim()
       : String(totalStockFieldValue(row) ?? '').trim()
-  const body = { week_start: row.weekStart, slot: row.slot, total_stock: null }
+  const body = { week_start: row.weekStart, slot: row.slot, total_stock: null, meal_period: mealPeriodTab.value }
   if (s !== '' && s !== '—') {
     const n = Math.floor(Number(s))
     if (!Number.isFinite(n) || n < 0) return { error: '请输入非负整数或留空（不限）' }
@@ -361,6 +368,27 @@ onMounted(() => {
   void fetchDishes()
   void loadPreview()
 })
+
+watch(mealPeriodTab, () => {
+  void loadPreview()
+})
+
+const {
+  modalOpen,
+  modalMealPeriod,
+  modalBusinessDate,
+  modalDelta,
+  modalReason,
+  modalRemark,
+  submitting: adjustSubmitting,
+  openAdjustModal,
+  submitAdjustment,
+} = useDayStockAdjustments({ onSuccess: () => loadPreview() })
+
+/** @param {{ weekStart: string, slot: number }} row */
+function openRowAdjust(row) {
+  openAdjustModal({ businessDate: slotCalendarYmd(row), mealPeriod: mealPeriodTab.value })
+}
 </script>
 
 <template>
@@ -379,6 +407,25 @@ onMounted(() => {
         <X :size="16" stroke-width="2.5" />
       </button>
     </div>
+
+    <nav class="wmenu-period-tabs" aria-label="餐段切换">
+      <button
+        type="button"
+        class="wmenu-period-tab"
+        :class="{ 'wmenu-period-tab--active': mealPeriodTab === 'lunch' }"
+        @click="mealPeriodTab = 'lunch'"
+      >
+        午餐
+      </button>
+      <button
+        type="button"
+        class="wmenu-period-tab"
+        :class="{ 'wmenu-period-tab--active': mealPeriodTab === 'dinner' }"
+        @click="mealPeriodTab = 'dinner'"
+      >
+        晚餐
+      </button>
+    </nav>
 
     <div v-if="preview" class="wmenu-schedule-scroll">
       <div class="wmenu-schedule-grid">
@@ -399,7 +446,9 @@ onMounted(() => {
                 <th>日总份数</th>
                 <th>单次零售</th>
                 <th>应配送</th>
-                <th>单次余</th>
+                <th>损耗</th>
+                <th>剩余</th>
+                <th>操作</th>
                 <th>菜品</th>
               </tr>
             </thead>
@@ -454,10 +503,21 @@ onMounted(() => {
                 <td>
                   <span class="wmenu-deliver-badge">{{ deliverDisplay(row) }}</span>
                 </td>
+                <td>{{ row.waste_total != null ? row.waste_total : '—' }}</td>
                 <td>
                   <span class="wmenu-remain-badge" :class="remainingBadgeClass(row)">
                     {{ remainingDisplay(row) }}
                   </span>
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    class="wmenu-adjust-btn"
+                    :disabled="!row.dish_id || isSlotRowPast(row)"
+                    @click="openRowAdjust(row)"
+                  >
+                    报损耗
+                  </button>
                 </td>
                 <td>
                   <el-select
@@ -513,7 +573,9 @@ onMounted(() => {
                 <th>日总份数</th>
                 <th>单次零售</th>
                 <th>应配送</th>
-                <th>单次余</th>
+                <th>损耗</th>
+                <th>剩余</th>
+                <th>操作</th>
                 <th>菜品</th>
               </tr>
             </thead>
@@ -568,10 +630,21 @@ onMounted(() => {
                 <td>
                   <span class="wmenu-deliver-badge">{{ deliverDisplay(row) }}</span>
                 </td>
+                <td>{{ row.waste_total != null ? row.waste_total : '—' }}</td>
                 <td>
                   <span class="wmenu-remain-badge" :class="remainingBadgeClass(row)">
                     {{ remainingDisplay(row) }}
                   </span>
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    class="wmenu-adjust-btn"
+                    :disabled="!row.dish_id || isSlotRowPast(row)"
+                    @click="openRowAdjust(row)"
+                  >
+                    报损耗
+                  </button>
                 </td>
                 <td>
                   <el-select
@@ -601,6 +674,21 @@ onMounted(() => {
       </div>
     </div>
   </div>
+
+  <DayStockAdjustmentModal
+    :open="modalOpen"
+    :meal-period="modalMealPeriod"
+    :business-date="modalBusinessDate"
+    :delta="modalDelta"
+    :reason="modalReason"
+    :remark="modalRemark"
+    :submitting="adjustSubmitting"
+    @update:open="(v) => (modalOpen = v)"
+    @update:delta="(v) => (modalDelta = v)"
+    @update:reason="(v) => (modalReason = v)"
+    @update:remark="(v) => (modalRemark = v)"
+    @submit="submitAdjustment"
+  />
 </template>
 
 <style scoped>
@@ -965,5 +1053,37 @@ onMounted(() => {
 .wmenu-dish-select :deep(.el-select__placeholder) {
   color: #94a3b8;
   font-weight: 700;
+}
+
+.wmenu-period-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 1rem 0;
+}
+.wmenu-period-tab {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.wmenu-period-tab--active {
+  background: #059669;
+  border-color: #059669;
+  color: #fff;
+}
+.wmenu-adjust-btn {
+  border: 1px solid #fecaca;
+  background: #fff7ed;
+  color: #c2410c;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.wmenu-adjust-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

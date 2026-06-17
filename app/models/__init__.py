@@ -1,3 +1,4 @@
+from app.models.day_stock_adjustment_log import DayStockAdjustmentLog
 from app.models.admin_dashboard_biz_day_snapshot import AdminDashboardBizDaySnapshot
 from app.models.admin_system_notification import AdminSystemNotification
 from app.models.admin_user import AdminUser
@@ -22,7 +23,7 @@ from app.models.member_coupon import MemberCoupon
 from app.models.member_membership_refund import MemberMembershipRefund
 from app.models.marketing_coupon_template import MarketingCouponTemplate
 from app.models.member_operation_log import MemberOperationLog
-from app.models.membership_card_template import MembershipCardTemplate
+from app.models.member_meal_period_state import MemberMealPeriodState
 from app.models.single_meal_order import SingleMealOrder
 from app.models.store_retail_category import StoreRetailCategory
 from app.models.store_retail_order import StoreRetailOrder
@@ -35,6 +36,7 @@ from app.models.home_banner import HomeBanner
 from app.models.home_entry_poster import HomeEntryPoster
 
 __all__ = [
+    "DayStockAdjustmentLog",
     "AdminDashboardBizDaySnapshot",
     "AdminSystemNotification",
     "AdminUser",
@@ -59,6 +61,7 @@ __all__ = [
     "MemberCoupon",
     "MemberOperationLog",
     "MarketingCouponTemplate",
+    "MemberMealPeriodState",
     "MembershipCardTemplate",
     "SingleMealOrder",
     "StoreRetailCategory",

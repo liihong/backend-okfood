@@ -216,19 +216,23 @@ def upsert_delivery_sheet_units_snapshot(
     member_units: dict[int, int],
     overwrite: bool = True,
     frozen_member_ids: frozenset[int] | None = None,
+    meal_period: str | None = None,
 ) -> bool:
     """
     写入/覆盖份数快照。overwrite=False 时若已有行则跳过。
     返回是否写入了库。
     """
+    from app.services.delivery_sheet_push_snapshot_service import _snapshot_pk
+
     sid = int(store_id)
     d = delivery_date
+    pk = _snapshot_pk(store_id=sid, delivery_date=d, meal_period=meal_period or "lunch")
     payload: dict[str, object] = {
         str(int(k)): max(1, int(v)) for k, v in sorted(member_units.items())
     }
     if frozen_member_ids is not None:
         payload[FROZEN_MEMBER_IDS_SNAPSHOT_KEY] = sorted(int(x) for x in frozen_member_ids)
-    row = db.get(DeliverySheetPushUnitsSnapshot, {"store_id": sid, "delivery_date": d})
+    row = db.get(DeliverySheetPushUnitsSnapshot, pk)
     if row is not None and not overwrite:
         return False
     if row is None:
@@ -236,6 +240,7 @@ def upsert_delivery_sheet_units_snapshot(
             DeliverySheetPushUnitsSnapshot(
                 store_id=sid,
                 delivery_date=d,
+                meal_period=pk["meal_period"],
                 member_meal_units=payload,
                 recorded_at=beijing_now_naive(),
             )

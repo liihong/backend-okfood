@@ -67,6 +67,31 @@ class MemberOut(BaseModel):
         False,
         description="小程序自助购卡微信已缴、尚未入账（balance 仍为 0）；须引导完善配送/自提信息",
     )
+    entitled_meal_periods: list[str] = Field(
+        default_factory=lambda: ["lunch"],
+        description='当前卡种覆盖餐段，如 ["lunch"] / ["dinner"] / ["lunch","dinner"]',
+    )
+    dinner_daily_meal_units: int | None = Field(
+        None,
+        ge=1,
+        description="晚餐每配送日份数（仅含晚餐餐段时返回）",
+    )
+    dinner_daily_meal_units_pending: int | None = Field(
+        None,
+        ge=1,
+        description="晚餐预约生效份数",
+    )
+    dinner_delivery_sheet_pushed_today: bool | None = Field(
+        None,
+        description="当日晚餐大表是否已向顺丰推单",
+    )
+    dinner_is_leaved_tomorrow: bool | None = Field(None, description="晚餐：仅明日请假")
+    dinner_tomorrow_leave_target_date: date | None = Field(None, description="晚餐：明日请假目标业务日")
+    dinner_leave_range: dict[str, date | None] | None = Field(None, description="晚餐：区间请假")
+    dinner_sf_self_service_locked: bool | None = Field(
+        None,
+        description="晚餐顺丰推单配送未完成时锁定自助操作",
+    )
     created_at: str
 
     model_config = {"from_attributes": True}
@@ -123,7 +148,13 @@ class ProfilePatchIn(BaseModel):
         default=None,
         ge=1,
         le=20,
-        description="每配送日需送达份数；小程序自助修改范围 1～20，确认送达时按此倍数扣次",
+        description="午餐每配送日份数；小程序自助修改范围 1～20",
+    )
+    dinner_daily_meal_units: int | None = Field(
+        default=None,
+        ge=1,
+        le=20,
+        description="晚餐每配送日份数（须含晚餐餐段卡）",
     )
 
 
@@ -138,6 +169,10 @@ class LeaveIn(BaseModel):
     type: LeaveType
     start: date | None = None
     end: date | None = None
+    meal_period: Literal["lunch", "dinner"] = Field(
+        "lunch",
+        description="餐段：lunch=午餐（默认）；dinner=晚餐",
+    )
 
 
 class WxMiniLoginIn(BaseModel):

@@ -7,10 +7,36 @@ class PlanType(str, Enum):
     MONTH = "月卡"
 
 
+class MealPeriod(str, Enum):
+    """订阅履约餐段（与 plan_type 周/月/次正交）。"""
+
+    LUNCH = "lunch"
+    DINNER = "dinner"
+
+
+class DeliverySheetView(str, Enum):
+    """管理端配送大表视图。"""
+
+    LUNCH = "lunch"
+    DINNER = "dinner"
+    LUNCH_DINNER = "lunch_dinner"
+
+
 class DeliveryStatus(str, Enum):
     PENDING = "pending"
     DELIVERED = "delivered"
     LEAVE = "leave"
+
+
+class DayStockAdjustmentReason(str, Enum):
+    """日库存损耗/回补原因（客服报损耗下拉）。"""
+
+    SPILL = "spill"
+    KITCHEN_TASTE = "kitchen_taste"
+    KITCHEN_WASTE = "kitchen_waste"
+    COMP_MEAL = "comp_meal"
+    COUNT_CORRECTION = "count_correction"
+    OTHER = "other"
 
 
 class BalanceReason(str, Enum):

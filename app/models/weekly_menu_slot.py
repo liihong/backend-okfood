@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -11,7 +11,11 @@ class WeeklyMenuSlot(Base):
     """每周槽位：week_start（周一）+ slot（1–7）对应具体供餐日；本周/下周仅 week_start 不同。"""
 
     __tablename__ = "weekly_menu_slot"
-    __table_args__ = (UniqueConstraint("store_id", "week_start", "slot", name="uk_weekly_slot_store_week_slot"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "store_id", "week_start", "slot", "meal_period", name="uk_weekly_slot_store_week_slot_period"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     store_id: Mapped[int] = mapped_column(
@@ -19,6 +23,9 @@ class WeeklyMenuSlot(Base):
     )
     week_start: Mapped[date] = mapped_column(Date, nullable=False)
     slot: Mapped[int] = mapped_column(Integer, nullable=False)
+    meal_period: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="lunch", comment="lunch=午餐；dinner=晚餐"
+    )
     dish_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("menu_dish.id", onupdate="CASCADE"), nullable=False)
     total_stock: Mapped[int | None] = mapped_column(
         Integer, nullable=True, default=None, comment="日总份(含订阅与单次)；NULL=未配置(单次卡不可售)"

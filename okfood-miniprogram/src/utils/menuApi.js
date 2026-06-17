@@ -285,10 +285,15 @@ async function fetchWeeklyMenuFromNetwork(opts = {}) {
       ? opts.weekStart.trim()
       : ''
   const includeStock = opts.includeStock === true
+  const mealPeriod =
+    typeof opts.mealPeriod === 'string' && opts.mealPeriod.trim()
+      ? opts.mealPeriod.trim().toLowerCase()
+      : 'lunch'
   const data = await request('/api/menu/weekly', {
     method: 'GET',
     data: {
       ...(weekStart ? { week_start: weekStart } : {}),
+      meal_period: mealPeriod,
       include_stock: includeStock,
       ...(includeStock ? { as_of_date: ymdTodayShanghai() } : {}),
     },
@@ -298,7 +303,7 @@ async function fetchWeeklyMenuFromNetwork(opts = {}) {
 }
 
 /**
- * @param {{ weekStart?: string, includeStock?: boolean }} [opts]
+ * @param {{ weekStart?: string, includeStock?: boolean, mealPeriod?: string }} [opts]
  */
 function weeklyInflightKey(opts = {}) {
   const base = resolveWeeklyMenuCacheKey(opts) || '__this__'
@@ -327,10 +332,11 @@ export function prefetchWeeklyMenu(opts = {}) {
 }
 
 /**
- * @param {{ weekStart?: string, forceRefresh?: boolean, skipCache?: boolean, includeStock?: boolean }} [opts]
+ * @param {{ weekStart?: string, forceRefresh?: boolean, skipCache?: boolean, includeStock?: boolean, mealPeriod?: string }} [opts]
  *   - `forceRefresh` 忽略缓存直接请求
  *   - `skipCache` 不读不写缓存（调试用）
  *   - `includeStock` 列表展示剩余库存时传 true（仅当前可见周请求，预取仍不带库存）
+ *   - `mealPeriod` lunch/dinner，默认 lunch
  * @returns {Promise<{ weekStart: string, items: ReturnType<typeof mapWeeklyListItem>[] }>}
  */
 export async function fetchWeeklyMenu(opts = {}) {
@@ -424,12 +430,15 @@ export function mapMenuDetail(raw) {
 /**
  * @param {string} dishId
  * @param {string} [serviceDateYmd] 供餐日 YYYY-MM-DD，与详情/确认页用于剩余库存
+ * @param {string} [mealPeriod] lunch/dinner，默认 lunch
  */
-export async function fetchMenuDetail(dishId, serviceDateYmd) {
+export async function fetchMenuDetail(dishId, serviceDateYmd, mealPeriod = 'lunch') {
   const s = (serviceDateYmd && String(serviceDateYmd).trim()) || ''
-  const q = s
-    ? `?service_date=${encodeURIComponent(s)}`
-    : ''
+  const mp = mealPeriod === 'dinner' ? 'dinner' : 'lunch'
+  const qParts = []
+  if (s) qParts.push(`service_date=${encodeURIComponent(s)}`)
+  qParts.push(`meal_period=${encodeURIComponent(mp)}`)
+  const q = qParts.length ? `?${qParts.join('&')}` : ''
   const raw = await request(`/api/menu/detail/${encodeURIComponent(dishId)}${q}`, {
     method: 'GET',
     retry: 1,

@@ -769,7 +769,13 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
         raise HTTPException(status_code=400, detail="该会员固定周六不参与订阅履约，无法确认送达")
 
     log = db.execute(
-        select(DeliveryLog).where(DeliveryLog.member_id == member_id, DeliveryLog.delivery_date == d).with_for_update()
+        select(DeliveryLog)
+        .where(
+            DeliveryLog.member_id == member_id,
+            DeliveryLog.delivery_date == d,
+            DeliveryLog.meal_period == "lunch",
+        )
+        .with_for_update()
     ).scalar_one_or_none()
 
     if log and log.status == DeliveryStatus.DELIVERED.value:
@@ -779,7 +785,13 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
         raise HTTPException(status_code=400, detail="该日记录为请假状态")
 
     if not log:
-        log = DeliveryLog(member_id=member_id, delivery_date=d, status=DeliveryStatus.DELIVERED.value, courier_id=courier_id)
+        log = DeliveryLog(
+            member_id=member_id,
+            delivery_date=d,
+            meal_period="lunch",
+            status=DeliveryStatus.DELIVERED.value,
+            courier_id=courier_id,
+        )
         db.add(log)
     else:
         log.status = DeliveryStatus.DELIVERED.value

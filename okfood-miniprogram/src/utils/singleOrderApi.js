@@ -151,12 +151,15 @@ export function getSingleMealOrder(orderId) {
  *   store_pickup?: boolean,
  *   quantity?: number,
  *   member_address_id?: number,
+ *   meal_period?: string,
  * }} body delivery_date: YYYY-MM-DD；配送到家须带 member_address_id；自提勿传地址
  */
 export function createSingleMealOrder(body) {
+  const data = { ...body }
+  if (!data.meal_period) data.meal_period = 'lunch'
   return request('/api/user/single-orders', {
     method: 'POST',
-    data: body,
+    data,
   })
 }
 

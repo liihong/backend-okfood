@@ -18,6 +18,7 @@ class StoreKitchenPlan(Base):
         BigInteger, ForeignKey("stores.id", onupdate="CASCADE"), primary_key=True
     )
     business_date: Mapped[date] = mapped_column(Date, primary_key=True, comment="上海业务日")
+    meal_period: Mapped[str] = mapped_column(String(16), primary_key=True, default="lunch", comment="lunch/dinner")
     planned_total: Mapped[int] = mapped_column(
         Integer, nullable=False, comment="后厨计划出单总数（份/单）"
     )

@@ -822,7 +822,7 @@ def _weekly_slots_raw(rows: list) -> list[dict]:
 
 
 def _weekly_menu_day_stats_by_dates(
-    db: Session, dates: list[date], *, store_id: int
+    db: Session, dates: list[date], *, store_id: int, meal_period: str = "lunch"
 ) -> tuple[dict[date, int], dict[date, int]]:
     """本周菜单统计：与单次卡库存、dashboard-summary 共用 menu_day_stock 聚合。"""
     from app.services.menu_day_stock_service import (
@@ -832,45 +832,62 @@ def _weekly_menu_day_stats_by_dates(
 
     uniq = list(dict.fromkeys(dates))
     return (
-        dashboard_meal_totals_by_dates(db, uniq, store_id=int(store_id)),
-        paid_single_retail_portions_by_dates(db, uniq, store_id=int(store_id)),
+        dashboard_meal_totals_by_dates(db, uniq, store_id=int(store_id), meal_period=meal_period),
+        paid_single_retail_portions_by_dates(db, uniq, store_id=int(store_id), meal_period=meal_period),
     )
 
 
-def _weekly_slots_payload(db: Session, anchor: date, store_id: int) -> list[dict]:
+def _weekly_slots_payload(db: Session, anchor: date, store_id: int, *, meal_period: str = "lunch") -> list[dict]:
     sid = int(store_id)
+    period = (meal_period or "lunch").strip().lower()
     rows = db.execute(
         select(WeeklyMenuSlot, MenuDish)
         .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
-        .where(WeeklyMenuSlot.week_start == anchor, WeeklyMenuSlot.store_id == sid)
+        .where(
+            WeeklyMenuSlot.week_start == anchor,
+            WeeklyMenuSlot.store_id == sid,
+            WeeklyMenuSlot.meal_period == period,
+        )
         .order_by(WeeklyMenuSlot.slot)
     ).all()
     from app.services.menu_day_stock_service import weekly_slot_stock_extras
 
     dates = [anchor + timedelta(days=i) for i in range(7)]
-    sub_by_date, paid_by_date = _weekly_menu_day_stats_by_dates(db, dates, store_id=sid)
+    sub_by_date, paid_by_date = _weekly_menu_day_stats_by_dates(
+        db, dates, store_id=sid, meal_period=period
+    )
     return weekly_slot_stock_extras(
         db,
         anchor,
         _weekly_slots_raw(rows),
         store_id=sid,
+        meal_period=period,
         sub_by_date=sub_by_date,
         paid_by_date=paid_by_date,
     )
 
 
-def _weekly_dual_preview(db: Session, this_a: date, next_a: date, *, store_id: int) -> dict[str, list[dict]]:
+def _weekly_dual_preview(
+    db: Session, this_a: date, next_a: date, *, store_id: int, meal_period: str = "lunch"
+) -> dict[str, list[dict]]:
     """本周+下周槽位：仅本周算应配送/单次余；下周只返回槽位与总份配置。"""
     sid = int(store_id)
+    period = (meal_period or "lunch").strip().lower()
     anchors = [this_a, next_a]
     this_dates = [this_a + timedelta(days=i) for i in range(7)]
     from app.services.menu_day_stock_service import weekly_slot_stock_extras
 
-    sub_by_date, paid_by_date = _weekly_menu_day_stats_by_dates(db, this_dates, store_id=sid)
+    sub_by_date, paid_by_date = _weekly_menu_day_stats_by_dates(
+        db, this_dates, store_id=sid, meal_period=period
+    )
     rows = db.execute(
         select(WeeklyMenuSlot, MenuDish)
         .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
-        .where(WeeklyMenuSlot.store_id == sid, WeeklyMenuSlot.week_start.in_(anchors))
+        .where(
+            WeeklyMenuSlot.store_id == sid,
+            WeeklyMenuSlot.week_start.in_(anchors),
+            WeeklyMenuSlot.meal_period == period,
+        )
         .order_by(WeeklyMenuSlot.week_start, WeeklyMenuSlot.slot)
     ).all()
     by_anchor: dict[date, list] = {this_a: [], next_a: []}
@@ -882,6 +899,7 @@ def _weekly_dual_preview(db: Session, this_a: date, next_a: date, *, store_id: i
             this_a,
             _weekly_slots_raw(by_anchor.get(this_a, [])),
             store_id=sid,
+            meal_period=period,
             sub_by_date=sub_by_date,
             paid_by_date=paid_by_date,
         ),
@@ -890,26 +908,32 @@ def _weekly_dual_preview(db: Session, this_a: date, next_a: date, *, store_id: i
             next_a,
             _weekly_slots_raw(by_anchor.get(next_a, [])),
             store_id=sid,
+            meal_period=period,
             skip_subscription_stats=True,
         ),
     }
 
 
-def admin_weekly_menu_preview(db: Session, week_start: date | None, *, store_id: int) -> dict:
+def admin_weekly_menu_preview(
+    db: Session, week_start: date | None, *, store_id: int, meal_period: str = "lunch"
+) -> dict:
     """不传 week_start 时返回本周 + 下周槽位，便于预告维护。"""
     t = today_shanghai()
     this_a = _monday_of_week(t)
     next_a = this_a + timedelta(days=7)
+    period = (meal_period or "lunch").strip().lower()
     if week_start is not None:
         anchor = _monday_of_week(week_start)
         return {
             "week_start": anchor.isoformat(),
-            "slots": _weekly_slots_payload(db, anchor, store_id),
+            "meal_period": period,
+            "slots": _weekly_slots_payload(db, anchor, store_id, meal_period=period),
         }
-    dual = _weekly_dual_preview(db, this_a, next_a, store_id=store_id)
+    dual = _weekly_dual_preview(db, this_a, next_a, store_id=store_id, meal_period=period)
     return {
         "this_week_start": this_a.isoformat(),
         "next_week_start": next_a.isoformat(),
+        "meal_period": period,
         **dual,
     }
 
@@ -917,12 +941,14 @@ def admin_weekly_menu_preview(db: Session, week_start: date | None, *, store_id:
 def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: int) -> None:
     anchor = _monday_of_week(body.week_start)
     sid = int(store_id)
+    period = (getattr(body, "meal_period", None) or "lunch").strip().lower()
     if body.dish_id is None:
         row = db.scalar(
             select(WeeklyMenuSlot).where(
                 WeeklyMenuSlot.store_id == sid,
                 WeeklyMenuSlot.week_start == anchor,
                 WeeklyMenuSlot.slot == body.slot,
+                WeeklyMenuSlot.meal_period == period,
             )
         )
         if row:
@@ -937,6 +963,7 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: 
             WeeklyMenuSlot.store_id == sid,
             WeeklyMenuSlot.week_start == anchor,
             WeeklyMenuSlot.slot == body.slot,
+            WeeklyMenuSlot.meal_period == period,
         )
     )
     try:
@@ -950,6 +977,7 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: 
                     store_id=sid,
                     week_start=anchor,
                     slot=body.slot,
+                    meal_period=period,
                     dish_id=body.dish_id,
                 )
             )
@@ -965,12 +993,14 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: 
 def set_weekly_slot_menu_total_stock(db: Session, body: MenuDayTotalStockIn, *, store_id: int) -> None:
     from app.services.menu_day_stock_service import set_weekly_slot_total_stock
 
+    period = (getattr(body, "meal_period", None) or "lunch").strip().lower()
     set_weekly_slot_total_stock(
         db,
         _monday_of_week(body.week_start),
         body.slot,
         body.total_stock,
         store_id=int(store_id),
+        meal_period=period,
     )
 
 
@@ -1067,18 +1097,77 @@ def _dashboard_snapshot_meal_totals(
     *,
     store_id: int,
     dates: list[date],
+    meal_period: str = "lunch",
 ) -> dict[date, int]:
     """批量读取历史锚日归档中的「当日备餐份数」，避免同比基线重复跑大表。"""
     uniq = list(dict.fromkeys(dates))
     if not uniq:
         return {}
+    period = (meal_period or "lunch").strip().lower()
     rows = db.scalars(
         select(AdminDashboardBizDaySnapshot).where(
             AdminDashboardBizDaySnapshot.store_id == int(store_id),
             AdminDashboardBizDaySnapshot.business_anchor_date.in_(uniq),
+            AdminDashboardBizDaySnapshot.meal_period == period,
         )
     ).all()
     return {row.business_anchor_date: int(row.today_meals_to_prepare) for row in rows}
+
+
+def _dashboard_meal_period_stock_fields(
+    db: Session,
+    *,
+    store_id: int,
+    anchor: date,
+    day_after: date,
+    day_after_tomorrow: date,
+) -> dict:
+    """顶卡午/晚餐库存扩展字段（损耗、剩余、晚餐 metrics）。"""
+    from app.models.enums import MealPeriod
+    from app.services.day_stock_service import get_day_stock_breakdown
+    from app.services.delivery_sheet_service import delivery_sheet_metrics_for_period
+    from app.services.menu_day_stock_service import paid_single_retail_portions_by_dates, weekly_menu_day_total_stock
+
+    sid = int(store_id)
+    metrics_cache: dict = {}
+    lunch_bd = get_day_stock_breakdown(db, store_id=sid, business_date=anchor, meal_period=MealPeriod.LUNCH.value)
+    dinner_bd = get_day_stock_breakdown(db, store_id=sid, business_date=anchor, meal_period=MealPeriod.DINNER.value)
+    today_dinner_m = delivery_sheet_metrics_for_period(
+        db,
+        delivery_date=anchor,
+        store_id=sid,
+        meal_period=MealPeriod.DINNER.value,
+        metrics_cache=metrics_cache,
+    )
+    tomorrow_dinner_m = delivery_sheet_metrics_for_period(
+        db,
+        delivery_date=day_after,
+        store_id=sid,
+        meal_period=MealPeriod.DINNER.value,
+        metrics_cache=metrics_cache,
+    )
+    tomorrow_dinner_retail = paid_single_retail_portions_by_dates(
+        db, [day_after], store_id=sid, meal_period=MealPeriod.DINNER.value
+    )
+    return {
+        "today_lunch_waste_total": lunch_bd.waste_total,
+        "today_lunch_remaining": lunch_bd.remaining,
+        "today_dinner_menu_day_total_stock": weekly_menu_day_total_stock(
+            db, anchor, store_id=sid, meal_period=MealPeriod.DINNER.value
+        ),
+        "tomorrow_dinner_menu_day_total_stock": weekly_menu_day_total_stock(
+            db, day_after, store_id=sid, meal_period=MealPeriod.DINNER.value
+        ),
+        "day_after_tomorrow_dinner_menu_day_total_stock": weekly_menu_day_total_stock(
+            db, day_after_tomorrow, store_id=sid, meal_period=MealPeriod.DINNER.value
+        ),
+        "today_dinner_single_retail_total_quantity": dinner_bd.single_retail_total,
+        "tomorrow_dinner_single_retail_total_quantity": int(tomorrow_dinner_retail.get(day_after, 0)),
+        "today_dinner_waste_total": dinner_bd.waste_total,
+        "today_dinner_remaining": dinner_bd.remaining,
+        "today_dinner_prep_metrics": _dashboard_day_prep_metrics_out(today_dinner_m),
+        "tomorrow_dinner_prep_metrics": _dashboard_day_prep_metrics_out(tomorrow_dinner_m),
+    }
 
 
 def _dashboard_cached_sheet_metrics(
@@ -1200,6 +1289,9 @@ def dashboard_meal_summary(
     day_after_tomorrow_menu_day_total_stock = weekly_menu_day_total_stock(
         db, day_after_tomorrow, store_id=sid
     )
+    period_stock_kw = _dashboard_meal_period_stock_fields(
+        db, store_id=sid, anchor=anchor, day_after=day_after, day_after_tomorrow=day_after_tomorrow
+    )
     metrics_cache: dict[date, DeliverySheetDayMetrics] = {}
     snapshot_meal_totals = _dashboard_snapshot_meal_totals(
         db,
@@ -1210,7 +1302,7 @@ def dashboard_meal_summary(
     if anchor < cal_today and not force_recompute:
         row = db.get(
             AdminDashboardBizDaySnapshot,
-            {"store_id": sid, "business_anchor_date": anchor},
+            {"store_id": sid, "business_anchor_date": anchor, "meal_period": "lunch"},
         )
         if row is not None:
             # 快照已含锚日/次日备餐；环比文案仍按需重算两周前两日份数总和
@@ -1265,6 +1357,7 @@ def dashboard_meal_summary(
                 day_after_tomorrow_menu_day_total_stock=day_after_tomorrow_menu_day_total_stock,
                 today_prep_metrics=today_metrics,
                 tomorrow_prep_metrics=tomorrow_metrics,
+                **period_stock_kw,
                 from_snapshot=True,
                 snapshot_recorded_at=row.recorded_at,
             )
@@ -1322,6 +1415,7 @@ def dashboard_meal_summary(
         day_after_tomorrow_menu_day_total_stock=day_after_tomorrow_menu_day_total_stock,
         today_prep_metrics=today_metrics,
         tomorrow_prep_metrics=tomorrow_metrics,
+        **period_stock_kw,
         from_snapshot=False,
         snapshot_recorded_at=None,
     )
@@ -1330,14 +1424,16 @@ def dashboard_meal_summary(
         now = beijing_now_naive()
         row = db.get(
             AdminDashboardBizDaySnapshot,
-            {"store_id": sid, "business_anchor_date": anchor},
+            {"store_id": sid, "business_anchor_date": anchor, "meal_period": "lunch"},
         )
         if row is None:
             row = AdminDashboardBizDaySnapshot(
                 store_id=sid,
                 business_anchor_date=anchor,
+                meal_period="lunch",
                 today_leave_members=tl,
                 today_meals_to_prepare=tp,
+                kitchen_output_total=today_menu_day_total_stock,
                 tomorrow_leave_members=nl,
                 tomorrow_meals_to_prepare=np,
                 today_expire_one_unit_members=te,
@@ -1347,6 +1443,7 @@ def dashboard_meal_summary(
         else:
             row.today_leave_members = tl
             row.today_meals_to_prepare = tp
+            row.kitchen_output_total = today_menu_day_total_stock
             row.tomorrow_leave_members = nl
             row.tomorrow_meals_to_prepare = np
             row.today_expire_one_unit_members = te
@@ -1379,6 +1476,17 @@ def dashboard_meal_summary(
             day_after_tomorrow_menu_day_total_stock=day_after_tomorrow_menu_day_total_stock,
             today_prep_metrics=out.today_prep_metrics,
             tomorrow_prep_metrics=out.tomorrow_prep_metrics,
+            today_lunch_waste_total=out.today_lunch_waste_total,
+            today_lunch_remaining=out.today_lunch_remaining,
+            today_dinner_menu_day_total_stock=out.today_dinner_menu_day_total_stock,
+            tomorrow_dinner_menu_day_total_stock=out.tomorrow_dinner_menu_day_total_stock,
+            day_after_tomorrow_dinner_menu_day_total_stock=out.day_after_tomorrow_dinner_menu_day_total_stock,
+            today_dinner_single_retail_total_quantity=out.today_dinner_single_retail_total_quantity,
+            tomorrow_dinner_single_retail_total_quantity=out.tomorrow_dinner_single_retail_total_quantity,
+            today_dinner_waste_total=out.today_dinner_waste_total,
+            today_dinner_remaining=out.today_dinner_remaining,
+            today_dinner_prep_metrics=out.today_dinner_prep_metrics,
+            tomorrow_dinner_prep_metrics=out.tomorrow_dinner_prep_metrics,
             from_snapshot=False,
             snapshot_recorded_at=row.recorded_at,
         )

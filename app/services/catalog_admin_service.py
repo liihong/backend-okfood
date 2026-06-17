@@ -49,10 +49,13 @@ def create_membership_template(
     kl = (body.kind_label or "").strip()
     if not kl:
         raise HTTPException(status_code=400, detail="请填写会员卡种类（如：周卡、季卡）")
+    from app.services.meal_period.template_periods import normalize_meal_periods_list
+
     row = MembershipCardTemplate(
         tenant_id=int(tenant_id),
         store_id=int(store_id),
         period_kind=None,
+        meal_periods=normalize_meal_periods_list(body.meal_periods),
         kind_label=kl[:64],
         name=body.name.strip(),
         meals_grant=int(body.meals_grant),
@@ -120,6 +123,10 @@ def patch_membership_template(
         row.intro_short = (body.intro_short.strip() or None) if body.intro_short else None
     if "purchase_notice" in fs:
         row.purchase_notice = (body.purchase_notice.strip() or None) if body.purchase_notice else None
+    if body.meal_periods is not None:
+        from app.services.meal_period.template_periods import normalize_meal_periods_list
+
+        row.meal_periods = normalize_meal_periods_list(body.meal_periods)
     db.commit()
     db.refresh(row)
     return row
@@ -329,6 +336,8 @@ def membership_template_public_dump(row: MembershipCardTemplate) -> dict:
 
 
 def membership_template_dump(row: MembershipCardTemplate) -> dict:
+    from app.services.meal_period.template_periods import normalize_meal_periods_list
+
     kl = (getattr(row, "kind_label", None) or "").strip()
     if not kl:
         kl = _fallback_kind_from_period(row.period_kind)
@@ -338,6 +347,7 @@ def membership_template_dump(row: MembershipCardTemplate) -> dict:
         "tenant_id": int(row.tenant_id),
         "kind_label": kl[:64],
         "period_kind": row.period_kind,
+        "meal_periods": normalize_meal_periods_list(getattr(row, "meal_periods", None)),
         "name": row.name,
         "meals_grant": int(row.meals_grant),
         "list_price_yuan": decimal_to_str_money(getattr(row, "list_price_yuan", None)),

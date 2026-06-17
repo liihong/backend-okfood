@@ -59,13 +59,46 @@ def job_reset_leave_flags() -> None:
                 m.leave_range_start = None
                 m.leave_range_end = None
         from app.services.member_daily_meal_units_service import apply_all_pending_daily_meal_units
+        from app.services.meal_period.dinner_units import apply_all_pending_dinner_daily_meal_units
+        from app.models.member_meal_period_state import MemberMealPeriodState
+        from app.models.enums import MealPeriod
 
         applied_units = apply_all_pending_daily_meal_units(db)
+        applied_dinner_units = apply_all_pending_dinner_daily_meal_units(db)
+        # 晚餐「明日请假」与过期区间清理（平行于 members 表）
+        db.execute(
+            update(MemberMealPeriodState)
+            .where(
+                MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+                MemberMealPeriodState.tomorrow_leave_target_date.is_not(None),
+                MemberMealPeriodState.tomorrow_leave_target_date < today,
+            )
+            .values(is_leaved_tomorrow=False, tomorrow_leave_target_date=None)
+        )
+        db.execute(
+            update(MemberMealPeriodState)
+            .where(
+                MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+                MemberMealPeriodState.tomorrow_leave_target_date.is_(None),
+                MemberMealPeriodState.is_leaved_tomorrow.is_(True),
+            )
+            .values(is_leaved_tomorrow=False)
+        )
+        for drow in db.scalars(
+            select(MemberMealPeriodState).where(
+                MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+                MemberMealPeriodState.leave_range_end.is_not(None),
+            )
+        ).all():
+            if drow.leave_range_end is not None and drow.leave_range_end < today:
+                drow.leave_range_start = None
+                drow.leave_range_end = None
         db.commit()
         logger.info(
-            "请假标记重置任务完成: today=%s, applied_daily_meal_units=%s",
+            "请假标记重置任务完成: today=%s, applied_daily_meal_units=%s, applied_dinner_units=%s",
             today.isoformat(),
             applied_units,
+            applied_dinner_units,
         )
     except Exception:
         logger.exception("请假标记重置任务失败")

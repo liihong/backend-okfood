@@ -112,6 +112,7 @@ class WeeklySlotAssignIn(BaseModel):
     week_start: date = Field(..., description="该周任意一天，服务端归一为周一")
     slot: int = Field(..., ge=1, le=7, description="1=周一 … 7=周日")
     dish_id: int | None = Field(None, ge=1)
+    meal_period: str = Field("lunch", description="lunch=午餐槽；dinner=晚餐槽")
 
 
 class MenuDayTotalStockIn(BaseModel):
@@ -120,6 +121,7 @@ class MenuDayTotalStockIn(BaseModel):
     week_start: date = Field(..., description="该周任意一天，服务端归一为周一")
     slot: int = Field(..., ge=1, le=7, description="1=周一 … 7=周日")
     total_stock: int | None = Field(default=None, description="当日该菜总可供应份数；null=未配置(不可售)")
+    meal_period: str = Field("lunch", description="lunch/dinner")
 
 
 class MenuScheduleAssignIn(BaseModel):
@@ -653,6 +655,29 @@ class DashboardMealSummaryOut(BaseModel):
         ...,
         description="锚定日次日备餐拆分/履约/到家配送点数",
     )
+    today_lunch_waste_total: int = Field(0, ge=0, description="锚定日午餐损耗流水合计（展示值，正数）")
+    today_lunch_remaining: int | None = Field(None, ge=0, description="锚定日午餐剩余可售；未配置后厨出餐时为 null")
+    today_dinner_menu_day_total_stock: int | None = Field(
+        None, ge=0, description="锚定日晚餐周菜单「日总份数」"
+    )
+    tomorrow_dinner_menu_day_total_stock: int | None = Field(
+        None, ge=0, description="锚定日次日晚餐「日总份数」"
+    )
+    day_after_tomorrow_dinner_menu_day_total_stock: int | None = Field(
+        None, ge=0, description="锚定日后天晚餐「日总份数」"
+    )
+    today_dinner_single_retail_total_quantity: int = Field(0, ge=0, description="锚定日晚餐单次零售占用份数")
+    tomorrow_dinner_single_retail_total_quantity: int = Field(0, ge=0, description="锚定日次日晚餐单次零售占用份数")
+    today_dinner_waste_total: int = Field(0, ge=0, description="锚定日晚餐损耗流水合计")
+    today_dinner_remaining: int | None = Field(None, ge=0, description="锚定日晚餐剩余可售")
+    today_dinner_prep_metrics: DashboardDayPrepMetricsOut = Field(
+        default_factory=lambda: DashboardDayPrepMetricsOut(),
+        description="锚定日晚餐备餐拆分",
+    )
+    tomorrow_dinner_prep_metrics: DashboardDayPrepMetricsOut = Field(
+        default_factory=lambda: DashboardDayPrepMetricsOut(),
+        description="锚定日次日晚餐备餐拆分",
+    )
     from_snapshot: bool = Field(False, description="过去日：是否直接读取 admin_dashboard_biz_day_snapshots")
     snapshot_recorded_at: datetime | None = Field(
         None, description="归档写入时间；当日实时计算时通常为空（过去日首算写入后同次响应亦可为空）"
@@ -664,6 +689,28 @@ class AdminKitchenPlanUpsertIn(BaseModel):
 
     business_date: date = Field(..., description="上海业务日，通常与营业概览锚定日一致")
     planned_total: int = Field(..., ge=0, le=99999, description="日总份数（与本周菜单配置同源）")
+    meal_period: str = Field("lunch", description="lunch/dinner")
+
+
+class DayStockAdjustmentCreateIn(BaseModel):
+    """报损耗/回补流水（禁止直接改剩余）。"""
+
+    business_date: date
+    meal_period: str = Field("lunch", description="lunch/dinner")
+    delta: int = Field(..., description="负数减可售；正数仅盘点校正")
+    reason_code: str = Field(..., description="spill/kitchen_taste/kitchen_waste/comp_meal/count_correction/other")
+    remark: str | None = Field(None, max_length=500)
+
+
+class DayStockBreakdownOut(BaseModel):
+    meal_period: str
+    kitchen_output: int | None = None
+    delivery_total: int = 0
+    pickup_total: int = 0
+    single_retail_total: int = 0
+    waste_total: int = 0
+    adjustment_delta_sum: int = 0
+    remaining: int | None = None
 
 
 class AdminDashboardSummaryApiOut(BaseModel):
@@ -774,8 +821,8 @@ class FinanceReceivedSummaryOut(BaseModel):
     shanghai_today: date = Field(..., description="请求时的上海日历日")
     shanghai_calendar_month: str = Field(..., description="当前上海自然月，YYYY-MM")
     cumulative: FinanceReceivedWindowOut = Field(..., description="历史全部已标记已收")
-    this_month: FinanceReceivedWindowOut = Field(..., description="本月内（按 updated_at 落入上海月界）")
-    today: FinanceReceivedWindowOut = Field(..., description="今日内（按 updated_at 落入上海日界）")
+    this_month: FinanceReceivedWindowOut = Field(..., description="本月内（按 created_at 落入上海月界）")
+    today: FinanceReceivedWindowOut = Field(..., description="今日内（按 created_at 落入上海日界）")
 
 
 class FinanceReceivedMonthOut(BaseModel):
@@ -842,6 +889,10 @@ class AdminDeliveryMarkIn(BaseModel):
     kind: Literal["home", "pickup"] = Field(
         ...,
         description="home=配送到家已送达；pickup=门店自提已取/已完成",
+    )
+    meal_period: Literal["lunch", "dinner"] = Field(
+        "lunch",
+        description="履约餐段；默认 lunch 与历史一致，dinner 用于晚餐大表标记",
     )
 
 

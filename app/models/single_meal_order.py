@@ -36,6 +36,7 @@ class SingleMealOrder(Base):
     store_pickup: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     delivery_date: Mapped[date] = mapped_column(Date, index=True)
+    meal_period: Mapped[str] = mapped_column(String(16), default="lunch", nullable=False, index=True)
     routing_area: Mapped[str] = mapped_column(String(64))
     amount_yuan: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     original_amount_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)

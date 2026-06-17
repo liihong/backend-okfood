@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -36,6 +36,8 @@ class MemberCardOrder(Base):
         nullable=True,
         index=True,
     )
+    #: 入账时从模版复制的餐段；经典卡为 ["lunch"]
+    meal_periods_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
     card_kind: Mapped[str] = mapped_column(String(10))
     pay_channel: Mapped[str] = mapped_column(String(10))
     pay_status: Mapped[str] = mapped_column(String(10), default="未缴")

@@ -16,7 +16,32 @@
         :refresher-triggered="refresherTriggered" @refresherrefresh="onMenuRefresherRefresh">
         <view class="catalog-panel__inner">
           <view class="catalog-panel__head">
-            <text class="catalog-panel__title">{{ activeCategoryTitle }}</text>
+            <view class="catalog-panel__head-top">
+              <text class="catalog-panel__title">{{ activeCategoryTitle }}</text>
+              <view
+                v-if="activeCategoryMeta?.type === 'week'"
+                class="catalog-meal-tabs"
+                role="tablist"
+                aria-label="午晚餐菜单"
+              >
+                <view
+                  class="catalog-meal-tab"
+                  :class="{ 'catalog-meal-tab--active': mealPeriod === 'lunch' }"
+                  role="tab"
+                  @tap="switchMealPeriod('lunch')"
+                >
+                  午餐
+                </view>
+                <view
+                  class="catalog-meal-tab"
+                  :class="{ 'catalog-meal-tab--active': mealPeriod === 'dinner' }"
+                  role="tab"
+                  @tap="switchMealPeriod('dinner')"
+                >
+                  晚餐
+                </view>
+              </view>
+            </view>
             <text v-if="activeCategoryDesc" class="catalog-panel__desc">{{ activeCategoryDesc }}</text>
           </view>
 
@@ -59,6 +84,7 @@ import {
   weeklyMenuItemsHaveStock,
 } from '@/utils/menuApi.js'
 import { peekWeeklyMenuCache } from '@/utils/weeklyMenuCache.js'
+import { MEAL_PERIOD_DINNER, MEAL_PERIOD_LUNCH } from '@/utils/memberMealPeriod.js'
 import { getTabPageLayoutStyles } from '@/utils/tabPageLayout.js'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { syncCustomTabBar } from '@/utils/customTabBar.js'
@@ -78,6 +104,7 @@ const refresherTriggered = ref(false)
 const cachedThisWeekMonday = ref('')
 const activeCategoryKey = ref('week-this')
 const fulfillMode = ref(readMenuFulfillMode())
+const mealPeriod = ref(MEAL_PERIOD_LUNCH)
 const nextWeekMenu = ref([])
 const nextWeekLoading = ref(false)
 let loadWeeklySeq = 0
@@ -209,10 +236,29 @@ function selectCategory(key) {
   }
 }
 
+function weekMenuCacheOpts(extra = {}) {
+  return { mealPeriod: mealPeriod.value, ...extra }
+}
+
+function switchMealPeriod(period) {
+  if (period !== MEAL_PERIOD_LUNCH && period !== MEAL_PERIOD_DINNER) return
+  if (mealPeriod.value === period) return
+  mealPeriod.value = period
+  const meta = activeCategoryMeta.value
+  if (meta?.type === 'week' && meta.weekTab === 'next') {
+    void loadNextWeek({ forceRefresh: false })
+    return
+  }
+  if (meta?.type === 'week') {
+    void loadThisWeek({ forceRefresh: false })
+  }
+}
+
 async function loadThisWeek(opts = {}) {
   const forceRefresh = opts.forceRefresh === true
   const seq = ++loadWeeklySeq
-  const cached = peekWeeklyMenuCache({})
+  const cacheOpts = weekMenuCacheOpts({})
+  const cached = peekWeeklyMenuCache(cacheOpts)
   const cacheHasStock = cached ? weeklyMenuItemsHaveStock(cached.items) : false
 
   if (cached && !forceRefresh) {
@@ -221,7 +267,9 @@ async function loadThisWeek(opts = {}) {
     if (cached.weekStart) cachedThisWeekMonday.value = cached.weekStart
     loading.value = false
     if (!cached.stale && cacheHasStock) {
-      if (cached.weekStart) prefetchWeeklyMenu({ weekStart: addDaysIso(cached.weekStart, 7) })
+      if (cached.weekStart) {
+        prefetchWeeklyMenu({ weekStart: addDaysIso(cached.weekStart, 7), mealPeriod: mealPeriod.value })
+      }
       return
     }
   } else if (!forceRefresh) {
@@ -230,13 +278,14 @@ async function loadThisWeek(opts = {}) {
 
   try {
     const fresh = await fetchWeeklyMenu({
+      ...cacheOpts,
       includeStock: true,
       forceRefresh: forceRefresh || !!cached?.stale || !cacheHasStock,
     })
     if (seq !== loadWeeklySeq) return
     if (fresh.weekStart) cachedThisWeekMonday.value = fresh.weekStart
     menu.value = fresh.items
-    if (fresh.weekStart) prefetchWeeklyMenu({ weekStart: addDaysIso(fresh.weekStart, 7) })
+    if (fresh.weekStart) prefetchWeeklyMenu({ weekStart: addDaysIso(fresh.weekStart, 7), mealPeriod: mealPeriod.value })
   } catch (e) {
     if (seq !== loadWeeklySeq) return
     if (!cached) {
@@ -256,10 +305,10 @@ async function loadNextWeek(opts = {}) {
 
   const mon =
     cachedThisWeekMonday.value ||
-    peekWeeklyMenuCache({})?.weekStart ||
+    peekWeeklyMenuCache(weekMenuCacheOpts({}))?.weekStart ||
     mondayOfWeekShanghai()
   const requestWeekStart = mon ? addDaysIso(mon, 7) : ''
-  const cacheOpts = requestWeekStart ? { weekStart: requestWeekStart } : {}
+  const cacheOpts = requestWeekStart ? weekMenuCacheOpts({ weekStart: requestWeekStart }) : weekMenuCacheOpts({})
   const cached = peekWeeklyMenuCache(cacheOpts)
   const cacheHasStock = cached ? weeklyMenuItemsHaveStock(cached.items) : false
 
@@ -385,6 +434,9 @@ function goDetail(m) {
       : ''
   const q = [`dish_id=${encodeURIComponent(dishId)}`]
   if (svc) q.push(`service_date=${encodeURIComponent(svc)}`)
+  if (mealPeriod.value === MEAL_PERIOD_DINNER) {
+    q.push(`meal_period=${encodeURIComponent(MEAL_PERIOD_DINNER)}`)
+  }
   uni.navigateTo({
     url: `/packageOrder/pages/detail/detail?${q.join('&')}`,
   })
@@ -469,6 +521,41 @@ function goDetail(m) {
 
 .catalog-panel__head {
   margin-bottom: 20rpx;
+}
+
+.catalog-panel__head-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.catalog-meal-tabs {
+  display: flex;
+  padding: 4rpx;
+  border-radius: 999rpx;
+  background: #f1f5f9;
+  flex-shrink: 0;
+}
+
+.catalog-meal-tab {
+  min-width: 88rpx;
+  padding: 10rpx 20rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  font-weight: 800;
+  color: $ok-slate-500;
+  text-align: center;
+}
+
+.catalog-meal-tab--active {
+  background: #fff;
+  color: $ok-forest-green;
+  box-shadow: 0 2rpx 8rpx rgba(15, 23, 42, 0.08);
+}
+
+.catalog-meal-tab:last-child.catalog-meal-tab--active {
+  color: #7c3aed;
 }
 
 .catalog-panel__title {

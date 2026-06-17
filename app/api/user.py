@@ -271,7 +271,15 @@ def leave(request: Request, body: LeaveIn, db: SessionDep, member_id: MemberIdSc
         request.headers.get("x-forwarded-for"),
         request.client.host if request.client else None,
     )
-    member = leave_request(db, member_id, body.type, body.start, body.end, ip_address=ip)
+    member = leave_request(
+        db,
+        member_id,
+        body.type,
+        body.start,
+        body.end,
+        ip_address=ip,
+        meal_period=body.meal_period,
+    )
 
     return success(data=dump_model(member), msg="请假状态已更新")
 
@@ -935,6 +943,7 @@ def patch_profile(request: Request, body: ProfilePatchIn, db: SessionDep, member
     card_pay_mode_val = body.card_pay_mode if "card_pay_mode" in updates else None
 
     set_units = "daily_meal_units" in updates
+    set_dinner_units = "dinner_daily_meal_units" in updates
 
     member = patch_member_profile(
 
@@ -975,6 +984,10 @@ def patch_profile(request: Request, body: ProfilePatchIn, db: SessionDep, member
         set_daily_meal_units=set_units,
 
         daily_meal_units=body.daily_meal_units if set_units else None,
+
+        set_dinner_daily_meal_units=set_dinner_units,
+
+        dinner_daily_meal_units=body.dinner_daily_meal_units if set_dinner_units else None,
 
         ip_address=ip,
 

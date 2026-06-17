@@ -176,6 +176,7 @@ import {
   invalidateWeeklyMenuCache,
   singleOrderBlockReason,
 } from '@/utils/menuApi.js'
+import { MEAL_PERIOD_DINNER, MEAL_PERIOD_LUNCH } from '@/utils/memberMealPeriod.js'
 import {
   getPageScrollStyle,
   schedulePageScrollLayout,
@@ -204,6 +205,7 @@ const dish = ref(null)
 const loading = ref(true)
 const loadError = ref('')
 const serviceDateYmd = ref('')
+const mealPeriod = ref(MEAL_PERIOD_LUNCH)
 
 const serviceDateDisplay = computed(() => {
   const text = formatServiceDateYmdWithWeekday(serviceDateYmd.value)
@@ -559,6 +561,12 @@ onLoad((options) => {
     (options && options.date) ||
     ''
   serviceDateYmd.value = svcRaw ? decodeURIComponent(String(svcRaw)).trim() : ''
+  const mpRaw =
+    (options && options.meal_period) ||
+    (options && options.mealPeriod) ||
+    ''
+  const mp = mpRaw ? decodeURIComponent(String(mpRaw)).trim().toLowerCase() : ''
+  mealPeriod.value = mp === MEAL_PERIOD_DINNER ? MEAL_PERIOD_DINNER : MEAL_PERIOD_LUNCH
 
   if (!getMemberToken()) {
     loading.value = false
@@ -621,7 +629,7 @@ async function loadPage() {
   dish.value = null
   try {
     const [d, raw] = await Promise.all([
-      fetchMenuDetail(dishIdStr.value, serviceDateYmd.value),
+      fetchMenuDetail(dishIdStr.value, serviceDateYmd.value, mealPeriod.value),
       request('/api/user/me/addresses', { method: 'GET', retry: 1 }),
     ])
     try {
@@ -707,6 +715,7 @@ async function handlePay() {
     const payload = {
       dish_id: Number(dish.value.dishId),
       delivery_date: serviceDateYmd.value,
+      meal_period: mealPeriod.value,
       store_pickup: isPickup,
       quantity: q,
     }

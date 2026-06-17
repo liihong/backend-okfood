@@ -78,6 +78,7 @@ import {
   isSingleOrderStockAvailable,
   singleOrderBlockReason,
 } from '@/utils/menuApi.js'
+import { MEAL_PERIOD_DINNER, MEAL_PERIOD_LUNCH } from '@/utils/memberMealPeriod.js'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { getMemberToken } from '@/utils/api.js'
 
@@ -86,6 +87,8 @@ const loading = ref(true)
 const loadError = ref('')
 /** 供餐日 YYYY-MM-DD，来自周菜单跳转 */
 const serviceDateYmd = ref('')
+/** 餐段 lunch/dinner，默认午餐 */
+const mealPeriod = ref(MEAL_PERIOD_LUNCH)
 
 const showOrderButton = computed(() =>
   canSubmitSingleOrder(dish.value, serviceDateYmd.value),
@@ -175,6 +178,12 @@ onLoad((options) => {
     (options && options.date) ||
     ''
   serviceDateYmd.value = svcRaw ? decodeURIComponent(String(svcRaw)).trim() : ''
+  const mpRaw =
+    (options && options.meal_period) ||
+    (options && options.mealPeriod) ||
+    ''
+  const mp = mpRaw ? decodeURIComponent(String(mpRaw)).trim().toLowerCase() : ''
+  mealPeriod.value = mp === MEAL_PERIOD_DINNER ? MEAL_PERIOD_DINNER : MEAL_PERIOD_LUNCH
   if (!dishId) {
     loading.value = false
     loadError.value = '缺少餐品参数'
@@ -188,7 +197,7 @@ async function loadDetail(dishId) {
   loadError.value = ''
   dish.value = null
   try {
-    const d = await fetchMenuDetail(dishId, serviceDateYmd.value)
+    const d = await fetchMenuDetail(dishId, serviceDateYmd.value, mealPeriod.value)
     if (!d) throw new Error('暂无数据')
     dish.value = d
   } catch (e) {
@@ -242,8 +251,12 @@ function handleBuy() {
   }
   const id = encodeURIComponent(String(dish.value.dishId))
   const d = encodeURIComponent(serviceDateYmd.value)
+  const q = [`dish_id=${id}`, `service_date=${d}`]
+  if (mealPeriod.value === MEAL_PERIOD_DINNER) {
+    q.push(`meal_period=${encodeURIComponent(MEAL_PERIOD_DINNER)}`)
+  }
   uni.navigateTo({
-    url: `/packageOrder/pages/singleConfirm/singleConfirm?dish_id=${id}&service_date=${d}`,
+    url: `/packageOrder/pages/singleConfirm/singleConfirm?${q.join('&')}`,
   })
 }
 </script>

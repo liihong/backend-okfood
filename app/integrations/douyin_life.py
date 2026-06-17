@@ -143,11 +143,12 @@ def _parse_prepare_certificates(data: dict[str, Any]) -> list[DouyinPrepareCerti
         if not cid:
             continue
         pid, sid, pout, sout, third, title = _parse_sku(item.get("sku") if isinstance(item.get("sku"), dict) else None)
+        # 抖音 prepare 返回的 pay_amount 单位已是「分」，勿再除以 100
         pay_fen: int | None = None
         amount = item.get("amount")
         if isinstance(amount, dict) and amount.get("pay_amount") is not None:
             try:
-                pay_fen = int(int(amount["pay_amount"]) / 100)
+                pay_fen = int(amount["pay_amount"])
             except (TypeError, ValueError):
                 pay_fen = None
         out.append(

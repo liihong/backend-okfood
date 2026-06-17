@@ -48,6 +48,7 @@ def weekly_menu(
             )
         ),
     ] = False,
+    meal_period: Annotated[str, Query(description="lunch/dinner，默认 lunch")] = "lunch",
 ):
     """一周菜单（周一至周日）：每日 `date`、`dish_id`（可空）、`title`/`desc`/`pic`。详情用 `dish_id` 调 `/menu/detail/{dish_id}`。无需登录。"""
     return success(
@@ -57,6 +58,7 @@ def weekly_menu(
             store_id=int(store_ctx.store_id),
             as_of_date=as_of_date,
             include_stock=include_stock,
+            meal_period=meal_period,
         ),
         msg="获取成功",
     )
@@ -71,9 +73,16 @@ def menu_detail(
         date | None,
         Query(description="供餐日 YYYY-MM-DD；传则返回该日单次卡剩余库存等字段"),
     ] = None,
+    meal_period: Annotated[str, Query(description="lunch/dinner，默认 lunch")] = "lunch",
 ):
     """餐品详情，dish_id 为菜品库主键，与周列表项中 `dish_id` 一致。无需登录。"""
     return success(
-        data=get_menu_detail_by_dish_id(db, dish_id, service_date=service_date, store_id=int(store_ctx.store_id)),
+        data=get_menu_detail_by_dish_id(
+            db,
+            dish_id,
+            service_date=service_date,
+            store_id=int(store_ctx.store_id),
+            meal_period=meal_period,
+        ),
         msg="获取成功",
     )

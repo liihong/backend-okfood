@@ -49,6 +49,8 @@ from app.schemas.admin import (
     MenuDayTotalStockIn,
     AdminDashboardSummaryApiOut,
     AdminKitchenPlanUpsertIn,
+    DayStockAdjustmentCreateIn,
+    DayStockBreakdownOut,
     SfSameCityPreviewOut,
     SfSameCityPushIn,
     SfSameCityPushOut,
@@ -92,7 +94,9 @@ from app.services.sf_order_fulfillment_service import (
 )
 from app.services.sf_same_city_service import (
     cancel_sf_same_city_push,
+    preview_sf_dinner_same_city,
     preview_sf_same_city,
+    push_sf_dinner_same_city,
     push_sf_same_city,
     push_sf_same_city_instant,
     push_single_meal_retail_to_sf,
@@ -263,14 +267,86 @@ def upsert_kitchen_plan_route(
         store_id=int(store_id),
         business_date=body.business_date,
         total_stock=int(body.planned_total),
+        meal_period=body.meal_period,
+        updated_by=admin_username,
     )
     return success(
         data={
             "business_date": body.business_date.isoformat(),
+            "meal_period": (body.meal_period or "lunch").strip().lower(),
             "total_stock": total,
         },
         msg="日总份数已保存",
     )
+
+
+@router.get("/day-stock/summary")
+def day_stock_summary_route(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    business_date: Annotated[date | None, Query(description="上海业务日，默认今日")] = None,
+    meal_period: Annotated[str | None, Query(description="lunch/dinner；不传则返回午晚两条")] = None,
+):
+    """日库存拆解：后厨出餐、配送、零售、损耗、剩余（只读）。"""
+    from app.models.enums import MealPeriod
+    from app.services.day_stock_service import breakdown_to_dict, get_day_stock_breakdown
+
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    d = business_date or today_shanghai()
+    if meal_period:
+        bd = get_day_stock_breakdown(db, store_id=int(store_id), business_date=d, meal_period=meal_period)
+        return success(data=breakdown_to_dict(bd), msg="获取成功")
+    lunch = get_day_stock_breakdown(db, store_id=int(store_id), business_date=d, meal_period=MealPeriod.LUNCH.value)
+    dinner = get_day_stock_breakdown(db, store_id=int(store_id), business_date=d, meal_period=MealPeriod.DINNER.value)
+    return success(
+        data={"lunch": breakdown_to_dict(lunch), "dinner": breakdown_to_dict(dinner)},
+        msg="获取成功",
+    )
+
+
+@router.get("/day-stock/adjustments")
+def day_stock_adjustments_list_route(
+    db: SessionDep,
+    business_date: Annotated[date, Query(description="上海业务日")],
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    meal_period: Annotated[str, Query(description="lunch/dinner")] = "lunch",
+):
+    """日库存损耗/回补流水列表。"""
+    from app.services.day_stock_service import list_day_stock_adjustments
+
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    items = list_day_stock_adjustments(
+        db, store_id=int(store_id), business_date=business_date, meal_period=meal_period
+    )
+    return success(data={"items": items}, msg="获取成功")
+
+
+@router.post("/day-stock/adjustments")
+def day_stock_adjustments_create_route(
+    body: DayStockAdjustmentCreateIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """报损耗/回补：禁止直接改剩余，仅写流水。"""
+    from app.services.admin_service import invalidate_dashboard_live_summary_cache
+    from app.services.day_stock_service import breakdown_to_dict, create_day_stock_adjustment
+
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    bd = create_day_stock_adjustment(
+        db,
+        store_id=int(store_id),
+        business_date=body.business_date,
+        meal_period=body.meal_period,
+        delta=int(body.delta),
+        reason_code=body.reason_code,
+        remark=body.remark,
+        operator=admin_username,
+    )
+    invalidate_dashboard_live_summary_cache(int(store_id))
+    return success(data=breakdown_to_dict(bd), msg="库存调整已记录")
 
 
 @router.get("/finance/received-summary")
@@ -279,7 +355,7 @@ def finance_received_summary_route(
     admin_username: str = Depends(admin_full_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """已收账款：累计 / 本月（上海自然月）/ 今日（上海自然日），按 updated_at 落入对应日界。"""
+    """已收账款：累计 / 本月（上海自然月）/ 今日（上海自然日），按 created_at 落入对应日界。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     summary = finance_received_summary(db, store_id=store_id)
     return success(data=dump_model(summary), msg="获取成功")
@@ -349,13 +425,85 @@ def delivery_sheet(
         Query(description="按会员手机号筛选；可输后几位或完整号码，忽略空格与符号"),
     ] = None,
 ):
-    """配送大表：激活且有余额、已达起送日、排除请假；周日与法定节假日不生成订阅派单；收件信息仅默认 member_addresses；同址聚合餐数。
-    配送到家会员带 is_delivered（与 delivery_logs / 骑手确认送达同源）；门店自提不参与到家送达统计。"""
+    """午餐配送大表（默认）：纯晚餐卡会员不会出现。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     area_key = (area or "").strip() or None
     phone_key = (phone or "").strip() or None
     payload = build_delivery_sheet(
-        db, delivery_date=delivery_date, area=area_key, phone=phone_key, store_id=store_id
+        db,
+        delivery_date=delivery_date,
+        area=area_key,
+        phone=phone_key,
+        store_id=store_id,
+        sheet_view="lunch",
+    )
+    return success(data=dump_model(payload), msg="获取成功")
+
+
+@router.get("/delivery-sheet/lunch")
+def delivery_sheet_lunch(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
+    area: Annotated[str | None, Query(description="按默认配送地址所属片区筛选，可选")] = None,
+    phone: Annotated[str | None, Query(description="按会员手机号筛选")] = None,
+):
+    """午餐配送大表（与 /delivery-sheet 等价）。"""
+    return delivery_sheet(
+        db,
+        admin_username=admin_username,
+        store_id=store_id,
+        delivery_date=delivery_date,
+        area=area,
+        phone=phone,
+    )
+
+
+@router.get("/delivery-sheet/dinner")
+def delivery_sheet_dinner(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
+    area: Annotated[str | None, Query(description="按默认配送地址所属片区筛选，可选")] = None,
+    phone: Annotated[str | None, Query(description="按会员手机号筛选")] = None,
+):
+    """晚餐配送大表：仅含持有晚餐餐段卡的会员。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    area_key = (area or "").strip() or None
+    phone_key = (phone or "").strip() or None
+    payload = build_delivery_sheet(
+        db,
+        delivery_date=delivery_date,
+        area=area_key,
+        phone=phone_key,
+        store_id=store_id,
+        sheet_view="dinner",
+    )
+    return success(data=dump_model(payload), msg="获取成功")
+
+
+@router.get("/delivery-sheet/lunch-dinner")
+def delivery_sheet_lunch_dinner(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
+    area: Annotated[str | None, Query(description="按默认配送地址所属片区筛选，可选")] = None,
+    phone: Annotated[str | None, Query(description="按会员手机号筛选")] = None,
+):
+    """午晚餐双餐段会员运维视图（推顺丰仍分午餐/晚餐两次推单）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    area_key = (area or "").strip() or None
+    phone_key = (phone or "").strip() or None
+    payload = build_delivery_sheet(
+        db,
+        delivery_date=delivery_date,
+        area=area_key,
+        phone=phone_key,
+        store_id=store_id,
+        sheet_view="lunch_dinner",
     )
     return success(data=dump_model(payload), msg="获取成功")
 
@@ -454,6 +602,52 @@ def delivery_sf_push_instant(
         success=success_count,
         failed=failed,
         title_prefix="顺丰及时单推单",
+    )
+    db.commit()
+    return success(data=dump_model(out), msg="处理完成")
+
+
+@router.get("/delivery-sf/dinner/preview", response_model=None)
+def delivery_sf_dinner_preview(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
+    area: Annotated[str | None, Query(description="同 delivery-sheet 片区筛选")] = None,
+    phone: Annotated[str | None, Query(description="同 delivery-sheet 手机筛选")] = None,
+):
+    """晚餐配送大表顺丰创单前预览（push_kind=dinner_delivery_sheet，与午餐推单隔离）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out: SfSameCityPreviewOut = preview_sf_dinner_same_city(
+        db, delivery_date=delivery_date, area=area, phone=phone, store_id=store_id
+    )
+    return success(data=dump_model(out), msg="获取成功")
+
+
+@router.post("/delivery-sf/dinner/push", response_model=None)
+def delivery_sf_dinner_push(
+    body: SfSameCityPushIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """晚餐配送大表推顺丰（独立 push_kind，不影响午餐推单记录）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        out: SfSameCityPushOut = push_sf_dinner_same_city(db, body, store_id=store_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    total = len(out.results)
+    success_count = sum(1 for r in out.results if r.ok)
+    failed = total - success_count
+    upsert_sf_push_batch_notification(
+        db,
+        store_id=store_id,
+        business_date=body.delivery_date,
+        total=total,
+        success=success_count,
+        failed=failed,
+        title_prefix="顺丰晚餐推单",
     )
     db.commit()
     return success(data=dump_model(out), msg="处理完成")
@@ -761,6 +955,30 @@ def delivery_mark(
         admin_username=admin_username,
         kind=body.kind,
         store_id=store_id,
+        meal_period=body.meal_period,
+    )
+    return success(msg="已标记")
+
+
+@router.post("/dinner-delivery-mark")
+def dinner_delivery_mark(
+    body: AdminDeliveryMarkIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """晚餐大表人工标记（等价于 delivery-mark 且 meal_period=dinner）。"""
+    if body.kind != "home":
+        raise HTTPException(status_code=400, detail="晚餐仅支持配送到家标记")
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    admin_mark_subscription_fulfilled(
+        db,
+        member_id=body.member_id,
+        delivery_date=body.delivery_date,
+        admin_username=admin_username,
+        kind="home",
+        store_id=store_id,
+        meal_period="dinner",
     )
     return success(msg="已标记")
 
@@ -1761,10 +1979,14 @@ def menu_weekly_slots(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     week_start: Annotated[date | None, Query(description="指定周任意一天则只返回该周槽位；不传则返回本周+下周")] = None,
+    meal_period: Annotated[str, Query(description="lunch/dinner，默认 lunch")] = "lunch",
 ):
     """每周餐品槽位：不传参数时同时返回本周与下周，便于预告维护（无需翻周拷贝数据）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    return success(data=admin_weekly_menu_preview(db, week_start, store_id=store_id), msg="获取成功")
+    return success(
+        data=admin_weekly_menu_preview(db, week_start, store_id=store_id, meal_period=meal_period),
+        msg="获取成功",
+    )
 
 
 @router.post("/menu/weekly-slot")

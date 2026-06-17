@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Date, DateTime, JSON
+from sqlalchemy import BigInteger, Date, DateTime, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.timeutil import beijing_now_naive
@@ -17,6 +17,7 @@ class DeliverySheetPushUnitsSnapshot(Base):
 
     store_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     delivery_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    meal_period: Mapped[str] = mapped_column(String(16), primary_key=True, default="lunch")
     member_meal_units: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,

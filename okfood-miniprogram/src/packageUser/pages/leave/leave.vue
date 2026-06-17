@@ -10,6 +10,22 @@
       @refresherrefresh="onLeaveRefresherRefresh"
     >
       <view class="page-leave">
+        <view v-if="showMealPeriodTabs" class="leave-period-tabs">
+          <view
+            class="leave-period-tab"
+            :class="{ 'leave-period-tab--active': mealPeriod === 'lunch' }"
+            @tap="switchMealPeriod('lunch')"
+          >
+            午餐
+          </view>
+          <view
+            class="leave-period-tab"
+            :class="{ 'leave-period-tab--active': mealPeriod === 'dinner' }"
+            @tap="switchMealPeriod('dinner')"
+          >
+            晚餐
+          </view>
+        </view>
         <view v-if="leaveRefreshing" class="leave-sync-hint">
           <text class="leave-sync-hint__text">正在同步最新状态…</text>
         </view>
@@ -117,6 +133,49 @@ import {
   shouldPromptMemberCardPay,
 } from '@/utils/memberProfile.js'
 import { guardMemberDeliverySelfService } from '@/utils/memberSelfServiceGuard.js'
+import {
+  MEAL_PERIOD_LUNCH,
+  MEAL_PERIOD_DINNER,
+  hasDinnerEntitlement,
+  leaveFieldsForPeriod,
+  mealPeriodLabel,
+} from '@/utils/memberMealPeriod.js'
+
+const mealPeriod = ref(MEAL_PERIOD_LUNCH)
+const memberProfileCache = ref(null)
+const showMealPeriodTabs = computed(() => hasDinnerEntitlement(memberProfileCache.value))
+
+function leavePostBody(extra = {}) {
+  return { meal_period: mealPeriod.value, ...extra }
+}
+
+function applyLeaveFieldsFromProfile(me) {
+  const f = leaveFieldsForPeriod(me, mealPeriod.value)
+  isTomorrowLeave.value = Boolean(f.is_leaved_tomorrow)
+  tomorrowTargetYmd.value = ymdFromApi(f.tomorrow_leave_target_date)
+  const lr = f.leave_range
+  if (lr && lr.start && lr.end) {
+    const s = ymdFromApi(lr.start)
+    const e = ymdFromApi(lr.end)
+    serverLeaveStart.value = s
+    serverLeaveEnd.value = e
+    rangeStart.value = s
+    rangeEnd.value = e
+  } else {
+    serverLeaveStart.value = ''
+    serverLeaveEnd.value = ''
+    rangeStart.value = ''
+    rangeEnd.value = ''
+  }
+}
+
+function switchMealPeriod(period) {
+  if (mealPeriod.value === period) return
+  mealPeriod.value = period
+  if (memberProfileCache.value) applyLeaveFieldsFromProfile(memberProfileCache.value)
+}
+
+const activePeriodLabel = computed(() => mealPeriodLabel(mealPeriod.value))
 
 const isTomorrowLeave = ref(false)
 const rangeStart = ref('')
@@ -418,14 +477,15 @@ const rangeEndPickerMinYmd = computed(() => {
 })
 
 const activeLeaveTitle = computed(() => {
-  if (isRangeOnlyLeave.value) return '当前区间请假'
+  const prefix = showMealPeriodTabs.value ? `${activePeriodLabel.value} · ` : ''
+  if (isRangeOnlyLeave.value) return `${prefix}当前区间请假`
   if (isTomorrowLeave.value) {
     const raw = ymdFromApi(tomorrowTargetYmd.value)
     const ymd = raw || addDaysIso(ymdTodayShanghai(), 1)
     const md = ymdToCnMd(ymd)
-    return md ? `${md} 请假` : '明日请假'
+    return md ? `${prefix}${md} 请假` : `${prefix}明日请假`
   }
-  return '当前请假'
+  return `${prefix}当前请假`
 })
 
 /** 请假结束提示：展示目标结束日 24:00，并说明到期自动恢复 */
@@ -494,23 +554,9 @@ async function syncLeaveFromServer(opts = {}) {
       }),
     ])
     if (gen !== leaveSyncGeneration) return
+    memberProfileCache.value = me
     leavePrepLocked.value = Boolean(me?.leave_prep_locked)
-    isTomorrowLeave.value = Boolean(me?.is_leaved_tomorrow)
-    tomorrowTargetYmd.value = ymdFromApi(me?.tomorrow_leave_target_date)
-    const lr = me?.leave_range
-    if (lr && lr.start && lr.end) {
-      const s = ymdFromApi(lr.start)
-      const e = ymdFromApi(lr.end)
-      serverLeaveStart.value = s
-      serverLeaveEnd.value = e
-      rangeStart.value = s
-      rangeEnd.value = e
-    } else {
-      serverLeaveStart.value = ''
-      serverLeaveEnd.value = ''
-      rangeStart.value = ''
-      rangeEnd.value = ''
-    }
+    applyLeaveFieldsFromProfile(me)
     redirectLeaveIfNoCardAndNotOnLeave(me)
   } catch (e) {
     if (gen !== leaveSyncGeneration) return
@@ -558,7 +604,7 @@ function confirmCancelAllLeave() {
       try {
         await request('/api/user/leave', {
           method: 'POST',
-          data: { type: 'cancel' },
+          data: leavePostBody({ type: 'cancel' }),
           timeout: LEAVE_POST_TIMEOUT_MS,
         })
         await syncLeaveFromServer({ noBanner: true })
@@ -600,7 +646,7 @@ async function toggleTomorrow() {
     if (wasTomorrow) {
       await request('/api/user/leave', {
         method: 'POST',
-        data: { type: 'clear_tomorrow' },
+        data: leavePostBody({ type: 'clear_tomorrow' }),
         timeout: LEAVE_POST_TIMEOUT_MS,
       })
       await syncLeaveFromServer({ noBanner: true })
@@ -609,7 +655,7 @@ async function toggleTomorrow() {
     } else {
       await request('/api/user/leave', {
         method: 'POST',
-        data: { type: 'tomorrow' },
+        data: leavePostBody({ type: 'tomorrow' }),
         timeout: LEAVE_POST_TIMEOUT_MS,
       })
       await syncLeaveFromServer({ noBanner: true })
@@ -656,11 +702,11 @@ async function submitRange() {
   try {
     await request('/api/user/leave', {
       method: 'POST',
-      data: {
+      data: leavePostBody({
         type: 'range',
         start: rangeStart.value,
         end: rangeEnd.value,
-      },
+      }),
       timeout: LEAVE_POST_TIMEOUT_MS,
     })
     await syncLeaveFromServer({ noBanner: true })
@@ -691,6 +737,31 @@ async function submitRange() {
 .page-leave {
   padding: 40rpx;
   padding-bottom: 80rpx;
+}
+
+.leave-period-tabs {
+  display: flex;
+  flex-direction: row;
+  gap: 16rpx;
+  margin-bottom: 28rpx;
+}
+
+.leave-period-tab {
+  flex: 1;
+  text-align: center;
+  padding: 20rpx 0;
+  border-radius: 999rpx;
+  font-size: 28rpx;
+  font-weight: 800;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 2rpx solid #e2e8f0;
+}
+
+.leave-period-tab--active {
+  color: #fff;
+  background: #73b054;
+  border-color: #73b054;
 }
 
 .leave-sync-hint {

@@ -17,12 +17,14 @@ def set_menu_day_total_stock_by_business_date(
     store_id: int,
     business_date: date,
     total_stock: int,
+    meal_period: str = "lunch",
+    updated_by: str | None = None,
 ) -> int:
-    """与「本周菜单配置」日总份数同源；槽位无菜品时拒绝保存。
+    """与「本周菜单配置」日总份数同源；槽位无菜品时拒绝保存。"""
+    from app.services.day_stock_service import normalize_meal_period, sync_store_kitchen_plan_row
 
-    非订阅配送日（周日、法定假等）无排单场景，静默跳过，不写入周菜单槽位。
-    """
     total = max(0, int(total_stock))
+    period = normalize_meal_period(meal_period)
     if not is_subscription_delivery_day(business_date):
         return total
     synced = sync_kitchen_planned_to_menu_day_total_stock(
@@ -30,12 +32,21 @@ def set_menu_day_total_stock_by_business_date(
         store_id=int(store_id),
         business_date=business_date,
         planned_total=total,
+        meal_period=period,
     )
     if not synced:
         raise HTTPException(
             status_code=400,
             detail="该日菜单未排菜，请先在「本周菜单」选择菜品后再设日总份数",
         )
+    sync_store_kitchen_plan_row(
+        db,
+        store_id=int(store_id),
+        business_date=business_date,
+        meal_period=period,
+        planned_total=total,
+        updated_by=updated_by,
+    )
     db.commit()
     # 顶卡 dashboard-summary 有 90s 锚点缓存，保存后需失效以免仍展示旧「日总份数」
     from app.services.admin_service import invalidate_dashboard_live_summary_cache

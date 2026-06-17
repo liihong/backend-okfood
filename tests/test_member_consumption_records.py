@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 from decimal import Decimal
 
 import pytest
@@ -38,7 +38,7 @@ def consumption_db() -> Session:
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     session = SessionLocal()
     session.add(Tenant(id=1, name="t", is_active=True))
-    session.add(Store(id=1, tenant_id=1, name="s", is_active=True))
+    session.add(Store(id=1, tenant_id=1, name="s", leave_deadline_time=time(21, 0), is_active=True))
     session.flush()
     m = Member(
         tenant_id=1,
@@ -58,6 +58,7 @@ def consumption_db() -> Session:
         DeliveryLog(
             member_id=mid,
             delivery_date=date(2026, 5, 6),
+            meal_period="lunch",
             status=DeliveryStatus.DELIVERED.value,
         )
     )
@@ -70,6 +71,7 @@ def consumption_db() -> Session:
         )
     )
     order = SingleMealOrder(
+        id=1,
         tenant_id=1,
         store_id=1,
         out_trade_no="smo_test_1",
