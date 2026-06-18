@@ -584,10 +584,10 @@ onMounted(() => {
     <p v-if="dashboardStatsLoading && !summaryMeta" class="dro-loading">正在加载营业概览…</p>
     <p v-else-if="!dashboardStats.length && !summaryMeta" class="dro-loading">暂无营业概览数据。</p>
 
-    <!-- 今日营业概览：三行大卡片 + 后厨/自提 -->
+    <!-- 今日营业概览：午餐一行 + 晚餐一行 + 后厨/自提 -->
     <div v-if="showDashboardOverview" class="dro-dash-layout">
-      <!-- 第一行：今日午餐 / 今日晚餐 -->
-      <div class="dro-dash-large-row">
+      <!-- 第一行：午餐（今日午餐 + 明日午餐预测） -->
+      <div class="dro-dash-large-row dro-dash-meal-row dro-dash-meal-row--lunch">
       <article class="dro-dash-kpi" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
         <div class="dro-dash-kpi__head">
           <div class="dro-dash-kpi__tags">
@@ -783,135 +783,18 @@ onMounted(() => {
         </div>
       </article>
 
-      <article class="dro-dash-kpi dro-dash-kpi--dinner" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
-        <div class="dro-dash-kpi__head">
-          <div class="dro-dash-kpi__tags">
-            <span class="dro-dash-pill dro-dash-pill--violet">今日晚餐 · {{ businessAnchorMdDisplay || '—' }}</span>
-          </div>
-        </div>
-        <div class="dro-dash-kpi__hero-metric">
-          <span class="dro-dash-kpi__hero-metric-num">{{
-            dinnerMenuDayTotalStock != null ? dinnerMenuDayTotalStock : '—'
-          }}</span>
-          <small class="dro-dash-kpi__hero-metric-suffix">份-后厨产出量</small>
-        </div>
-        <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
-          <div class="dro-dash-kpi__metric-top">
-            <div
-              class="dro-dash-distribution-chain"
-              role="note"
-              :aria-label="
-                dinnerMenuDayTotalStock != null
-                  ? `${dinnerMenuDayTotalStock}份当日晚餐出餐量等于配送、自提、单次零售与可卖数量之和`
-                  : '当日晚餐出餐量未配置'
-              "
-            >
-              <div class="dro-dash-chain-node-header">
-                <span class="dro-dash-chain-node-label">配额去向拆解线</span>
-                <span class="dro-dash-chain-node dro-dash-chain-node--main">
-                  已售出 {{ todayDinnerSoldTotal != null ? `${todayDinnerSoldTotal}份` : '—' }}
-                </span>
-              </div>
-              <div class="dro-dash-stacked-bar" aria-hidden="true">
-                <div
-                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--deliver"
-                  :style="{
-                    width: distributionStackWidth(todayDinnerDelivery, dinnerMenuDayTotalStock),
-                  }"
-                />
-                <div
-                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--pickup"
-                  :style="{
-                    width: distributionStackWidth(todayDinnerPickup, dinnerMenuDayTotalStock),
-                  }"
-                />
-                <div
-                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--retail"
-                  :style="{
-                    width: distributionStackWidth(todayDinnerRetail, dinnerMenuDayTotalStock),
-                  }"
-                />
-                <div
-                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--sellable"
-                  :class="{
-                    'dro-dash-stacked-bar__seg--sellable-empty':
-                      todayDinnerRemaining != null && todayDinnerRemaining <= 0,
-                  }"
-                  :style="{
-                    width: distributionStackWidth(todayDinnerRemaining, dinnerMenuDayTotalStock),
-                  }"
-                />
-              </div>
-              <div class="dro-dash-branch-pill-grid dro-dash-branch-pill-grid--5">
-                <div class="dro-dash-branch-pill">
-                  <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />配送</span
-                  >
-                  <span class="dro-dash-branch-pill__val">{{
-                    todayDinnerDelivery == null ? '—' : `${Math.trunc(Number(todayDinnerDelivery))}`
-                  }}</span>
-                </div>
-                <div class="dro-dash-branch-pill">
-                  <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提</span
-                  >
-                  <span class="dro-dash-branch-pill__val">{{
-                    todayDinnerPickup == null ? '—' : `${Math.trunc(Number(todayDinnerPickup))}`
-                  }}</span>
-                </div>
-                <div class="dro-dash-branch-pill">
-                  <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />零售</span
-                  >
-                  <span class="dro-dash-branch-pill__val">{{ todayDinnerRetail }}</span>
-                </div>
-                <div class="dro-dash-branch-pill">
-                  <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--waste" aria-hidden="true" />损耗</span
-                  >
-                  <span class="dro-dash-branch-pill__val">{{ todayDinnerWasteTotal }}</span>
-                </div>
-                <div class="dro-dash-branch-pill">
-                  <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--sellable" aria-hidden="true" />剩余</span
-                  >
-                  <span
-                    class="dro-dash-branch-pill__val dro-dash-branch-pill__val--sellable"
-                    :class="{
-                      'dro-dash-branch-pill__val--sellable-muted':
-                        todayDinnerRemaining != null && todayDinnerRemaining <= 0,
-                    }"
-                    >{{
-                      todayDinnerRemaining == null ? '—' : `${todayDinnerRemaining}`
-                    }}</span
-                  >
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="dro-dash-kpi__mid-spacer" aria-hidden="true" />
-        </div>
-      </article>
-      </div>
-
-      <!-- 第二行：明日预测（午餐 / 晚餐） -->
-      <div class="dro-dash-forecast-section">
-        <div class="dro-dash-forecast-head">
-          <span class="dro-dash-pill dro-dash-pill--blue"
-            >明日预测 · {{ businessAnchorTomorrowMdDisplay || '—'
-            }}<template v-if="businessAnchorTomorrowWeekdayDisplay">
-              {{ businessAnchorTomorrowWeekdayDisplay }}</template
-            ></span
-          >
-        </div>
-        <div class="dro-dash-large-row">
       <article
         class="dro-dash-kpi dro-dash-kpi--tomorrow"
         :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }"
       >
         <div class="dro-dash-kpi__head">
           <div class="dro-dash-kpi__tags">
-            <span class="dro-dash-pill dro-dash-pill--emerald">明日午餐预测</span>
+            <span class="dro-dash-pill dro-dash-pill--emerald"
+              >明日午餐预测 · {{ businessAnchorTomorrowMdDisplay || '—'
+              }}<template v-if="businessAnchorTomorrowWeekdayDisplay">
+                {{ businessAnchorTomorrowWeekdayDisplay }}</template
+              ></span
+            >
           </div>
           <span
             class="dro-dash-kpi__ico-badge dro-dash-kpi__ico-badge--blue"
@@ -1077,7 +960,133 @@ onMounted(() => {
           </div>
         </div>
       </article>
+      </div>
 
+      <!-- 第二行：晚餐（今日晚餐 + 明日晚餐预测；功能暂不上线，卡片见下方注释块） -->
+      <div class="dro-dash-large-row dro-dash-meal-row dro-dash-meal-row--dinner">
+      <!--
+        [功能暂不上线] 今日晚餐营业概览卡片
+        晚餐餐段营业概览暂未对外开放，待晚餐功能上线后，取消本段 HTML 注释即可恢复展示。
+        请勿删除下方模板代码。
+      -->
+      <!--
+      <article class="dro-dash-kpi dro-dash-kpi--dinner" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
+        <div class="dro-dash-kpi__head">
+          <div class="dro-dash-kpi__tags">
+            <span class="dro-dash-pill dro-dash-pill--violet">今日晚餐 · {{ businessAnchorMdDisplay || '—' }}</span>
+          </div>
+        </div>
+        <div class="dro-dash-kpi__hero-metric">
+          <span class="dro-dash-kpi__hero-metric-num">{{
+            dinnerMenuDayTotalStock != null ? dinnerMenuDayTotalStock : '—'
+          }}</span>
+          <small class="dro-dash-kpi__hero-metric-suffix">份-后厨产出量</small>
+        </div>
+        <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
+          <div class="dro-dash-kpi__metric-top">
+            <div
+              class="dro-dash-distribution-chain"
+              role="note"
+              :aria-label="
+                dinnerMenuDayTotalStock != null
+                  ? `${dinnerMenuDayTotalStock}份当日晚餐出餐量等于配送、自提、单次零售与可卖数量之和`
+                  : '当日晚餐出餐量未配置'
+              "
+            >
+              <div class="dro-dash-chain-node-header">
+                <span class="dro-dash-chain-node-label">配额去向拆解线</span>
+                <span class="dro-dash-chain-node dro-dash-chain-node--main">
+                  已售出 {{ todayDinnerSoldTotal != null ? `${todayDinnerSoldTotal}份` : '—' }}
+                </span>
+              </div>
+              <div class="dro-dash-stacked-bar" aria-hidden="true">
+                <div
+                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--deliver"
+                  :style="{
+                    width: distributionStackWidth(todayDinnerDelivery, dinnerMenuDayTotalStock),
+                  }"
+                />
+                <div
+                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--pickup"
+                  :style="{
+                    width: distributionStackWidth(todayDinnerPickup, dinnerMenuDayTotalStock),
+                  }"
+                />
+                <div
+                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--retail"
+                  :style="{
+                    width: distributionStackWidth(todayDinnerRetail, dinnerMenuDayTotalStock),
+                  }"
+                />
+                <div
+                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--sellable"
+                  :class="{
+                    'dro-dash-stacked-bar__seg--sellable-empty':
+                      todayDinnerRemaining != null && todayDinnerRemaining <= 0,
+                  }"
+                  :style="{
+                    width: distributionStackWidth(todayDinnerRemaining, dinnerMenuDayTotalStock),
+                  }"
+                />
+              </div>
+              <div class="dro-dash-branch-pill-grid dro-dash-branch-pill-grid--5">
+                <div class="dro-dash-branch-pill">
+                  <span class="dro-dash-branch-pill__lbl"
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />配送</span
+                  >
+                  <span class="dro-dash-branch-pill__val">{{
+                    todayDinnerDelivery == null ? '—' : `${Math.trunc(Number(todayDinnerDelivery))}`
+                  }}</span>
+                </div>
+                <div class="dro-dash-branch-pill">
+                  <span class="dro-dash-branch-pill__lbl"
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提</span
+                  >
+                  <span class="dro-dash-branch-pill__val">{{
+                    todayDinnerPickup == null ? '—' : `${Math.trunc(Number(todayDinnerPickup))}`
+                  }}</span>
+                </div>
+                <div class="dro-dash-branch-pill">
+                  <span class="dro-dash-branch-pill__lbl"
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />零售</span
+                  >
+                  <span class="dro-dash-branch-pill__val">{{ todayDinnerRetail }}</span>
+                </div>
+                <div class="dro-dash-branch-pill">
+                  <span class="dro-dash-branch-pill__lbl"
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--waste" aria-hidden="true" />损耗</span
+                  >
+                  <span class="dro-dash-branch-pill__val">{{ todayDinnerWasteTotal }}</span>
+                </div>
+                <div class="dro-dash-branch-pill">
+                  <span class="dro-dash-branch-pill__lbl"
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--sellable" aria-hidden="true" />剩余</span
+                  >
+                  <span
+                    class="dro-dash-branch-pill__val dro-dash-branch-pill__val--sellable"
+                    :class="{
+                      'dro-dash-branch-pill__val--sellable-muted':
+                        todayDinnerRemaining != null && todayDinnerRemaining <= 0,
+                    }"
+                    >{{
+                      todayDinnerRemaining == null ? '—' : `${todayDinnerRemaining}`
+                    }}</span
+                  >
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="dro-dash-kpi__mid-spacer" aria-hidden="true" />
+        </div>
+      </article>
+      -->
+
+      <!--
+        [功能暂不上线] 明日晚餐预测营业概览卡片
+        晚餐餐段明日预测暂未对外开放，待晚餐功能上线后，取消本段 HTML 注释即可恢复展示。
+        请勿删除下方模板代码。
+      -->
+      <!--
       <article
         class="dro-dash-kpi dro-dash-kpi--tomorrow dro-dash-kpi--dinner"
         :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }"
@@ -1218,7 +1227,7 @@ onMounted(() => {
           </div>
         </div>
       </article>
-        </div>
+      -->
       </div>
 
       <!-- 第三行：后厨计划管理 / 门店自提快速核销舱 -->
