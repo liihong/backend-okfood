@@ -1,4 +1,5 @@
 import { minMemberDeliveryStartYmd, ymdTodayShanghai } from '@/utils/memberDeliveryDate.js'
+import { hasAnyMealBalance } from '@/utils/memberMealPeriod.js'
 
 /** 与后端 `STUB_MEMBER_NAME` 一致 */
 export const MEMBER_STUB_NAME = '待完善'
@@ -91,8 +92,7 @@ export function shouldPromptMemberCardPay(profile) {
   if (!profile || typeof profile !== 'object') return false
   // 微信已缴待完善配送：不可再引导购卡
   if (isPaidCardAwaitingSetup(profile)) return false
-  const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
-  return balance <= 0
+  return !hasAnyMealBalance(profile)
 }
 
 /**

@@ -273,7 +273,7 @@ def upsert_kitchen_plan_route(
     return success(
         data={
             "business_date": body.business_date.isoformat(),
-            "meal_period": (body.meal_period or "lunch").strip().lower(),
+            "meal_period": body.meal_period,
             "total_stock": total,
         },
         msg="日总份数已保存",
@@ -1982,9 +1982,12 @@ def menu_weekly_slots(
     meal_period: Annotated[str, Query(description="lunch/dinner，默认 lunch")] = "lunch",
 ):
     """每周餐品槽位：不传参数时同时返回本周与下周，便于预告维护（无需翻周拷贝数据）。"""
+    from app.services.meal_period.normalize import normalize_meal_period
+
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    period = normalize_meal_period(meal_period)
     return success(
-        data=admin_weekly_menu_preview(db, week_start, store_id=store_id, meal_period=meal_period),
+        data=admin_weekly_menu_preview(db, week_start, store_id=store_id, meal_period=period),
         msg="获取成功",
     )
 

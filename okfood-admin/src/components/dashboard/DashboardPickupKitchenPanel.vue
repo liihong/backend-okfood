@@ -12,13 +12,13 @@ const props = defineProps({
   tomorrowBusinessDate: { type: String, default: '' },
   /** 锚定日后天 YYYY-MM-DD */
   dayAfterTomorrowBusinessDate: { type: String, default: '' },
-  /** 锚定日周菜单「日总份数」；null 表示未配置 */
+  /** 锚定日午餐周菜单「日总份数」；与 menuDayTotalStockDinner 分餐段 */
   menuDayTotalStock: { type: Number, default: null },
-  /** 锚定日次日周菜单「日总份数」；null 表示未配置 */
+  /** 锚定日次日午餐周菜单「日总份数」（meal_period=lunch） */
   menuDayTotalStockTomorrow: { type: Number, default: null },
-  /** 锚定日后天周菜单「日总份数」；null 表示未配置 */
+  /** 锚定日后天午餐周菜单「日总份数」 */
   menuDayTotalStockDayAfterTomorrow: { type: Number, default: null },
-  /** 锚定日晚餐周菜单「日总份数」 */
+  /** 锚定日晚餐周菜单「日总份数」；与 menuDayTotalStock 分餐段，互不影响 */
   menuDayTotalStockDinner: { type: Number, default: null },
   /** 锚定日次日晚餐周菜单「日总份数」 */
   menuDayTotalStockTomorrowDinner: { type: Number, default: null },
@@ -59,7 +59,7 @@ function syncKitchenInputFromStock(stock, targetRef) {
   }
 }
 
-/** 后厨输入框：读取本周菜单对应日「日总份数」 */
+/** 后厨输入框：午餐列 ← dashboard-summary.today_menu_day_total_stock（meal_period=lunch） */
 watch(
   () => [props.menuDayTotalStock, props.businessDate],
   () => {
@@ -84,6 +84,7 @@ watch(
   { immediate: true },
 )
 
+/** 后厨输入框：晚餐列 ← dashboard-summary.today_dinner_menu_day_total_stock（meal_period=dinner） */
 watch(
   () => [props.menuDayTotalStockDinner, props.businessDate],
   () => {

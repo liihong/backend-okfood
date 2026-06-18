@@ -7,7 +7,11 @@ import { showToast } from '../composables/useToast.js'
 import { useDayStockAdjustments } from '../composables/useDayStockAdjustments.js'
 import DayStockAdjustmentModal from '../components/dashboard/DayStockAdjustmentModal.vue'
 
-const mealPeriodTab = ref(/** @type {'lunch'|'dinner'} */ ('lunch'))
+/** 顶部 Tab：本周 / 下周 */
+const weekTab = ref(/** @type {'this'|'next'} */ ('this'))
+/** 午餐、晚餐双预览（一次加载两组餐段） */
+const previewLunch = ref(null)
+const previewDinner = ref(null)
 
 const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
@@ -43,8 +47,7 @@ function isSlotRowPast(row) {
 
 const loading = ref(false)
 const savingSlot = ref(null)
-const cloning = ref(false)
-const preview = ref(null)
+const cloning = ref(/** @type {'lunch'|'dinner'|null} */ (null))
 const dishes = ref([])
 /** 顶部说明横条是否展示 */
 const bannerVisible = ref(true)
@@ -95,29 +98,39 @@ function formatSlotPrice(v) {
   return `¥ ${s}`
 }
 
-const thisWeekRows = computed(() => {
-  const p = preview.value
-  if (!p || !p.this_week_start) return []
-  return slotsToRows(p.this_week, p.this_week_start)
+/** 从预览中取当前 Tab 对应周的行数据 */
+function rowsForPreview(preview) {
+  if (!preview) return []
+  if (weekTab.value === 'this') {
+    if (!preview.this_week_start) return []
+    return slotsToRows(preview.this_week, preview.this_week_start)
+  }
+  if (!preview.next_week_start) return []
+  return slotsToRows(preview.next_week, preview.next_week_start)
+}
+
+const lunchRows = computed(() => rowsForPreview(previewLunch.value))
+const dinnerRows = computed(() => rowsForPreview(previewDinner.value))
+
+/** 当前 Tab 对应的 week_start（用于卡片日期徽章） */
+const activeWeekStart = computed(() => {
+  const p = previewLunch.value || previewDinner.value
+  if (!p) return ''
+  return weekTab.value === 'this' ? p.this_week_start || '' : p.next_week_start || ''
 })
 
-const nextWeekRows = computed(() => {
-  const p = preview.value
-  if (!p || !p.next_week_start) return []
-  return slotsToRows(p.next_week, p.next_week_start)
-})
-
-/** @param {{ weekStart: string, slot: number }} row */
-function totalStockKey(row) {
-  return `${row.weekStart}|${row.slot}`
+/** @param {{ weekStart: string, slot: number }} row @param {'lunch'|'dinner'} mealPeriod */
+function totalStockKey(row, mealPeriod) {
+  return `${mealPeriod}|${row.weekStart}|${row.slot}`
 }
 
 /**
  * @param {{ weekStart: string, slot: number, total_stock?: unknown }} row
  * @returns {string}
  */
-function totalStockFieldValue(row) {
-  const k = totalStockKey(row)
+/** @param {'lunch'|'dinner'} mealPeriod */
+function totalStockFieldValue(row, mealPeriod) {
+  const k = totalStockKey(row, mealPeriod)
   if (Object.prototype.hasOwnProperty.call(totalStockDraft.value, k)) {
     return totalStockDraft.value[k] ?? ''
   }
@@ -129,24 +142,25 @@ function totalStockFieldValue(row) {
  * @param {{ weekStart: string, slot: number }} row
  * @param {string} val
  */
-function setTotalStockDraft(row, val) {
-  const k = totalStockKey(row)
+/** @param {'lunch'|'dinner'} mealPeriod */
+function setTotalStockDraft(row, val, mealPeriod) {
+  const k = totalStockKey(row, mealPeriod)
   totalStockDraft.value = { ...totalStockDraft.value, [k]: val }
 }
 
-/** 单次余展示文案 */
-function remainingDisplay(row) {
+/** 单次余展示文案 @param {'lunch'|'dinner'} mealPeriod */
+function remainingDisplay(row, mealPeriod) {
   if (!row.dish_id) return '—'
-  if (totalStockFieldValue(row) === '') return '0'
+  if (totalStockFieldValue(row, mealPeriod) === '') return '0'
   const rem = row.single_stock_remaining
   if (rem == null || rem === '') return '0'
   return String(rem)
 }
 
-/** 单次余徽章样式：未配置 / 有余 / 售罄 */
-function remainingBadgeClass(row) {
+/** 单次余徽章样式：未配置 / 有余 / 售罄 @param {'lunch'|'dinner'} mealPeriod */
+function remainingBadgeClass(row, mealPeriod) {
   if (!row.dish_id) return 'wmenu-remain--none'
-  if (totalStockFieldValue(row) === '') return 'wmenu-remain--warn'
+  if (totalStockFieldValue(row, mealPeriod) === '') return 'wmenu-remain--warn'
   const rem = row.single_stock_remaining
   if (rem == null || rem === '') return 'wmenu-remain--warn'
   const n = Number(rem)
@@ -200,8 +214,12 @@ async function loadPreview() {
   if (!adminAccessToken.value) return
   loading.value = true
   try {
-    const qs = `?meal_period=${encodeURIComponent(mealPeriodTab.value)}`
-    preview.value = await apiJson(`/api/admin/menu/weekly-slots${qs}`, {}, { auth: true })
+    const [lunch, dinner] = await Promise.all([
+      apiJson('/api/admin/menu/weekly-slots?meal_period=lunch', {}, { auth: true }),
+      apiJson('/api/admin/menu/weekly-slots?meal_period=dinner', {}, { auth: true }),
+    ])
+    previewLunch.value = lunch
+    previewDinner.value = dinner
     totalStockDraft.value = {}
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
@@ -211,7 +229,8 @@ async function loadPreview() {
       return
     }
     showToast(e instanceof Error ? e.message : '加载周菜单失败', 'error')
-    preview.value = null
+    previewLunch.value = null
+    previewDinner.value = null
   } finally {
     loading.value = false
   }
@@ -220,14 +239,15 @@ async function loadPreview() {
 /**
  * @param {Record<string, unknown> & { weekStart: string, slot: number }} row
  * @param {unknown} dishId
+ * @param {'lunch'|'dinner'} mealPeriod
  * @param {{ silent?: boolean }} [opts]
  */
-async function onDishChange(row, dishId, opts = {}) {
+async function onDishChange(row, dishId, mealPeriod, opts = {}) {
   if (isSlotRowPast(row)) {
     if (!opts.silent) showToast('历史日期不可修改菜品', 'info')
     return
   }
-  const key = `${row.weekStart}-${row.slot}`
+  const key = `${mealPeriod}-${row.weekStart}-${row.slot}`
   savingSlot.value = key
   try {
     await apiJson(
@@ -238,7 +258,7 @@ async function onDishChange(row, dishId, opts = {}) {
           week_start: row.weekStart,
           slot: row.slot,
           dish_id: dishId == null || dishId === '' ? null : Number(dishId),
-          meal_period: mealPeriodTab.value,
+          meal_period: mealPeriod,
         }),
       },
       { auth: true },
@@ -256,14 +276,21 @@ async function onDishChange(row, dishId, opts = {}) {
 
 /**
  * @param {Record<string, unknown> & { weekStart: string, slot: number, dish_id?: unknown, total_stock?: unknown }} row
+ * @param {'lunch'|'dinner'} mealPeriod
  * @param {{ silent?: boolean, stockOverride?: string | null }} [opts]
  */
-function buildTotalStockBody(row, opts = {}) {
+function buildTotalStockBody(row, mealPeriod, opts = {}) {
   const s =
     opts.stockOverride !== undefined
       ? String(opts.stockOverride ?? '').trim()
-      : String(totalStockFieldValue(row) ?? '').trim()
-  const body = { week_start: row.weekStart, slot: row.slot, total_stock: null, meal_period: mealPeriodTab.value }
+      : String(totalStockFieldValue(row, mealPeriod) ?? '').trim()
+  const body = {
+    week_start: row.weekStart,
+    slot: row.slot,
+    total_stock: null,
+    // 必传：lunch=午餐槽 / dinner=晚餐槽；与营业概览 today_menu_day_total_stock / today_dinner_menu_day_total_stock 一一对应
+    meal_period: mealPeriod,
+  }
   if (s !== '' && s !== '—') {
     const n = Math.floor(Number(s))
     if (!Number.isFinite(n) || n < 0) return { error: '请输入非负整数或留空（不限）' }
@@ -275,15 +302,16 @@ function buildTotalStockBody(row, opts = {}) {
 /**
  * 失焦或回车时提交日总份
  * @param {Record<string, unknown> & { weekStart: string, slot: number, dish_id?: unknown, total_stock?: unknown }} row
+ * @param {'lunch'|'dinner'} mealPeriod
  * @param {{ silent?: boolean, stockOverride?: string | null }} [opts]
  */
-async function onTotalStockCommit(row, opts = {}) {
+async function onTotalStockCommit(row, mealPeriod, opts = {}) {
   if (isSlotRowPast(row)) return
   if (!row.dish_id) {
     if (!opts.silent) showToast('请先选择菜品', 'error')
     return
   }
-  const built = buildTotalStockBody(row, opts)
+  const built = buildTotalStockBody(row, mealPeriod, opts)
   if (built.error) {
     if (!opts.silent) showToast(built.error, 'error')
     return
@@ -293,7 +321,7 @@ async function onTotalStockCommit(row, opts = {}) {
   if (body.total_stock == null && (server == null || server === '')) return
   if (body.total_stock != null && server != null && Number(server) === body.total_stock) return
 
-  const key = `${row.weekStart}-stock-${row.slot}`
+  const key = `${mealPeriod}-${row.weekStart}-stock-${row.slot}`
   savingSlot.value = key
   try {
     await apiJson('/api/admin/menu/day-total-stock', { method: 'POST', body: JSON.stringify(body) }, { auth: true })
@@ -308,37 +336,43 @@ async function onTotalStockCommit(row, opts = {}) {
   }
 }
 
-/** 读取本周槽位对应的日总份字符串（含草稿） */
-function resolveTotalStockString(src) {
-  if (Object.prototype.hasOwnProperty.call(totalStockDraft.value, totalStockKey(src))) {
-    return totalStockFieldValue(src)
+/** 读取源槽位对应的日总份字符串（含草稿） @param {'lunch'|'dinner'} mealPeriod */
+function resolveTotalStockString(src, mealPeriod) {
+  if (Object.prototype.hasOwnProperty.call(totalStockDraft.value, totalStockKey(src, mealPeriod))) {
+    return totalStockFieldValue(src, mealPeriod)
   }
   if (src.total_stock == null || src.total_stock === '') return ''
   return String(src.total_stock)
 }
 
-/** 一键将本周菜品与日总份复制到下周 */
-async function cloneThisWeekToNext() {
-  const srcRows = thisWeekRows.value
-  const dstRows = nextWeekRows.value
+/** 一键将本周菜品与日总份复制到下周（指定餐段） @param {'lunch'|'dinner'} mealPeriod */
+async function cloneThisWeekToNext(mealPeriod) {
+  const preview = mealPeriod === 'lunch' ? previewLunch.value : previewDinner.value
+  if (!preview?.this_week_start || !preview?.next_week_start) {
+    showToast('菜单数据未就绪', 'error')
+    return
+  }
+  const srcRows = slotsToRows(preview.this_week, preview.this_week_start)
+  const dstRows = slotsToRows(preview.next_week, preview.next_week_start)
   if (!srcRows.length || !dstRows.length) {
     showToast('菜单数据未就绪', 'error')
     return
   }
-  if (!window.confirm('将本周一至周日的菜品与日总份复制到下周？已有下周配置会被覆盖。')) return
+  const label = mealPeriod === 'lunch' ? '午餐' : '晚餐'
+  if (!window.confirm(`将本周一至周日的${label}菜品与日总份复制到下周？已有下周配置会被覆盖。`)) return
 
-  cloning.value = true
+  cloning.value = mealPeriod
   try {
     for (let i = 0; i < 7; i++) {
       const src = srcRows[i]
       const dst = dstRows[i]
       if (!src || !dst) continue
 
-      await onDishChange(dst, src.dish_id, { silent: true })
+      await onDishChange(dst, src.dish_id, mealPeriod, { silent: true })
 
-      const stockStr = resolveTotalStockString(src)
+      const stockStr = resolveTotalStockString(src, mealPeriod)
       if (src.dish_id) {
-        const built = buildTotalStockBody(dst, { stockOverride: stockStr })
+        const built = buildTotalStockBody(dst, mealPeriod, { stockOverride: stockStr })
         if (built.error) throw new Error(built.error)
         await apiJson(
           '/api/admin/menu/day-total-stock',
@@ -348,20 +382,21 @@ async function cloneThisWeekToNext() {
       }
     }
     await loadPreview()
-    showToast('已成功将本周排程复制至下周', 'success')
+    showToast(`已成功将本周${label}复制至下周`, 'success')
   } catch (e) {
     showToast(e instanceof Error ? e.message : '复制失败', 'error')
     await loadPreview()
   } finally {
-    cloning.value = false
+    cloning.value = null
     savingSlot.value = null
   }
 }
 
-function isRowBusy(row) {
-  const k1 = `${row.weekStart}-${row.slot}`
-  const k2 = `${row.weekStart}-stock-${row.slot}`
-  return savingSlot.value === k1 || savingSlot.value === k2 || cloning.value
+/** @param {'lunch'|'dinner'} mealPeriod */
+function isRowBusy(row, mealPeriod) {
+  const k1 = `${mealPeriod}-${row.weekStart}-${row.slot}`
+  const k2 = `${mealPeriod}-${row.weekStart}-stock-${row.slot}`
+  return savingSlot.value === k1 || savingSlot.value === k2 || cloning.value === mealPeriod
 }
 
 onMounted(() => {
@@ -369,9 +404,17 @@ onMounted(() => {
   void loadPreview()
 })
 
-watch(mealPeriodTab, () => {
-  void loadPreview()
+watch(weekTab, () => {
+  totalStockDraft.value = {}
 })
+
+/** 双卡片配置：左午餐、右晚餐 */
+const mealCards = computed(() => [
+  { key: 'lunch', title: '午餐菜单配置', mealPeriod: /** @type {'lunch'} */ ('lunch'), rows: lunchRows.value },
+  { key: 'dinner', title: '晚餐菜单配置', mealPeriod: /** @type {'dinner'} */ ('dinner'), rows: dinnerRows.value },
+])
+
+const hasPreview = computed(() => previewLunch.value != null || previewDinner.value != null)
 
 const {
   modalOpen,
@@ -385,9 +428,9 @@ const {
   submitAdjustment,
 } = useDayStockAdjustments({ onSuccess: () => loadPreview() })
 
-/** @param {{ weekStart: string, slot: number }} row */
-function openRowAdjust(row) {
-  openAdjustModal({ businessDate: slotCalendarYmd(row), mealPeriod: mealPeriodTab.value })
+/** @param {{ weekStart: string, slot: number }} row @param {'lunch'|'dinner'} mealPeriod */
+function openRowAdjust(row, mealPeriod) {
+  openAdjustModal({ businessDate: slotCalendarYmd(row), mealPeriod })
 }
 </script>
 
@@ -408,269 +451,153 @@ function openRowAdjust(row) {
       </button>
     </div>
 
-    <nav class="wmenu-period-tabs" aria-label="餐段切换">
+    <nav class="wmenu-period-tabs" aria-label="周次切换">
       <button
         type="button"
         class="wmenu-period-tab"
-        :class="{ 'wmenu-period-tab--active': mealPeriodTab === 'lunch' }"
-        @click="mealPeriodTab = 'lunch'"
+        :class="{ 'wmenu-period-tab--active': weekTab === 'this' }"
+        @click="weekTab = 'this'"
       >
-        午餐
+        本周
       </button>
       <button
         type="button"
         class="wmenu-period-tab"
-        :class="{ 'wmenu-period-tab--active': mealPeriodTab === 'dinner' }"
-        @click="mealPeriodTab = 'dinner'"
+        :class="{ 'wmenu-period-tab--active': weekTab === 'next' }"
+        @click="weekTab = 'next'"
       >
-        晚餐
+        下周
       </button>
     </nav>
 
-    <div v-if="preview" class="wmenu-schedule-scroll">
+    <div v-if="hasPreview" class="wmenu-schedule-scroll">
       <div class="wmenu-schedule-grid">
-      <!-- 本周 -->
-      <div class="wmenu-week-card">
-        <div class="wmenu-week-card-header">
-          <h3 class="wmenu-week-title">本周菜单配置</h3>
-          <div class="wmenu-date-badge">
-            起：<span>{{ preview.this_week_start }}</span>
-          </div>
-        </div>
-        <div class="wmenu-table-scroll">
-          <table class="wmenu-table">
-            <thead>
-              <tr>
-                <th>星期</th>
-                <th>单点价</th>
-                <th>日总份数</th>
-                <th>单次零售</th>
-                <th>应配送</th>
-                <th>损耗</th>
-                <th>剩余</th>
-                <th>操作</th>
-                <th>菜品</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in thisWeekRows"
-                :key="`this-${row.slot}`"
-                :class="{ 'wmenu-row--past': isSlotRowPast(row) }"
+        <div v-for="card in mealCards" :key="card.key" class="wmenu-week-card">
+          <div class="wmenu-week-card-header">
+            <h3 class="wmenu-week-title">{{ card.title }}</h3>
+            <div class="wmenu-week-header-actions">
+              <button
+                v-if="weekTab === 'next'"
+                type="button"
+                class="wmenu-btn-sync"
+                :disabled="loading || cloning === card.mealPeriod || !card.rows.length"
+                @click="cloneThisWeekToNext(card.mealPeriod)"
               >
-                <td>
-                  <span
-                    class="wmenu-day-label"
-                    :class="[
-                      `wmenu-day-tone--${row.slot}`,
-                      { 'wmenu-day-label--past': isSlotRowPast(row) },
-                    ]"
-                  >
-                    {{ row.weekday }}
-                  </span>
-                </td>
-                <td>
-                  <span
-                    class="wmenu-price"
-                    :class="{
-                      'wmenu-price--missing':
-                        row.dish_id &&
-                        (!row.single_order_price_yuan || !String(row.single_order_price_yuan).trim()),
-                    }"
-                  >
-                    {{ row.dish_id ? formatSlotPrice(row.single_order_price_yuan) : '—' }}
-                  </span>
-                </td>
-                <td>
-                  <input
-                    v-if="row.dish_id"
-                    type="number"
-                    min="0"
-                    class="wmenu-total-input"
-                    placeholder="留空=不限"
-                    :value="totalStockFieldValue(row)"
-                    :disabled="isRowBusy(row) || isSlotRowPast(row)"
-                    @input="(e) => setTotalStockDraft(row, (e.target).value)"
-                    @blur="() => onTotalStockCommit(row)"
-                  />
-                  <span v-else class="wmenu-dash">—</span>
-                </td>
-                <td>
-                  <span class="wmenu-retail-badge" :class="singleRetailBadgeClass(row)">
-                    {{ singleRetailDisplay(row) }}
-                  </span>
-                </td>
-                <td>
-                  <span class="wmenu-deliver-badge">{{ deliverDisplay(row) }}</span>
-                </td>
-                <td>{{ row.waste_total != null ? row.waste_total : '—' }}</td>
-                <td>
-                  <span class="wmenu-remain-badge" :class="remainingBadgeClass(row)">
-                    {{ remainingDisplay(row) }}
-                  </span>
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    class="wmenu-adjust-btn"
-                    :disabled="!row.dish_id || isSlotRowPast(row)"
-                    @click="openRowAdjust(row)"
-                  >
-                    报损耗
-                  </button>
-                </td>
-                <td>
-                  <el-select
-                    :model-value="row.dish_id"
-                    filterable
-                    clearable
-                    placeholder="选择菜品"
-                    class="wmenu-dish-select"
-                    :loading="savingSlot === `${row.weekStart}-${row.slot}`"
-                    :disabled="isRowBusy(row) || isSlotRowPast(row)"
-                    @update:model-value="(v) => onDishChange(row, v)"
-                  >
-                    <el-option
-                      v-for="opt in dishOptions"
-                      :key="opt.value"
-                      :label="opt.label"
-                      :value="opt.value"
-                      :disabled="opt.disabled"
-                    />
-                  </el-select>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- 下周 -->
-      <div class="wmenu-week-card">
-        <div class="wmenu-week-card-header">
-          <h3 class="wmenu-week-title">下周菜单配置</h3>
-          <div class="wmenu-week-header-actions">
-            <button
-              type="button"
-              class="wmenu-btn-sync"
-              :disabled="loading || cloning || !thisWeekRows.length"
-              @click="cloneThisWeekToNext"
-            >
-              <CornerDownRight :size="14" stroke-width="2.5" aria-hidden="true" />
-              {{ cloning ? '复制中…' : '一键复制本周菜单' }}
-            </button>
-            <div class="wmenu-date-badge">
-              起：<span>{{ preview.next_week_start }}</span>
+                <CornerDownRight :size="14" stroke-width="2.5" aria-hidden="true" />
+                {{ cloning === card.mealPeriod ? '复制中…' : '一键复制本周菜单' }}
+              </button>
+              <div class="wmenu-date-badge">
+                起：<span>{{ activeWeekStart }}</span>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="wmenu-table-scroll">
-          <table class="wmenu-table">
-            <thead>
-              <tr>
-                <th>星期</th>
-                <th>单点价</th>
-                <th>日总份数</th>
-                <th>单次零售</th>
-                <th>应配送</th>
-                <th>损耗</th>
-                <th>剩余</th>
-                <th>操作</th>
-                <th>菜品</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in nextWeekRows"
-                :key="`next-${row.slot}`"
-                :class="{ 'wmenu-row--past': isSlotRowPast(row) }"
-              >
-                <td>
-                  <span
-                    class="wmenu-day-label"
-                    :class="[
-                      `wmenu-day-tone--${row.slot}`,
-                      { 'wmenu-day-label--past': isSlotRowPast(row) },
-                    ]"
-                  >
-                    {{ row.weekday }}
-                  </span>
-                </td>
-                <td>
-                  <span
-                    class="wmenu-price"
-                    :class="{
-                      'wmenu-price--missing':
-                        row.dish_id &&
-                        (!row.single_order_price_yuan || !String(row.single_order_price_yuan).trim()),
-                    }"
-                  >
-                    {{ row.dish_id ? formatSlotPrice(row.single_order_price_yuan) : '—' }}
-                  </span>
-                </td>
-                <td>
-                  <input
-                    v-if="row.dish_id"
-                    type="number"
-                    min="0"
-                    class="wmenu-total-input"
-                    placeholder="留空=不限"
-                    :value="totalStockFieldValue(row)"
-                    :disabled="isRowBusy(row) || isSlotRowPast(row)"
-                    @input="(e) => setTotalStockDraft(row, (e.target).value)"
-                    @blur="() => onTotalStockCommit(row)"
-                  />
-                  <span v-else class="wmenu-dash">—</span>
-                </td>
-                <td>
-                  <span class="wmenu-retail-badge" :class="singleRetailBadgeClass(row)">
-                    {{ singleRetailDisplay(row) }}
-                  </span>
-                </td>
-                <td>
-                  <span class="wmenu-deliver-badge">{{ deliverDisplay(row) }}</span>
-                </td>
-                <td>{{ row.waste_total != null ? row.waste_total : '—' }}</td>
-                <td>
-                  <span class="wmenu-remain-badge" :class="remainingBadgeClass(row)">
-                    {{ remainingDisplay(row) }}
-                  </span>
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    class="wmenu-adjust-btn"
-                    :disabled="!row.dish_id || isSlotRowPast(row)"
-                    @click="openRowAdjust(row)"
-                  >
-                    报损耗
-                  </button>
-                </td>
-                <td>
-                  <el-select
-                    :model-value="row.dish_id"
-                    filterable
-                    clearable
-                    placeholder="选择菜品"
-                    class="wmenu-dish-select"
-                    :loading="savingSlot === `${row.weekStart}-${row.slot}`"
-                    :disabled="isRowBusy(row) || isSlotRowPast(row)"
-                    @update:model-value="(v) => onDishChange(row, v)"
-                  >
-                    <el-option
-                      v-for="opt in dishOptions"
-                      :key="opt.value"
-                      :label="opt.label"
-                      :value="opt.value"
-                      :disabled="opt.disabled"
+          <div class="wmenu-table-scroll">
+            <table class="wmenu-table">
+              <thead>
+                <tr>
+                  <th>星期</th>
+                  <th>单点价</th>
+                  <th>日总份数</th>
+                  <th>单次零售</th>
+                  <th>应配送</th>
+                  <th>损耗</th>
+                  <th>剩余</th>
+                  <th>操作</th>
+                  <th>菜品</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="row in card.rows"
+                  :key="`${card.key}-${row.slot}`"
+                  :class="{ 'wmenu-row--past': isSlotRowPast(row) }"
+                >
+                  <td>
+                    <span
+                      class="wmenu-day-label"
+                      :class="[
+                        `wmenu-day-tone--${row.slot}`,
+                        { 'wmenu-day-label--past': isSlotRowPast(row) },
+                      ]"
+                    >
+                      {{ row.weekday }}
+                    </span>
+                  </td>
+                  <td>
+                    <span
+                      class="wmenu-price"
+                      :class="{
+                        'wmenu-price--missing':
+                          row.dish_id &&
+                          (!row.single_order_price_yuan || !String(row.single_order_price_yuan).trim()),
+                      }"
+                    >
+                      {{ row.dish_id ? formatSlotPrice(row.single_order_price_yuan) : '—' }}
+                    </span>
+                  </td>
+                  <td>
+                    <input
+                      v-if="row.dish_id"
+                      type="number"
+                      min="0"
+                      class="wmenu-total-input"
+                      placeholder="留空=不限"
+                      :value="totalStockFieldValue(row, card.mealPeriod)"
+                      :disabled="isRowBusy(row, card.mealPeriod) || isSlotRowPast(row)"
+                      @input="(e) => setTotalStockDraft(row, (e.target).value, card.mealPeriod)"
+                      @blur="() => onTotalStockCommit(row, card.mealPeriod)"
                     />
-                  </el-select>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                    <span v-else class="wmenu-dash">—</span>
+                  </td>
+                  <td>
+                    <span class="wmenu-retail-badge" :class="singleRetailBadgeClass(row)">
+                      {{ singleRetailDisplay(row) }}
+                    </span>
+                  </td>
+                  <td>
+                    <span class="wmenu-deliver-badge">{{ deliverDisplay(row) }}</span>
+                  </td>
+                  <td>{{ row.waste_total != null ? row.waste_total : '—' }}</td>
+                  <td>
+                    <span class="wmenu-remain-badge" :class="remainingBadgeClass(row, card.mealPeriod)">
+                      {{ remainingDisplay(row, card.mealPeriod) }}
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      class="wmenu-adjust-btn"
+                      :disabled="!row.dish_id || isSlotRowPast(row)"
+                      @click="openRowAdjust(row, card.mealPeriod)"
+                    >
+                      报损耗
+                    </button>
+                  </td>
+                  <td>
+                    <el-select
+                      :model-value="row.dish_id"
+                      filterable
+                      clearable
+                      placeholder="选择菜品"
+                      class="wmenu-dish-select"
+                      :loading="savingSlot === `${card.mealPeriod}-${row.weekStart}-${row.slot}`"
+                      :disabled="isRowBusy(row, card.mealPeriod) || isSlotRowPast(row)"
+                      @update:model-value="(v) => onDishChange(row, v, card.mealPeriod)"
+                    >
+                      <el-option
+                        v-for="opt in dishOptions"
+                        :key="opt.value"
+                        :label="opt.label"
+                        :value="opt.value"
+                        :disabled="opt.disabled"
+                      />
+                    </el-select>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
       </div>
     </div>
   </div>

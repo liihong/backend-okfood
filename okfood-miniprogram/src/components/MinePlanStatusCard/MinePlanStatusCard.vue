@@ -13,9 +13,15 @@
     </view>
 
     <view class="plan-card__hero-row">
-      <view class="plan-card__balance">
-        <text class="plan-card__num">{{ remainingDisplay }}</text>
-        <text class="plan-card__num-lab">剩余自律餐次</text>
+      <view class="plan-card__balances">
+        <view v-if="showLunchBalanceRow" class="plan-card__balance">
+          <text class="plan-card__num">{{ remainingDisplay }}</text>
+          <text class="plan-card__num-lab">次 午餐</text>
+        </view>
+        <view v-if="showDinnerBalanceRow" class="plan-card__balance">
+          <text class="plan-card__num">{{ dinnerRemainingDisplay }}</text>
+          <text class="plan-card__num-lab">次 晚餐</text>
+        </view>
       </view>
       <view v-if="statusText" class="plan-card__slant-wrap">
         <text
@@ -65,6 +71,10 @@ import { computed } from 'vue'
 
 const props = defineProps({
   remainingMeals: { type: Number, default: 0 },
+  /** 双餐段会员展示晚餐剩余餐次 */
+  dinnerRemainingMeals: { type: Number, default: 0 },
+  showLunchBalance: { type: Boolean, default: true },
+  showDinnerBalance: { type: Boolean, default: false },
   statusText: { type: String, default: '' },
   /** 与高亮状态文案（如待完善资料）配套的浅色强调 */
   statusAlert: { type: Boolean, default: false },
@@ -84,6 +94,19 @@ defineEmits(['resume', 'buy-card', 'setup-delivery'])
 
 const remainingDisplay = computed(() =>
   Math.max(0, Math.floor(Number(props.remainingMeals) || 0)),
+)
+
+const dinnerRemainingDisplay = computed(() =>
+  Math.max(0, Math.floor(Number(props.dinnerRemainingMeals) || 0)),
+)
+
+/** 餐次为 0 时不展示该行 */
+const showLunchBalanceRow = computed(
+  () => props.showLunchBalance && remainingDisplay.value > 0,
+)
+
+const showDinnerBalanceRow = computed(
+  () => props.showDinnerBalance && dinnerRemainingDisplay.value > 0,
 )
 
 /** 请假、暂停时用高亮色强调 */
@@ -259,9 +282,15 @@ const vipRibbonClass = computed(() => {
   margin-bottom: 8rpx;
 }
 
-.plan-card__balance {
+.plan-card__balances {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.plan-card__balance {
   display: flex;
   flex-direction: row;
   align-items: baseline;

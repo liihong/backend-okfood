@@ -15,6 +15,11 @@ import MemberDeliveryMapPicker from '../components/MemberDeliveryMapPicker.vue'
 
 const route = useRoute()
 
+const storeId = ref(1)
+/** 已开启且生效的卡包模版（新建工单卡类型下拉） */
+const membershipTemplates = ref([])
+const membershipTemplatesLoading = ref(false)
+
 const list = ref([])
 const loading = ref(false)
 const page = ref(1)
@@ -90,6 +95,31 @@ function planTagClass(kind) {
   if (kind === '周卡') return 't-plan--week'
   if (kind === '月卡') return 't-plan--month'
   return 't-plan--count'
+}
+
+/** 工单/模版餐段展示：午餐 / 晚餐 / 午+晚 */
+function mealPeriodsLabel(periods) {
+  const ps = Array.isArray(periods) ? periods : ['lunch']
+  const hasL = ps.includes('lunch')
+  const hasD = ps.includes('dinner')
+  if (hasL && hasD) return '午+晚'
+  if (hasD) return '晚餐'
+  return '午餐'
+}
+
+function mealPeriodBadgeClass(periods) {
+  const ps = Array.isArray(periods) ? periods : ['lunch']
+  const hasL = ps.includes('lunch')
+  const hasD = ps.includes('dinner')
+  if (hasL && hasD) return 'co-meal-period--both'
+  if (hasD) return 'co-meal-period--dinner'
+  return 'co-meal-period--lunch'
+}
+
+/** 卡包模版下拉文案：名称 + 种类 + 餐段 + 入账次数 */
+function templateOptionLabel(t) {
+  const periods = Array.isArray(t.meal_periods) ? t.meal_periods : ['lunch']
+  return `${t.name}（${t.kind_label || '卡包'} · ${mealPeriodsLabel(periods)} · +${t.meals_grant} 次）`
 }
 
 /** 列表格内备注（列宽加大后以换行展示全文；空为 —） */
@@ -199,7 +229,7 @@ const createForm = ref({
   wechat_name: '',
   delivery_start_mode: 'date',
   delivery_start_date: todayInputDate(),
-  card_kind: '周卡',
+  membership_template_id: null,
   pay_channel: '微信',
   pay_status: '已缴',
   amount_yuan: '',
@@ -245,6 +275,41 @@ async function loadRenewPreview() {
 
 function onCreatePhoneInput() {
   if (createForm.value.open_mode === 'renew') scheduleRenewPreview()
+}
+
+/** 新建工单当前选中的卡包模版 */
+const selectedCreateTemplate = computed(() => {
+  const id = createForm.value.membership_template_id
+  if (id == null) return null
+  return membershipTemplates.value.find((t) => Number(t.id) === Number(id)) || null
+})
+
+async function loadMembershipTemplates() {
+  if (!adminAccessToken.value) return
+  membershipTemplatesLoading.value = true
+  try {
+    const data = await apiJson(
+      `/api/admin/catalog/membership-templates?store_id=${storeId.value}&active_only=true`,
+      {},
+      { auth: true },
+    )
+    membershipTemplates.value = Array.isArray(data) ? data : []
+    if (membershipTemplates.value.length > 0) {
+      const cur = createForm.value.membership_template_id
+      const hit = cur != null && membershipTemplates.value.some((t) => Number(t.id) === Number(cur))
+      if (!hit) {
+        createForm.value.membership_template_id = Number(membershipTemplates.value[0].id)
+      }
+    } else {
+      createForm.value.membership_template_id = null
+    }
+  } catch (e) {
+    membershipTemplates.value = []
+    createForm.value.membership_template_id = null
+    showToast(e instanceof Error ? e.message : '加载卡包模版失败', 'error')
+  } finally {
+    membershipTemplatesLoading.value = false
+  }
 }
 
 /** 续卡：仍有剩余且未暂停 → 仅叠加次数，不改起送日 */
@@ -309,8 +374,9 @@ const renewSyncPreview = computed(() => {
   const p = renewPreview.value
   if (!p || createForm.value.open_mode !== 'renew') return null
   const bal = Number(p.balance) || 0
-  const add = planDefaultTotal(createForm.value.card_kind)
-  if (add == null) return null
+  const tpl = selectedCreateTemplate.value
+  const add = tpl != null ? Number(tpl.meals_grant) || 0 : null
+  if (add == null || add <= 0) return null
   const mqt = Number(p.meal_quota_total)
   const planBase = planDefaultTotal(p.plan_type)
   const curTotal =
@@ -358,7 +424,7 @@ function openCreateModal() {
     wechat_name: '',
     delivery_start_mode: 'date',
     delivery_start_date: todayInputDate(),
-    card_kind: '周卡',
+    membership_template_id: null,
     pay_channel: '微信',
     pay_status: '已缴',
     amount_yuan: '',
@@ -369,6 +435,7 @@ function openCreateModal() {
     door_detail: '',
   }
   showCreateModal.value = true
+  void loadMembershipTemplates()
 }
 
 async function submitCreate() {
@@ -427,13 +494,19 @@ async function submitCreate() {
     }
   }
 
+  const tplId = createForm.value.membership_template_id
+  if (tplId == null || !Number.isFinite(Number(tplId))) {
+    showToast('请选择卡类型（暂无已开启的卡包模版时，请先在会员卡管理中创建并开启）', 'error')
+    return
+  }
+
   createSubmitting.value = true
   try {
     const body = {
       phone,
       open_mode: openMode,
       delivery_start_date: keepSchedule || deferStart ? null : startD,
-      card_kind: createForm.value.card_kind,
+      membership_template_id: Math.floor(Number(tplId)),
       pay_channel: createForm.value.pay_channel,
       pay_status: createForm.value.pay_status,
     }
@@ -479,7 +552,9 @@ const editForm = ref({
   member_phone: '',
   member_name: '',
   member_wechat_name: '',
-  card_kind: '',
+  membership_template_id: null,
+  meal_periods: ['lunch'],
+  template_product_label: '',
   delivery_start_mode: 'date',
   delivery_start_date: '',
   pay_channel: '微信',
@@ -490,6 +565,13 @@ const editForm = ref({
   created_by: '',
 })
 
+/** 更新工单当前选中的卡包模版 */
+const selectedEditTemplate = computed(() => {
+  const id = editForm.value.membership_template_id
+  if (id == null) return null
+  return membershipTemplates.value.find((t) => Number(t.id) === Number(id)) || null
+})
+
 function openEditModal(row) {
   const ds = row.delivery_start_date ? String(row.delivery_start_date).slice(0, 10) : ''
   editForm.value = {
@@ -497,7 +579,10 @@ function openEditModal(row) {
     member_phone: row.member_phone || '',
     member_name: row.member_name || '',
     member_wechat_name: row.member_wechat_name || '',
-    card_kind: row.card_kind || '',
+    membership_template_id:
+      row.membership_template_id != null ? Number(row.membership_template_id) : null,
+    meal_periods: Array.isArray(row.meal_periods) ? [...row.meal_periods] : ['lunch'],
+    template_product_label: row.template_product_label || '',
     delivery_start_mode: ds ? 'date' : 'defer',
     delivery_start_date: ds || todayInputDate(),
     pay_channel: row.pay_channel || '微信',
@@ -508,6 +593,40 @@ function openEditModal(row) {
     created_by: row.created_by || '',
   }
   showEditModal.value = true
+  void loadMembershipTemplatesForEdit()
+}
+
+async function loadMembershipTemplatesForEdit() {
+  if (!adminAccessToken.value) return
+  membershipTemplatesLoading.value = true
+  try {
+    const data = await apiJson(
+      `/api/admin/catalog/membership-templates?store_id=${storeId.value}&active_only=true`,
+      {},
+      { auth: true },
+    )
+    membershipTemplates.value = Array.isArray(data) ? data : []
+    const cur = editForm.value.membership_template_id
+    if (cur != null && !membershipTemplates.value.some((t) => Number(t.id) === Number(cur))) {
+      // 已入账或模版已下架：保留当前绑定 id，列表仍展示 template_product_label
+      membershipTemplates.value = [
+        {
+          id: cur,
+          name: editForm.value.template_product_label || `模版#${cur}`,
+          kind_label: '',
+          meals_grant: 0,
+          meal_periods: editForm.value.meal_periods,
+          is_active: false,
+        },
+        ...membershipTemplates.value,
+      ]
+    }
+  } catch (e) {
+    membershipTemplates.value = []
+    showToast(e instanceof Error ? e.message : '加载卡包模版失败', 'error')
+  } finally {
+    membershipTemplatesLoading.value = false
+  }
 }
 
 async function tryOpenOrderFromRouteQuery() {
@@ -597,7 +716,12 @@ async function submitEdit(syncMember = false) {
       sync_member: syncMember,
     }
     if (!editForm.value.applied_to_member) {
-      body.card_kind = editForm.value.card_kind || '周卡'
+      const tplId = editForm.value.membership_template_id
+      if (tplId == null || !Number.isFinite(Number(tplId))) {
+        showToast('请选择卡包模版（暂无已开启模版时请先在会员卡管理中创建并开启）', 'error')
+        return
+      }
+      body.membership_template_id = Math.floor(Number(tplId))
     }
     const ay = String(editForm.value.amount_yuan || '').trim()
     if (ay !== '') {
@@ -719,6 +843,23 @@ onUnmounted(() => {
               row.card_kind
             }}</span>
             <span v-else class="co-card-kind-empty">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          label="餐段"
+          width="76"
+          min-width="68"
+          align="center"
+          class-name="co-nowrap td-co-meal-period"
+        >
+          <template #default="{ row }">
+            <span
+              class="co-meal-period-badge"
+              :class="mealPeriodBadgeClass(row.meal_periods)"
+              :title="mealPeriodsLabel(row.meal_periods)"
+            >
+              {{ mealPeriodsLabel(row.meal_periods) }}
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="电话" width="118" min-width="108" class-name="td-mono co-nowrap td-co-phone-col">
@@ -933,20 +1074,26 @@ class="member-pill"
               <div class="co-create-fees-row3">
                 <div class="form-group">
                   <label>卡类型</label>
-                  <el-select v-model="createForm.card_kind" class="co-create-fees-select">
+                  <el-select
+                    v-model="createForm.membership_template_id"
+                    class="co-create-fees-select"
+                    :loading="membershipTemplatesLoading"
+                    :disabled="!membershipTemplates.length"
+                    placeholder="请选择已开启的卡包"
+                  >
                     <el-option
-                      value="周卡"
-                      :label="`周卡（默认 +${planDefaultTotal('周卡')} 次）`"
-                    />
-                    <el-option
-                      value="月卡"
-                      :label="`月卡（默认 +${planDefaultTotal('月卡')} 次）`"
-                    />
-                    <el-option
-                      value="次卡"
-                      :label="`次卡（默认 +${planDefaultTotal('次卡')} 次）`"
+                      v-for="t in membershipTemplates"
+                      :key="t.id"
+                      :value="Number(t.id)"
+                      :label="templateOptionLabel(t)"
                     />
                   </el-select>
+                  <p
+                    v-if="!membershipTemplatesLoading && !membershipTemplates.length"
+                    class="modal-hint modal-hint--warn"
+                  >
+                    暂无已开启的卡包模版，请先在「会员卡管理」中创建并开启。
+                  </p>
                 </div>
                 <div class="form-group">
                   <label>缴费渠道</label>
@@ -1134,26 +1281,39 @@ class="member-pill"
             />
           </div>
           <div class="form-group">
-            <label>卡类型</label>
+            <label>卡包模版</label>
             <el-select
-              v-model="editForm.card_kind"
+              v-model="editForm.membership_template_id"
               class="input-delivery-area co-edit-card-kind-select"
-              :disabled="editForm.applied_to_member"
+              :loading="membershipTemplatesLoading"
+              :disabled="editForm.applied_to_member || !membershipTemplates.length"
+              placeholder="请选择已开启的卡包"
             >
               <el-option
-                value="周卡"
-                :label="`周卡（同步入账 +${planDefaultTotal('周卡')} 次）`"
-              />
-              <el-option
-                value="月卡"
-                :label="`月卡（同步入账 +${planDefaultTotal('月卡')} 次）`"
-              />
-              <el-option
-                value="次卡"
-                :label="`次卡（同步入账 +${planDefaultTotal('次卡')} 次）`"
+                v-for="t in membershipTemplates"
+                :key="t.id"
+                :value="Number(t.id)"
+                :label="templateOptionLabel(t)"
               />
             </el-select>
-            <p v-if="editForm.applied_to_member" class="modal-hint">已入账工单不可改卡类型；若档案套餐标签有误请在「会员管理」中修正。</p>
+            <p v-if="editForm.applied_to_member" class="modal-hint">
+              已入账工单不可改卡包模版；餐段为
+              <strong>{{ mealPeriodsLabel(editForm.meal_periods) }}</strong>
+              <template v-if="editForm.template_product_label">
+                （{{ editForm.template_product_label }}）
+              </template>
+              。若档案有误请在「会员管理」中修正。
+            </p>
+            <p
+              v-else-if="!membershipTemplatesLoading && !membershipTemplates.length"
+              class="modal-hint modal-hint--warn"
+            >
+              暂无已开启的卡包模版，请先在「会员卡管理」中创建并开启。
+            </p>
+            <p v-else-if="selectedEditTemplate" class="modal-hint">
+              所选餐段：<strong>{{ mealPeriodsLabel(selectedEditTemplate.meal_periods) }}</strong>
+              · 同步入账 +{{ selectedEditTemplate.meals_grant }} 次
+            </p>
           </div>
           <div class="form-group open-mode-group">
             <label>开始配送日</label>
@@ -1782,6 +1942,34 @@ class="member-pill"
   color: #94a3b8;
 }
 
+.co-meal-period-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.co-meal-period--lunch {
+  color: #0369a1;
+  background: #e0f2fe;
+  border: 1px solid #bae6fd;
+}
+
+.co-meal-period--dinner {
+  color: #9a3412;
+  background: #ffedd5;
+  border: 1px solid #fed7aa;
+}
+
+.co-meal-period--both {
+  color: #6d28d9;
+  background: #ede9fe;
+  border: 1px solid #ddd6fe;
+}
+
 .card-orders-page :deep(.co-nowrap .cell) {
   white-space: nowrap;
 }
@@ -1803,6 +1991,7 @@ class="member-pill"
 .card-orders-page :deep(.td-co-sync .cell),
 .card-orders-page :deep(.td-co-phone-col .cell),
 .card-orders-page :deep(.td-co-card-kind .cell),
+.card-orders-page :deep(.td-co-meal-period .cell),
 .card-orders-page :deep(.td-co-pay-status .cell),
 .card-orders-page :deep(.td-co-amt-col .cell) {
   overflow: visible;

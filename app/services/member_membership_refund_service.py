@@ -26,6 +26,7 @@ from app.services.member_delivery_deduction_service import (
     total_member_delivery_meal_units_consumed,
 )
 from app.services.member_operation_log_service import OP_MEMBERSHIP_REFUND, record_member_operation
+from app.models.enums import MealPeriod
 from app.services.menu_day_stock_service import resolve_dishes_for_dates_batch
 
 _TWO_PLACES = Decimal("0.01")
@@ -57,7 +58,10 @@ def _consumption_charge_for_member(
     if not units_by_date:
         return Decimal("0.00"), []
 
-    dishes_by_date = resolve_dishes_for_dates_batch(db, units_by_date.keys(), store_id=int(store_id))
+    # 退卡扣款按午餐菜单单价（经典周/月卡默认午餐履约口径）
+    dishes_by_date = resolve_dishes_for_dates_batch(
+        db, units_by_date.keys(), store_id=int(store_id), meal_period=MealPeriod.LUNCH.value
+    )
     items: list[MemberMembershipRefundConsumptionRowOut] = []
     missing: list[date] = []
     total = Decimal("0")

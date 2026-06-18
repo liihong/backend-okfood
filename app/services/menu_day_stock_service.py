@@ -18,6 +18,7 @@ from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.models.enums import MealPeriod
 from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
+from app.services.meal_period.normalize import normalize_meal_period
 from app.services.delivery_sheet_service import (
     DeliverySheetDayMetrics,
     _total_meal_units_locked_date_sql,
@@ -34,17 +35,12 @@ def _week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def _norm_period(meal_period: str | None) -> str:
-    p = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
-    return p if p in (MealPeriod.LUNCH.value, MealPeriod.DINNER.value) else MealPeriod.LUNCH.value
-
-
 def scheduled_dish_id_for_calendar_date(
     db: Session, menu_date: date, *, store_id: int, meal_period: str = DEFAULT_MEAL_PERIOD
 ) -> int | None:
     """某日排期菜品 id：按日排期优先，否则周槽；无排期则 None。仅查 id，供库存/比对用。"""
     sid = int(store_id)
-    period = _norm_period(meal_period)
+    period = normalize_meal_period(meal_period)
     sched_id = db.scalar(
         select(MenuSchedule.dish_id).where(
             MenuSchedule.menu_date == menu_date,
@@ -72,7 +68,7 @@ def resolve_dish_for_calendar_date(
 ) -> MenuDish | None:
     """某日周槽位或按日排期上的菜品；无排期则 None。"""
     sid = int(store_id)
-    period = _norm_period(meal_period)
+    period = normalize_meal_period(meal_period)
     anchor = _week_start(menu_date)
     slot = menu_date.weekday() + 1
     row = db.execute(
@@ -125,15 +121,20 @@ def subscription_total_meals_by_dates(
 
 
 def dashboard_meal_totals_by_dates(
-    db: Session, dates: Iterable[date], *, store_id: int, meal_period: str = DEFAULT_MEAL_PERIOD
+    db: Session,
+    dates: Iterable[date],
+    *,
+    store_id: int,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
+    metrics_cache: dict | None = None,
 ) -> dict[date, int]:
     """与营业概览备餐份数（meal_total）同源，按餐段拆分。"""
     sid = int(store_id)
-    period = _norm_period(meal_period)
+    period = normalize_meal_period(meal_period)
     uniq = list(dict.fromkeys(dates))
     if not uniq:
         return {}
-    metrics_cache: dict = {}
+    cache = metrics_cache if metrics_cache is not None else {}
     out: dict[date, int] = {}
     for d in uniq:
         m = delivery_sheet_metrics_for_period(
@@ -141,7 +142,7 @@ def dashboard_meal_totals_by_dates(
             delivery_date=d,
             store_id=sid,
             meal_period=period,
-            metrics_cache=metrics_cache,
+            metrics_cache=cache,
         )
         out[d] = int(m.meal_total)
     return out
@@ -178,7 +179,7 @@ def paid_single_retail_portions_by_dates(
     if not uniq:
         return {}
     sid = int(store_id)
-    period = _norm_period(meal_period)
+    period = normalize_meal_period(meal_period)
     rows = db.execute(
         select(
             SingleMealOrder.delivery_date,
@@ -199,19 +200,28 @@ def paid_single_retail_portions_by_dates(
 
 
 def resolve_dishes_for_dates_batch(
-    db: Session, dates: Iterable[date], *, store_id: int
+    db: Session,
+    dates: Iterable[date],
+    *,
+    store_id: int,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
 ) -> dict[date, MenuDish | None]:
-    """批量解析日历日对应菜品：按日排期优先，否则取周槽位。"""
+    """批量解析日历日对应菜品：按日排期优先，否则取周槽位；须指定 meal_period 避免午/晚餐混读。"""
     unique_dates = sorted({d for d in dates})
     if not unique_dates:
         return {}
     sid = int(store_id)
+    period = normalize_meal_period(meal_period)
     out: dict[date, MenuDish | None] = {d: None for d in unique_dates}
 
     sched_rows = db.execute(
         select(MenuSchedule.menu_date, MenuDish)
         .join(MenuDish, MenuSchedule.dish_id == MenuDish.id)
-        .where(MenuSchedule.store_id == sid, MenuSchedule.menu_date.in_(unique_dates))
+        .where(
+            MenuSchedule.store_id == sid,
+            MenuSchedule.menu_date.in_(unique_dates),
+            MenuSchedule.meal_period == period,
+        )
     ).all()
     for menu_date, dish in sched_rows:
         out[menu_date] = dish
@@ -230,7 +240,11 @@ def resolve_dishes_for_dates_batch(
         slot_rows = db.execute(
             select(WeeklyMenuSlot.week_start, WeeklyMenuSlot.slot, MenuDish)
             .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
-            .where(WeeklyMenuSlot.store_id == sid, WeeklyMenuSlot.week_start.in_(week_starts))
+            .where(
+                WeeklyMenuSlot.store_id == sid,
+                WeeklyMenuSlot.week_start.in_(week_starts),
+                WeeklyMenuSlot.meal_period == period,
+            )
         ).all()
         slot_map = {(ws, sl): dish for ws, sl, dish in slot_rows}
         for menu_date, anchor, slot in pending:
@@ -238,12 +252,26 @@ def resolve_dishes_for_dates_batch(
     return out
 
 
+def weekly_menu_lunch_day_total_stock(db: Session, menu_date: date, *, store_id: int) -> int | None:
+    """营业概览午餐顶卡「后厨产出量」：仅读 weekly_menu_slot.meal_period=lunch。"""
+    return weekly_menu_day_total_stock(
+        db, menu_date, store_id=store_id, meal_period=MealPeriod.LUNCH.value
+    )
+
+
+def weekly_menu_dinner_day_total_stock(db: Session, menu_date: date, *, store_id: int) -> int | None:
+    """营业概览晚餐顶卡「后厨产出量」：仅读 weekly_menu_slot.meal_period=dinner。"""
+    return weekly_menu_day_total_stock(
+        db, menu_date, store_id=store_id, meal_period=MealPeriod.DINNER.value
+    )
+
+
 def weekly_menu_day_total_stock(
     db: Session, menu_date: date, *, store_id: int, meal_period: str = DEFAULT_MEAL_PERIOD
 ) -> int | None:
-    """业务日对应周菜单槽位「日总份数」（后厨出餐）；未排菜或未填则 None。"""
+    """业务日对应周菜单槽位「日总份数」（后厨出餐）；须显式传入 meal_period 区分午/晚餐。"""
     sid = int(store_id)
-    period = _norm_period(meal_period)
+    period = normalize_meal_period(meal_period)
     anchor = _week_start(menu_date)
     slot = menu_date.weekday() + 1
     w = db.scalar(
@@ -259,12 +287,17 @@ def weekly_menu_day_total_stock(
     return max(0, int(w.total_stock))
 
 
-def paid_single_portions_sum(db: Session, dish_id: int, menu_date: date, *, store_id: int) -> int:
+def paid_single_portions_sum(
+    db: Session, dish_id: int, menu_date: date, *, store_id: int, meal_period: str = DEFAULT_MEAL_PERIOD
+) -> int:
+    """指定餐段、菜品、供餐日的已付单次零售份数（与 paid_single_retail_portions_by_dates 同源）。"""
     sid = int(store_id)
+    period = normalize_meal_period(meal_period)
     v = db.scalar(
         select(func.coalesce(func.sum(SingleMealOrder.quantity), 0)).where(
             SingleMealOrder.delivery_date == menu_date,
             SingleMealOrder.dish_id == dish_id,
+            SingleMealOrder.meal_period == period,
             *_single_retail_inventory_scope_filters(store_id=sid),
         )
     )
@@ -276,7 +309,7 @@ def weekly_slot_row_for_dish_date(
 ) -> WeeklyMenuSlot | None:
     """与单次点餐同周槽+同一道菜的行；仅周排期有库存字段。"""
     sid = int(store_id)
-    period = _norm_period(meal_period)
+    period = normalize_meal_period(meal_period)
     anchor = _week_start(menu_date)
     slot = menu_date.weekday() + 1
     return db.scalar(
@@ -321,7 +354,7 @@ def single_order_stock_for_dish_date(
     from app.services.day_stock_service import get_day_stock_breakdown
 
     sid = int(store_id)
-    period = _norm_period(meal_period)
+    period = normalize_meal_period(meal_period)
     did = int(dish_id)
     w = weekly_slot_row_for_dish_date(db, did, menu_date, store_id=sid, meal_period=period)
     sub = dashboard_meal_totals_by_dates(db, [menu_date], store_id=sid, meal_period=period).get(menu_date, 0)
@@ -347,11 +380,12 @@ def single_order_stock_by_date_for_week(
     weekly_slot_rows: Iterable[tuple[WeeklyMenuSlot, MenuDish]],
     store_id: int,
     subscription_floor_date: date | None,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
 ) -> dict[date, SingleOrderStockInfo]:
     """与逐日调用 `single_order_stock_for_dish_date` 结果一致：预取营业概览同源备餐份数 / 当日已付单次零售合计。
 
     `dishes_by_date` 必须与 `GET /api/menu/weekly` 的周槽+按日补全合并结果一致；
-    `weekly_slot_rows` 须为当周 `WeeklyMenuSlot` JOIN `MenuDish` 的原始行。
+    `weekly_slot_rows` 须为当周 `WeeklyMenuSlot` JOIN `MenuDish` 的原始行（同一 meal_period）。
 
     ``subscription_floor_date``：早于该日历日的供餐日不扫会员履约份数，且 ``remaining`` 固定为 0（已过日不可下单；若仍按 sub=0 计算会虚高）。
     """
@@ -362,6 +396,8 @@ def single_order_stock_by_date_for_week(
 
     # 早于 subscription_floor（通常为上海业务『今天』）的供餐日不再扫会员履约份数：已过日不可下单，省去最贵查询。
     subscription_floor = subscription_floor_date
+    # 须与调用方 get_weekly_menu(meal_period=…) 一致，禁止写死午餐导致晚餐库存串读
+    period = normalize_meal_period(meal_period)
 
     ws_by_day_dish: dict[tuple[date, int], WeeklyMenuSlot] = {}
     for ws, od in weekly_slot_rows:
@@ -369,11 +405,15 @@ def single_order_stock_by_date_for_week(
         ws_by_day_dish[(day, int(od.id))] = ws
 
     dates_needing_sub = [d for d in dates if subscription_floor is None or d >= subscription_floor]
-    sub_by_date = dashboard_meal_totals_by_dates(db, dates_needing_sub, store_id=sid)
+    sub_by_date = dashboard_meal_totals_by_dates(
+        db, dates_needing_sub, store_id=sid, meal_period=period
+    )
     for d in dates:
         if subscription_floor is not None and d < subscription_floor:
             sub_by_date[d] = 0
-    paid_by_date = paid_single_retail_portions_by_dates(db, dates, store_id=sid)
+    paid_by_date = paid_single_retail_portions_by_dates(
+        db, dates, store_id=sid, meal_period=period
+    )
 
     out: dict[date, SingleOrderStockInfo] = {}
     for d in dates:
@@ -433,7 +473,7 @@ def sync_kitchen_planned_to_menu_day_total_stock(
 ) -> bool:
     """后厨计划联动：写入营业日对应周槽「日总份数」；槽位无菜品则跳过。"""
     sid = int(store_id)
-    period = _norm_period(meal_period)
+    period = normalize_meal_period(meal_period)
     anchor = _week_start(business_date)
     slot = business_date.weekday() + 1
     w = db.scalar(
@@ -462,8 +502,11 @@ def set_weekly_slot_total_stock(
     """更新周槽日总份；NULL=未配置（单次卡不可售）。槽位须已有菜品行。"""
     if slot < 1 or slot > 7:
         raise HTTPException(status_code=400, detail="slot 须在 1～7 之间")
+    from app.services.meal_period.normalize import normalize_meal_period
+
     sid = int(store_id)
-    period = _norm_period(meal_period)
+    # 写入路径严格校验餐段，避免 dinner 请求被静默当成 lunch 更新错槽位
+    period = normalize_meal_period(meal_period)
     anchor = _week_start(week_start)
     w = db.scalar(
         select(WeeklyMenuSlot).where(
@@ -483,7 +526,21 @@ def set_weekly_slot_total_stock(
     if total_stock < 0:
         raise HTTPException(status_code=400, detail="总库存不能为负数")
     w.total_stock = int(total_stock)
+    menu_date = anchor + timedelta(days=slot - 1)
+    from app.services.day_stock_service import sync_store_kitchen_plan_row
+
+    # 午/晚餐后厨出餐分字段存储：同步写入 store_kitchen_plans 对应餐段行
+    sync_store_kitchen_plan_row(
+        db,
+        store_id=sid,
+        business_date=menu_date,
+        meal_period=period,
+        planned_total=int(total_stock),
+    )
     db.commit()
+    from app.services.admin_service import invalidate_dashboard_live_summary_cache
+
+    invalidate_dashboard_live_summary_cache(sid)
 
 
 def _paid_sums_for_dates_dishes(
@@ -530,7 +587,7 @@ def weekly_slot_stock_extras(
     if not slot_payload:
         return []
     sid = int(store_id)
-    period = _norm_period(meal_period)
+    period = normalize_meal_period(meal_period)
     dates = [week_start_anchor + timedelta(days=i) for i in range(7)]
     if skip_subscription_stats:
         sub_by_date = {}
@@ -542,7 +599,14 @@ def weekly_slot_stock_extras(
             sub_by_date = dashboard_meal_totals_by_dates(db, dates, store_id=sid, meal_period=period)
         if paid_by_date is None:
             paid_by_date = paid_single_retail_portions_by_dates(db, dates, store_id=sid, meal_period=period)
-    from app.services.day_stock_service import get_day_stock_breakdown
+    from app.services.day_stock_service import sum_adjustment_deltas_by_dates, waste_total_display
+
+    # 批量预取损耗流水，避免逐槽位调用 get_day_stock_breakdown（会重复扫配送大表）
+    delta_by_date = (
+        {}
+        if skip_subscription_stats
+        else sum_adjustment_deltas_by_dates(db, store_id=sid, dates=dates, meal_period=period)
+    )
 
     out: list[dict[str, Any]] = []
     for s in slot_payload:
@@ -581,8 +645,11 @@ def weekly_slot_stock_extras(
         else:
             cap = int(cap_raw)
             base["total_stock"] = cap
-            bd = get_day_stock_breakdown(db, store_id=sid, business_date=menu_date, meal_period=period)
-            base["single_stock_remaining"] = bd.remaining if bd.remaining is not None else 0
-            base["waste_total"] = bd.waste_total
+            sub = int(sub_by_date.get(menu_date, 0))
+            paid_n = int(paid_by_date.get(menu_date, 0) if paid_by_date is not None else 0)
+            delta_sum = int(delta_by_date.get(menu_date, 0))
+            # 与 get_day_stock_breakdown 同源：后厨出餐 − 应配送 − 单次零售 + 流水 delta
+            base["single_stock_remaining"] = max(0, cap - sub - paid_n + delta_sum)
+            base["waste_total"] = waste_total_display(delta_sum)
         out.append(base)
     return out

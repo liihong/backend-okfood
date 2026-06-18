@@ -221,12 +221,10 @@ def _home_members_for_dinner_delivery_sheet(
 
 
 def _member_balance_quota(mem: Member) -> tuple[int, int]:
-    """剩余次数与展示用总次数（次卡无 quota 时用 balance 作为分母）。"""
-    bal = max(0, int(mem.balance or 0))
-    quota = max(0, int(getattr(mem, "meal_quota_total", 0) or 0))
-    if quota <= 0:
-        quota = bal
-    return bal, quota
+    """剩余次数与展示用总次数（次卡无 quota 时用 balance 作为分母）；午餐口径。"""
+    from app.services.meal_period.balance import balance_quota_for_sheet_period
+
+    return balance_quota_for_sheet_period(mem, meal_period=MealPeriod.LUNCH.value)
 
 
 def _normalize_address_key(s: str) -> str:
@@ -1197,6 +1195,12 @@ def build_delivery_sheet(
     units_ctx = DeliverySheetMealUnitsContext.from_day_snapshots(day_snap, db=db)
     all_member_ids = {int(m.id) for m in members} | {int(m.id) for m in pu_members}
     delivered_set = day_delivered_ids & all_member_ids
+    dinner_state_map: dict[int, object] = {}
+    if meal_period == MealPeriod.DINNER.value and all_member_ids:
+        from app.services.meal_period.units import load_dinner_meal_period_states_map
+
+        dinner_state_map = load_dinner_meal_period_states_map(db, sorted(all_member_ids))
+    from app.services.meal_period.balance import balance_quota_for_sheet_period
 
     region_ids: set[int] = set()
     for m in members:
@@ -1230,7 +1234,11 @@ def build_delivery_sheet(
             for mem in ms_sorted:
                 addr = default_by_id.get(mem.id)
                 rmk = _member_line_remarks(mem, addr)
-                bal, quota = _member_balance_quota(mem)
+                bal, quota = balance_quota_for_sheet_period(
+                    mem,
+                    meal_period=meal_period,
+                    state_row=dinner_state_map.get(int(mem.id)),
+                )
                 mem_units = units_ctx.units_for(mem)
                 lines.append(
                     DeliverySheetMemberOut(

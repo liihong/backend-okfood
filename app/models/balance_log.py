@@ -18,6 +18,8 @@ class BalanceLog(Base):
         ForeignKey("members.id", onupdate="CASCADE"),
         index=True,
     )
+    #: lunch=午餐次数池（members.balance）；dinner=晚餐次数池（member_meal_period_state）
+    meal_period: Mapped[str] = mapped_column(String(16), default="lunch", nullable=False)
     change: Mapped[int] = mapped_column(Integer)
     reason: Mapped[str] = mapped_column(String(20))
     operator: Mapped[str] = mapped_column(String(50))

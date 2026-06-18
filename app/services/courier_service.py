@@ -799,11 +799,13 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
 
     member.balance -= deduct
     balance_before = int(member.balance) + int(deduct)
-    if member.balance <= 0:
-        member.is_active = False
+    from app.services.meal_period.balance import sync_member_is_active_from_period_balances
+
+    sync_member_is_active_from_period_balances(db, member)
     db.add(
         BalanceLog(
             member_id=member_id,
+            meal_period="lunch",
             change=-deduct,
             reason=BalanceReason.DELIVERY.value,
             operator=f"courier:{courier_id}",

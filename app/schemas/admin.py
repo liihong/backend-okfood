@@ -14,8 +14,17 @@ from app.models.enums import (
     CardOrderPayStatus,
     CardPayChannel,
     LeaveType,
+    MealPeriod,
     PlanType,
 )
+
+
+def _validate_menu_meal_period(v: str) -> str:
+    """周菜单/日总份写入：meal_period 必须为 lunch 或 dinner，禁止静默回落到午餐。"""
+    p = (v or "").strip().lower()
+    if p not in (MealPeriod.LUNCH.value, MealPeriod.DINNER.value):
+        raise ValueError("meal_period 须为 lunch（午餐）或 dinner（晚餐）")
+    return p
 
 
 class AdminLoginIn(BaseModel):
@@ -112,7 +121,16 @@ class WeeklySlotAssignIn(BaseModel):
     week_start: date = Field(..., description="该周任意一天，服务端归一为周一")
     slot: int = Field(..., ge=1, le=7, description="1=周一 … 7=周日")
     dish_id: int | None = Field(None, ge=1)
-    meal_period: str = Field("lunch", description="lunch=午餐槽；dinner=晚餐槽")
+    meal_period: str = Field(
+        "lunch",
+        description="lunch=午餐槽；dinner=晚餐槽（写入时必填且不可混用）",
+        validation_alias=AliasChoices("meal_period", "mealPeriod"),
+    )
+
+    @field_validator("meal_period")
+    @classmethod
+    def _check_meal_period(cls, v: str) -> str:
+        return _validate_menu_meal_period(v)
 
 
 class MenuDayTotalStockIn(BaseModel):
@@ -121,7 +139,16 @@ class MenuDayTotalStockIn(BaseModel):
     week_start: date = Field(..., description="该周任意一天，服务端归一为周一")
     slot: int = Field(..., ge=1, le=7, description="1=周一 … 7=周日")
     total_stock: int | None = Field(default=None, description="当日该菜总可供应份数；null=未配置(不可售)")
-    meal_period: str = Field("lunch", description="lunch/dinner")
+    meal_period: str = Field(
+        "lunch",
+        description="lunch=午餐日总份；dinner=晚餐日总份（与营业概览顶卡分字段一一对应）",
+        validation_alias=AliasChoices("meal_period", "mealPeriod"),
+    )
+
+    @field_validator("meal_period")
+    @classmethod
+    def _check_meal_period(cls, v: str) -> str:
+        return _validate_menu_meal_period(v)
 
 
 class MenuScheduleAssignIn(BaseModel):
@@ -635,12 +662,12 @@ class DashboardMealSummaryOut(BaseModel):
     today_menu_day_total_stock: int | None = Field(
         None,
         ge=0,
-        description="锚定日周菜单槽位「日总份数」；未排菜或未配置则为 null",
+        description="锚定日午餐周菜单槽位「日总份数」(meal_period=lunch)；与 today_dinner_menu_day_total_stock 独立",
     )
     tomorrow_menu_day_total_stock: int | None = Field(
         None,
         ge=0,
-        description="锚定日次日周菜单槽位「日总份数」；未排菜或未配置则为 null",
+        description="锚定日次日午餐周菜单槽位「日总份数」(meal_period=lunch)",
     )
     day_after_tomorrow_menu_day_total_stock: int | None = Field(
         None,
@@ -689,17 +716,35 @@ class AdminKitchenPlanUpsertIn(BaseModel):
 
     business_date: date = Field(..., description="上海业务日，通常与营业概览锚定日一致")
     planned_total: int = Field(..., ge=0, le=99999, description="日总份数（与本周菜单配置同源）")
-    meal_period: str = Field("lunch", description="lunch/dinner")
+    meal_period: str = Field(
+        "lunch",
+        description="lunch=午餐；dinner=晚餐（写入周槽 total_stock 时须与顶卡字段一致）",
+        validation_alias=AliasChoices("meal_period", "mealPeriod"),
+    )
+
+    @field_validator("meal_period")
+    @classmethod
+    def _check_meal_period(cls, v: str) -> str:
+        return _validate_menu_meal_period(v)
 
 
 class DayStockAdjustmentCreateIn(BaseModel):
     """报损耗/回补流水（禁止直接改剩余）。"""
 
     business_date: date
-    meal_period: str = Field("lunch", description="lunch/dinner")
+    meal_period: str = Field(
+        "lunch",
+        description="lunch=午餐库存；dinner=晚餐库存",
+        validation_alias=AliasChoices("meal_period", "mealPeriod"),
+    )
     delta: int = Field(..., description="负数减可售；正数仅盘点校正")
     reason_code: str = Field(..., description="spill/kitchen_taste/kitchen_waste/comp_meal/count_correction/other")
     remark: str | None = Field(None, max_length=500)
+
+    @field_validator("meal_period")
+    @classmethod
+    def _check_meal_period(cls, v: str) -> str:
+        return _validate_menu_meal_period(v)
 
 
 class DayStockBreakdownOut(BaseModel):
@@ -1069,7 +1114,15 @@ class CardOrderCreateIn(BaseModel):
         None,
         description="起送业务日（上海）；空表示暂不开卡：已缴入账仍加次数/套餐，但不写会员起送日、不强制激活",
     )
-    card_kind: CardOrderKind
+    card_kind: CardOrderKind | None = Field(
+        None,
+        description="经典周/月/次卡；与 membership_template_id 二选一",
+    )
+    membership_template_id: int | None = Field(
+        None,
+        ge=1,
+        description="已开启的卡包模版 id；后台新建工单优先使用",
+    )
     pay_channel: CardPayChannel
     pay_status: CardOrderPayStatus = CardOrderPayStatus.UNPAID
     amount_yuan: Decimal | None = Field(None, ge=0, max_digits=12, decimal_places=2)
@@ -1083,12 +1136,27 @@ class CardOrderCreateIn(BaseModel):
         description="可选；有值时创建工单后 upsert 会员默认配送地址（含经纬度、门牌、划区）",
     )
 
+    @model_validator(mode="after")
+    def _validate_card_selection(self) -> Self:
+        if self.membership_template_id is not None:
+            if self.card_kind is not None:
+                raise ValueError("请勿同时提交 membership_template_id 与 card_kind")
+            return self
+        if self.card_kind is None:
+            raise ValueError("请选择卡包模版或经典卡类型")
+        return self
+
 
 class CardOrderPatchIn(BaseModel):
     delivery_start_date: date | None = None
     card_kind: CardOrderKind | None = Field(
         None,
-        description="未入账前可更正卡类型；已同步的工单不可改，以免与已入次数不一致",
+        description="经典周/月/次卡；与 membership_template_id 二选一；未入账前可更正",
+    )
+    membership_template_id: int | None = Field(
+        None,
+        ge=1,
+        description="已开启的卡包模版 id；未入账前可绑定/更换，入账时按模版餐段写入会员",
     )
     pay_status: CardOrderPayStatus | None = None
     pay_channel: CardPayChannel | None = None
@@ -1098,6 +1166,12 @@ class CardOrderPatchIn(BaseModel):
         False,
         description="为 true 时在保存后执行同步入账（写入会员次数/套餐）；默认仅更新工单字段",
     )
+
+    @model_validator(mode="after")
+    def _validate_card_selection(self) -> Self:
+        if self.membership_template_id is not None and self.card_kind is not None:
+            raise ValueError("请勿同时提交 membership_template_id 与 card_kind")
+        return self
 
 
 class SfSameCityRowBase(BaseModel):
@@ -1301,6 +1375,10 @@ class CardOrderOut(BaseModel):
     )
     template_product_label: str | None = Field(
         None, description="商城卡包展示文案：模版名称（种类）"
+    )
+    meal_periods: list[str] = Field(
+        default_factory=lambda: ["lunch"],
+        description='覆盖餐段：已入账取快照；未入账取模版或默认午餐 ["lunch"] / ["dinner"] / ["lunch","dinner"]',
     )
 
 

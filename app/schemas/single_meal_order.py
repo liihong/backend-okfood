@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SingleMealOrderCreateIn(BaseModel):
@@ -21,6 +21,14 @@ class SingleMealOrderCreateIn(BaseModel):
         if not self.store_pickup and self.member_address_id is None:
             raise ValueError("配送到家须选择配送地址")
         return self
+
+    @field_validator("meal_period")
+    @classmethod
+    def _check_meal_period(cls, v: str) -> str:
+        p = (v or "lunch").strip().lower()
+        if p not in ("lunch", "dinner"):
+            raise ValueError("meal_period 须为 lunch 或 dinner")
+        return p
 
 
 class SingleMealOrderOut(BaseModel):

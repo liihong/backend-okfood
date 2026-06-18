@@ -309,6 +309,9 @@ def _to_member_out(
     dinner_lr: dict | None = None
     dinner_sf_locked: bool | None = None
 
+    dinner_balance: int | None = None
+    dinner_meal_quota_total: int | None = None
+
     if MealPeriod.DINNER.value in entitled:
         drow = db.get(
             MemberMealPeriodState,
@@ -325,6 +328,11 @@ def _to_member_out(
             member_phone=(m.phone or "").strip() or None,
             meal_period=MealPeriod.DINNER.value,
         )
+        from app.services.meal_period.balance import dinner_balance_and_quota
+
+        dbal, dquota = dinner_balance_and_quota(drow)
+        dinner_balance = dbal
+        dinner_meal_quota_total = dquota
         if drow is not None:
             dinner_is_leaved_tomorrow = bool(drow.is_leaved_tomorrow)
             dinner_tomorrow_target = drow.tomorrow_leave_target_date
@@ -425,6 +433,10 @@ def _to_member_out(
         dinner_leave_range=dinner_lr,
 
         dinner_sf_self_service_locked=dinner_sf_locked,
+
+        dinner_balance=dinner_balance,
+
+        dinner_meal_quota_total=dinner_meal_quota_total,
 
         created_at=m.created_at.isoformat() if m.created_at else "",
 
@@ -1026,8 +1038,9 @@ def leave_request(
 ) -> MemberOut:
     """请假/取消；meal_period=dinner 时写入 member_meal_period_state，不影响午餐请假。"""
     from app.models.enums import MealPeriod
+    from app.services.meal_period.normalize import normalize_meal_period
 
-    period = (meal_period or MealPeriod.LUNCH.value).strip().lower()
+    period = normalize_meal_period(meal_period)
     if period == MealPeriod.DINNER.value:
         from app.services.meal_period.dinner_leave import dinner_leave_request
 
@@ -1416,13 +1429,14 @@ def get_weekly_menu(
     include_stock: bool = False,
     meal_period: str = "lunch",
 ) -> dict:
+    from app.services.meal_period.normalize import normalize_meal_period
 
     anchor = _monday_of_week(week_start) if week_start else _monday_of_week(today_shanghai())
 
     dates = [anchor + timedelta(days=i) for i in range(7)]
 
     sid = int(store_id)
-    period = (meal_period or "lunch").strip().lower()
+    period = normalize_meal_period(meal_period)
 
     as_of_eff = as_of_date if as_of_date is not None else today_shanghai()
 
@@ -1476,6 +1490,7 @@ def get_weekly_menu(
             weekly_slot_rows=weekly_rows,
             store_id=sid,
             subscription_floor_date=as_of_eff,
+            meal_period=period,
         )
 
     items: list[dict] = []
@@ -1500,7 +1515,9 @@ def get_menu_detail_by_dish_id(
     store_id: int,
     meal_period: str = "lunch",
 ) -> dict:
+    from app.services.meal_period.normalize import normalize_meal_period
 
+    period = normalize_meal_period(meal_period)
     dish = db.get(MenuDish, dish_id)
 
     if not dish:
@@ -1544,7 +1561,7 @@ def get_menu_detail_by_dish_id(
 
         out.update(
             single_order_stock_for_dish_date(
-                db, int(dish_id), service_date, store_id=int(store_id), meal_period=meal_period
+                db, int(dish_id), service_date, store_id=int(store_id), meal_period=period
             ).to_detail_dict()
         )
 

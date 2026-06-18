@@ -21,7 +21,8 @@ def set_menu_day_total_stock_by_business_date(
     updated_by: str | None = None,
 ) -> int:
     """与「本周菜单配置」日总份数同源；槽位无菜品时拒绝保存。"""
-    from app.services.day_stock_service import normalize_meal_period, sync_store_kitchen_plan_row
+    from app.services.meal_period.normalize import normalize_meal_period
+    from app.services.day_stock_service import sync_store_kitchen_plan_row
 
     total = max(0, int(total_stock))
     period = normalize_meal_period(meal_period)

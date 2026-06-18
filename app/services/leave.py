@@ -97,8 +97,10 @@ def guard_miniprogram_pause_delivery_prep_window(
 
 
 def guard_miniprogram_self_service_requires_balance(db: Session, member: Member) -> None:
-    """小程序自助请假/暂停配送/份数等须已开卡（剩余餐次 > 0）。"""
-    if int(member.balance) > 0:
+    """小程序自助请假/暂停配送/份数等须已开卡（任一餐段剩余餐次 > 0）。"""
+    from app.services.meal_period.balance import member_has_any_period_balance
+
+    if member_has_any_period_balance(db, member):
         return
     from app.services.member_card_order_service import member_paid_card_awaiting_setup
 

@@ -30,6 +30,25 @@ export function hasDinnerEntitlement(profile) {
 }
 
 /** @param {object | null | undefined} profile @param {'lunch'|'dinner'} period */
+export function balanceForPeriod(profile, period) {
+  if (!profile || typeof profile !== 'object') return 0
+  if (period === MEAL_PERIOD_DINNER) {
+    return Math.max(0, Math.floor(Number(profile.dinner_balance) || 0))
+  }
+  return Math.max(0, Math.floor(Number(profile.balance) || 0))
+}
+
+/** 午餐或晚餐任一有余次即视为仍有餐次 */
+export function hasAnyMealBalance(profile) {
+  if (!profile || typeof profile !== 'object') return false
+  if (balanceForPeriod(profile, MEAL_PERIOD_LUNCH) > 0) return true
+  if (hasDinnerEntitlement(profile) && balanceForPeriod(profile, MEAL_PERIOD_DINNER) > 0) {
+    return true
+  }
+  return false
+}
+
+/** @param {object | null | undefined} profile @param {'lunch'|'dinner'} period */
 export function leaveFieldsForPeriod(profile, period) {
   if (period === MEAL_PERIOD_DINNER) {
     return {

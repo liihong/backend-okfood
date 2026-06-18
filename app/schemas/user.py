@@ -92,6 +92,16 @@ class MemberOut(BaseModel):
         None,
         description="晚餐顺丰推单配送未完成时锁定自助操作",
     )
+    dinner_balance: int | None = Field(
+        None,
+        ge=0,
+        description="晚餐剩余次数（仅含晚餐餐段时返回；午餐仍用 balance）",
+    )
+    dinner_meal_quota_total: int | None = Field(
+        None,
+        ge=0,
+        description="晚餐累计总次数（展示分母）",
+    )
     created_at: str
 
     model_config = {"from_attributes": True}

@@ -13,6 +13,7 @@ from app.models.enums import CardOrderPayStatus, DeliverySheetView, MealPeriod
 from app.models.member import Member
 from app.models.member_address import MemberAddress
 from app.models.member_card_order import MemberCardOrder
+from app.models.member_meal_period_state import MemberMealPeriodState
 from app.services.courier_service import (
     _member_not_skip_subscription_saturday,
     _member_scope_clause,
@@ -91,6 +92,16 @@ def eligible_members_for_dinner_delivery(
         Member.delivery_start_date <= d,
     )
     daf = default_address_pick_subquery()
+    dinner_state = (
+        select(MemberMealPeriodState)
+        .where(
+            MemberMealPeriodState.member_id == Member.id,
+            MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+            MemberMealPeriodState.balance >= 1,
+        )
+        .correlate(Member)
+        .exists()
+    )
     q = (
         select(Member, MemberAddress)
         .outerjoin(daf, daf.c.mid == Member.id)
@@ -98,7 +109,7 @@ def eligible_members_for_dinner_delivery(
         .where(
             Member.deleted_at.is_(None),
             Member.is_active.is_(True),
-            Member.balance >= 1,
+            dinner_state,
             Member.store_pickup.is_(False),
             not_(lunch_absent),
             started,
@@ -132,7 +143,8 @@ def eligible_members_for_dinner_delivery(
     for m, addr in candidates:
         state_row = state_map.get(int(m.id))
         units = dinner_daily_meal_units_from_state(state_row)
-        if int(m.balance or 0) < units:
+        d_bal = max(0, int(state_row.balance or 0)) if state_row is not None else 0
+        if d_bal < units:
             continue
         if is_dinner_absent_on_delivery_date(state_row, d, today=today):
             continue

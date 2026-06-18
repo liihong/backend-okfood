@@ -19,6 +19,7 @@ from app.schemas.admin import CardOrderCreateIn, CardOrderOut, CardOrderPatchIn,
 from app.services.admin_service import apply_member_recharge_delta
 from app.utils.sql_like import escape_like_fragment
 from app.services.member_address_service import upsert_default_address_from_admin_map_pick
+from app.services.catalog_admin_service import get_membership_template_row
 from app.services.store_config_service import get_member_card_prices_yuan
 from app.services.marketing.coupon_checkout_service import (
     mark_member_coupon_used_for_order,
@@ -147,11 +148,13 @@ def ensure_miniprogram_offline_claim_order(
 
 def member_paid_card_awaiting_setup(db: Session, member_id: int) -> bool:
     """
-    小程序自助购卡：微信已缴且工单未入账、会员 balance 仍为 0。
+    小程序自助购卡：微信已缴且工单未入账、会员各餐段余次均为 0。
     用于「我的」页引导完善配送信息，避免误判为未购卡。
     """
+    from app.services.meal_period.balance import member_has_any_period_balance
+
     m = db.get(Member, int(member_id))
-    if not m or int(m.balance) > 0:
+    if not m or member_has_any_period_balance(db, m):
         return False
     order = _latest_miniprogram_self_service_card_order(
         db, int(member_id), applied_to_member=False
@@ -251,6 +254,25 @@ def apply_delivery_start_to_pending_miniprogram_card_order(
     return order
 
 
+def _meal_periods_for_order(db: Session, order: MemberCardOrder) -> list[str]:
+    """已入账用工单快照；未入账优先读绑定模版，经典卡默认午餐。"""
+    from app.services.meal_period.template_periods import (
+        classic_card_meal_periods_snapshot,
+        meal_periods_from_template,
+        normalize_meal_periods_list,
+    )
+
+    snap = getattr(order, "meal_periods_snapshot", None)
+    if order.applied_to_member and snap is not None:
+        return normalize_meal_periods_list(snap)
+    tpl_id = getattr(order, "membership_template_id", None)
+    if tpl_id is not None:
+        tpl = db.get(MembershipCardTemplate, int(tpl_id))
+        if tpl:
+            return meal_periods_from_template(tpl)
+    return classic_card_meal_periods_snapshot()
+
+
 def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
     m = db.get(Member, order.member_id)
     name = (m.name if m else "") or ""
@@ -287,6 +309,7 @@ def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
         updated_at=ua,
         membership_template_id=int(tpl_id) if tpl_id is not None else None,
         template_product_label=tpl_label,
+        meal_periods=_meal_periods_for_order(db, order),
     )
 
 
@@ -341,24 +364,44 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
         parts.append(f"备注{rmk[:180]}")
     log_detail = "；".join(parts)
     bump_quota = tpl_id is not None
+    from app.models.enums import MealPeriod
+    from app.services.meal_period.balance import (
+        apply_dinner_recharge_delta,
+        reset_dinner_quota_on_membership_reopen,
+        sync_member_is_active_from_period_balances,
+    )
+    from app.services.meal_period.template_periods import normalize_meal_periods_list
+
+    periods = normalize_meal_periods_list(order.meal_periods_snapshot)
     # 退卡后重新开卡：清除退款标记并重置总次数，避免状态仍为「已退款」、剩余/总叠加旧周期
     if m.membership_refunded_at is not None:
         m.membership_refunded_at = None
         m.meal_quota_total = 0
-    apply_member_recharge_delta(
-        db,
-        RechargeIn(phone=m.phone, amount=amt, plan_type=plan, bump_meal_quota_total=bump_quota),
-        operator=operator,
-        log_detail=log_detail,
-        member_id=int(m.id),
-    )
+        reset_dinner_quota_on_membership_reopen(db, int(m.id))
+    if MealPeriod.LUNCH.value in periods:
+        apply_member_recharge_delta(
+            db,
+            RechargeIn(phone=m.phone, amount=amt, plan_type=plan, bump_meal_quota_total=bump_quota),
+            operator=operator,
+            log_detail=log_detail,
+            member_id=int(m.id),
+        )
+    if MealPeriod.DINNER.value in periods:
+        apply_dinner_recharge_delta(
+            db,
+            m,
+            amount=amt,
+            plan_type=plan,
+            bump_meal_quota_total=bump_quota,
+            operator=operator,
+            log_detail=log_detail,
+        )
     if order.delivery_start_date is not None:
         m.is_active = True
         m.delivery_start_date = order.delivery_start_date
         m.delivery_deferred = False
-    elif int(m.balance) > 0 and m.delivery_start_date is not None and not m.delivery_deferred:
-        # 续卡未改起送日：次数恢复后重新激活
-        m.is_active = True
+    else:
+        sync_member_is_active_from_period_balances(db, m)
     from app.services.meal_period.apply_side_effects import ensure_meal_period_states_after_card_apply
 
     ensure_meal_period_states_after_card_apply(db, m, order.meal_periods_snapshot)
@@ -377,30 +420,97 @@ def _meals_grant_units_for_card_order(db: Session, order: MemberCardOrder) -> tu
     return max(1, int(amt)), False
 
 
+def _actual_credit_periods_for_card_order(db: Session, order: MemberCardOrder) -> frozenset[str]:
+    """
+    查开卡工单正向入账流水，确定实际写入的餐段。
+
+    兼容晚餐卡误入午餐次数池的历史数据：退款扣次须与入账池一致。
+    """
+    from app.models.balance_log import BalanceLog
+    from app.models.enums import BalanceReason, MealPeriod
+
+    detail_prefix = f"开卡工单#{int(order.id)}"
+    rows = db.scalars(
+        select(BalanceLog).where(
+            BalanceLog.member_id == int(order.member_id),
+            BalanceLog.change > 0,
+            BalanceLog.reason == BalanceReason.RECHARGE.value,
+            BalanceLog.detail.like(f"%{detail_prefix}%"),
+        )
+    ).all()
+    if not rows:
+        return frozenset()
+    out: set[str] = set()
+    for row in rows:
+        p = (row.meal_period or MealPeriod.LUNCH.value).strip().lower()
+        if p in (MealPeriod.LUNCH.value, MealPeriod.DINNER.value):
+            out.add(p)
+    return frozenset(out)
+
+
+def _revoke_target_periods_for_card_order(db: Session, order: MemberCardOrder) -> frozenset[str]:
+    """撤销入账扣次餐段：优先按实际入账流水，否则按工单快照/模版。"""
+    actual = _actual_credit_periods_for_card_order(db, order)
+    if actual:
+        return actual
+    return frozenset(_meal_periods_for_order(db, order))
+
+
 def revoke_paid_card_order_member_sync(db: Session, order: MemberCardOrder, *, operator: str) -> None:
-    """微信原路退款前：若工单已同步入账，扣回会员次数/总配额并标记未入账。"""
+    """微信原路退款前：若工单已同步入账，按餐段快照扣回次数/总配额并标记未入账。"""
     if not order.applied_to_member:
         return
     m = db.get(Member, int(order.member_id))
     if not m or m.deleted_at is not None:
         raise ValueError("会员不存在，无法撤销入账")
-    units, bump_quota_total = _meals_grant_units_for_card_order(db, order)
-    bal = int(m.balance or 0)
-    if bal < units:
-        raise ValueError(
-            f"会员剩余次数 {bal} 不足扣回本次入账 {units} 次，无法原路退款；请先在会员档案调整次数",
-        )
-    detail = f"开卡工单#{int(order.id)}微信退款撤销入账-{units}次"
-    apply_member_recharge_delta(
-        db,
-        RechargeIn(phone=m.phone, amount=-units, plan_type=None),
-        operator=operator,
-        log_detail=detail,
-        member_id=int(m.id),
+    from app.models.enums import MealPeriod
+    from app.services.meal_period.balance import (
+        apply_dinner_recharge_delta,
+        sync_member_is_active_from_period_balances,
     )
-    if bump_quota_total:
-        m.meal_quota_total = max(0, int(m.meal_quota_total or 0) - units)
-        db.add(m)
+    from app.models.member_meal_period_state import MemberMealPeriodState
+
+    periods = _revoke_target_periods_for_card_order(db, order)
+    units, bump_quota_total = _meals_grant_units_for_card_order(db, order)
+    detail = f"开卡工单#{int(order.id)}微信退款撤销入账-{units}次"
+    if MealPeriod.LUNCH.value in periods:
+        bal = int(m.balance or 0)
+        if bal < units:
+            raise ValueError(
+                f"会员午餐剩余次数 {bal} 不足扣回本次入账 {units} 次，无法原路退款；请先在会员档案调整次数",
+            )
+        apply_member_recharge_delta(
+            db,
+            RechargeIn(phone=m.phone, amount=-units, plan_type=None),
+            operator=operator,
+            log_detail=detail,
+            member_id=int(m.id),
+        )
+        if bump_quota_total:
+            m.meal_quota_total = max(0, int(m.meal_quota_total or 0) - units)
+            db.add(m)
+    if MealPeriod.DINNER.value in periods:
+        row = db.get(
+            MemberMealPeriodState,
+            {"member_id": int(m.id), "meal_period": MealPeriod.DINNER.value},
+        )
+        d_bal = int(row.balance or 0) if row else 0
+        if d_bal < units:
+            raise ValueError(
+                f"会员晚餐剩余次数 {d_bal} 不足扣回本次入账 {units} 次，无法原路退款；请先在会员档案调整次数",
+            )
+        apply_dinner_recharge_delta(
+            db,
+            m,
+            amount=-units,
+            plan_type=None,
+            operator=operator,
+            log_detail=detail,
+        )
+        if bump_quota_total and row is not None:
+            row.meal_quota_total = max(0, int(row.meal_quota_total or 0) - units)
+            db.add(row)
+    sync_member_is_active_from_period_balances(db, m)
     order.applied_to_member = False
     db.add(order)
 
@@ -609,11 +719,26 @@ def create_card_order(
             lat=float(da.lat),
             tenant_id=int(tenant_id),
         )
+    tpl: MembershipCardTemplate | None = None
+    card_kind_value: str
+    if body.membership_template_id is not None:
+        tpl = get_membership_template_row(
+            db,
+            template_id=int(body.membership_template_id),
+            tenant_id=int(tenant_id),
+            store_id=int(store_id),
+        )
+        if not bool(tpl.is_active):
+            raise HTTPException(status_code=400, detail="该卡包模版未开启或已下架")
+        card_kind_value = enum_card_kind_for_template(tpl)
+    else:
+        card_kind_value = body.card_kind.value  # type: ignore[union-attr]
     order = MemberCardOrder(
         member_id=m.id,
         tenant_id=int(tenant_id),
         store_id=int(store_id),
-        card_kind=body.card_kind.value,
+        membership_template_id=int(tpl.id) if tpl is not None else None,
+        card_kind=card_kind_value,
         pay_channel=body.pay_channel.value,
         pay_status=body.pay_status.value,
         amount_yuan=body.amount_yuan,
@@ -670,15 +795,34 @@ def update_card_order(
     patch = body.model_dump(exclude_unset=True)
     patch.pop("sync_member", None)
     updating_card_kind = "card_kind" in body.model_fields_set
-    if updating_card_kind:
-        patch.pop("card_kind", None)
+    updating_template = "membership_template_id" in body.model_fields_set
+    if updating_card_kind or updating_template:
         if order.applied_to_member:
             raise HTTPException(status_code=400, detail="已入账的工单不可修改卡类型")
-        if body.card_kind is None:
+        patch.pop("card_kind", None)
+        patch.pop("membership_template_id", None)
+        if updating_template:
+            if body.membership_template_id is None:
+                raise HTTPException(status_code=400, detail="请选择卡包模版")
+            tpl = get_membership_template_row(
+                db,
+                template_id=int(body.membership_template_id),
+                tenant_id=int(order.tenant_id),
+                store_id=int(order.store_id),
+            )
+            if not bool(tpl.is_active):
+                raise HTTPException(status_code=400, detail="该卡包模版未开启或已下架")
+            order.membership_template_id = int(tpl.id)
+            order.card_kind = enum_card_kind_for_template(tpl)
+            order.meal_periods_snapshot = None
+        elif body.card_kind is None:
             raise HTTPException(status_code=400, detail="卡类型无效")
-        order.card_kind = body.card_kind.value
+        else:
+            order.card_kind = body.card_kind.value
+            order.membership_template_id = None
+            order.meal_periods_snapshot = None
 
-    if not patch and not updating_card_kind and not want_sync:
+    if not patch and not updating_card_kind and not updating_template and not want_sync:
         raise HTTPException(status_code=400, detail="请至少提交一项修改")
 
     if "pay_status" in patch and body.pay_status is not None:

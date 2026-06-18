@@ -90,6 +90,9 @@
 
         <MinePlanStatusCard
           :remaining-meals="planCardRemainingMeals"
+          :dinner-remaining-meals="planCardDinnerRemainingMeals"
+          :show-lunch-balance="showPlanCardLunchBalance"
+          :show-dinner-balance="showPlanCardDinnerBalance"
           :status-text="memberDeliveryStatus"
           :status-alert="planCardStatusAlert"
           :footer-tagline="cardFooter"
@@ -282,7 +285,12 @@ import {
   isLeaveRangeActiveOrFuture,
   isTomorrowLeaveActive,
 } from '@/utils/memberLeaveDisplay.js'
-import { combinedLeaveStatusLine } from '@/utils/memberMealPeriod.js'
+import {
+  combinedLeaveStatusLine,
+  entitledMealPeriodsFromProfile,
+  MEAL_PERIOD_DINNER,
+  MEAL_PERIOD_LUNCH,
+} from '@/utils/memberMealPeriod.js'
 
 const pageStyle = ref({})
 const scrollStyle = ref({})
@@ -309,6 +317,8 @@ const wxNickDraft = ref('')
 const showNickEditor = ref(false)
 const nickInputFocus = ref(false)
 const serverBalance = ref(0)
+/** 晚餐剩余餐次（与 /api/user/me.dinner_balance 一致） */
+const serverDinnerBalance = ref(0)
 const userName = ref('')
 const planType = ref('')
 const leaveRange = ref(null)
@@ -322,6 +332,8 @@ const createdAt = ref('')
 const dailyMealUnits = ref(1)
 /** 与界面同步的剩余餐次（含滚动动画） */
 const displayBalance = ref(0)
+/** 晚餐剩余餐次展示（含滚动动画） */
+const displayDinnerBalance = ref(0)
 /** 陪伴天数、每日份数展示用（含滚动动画） */
 const displayCompanionDays = ref(0)
 const displayDailyUnitsAnim = ref(1)
@@ -403,21 +415,27 @@ function syncPlanCardDisplay(options = {}) {
   const { animate = false } = options
   if (!isLoggedIn.value) {
     displayBalance.value = 0
+    displayDinnerBalance.value = 0
     displayCompanionDays.value = 0
     displayDailyUnitsAnim.value = 1
     return
   }
   const balanceTotal = Math.max(0, serverBalance.value + getDemoCredits())
+  const dinnerTotal = showPlanCardDinnerBalance.value
+    ? Math.max(0, serverDinnerBalance.value)
+    : 0
   const days = daysSinceCreated(createdAt.value)
   const n = Math.floor(Number(dailyMealUnits.value) || 0)
   const units = n >= 1 ? Math.min(50, n) : 1
   if (animate) {
     animateNumberTo(displayBalance, balanceTotal)
+    animateNumberTo(displayDinnerBalance, dinnerTotal)
     animateNumberTo(displayCompanionDays, days)
     animateNumberTo(displayDailyUnitsAnim, units)
     return
   }
   displayBalance.value = balanceTotal
+  displayDinnerBalance.value = dinnerTotal
   displayCompanionDays.value = days
   displayDailyUnitsAnim.value = units
 }
@@ -442,7 +460,7 @@ const showMemberCardModule = computed(() => {
   if (!isLoggedIn.value) return false
   const p = memberProfileRaw.value
   if (p && typeof p === 'object') return shouldPromptMemberCardPay(p)
-  return serverBalance.value <= 0
+  return serverBalance.value <= 0 && serverDinnerBalance.value <= 0
 })
 
 /** 未完善资料时不展示购卡按钮（优先引导完善配送） */
@@ -463,7 +481,7 @@ const showMemberSetupGear = computed(() => {
   const p = memberProfileRaw.value
   if (p && typeof p === 'object') return !shouldPromptMemberCardPay(p)
   // 档案尚未拉取完时暂不展示，避免非会员误点闪一下配送页
-  return serverBalance.value > 0
+  return serverBalance.value > 0 || serverDinnerBalance.value > 0
 })
 
 /** 有余额且暂停配送：计划卡上展示「恢复配送」（资料待完善也可点此进入资料页恢复） */
@@ -655,6 +673,22 @@ const planCardRemainingMeals = computed(() => {
   return displayBalance.value
 })
 
+/** 双餐段会员展示午餐/晚餐剩余餐次 */
+const memberMealPeriods = computed(() => entitledMealPeriodsFromProfile(memberProfileRaw.value))
+
+const showPlanCardLunchBalance = computed(() =>
+  memberMealPeriods.value.includes(MEAL_PERIOD_LUNCH),
+)
+
+const showPlanCardDinnerBalance = computed(() =>
+  memberMealPeriods.value.includes(MEAL_PERIOD_DINNER),
+)
+
+const planCardDinnerRemainingMeals = computed(() => {
+  if (!isLoggedIn.value || !showPlanCardDinnerBalance.value) return 0
+  return displayDinnerBalance.value
+})
+
 const planCardStatusAlert = computed(
   () => isLoggedIn.value && needsMemberSetupPage.value,
 )
@@ -802,7 +836,6 @@ const memberDeliveryStatus = computed(() => {
   }
   if (isDeliveryPausedWithBalance(memberProfileRaw.value)) return '暂停配送'
   if (showMemberCardModule.value) return ''
-  const p = memberProfileRaw.value
   const today = ymdTodayShanghai()
   if (isMemberInActiveDelivery(p, today)) return '正常配送中'
   if (isMemberDeliveryScheduledFuture(p, today)) {
@@ -845,6 +878,7 @@ function mergeMemberApiProfile(data) {
   }
   userName.value = data.name != null ? String(data.name) : ''
   serverBalance.value = Math.max(0, Math.floor(Number(data.balance) || 0))
+  serverDinnerBalance.value = Math.max(0, Math.floor(Number(data.dinner_balance) || 0))
   planType.value = data.plan_type != null ? String(data.plan_type) : ''
   leaveRange.value =
     data.leave_range && typeof data.leave_range === 'object' ? data.leave_range : null
@@ -896,6 +930,7 @@ async function refreshMember(options = {}) {
     if (seq !== refreshMemberSeq) return
     memberProfileRaw.value = null
     serverBalance.value = 0
+    serverDinnerBalance.value = 0
     userName.value = ''
     planType.value = ''
     leaveRange.value = null
@@ -946,6 +981,7 @@ async function refreshMember(options = {}) {
       }
       memberProfileRaw.value = null
       serverBalance.value = 0
+      serverDinnerBalance.value = 0
       userName.value = ''
       planType.value = ''
       leaveRange.value = null
@@ -1195,7 +1231,7 @@ function goMemberSetup() {
       uni.showToast({ title: '请先购买自律卡包', icon: 'none' })
       return
     }
-  } else if (serverBalance.value <= 0) {
+  } else if (serverBalance.value <= 0 && serverDinnerBalance.value <= 0) {
     uni.showToast({ title: '请先购买自律卡包', icon: 'none' })
     return
   }

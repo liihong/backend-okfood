@@ -26,6 +26,10 @@ class MemberMealPeriodState(Base):
     tomorrow_leave_target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     leave_range_start: Mapped[date | None] = mapped_column(Date, nullable=True)
     leave_range_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: 该餐段剩余次数（晚餐独立池；午餐仍读 members.balance）
+    balance: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: 该餐段累计总次数（展示分母）
+    meal_quota_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=beijing_now_naive, onupdate=beijing_now_naive

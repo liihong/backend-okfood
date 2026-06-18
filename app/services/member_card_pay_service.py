@@ -607,6 +607,8 @@ def create_miniprogram_member_card_order(
             f"卡包模版#{tpl.id}·{tpl.name.strip()}",
             is_renewal=is_renewal,
         )
+        from app.services.meal_period.template_periods import meal_periods_from_template
+
         row = MemberCardOrder(
             member_id=member_id,
             tenant_id=int(m.tenant_id),
@@ -619,6 +621,7 @@ def create_miniprogram_member_card_order(
             remark=rmk,
             delivery_start_date=d0,
             applied_to_member=False,
+            meal_periods_snapshot=meal_periods_from_template(tpl),
             out_trade_no=_new_temp_out_trade_no(),
             wx_transaction_id=None,
             created_by="miniprogram",
@@ -637,6 +640,8 @@ def create_miniprogram_member_card_order(
             )
         amt = card_order_amount_yuan_for_kind(db, k, store_id=int(m.store_id))
         rmk = _miniprogram_card_order_remark(None, is_renewal=is_renewal)
+        from app.services.meal_period.template_periods import classic_card_meal_periods_snapshot
+
         row = MemberCardOrder(
             member_id=member_id,
             tenant_id=int(m.tenant_id),
@@ -649,6 +654,7 @@ def create_miniprogram_member_card_order(
             remark=rmk,
             delivery_start_date=d0,
             applied_to_member=False,
+            meal_periods_snapshot=classic_card_meal_periods_snapshot(),
             out_trade_no=_new_temp_out_trade_no(),
             wx_transaction_id=None,
             created_by="miniprogram",

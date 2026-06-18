@@ -9,7 +9,7 @@ const viteApiBase =
     : ''
 export const API_BASE =
   viteApiBase ||
-  (import.meta.env.DEV ? 'https://ok.sourcefire.cn' : 'https://ok.sourcefire.cn')
+  (import.meta.env.DEV ? 'http://127.0.0.1:8001' : 'https://ok.sourcefire.cn')
 
 /** 默认超时（ms）。可在 request(path, { timeout })覆盖；弱网可适当加大 */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 120000

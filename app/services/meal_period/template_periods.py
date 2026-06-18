@@ -2,16 +2,34 @@
 
 from __future__ import annotations
 
+import json
+
 from app.models.membership_card_template import MembershipCardTemplate
 from app.services.meal_period.constants import DEFAULT_MEAL_PERIODS_SNAPSHOT
 
 
+def _coerce_meal_periods_raw(raw: object) -> list[object]:
+    """JSON 列偶发以字符串读出时先解析，避免晚餐 snapshot 被误判为午餐。"""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return []
+        try:
+            parsed = json.loads(s)
+            return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
 def normalize_meal_periods_list(raw: object) -> list[str]:
     """合法餐段仅 lunch / dinner；空则默认午餐。"""
-    if not isinstance(raw, list):
-        return list(DEFAULT_MEAL_PERIODS_SNAPSHOT)
     out: list[str] = []
-    for x in raw:
+    for x in _coerce_meal_periods_raw(raw):
         s = str(x).strip().lower()
         if s in ("lunch", "dinner") and s not in out:
             out.append(s)

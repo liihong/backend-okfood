@@ -416,8 +416,10 @@ def _final_out_trade_no(order_id: int) -> str:
 def dish_planned_for_date(
     db: Session, dish_id: int, d: date, *, store_id: int, meal_period: str = "lunch"
 ) -> bool:
+    from app.services.meal_period.normalize import normalize_meal_period
+
     sid = int(store_id)
-    period = (meal_period or "lunch").strip().lower()
+    period = normalize_meal_period(meal_period)
     if db.scalar(
         select(MenuSchedule.id).where(
             MenuSchedule.menu_date == d,
@@ -534,7 +536,9 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
         raise HTTPException(status_code=404, detail="餐品不存在或已停用")
     if dish.single_order_price_yuan is None:
         raise HTTPException(status_code=400, detail="该餐品暂未开放单点")
-    period = (getattr(body, "meal_period", None) or "lunch").strip().lower()
+    from app.services.meal_period.normalize import normalize_meal_period
+
+    period = normalize_meal_period(getattr(body, "meal_period", None))
     if not dish_planned_for_date(
         db, int(dish.id), body.delivery_date, store_id=int(mem.store_id), meal_period=period
     ):

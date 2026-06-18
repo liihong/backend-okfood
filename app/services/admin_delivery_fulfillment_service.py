@@ -94,14 +94,25 @@ def _subscription_fulfilled_apply(
         absent = is_absent_on_delivery_date_for_period(
             db, member, d, meal_period=period, today=today
         )
+        from app.services.meal_period.balance import deduct_dinner_balance, dinner_balance_and_quota
+        from app.models.member_meal_period_state import MemberMealPeriodState
+
+        state_row = db.get(
+            MemberMealPeriodState,
+            {"member_id": int(member.id), "meal_period": MealPeriod.DINNER.value},
+        )
+        d_bal, _ = dinner_balance_and_quota(state_row)
+        if not member.is_active or d_bal <= 0:
+            raise HTTPException(status_code=400, detail="用户未激活或晚餐次数不足")
+        if d_bal < deduct:
+            raise HTTPException(status_code=400, detail="晚餐次数不足，无法满足当日份数扣减")
     else:
         deduct = effective_daily_meal_units(member)
         absent = is_absent_on_delivery_date(member, d, today=today)
-
-    if not member.is_active or member.balance <= 0:
-        raise HTTPException(status_code=400, detail="用户未激活或次数不足")
-    if member.balance < deduct:
-        raise HTTPException(status_code=400, detail="次数不足，无法满足当日份数扣减")
+        if not member.is_active or member.balance <= 0:
+            raise HTTPException(status_code=400, detail="用户未激活或次数不足")
+        if member.balance < deduct:
+            raise HTTPException(status_code=400, detail="次数不足，无法满足当日份数扣减")
     if absent:
         raise HTTPException(status_code=400, detail="该日用户请假，无法确认")
     if member.delivery_start_date is not None and d < member.delivery_start_date:
@@ -140,19 +151,28 @@ def _subscription_fulfilled_apply(
         log.status = DeliveryStatus.DELIVERED.value
         log.courier_id = None
 
-    member.balance -= deduct
-    balance_before = int(member.balance) + int(deduct)
-    if member.balance <= 0:
-        member.is_active = False
-    db.add(
-        BalanceLog(
-            member_id=member_id,
-            change=-deduct,
-            reason=BalanceReason.DELIVERY.value,
-            operator=op_tag,
-            detail=None,
+    if period == MealPeriod.DINNER.value:
+        from app.services.meal_period.balance import deduct_dinner_balance
+
+        balance_before = deduct_dinner_balance(
+            db, member, deduct=deduct, operator=op_tag, reason=BalanceReason.DELIVERY
         )
-    )
+    else:
+        member.balance -= deduct
+        balance_before = int(member.balance) + int(deduct)
+        from app.services.meal_period.balance import sync_member_is_active_from_period_balances
+
+        sync_member_is_active_from_period_balances(db, member)
+        db.add(
+            BalanceLog(
+                member_id=member_id,
+                meal_period=MealPeriod.LUNCH.value,
+                change=-deduct,
+                reason=BalanceReason.DELIVERY.value,
+                operator=op_tag,
+                detail=None,
+            )
+        )
     return member, balance_before
 
 
@@ -188,7 +208,7 @@ def admin_mark_subscription_fulfilled(
         meal_period=period,
     )
     db.commit()
-    if renew is not None:
+    if renew is not None and period == MealPeriod.LUNCH.value:
         from app.services.member_renew_subscribe_service import try_send_renew_remind_after_balance_change
 
         try_send_renew_remind_after_balance_change(db, renew[0], balance_before=renew[1])

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Iterable
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -17,6 +18,7 @@ from app.services.menu_day_stock_service import (
     weekly_menu_day_total_stock,
 )
 from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
+from app.services.meal_period.normalize import normalize_meal_period
 
 # 普通客服单次报损耗份数上限（绝对值）
 _MAX_ADJUSTMENT_ABS_DELTA = 20
@@ -29,13 +31,6 @@ _REASON_LABELS: dict[str, str] = {
     DayStockAdjustmentReason.COUNT_CORRECTION.value: "盘点校正",
     DayStockAdjustmentReason.OTHER.value: "其他",
 }
-
-
-def normalize_meal_period(meal_period: str | None) -> str:
-    p = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
-    if p not in (MealPeriod.LUNCH.value, MealPeriod.DINNER.value):
-        raise HTTPException(status_code=400, detail="meal_period 须为 lunch 或 dinner")
-    return p
 
 
 @dataclass(frozen=True)
@@ -60,15 +55,39 @@ def sum_adjustment_deltas(
     db: Session, *, store_id: int, business_date: date, meal_period: str
 ) -> int:
     """流水 delta 合计（负=减可售，正=回补）。"""
+    return sum_adjustment_deltas_by_dates(
+        db,
+        store_id=int(store_id),
+        dates=[business_date],
+        meal_period=meal_period,
+    ).get(business_date, 0)
+
+
+def sum_adjustment_deltas_by_dates(
+    db: Session, *, store_id: int, dates: Iterable[date], meal_period: str
+) -> dict[date, int]:
+    """批量获取多日损耗/回补流水 delta 合计（按餐段隔离）。"""
     period = normalize_meal_period(meal_period)
-    v = db.scalar(
-        select(func.coalesce(func.sum(DayStockAdjustmentLog.delta), 0)).where(
+    uniq = list(dict.fromkeys(dates))
+    if not uniq:
+        return {}
+    rows = db.execute(
+        select(
+            DayStockAdjustmentLog.business_date,
+            func.coalesce(func.sum(DayStockAdjustmentLog.delta), 0),
+        )
+        .where(
             DayStockAdjustmentLog.store_id == int(store_id),
-            DayStockAdjustmentLog.business_date == business_date,
+            DayStockAdjustmentLog.business_date.in_(uniq),
             DayStockAdjustmentLog.meal_period == period,
         )
-    )
-    return int(v or 0)
+        .group_by(DayStockAdjustmentLog.business_date)
+    ).all()
+    out = {d: 0 for d in uniq}
+    for d, s in rows:
+        if d is not None:
+            out[d] = int(s or 0)
+    return out
 
 
 def waste_total_display(adjustment_delta_sum: int) -> int:

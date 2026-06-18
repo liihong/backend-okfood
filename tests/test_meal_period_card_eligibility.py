@@ -12,6 +12,7 @@ from app.db.base import Base
 from app.models.member import Member
 from app.models.enums import CardOrderPayStatus
 from app.models.member_card_order import MemberCardOrder
+from app.models.member_meal_period_state import MemberMealPeriodState
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.services.meal_period.card_eligibility import (
@@ -28,6 +29,7 @@ def eligibility_db() -> Session:
         Store.__table__,
         Member.__table__,
         MemberCardOrder.__table__,
+        MemberMealPeriodState.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -51,9 +53,19 @@ def eligibility_db() -> Session:
                 store_id=1,
                 phone="13000000101",
                 name="晚餐会员",
-                balance=10,
+                balance=0,
                 is_active=True,
+                delivery_start_date=date(2026, 1, 1),
                 store_pickup=False,
+            )
+        )
+        session.add(
+            MemberMealPeriodState(
+                member_id=101,
+                meal_period="dinner",
+                daily_meal_units=1,
+                balance=10,
+                meal_quota_total=10,
             )
         )
         session.add(
