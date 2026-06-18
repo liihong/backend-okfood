@@ -363,9 +363,7 @@ watch(
     <!-- 后厨计划管理（左） -->
     <article class="dpk-card dpk-card--kitchen">
       <div class="dpk-card-title dpk-card-title--blue">🍳 后厨计划管理</div>
-      <div class="dpk-formula">
-        保存后同步更新「本周菜单配置」与顶卡「后厨总生产 / 可卖数量」（午餐与晚餐分餐段）
-      </div>
+
       <div class="dpk-kitchen-grid">
         <div class="dpk-kitchen-grid__head">
           <span class="dpk-kitchen-grid__corner" />
@@ -424,7 +422,7 @@ watch(
         </div>
         <div class="dpk-kitchen-grid__row">
           <label class="dpk-kitchen-grid__row-label">
-            {{ KITCHEN_DAY_LABELS[2] }}日总份数
+            {{ KITCHEN_DAY_LABELS[2] }}日
             <span v-if="!dayAfterTomorrowIsBusinessDay" class="dpk-nonbiz-hint">（非营业日）</span>
           </label>
           <div class="dpk-input-row">
