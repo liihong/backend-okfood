@@ -107,6 +107,7 @@ def _prep_metrics_for_period(
     from app.services.delivery_sheet_service import (
         delivery_sheet_metrics_for_date,
         delivery_sheet_metrics_for_dinner_date,
+        delivery_sheet_metrics_pending_sql_for_dinner_future_date,
         delivery_sheet_metrics_pending_sql_for_future_date,
         delivery_sheet_metrics_via_sql_for_unlocked_date,
     )
