@@ -115,6 +115,13 @@ function dishSpiceBadge(row) {
   if (!k) return '未标注'
   return SPICE_ADMIN_LABELS[k] || '未标注'
 }
+
+/** 卡片右下角：上次排期供餐日 */
+function dishLastUsedLabel(row) {
+  const raw = row?.last_used_date
+  if (raw == null || String(raw).trim() === '') return '从未使用'
+  return `上次 ${String(raw).trim()}`
+}
 const dishPhotoUploading = ref(false)
 
 async function fetchCategoriesForDishes() {
@@ -434,13 +441,22 @@ onMounted(() => {
                 </span>
               </p>
               <p v-if="d.description" class="dish-compact-card__desc">{{ d.description }}</p>
-              <div class="dish-compact-card__actions">
-                <button type="button" class="dish-compact-btn dish-compact-btn--edit" @click="openDishEditorEdit(d)">
-                  编辑
-                </button>
-                <button type="button" class="dish-compact-btn dish-compact-btn--delete" @click="deleteDish(d)">
-                  <Trash2 :size="14" stroke-width="2" />
-                </button>
+              <div class="dish-compact-card__footer">
+                <div class="dish-compact-card__actions">
+                  <button type="button" class="dish-compact-btn dish-compact-btn--edit" @click="openDishEditorEdit(d)">
+                    编辑
+                  </button>
+                  <button type="button" class="dish-compact-btn dish-compact-btn--delete" @click="deleteDish(d)">
+                    <Trash2 :size="14" stroke-width="2" />
+                  </button>
+                </div>
+                <span
+                  class="dish-compact-card__last-used"
+                  :class="{ 'dish-compact-card__last-used--none': !d.last_used_date }"
+                  :title="d.last_used_date ? `上次排期供餐日：${d.last_used_date}` : '尚未排期供餐'"
+                >
+                  {{ dishLastUsedLabel(d) }}
+                </span>
               </div>
             </div>
           </article>
@@ -796,11 +812,27 @@ onMounted(() => {
   -webkit-box-orient: vertical;
 }
 
+.dish-compact-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+}
 .dish-compact-card__actions {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  margin-top: 0.15rem;
+}
+.dish-compact-card__last-used {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  color: #64748b;
+  white-space: nowrap;
+}
+.dish-compact-card__last-used--none {
+  color: #cbd5e1;
 }
 .dish-compact-btn {
   display: inline-flex;

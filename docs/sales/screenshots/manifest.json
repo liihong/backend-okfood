@@ -1,0 +1,57 @@
+{
+  "comment": "截图文件名相对本目录。运行 capture_admin_screenshots.py 可自动截取管理后台；小程序截图请从微信开发者工具导出后放入本目录。",
+  "sections": {
+    "03_home": {
+      "file": "mini-home.png",
+      "caption": "图：小程序首页"
+    },
+    "03_menu": {
+      "file": "mini-menu.png",
+      "caption": "图：小程序菜单与点餐"
+    },
+    "03_card": {
+      "file": "mini-card.png",
+      "caption": "图：会员卡 / 卡包购买"
+    },
+    "03_mine": {
+      "file": "mini-mine.png",
+      "caption": "图：会员中心（请假、份数、扣次记录）"
+    },
+    "04_courier": {
+      "file": "mini-courier.png",
+      "caption": "图：配送员今日任务"
+    },
+    "05_dashboard": {
+      "file": "admin-dashboard.png",
+      "caption": "图：管理后台 · 营业概览"
+    },
+    "05_members": {
+      "file": "admin-members.png",
+      "caption": "图：管理后台 · 会员档案库"
+    },
+    "05_card_orders": {
+      "file": "admin-card-orders.png",
+      "caption": "图：管理后台 · 开卡工单"
+    },
+    "05_orders": {
+      "file": "admin-orders.png",
+      "caption": "图：管理后台 · 订单管理"
+    },
+    "05_delivery": {
+      "file": "admin-delivery.png",
+      "caption": "图：管理后台 · 智能配送大表"
+    },
+    "05_finance": {
+      "file": "admin-finance.png",
+      "caption": "图：管理后台 · 财务中心"
+    },
+    "05_weekly_menu": {
+      "file": "admin-weekly-menu.png",
+      "caption": "图：管理后台 · 本周菜单"
+    },
+    "05_marketing": {
+      "file": "admin-marketing-banners.png",
+      "caption": "图：管理后台 · 小程序营销"
+    }
+  }
+}

@@ -462,11 +462,64 @@ def admin_delete_member(db: Session, member_id: int) -> dict[str, str]:
     }
 
 
+def _merge_dish_last_used_date(existing: date | None, candidate: date | None) -> date | None:
+    """取两个供餐日中较晚的一天；任一为空则返回另一个。"""
+    if candidate is None:
+        return existing
+    if existing is None:
+        return candidate
+    return candidate if candidate > existing else existing
+
+
+def _dish_last_used_dates_batch(
+    db: Session,
+    dish_ids: list[int],
+    *,
+    store_id: int,
+) -> dict[int, date | None]:
+    """批量查询菜品上次排期供餐日：按日排期与周槽位取最大值，不含未来日期。"""
+    if not dish_ids:
+        return {}
+    sid = int(store_id)
+    today = today_shanghai()
+    out: dict[int, date | None] = {int(did): None for did in dish_ids}
+
+    sched_rows = db.execute(
+        select(MenuSchedule.dish_id, func.max(MenuSchedule.menu_date)).where(
+            MenuSchedule.store_id == sid,
+            MenuSchedule.dish_id.in_(dish_ids),
+            MenuSchedule.menu_date <= today,
+        ).group_by(MenuSchedule.dish_id)
+    ).all()
+    for dish_id, max_date in sched_rows:
+        out[int(dish_id)] = max_date
+
+    slot_rows = db.execute(
+        select(WeeklyMenuSlot.dish_id, WeeklyMenuSlot.week_start, WeeklyMenuSlot.slot).where(
+            WeeklyMenuSlot.store_id == sid,
+            WeeklyMenuSlot.dish_id.in_(dish_ids),
+        )
+    ).all()
+    for dish_id, week_start, slot in slot_rows:
+        serve_date = week_start + timedelta(days=int(slot) - 1)
+        if serve_date > today:
+            continue
+        did = int(dish_id)
+        out[did] = _merge_dish_last_used_date(out.get(did), serve_date)
+
+    return out
+
+
+def _format_dish_last_used_date(value: date | None) -> str | None:
+    return value.isoformat() if value else None
+
+
 def _dish_admin_out_from_row(
     row: MenuDish,
     *,
     include_sop: bool = True,
     lite: bool = False,
+    last_used_date: date | None = None,
 ) -> DishAdminOut:
     return DishAdminOut(
         id=row.id,
@@ -481,6 +534,7 @@ def _dish_admin_out_from_row(
         spice_level=_dish_spice_level_out(row.spice_level),
         internal_view_sop=row.internal_view_sop if include_sop else None,
         created_at=row.created_at.isoformat() if row.created_at else "",
+        last_used_date=None if lite else _format_dish_last_used_date(last_used_date),
     )
 
 
@@ -611,7 +665,22 @@ def list_dishes_admin(
                 or_(MenuDish.meat_category_id.in_(ids), MenuDish.dish_type_category_id.in_(ids))
             )
     rows = db.scalars(stmt).all()
-    return [_dish_admin_out_from_row(r, include_sop=False, lite=lite) for r in rows]
+    last_used_map: dict[int, date | None] = {}
+    if not lite and rows:
+        last_used_map = _dish_last_used_dates_batch(
+            db,
+            [int(r.id) for r in rows],
+            store_id=sid,
+        )
+    return [
+        _dish_admin_out_from_row(
+            r,
+            include_sop=False,
+            lite=lite,
+            last_used_date=last_used_map.get(int(r.id)),
+        )
+        for r in rows
+    ]
 
 
 def delete_dish(db: Session, dish_id: int, *, store_id: int) -> None:

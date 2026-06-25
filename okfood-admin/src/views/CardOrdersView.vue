@@ -572,6 +572,35 @@ const selectedEditTemplate = computed(() => {
   return membershipTemplates.value.find((t) => Number(t.id) === Number(id)) || null
 })
 
+/** 更新工单卡包模版展示文案（已入账只读、下拉无匹配时兜底） */
+const editTemplateDisplayLabel = computed(() => {
+  const productLabel = (editForm.value.template_product_label || '').trim()
+  if (productLabel) return productLabel
+  const tpl = selectedEditTemplate.value
+  if (tpl) return templateOptionLabel(tpl)
+  const id = editForm.value.membership_template_id
+  if (id != null) return `模版#${id}`
+  return '—'
+})
+
+/** 确保当前工单绑定的卡包在下拉选项中（含已下架/未开启，避免 el-select 只显示 id） */
+function ensureEditTemplateOptionVisible() {
+  const cur = editForm.value.membership_template_id
+  if (cur == null) return
+  if (membershipTemplates.value.some((t) => Number(t.id) === Number(cur))) return
+  membershipTemplates.value = [
+    {
+      id: cur,
+      name: editForm.value.template_product_label || `模版#${cur}`,
+      kind_label: '',
+      meals_grant: 0,
+      meal_periods: editForm.value.meal_periods,
+      is_active: false,
+    },
+    ...membershipTemplates.value,
+  ]
+}
+
 function openEditModal(row) {
   const ds = row.delivery_start_date ? String(row.delivery_start_date).slice(0, 10) : ''
   editForm.value = {
@@ -592,6 +621,7 @@ function openEditModal(row) {
     applied_to_member: !!row.applied_to_member,
     created_by: row.created_by || '',
   }
+  ensureEditTemplateOptionVisible()
   showEditModal.value = true
   void loadMembershipTemplatesForEdit()
 }
@@ -606,21 +636,8 @@ async function loadMembershipTemplatesForEdit() {
       { auth: true },
     )
     membershipTemplates.value = Array.isArray(data) ? data : []
-    const cur = editForm.value.membership_template_id
-    if (cur != null && !membershipTemplates.value.some((t) => Number(t.id) === Number(cur))) {
-      // 已入账或模版已下架：保留当前绑定 id，列表仍展示 template_product_label
-      membershipTemplates.value = [
-        {
-          id: cur,
-          name: editForm.value.template_product_label || `模版#${cur}`,
-          kind_label: '',
-          meals_grant: 0,
-          meal_periods: editForm.value.meal_periods,
-          is_active: false,
-        },
-        ...membershipTemplates.value,
-      ]
-    }
+    // 已入账或模版已下架：保留当前绑定 id，避免下拉只显示数字
+    ensureEditTemplateOptionVisible()
   } catch (e) {
     membershipTemplates.value = []
     showToast(e instanceof Error ? e.message : '加载卡包模版失败', 'error')
@@ -1282,11 +1299,19 @@ class="member-pill"
           </div>
           <div class="form-group">
             <label>卡包模版</label>
+            <el-input
+              v-if="editForm.applied_to_member"
+              :model-value="editTemplateDisplayLabel"
+              type="text"
+              disabled
+              class="input-disabled input-delivery-area co-edit-card-kind-select"
+            />
             <el-select
+              v-else
               v-model="editForm.membership_template_id"
               class="input-delivery-area co-edit-card-kind-select"
               :loading="membershipTemplatesLoading"
-              :disabled="editForm.applied_to_member || !membershipTemplates.length"
+              :disabled="!membershipTemplates.length"
               placeholder="请选择已开启的卡包"
             >
               <el-option

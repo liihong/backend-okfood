@@ -84,6 +84,10 @@ class DishAdminOut(BaseModel):
     spice_level: DishSpiceLevelCode | None = None
     internal_view_sop: str | None = None
     created_at: str
+    last_used_date: str | None = Field(
+        None,
+        description="上次排期供餐日(YYYY-MM-DD)；取自按日排期与周槽位，不含未来日期",
+    )
 
 
 class FileUploadOut(BaseModel):

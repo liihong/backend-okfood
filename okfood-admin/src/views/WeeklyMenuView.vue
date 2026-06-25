@@ -90,19 +90,37 @@ function formatSlotPrice(v) {
   return `¥ ${s}`
 }
 
-/** 从预览中取本周行数据 */
-function rowsForPreview(preview) {
-  if (!preview?.this_week_start) return []
-  return slotsToRows(preview.this_week, preview.this_week_start)
+/** @typedef {'this' | 'next'} WeekTabKey */
+
+/** 当前查看的周：本周 / 下周 */
+const activeWeekTab = ref(/** @type {WeekTabKey} */ ('this'))
+
+/** 从预览中取指定周的行数据 */
+function rowsForPreview(preview, weekKey = 'this') {
+  if (!preview) return []
+  const weekStart = weekKey === 'next' ? preview.next_week_start : preview.this_week_start
+  const slotList = weekKey === 'next' ? preview.next_week : preview.this_week
+  if (!weekStart) return []
+  return slotsToRows(slotList, weekStart)
 }
 
-const lunchRows = computed(() => rowsForPreview(previewLunch.value))
-const dinnerRows = computed(() => rowsForPreview(previewDinner.value))
+const lunchRows = computed(() => rowsForPreview(previewLunch.value, activeWeekTab.value))
+const dinnerRows = computed(() => rowsForPreview(previewDinner.value, activeWeekTab.value))
 
-/** 本周 week_start（用于卡片日期徽章） */
+/** 当前 Tab 对应的 week_start（用于卡片日期徽章） */
 const activeWeekStart = computed(() => {
   const p = previewLunch.value || previewDinner.value
-  return p?.this_week_start || ''
+  if (!p) return ''
+  return activeWeekTab.value === 'next' ? p.next_week_start || '' : p.this_week_start || ''
+})
+
+/** 顶栏 Tab 选项（含起止日期提示） */
+const weekTabOptions = computed(() => {
+  const p = previewLunch.value || previewDinner.value
+  return [
+    { key: /** @type {WeekTabKey} */ ('this'), label: '本周菜单', weekStart: p?.this_week_start || '' },
+    { key: /** @type {WeekTabKey} */ ('next'), label: '下周菜单', weekStart: p?.next_week_start || '' },
+  ]
 })
 
 /** @param {{ weekStart: string, slot: number }} row @param {'lunch'|'dinner'} mealPeriod */
@@ -345,6 +363,16 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 
 <template>
   <div class="wmenu-page tab-content animate-up page-content-shell" v-loading="loading">
+    <div v-if="hasPreview" class="wmenu-week-tabs">
+      <el-tabs v-model="activeWeekTab" class="wmenu-week-tabs-el">
+        <el-tab-pane v-for="tab in weekTabOptions" :key="tab.key" :name="tab.key">
+          <template #label>
+            <span class="wmenu-week-tab-label">{{ tab.label }}</span>
+            <span v-if="tab.weekStart" class="wmenu-week-tab-date">起 {{ tab.weekStart }}</span>
+          </template>
+        </el-tab-pane>
+      </el-tabs>
+    </div>
     <div v-if="hasPreview" class="wmenu-schedule-scroll">
       <div class="wmenu-schedule-grid">
         <div v-for="card in mealCards" :key="card.key" class="wmenu-week-card">
@@ -473,6 +501,51 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
     margin-right: 0;
     width: 100%;
   }
+}
+
+.wmenu-week-tabs {
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+
+.wmenu-week-tabs-el :deep(.el-tabs__header) {
+  margin: 0 0 12px;
+}
+
+.wmenu-week-tabs-el :deep(.el-tabs__nav-wrap::after) {
+  height: 1px;
+  background-color: var(--wmenu-border, #eaedf1);
+}
+
+.wmenu-week-tabs-el :deep(.el-tabs__item) {
+  height: 40px;
+  line-height: 40px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--wmenu-muted, #64748b);
+  padding: 0 18px;
+}
+
+.wmenu-week-tabs-el :deep(.el-tabs__item.is-active) {
+  color: var(--wmenu-primary, #0d5c46);
+}
+
+.wmenu-week-tabs-el :deep(.el-tabs__active-bar) {
+  background-color: var(--wmenu-primary, #0d5c46);
+}
+
+.wmenu-week-tab-label {
+  margin-right: 6px;
+}
+
+.wmenu-week-tab-date {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.wmenu-week-tabs-el :deep(.el-tabs__item.is-active) .wmenu-week-tab-date {
+  color: #059669;
 }
 
 .wmenu-page {
