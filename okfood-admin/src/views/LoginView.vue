@@ -11,7 +11,6 @@ import {
   adminKind,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
-import { PASSWORD_POLICY_MSG } from '../utils/passwordPolicy.js'
 
 const router = useRouter()
 
@@ -19,6 +18,14 @@ const loginUsername = ref(LOGIN_PRESET_USER)
 const loginPassword = ref(LOGIN_PRESET_PASSWORD)
 const loginLoading = ref(false)
 const loginError = ref(false)
+
+const brandFeatures = [
+  { label: '会员履约', emoji: '👥' },
+  { label: '配送调度', emoji: '🚚' },
+  { label: '财务透明', emoji: '💰' },
+  { label: '订单统计', emoji: '📊' },
+  { label: '续卡管理', emoji: '💳' },
+]
 
 const handleAdminLogin = async () => {
   if (loginLoading.value) return
@@ -69,20 +76,13 @@ const handleAdminLogin = async () => {
         <div class="brand-side-bg"></div>
         <div class="brand-side-content">
           <div class="logo-box brand-logo-mark">&#128076;</div>
-          <h1>OK Fine</h1>
-          <p>Digital Management Center</p>
+          <h1>OK饭-会员制经营系统</h1>
           <div class="brand-features">
-            <div class="feature-item">
-              <div class="feature-emoji">&#128202;</div>
-              <span>数据实时</span>
-            </div>
-            <div class="feature-item">
-              <div class="feature-emoji">&#128666;</div>
-              <span>调度智能</span>
-            </div>
-            <div class="feature-item">
-              <div class="feature-emoji">&#128176;</div>
-              <span>财务透明</span>
+            <div v-for="item in brandFeatures" :key="item.label" class="feature-item">
+              <div class="feature-icon-wrap">
+                <span class="feature-emoji" aria-hidden="true">{{ item.emoji }}</span>
+              </div>
+              <span>{{ item.label }}</span>
             </div>
           </div>
         </div>
@@ -92,7 +92,7 @@ const handleAdminLogin = async () => {
         <div class="form-container" :class="{ 'shake-err': loginError }">
           <div class="form-header">
             <h2>欢迎回来 &#128076;</h2>
-            <p>请登录 OK Fine 超级管家后台</p>
+            <p>请登录超级管家后台</p>
           </div>
 
           <form class="login-form" @submit.prevent="handleAdminLogin">
@@ -147,7 +147,6 @@ const handleAdminLogin = async () => {
                   </template>
                 </el-input>
               </div>
-              <p class="password-policy-hint">{{ PASSWORD_POLICY_MSG }}</p>
             </div>
 
             <div class="form-extras">

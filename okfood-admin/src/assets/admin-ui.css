@@ -110,12 +110,12 @@
 }
 
 .brand-side-content h1 {
-  font-size: 4.5rem;
+  font-size: 2.75rem;
   font-weight: 950;
-  font-style: italic;
-  letter-spacing: -2px;
-  line-height: 1;
-  margin: 0 0 1.5rem;
+  font-style: normal;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  margin: 0 0 2rem;
   text-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
   color: white;
 }
@@ -130,10 +130,14 @@
 }
 
 .brand-features {
-  margin-top: 4rem;
+  margin-top: 3.5rem;
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 2rem;
+  gap: 1.25rem 1.75rem;
+  max-width: 520px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .feature-item {
@@ -141,18 +145,35 @@
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
+  min-width: 4.5rem;
 }
 
 .feature-item span {
-  font-size: 12px;
+  /* font-size: px; */
   font-weight: 900;
-  letter-spacing: 2px;
-  opacity: 0.5;
+  letter-spacing: 2UNpx;
+  opacity: 0.85;
+  white-space: nowrap;
+  color: white;
+}
+
+.feature-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3.5rem;
+  transition: transform 0.2s ease;
+}
+
+.feature-item:hover .feature-icon-wrap {
+  transform: scale(1.08);
 }
 
 .feature-emoji {
   font-size: 2rem;
   line-height: 1;
+  display: block;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.2));
 }
 
 .form-side {

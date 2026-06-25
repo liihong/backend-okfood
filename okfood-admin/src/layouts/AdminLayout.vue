@@ -132,7 +132,7 @@ const portalSubtitle = computed(() => {
   if (isDeliveryOnly.value) return '配送管理'
   if (isSupportOnly.value) return '客服工作台'
   if (isSystemOnly.value) return '平台管理'
-  return 'SUPER ADMIN'
+  return '会员制经营系统'
 })
 
 /** 配送大表：第二行挂载筛选工具条（Teleport 目标） */
@@ -314,7 +314,7 @@ function onTabClose(tab) {
       <div class="logo-area">
         <div class="logo-box" aria-hidden="true">OK</div>
         <div v-show="!sidebarCollapsed" class="logo-text">
-          <h1>OK Fine</h1>
+          <h1>OK饭</h1>
           <span>{{ portalSubtitle }}</span>
         </div>
         <button
