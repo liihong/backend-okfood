@@ -1,15 +1,26 @@
 <script setup>
 defineOptions({ name: 'MemberCouponGrantsView' })
 import { ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Plus, Search } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 import GrantCouponModal from './components/GrantCouponModal.vue'
 
+const route = useRoute()
+const router = useRouter()
+
 const storeId = ref(1)
 const list = ref([])
 const loading = ref(false)
 const grantVisible = ref(false)
+/** 打开发券弹窗时的预填（来自会员统计/档案跳转） */
+const grantPrefill = ref({
+  mode: 'single',
+  phone: '',
+  phonesText: '',
+  remark: '',
+})
 /** 分页：与接口 page / page_size 一致 */
 const page = ref(1)
 const pageSize = ref(20)
@@ -52,6 +63,78 @@ async function loadList() {
   } finally {
     loading.value = false
   }
+}
+
+/** 拉取全部待续费会员手机号（分页合并，供批量发券预填） */
+async function fetchRenewPendingPhonesText() {
+  const phones = []
+  const seen = new Set()
+  let pageNum = 1
+  const ps = 100
+  for (;;) {
+    const q = new URLSearchParams({
+      page: String(pageNum),
+      page_size: String(ps),
+      renew_pending_only: '1',
+    })
+    const data = await apiJson(`/api/admin/users?${q.toString()}`, {}, { auth: true })
+    const items = Array.isArray(data?.items) ? data.items : []
+    for (const it of items) {
+      const ph = String(it.phone || '').trim()
+      if (!ph || seen.has(ph)) continue
+      seen.add(ph)
+      phones.push(ph)
+    }
+    const totalCount = Number(data?.total) || 0
+    if (pageNum * ps >= totalCount || items.length < ps) break
+    pageNum += 1
+  }
+  return phones.join('\n')
+}
+
+function resetGrantPrefill() {
+  grantPrefill.value = { mode: 'single', phone: '', phonesText: '', remark: '' }
+}
+
+function openGrantModal() {
+  resetGrantPrefill()
+  grantVisible.value = true
+}
+
+/** 会员统计/档案页带 query 跳转时自动打开发券弹窗 */
+async function tryOpenGrantFromRouteQuery() {
+  if (String(route.query.grant || '') !== '1') return
+  const batch = String(route.query.batch || '').trim()
+  const phone = String(route.query.phone || '').trim().replace(/\s+/g, '').replace(/-/g, '')
+
+  if (batch === 'renew_pending') {
+    const phonesText = await fetchRenewPendingPhonesText()
+    if (!phonesText) {
+      showToast('暂无待续费会员', 'info')
+    } else {
+      grantPrefill.value = {
+        mode: 'batch',
+        phone: '',
+        phonesText,
+        remark: '待续费会员续卡激励',
+      }
+      grantVisible.value = true
+    }
+  } else if (phone) {
+    grantPrefill.value = {
+      mode: 'single',
+      phone,
+      phonesText: '',
+      remark: '',
+    }
+    grantVisible.value = true
+  }
+
+  const nextQuery = { ...route.query }
+  delete nextQuery.grant
+  delete nextQuery.batch
+  delete nextQuery.phone
+  router.replace({ path: route.path, query: nextQuery })
 }
 
 function onSearch() {
@@ -98,9 +181,10 @@ async function revokeRow(row) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   if (!adminAccessToken.value) return
-  void loadList()
+  await loadList()
+  await tryOpenGrantFromRouteQuery()
 })
 </script>
 
@@ -130,7 +214,7 @@ onMounted(() => {
             <el-button @click="onReset">重置</el-button>
           </el-form-item>
         </el-form>
-        <button type="button" class="btn-primary btn-primary--sm" @click="grantVisible = true">
+        <button type="button" class="btn-primary btn-primary--sm" @click="openGrantModal">
           <Plus :size="16" /> 发放优惠券
         </button>
       </div>
@@ -182,7 +266,15 @@ onMounted(() => {
         />
       </div>
     </div>
-    <GrantCouponModal v-model:visible="grantVisible" :store-id="storeId" @saved="onGrantSaved" />
+    <GrantCouponModal
+      v-model:visible="grantVisible"
+      :store-id="storeId"
+      :initial-grant-mode="grantPrefill.mode"
+      :initial-member-phone="grantPrefill.phone"
+      :initial-member-phones-text="grantPrefill.phonesText"
+      :initial-remark="grantPrefill.remark"
+      @saved="onGrantSaved"
+    />
   </section>
 </template>
 

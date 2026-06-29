@@ -1,6 +1,7 @@
 <script setup>
 defineOptions({ name: 'MembersView' })
 import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import {
   Search,
@@ -15,6 +16,7 @@ import {
   History,
   Banknote,
   UtensilsCrossed,
+  Ticket,
 } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import {
@@ -66,6 +68,29 @@ const membersRegionFilter = ref('')
 /** 会员卡状态：'' 全部 | inactive 未开卡 | paused 暂停配送 | leave 请假中 */
 const membersStatusSegment = ref('')
 const regionFilterOptions = ref([])
+
+const route = useRoute()
+const router = useRouter()
+
+/** 当前是否为待续费筛选（客服续卡提醒场景） */
+const isRenewPendingFilter = computed(() => membersStatusSegment.value === 'renew_pending')
+
+/** 从路由 query 恢复筛选（会员统计页跳转带参） */
+function applyMembersRouteQueryFilters() {
+  const q = route.query
+  const validity = String(q.validity ?? '').trim()
+  if (['active', 'expired', 'refunded'].includes(validity)) {
+    membersValidityFilter.value = validity
+  }
+  const segment = String(q.segment ?? '').trim()
+  if (['inactive', 'paused', 'leave', 'renew_pending'].includes(segment)) {
+    membersStatusSegment.value = segment
+  }
+  const region = String(q.region ?? '').trim()
+  if (region === 'unassigned') {
+    membersRegionFilter.value = 'unassigned'
+  }
+}
 
 /** 顶栏全库统计（不受当前搜索/筛选影响） */
 const membersStats = ref({ total: null, active: null, expired: null, refunded: null, refund_rate_percent: null })
@@ -218,6 +243,10 @@ function onMembersActionDropdown(command, row) {
     void openMemberRefund(row)
     return
   }
+  if (command === 'grant_coupon') {
+    goGrantCouponForMember(row)
+    return
+  }
   if (command === 'delete') {
     void deleteMemberRow(row)
   }
@@ -230,7 +259,11 @@ function buildMembersListParams(page, pageSize, { exportMode = false } = {}) {
     page_size: String(pageSize),
   })
   if (exportMode) {
-    params.set('validity', 'active')
+    if (membersStatusSegment.value === 'renew_pending') {
+      params.set('renew_pending_only', '1')
+    } else {
+      params.set('validity', 'active')
+    }
   } else {
     const vq = validityQuery()
     if (vq) params.set('validity', vq)
@@ -242,6 +275,7 @@ function buildMembersListParams(page, pageSize, { exportMode = false } = {}) {
   if (membersStatusSegment.value === 'inactive') params.set('inactive_only', '1')
   else if (membersStatusSegment.value === 'paused') params.set('delivery_deferred_only', '1')
   else if (membersStatusSegment.value === 'leave') params.set('on_leave_only', '1')
+  else if (membersStatusSegment.value === 'renew_pending') params.set('renew_pending_only', '1')
   const mrf = String(membersRegionFilter.value ?? '').trim()
   if (mrf === 'unassigned') params.set('unassigned_region', '1')
   else if (mrf) {
@@ -342,8 +376,9 @@ async function exportMembersExcel() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '会员档案')
     const stamp = shanghaiTodayYmd()
-    XLSX.writeFile(wb, `会员档案_剩余次数大于0_${stamp}.xlsx`)
-    showToast(`已导出 ${out.length} 条（已排除剩余次数为 0）`, 'success')
+    const exportTag = isRenewPendingFilter.value ? '待续费' : '剩余次数大于0'
+    XLSX.writeFile(wb, `会员档案_${exportTag}_${stamp}.xlsx`)
+    showToast(`已导出 ${out.length} 条`, 'success')
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -898,11 +933,31 @@ watch(showRefundModal, (v) => {
   }
 })
 
+function goGrantCouponForMember(row) {
+  const phone = String(row?.phone || '').trim()
+  if (!phone) {
+    showToast('该会员无手机号，无法发券', 'error')
+    return
+  }
+  router.push({
+    path: '/marketing/member-coupons',
+    query: { grant: '1', phone },
+  })
+}
+
+function goBatchGrantCouponsForRenewPending() {
+  router.push({
+    path: '/marketing/member-coupons',
+    query: { grant: '1', batch: 'renew_pending' },
+  })
+}
+
 async function onMemberAddressesSaved() {
   await fetchMembers()
 }
 
 onMounted(async () => {
+  applyMembersRouteQueryFilters()
   await loadRegionFilterOptions()
   await fetchMemberStats()
   await fetchMembers()
@@ -998,6 +1053,7 @@ onUnmounted(() => {
                     <el-option label="未开卡" value="inactive" />
                     <el-option label="暂停配送" value="paused" />
                     <el-option label="请假中" value="leave" />
+                    <el-option label="待续费" value="renew_pending" />
                   </el-select>
                 </div>
               </div>
@@ -1056,6 +1112,15 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
+      </div>
+      <div v-if="isRenewPendingFilter" class="members-renew-banner" role="status">
+        <p class="members-renew-banner__text">
+          当前展示<strong>待续费</strong>会员（生效中、剩余次数 ≤ 2，不含暂停/退款/请假）。可导出名单后电话/微信提醒续卡，或批量发放续卡优惠券。
+        </p>
+        <el-button type="warning" size="small" @click="goBatchGrantCouponsForRenewPending">
+          <Ticket :size="14" aria-hidden="true" style="margin-right: 4px; vertical-align: -2px" />
+          批量发券
+        </el-button>
       </div>
       <div ref="membersTableHostRef" class="members-table-host">
         <AdminTable
@@ -1218,6 +1283,15 @@ onUnmounted(() => {
                       >
                         <UtensilsCrossed :size="14" aria-hidden="true" />
                         补餐赔付
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="grant_coupon">
+                      <span
+                        class="members-dropdown-item-inner"
+                        title="跳转优惠券发放页，向该会员发放续卡优惠券"
+                      >
+                        <Ticket :size="14" aria-hidden="true" />
+                        发优惠券
                       </span>
                     </el-dropdown-item>
                     <el-dropdown-item command="refund" :disabled="!canMemberRefund(u)">
@@ -1643,6 +1717,31 @@ onUnmounted(() => {
 .members-overview-stat__value--danger {
   color: #ef4444;
 }
+
+.members-renew-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 14px;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+}
+
+.members-renew-banner__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #92400e;
+}
+
+.members-renew-banner__text strong {
+  color: #b45309;
+}
+
 .members-region-select-el {
   width: 118px;
 }

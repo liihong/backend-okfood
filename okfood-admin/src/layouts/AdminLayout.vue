@@ -11,6 +11,7 @@ import {
   Package,
   ChevronsLeft,
   ChevronsRight,
+  PieChart,
   Settings,
   X,
   Bell,
@@ -121,7 +122,7 @@ function goCardOrders(item) {
 
 /** 与模板绑定：明确布尔，避免 Element Plus 菜单缓存旧结构 */
 const showFullAdminMenus = computed(() => !isDeliveryOnly.value && !isSystemOnly.value)
-/** 仅店主完整账号：财务中心、门店配置 */
+/** 仅店主完整账号：数据统计、门店配置 */
 const showOwnerAdminMenus = computed(
   () => !isDeliveryOnly.value && !isSupportOnly.value && !isSystemOnly.value,
 )
@@ -151,6 +152,8 @@ const TAB_ROUTE_ICONS = {
   'delivery-range-check': MapPinned,
   couriers: UserCircle,
   'delivery-sf-orders': Activity,
+  'stats-members': Users,
+  'stats-finance': DollarSign,
   finance: DollarSign,
   menu: Utensils,
   'weekly-menu': Utensils,
@@ -387,12 +390,16 @@ function onTabClose(tab) {
           <el-menu-item index="/couriers">配送员管理</el-menu-item>
         </el-sub-menu>
 
-        <el-menu-item v-if="showOwnerAdminMenus" index="/finance">
-          <div class="menu-item-inner">
-            <DollarSign :size="20" stroke-width="2" />
-            <span class="menu-item-label">财务中心</span>
-          </div>
-        </el-menu-item>
+        <el-sub-menu v-if="showOwnerAdminMenus" index="sub-stats">
+          <template #title>
+            <div class="menu-item-inner">
+              <PieChart :size="20" stroke-width="2" />
+              <span class="menu-item-label">数据统计</span>
+            </div>
+          </template>
+          <el-menu-item index="/stats/members">会员统计</el-menu-item>
+          <el-menu-item index="/stats/finance">财务统计</el-menu-item>
+        </el-sub-menu>
 
         <el-sub-menu v-if="showFullAdminMenus" index="sub-menu-mgmt">
           <template #title>

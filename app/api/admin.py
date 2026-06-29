@@ -81,6 +81,7 @@ from app.services.admin_service import (
     list_categories_admin,
     list_dishes_admin,
     list_members_paged,
+    member_analytics_summary,
     member_list_overview_counts,
     update_settings,
     upsert_dish,
@@ -997,6 +998,20 @@ def users_stats(
     return success(data=dump_model(out), msg="获取成功")
 
 
+@router.get("/users/analytics")
+def users_analytics(
+    response: Response,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """会员运营分析：档案库总览、周/月卡结构、续卡率与运营状态分布。"""
+    response.headers["Cache-Control"] = "no-store"
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = member_analytics_summary(db, store_id=store_id)
+    return success(data=dump_model(out), msg="获取成功")
+
+
 @router.get("/users")
 def users(
     response: Response,
@@ -1033,6 +1048,10 @@ def users(
         bool,
         Query(description="true=仅当前请假中（与列表「请假中」状态一致：区间含今日或明日请假未过期）"),
     ] = False,
+    renew_pending_only: Annotated[
+        bool,
+        Query(description="true=仅待续费：生效中且剩余次数<=低余额阈值，非暂停/退款/请假"),
+    ] = False,
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     response.headers["Cache-Control"] = "no-store"
@@ -1049,6 +1068,8 @@ def users(
         raise HTTPException(status_code=400, detail="不能同时指定 delivery_region_id 与 unassigned_region")
     if inactive_only and delivery_deferred_only:
         raise HTTPException(status_code=400, detail="inactive_only 与 delivery_deferred_only 不能同时为 true")
+    if renew_pending_only and (inactive_only or delivery_deferred_only or on_leave_only):
+        raise HTTPException(status_code=400, detail="renew_pending_only 与 inactive/delivery_deferred/on_leave 筛选互斥")
     items, total = list_members_paged(
         db,
         q_phone=q,
@@ -1062,6 +1083,7 @@ def users(
         plan_type=pt or None,
         on_leave_only=on_leave_only,
         store_id=store_id,
+        renew_pending_only=renew_pending_only,
     )
     serialized = [dump_model(i) for i in items]
     return page_response(items=serialized, total=total, page=page, page_size=page_size, msg="获取成功")

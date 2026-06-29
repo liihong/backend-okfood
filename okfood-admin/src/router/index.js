@@ -14,6 +14,7 @@ const DeliveryView = () => import('../views/DeliveryView.vue')
 const RegionsView = () => import('../views/RegionsView.vue')
 const CouriersView = () => import('../views/CouriersView.vue')
 const FinanceView = () => import('../views/FinanceView.vue')
+const MemberStatsView = () => import('../views/MemberStatsView.vue')
 const MenuView = () => import('../views/MenuView.vue')
 const WeeklyMenuView = () => import('../views/WeeklyMenuView.vue')
 const CardOrdersView = () => import('../views/CardOrdersView.vue')
@@ -168,10 +169,25 @@ const router = createRouter({
           },
         },
         {
-          path: 'finance',
-          name: 'finance',
+          path: 'stats/members',
+          name: 'stats-members',
+          component: MemberStatsView,
+          meta: {
+            title: '会员统计',
+            pageSubtitle: '周/月卡档案库总览、套餐结构、续卡率与运营状态分布',
+            ownerAdminOnly: true,
+            hidePageTitle: true,
+          },
+        },
+        {
+          path: 'stats/finance',
+          name: 'stats-finance',
           component: FinanceView,
-          meta: { title: '财务中心', ownerAdminOnly: true, hidePageTitle: true },
+          meta: { title: '财务统计', ownerAdminOnly: true, hidePageTitle: true },
+        },
+        {
+          path: 'finance',
+          redirect: { name: 'stats-finance' },
         },
         {
           path: 'menu',

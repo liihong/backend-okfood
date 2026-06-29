@@ -36,7 +36,11 @@ from app.schemas.admin import (
     DishAdminOut,
     DishUpsertIn,
     MemberAdminOut,
+    MemberAnalyticsOut,
     MemberListStatsOut,
+    MemberPlanStatsOut,
+    MemberRenewPendingStatsOut,
+    MemberReorderStatsOut,
     MenuScheduleAssignIn,
     RechargeIn,
     SettingsIn,
@@ -116,6 +120,36 @@ def _member_card_expired_scope():
     )
 
 
+def _member_exclude_on_leave_scope(*, today: date | None = None):
+    """非请假中（与列表「请假中」状态互斥，待续费口径需排除）。"""
+    biz_today = today or today_shanghai()
+    in_leave_range = and_(
+        Member.leave_range_start.isnot(None),
+        Member.leave_range_end.isnot(None),
+        Member.leave_range_start <= biz_today,
+        Member.leave_range_end >= biz_today,
+    )
+    tomorrow_leave_active = and_(
+        Member.is_leaved_tomorrow.is_(True),
+        Member.tomorrow_leave_target_date.isnot(None),
+        biz_today <= Member.tomorrow_leave_target_date,
+    )
+    return ~or_(in_leave_range, tomorrow_leave_active)
+
+
+def _member_renew_pending_scope(*, threshold: int):
+    """待续费：生效中、剩余次数 <= 阈值、非暂停/退款/请假（与前台状态标签一致）。"""
+    t = int(threshold)
+    return and_(
+        Member.is_active.is_(True),
+        Member.balance > 0,
+        Member.balance <= t,
+        Member.delivery_deferred.is_(False),
+        Member.membership_refunded_at.is_(None),
+        _member_exclude_on_leave_scope(),
+    )
+
+
 def _apply_member_list_filters(
     stmt,
     *,
@@ -127,6 +161,7 @@ def _apply_member_list_filters(
     unassigned_region: bool = False,
     plan_type: str | None = None,
     on_leave_only: bool = False,
+    renew_pending_only: bool = False,
     store_id: int | None = None,
 ):
     stmt = stmt.where(Member.deleted_at.is_(None)).where(_member_archive_scope())
@@ -219,6 +254,11 @@ def _apply_member_list_filters(
             biz_today <= Member.tomorrow_leave_target_date,
         )
         stmt = stmt.where(or_(in_leave_range, tomorrow_leave_active))
+    if renew_pending_only:
+        from app.core.config import get_settings
+
+        threshold = int(get_settings().LOW_BALANCE_THRESHOLD)
+        stmt = stmt.where(_member_renew_pending_scope(threshold=threshold))
     return stmt
 
 
@@ -256,6 +296,134 @@ def member_list_overview_counts(db: Session, *, store_id: int | None = None) -> 
     )
 
 
+def _member_filter_count(
+    db: Session,
+    *,
+    store_id: int,
+    inactive_only: bool = False,
+    delivery_deferred_only: bool = False,
+    on_leave_only: bool = False,
+    unassigned_region: bool = False,
+    store_pickup_active: bool = False,
+    renew_pending_only: bool = False,
+) -> int:
+    """会员档案库筛选计数：与列表页各 Tab/筛选项口径一致。"""
+    stmt = _apply_member_list_filters(
+        select(func.count()).select_from(Member),
+        q_phone=None,
+        validity=None,
+        inactive_only=inactive_only,
+        delivery_deferred_only=delivery_deferred_only,
+        on_leave_only=on_leave_only,
+        unassigned_region=unassigned_region,
+        store_id=int(store_id),
+        renew_pending_only=renew_pending_only,
+    )
+    if store_pickup_active:
+        stmt = stmt.where(Member.store_pickup.is_(True), Member.balance > 0)
+    return int(db.execute(stmt).scalar() or 0)
+
+
+def _reorder_rate_percent(reorder: int, base: int) -> Decimal:
+    """续卡率百分比，分母为 0 时返回 0。"""
+    if base <= 0:
+        return Decimal("0")
+    return (Decimal(reorder) * Decimal("100") / Decimal(base)).quantize(Decimal("0.01"))
+
+
+def _member_renew_pending_counts(db: Session, *, store_id: int, active_total: int) -> MemberRenewPendingStatsOut:
+    """待续费户数及剩余 1 次 / 阈值次分布（与前台「待续费」标签口径一致）。"""
+    from app.core.config import get_settings
+
+    threshold = int(get_settings().LOW_BALANCE_THRESHOLD)
+    row = db.execute(
+        select(
+            func.count().label("total"),
+            func.coalesce(func.sum(case((Member.balance == 1, 1), else_=0)), 0).label("b1"),
+            func.coalesce(func.sum(case((Member.balance == threshold, 1), else_=0)), 0).label("bt"),
+        )
+        .select_from(Member)
+        .where(Member.deleted_at.is_(None), _member_archive_scope(), Member.store_id == int(store_id))
+        .where(_member_renew_pending_scope(threshold=threshold))
+    ).one()
+    count = int(row.total or 0)
+    share = (
+        (Decimal(count) * Decimal("100") / Decimal(active_total)).quantize(Decimal("0.01"))
+        if active_total > 0
+        else Decimal("0")
+    )
+    return MemberRenewPendingStatsOut(
+        count=count,
+        balance_1_count=int(row.b1 or 0),
+        balance_threshold_count=int(row.bt or 0),
+        threshold=threshold,
+        share_of_active_percent=share,
+    )
+
+
+def member_analytics_summary(db: Session, *, store_id: int) -> MemberAnalyticsOut:
+    """会员运营分析：档案库总览 + 周/月卡结构 + 续卡率 + 运营状态分布。"""
+    sid = int(store_id)
+    overview = member_list_overview_counts(db, store_id=sid)
+    mem_kw = _dashboard_membership_kw(db, store_id=sid)
+    active_weekly = int(mem_kw.get("active_weekly_members") or 0)
+    active_monthly = int(mem_kw.get("active_monthly_members") or 0)
+    active_plan_total = active_weekly + active_monthly
+    if active_plan_total > 0:
+        weekly_share = (Decimal(active_weekly) * Decimal("100") / Decimal(active_plan_total)).quantize(
+            Decimal("0.01")
+        )
+        monthly_share = (Decimal("100") - weekly_share).quantize(Decimal("0.01"))
+    else:
+        weekly_share = Decimal("0")
+        monthly_share = Decimal("0")
+    total = overview.total
+    active_rate = (
+        (Decimal(overview.active) * Decimal("100") / Decimal(total)).quantize(Decimal("0.01"))
+        if total > 0
+        else Decimal("0")
+    )
+    week_reorder = int(mem_kw.get("weekly_card_reorder_members") or 0)
+    week_base = int(mem_kw.get("weekly_card_reorder_base_members") or 0)
+    month_reorder = int(mem_kw.get("monthly_card_reorder_members") or 0)
+    month_base = int(mem_kw.get("monthly_card_reorder_base_members") or 0)
+    renew_pending = _member_renew_pending_counts(db, store_id=sid, active_total=overview.active)
+    return MemberAnalyticsOut(
+        total=overview.total,
+        active=overview.active,
+        expired=overview.expired,
+        refunded=overview.refunded,
+        refund_rate_percent=overview.refund_rate_percent,
+        active_rate_percent=active_rate,
+        weekly=MemberPlanStatsOut(
+            active=active_weekly,
+            expired=int(mem_kw.get("expired_weekly_members") or 0),
+        ),
+        monthly=MemberPlanStatsOut(
+            active=active_monthly,
+            expired=int(mem_kw.get("expired_monthly_members") or 0),
+        ),
+        active_weekly_share_percent=weekly_share,
+        active_monthly_share_percent=monthly_share,
+        weekly_reorder=MemberReorderStatsOut(
+            reorder_members=week_reorder,
+            base_members=week_base,
+            rate_percent=_reorder_rate_percent(week_reorder, week_base),
+        ),
+        monthly_reorder=MemberReorderStatsOut(
+            reorder_members=month_reorder,
+            base_members=month_base,
+            rate_percent=_reorder_rate_percent(month_reorder, month_base),
+        ),
+        renew_pending=renew_pending,
+        inactive_count=_member_filter_count(db, store_id=sid, inactive_only=True),
+        paused_delivery_count=_member_filter_count(db, store_id=sid, delivery_deferred_only=True),
+        on_leave_count=_member_filter_count(db, store_id=sid, on_leave_only=True),
+        store_pickup_active_count=_member_filter_count(db, store_id=sid, store_pickup_active=True),
+        unassigned_region_count=_member_filter_count(db, store_id=sid, unassigned_region=True),
+    )
+
+
 def list_members_paged(
     db: Session,
     *,
@@ -269,6 +437,7 @@ def list_members_paged(
     unassigned_region: bool = False,
     plan_type: str | None = None,
     on_leave_only: bool = False,
+    renew_pending_only: bool = False,
     store_id: int | None = None,
 ) -> tuple[list[MemberAdminOut], int]:
     # 每人至多一条「默认地址」：避免多条 is_default=1 时 JOIN 放大行数、拖慢 ORDER BY + LIMIT
@@ -286,6 +455,7 @@ def list_members_paged(
         plan_type=plan_type,
         on_leave_only=on_leave_only,
         store_id=store_id,
+        renew_pending_only=renew_pending_only,
     ).subquery("cnt")
     page_sq = _apply_member_list_filters(
         select(Member.id.label("pid")).select_from(Member),
@@ -298,6 +468,7 @@ def list_members_paged(
         plan_type=plan_type,
         on_leave_only=on_leave_only,
         store_id=store_id,
+        renew_pending_only=renew_pending_only,
     )
     page_sq = (
         # 用户操作时间：members.updated_at（小程序/管理端档案变更时刷新，微信仅同步 openid 不刷新）

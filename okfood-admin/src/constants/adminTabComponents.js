@@ -22,6 +22,8 @@ export const ADMIN_TAB_COMPONENT_NAMES = {
   couriers: 'CouriersView',
   'delivery-sf-orders': 'SfOrdersMonitorView',
   'delivery-geo-map': 'DeliveryGeoMapView',
+  'stats-members': 'MemberStatsView',
+  'stats-finance': 'FinanceView',
   finance: 'FinanceView',
   menu: 'MenuView',
   'weekly-menu': 'WeeklyMenuView',

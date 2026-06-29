@@ -7,6 +7,11 @@ import { showToast } from '../../../composables/useToast.js'
 const props = defineProps({
   visible: { type: Boolean, default: false },
   storeId: { type: Number, default: 1 },
+  /** 打开弹窗时的预填：single | batch */
+  initialGrantMode: { type: String, default: '' },
+  initialMemberPhone: { type: String, default: '' },
+  initialMemberPhonesText: { type: String, default: '' },
+  initialRemark: { type: String, default: '' },
 })
 const emit = defineEmits(['update:visible', 'saved'])
 
@@ -50,8 +55,13 @@ watch(
   () => props.visible,
   (v) => {
     if (v) {
-      grantMode.value = 'single'
-      form.value = { template_id: null, member_phone: '', member_phones_text: '', remark: '' }
+      grantMode.value = props.initialGrantMode === 'batch' ? 'batch' : 'single'
+      form.value = {
+        template_id: null,
+        member_phone: props.initialMemberPhone || '',
+        member_phones_text: props.initialMemberPhonesText || '',
+        remark: props.initialRemark || '',
+      }
       void loadTemplates()
     }
   },

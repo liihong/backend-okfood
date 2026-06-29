@@ -477,6 +477,84 @@ class MemberListStatsOut(BaseModel):
     )
 
 
+class MemberPlanStatsOut(BaseModel):
+    """周卡/月卡生效与过期户数。"""
+
+    active: int = Field(..., ge=0, description="balance>0")
+    expired: int = Field(..., ge=0, description="balance=0")
+
+
+class MemberReorderStatsOut(BaseModel):
+    """续卡率：二次及以上入账会员 / 曾有过入账会员。"""
+
+    reorder_members: int = Field(..., ge=0, description="续卡会员数（分子）")
+    base_members: int = Field(..., ge=0, description="曾有过入账会员数（分母）")
+    rate_percent: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=6,
+        decimal_places=2,
+        description="续卡率 = 分子 / 分母 × 100；分母为 0 时为 0",
+    )
+
+
+class MemberRenewPendingStatsOut(BaseModel):
+    """待续费：生效中且剩余次数 <= LOW_BALANCE_THRESHOLD，非暂停/退款/请假。"""
+
+    count: int = Field(..., ge=0, description="待续费总户数")
+    balance_1_count: int = Field(..., ge=0, description="剩余 1 次")
+    balance_threshold_count: int = Field(..., ge=0, description="剩余次数恰为阈值（通常 2 次）")
+    threshold: int = Field(..., ge=1, description="低余额阈值，与续费提醒配置一致")
+    share_of_active_percent: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=6,
+        decimal_places=2,
+        description="待续费占生效中会员比例",
+    )
+
+
+class MemberAnalyticsOut(BaseModel):
+    """会员运营分析：档案库口径 + 周/月卡结构 + 续卡率 + 运营状态分布。"""
+
+    total: int = Field(..., ge=0, description="周/月卡档案总户数")
+    active: int = Field(..., ge=0, description="生效中：balance>0")
+    expired: int = Field(..., ge=0, description="已过期：次数用尽且未退卡")
+    refunded: int = Field(..., ge=0, description="已退款")
+    refund_rate_percent: Decimal = Field(..., ge=0, max_digits=6, decimal_places=2)
+    active_rate_percent: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=6,
+        decimal_places=2,
+        description="活跃率 = 生效中 / 总户数 × 100",
+    )
+    weekly: MemberPlanStatsOut
+    monthly: MemberPlanStatsOut
+    active_weekly_share_percent: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=6,
+        decimal_places=2,
+        description="生效中周卡占生效会员比例",
+    )
+    active_monthly_share_percent: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=6,
+        decimal_places=2,
+        description="生效中月卡占生效会员比例",
+    )
+    weekly_reorder: MemberReorderStatsOut
+    monthly_reorder: MemberReorderStatsOut
+    renew_pending: MemberRenewPendingStatsOut
+    inactive_count: int = Field(..., ge=0, description="未开卡：is_active=false 且非暂停配送")
+    paused_delivery_count: int = Field(..., ge=0, description="暂停配送：delivery_deferred=true")
+    on_leave_count: int = Field(..., ge=0, description="请假中（含区间请假与明日请假）")
+    store_pickup_active_count: int = Field(..., ge=0, description="门店自提且 balance>0")
+    unassigned_region_count: int = Field(..., ge=0, description="默认地址片区未分配")
+
+
 class AdminAddressIn(BaseModel):
     phone: str
     address: str = Field(..., min_length=1, max_length=500)
