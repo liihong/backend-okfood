@@ -17,7 +17,9 @@ const FinanceView = () => import('../views/FinanceView.vue')
 const MenuView = () => import('../views/MenuView.vue')
 const WeeklyMenuView = () => import('../views/WeeklyMenuView.vue')
 const CardOrdersView = () => import('../views/CardOrdersView.vue')
-const OrdersManageView = () => import('../views/orders/OrdersManageView.vue')
+const SingleMealOrdersView = () => import('../views/orders/single-meal/SingleMealOrdersView.vue')
+const MallOrdersView = () => import('../views/orders/mall/MallOrdersView.vue')
+const CardPackOrdersView = () => import('../views/orders/card-pack/CardPackOrdersView.vue')
 const StoreConfigView = () => import('../views/StoreConfigView.vue')
 const SfOrdersMonitorView = () => import('../views/SfOrdersMonitorView.vue')
 const DeliveryGeoMapView = () => import('../views/DeliveryGeoMapView.vue')
@@ -89,11 +91,41 @@ const router = createRouter({
         },
         {
           path: 'orders',
-          name: 'orders',
-          component: OrdersManageView,
+          redirect: (to) => {
+            const tab = String(to.query.tab || '').trim()
+            const dateQuery = to.query.delivery_date ? { delivery_date: to.query.delivery_date } : {}
+            if (tab === 'retail') return { name: 'orders-mall', query: dateQuery }
+            if (tab === 'mall' || tab === 'card_pack') return { name: 'orders-card-pack', query: dateQuery }
+            return { name: 'orders-single-meal', query: dateQuery }
+          },
+        },
+        {
+          path: 'orders/single-meal',
+          name: 'orders-single-meal',
+          component: SingleMealOrdersView,
           meta: {
-            title: '订单管理',
-            pageSubtitle: '单次点餐按供餐日；商城订单与卡包订单按下单日查看',
+            title: '零售订单',
+            pageSubtitle: '按供餐日查看单次零售订单，支持推单、派单与履约同步',
+            fullAdminOnly: true,
+          },
+        },
+        {
+          path: 'orders/mall',
+          name: 'orders-mall',
+          component: MallOrdersView,
+          meta: {
+            title: '商城订单',
+            pageSubtitle: '按下单日查看普通商品订单，支持配送与退款',
+            fullAdminOnly: true,
+          },
+        },
+        {
+          path: 'orders/card-pack',
+          name: 'orders-card-pack',
+          component: CardPackOrdersView,
+          meta: {
+            title: '卡包订单',
+            pageSubtitle: '按下单日查看小程序在线购卡记录，支持退款',
             fullAdminOnly: true,
           },
         },

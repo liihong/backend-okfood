@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.courier_delivery_fee import courier_delivery_fee_yuan_for_meal_units
@@ -50,7 +50,12 @@ from app.services.courier_task_sorting import (
     distance_from_anchor_m,
     order_task_rows_by_nearest_neighbor,
 )
-from app.services.member_address_service import delivery_region_name_map, full_address_line, routing_area_label
+from app.services.member_address_service import (
+    delivery_region_name_map,
+    full_address_line,
+    load_default_address_map,
+    routing_area_label,
+)
 from app.services.admin_system_notification_service import create_single_meal_order_paid_notification
 from app.services.store_config_service import get_store_base_delivery_fee_yuan, load_store_coordinates_for_sorting
 from app.services.marketing.coupon_checkout_service import (
@@ -63,21 +68,23 @@ from app.services.marketing.coupon_checkout_service import (
 logger = logging.getLogger(__name__)
 
 
+def _usable_member_contact_name(raw: str | None) -> str:
+    c = (raw or "").strip()
+    if not c or c == STUB_MEMBER_NAME:
+        return ""
+    return c
+
+
 def _admin_single_meal_member_display_name(
     db: Session,
     member: Member | None,
     *,
     member_address_id: int | None,
     order_address: MemberAddress | None = None,
+    fallback_address: MemberAddress | None = None,
 ) -> str:
     """管理端展示名：档案仍为占位「待完善」时，优先用订单关联地址的收件人姓名。"""
     profile = ((member.name or "").strip() if member else "") or ""
-
-    def _usable_contact(raw: str | None) -> str:
-        c = (raw or "").strip()
-        if not c or c == STUB_MEMBER_NAME:
-            return ""
-        return c
 
     if profile and profile != STUB_MEMBER_NAME:
         return profile
@@ -85,21 +92,22 @@ def _admin_single_meal_member_display_name(
     addr = order_address
     if addr is None and member_address_id:
         addr = db.get(MemberAddress, int(member_address_id))
-    contact = _usable_contact(addr.contact_name if addr else None)
+    contact = _usable_member_contact_name(addr.contact_name if addr else None)
     if contact:
         return contact
 
-    # 订单地址无收件人时：回退该会员默认/最近一条地址
-    if member is not None:
+    # 订单地址无收件人时：回退该会员默认/最近一条地址（列表批量预加载时可传入 fallback_address）
+    fallback_addr = fallback_address
+    if fallback_addr is None and member is not None:
         fallback_addr = db.scalar(
             select(MemberAddress)
             .where(MemberAddress.member_id == int(member.id))
             .order_by(MemberAddress.is_default.desc(), MemberAddress.id.desc())
             .limit(1)
         )
-        contact = _usable_contact(fallback_addr.contact_name if fallback_addr else None)
-        if contact:
-            return contact
+    contact = _usable_member_contact_name(fallback_addr.contact_name if fallback_addr else None)
+    if contact:
+        return contact
 
     return profile
 
@@ -121,6 +129,7 @@ def _admin_single_meal_member_list_fields(
     *,
     member_address_id: int | None,
     order_address: MemberAddress | None = None,
+    fallback_address: MemberAddress | None = None,
 ) -> tuple[str, str]:
     addr = order_address
     if addr is None and member_address_id:
@@ -133,6 +142,7 @@ def _admin_single_meal_member_list_fields(
         member,
         member_address_id=member_address_id,
         order_address=addr,
+        fallback_address=fallback_address,
     )
     return display, recipient
 
@@ -141,23 +151,56 @@ def _member_address_remarks_text(addr: MemberAddress | None) -> str:
     return (addr.remarks or "").strip() if addr else ""
 
 
+def _single_meal_address_summary(
+    row: SingleMealOrder,
+    *,
+    order_address: MemberAddress | None,
+    region_name_map: dict[int, str],
+) -> str:
+    """单次订单列表展示用地址摘要（无 DB 访问）。"""
+    if bool(getattr(row, "store_pickup", False)):
+        return "门店自提"
+    if order_address:
+        ar = routing_area_label(order_address, region_name_map)
+        detail_line = full_address_line(order_address.map_location_text, order_address.door_detail)
+        return f"{ar} {detail_line}".strip()
+    return (row.routing_area or "").strip() or "—"
+
+
 def _build_admin_single_meal_order_list_out(
     db: Session,
     row: SingleMealOrder,
     *,
     order_address: MemberAddress | None = None,
+    member: Member | None = None,
+    dish_title: str | None = None,
+    address_summary: str | None = None,
+    region_name_map: dict[int, str] | None = None,
+    member_fallback_address: MemberAddress | None = None,
 ) -> AdminSingleMealOrderListOut:
-    m = db.get(Member, row.member_id)
+    m = member if member is not None else db.get(Member, row.member_id)
     aid = int(row.member_address_id) if row.member_address_id is not None else None
     addr = order_address
     if addr is None and aid is not None:
         addr = db.get(MemberAddress, aid)
-    base = _single_meal_order_row_to_out(db, row)
+    if address_summary is None and region_name_map is not None:
+        address_summary = _single_meal_address_summary(
+            row, order_address=addr, region_name_map=region_name_map
+        )
+    base = _single_meal_order_row_to_out(
+        db,
+        row,
+        dish_title=dish_title,
+        address_summary=address_summary,
+        order_address=addr,
+        region_name_map=region_name_map,
+    )
     member_name, recipient_name = _admin_single_meal_member_list_fields(
         db,
         m,
         member_address_id=aid,
         order_address=addr,
+        fallback_address=member_fallback_address,
     )
     return AdminSingleMealOrderListOut(
         **base.model_dump(),
@@ -640,24 +683,29 @@ def _single_meal_order_row_to_out(
     *,
     dish_title: str | None = None,
     address_summary: str | None = None,
+    order_address: MemberAddress | None = None,
+    region_name_map: dict[int, str] | None = None,
 ) -> SingleMealOrderOut:
     if dish_title is None:
         dsh = db.get(MenuDish, row.dish_id)
         dish_title = (dsh.name or "").strip() if dsh else "餐品"
     if address_summary is None:
-        if bool(getattr(row, "store_pickup", False)):
-            address_summary = "门店自提"
-        else:
+        addr = order_address
+        if addr is None and row.member_address_id is not None:
             addr = db.get(MemberAddress, row.member_address_id)
-            if addr:
-                nm = delivery_region_name_map(
-                    db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set()
-                )
-                ar = routing_area_label(addr, nm)
-                detail_line = full_address_line(addr.map_location_text, addr.door_detail)
-                address_summary = f"{ar} {detail_line}".strip()
-            else:
-                address_summary = (row.routing_area or "").strip() or "—"
+        if region_name_map is not None:
+            address_summary = _single_meal_address_summary(
+                row, order_address=addr, region_name_map=region_name_map
+            )
+        elif bool(getattr(row, "store_pickup", False)):
+            address_summary = "门店自提"
+        elif addr:
+            nm = delivery_region_name_map(
+                db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set()
+            )
+            address_summary = _single_meal_address_summary(row, order_address=addr, region_name_map=nm)
+        else:
+            address_summary = (row.routing_area or "").strip() or "—"
     return SingleMealOrderOut(
         id=int(row.id),
         out_trade_no=str(row.out_trade_no or ""),
@@ -726,6 +774,35 @@ def _admin_store_single_meal_scope_filters_for_delivery_day(
     return filters
 
 
+def _admin_single_meal_needs_member_join(q: str | None) -> bool:
+    """会员手机/姓名搜索时才需要 JOIN members。"""
+    return bool((q or "").strip())
+
+
+def _admin_single_meal_list_page_stmt(*, need_member_join: bool):
+    """单次订单管理列表：一次 JOIN 取订单、会员、菜品、地址、片区（减少远程库 RTT）。"""
+    total_over = func.count(SingleMealOrder.id).over().label("_total")
+    stmt = (
+        select(SingleMealOrder, Member, MenuDish, MemberAddress, DeliveryRegion, total_over)
+        .select_from(SingleMealOrder)
+        .outerjoin(MenuDish, MenuDish.id == SingleMealOrder.dish_id)
+        .outerjoin(MemberAddress, MemberAddress.id == SingleMealOrder.member_address_id)
+        .outerjoin(DeliveryRegion, DeliveryRegion.id == MemberAddress.delivery_region_id)
+    )
+    if need_member_join:
+        return stmt.join(Member, Member.id == SingleMealOrder.member_id)
+    return stmt.outerjoin(Member, Member.id == SingleMealOrder.member_id)
+
+
+def _region_name_map_from_joined_row(region_row: DeliveryRegion | None) -> dict[int, str]:
+    from app.services.member_address_service import UNASSIGNED_DELIVERY_AREA
+
+    if region_row is None or region_row.id is None:
+        return {}
+    n = (region_row.name or "").strip()
+    return {int(region_row.id): n if n else UNASSIGNED_DELIVERY_AREA}
+
+
 def summarize_admin_store_single_meal_orders_by_delivery_day(
     db: Session,
     *,
@@ -738,7 +815,7 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
 
     - ``pending_ship``：已支付且履约 pending（含待发货与待自提口径，与列表「订单状态」pending 一致）。
     """
-    join_on = Member.id == SingleMealOrder.member_id
+    need_join = _admin_single_meal_needs_member_join(q)
     base = _admin_store_single_meal_scope_filters_for_delivery_day(
         store_id=store_id,
         delivery_day=delivery_day,
@@ -746,19 +823,40 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
         delivery_phase=delivery_phase,
     )
 
-    def _count(extra: list) -> int:
-        stmt = select(func.count()).select_from(SingleMealOrder).join(Member, join_on)
-        for f in base + extra:
-            stmt = stmt.where(f)
-        return int(db.scalar(stmt) or 0)
+    paid_cond = SingleMealOrder.pay_status == "已支付"
+    unpaid_cond = and_(
+        SingleMealOrder.pay_status == "未支付",
+        SingleMealOrder.fulfillment_status == "pending",
+    )
+    cancelled_cond = SingleMealOrder.fulfillment_status == "cancelled"
+    pending_ship_cond = and_(paid_cond, SingleMealOrder.fulfillment_status == "pending")
+    paid_portions_cond = and_(
+        paid_cond,
+        SingleMealOrder.fulfillment_status.notin_(("cancelled", "sf_cancelled")),
+    )
 
-    def _sum_qty(extra: list) -> int:
-        stmt = select(func.coalesce(func.sum(SingleMealOrder.quantity), 0)).select_from(
-            SingleMealOrder
-        ).join(Member, join_on)
-        for f in base + extra:
-            stmt = stmt.where(f)
-        return int(db.scalar(stmt) or 0)
+    agg_stmt = (
+        select(
+            func.coalesce(func.sum(case((paid_cond, 1), else_=0)), 0).label("paid"),
+            func.coalesce(func.sum(case((unpaid_cond, 1), else_=0)), 0).label("unpaid"),
+            func.coalesce(func.sum(case((cancelled_cond, 1), else_=0)), 0).label("cancelled"),
+            func.coalesce(func.sum(case((pending_ship_cond, 1), else_=0)), 0).label("pending_ship"),
+            func.coalesce(
+                func.sum(case((paid_portions_cond, SingleMealOrder.quantity), else_=0)),
+                0,
+            ).label("paid_portions"),
+            func.coalesce(
+                func.sum(case((unpaid_cond, SingleMealOrder.quantity), else_=0)),
+                0,
+            ).label("pending_unpaid_portions"),
+        )
+        .select_from(SingleMealOrder)
+    )
+    if need_join:
+        agg_stmt = agg_stmt.join(Member, Member.id == SingleMealOrder.member_id)
+    for f in base:
+        agg_stmt = agg_stmt.where(f)
+    row = db.execute(agg_stmt).one()
 
     from app.services.menu_day_stock_service import paid_single_retail_portions_by_dates
 
@@ -769,35 +867,13 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
     )
 
     return {
-        "paid": _count([SingleMealOrder.pay_status == "已支付"]),
-        # 仅待支付未取消（已取消未支付不再计入，避免与「已取消」重复误解）
-        "unpaid": _count(
-            [
-                SingleMealOrder.pay_status == "未支付",
-                SingleMealOrder.fulfillment_status == "pending",
-            ]
-        ),
-        "cancelled": _count([SingleMealOrder.fulfillment_status == "cancelled"]),
-        "pending_ship": _count(
-            [
-                SingleMealOrder.pay_status == "已支付",
-                SingleMealOrder.fulfillment_status == "pending",
-            ]
-        ),
-        # 份数：与营业概览「单次零售 / 可卖余量」同源
+        "paid": int(row.paid or 0),
+        "unpaid": int(row.unpaid or 0),
+        "cancelled": int(row.cancelled or 0),
+        "pending_ship": int(row.pending_ship or 0),
         "retail_inventory_portions": retail_inventory,
-        "paid_portions": _sum_qty(
-            [
-                SingleMealOrder.pay_status == "已支付",
-                SingleMealOrder.fulfillment_status.notin_(("cancelled", "sf_cancelled")),
-            ]
-        ),
-        "pending_unpaid_portions": _sum_qty(
-            [
-                SingleMealOrder.pay_status == "未支付",
-                SingleMealOrder.fulfillment_status == "pending",
-            ]
-        ),
+        "paid_portions": int(row.paid_portions or 0),
+        "pending_unpaid_portions": int(row.pending_unpaid_portions or 0),
     }
 
 
@@ -818,7 +894,7 @@ def list_admin_store_single_meal_orders_by_delivery_day(
     """
     page = max(1, page)
     page_size = min(100, max(1, page_size))
-    join_on = Member.id == SingleMealOrder.member_id
+    need_join = _admin_single_meal_needs_member_join(q)
     filters = list(
         _admin_store_single_meal_scope_filters_for_delivery_day(
             store_id=store_id,
@@ -833,34 +909,45 @@ def list_admin_store_single_meal_orders_by_delivery_day(
     elif ps:
         filters.append(SingleMealOrder.pay_status == ps)
 
-    count_stmt = select(func.count()).select_from(SingleMealOrder).join(Member, join_on)
-    for f in filters:
-        count_stmt = count_stmt.where(f)
-    total = int(db.scalar(count_stmt) or 0)
-
-    list_stmt = (
-        select(SingleMealOrder)
-        .join(Member, join_on)
-        .order_by(SingleMealOrder.created_at.desc(), SingleMealOrder.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )
+    list_stmt = _admin_single_meal_list_page_stmt(need_member_join=need_join).order_by(
+        SingleMealOrder.created_at.desc(),
+        SingleMealOrder.id.desc(),
+    ).offset((page - 1) * page_size).limit(page_size)
     for f in filters:
         list_stmt = list_stmt.where(f)
-    rows = db.scalars(list_stmt).all()
-    addr_ids = {int(r.member_address_id) for r in rows if r.member_address_id is not None}
-    addr_map: dict[int, MemberAddress] = {}
-    if addr_ids:
-        for addr_row in db.scalars(
-            select(MemberAddress).where(MemberAddress.id.in_(addr_ids))
-        ).all():
-            addr_map[int(addr_row.id)] = addr_row
+    result_rows = db.execute(list_stmt).all()
+    if not result_rows:
+        return [], 0
+    total = int(result_rows[0]._total or 0)
+
+    # 展示名回退地址：仅少量「待完善」会员需要额外查一次
+    fallback_member_ids: list[int] = []
+    parsed: list[tuple[SingleMealOrder, Member | None, MenuDish | None, MemberAddress | None, DeliveryRegion | None]] = []
+    for row in result_rows:
+        smo, member_row, dish_row, addr_row, region_row = row[0], row[1], row[2], row[3], row[4]
+        parsed.append((smo, member_row, dish_row, addr_row, region_row))
+        profile = ((member_row.name or "").strip() if member_row else "") or ""
+        if profile and profile != STUB_MEMBER_NAME:
+            continue
+        if _usable_member_contact_name(addr_row.contact_name if addr_row else None):
+            continue
+        fallback_member_ids.append(int(smo.member_id))
+    fallback_addr_map = load_default_address_map(db, fallback_member_ids)
 
     out: list[AdminSingleMealOrderListOut] = []
-    for r in rows:
-        aid = int(r.member_address_id) if r.member_address_id is not None else None
-        order_addr = addr_map.get(aid) if aid is not None else None
-        out.append(_build_admin_single_meal_order_list_out(db, r, order_address=order_addr))
+    for smo, member_row, dish_row, addr_row, region_row in parsed:
+        dish_title = (dish_row.name or "").strip() if dish_row else "餐品"
+        out.append(
+            _build_admin_single_meal_order_list_out(
+                db,
+                smo,
+                order_address=addr_row,
+                member=member_row,
+                dish_title=dish_title,
+                region_name_map=_region_name_map_from_joined_row(region_row),
+                member_fallback_address=fallback_addr_map.get(int(smo.member_id)),
+            )
+        )
     return out, total
 
 

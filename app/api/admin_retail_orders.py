@@ -39,11 +39,19 @@ def admin_orders_daily_retail_orders(
         Query(description="下单业务日（上海日历日），默认当天"),
     ] = None,
     q: Annotated[str | None, Query(description="会员手机前缀或姓名模糊")] = None,
-    pay_status: Annotated[str | None, Query(description="未支付 / 已支付 / 已退款 / 已取消")] = None,
+    fulfillment_phase: Annotated[
+        str | None,
+        Query(
+            description=(
+                "配送阶段：awaiting_accept 待接单 / pending_ship 待发货 / "
+                "in_delivery 配送中 / delivered 已完成 / after_sale 退单售后"
+            ),
+        ),
+    ] = None,
     page: int = 1,
     page_size: int = 20,
 ):
-    """订单管理：当日商城零售订单（按下单日）。"""
+    """订单管理：当日商城零售订单（按下单日 + 配送阶段 Tab）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     day = order_date or today_shanghai()
     items, total = list_admin_store_retail_orders_by_order_day(
@@ -51,7 +59,7 @@ def admin_orders_daily_retail_orders(
         store_id=store_id,
         order_day=day,
         q=q,
-        pay_status=pay_status,
+        fulfillment_phase=fulfillment_phase,
         page=max(1, page),
         page_size=min(max(1, page_size), 100),
     )

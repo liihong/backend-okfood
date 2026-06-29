@@ -1213,6 +1213,10 @@ def admin_orders_daily_single_meals(
     ] = None,
     page: int = 1,
     page_size: int = 20,
+    include_summary: Annotated[
+        bool,
+        Query(description="是否返回 summary 桶统计；翻页时可传 false 跳过重复统计"),
+    ] = True,
 ):
     """订单管理：当日单次点餐订单（按供餐日 delivery_date）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
@@ -1229,13 +1233,15 @@ def admin_orders_daily_single_meals(
         page=page,
         page_size=page_size,
     )
-    bucket_summary = summarize_admin_store_single_meal_orders_by_delivery_day(
-        db,
-        store_id=store_id,
-        delivery_day=day,
-        q=q,
-        delivery_phase=delivery_phase,
-    )
+    bucket_summary = None
+    if include_summary:
+        bucket_summary = summarize_admin_store_single_meal_orders_by_delivery_day(
+            db,
+            store_id=store_id,
+            delivery_day=day,
+            q=q,
+            delivery_phase=delivery_phase,
+        )
     return page_response(
         items=[dump_model(i) for i in items],
         total=total,

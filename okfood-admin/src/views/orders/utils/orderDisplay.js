@@ -15,9 +15,11 @@ export function resolveSingleOrderMemberDisplayName(row, addrDraft) {
 /** 门店自提且未核销完成前：pending 展示为待自提 */
 export function singleOrderStatusLabelZh(row) {
   if (!row) return '—'
+  const pay = String(row.pay_status || '').trim()
   const s = row.fulfillment_status
   if (s == null || s === '') return '—'
   const k = String(s).trim().toLowerCase()
+  if (k === 'pending' && pay === '未支付') return '待接单'
   if (k === 'pending' && row.store_pickup) return '待自提'
   return SINGLE_ORDER_STATUS_ZH[k] ?? String(s).trim()
 }

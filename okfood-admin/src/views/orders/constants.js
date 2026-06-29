@@ -6,6 +6,15 @@ export const SINGLE_PAY_TABS = [
   { label: '已取消', value: '已取消' },
 ]
 
+/** 商城订单：配送状态 Tab（与接口 fulfillment_phase 对应） */
+export const RETAIL_DELIVERY_TABS = [
+  { label: '待接单', value: 'awaiting_accept' },
+  { label: '待发货', value: 'pending_ship' },
+  { label: '配送中', value: 'in_delivery' },
+  { label: '已完成', value: 'delivered' },
+  { label: '退单/售后', value: 'after_sale' },
+]
+
 /** 卡包订单：支付状态 Tab */
 export const MALL_PAY_TABS = [
   { label: '全部', value: 'all' },

@@ -65,13 +65,49 @@ def _build_admin_list_out(
     )
 
 
+def _apply_admin_retail_fulfillment_phase_filter(filters: list, fulfillment_phase: str | None) -> None:
+    """管理端商城订单：按配送阶段 Tab 过滤。
+
+    - ``awaiting_accept``：待接单（未支付且待履约）
+    - ``pending_ship``：待发货（已支付且 pending / 顺丰取消可重推）
+    - ``in_delivery``：配送中（顺丰待取货 / 门店配送中）
+    - ``delivered``：已完成
+    - ``after_sale``：退单/售后（已取消或已退款）
+    """
+    fp = (fulfillment_phase or "").strip().lower()
+    if fp == "awaiting_accept":
+        filters.append(StoreRetailOrder.pay_status == "未支付")
+        filters.append(StoreRetailOrder.fulfillment_status == "pending")
+    elif fp == "pending_ship":
+        filters.append(StoreRetailOrder.pay_status == "已支付")
+        filters.append(
+            StoreRetailOrder.fulfillment_status.in_(("pending", "sf_cancelled")),
+        )
+    elif fp == "in_delivery":
+        filters.append(StoreRetailOrder.pay_status == "已支付")
+        filters.append(
+            StoreRetailOrder.fulfillment_status.in_(
+                (_FULFILLMENT_SF_AWAITING_PICKUP, "accepted"),
+            ),
+        )
+    elif fp == "delivered":
+        filters.append(StoreRetailOrder.fulfillment_status == "delivered")
+    elif fp == "after_sale":
+        filters.append(
+            or_(
+                StoreRetailOrder.fulfillment_status == "cancelled",
+                StoreRetailOrder.pay_status == "已退款",
+            ),
+        )
+
+
 def list_admin_store_retail_orders_by_order_day(
     db: Session,
     *,
     store_id: int,
     order_day: date,
     q: str | None = None,
-    pay_status: str | None = None,
+    fulfillment_phase: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[AdminStoreRetailOrderListOut], int]:
@@ -82,11 +118,7 @@ def list_admin_store_retail_orders_by_order_day(
         StoreRetailOrder.store_id == int(store_id),
         func.date(StoreRetailOrder.created_at) == order_day,
     ]
-    ps = (pay_status or "").strip()
-    if ps == "已取消":
-        filters.append(StoreRetailOrder.fulfillment_status == "cancelled")
-    elif ps:
-        filters.append(StoreRetailOrder.pay_status == ps)
+    _apply_admin_retail_fulfillment_phase_filter(filters, fulfillment_phase)
     if q and q.strip():
         esc = escape_like_fragment(q.strip())
         filters.append(

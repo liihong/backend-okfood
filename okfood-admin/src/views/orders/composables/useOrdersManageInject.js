@@ -5,7 +5,7 @@ import { ORDERS_MANAGE_KEY } from '../constants.js'
 export function useOrdersManageInject() {
   const ctx = inject(ORDERS_MANAGE_KEY)
   if (!ctx) {
-    throw new Error('useOrdersManageInject 必须在 OrdersManageView 内使用')
+    throw new Error('useOrdersManageInject 必须在订单管理页面内使用')
   }
   return ctx
 }

@@ -181,7 +181,7 @@ const {
     :data="singleItems"
     :loading="loading && activeTab === 'single'"
     row-key="id"
-    empty-text="该供餐日暂无单次点餐订单"
+    empty-text="该供餐日暂无零售订单"
     @selection-change="onSingleSelectionChange"
   >
     <el-table-column type="selection" width="42" :selectable="isSingleRowSelectable" />

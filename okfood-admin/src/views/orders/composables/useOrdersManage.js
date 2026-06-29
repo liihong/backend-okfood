@@ -18,19 +18,20 @@ import {
 } from '../utils/orderPermissions.js'
 
 /**
- * 订单管理页核心业务逻辑（单次点餐 / 商城订单 / 卡包订单）
+ * 订单管理页核心业务逻辑（零售订单 / 商城订单 / 卡包订单）
+ * @param {'single' | 'retail' | 'mall'} orderKind 各独立页面固定传入的订单类型
  */
-export function useOrdersManage() {
-  const activeTab = ref('single')
+export function useOrdersManage(orderKind = 'single') {
+  const activeTab = ref(orderKind)
   const orderDate = ref(todayShanghaiStr())
   const route = useRoute()
   const searchQuery = ref('')
   const singlePayFilter = ref('all')
   const singleDeliveryFilter = ref('')
   const mallPayFilter = ref('all')
-  const retailPayFilter = ref('all')
+  const retailDeliveryFilter = ref('awaiting_accept')
 
-  const dateFilterLabel = computed(() => (activeTab.value === 'single' ? '供餐日' : '下单日'))
+  const dateFilterLabel = computed(() => (orderKind === 'single' ? '供餐日' : '下单日'))
 
   const loading = ref(false)
   const singleItems = ref([])
@@ -97,7 +98,7 @@ export function useOrdersManage() {
     const amountStr = amt != null && amt !== '' ? String(amt) : '—'
     if (t.kind === 'single') {
       return {
-        orderType: '单次点餐',
+        orderType: '零售订单',
         orderId: row.id,
         amountStr,
         sub: '全额退回支付用户微信零钱',
@@ -942,7 +943,8 @@ export function useOrdersManage() {
     }
   }
 
-  async function fetchSingleMeals() {
+  async function fetchSingleMeals(options = {}) {
+    const includeSummary = options.includeSummary !== false
     if (!adminAccessToken.value) return
     loading.value = true
     try {
@@ -950,6 +952,7 @@ export function useOrdersManage() {
         page: String(page.value),
         page_size: String(pageSize.value),
       })
+      if (!includeSummary) q.set('include_summary', 'false')
       const d = (orderDate.value || '').trim()
       if (d) q.set('delivery_date', d)
       const sq = searchQuery.value.trim()
@@ -972,7 +975,7 @@ export function useOrdersManage() {
           paid_portions: Number(sm.paid_portions) || 0,
           pending_unpaid_portions: Number(sm.pending_unpaid_portions) || 0,
         }
-      } else {
+      } else if (includeSummary) {
         singleOrderBucketSummary.value = null
       }
     } catch (e) {
@@ -1002,9 +1005,15 @@ export function useOrdersManage() {
       if (d) q.set('order_date', d)
       const sq = searchQuery.value.trim()
       if (sq) q.set('q', sq)
-      const pf = String(retailPayFilter.value || '').trim()
-      if (pf === '未支付' || pf === '已支付' || pf === '已退款' || pf === '已取消') {
-        q.set('pay_status', pf)
+      const fp = String(retailDeliveryFilter.value || '').trim()
+      if (
+        fp === 'awaiting_accept' ||
+        fp === 'pending_ship' ||
+        fp === 'in_delivery' ||
+        fp === 'delivered' ||
+        fp === 'after_sale'
+      ) {
+        q.set('fulfillment_phase', fp)
       }
       const data = await apiJson(`/api/admin/orders/daily/retail-orders?${q.toString()}`, {}, { auth: true })
       retailItems.value = Array.isArray(data.items) ? data.items : []
@@ -1063,12 +1072,20 @@ export function useOrdersManage() {
   function goPrev() {
     if (page.value <= 1) return
     page.value -= 1
+    if (activeTab.value === 'single') {
+      void fetchSingleMeals({ includeSummary: false })
+      return
+    }
     void fetchActive()
   }
 
   function goNext() {
     if (page.value >= totalPages.value) return
     page.value += 1
+    if (activeTab.value === 'single') {
+      void fetchSingleMeals({ includeSummary: false })
+      return
+    }
     void fetchActive()
   }
 
@@ -1082,9 +1099,9 @@ export function useOrdersManage() {
     }, 320)
   })
 
-  watch([orderDate, singlePayFilter, singleDeliveryFilter, mallPayFilter, retailPayFilter, pageSize, activeTab], () => {
+  watch([orderDate, singlePayFilter, singleDeliveryFilter, mallPayFilter, retailDeliveryFilter, pageSize], () => {
     page.value = 1
-    clearSingleSelection()
+    if (orderKind === 'single') clearSingleSelection()
     void fetchActive()
   })
 
@@ -1126,10 +1143,6 @@ export function useOrdersManage() {
   }
 
   function applyOrdersRouteQuery() {
-    const qTab = String(route.query.tab || '').trim()
-    if (qTab === 'single' || qTab === 'mall' || qTab === 'retail' || qTab === 'card_pack') {
-      activeTab.value = qTab === 'card_pack' ? 'mall' : qTab
-    }
     const qDate = String(route.query.delivery_date || '').trim()
     if (/^\d{4}-\d{2}-\d{2}$/.test(qDate)) {
       orderDate.value = qDate
@@ -1137,7 +1150,7 @@ export function useOrdersManage() {
   }
 
   watch(
-    () => [route.query.tab, route.query.delivery_date],
+    () => route.query.delivery_date,
     () => {
       applyOrdersRouteQuery()
     },
@@ -1156,7 +1169,7 @@ export function useOrdersManage() {
     singlePayFilter,
     singleDeliveryFilter,
     mallPayFilter,
-    retailPayFilter,
+    retailDeliveryFilter,
     dateFilterLabel,
     loading,
     singleItems,

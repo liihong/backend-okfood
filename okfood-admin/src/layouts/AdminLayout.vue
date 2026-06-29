@@ -98,8 +98,8 @@ function goSfMonitor(item) {
 function goOrdersManage(item) {
   const d = resolveNotificationDeliveryDate(item)
   notificationPopoverVisible.value = false
-  const query = d ? { delivery_date: d, tab: 'single' } : { tab: 'single' }
-  router.push({ path: '/orders', query })
+  const query = d ? { delivery_date: d } : {}
+  router.push({ name: 'orders-single-meal', query })
 }
 
 function parseCardOrderIdFromNotification(item) {
@@ -143,7 +143,9 @@ const TAB_ROUTE_ICONS = {
   dashboard: BarChart3,
   users: Users,
   'card-orders': ClipboardList,
-  orders: Package,
+  'orders-single-meal': Package,
+  'orders-mall': Package,
+  'orders-card-pack': Package,
   delivery: Truck,
   regions: MapPin,
   'delivery-range-check': MapPinned,
@@ -360,12 +362,17 @@ function onTabClose(tab) {
             <span class="menu-item-label">开卡工单</span>
           </div>
         </el-menu-item>
-        <el-menu-item v-if="showFullAdminMenus" index="/orders">
-          <div class="menu-item-inner">
-            <Package :size="20" stroke-width="2" />
-            <span class="menu-item-label">订单管理</span>
-          </div>
-        </el-menu-item>
+        <el-sub-menu v-if="showFullAdminMenus" index="sub-orders">
+          <template #title>
+            <div class="menu-item-inner">
+              <Package :size="20" stroke-width="2" />
+              <span class="menu-item-label">订单管理</span>
+            </div>
+          </template>
+          <el-menu-item index="/orders/single-meal">零售订单</el-menu-item>
+          <el-menu-item index="/orders/mall">商城订单</el-menu-item>
+          <el-menu-item index="/orders/card-pack">卡包订单</el-menu-item>
+        </el-sub-menu>
         <el-sub-menu index="sub-delivery">
           <template #title>
             <div class="menu-item-inner">

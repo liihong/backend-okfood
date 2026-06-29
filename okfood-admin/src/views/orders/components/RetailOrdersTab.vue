@@ -1,7 +1,8 @@
 <script setup>
 import { ChevronDown } from 'lucide-vue-next'
 import AdminTable from '../../../components/AdminTable.vue'
-import { SINGLE_PAY_TABS } from '../constants.js'
+import { RETAIL_DELIVERY_TABS } from '../constants.js'
+import { singleOrderStatusClass, singleOrderStatusLabelZh } from '../utils/orderDisplay.js'
 import { orderCreatedAtParts, singleOrderDeliveryAddressTextOnly } from '../utils/orderFormatters.js'
 import {
   canDispatchActions,
@@ -12,7 +13,7 @@ import {
 import { useOrdersManageInject } from '../composables/useOrdersManageInject.js'
 
 const {
-  retailPayFilter,
+  retailDeliveryFilter,
   retailItems,
   loading,
   activeTab,
@@ -24,9 +25,9 @@ const {
 
 <template>
   <div class="orders-manage-tab-bar">
-    <el-tabs v-model="retailPayFilter" class="orders-pay-tabs">
+    <el-tabs v-model="retailDeliveryFilter" class="orders-pay-tabs">
       <el-tab-pane
-        v-for="tab in SINGLE_PAY_TABS"
+        v-for="tab in RETAIL_DELIVERY_TABS"
         :key="'r-' + tab.value"
         :label="tab.label"
         :name="tab.value"
@@ -65,6 +66,11 @@ const {
     <el-table-column label="金额" width="100" prop="amount_yuan" />
     <el-table-column label="支付" width="88">
       <template #default="{ row }">{{ row.pay_status || '—' }}</template>
+    </el-table-column>
+    <el-table-column label="状态" width="100">
+      <template #default="{ row }">
+        <span :class="singleOrderStatusClass(row)">{{ singleOrderStatusLabelZh(row) }}</span>
+      </template>
     </el-table-column>
     <el-table-column label="配送" min-width="120" show-overflow-tooltip>
       <template #default="{ row }">{{
