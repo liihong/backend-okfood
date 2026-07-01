@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from app.services.admin_system_notification_service import (
+from app.services.admin.admin_system_notification_service import (
     _build_single_meal_order_paid_notification_text,
     _is_legacy_single_meal_paid_notification_message,
     supply_day_from_single_meal_notification_message,

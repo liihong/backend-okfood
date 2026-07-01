@@ -26,7 +26,7 @@ from app.models.member_card_order import MemberCardOrder
 from app.models.member_meal_period_state import MemberMealPeriodState
 from app.models.membership_card_template import MembershipCardTemplate
 from app.schemas.admin import RechargeIn
-from app.services.admin_service import apply_member_recharge_delta
+from app.services.admin.admin_service import apply_member_recharge_delta
 from app.services.meal_period.apply_side_effects import ensure_meal_period_states_after_card_apply
 from app.services.meal_period.balance import apply_dinner_recharge_delta
 from app.services.meal_period.template_periods import normalize_meal_periods_list
@@ -66,7 +66,7 @@ def _units_for_order(db: Session, order: MemberCardOrder) -> int:
         tpl = db.get(MembershipCardTemplate, int(tpl_id))
         if tpl:
             return max(1, int(tpl.meals_grant))
-    from app.services.member_card_order_service import _quota_for_card_kind
+    from app.services.member.member_card_order_service import _quota_for_card_kind
 
     _, amt = _quota_for_card_kind(order.card_kind)
     return max(1, int(amt))
@@ -111,7 +111,7 @@ def repair_order(db: Session, order: MemberCardOrder, *, dry_run: bool) -> None:
     if tpl_id is not None:
         tpl = db.get(MembershipCardTemplate, int(tpl_id))
         if tpl:
-            from app.services.member_card_order_service import _plan_for_membership_template
+            from app.services.member.member_card_order_service import _plan_for_membership_template
 
             plan = _plan_for_membership_template(tpl)
     apply_dinner_recharge_delta(

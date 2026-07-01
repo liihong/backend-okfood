@@ -13,7 +13,7 @@ from app.api import admin, admin_catalog, admin_couriers, admin_douyin, admin_ma
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.jobs.scheduler import setup_scheduler, shutdown_scheduler
-from app.services.upload_service import ensure_upload_root
+from app.services.shared.upload_service import ensure_upload_root
 from app.utils.response import success
 
 logging.basicConfig(level=logging.INFO)

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.services.sf_same_city_service import _apply_instant_sf_shop_gset, _instant_sf_shop_configured
+from app.services.delivery.sf_same_city_service import _apply_instant_sf_shop_gset, _instant_sf_shop_configured
 
 
 def test_instant_sf_shop_configured_requires_retail_shop_id(monkeypatch):
@@ -21,7 +21,7 @@ def test_instant_sf_shop_configured_requires_retail_shop_id(monkeypatch):
         SF_PICKUP_ADDRESS="取件地址",
     )
     monkeypatch.setattr(
-        "app.services.sf_same_city_service.merged_sf_integration_namespace",
+        "app.services.delivery.sf_same_city_service.merged_sf_integration_namespace",
         lambda _db, _tid: gset,
     )
     assert _instant_sf_shop_configured(db, store_id=1, tenant_id=1) is True

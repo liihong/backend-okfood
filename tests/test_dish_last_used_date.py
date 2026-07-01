@@ -13,7 +13,7 @@ from app.models.menu_schedule import MenuSchedule
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.models.weekly_menu_slot import WeeklyMenuSlot
-from app.services.admin_service import list_dishes_admin
+from app.services.admin.admin_service import list_dishes_admin
 
 
 @pytest.fixture()
@@ -62,7 +62,7 @@ def dish_db(monkeypatch) -> Session:
             )
         )
         session.commit()
-        monkeypatch.setattr("app.services.admin_service.today_shanghai", lambda: date(2026, 6, 23))
+        monkeypatch.setattr("app.services.admin.admin_service.today_shanghai", lambda: date(2026, 6, 23))
         yield session
     finally:
         session.close()

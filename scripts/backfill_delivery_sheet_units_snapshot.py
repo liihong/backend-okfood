@@ -23,11 +23,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db.session import SessionLocal
-from app.services.delivery_sheet_service import build_delivery_sheet
-from app.services.delivery_sheet_push_snapshot_service import (
+from app.services.delivery.delivery_sheet_service import build_delivery_sheet
+from app.services.delivery.delivery_sheet_push_snapshot_service import (
     patch_frozen_member_ids_on_units_snapshot_if_missing,
 )
-from app.services.delivery_sheet_units_backfill_service import (
+from app.services.delivery.delivery_sheet_units_backfill_service import (
     backfill_and_refreeze_delivery_sheet_units,
     build_member_meal_units_from_sf_pushes,
 )

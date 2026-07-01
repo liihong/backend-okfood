@@ -5,6 +5,8 @@ defineProps({
   open: { type: Boolean, default: false },
   mealPeriod: { type: String, default: 'lunch' },
   businessDate: { type: String, default: '' },
+  /** 当前剩余可售份数（仅展示；剩余为 0 时后厨/配送类原因仍可记损耗） */
+  remaining: { type: Number, default: null },
   delta: { type: Number, default: -1 },
   reason: { type: String, default: 'spill' },
   remark: { type: String, default: '' },
@@ -20,7 +22,15 @@ defineEmits(['update:open', 'update:delta', 'update:reason', 'update:remark', 's
       <h3 id="dsa-title" class="dsa-title">
         报损耗 · {{ mealPeriod === 'dinner' ? '晚餐' : '午餐' }} · {{ businessDate || '—' }}
       </h3>
-      <p class="dsa-hint">剩余库存不可直接修改，请通过流水扣减并选择原因。</p>
+      <p class="dsa-hint">
+        剩余库存不可直接修改，请通过流水扣减并选择原因。
+        <template v-if="remaining != null">
+          当前剩余 <strong>{{ remaining }}</strong> 份。
+        </template>
+        <template v-if="remaining === 0">
+          剩余为 0 时，后厨/配送类损耗仍会记入「损耗」统计，不影响已售份数。
+        </template>
+      </p>
       <label class="dsa-field">
         <span>扣减份数（负数）</span>
         <input

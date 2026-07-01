@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.services.admin_system_notification_service import (
+from app.services.admin.admin_system_notification_service import (
     _is_legacy_miniprogram_card_order_pending_notification_message,
     _mask_phone_middle_four,
     _miniprogram_card_order_pending_message,

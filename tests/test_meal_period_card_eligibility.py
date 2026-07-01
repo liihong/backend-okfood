@@ -121,6 +121,19 @@ def test_member_entitled_meal_periods_from_orders(eligibility_db: Session):
     assert member_entitled_meal_periods(eligibility_db, 102) == frozenset({"lunch"})
 
 
+def test_filter_member_groups_share_one_query(eligibility_db: Session):
+    """到家 + 自提两组名单应共用一次餐段资格查库。"""
+    dinner_member = eligibility_db.get(Member, 101)
+    lunch_member = eligibility_db.get(Member, 102)
+    from app.services.meal_period.card_eligibility import filter_member_groups_for_sheet_view
+
+    home_out, pu_out = filter_member_groups_for_sheet_view(
+        eligibility_db, "lunch", [dinner_member, lunch_member], [lunch_member]
+    )
+    assert {m.id for m in home_out} == {102}
+    assert {m.id for m in pu_out} == {102}
+
+
 def test_filter_lunch_excludes_pure_dinner(eligibility_db: Session):
     members = [
         eligibility_db.get(Member, 101),

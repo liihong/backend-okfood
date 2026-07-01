@@ -13,8 +13,8 @@ from app.models.member import Member
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store import Store
 from app.models.tenant import Tenant
-from app.services.delivery_sheet_meal_units_service import meal_units_for_delivery_sheet_member
-from app.services.delivery_sheet_push_snapshot_service import (
+from app.services.delivery.delivery_sheet_meal_units_service import meal_units_for_delivery_sheet_member
+from app.services.delivery.delivery_sheet_push_snapshot_service import (
     FROZEN_MEMBER_IDS_SNAPSHOT_KEY,
     capture_delivery_sheet_units_on_first_push,
     frozen_member_ids_from_units_snapshot,
@@ -86,7 +86,7 @@ def test_units_snapshot_captured_once(units_db: Session):
         )
     )
     with patch(
-        "app.services.delivery_sheet_push_snapshot_service._collect_member_meal_units_for_sf_push_sheet",
+        "app.services.delivery.delivery_sheet_push_snapshot_service._collect_member_meal_units_for_sf_push_sheet",
         return_value={"1": 1},
     ):
         capture_delivery_sheet_units_on_first_push(units_db, store_id=1, delivery_date=d)
@@ -113,7 +113,7 @@ def test_capture_frozen_ids_use_full_sheet_not_first_push_only(units_db: Session
         )
     )
     with patch(
-        "app.services.delivery_sheet_push_snapshot_service._collect_member_meal_units_for_sf_push_sheet",
+        "app.services.delivery.delivery_sheet_push_snapshot_service._collect_member_meal_units_for_sf_push_sheet",
         return_value={"1": 1, "2": 1},
     ):
         capture_delivery_sheet_units_on_first_push(units_db, store_id=1, delivery_date=d)
@@ -124,7 +124,7 @@ def test_capture_frozen_ids_use_full_sheet_not_first_push_only(units_db: Session
 
 def test_reconcile_expands_stale_frozen_snapshot(units_db: Session):
     """读大表时若快照 frozen 小于推单并集，应自动补齐。"""
-    from app.services.delivery_sheet_push_snapshot_service import (
+    from app.services.delivery.delivery_sheet_push_snapshot_service import (
         reconcile_frozen_ids_with_sf_pushes_no_commit,
     )
 

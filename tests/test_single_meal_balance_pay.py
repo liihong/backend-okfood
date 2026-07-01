@@ -16,7 +16,7 @@ from app.models.member import Member
 from app.models.single_meal_order import SingleMealOrder
 from app.models.store import Store
 from app.models.tenant import Tenant
-from app.services.single_meal_balance_pay_service import (
+from app.services.client.single_meal_balance_pay_service import (
     MEMBER_CARD_PAY_CHANNEL,
     evaluate_single_meal_balance_pay,
     restore_member_balance_for_cancelled_single_meal,
@@ -68,7 +68,7 @@ def _week_member(db: Session, *, balance: int, daily: int = 1) -> Member:
 
 
 @patch(
-    "app.services.single_meal_balance_pay_service.member_subscription_delivery_pending_today",
+    "app.services.client.single_meal_balance_pay_service.member_subscription_delivery_pending_today",
     return_value=(False, 0),
 )
 def test_evaluate_balance_pay_ok_without_reserve(_mock_pending, balance_pay_db: Session) -> None:
@@ -79,7 +79,7 @@ def test_evaluate_balance_pay_ok_without_reserve(_mock_pending, balance_pay_db: 
 
 
 @patch(
-    "app.services.single_meal_balance_pay_service.member_subscription_delivery_pending_today",
+    "app.services.client.single_meal_balance_pay_service.member_subscription_delivery_pending_today",
     return_value=(True, 1),
 )
 def test_evaluate_balance_pay_blocked_last_time_for_today(_mock_pending, balance_pay_db: Session) -> None:
@@ -90,7 +90,7 @@ def test_evaluate_balance_pay_blocked_last_time_for_today(_mock_pending, balance
 
 
 @patch(
-    "app.services.single_meal_balance_pay_service.member_subscription_delivery_pending_today",
+    "app.services.client.single_meal_balance_pay_service.member_subscription_delivery_pending_today",
     return_value=(True, 2),
 )
 def test_evaluate_balance_pay_needs_qty_plus_reserve(_mock_pending, balance_pay_db: Session) -> None:
@@ -102,7 +102,7 @@ def test_evaluate_balance_pay_needs_qty_plus_reserve(_mock_pending, balance_pay_
 
 
 @patch(
-    "app.services.single_meal_balance_pay_service.member_subscription_delivery_pending_today",
+    "app.services.client.single_meal_balance_pay_service.member_subscription_delivery_pending_today",
     return_value=(False, 0),
 )
 def test_evaluate_rejects_times_card(_mock_pending, balance_pay_db: Session) -> None:

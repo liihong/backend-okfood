@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app.core.deps import SessionDep, public_store_dep, PublicStoreContext
-from app.services.member_service import get_menu_detail_by_dish_id, get_today_menu, get_tomorrow_menu, get_weekly_menu
+from app.services.member.member_service import get_menu_detail_by_dish_id, get_today_menu, get_tomorrow_menu, get_weekly_menu
 from app.utils.response import success
 
 router = APIRouter(prefix="/menu", tags=["菜单"])

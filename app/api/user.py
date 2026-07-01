@@ -57,10 +57,10 @@ from app.schemas.user import (
 )
 from app.schemas.marketing.coupon import UserMemberCouponAvailableOut, UserMemberCouponReminderOut
 
-from app.services.member_delivery_deduction_service import list_member_delivery_deductions
-from app.services.oss_upload_service import upload_member_avatar_bytes
+from app.services.admin.member_delivery_deduction_service import list_member_delivery_deductions
+from app.services.shared.oss_upload_service import upload_member_avatar_bytes
 
-from app.services.member_address_service import (
+from app.services.member.member_address_service import (
     check_coords_in_delivery_region,
     create_address,
     delete_address,
@@ -68,7 +68,7 @@ from app.services.member_address_service import (
     update_address,
 )
 
-from app.services.member_service import (
+from app.services.member.member_service import (
 
     activate_member,
 
@@ -86,7 +86,7 @@ from app.services.member_service import (
 
 from app.schemas.single_meal_order import SingleMealOrderCreateIn
 
-from app.services.member_card_pay_service import (
+from app.services.client.member_card_pay_service import (
     apply_member_coupon_to_unpaid_card_order,
     create_miniprogram_member_card_order,
     get_member_card_order_for_user,
@@ -100,16 +100,16 @@ from app.services.marketing.member_coupon_service import (
     list_available_member_coupons_for_user,
     list_member_card_coupons_for_reminder,
 )
-from app.services.catalog_admin_service import (
+from app.services.admin.catalog_admin_service import (
     get_membership_template_row,
     list_membership_templates,
     membership_template_public_dump,
 )
-from app.services.single_meal_balance_pay_service import (
+from app.services.client.single_meal_balance_pay_service import (
     evaluate_single_meal_balance_pay,
     pay_single_meal_order_with_member_balance,
 )
-from app.services.single_meal_order_service import (
+from app.services.order.single_meal_order_service import (
     create_single_meal_order,
     get_member_single_meal_order,
     list_member_single_meal_orders,
@@ -118,9 +118,9 @@ from app.services.single_meal_order_service import (
     sync_single_meal_from_wechat_or_raise,
 )
 
-from app.services.store_config_service import get_member_card_prices_extended
+from app.services.shared.store_config_service import get_member_card_prices_extended
 
-from app.services.member_renew_subscribe_service import grant_renew_remind_quota
+from app.services.member.member_renew_subscribe_service import grant_renew_remind_quota
 
 from app.integrations.wechat_pay_v2 import resolve_request_client_ip
 
@@ -680,12 +680,12 @@ def list_available_member_coupons_me(
             if price is not None:
                 original = Decimal(price).quantize(Decimal("0.01"))
         elif card_kind:
-            from app.services.member_card_pay_service import card_order_amount_yuan_for_kind
+            from app.services.client.member_card_pay_service import card_order_amount_yuan_for_kind
 
             original = card_order_amount_yuan_for_kind(db, card_kind.strip(), store_id=store_id)
     elif bt == "single_meal" and dish_id is not None:
         from app.models.menu_dish import MenuDish
-        from app.services.store_config_service import get_store_base_delivery_fee_yuan
+        from app.services.shared.store_config_service import get_store_base_delivery_fee_yuan
 
         dish = db.get(MenuDish, int(dish_id))
         if dish and dish.single_order_price_yuan is not None:

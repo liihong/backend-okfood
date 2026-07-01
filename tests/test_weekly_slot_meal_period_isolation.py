@@ -12,7 +12,7 @@ from app.models.menu_dish import MenuDish
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.models.weekly_menu_slot import WeeklyMenuSlot
-from app.services.menu_day_stock_service import (
+from app.services.admin.menu_day_stock_service import (
     set_weekly_slot_total_stock,
     weekly_menu_dinner_day_total_stock,
     weekly_menu_lunch_day_total_stock,
@@ -67,11 +67,11 @@ def test_set_dinner_total_stock_does_not_change_lunch(menu_db: Session, monkeypa
     menu_date = anchor  # slot=1 周一
 
     monkeypatch.setattr(
-        "app.services.day_stock_service.sync_store_kitchen_plan_row",
+        "app.services.admin.day_stock_service.sync_store_kitchen_plan_row",
         lambda *a, **k: None,
     )
     monkeypatch.setattr(
-        "app.services.admin_service.invalidate_dashboard_live_summary_cache",
+        "app.services.admin.admin_service.invalidate_dashboard_live_summary_cache",
         lambda *a, **k: None,
     )
 

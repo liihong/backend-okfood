@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.core.deps import SessionDep
-from app.services.sf_callback_service import (
+from app.services.delivery.sf_callback_service import (
     persist_oauth_style_callback,
     process_sf_notify,
     run_sf_callback_side_effect_job,

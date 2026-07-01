@@ -179,9 +179,9 @@ class LeaveIn(BaseModel):
     type: LeaveType
     start: date | None = None
     end: date | None = None
-    meal_period: Literal["lunch", "dinner"] = Field(
+    meal_period: Literal["lunch", "dinner", "all"] = Field(
         "lunch",
-        description="餐段：lunch=午餐（默认）；dinner=晚餐",
+        description="餐段：lunch=午餐（默认）；dinner=晚餐；all=全天（午/晚餐同时请假，仅对已开通餐段生效）",
     )
 
 

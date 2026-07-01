@@ -27,7 +27,7 @@ from app.schemas.douyin import DouyinCertificateRedeemIn, DouyinCertificateRedee
 from app.services.douyin.config_service import get_douyin_access_token, get_douyin_store_config
 from app.services.douyin.product_mapping_service import find_active_mapping_for_certificate, grant_type_label
 from app.services.marketing.member_coupon_service import _grant_member_coupon_to_member
-from app.services.member_card_order_service import create_paid_card_order_for_douyin_redeem
+from app.services.member.member_card_order_service import create_paid_card_order_for_douyin_redeem
 
 logger = logging.getLogger(__name__)
 

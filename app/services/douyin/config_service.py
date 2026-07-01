@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.models.tenant_integration_settings import TenantIntegrationSettings
 from app.integrations.douyin_life import fetch_client_token
 from app.models.store import Store
-from app.services.tenant_integration_service import get_tenant_integration_row
+from app.services.shared.tenant_integration_service import get_tenant_integration_row
 
 
 def _s(raw: str | None) -> str:

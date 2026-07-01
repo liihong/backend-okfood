@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from app.services.amap import RegeoSnapshot
-from app.services.sf_same_city_service import (
+from app.services.shared.amap import RegeoSnapshot
+from app.services.delivery.sf_same_city_service import (
     _sf_receive_city_name,
     _sf_receive_full_address,
 )
@@ -31,7 +31,7 @@ def test_sf_receive_city_name_uses_regeo_when_text_has_no_city(monkeypatch):
         district="项城市",
     )
     monkeypatch.setattr(
-        "app.services.sf_same_city_service._row_regeo_snapshot",
+        "app.services.delivery.sf_same_city_service._row_regeo_snapshot",
         lambda _row: snap,
     )
     city = _sf_receive_city_name(_row(), "新乡市")
@@ -46,7 +46,7 @@ def test_sf_receive_full_address_prefixes_regeo_when_missing_admin(monkeypatch):
         district="项城市",
     )
     monkeypatch.setattr(
-        "app.services.sf_same_city_service._row_regeo_snapshot",
+        "app.services.delivery.sf_same_city_service._row_regeo_snapshot",
         lambda _row: snap,
     )
     addr = _sf_receive_full_address(_row())
@@ -55,7 +55,7 @@ def test_sf_receive_full_address_prefixes_regeo_when_missing_admin(monkeypatch):
 
 def test_sf_receive_city_name_prefers_parsed_text_over_regeo(monkeypatch):
     monkeypatch.setattr(
-        "app.services.sf_same_city_service._row_regeo_snapshot",
+        "app.services.delivery.sf_same_city_service._row_regeo_snapshot",
         lambda _row: RegeoSnapshot(
             pca_prefix_line="河南省周口市项城市",
             province="河南省",

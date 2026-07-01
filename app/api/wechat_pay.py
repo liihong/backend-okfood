@@ -13,11 +13,11 @@ from app.integrations.wechat_pay_v2 import (
 )
 from app.models.member_card_order import MemberCardOrder
 from app.schemas.user import UserMemberCardOrderOut
-from app.services.member_card_pay_service import (
+from app.services.client.member_card_pay_service import (
     member_card_order_user_dict,
     sync_member_card_from_wechat_or_raise,
 )
-from app.services.wechat_pay_notify_dispatch import apply_wechat_pay_notify
+from app.services.shared.wechat_pay_notify_dispatch import apply_wechat_pay_notify
 from app.utils.response import dump_model, success
 
 logger = logging.getLogger(__name__)

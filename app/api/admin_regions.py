@@ -15,9 +15,9 @@ from app.schemas.delivery_region import (
     DeliveryRegionCreateIn,
     DeliveryRegionUpdateIn,
 )
-from app.services.delivery_region_consult_service import consult_delivery_region
-from app.services.delivery_region_map_overview_service import delivery_region_map_overview
-from app.services.delivery_region_service import (
+from app.services.client.delivery_region_consult_service import consult_delivery_region
+from app.services.admin.delivery_region_map_overview_service import delivery_region_map_overview
+from app.services.shared.delivery_region_service import (
     create_delivery_region,
     delete_delivery_region,
     get_delivery_region,

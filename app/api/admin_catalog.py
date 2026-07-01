@@ -13,7 +13,7 @@ from app.schemas.catalog_admin import (
     StoreRetailProductCreateIn,
     StoreRetailProductPatchIn,
 )
-from app.services.catalog_admin_service import (
+from app.services.admin.catalog_admin_service import (
     create_membership_template,
     create_retail_category,
     create_retail_product,

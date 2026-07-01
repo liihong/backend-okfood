@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db.session import SessionLocal
 from app.schemas.admin_courier import CourierCreateIn
-from app.services.courier_admin_service import create_courier_admin
+from app.services.admin.courier_admin_service import create_courier_admin
 
 
 def main() -> None:

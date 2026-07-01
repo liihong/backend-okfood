@@ -15,7 +15,7 @@ from app.models.menu_dish import MenuDish
 from app.models.single_meal_order import SingleMealOrder
 from app.models.store import Store
 from app.models.tenant import Tenant
-from app.services.menu_day_stock_service import paid_single_retail_portions_by_dates
+from app.services.admin.menu_day_stock_service import paid_single_retail_portions_by_dates
 
 
 @pytest.fixture()

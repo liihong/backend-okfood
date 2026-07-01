@@ -1,4 +1,4 @@
-import { request, clearMemberSession, isUserMeNotFoundError } from './api.js'
+import { request, clearMemberSession, isUserMeNotFoundError, setMemberStoreId } from './api.js'
 import { tryShowMemberCouponReminder } from './memberCouponReminder.js'
 
 function normalizeCnPhone(raw) {
@@ -46,6 +46,9 @@ export async function ensureMemberPhoneFromStoredToken() {
     }
     if (profile?.id != null) {
       uni.setStorageSync('memberId', String(profile.id))
+    }
+    if (profile?.store_id != null) {
+      setMemberStoreId(profile.store_id)
     }
   } catch (e) {
     if (isUserMeNotFoundError(e)) clearMemberSession()

@@ -99,7 +99,7 @@ def parse_wechat_pay_notify(
         return False, (data.get("return_msg") or "return_fail")[:200], None
     api_key: str | None = None
     if db is not None:
-        from app.services.tenant_integration_service import (
+        from app.services.shared.tenant_integration_service import (
             get_merged_pay_config,
             resolve_tenant_id_for_wechat_out_trade_no,
         )
@@ -180,7 +180,7 @@ def unified_order_jsapi(
     pay: Any | None = None,
 ) -> str:
     """统一下单 JSAPI，返回 prepay_id。``pay`` 为空时使用全局 .env（兼容旧行为）。"""
-    from app.services.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
+    from app.services.shared.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
 
     cfg = pay
     if cfg is None:
@@ -257,7 +257,7 @@ def query_order_by_out_trade_no(out_trade_no: str, *, pay: Any | None = None) ->
 
     用于异步通知未达服务端时，由小程序主动拉单完成入账（与 /pay/wechat/notify 等效验签后字段）。
     """
-    from app.services.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
+    from app.services.shared.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
 
     cfg = pay
     if cfg is None:
@@ -311,7 +311,7 @@ def close_order_by_out_trade_no(out_trade_no: str, *, pay: Any | None = None) ->
 
     若订单不存在或已关闭，视为成功（幂等）。
     """
-    from app.services.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
+    from app.services.shared.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
 
     cfg = pay
     if cfg is None:
@@ -405,7 +405,7 @@ def refund_order_v2(
 
     ``out_trade_no`` 与 ``transaction_id`` 至少其一必填（此处一般以商户单号为主）。
     """
-    from app.services.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
+    from app.services.shared.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
 
     cfg = pay
     if cfg is None:

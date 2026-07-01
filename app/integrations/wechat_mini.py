@@ -43,7 +43,7 @@ def wx_mini_configured() -> bool:
 
 
 def wx_mini_configured_for_tenant(db: "Session", tenant_id: int) -> bool:
-    from app.services.tenant_integration_service import get_merged_wx_credentials
+    from app.services.shared.tenant_integration_service import get_merged_wx_credentials
 
     a, s = get_merged_wx_credentials(db, int(tenant_id))
     return bool(a and s)
@@ -59,7 +59,7 @@ def _app_credentials() -> tuple[str, str]:
 
 def _credentials_for_call(db: "Session | None", tenant_id: int | None) -> tuple[str, str]:
     if db is not None and tenant_id is not None:
-        from app.services.tenant_integration_service import get_merged_wx_credentials
+        from app.services.shared.tenant_integration_service import get_merged_wx_credentials
 
         appid, secret = get_merged_wx_credentials(db, int(tenant_id))
         if not appid or not secret:
@@ -238,7 +238,7 @@ def try_notify_member_delivery_confirmed(
     tenant_id: int | None = None,
 ) -> None:
     """会员订阅消息；未配置模板或未配置小程序时静默跳过。"""
-    from app.services.tenant_integration_service import get_tenant_integration_row
+    from app.services.shared.tenant_integration_service import get_tenant_integration_row
 
     template_id = (settings.WX_MINI_SUBSCRIBE_DELIVERY_TMPL_ID or "").strip()
     if db is not None and tenant_id is not None:
@@ -292,7 +292,7 @@ def try_notify_member_delivery_confirmed(
 
 
 def _resolve_renew_subscribe_template_id(db: "Session | None", tenant_id: int | None) -> str:
-    from app.services.tenant_integration_service import get_tenant_integration_row
+    from app.services.shared.tenant_integration_service import get_tenant_integration_row
 
     template_id = (settings.WX_MINI_SUBSCRIBE_RENEW_TMPL_ID or "").strip()
     if db is not None and tenant_id is not None:

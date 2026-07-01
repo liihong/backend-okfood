@@ -31,7 +31,7 @@ from app.schemas.marketing.home_banner import (
     HomeBannerCreateIn,
     HomeBannerPatchIn,
 )
-from app.services.home_banner_service import (
+from app.services.client.home_banner_service import (
     create_home_banner,
     delete_home_banner,
     list_home_banners_admin,
@@ -39,7 +39,7 @@ from app.services.home_banner_service import (
     set_home_banner_active,
 )
 from app.schemas.marketing.home_entry_poster import HomeEntryPosterUpsertIn
-from app.services.home_entry_poster_service import get_entry_poster_admin, upsert_entry_poster
+from app.services.client.home_entry_poster_service import get_entry_poster_admin, upsert_entry_poster
 from app.utils.response import dump_model, page_response, success
 
 router = APIRouter(prefix="/admin/marketing", tags=["管理端-小程序营销"])

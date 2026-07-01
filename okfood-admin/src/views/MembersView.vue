@@ -424,9 +424,10 @@ const memberStatusClass = (status) => {
   return 'member-pill member-pill--emerald'
 }
 
-function planTagClass(plan) {
-  if (plan === '周卡') return 't-plan--week'
-  if (plan === '月卡') return 't-plan--month'
+function planTagClass(plan, planBase) {
+  const base = (planBase || String(plan || '').split(' · ')[0] || '').trim()
+  if (base === '周卡') return 't-plan--week'
+  if (base === '月卡') return 't-plan--month'
   return 't-plan--count'
 }
 
@@ -435,9 +436,24 @@ const showLeaveModal = ref(false)
 const leaveSaving = ref(false)
 const leaveTarget = ref(null)
 const leaveMode = ref('tomorrow')
+const leaveMealPeriod = ref('lunch')
 /** 多天请假（区间）：YYYY-MM-DD，与小程序「多天请假」同一接口口径 */
 const leaveRangeStart = ref('')
 const leaveRangeEnd = ref('')
+
+const leavePeriodTabs = computed(() => {
+  const u = leaveTarget.value
+  if (!u) return [{ value: 'lunch', label: '午餐' }]
+  const periods = Array.isArray(u.entitled_meal_periods) ? u.entitled_meal_periods : []
+  const hasLunch = periods.includes('lunch')
+  const hasDinner = periods.includes('dinner')
+  const tabs = []
+  if (hasLunch && hasDinner) tabs.push({ value: 'all', label: '全天' })
+  if (hasLunch) tabs.push({ value: 'lunch', label: '午餐' })
+  if (hasDinner) tabs.push({ value: 'dinner', label: '晚餐' })
+  if (!tabs.length) tabs.push({ value: 'lunch', label: '午餐' })
+  return tabs
+})
 
 function shanghaiTodayYmd() {
   try {
@@ -497,6 +513,14 @@ function openLeaveMember(u) {
   const r = defaultAdminLeaveRange()
   leaveRangeStart.value = r.start
   leaveRangeEnd.value = r.end
+  const tabs = []
+  const periods = Array.isArray(u?.entitled_meal_periods) ? u.entitled_meal_periods : []
+  const hasLunch = periods.includes('lunch')
+  const hasDinner = periods.includes('dinner')
+  if (hasLunch && hasDinner) tabs.push({ value: 'all', label: '全天' })
+  if (hasLunch) tabs.push({ value: 'lunch', label: '午餐' })
+  if (hasDinner) tabs.push({ value: 'dinner', label: '晚餐' })
+  leaveMealPeriod.value = tabs[0]?.value || 'lunch'
   showLeaveModal.value = true
 }
 
@@ -517,7 +541,7 @@ async function submitLeaveMember() {
   }
   leaveSaving.value = true
   try {
-    const payload = { phone: u.phone, type: leaveMode.value }
+    const payload = { phone: u.phone, type: leaveMode.value, meal_period: leaveMealPeriod.value }
     if (leaveMode.value === 'range') {
       payload.start = leaveRangeStart.value.trim()
       payload.end = leaveRangeEnd.value.trim()
@@ -1154,9 +1178,9 @@ onUnmounted(() => {
             <span class="member-phone-num">{{ u.phone || '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="级别" align="center" min-width="75">
+        <el-table-column label="套餐类型" align="center" min-width="108">
           <template #default="{ row: u }">
-            <span class="t-plan" :class="planTagClass(u.plan)">{{ u.plan }}</span>
+            <span class="t-plan" :class="planTagClass(u.plan, u.planBase)">{{ u.plan }}</span>
           </template>
         </el-table-column>
         <el-table-column
@@ -1356,7 +1380,16 @@ onUnmounted(() => {
         <form class="modal-form" @submit.prevent="submitLeaveMember">
           <p v-if="leaveTarget" class="modal-hint modal-hint--tight">
             {{ leaveTarget.name || '—' }} · {{ leaveTarget.phone || '' }}
+            <span v-if="leaveTarget.plan"> · {{ leaveTarget.plan }}</span>
           </p>
+          <div v-if="leavePeriodTabs.length > 1" class="form-group">
+            <label>请假餐段</label>
+            <el-radio-group v-model="leaveMealPeriod" class="leave-period-radio">
+              <el-radio v-for="tab in leavePeriodTabs" :key="tab.value" :value="tab.value">
+                {{ tab.label }}
+              </el-radio>
+            </el-radio-group>
+          </div>
           <div class="form-group">
             <label>操作类型</label>
             <el-select v-model="leaveMode" class="leave-mode-select" placeholder="请选择">

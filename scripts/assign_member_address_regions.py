@@ -30,12 +30,12 @@ from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models.member_address import MemberAddress
-from app.services.member_address_service import (
+from app.services.member.member_address_service import (
     apply_auto_area_from_coords_or_geocode,
     delivery_region_name_map,
     full_address_line,
 )
-from app.services.region_assignment import assign_region_for_coords
+from app.services.shared.region_assignment import assign_region_for_coords
 
 
 def _parse_args() -> argparse.Namespace:

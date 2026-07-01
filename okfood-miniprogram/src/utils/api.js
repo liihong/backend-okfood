@@ -15,6 +15,8 @@ export const API_BASE =
 export const DEFAULT_REQUEST_TIMEOUT_MS = 120000
 
 const MEMBER_TOKEN_KEY = 'okfood_member_token'
+/** 会员所属门店（对应后端 X-Store-Id；默认 1 兼容单店） */
+const MEMBER_STORE_ID_KEY = 'okfood_member_store_id'
 const COURIER_TOKEN_KEY = 'okfood_courier_token'
 /** 配送员登录手机号（仅本地缓存，用于预填与快速验证；与会员 token 独立） */
 const COURIER_PHONE_KEY = 'okfood_courier_phone'
@@ -35,6 +37,32 @@ export function reLaunchIfCourierModePreferred() {
   }
   uni.reLaunch({ url: '/pages/courier/login' })
   return true
+}
+
+/**
+ * @returns {number}
+ */
+export function getMemberStoreId() {
+  try {
+    const raw = uni.getStorageSync(MEMBER_STORE_ID_KEY)
+    const n = Number(raw)
+    if (Number.isFinite(n) && n >= 1) return Math.floor(n)
+  } catch {
+    /* ignore */
+  }
+  const envDefault = Number(import.meta.env.VITE_DEFAULT_STORE_ID)
+  if (Number.isFinite(envDefault) && envDefault >= 1) return Math.floor(envDefault)
+  return 1
+}
+
+/** @param {number | string | null | undefined} storeId */
+export function setMemberStoreId(storeId) {
+  const sid = Math.max(1, Math.floor(Number(storeId) || 1))
+  try {
+    uni.setStorageSync(MEMBER_STORE_ID_KEY, sid)
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -244,6 +272,8 @@ export function request(path, options = {}) {
     'Content-Type': 'application/json',
     ...(options.header || {}),
   }
+  const storeId = getMemberStoreId()
+  if (storeId >= 1) header['X-Store-Id'] = String(storeId)
   const token = getMemberToken()
   if (token) header.Authorization = `Bearer ${token}`
 

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.enums import MealPeriod
 from app.models.member import Member
 from app.models.member_meal_period_state import MemberMealPeriodState
-from app.services.member_service import effective_daily_meal_units
+from app.services.member.member_service import effective_daily_meal_units
 
 MAX_DAILY_MEAL_UNITS = 50
 

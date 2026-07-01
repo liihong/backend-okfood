@@ -14,11 +14,11 @@ from app.schemas.admin import (
     PlatformTenantPatchIn,
     TenantIntegrationSettingsPatchIn,
 )
-from app.services.tenant_integration_service import (
+from app.services.shared.tenant_integration_service import (
     get_tenant_integration_admin_out,
     patch_tenant_integration_admin,
 )
-from app.services.platform_tenant_service import (
+from app.services.shared.platform_tenant_service import (
     create_platform_tenant,
     create_store_for_platform,
     create_tenant_admin_for_platform,

@@ -3,7 +3,7 @@
 from datetime import date
 from unittest.mock import MagicMock
 
-from app.services.store_kitchen_plan_service import set_menu_day_total_stock_by_business_date
+from app.services.admin.store_kitchen_plan_service import set_menu_day_total_stock_by_business_date
 
 
 def test_set_menu_day_total_stock_skips_sunday_without_db_write(monkeypatch):
@@ -15,7 +15,7 @@ def test_set_menu_day_total_stock_skips_sunday_without_db_write(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        "app.services.store_kitchen_plan_service.sync_kitchen_planned_to_menu_day_total_stock",
+        "app.services.admin.store_kitchen_plan_service.sync_kitchen_planned_to_menu_day_total_stock",
         _fake_sync,
     )
 

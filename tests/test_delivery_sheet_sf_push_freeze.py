@@ -10,7 +10,7 @@ from app.db.base import Base
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store import Store
 from app.models.tenant import Tenant
-from app.services.delivery_day_lock_service import (
+from app.services.delivery.delivery_day_lock_service import (
     has_delivery_sheet_sf_push_on_date,
     is_delivery_day_sheet_frozen_after_sf_push,
 )

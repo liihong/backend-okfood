@@ -5,6 +5,8 @@ import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.j
 import { showToast } from '../../composables/useToast.js'
 import { useAnimatedInteger } from '../../composables/useAnimatedInteger.js'
 import DashboardPickupKitchenPanel from './DashboardPickupKitchenPanel.vue'
+import DayStockAdjustmentModal from './DayStockAdjustmentModal.vue'
+import { useDayStockAdjustments } from '../../composables/useDayStockAdjustments.js'
 
 /** 营业概览顶卡数字条（请假/备餐/当日过期份数）；与 dashboard-summary / 归档接口回填 */
 const dashboardStats = ref([])
@@ -364,6 +366,36 @@ const todayDinnerSoldTotal = computed(() => {
     todayDinnerRetail.value
   )
 })
+
+const stockModalRemaining = ref(null)
+
+const {
+  modalOpen: stockModalOpen,
+  modalMealPeriod: stockModalMealPeriod,
+  modalBusinessDate: stockModalBusinessDate,
+  modalDelta: stockModalDelta,
+  modalReason: stockModalReason,
+  modalRemark: stockModalRemark,
+  submitting: stockAdjustSubmitting,
+  openAdjustModal: openStockAdjustModal,
+  submitAdjustment: submitStockAdjustment,
+} = useDayStockAdjustments({ onSuccess: () => fetchDashboardSummary() })
+
+function openLunchStockAdjust() {
+  stockModalRemaining.value = todayLunchRemainingDisplay.value
+  openStockAdjustModal({
+    businessDate: businessAnchorIsoNormalized.value || summaryAnchorDate.value,
+    mealPeriod: 'lunch',
+  })
+}
+
+function openDinnerStockAdjust() {
+  stockModalRemaining.value = todayDinnerRemaining.value
+  openStockAdjustModal({
+    businessDate: businessAnchorIsoNormalized.value || summaryAnchorDate.value,
+    mealPeriod: 'dinner',
+  })
+}
 
 /** 明日单次零售：锚定日次日已支付单次零售份数（dashboard-summary.tomorrow_single_retail_total_quantity） */
 const tomorrowSingleRetailTotalCount = computed(
@@ -732,6 +764,9 @@ onMounted(() => {
             </div>
           </div>
           <div class="dro-dash-kpi__mid-spacer" aria-hidden="true" />
+        </div>
+        <div class="dro-dash-kpi__foot-row">
+          <button type="button" class="dro-dash-adjust-btn" @click="openLunchStockAdjust">报损耗</button>
         </div>
         <div class="dro-dash-kpi__stat-row dro-dash-kpi__stat-row--chips-then-yoy">
           <div class="dro-dash-chip dro-dash-chip--amber">
@@ -1247,6 +1282,22 @@ onMounted(() => {
       />
     </div>
   </section>
+
+  <DayStockAdjustmentModal
+    :open="stockModalOpen"
+    :meal-period="stockModalMealPeriod"
+    :business-date="stockModalBusinessDate"
+    :remaining="stockModalRemaining"
+    :delta="stockModalDelta"
+    :reason="stockModalReason"
+    :remark="stockModalRemark"
+    :submitting="stockAdjustSubmitting"
+    @update:open="(v) => (stockModalOpen = v)"
+    @update:delta="(v) => (stockModalDelta = v)"
+    @update:reason="(v) => (stockModalReason = v)"
+    @update:remark="(v) => (stockModalRemark = v)"
+    @submit="submitStockAdjustment"
+  />
 </template>
 
 <style scoped>

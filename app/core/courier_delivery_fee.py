@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.services.store_config_service import get_courier_delivery_fee_config
+from app.services.shared.store_config_service import get_courier_delivery_fee_config
 
 
 def courier_delivery_fee_yuan_for_meal_units(

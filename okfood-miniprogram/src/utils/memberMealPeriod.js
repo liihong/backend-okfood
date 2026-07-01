@@ -11,6 +11,8 @@ import { ymdTodayShanghai } from '@/utils/memberDeliveryDate.js'
 
 export const MEAL_PERIOD_LUNCH = 'lunch'
 export const MEAL_PERIOD_DINNER = 'dinner'
+/** 全天请假：后端同时写入已开通的午/晚餐请假字段 */
+export const MEAL_PERIOD_ALL = 'all'
 
 /** @param {object | null | undefined} profile */
 export function entitledMealPeriodsFromProfile(profile) {
@@ -27,6 +29,18 @@ export function entitledMealPeriodsFromProfile(profile) {
 /** @param {object | null | undefined} profile */
 export function hasDinnerEntitlement(profile) {
   return entitledMealPeriodsFromProfile(profile).includes(MEAL_PERIOD_DINNER)
+}
+
+/** 请假页可选餐段：午餐 / 晚餐 / 全天（双餐段才有全天） */
+export function leaveMealPeriodTabOptions(profile) {
+  const entitled = entitledMealPeriodsFromProfile(profile)
+  const tabs = []
+  if (entitled.includes(MEAL_PERIOD_LUNCH)) tabs.push(MEAL_PERIOD_LUNCH)
+  if (entitled.includes(MEAL_PERIOD_DINNER)) tabs.push(MEAL_PERIOD_DINNER)
+  if (entitled.includes(MEAL_PERIOD_LUNCH) && entitled.includes(MEAL_PERIOD_DINNER)) {
+    tabs.push(MEAL_PERIOD_ALL)
+  }
+  return tabs.length ? tabs : [MEAL_PERIOD_LUNCH]
 }
 
 /** @param {object | null | undefined} profile @param {'lunch'|'dinner'} period */
@@ -84,9 +98,11 @@ export function dailyMealUnitsFieldsForPeriod(profile, period) {
   }
 }
 
-/** @param {'lunch'|'dinner'} period */
+/** @param {'lunch'|'dinner'|'all'} period */
 export function mealPeriodLabel(period) {
-  return period === MEAL_PERIOD_DINNER ? '晚餐' : '午餐'
+  if (period === MEAL_PERIOD_DINNER) return '晚餐'
+  if (period === MEAL_PERIOD_ALL) return '全天'
+  return '午餐'
 }
 
 /**

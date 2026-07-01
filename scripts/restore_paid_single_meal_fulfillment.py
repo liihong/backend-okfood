@@ -27,7 +27,7 @@ from sqlalchemy import select
 from app.db.session import SessionLocal
 from app.models.member_address import MemberAddress
 from app.models.single_meal_order import SingleMealOrder
-from app.services.single_meal_order_service import primary_courier_for_region_id
+from app.services.order.single_meal_order_service import primary_courier_for_region_id
 
 
 def _parse_args() -> argparse.Namespace:

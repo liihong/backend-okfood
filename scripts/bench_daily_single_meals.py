@@ -7,7 +7,7 @@ from datetime import date
 from sqlalchemy import event
 
 from app.db.session import SessionLocal
-from app.services.single_meal_order_service import (
+from app.services.order.single_meal_order_service import (
     list_admin_store_single_meal_orders_by_delivery_day,
     summarize_admin_store_single_meal_orders_by_delivery_day,
 )

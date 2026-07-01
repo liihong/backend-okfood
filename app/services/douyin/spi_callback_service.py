@@ -18,7 +18,7 @@ from app.models.enums import CardOrderPayStatus, DouyinRedemptionStatus, MemberC
 from app.models.member_card_order import MemberCardOrder
 from app.models.member_coupon import MemberCoupon
 from app.services.douyin.config_service import resolve_douyin_client_secret_by_client_key
-from app.services.member_card_order_service import revoke_paid_card_order_member_sync
+from app.services.member.member_card_order_service import revoke_paid_card_order_member_sync
 
 logger = logging.getLogger(__name__)
 

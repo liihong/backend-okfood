@@ -9,11 +9,16 @@ export const LOGIN_PRESET_PASSWORD = String(
 ).trim()
 export const ADMIN_TOKEN_KEY = 'okfood_admin_access_token'
 export const ADMIN_KIND_KEY = 'okfood_admin_kind'
+/** 管理端当前操作门店（多店时须与后端 store_id 一致） */
+export const ADMIN_STORE_ID_KEY = 'okfood_admin_store_id'
 const ENV_API_BASE = String(import.meta.env.VITE_API_BASE_URL || '').trim()
 export const API_BASE = ENV_API_BASE.replace(/\/$/, '')
 
 export const adminAccessToken = ref('')
 export const rememberLogin = ref(false)
+/** 管理端当前门店 id，默认 1；可通过 VITE_ADMIN_DEFAULT_STORE_ID 覆盖 */
+const ENV_DEFAULT_STORE_ID = Number(import.meta.env.VITE_ADMIN_DEFAULT_STORE_ID) || 1
+export const adminStoreId = ref(ENV_DEFAULT_STORE_ID)
 /** `full` | `delivery` | `support` | `system`，与登录 JWT / 接口 admin_kind 一致 */
 export const adminKind = ref('full')
 /** 会员列表：会员档案页写入，营业概览预览读取 */
@@ -132,9 +137,50 @@ export function hydrateTokenFromStorage() {
     adminAccessToken.value = (fromLocal || fromSess || '').trim()
     rememberLogin.value = Boolean(fromLocal)
     applyAdminKindFromCurrentToken()
+    hydrateAdminStoreFromStorage()
   } catch {
     /* ignore */
   }
+}
+
+/** 从本地存储恢复管理端门店 id */
+export function hydrateAdminStoreFromStorage() {
+  try {
+    const raw =
+      localStorage.getItem(ADMIN_STORE_ID_KEY) ||
+      sessionStorage.getItem(ADMIN_STORE_ID_KEY)
+    const n = Number(raw)
+    if (Number.isFinite(n) && n >= 1) adminStoreId.value = Math.floor(n)
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 切换管理端操作门店（写入与 token 相同的持久化策略） */
+export function setAdminStoreId(storeId) {
+  const sid = Math.max(1, Math.floor(Number(storeId) || ENV_DEFAULT_STORE_ID))
+  adminStoreId.value = sid
+  try {
+    if (rememberLogin.value) {
+      localStorage.setItem(ADMIN_STORE_ID_KEY, String(sid))
+      sessionStorage.removeItem(ADMIN_STORE_ID_KEY)
+    } else {
+      sessionStorage.setItem(ADMIN_STORE_ID_KEY, String(sid))
+      localStorage.removeItem(ADMIN_STORE_ID_KEY)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 管理端 API：未显式带 store_id 时自动追加当前门店 */
+function appendAdminStoreIdQuery(path) {
+  const p = String(path || '')
+  if (!p.startsWith('/api/admin')) return p
+  if (/[?&]store_id=/.test(p)) return p
+  const sid = Math.max(1, Math.floor(Number(adminStoreId.value) || ENV_DEFAULT_STORE_ID))
+  const sep = p.includes('?') ? '&' : '?'
+  return `${p}${sep}store_id=${sid}`
 }
 
 export function setAdminToken(token) {
@@ -218,7 +264,8 @@ export function errorMessageFromBody(data, fallback) {
 }
 
 export async function apiJson(path, init = {}, { auth = false } = {}) {
-  const url = `${API_BASE}${path}`
+  const reqPath = auth ? appendAdminStoreIdQuery(path) : path
+  const url = `${API_BASE}${reqPath}`
   const headers = {
     'Content-Type': 'application/json',
     ...(init.headers || {}),
@@ -261,7 +308,8 @@ export async function apiJson(path, init = {}, { auth = false } = {}) {
  * @returns {Promise<{ blob: Blob, status: number }>}
  */
 export async function apiBlob(path, init = {}, { auth = false } = {}) {
-  const url = `${API_BASE}${path}`
+  const reqPath = auth ? appendAdminStoreIdQuery(path) : path
+  const url = `${API_BASE}${reqPath}`
   const headers = {
     ...(init.headers || {}),
   }
@@ -299,7 +347,8 @@ export async function apiBlob(path, init = {}, { auth = false } = {}) {
 
 /** multipart 上传（不要设置 Content-Type，由浏览器带 boundary） */
 export async function apiForm(path, formData, { auth = false } = {}) {
-  const url = `${API_BASE}${path}`
+  const reqPath = auth ? appendAdminStoreIdQuery(path) : path
+  const url = `${API_BASE}${reqPath}`
   const headers = {}
   if (auth && adminAccessToken.value) {
     headers.Authorization = `Bearer ${adminAccessToken.value}`
@@ -349,6 +398,23 @@ export function planDefaultTotal(planType) {
   if (planType === '周卡') return 6
   if (planType === '次卡') return 1
   return null
+}
+
+/** 餐段资格 → 午餐 / 晚餐 / 全餐 */
+export function mealScopeLabelFromPeriods(periods) {
+  const set = new Set(Array.isArray(periods) ? periods.map((x) => String(x || '').trim().toLowerCase()) : [])
+  const hasLunch = set.has('lunch')
+  const hasDinner = set.has('dinner')
+  if (hasLunch && hasDinner) return '全餐'
+  if (hasDinner) return '晚餐'
+  if (hasLunch) return '午餐'
+  return '午餐'
+}
+
+/** 管理端方案 A：「周卡 · 全餐」 */
+export function formatPlanTypeDisplay(planType, periods) {
+  const pt = String(planType || '次卡').trim() || '次卡'
+  return `${pt} · ${mealScopeLabelFromPeriods(periods)}`
 }
 
 /** API 日期字段规范为 YYYY-MM-DD */
@@ -453,6 +519,9 @@ export function mapAdminUserToRow(raw, idx) {
       map_location_text: '',
       door_detail: '',
       plan: '次卡',
+      planBase: '次卡',
+      entitled_meal_periods: [],
+      meal_scope_label: '午餐',
       remarks: '',
       daily_meal_units: 1,
       meal_quota_total: 0,
@@ -496,8 +565,12 @@ export function mapAdminUserToRow(raw, idx) {
     status = '待续费'
   }
 
-  const plan = raw.plan_type || '次卡'
-  const totalQuota = planDefaultTotal(plan)
+  const planBase = raw.plan_type || '次卡'
+  const entitledPeriods = Array.isArray(raw.entitled_meal_periods) ? raw.entitled_meal_periods : []
+  const plan =
+    (raw.plan_type_display && String(raw.plan_type_display).trim()) ||
+    formatPlanTypeDisplay(planBase, entitledPeriods)
+  const totalQuota = planDefaultTotal(planBase)
   const mealQuotaTotal = Number(raw.meal_quota_total)
   const hasPersistedTotal = Number.isFinite(mealQuotaTotal) && mealQuotaTotal > 0
   // 有 meal_quota_total 时与 balance 组成「剩余/总」；否则沿用原周卡/月卡展示规则
@@ -534,6 +607,17 @@ export function mapAdminUserToRow(raw, idx) {
     map_location_text: typeof raw.map_location_text === 'string' ? raw.map_location_text : '',
     door_detail: typeof raw.door_detail === 'string' ? raw.door_detail : '',
     plan,
+    planBase,
+    entitled_meal_periods: entitledPeriods,
+    meal_scope_label:
+      (raw.meal_scope_label && String(raw.meal_scope_label).trim()) ||
+      mealScopeLabelFromPeriods(entitledPeriods),
+    dinner_balance: Number(raw.dinner_balance) || 0,
+    dinner_meal_quota_total: Number(raw.dinner_meal_quota_total) || 0,
+    dinner_is_leaved_tomorrow: raw.dinner_is_leaved_tomorrow === true,
+    dinner_tomorrow_leave_target_date: adminUserYmd(raw.dinner_tomorrow_leave_target_date),
+    dinner_leave_range_start: adminUserYmd(raw.dinner_leave_range_start),
+    dinner_leave_range_end: adminUserYmd(raw.dinner_leave_range_end),
     remarks: raw.remarks ?? '',
     daily_meal_units: Math.max(1, Math.min(50, Number(raw.daily_meal_units) || 1)),
     meal_quota_total: hasPersistedTotal ? mealQuotaTotal : 0,

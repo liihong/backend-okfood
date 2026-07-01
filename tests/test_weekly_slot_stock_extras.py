@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models.enums import MealPeriod
-from app.services.menu_day_stock_service import weekly_slot_stock_extras
+from app.services.admin.menu_day_stock_service import weekly_slot_stock_extras
 
 
 def test_weekly_slot_stock_extras_lunch_dinner_independent(db: Session, monkeypatch):
@@ -15,15 +15,15 @@ def test_weekly_slot_stock_extras_lunch_dinner_independent(db: Session, monkeypa
     menu_date = anchor  # slot=1 → 周一
 
     monkeypatch.setattr(
-        "app.services.menu_day_stock_service.dashboard_meal_totals_by_dates",
+        "app.services.admin.menu_day_stock_service.dashboard_meal_totals_by_dates",
         lambda *a, **k: {menu_date: 40 if k.get("meal_period") == MealPeriod.LUNCH.value else 15},
     )
     monkeypatch.setattr(
-        "app.services.menu_day_stock_service.paid_single_retail_portions_by_dates",
+        "app.services.admin.menu_day_stock_service.paid_single_retail_portions_by_dates",
         lambda *a, **k: {menu_date: 5 if k.get("meal_period") == MealPeriod.LUNCH.value else 2},
     )
     monkeypatch.setattr(
-        "app.services.day_stock_service.sum_adjustment_deltas_by_dates",
+        "app.services.admin.day_stock_service.sum_adjustment_deltas_by_dates",
         lambda *a, **k: {menu_date: -3 if k.get("meal_period") == MealPeriod.LUNCH.value else -1},
     )
 
@@ -72,9 +72,9 @@ def test_weekly_slot_stock_extras_skips_breakdown_per_slot(db: Session, monkeypa
         calls["n"] += 1
         raise AssertionError("不应逐槽位调用 get_day_stock_breakdown")
 
-    monkeypatch.setattr("app.services.day_stock_service.get_day_stock_breakdown", _forbidden)
+    monkeypatch.setattr("app.services.admin.day_stock_service.get_day_stock_breakdown", _forbidden)
     monkeypatch.setattr(
-        "app.services.day_stock_service.sum_adjustment_deltas_by_dates",
+        "app.services.admin.day_stock_service.sum_adjustment_deltas_by_dates",
         lambda *a, **k: {anchor + __import__("datetime").timedelta(days=i): 0 for i in range(7)},
     )
 

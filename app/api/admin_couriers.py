@@ -6,7 +6,7 @@ from app.core.config import get_settings
 from app.core.deps import SessionDep, admin_or_delivery_staff_subject
 from app.models.admin_user import AdminUser
 from app.schemas.admin_courier import CourierCreateIn, CourierPinResetIn, CourierUpdateIn
-from app.services.courier_admin_service import (
+from app.services.admin.courier_admin_service import (
     create_courier_admin,
     list_couriers_admin,
     reset_courier_pin,

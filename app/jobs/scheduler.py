@@ -58,7 +58,7 @@ def job_reset_leave_flags() -> None:
             if m.leave_range_end is not None and m.leave_range_end < today:
                 m.leave_range_start = None
                 m.leave_range_end = None
-        from app.services.member_daily_meal_units_service import apply_all_pending_daily_meal_units
+        from app.services.member.member_daily_meal_units_service import apply_all_pending_daily_meal_units
         from app.services.meal_period.dinner_units import apply_all_pending_dinner_daily_meal_units
         from app.models.member_meal_period_state import MemberMealPeriodState
         from app.models.enums import MealPeriod
@@ -115,7 +115,7 @@ def job_low_balance_notify() -> None:
     2. 余量不足配送：扫描 **次日供餐日** 每日多份但剩余次数不够的会员，写入客服系统消息。
     """
     from app.core.timeutil import tomorrow_shanghai
-    from app.services.admin_system_notification_service import (
+    from app.services.admin.admin_system_notification_service import (
         scan_insufficient_balance_delivery_notifications_for_all_stores,
     )
 
@@ -159,7 +159,7 @@ def job_low_balance_notify() -> None:
 
 def job_expire_unpaid_single_meal_orders() -> None:
     """每 2 分钟：单次零售未支付超过 30 分钟的订单自动取消。"""
-    from app.services.single_meal_order_service import expire_stale_unpaid_single_meal_orders
+    from app.services.order.single_meal_order_service import expire_stale_unpaid_single_meal_orders
 
     db = SessionLocal()
     try:
@@ -175,7 +175,7 @@ def job_expire_unpaid_single_meal_orders() -> None:
 
 def job_expire_unpaid_store_retail_orders() -> None:
     """每 2 分钟：商城零售未支付超过 30 分钟的订单自动取消。"""
-    from app.services.store_retail_order_service import expire_stale_unpaid_store_retail_orders
+    from app.services.client.store_retail_order_service import expire_stale_unpaid_store_retail_orders
 
     db = SessionLocal()
     try:
@@ -191,7 +191,7 @@ def job_expire_unpaid_store_retail_orders() -> None:
 
 def job_expire_stale_unpaid_miniprogram_card_orders() -> None:
     """每 2 分钟：购卡未支付超过 30 分钟则释放 locked 券并恢复原价。"""
-    from app.services.member_card_pay_service import expire_stale_unpaid_miniprogram_card_orders
+    from app.services.client.member_card_pay_service import expire_stale_unpaid_miniprogram_card_orders
 
     db = SessionLocal()
     try:
@@ -210,7 +210,7 @@ def job_sf_nightly_auto_push() -> None:
     每日 08:50（上海）：对启用「顺丰自动推单」的门店，自动推送当日业务日配送大表（订阅合并）停靠点至顺丰。
     单次零售订单不在此任务内，须订单管理手动推单。
     """
-    from app.services.sf_same_city_service import run_sf_nightly_auto_push_for_all_stores
+    from app.services.delivery.sf_same_city_service import run_sf_nightly_auto_push_for_all_stores
 
     db = SessionLocal()
     try:

@@ -13,11 +13,11 @@ from app.models.member import Member
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store import Store
 from app.models.tenant import Tenant
-from app.services.delivery_sheet_push_snapshot_service import (
+from app.services.delivery.delivery_sheet_push_snapshot_service import (
     capture_delivery_sheet_absent_members_on_first_push,
     member_qualifies_post_push_whitelist,
 )
-from app.services.delivery_sheet_service import _merged_home_member_ids_when_sheet_frozen
+from app.services.delivery.delivery_sheet_service import _merged_home_member_ids_when_sheet_frozen
 
 
 @pytest.fixture()
@@ -116,7 +116,7 @@ def test_merged_blocks_absent_cancel_leave_allows_first_day_whitelist(merge_db: 
     merge_db.commit()
 
     with patch(
-        "app.services.delivery_sheet_service.post_push_first_day_whitelist_member_ids",
+        "app.services.delivery.delivery_sheet_service.post_push_first_day_whitelist_member_ids",
         return_value={3},
     ):
         merged = _merged_home_member_ids_when_sheet_frozen(
@@ -158,7 +158,7 @@ def test_merged_without_absent_snapshot_only_frozen(merge_db: Session):
     merge_db.commit()
 
     with patch(
-        "app.services.delivery_sheet_service.post_push_first_day_whitelist_member_ids",
+        "app.services.delivery.delivery_sheet_service.post_push_first_day_whitelist_member_ids",
         return_value=set(),
     ):
         merged = _merged_home_member_ids_when_sheet_frozen(

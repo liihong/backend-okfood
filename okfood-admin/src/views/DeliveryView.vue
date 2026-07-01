@@ -367,6 +367,7 @@ async function fetchSheet() {
 
     const q0 = new URLSearchParams(base)
     q0.set('delivery_date', d0)
+    q0.set('include_member_stats', 'false')
 
     const data0 = await apiJson(`${getDeliverySheetApiPath(sheetView.value)}?${q0.toString()}`, {}, { auth: true })
 

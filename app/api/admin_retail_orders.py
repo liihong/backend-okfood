@@ -13,7 +13,7 @@ from app.schemas.store_retail_order import (
     StoreRetailCancelIn,
     StoreRetailOrderIdsIn,
 )
-from app.services.store_retail_order_admin_service import (
+from app.services.admin.store_retail_order_admin_service import (
     admin_assign_courier_store_retail_order,
     admin_cancel_store_retail_order,
     admin_mark_store_retail_order_delivered,

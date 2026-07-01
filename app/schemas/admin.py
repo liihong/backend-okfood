@@ -440,6 +440,25 @@ class MemberAdminOut(BaseModel):
         description="周卡/月卡累计总次数（展示分母）；0 表示未启用或与次卡同源仅用 balance",
     )
     plan_type: str | None
+    entitled_meal_periods: list[str] = Field(
+        default_factory=list,
+        description="开卡工单合并后的餐段资格：lunch / dinner",
+    )
+    meal_scope_label: str = Field("", description="午餐 / 晚餐 / 全餐")
+    plan_type_display: str = Field("", description="管理端展示：周卡 · 全餐（方案 A）")
+    dinner_balance: int = Field(0, ge=0, description="晚餐剩余次数")
+    dinner_meal_quota_total: int = Field(
+        0,
+        ge=0,
+        description="晚餐累计总次数（展示分母）",
+    )
+    dinner_is_leaved_tomorrow: bool = Field(False, description="晚餐：已勾选仅明天请假")
+    dinner_tomorrow_leave_target_date: date | None = Field(
+        None,
+        description="晚餐：仅明日请假目标业务日",
+    )
+    dinner_leave_range_start: date | None = None
+    dinner_leave_range_end: date | None = None
     is_active: bool
     delivery_deferred: bool = Field(
         False,
@@ -498,6 +517,23 @@ class MemberReorderStatsOut(BaseModel):
     )
 
 
+class MemberUnconsumedMealsOut(BaseModel):
+    """档案库未消费餐次与金额：午餐池 members.balance + 晚餐池 member_meal_period_state。"""
+
+    total: int = Field(..., ge=0, description="未消费餐次总数（午餐+晚餐）")
+    lunch_total: int = Field(..., ge=0, description="午餐次数池剩余合计")
+    dinner_total: int = Field(..., ge=0, description="晚餐次数池剩余合计")
+    total_amount_yuan: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=14,
+        decimal_places=2,
+        description="未消费金额合计（按实收×剩余/累计入账；无入账记录时用卡型单价估算）",
+    )
+    lunch_amount_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="午餐池未消费金额")
+    dinner_amount_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="晚餐池未消费金额")
+
+
 class MemberRenewPendingStatsOut(BaseModel):
     """待续费：生效中且剩余次数 <= LOW_BALANCE_THRESHOLD，非暂停/退款/请假。"""
 
@@ -548,6 +584,7 @@ class MemberAnalyticsOut(BaseModel):
     weekly_reorder: MemberReorderStatsOut
     monthly_reorder: MemberReorderStatsOut
     renew_pending: MemberRenewPendingStatsOut
+    unconsumed_meals: MemberUnconsumedMealsOut
     inactive_count: int = Field(..., ge=0, description="未开卡：is_active=false 且非暂停配送")
     paused_delivery_count: int = Field(..., ge=0, description="暂停配送：delivery_deferred=true")
     on_leave_count: int = Field(..., ge=0, description="请假中（含区间请假与明日请假）")
@@ -567,6 +604,10 @@ class AdminMemberLeaveIn(BaseModel):
     type: LeaveType
     start: date | None = None
     end: date | None = None
+    meal_period: Literal["lunch", "dinner", "all"] = Field(
+        "lunch",
+        description="请假餐段：lunch 午餐 / dinner 晚餐 / all 全天；默认 lunch 与现网一致",
+    )
 
 
 class AdminMemberPatchIn(BaseModel):
@@ -901,6 +942,10 @@ class MemberMealCompensationIn(BaseModel):
     """会员补餐赔付：因餐品问题将已消费次数补回余额。"""
 
     meal_units: int = Field(1, ge=1, le=50, description="补餐份数，默认 1")
+    meal_period: Literal["lunch", "dinner"] = Field(
+        "lunch",
+        description="补回餐段：lunch=午餐池（members.balance）；dinner=晚餐池",
+    )
     remark: str | None = Field(None, max_length=500, description="赔付说明（如餐品问题描述）")
 
 
@@ -908,6 +953,7 @@ class MemberMealCompensationOut(BaseModel):
     """补餐赔付结果。"""
 
     member_id: int = Field(..., ge=1)
+    meal_period: str = Field("lunch", description="本次补回的餐段")
     balance_before: int = Field(..., ge=0)
     balance_after: int = Field(..., ge=0)
     meal_units: int = Field(..., ge=1, description="本次补回份数")
@@ -1149,6 +1195,11 @@ class DeliverySheetOut(BaseModel):
         0,
         ge=0,
         description="月卡且 balance=0",
+    )
+    active_dinner_members: int = Field(
+        0,
+        ge=0,
+        description="晚餐次数池 balance>0 的会员数（member_meal_period_state，与午餐统计独立）",
     )
 
 

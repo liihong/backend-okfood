@@ -2,11 +2,11 @@ from fastapi import APIRouter, Depends
 
 from app.core.deps import SessionDep, public_store_dep, PublicStoreContext
 from app.schemas.user import MembershipCardTemplateMemberOut
-from app.services.catalog_admin_service import list_membership_templates, membership_template_public_dump
-from app.services.home_banner_service import list_active_home_banners
-from app.services.home_entry_poster_service import get_active_entry_poster
-from app.services.store_config_service import get_store_config
-from app.services.tenant_integration_service import merged_sf_integration_namespace
+from app.services.admin.catalog_admin_service import list_membership_templates, membership_template_public_dump
+from app.services.client.home_banner_service import list_active_home_banners
+from app.services.client.home_entry_poster_service import get_active_entry_poster
+from app.services.shared.store_config_service import get_store_config
+from app.services.shared.tenant_integration_service import merged_sf_integration_namespace
 from app.utils.response import dump_model, success
 
 router = APIRouter(prefix="/home", tags=["首页"])

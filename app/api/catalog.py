@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.core.deps import SessionDep, public_store_dep, PublicStoreContext
-from app.services.catalog_admin_service import list_retail_menu_public
+from app.services.admin.catalog_admin_service import list_retail_menu_public
 from app.utils.response import success
 
 router = APIRouter(prefix="/catalog", tags=["商品目录"])

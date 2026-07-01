@@ -11,16 +11,16 @@ from app.schemas.common import TokenResponse
 from app.models.courier import Courier
 from app.models.store import Store
 from app.schemas.courier import ConfirmDeliveryIn, ConfirmSingleOrderIn, CourierLoginIn, CourierPhoneLoginIn, CourierSelfOut
-from app.services.courier_admin_service import regions_for_courier
-from app.services.courier_service import (
+from app.services.admin.courier_admin_service import regions_for_courier
+from app.services.delivery.courier_service import (
     confirm_delivery,
     courier_login,
     courier_login_by_phone,
     group_task_rows,
     list_tasks_for_courier,
 )
-from app.services.single_meal_order_service import confirm_single_order_delivery
-from app.services.store_config_service import get_store_config
+from app.services.order.single_meal_order_service import confirm_single_order_delivery
+from app.services.shared.store_config_service import get_store_config
 from app.utils.response import dump_model, success
 
 router = APIRouter(prefix="/courier", tags=["配送端"])

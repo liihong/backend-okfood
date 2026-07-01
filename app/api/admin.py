@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import Response as PlainResponse
 
+from app.core.admin_access import require_member_in_admin_store, require_sf_push_in_admin_tenant
 from app.core.deps import (
     ADMIN_ACCOUNT_DELIVERY,
     ADMIN_ACCOUNT_SUPPORT,
@@ -65,7 +66,7 @@ from app.schemas.admin import (
     MemberMealCompensationIn,
 )
 from app.schemas.common import AdminLoginTokenOut
-from app.services.admin_service import (
+from app.services.admin.admin_service import (
     admin_delete_member,
     admin_login_user,
     admin_weekly_menu_preview,
@@ -86,14 +87,14 @@ from app.services.admin_service import (
     update_settings,
     upsert_dish,
 )
-from app.services.sf_order_fulfillment_service import (
+from app.services.delivery.sf_order_fulfillment_service import (
     admin_apply_sf_fulfillment_for_push_id,
     bulk_admin_resync_subscription_fulfilled_from_sf_monitor_for_delivery_day,
     count_sf_same_city_pushes_for_delivery_date,
     list_sf_same_city_pushes_for_monitor,
     list_sf_same_city_pushes_for_monitor_export,
 )
-from app.services.sf_same_city_service import (
+from app.services.delivery.sf_same_city_service import (
     cancel_sf_same_city_push,
     preview_sf_dinner_same_city,
     preview_sf_same_city,
@@ -103,22 +104,22 @@ from app.services.sf_same_city_service import (
     push_single_meal_retail_to_sf,
     retry_sf_same_city_push_by_id,
 )
-from app.services.store_config_service import get_store_config, update_store_config
-from app.services.delivery_sheet_service import build_delivery_sheet
-from app.services.pickup_verification_service import list_pickup_verification_panel
-from app.services.admin_delivery_fulfillment_service import admin_mark_subscription_fulfilled
-from app.services.member_delivery_deduction_service import list_member_delivered_dates_admin
-from app.services.member_address_service import list_addresses, update_address
-from app.services.member_operation_log_service import (
+from app.services.shared.store_config_service import get_store_config, update_store_config
+from app.services.delivery.delivery_sheet_service import build_delivery_sheet
+from app.services.admin.pickup_verification_service import list_pickup_verification_panel
+from app.services.admin.admin_delivery_fulfillment_service import admin_mark_subscription_fulfilled
+from app.services.admin.member_delivery_deduction_service import list_member_delivered_dates_admin
+from app.services.member.member_address_service import list_addresses, update_address
+from app.services.member.member_operation_log_service import (
     list_member_operations,
     operation_log_to_dict,
 )
-from app.services.member_service import (
+from app.services.member.member_service import (
     admin_member_leave,
     admin_patch_member_profile,
     admin_update_member_address,
 )
-from app.services.single_meal_order_service import (
+from app.services.order.single_meal_order_service import (
     admin_assign_courier_single_meal_order,
     admin_cancel_single_meal_order,
     admin_resync_single_meal_delivered_from_sf_monitor,
@@ -137,30 +138,30 @@ from app.services.single_meal_order_service import (
     get_admin_single_meal_order_list_out,
     sync_single_meal_from_wechat_admin_or_raise,
 )
-from app.services.member_card_order_service import (
+from app.services.member.member_card_order_service import (
     create_card_order,
     delete_card_order,
     list_card_orders_paged,
     list_mall_template_card_orders_for_order_day,
     update_card_order,
 )
-from app.services.member_card_pay_service import (
+from app.services.client.member_card_pay_service import (
     admin_wechat_refund_member_card_order,
     sync_member_card_from_wechat_admin_or_raise,
 )
-from app.services.finance_received_service import (
+from app.services.admin.finance_received_service import (
     _parse_calendar_date,
     finance_paid_card_orders_for_day,
     finance_received_day_window,
     finance_received_month_window,
     finance_received_summary,
 )
-from app.services.member_membership_refund_service import (
+from app.services.admin.member_membership_refund_service import (
     member_membership_refund_confirm,
     member_membership_refund_preview,
 )
-from app.services.member_meal_compensation_service import admin_member_meal_compensation
-from app.services.admin_system_notification_service import (
+from app.services.admin.member_meal_compensation_service import admin_member_meal_compensation
+from app.services.admin.admin_system_notification_service import (
     acknowledge_admin_system_notification,
     admin_system_notification_to_dict,
     count_unacknowledged_admin_system_notifications,
@@ -198,11 +199,27 @@ def _normalize_sf_monitor_push_kind(raw: str | None) -> str | None:
         return None
     if s == "delivery_sheet":
         return "delivery_sheet"
+    if s == "dinner_delivery_sheet":
+        return "dinner_delivery_sheet"
     if s == "single_meal_retail":
         return "single_meal_retail"
     raise HTTPException(
         status_code=400,
-        detail="push_kind 仅支持 delivery_sheet（大表合并）、single_meal_retail（单次零售）或留空",
+        detail="push_kind 仅支持 delivery_sheet、dinner_delivery_sheet、single_meal_retail 或留空",
+    )
+
+
+def _normalize_sf_monitor_meal_period(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    s = raw.strip().lower()
+    if not s or s == "all":
+        return None
+    if s in ("lunch", "dinner"):
+        return s
+    raise HTTPException(
+        status_code=400,
+        detail="meal_period 仅支持 lunch、dinner 或留空（全部）",
     )
 
 
@@ -260,7 +277,7 @@ def upsert_kitchen_plan_route(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """快捷设定营业日周菜单「日总份数」（与本周菜单配置页同源，不联动顶卡等其他数据）。"""
-    from app.services.store_kitchen_plan_service import set_menu_day_total_stock_by_business_date
+    from app.services.admin.store_kitchen_plan_service import set_menu_day_total_stock_by_business_date
 
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     total = set_menu_day_total_stock_by_business_date(
@@ -291,7 +308,7 @@ def day_stock_summary_route(
 ):
     """日库存拆解：后厨出餐、配送、零售、损耗、剩余（只读）。"""
     from app.models.enums import MealPeriod
-    from app.services.day_stock_service import breakdown_to_dict, get_day_stock_breakdown
+    from app.services.admin.day_stock_service import breakdown_to_dict, get_day_stock_breakdown
 
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     d = business_date or today_shanghai()
@@ -315,7 +332,7 @@ def day_stock_adjustments_list_route(
     meal_period: Annotated[str, Query(description="lunch/dinner")] = "lunch",
 ):
     """日库存损耗/回补流水列表。"""
-    from app.services.day_stock_service import list_day_stock_adjustments
+    from app.services.admin.day_stock_service import list_day_stock_adjustments
 
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     items = list_day_stock_adjustments(
@@ -332,8 +349,8 @@ def day_stock_adjustments_create_route(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """报损耗/回补：禁止直接改剩余，仅写流水。"""
-    from app.services.admin_service import invalidate_dashboard_live_summary_cache
-    from app.services.day_stock_service import breakdown_to_dict, create_day_stock_adjustment
+    from app.services.admin.admin_service import invalidate_dashboard_live_summary_cache
+    from app.services.admin.day_stock_service import breakdown_to_dict, create_day_stock_adjustment
 
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     bd = create_day_stock_adjustment(
@@ -425,6 +442,10 @@ def delivery_sheet(
         str | None,
         Query(description="按会员手机号筛选；可输后几位或完整号码，忽略空格与符号"),
     ] = None,
+    include_member_stats: Annotated[
+        bool,
+        Query(description="是否附带顶栏会员统计；配送页可传 false 加速加载"),
+    ] = True,
 ):
     """午餐配送大表（默认）：纯晚餐卡会员不会出现。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
@@ -437,6 +458,7 @@ def delivery_sheet(
         phone=phone_key,
         store_id=store_id,
         sheet_view="lunch",
+        include_member_stats=include_member_stats,
     )
     return success(data=dump_model(payload), msg="获取成功")
 
@@ -449,6 +471,10 @@ def delivery_sheet_lunch(
     delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
     area: Annotated[str | None, Query(description="按默认配送地址所属片区筛选，可选")] = None,
     phone: Annotated[str | None, Query(description="按会员手机号筛选")] = None,
+    include_member_stats: Annotated[
+        bool,
+        Query(description="是否附带顶栏会员统计；配送页可传 false 加速加载"),
+    ] = True,
 ):
     """午餐配送大表（与 /delivery-sheet 等价）。"""
     return delivery_sheet(
@@ -458,6 +484,7 @@ def delivery_sheet_lunch(
         delivery_date=delivery_date,
         area=area,
         phone=phone,
+        include_member_stats=include_member_stats,
     )
 
 
@@ -469,6 +496,10 @@ def delivery_sheet_dinner(
     delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
     area: Annotated[str | None, Query(description="按默认配送地址所属片区筛选，可选")] = None,
     phone: Annotated[str | None, Query(description="按会员手机号筛选")] = None,
+    include_member_stats: Annotated[
+        bool,
+        Query(description="是否附带顶栏会员统计；配送页可传 false 加速加载"),
+    ] = True,
 ):
     """晚餐配送大表：仅含持有晚餐餐段卡的会员。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
@@ -481,6 +512,7 @@ def delivery_sheet_dinner(
         phone=phone_key,
         store_id=store_id,
         sheet_view="dinner",
+        include_member_stats=include_member_stats,
     )
     return success(data=dump_model(payload), msg="获取成功")
 
@@ -493,6 +525,10 @@ def delivery_sheet_lunch_dinner(
     delivery_date: Annotated[date | None, Query(description="配送业务日，默认上海当日")] = None,
     area: Annotated[str | None, Query(description="按默认配送地址所属片区筛选，可选")] = None,
     phone: Annotated[str | None, Query(description="按会员手机号筛选")] = None,
+    include_member_stats: Annotated[
+        bool,
+        Query(description="是否附带顶栏会员统计；配送页可传 false 加速加载"),
+    ] = True,
 ):
     """午晚餐双餐段会员运维视图（推顺丰仍分午餐/晚餐两次推单）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
@@ -505,6 +541,7 @@ def delivery_sheet_lunch_dinner(
         phone=phone_key,
         store_id=store_id,
         sheet_view="lunch_dinner",
+        include_member_stats=include_member_stats,
     )
     return success(data=dump_model(payload), msg="获取成功")
 
@@ -660,11 +697,16 @@ def delivery_sf_push_stats(
     delivery_date: Annotated[date, Query(description="配送业务日，与下方列表「业务日」筛选一致")],
     admin_username: str = Depends(admin_or_delivery_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    meal_period: Annotated[
+        str | None,
+        Query(description="餐段：lunch=午餐；dinner=晚餐；留空=全部"),
+    ] = None,
 ):
     """按配送业务日统计：推单记录总数 / 创单成功（未取消）/ 创单失败 / 取消订单；并按大表合并、单次零售拆分。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    mp = _normalize_sf_monitor_meal_period(meal_period)
     raw = count_sf_same_city_pushes_for_delivery_date(
-        db, store_id=store_id, delivery_date=delivery_date
+        db, store_id=store_id, delivery_date=delivery_date, meal_period=mp
     )
     out = SfSameCityPushStatsOut(
         delivery_date=delivery_date.isoformat(),
@@ -750,8 +792,12 @@ def delivery_sf_pushes(
     push_kind: Annotated[
         str | None,
         Query(
-            description="订单类别：delivery_sheet=大表合并；single_meal_retail=单次零售；留空=全部",
+            description="订单类别：delivery_sheet=午餐大表；dinner_delivery_sheet=晚餐大表；single_meal_retail=单次零售；留空=全部",
         ),
+    ] = None,
+    meal_period: Annotated[
+        str | None,
+        Query(description="餐段：lunch=午餐；dinner=晚餐；留空=全部"),
     ] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -761,6 +807,7 @@ def delivery_sf_pushes(
     try:
         st = _normalize_sf_monitor_create_status(sf_create_status)
         pk = _normalize_sf_monitor_push_kind(push_kind)
+        mp = _normalize_sf_monitor_meal_period(meal_period)
         items_raw, total = list_sf_same_city_pushes_for_monitor(
             db,
             delivery_date=delivery_date,
@@ -773,6 +820,7 @@ def delivery_sf_pushes(
             sf_order_id_contains=(sf_order_id or "").strip() or None,
             member_phone_contains=(member_phone or "").strip() or None,
             push_kind=pk,
+            meal_period=mp,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -806,7 +854,11 @@ def delivery_sf_pushes_export_xlsx(
     sf_order_id: Annotated[str | None, Query(description="顺丰运单号包含")] = None,
     push_kind: Annotated[
         str | None,
-        Query(description="订单类别：delivery_sheet / single_meal_retail；留空=全部"),
+        Query(description="订单类别：delivery_sheet / dinner_delivery_sheet / single_meal_retail；留空=全部"),
+    ] = None,
+    meal_period: Annotated[
+        str | None,
+        Query(description="餐段：lunch=午餐；dinner=晚餐；留空=全部"),
     ] = None,
     admin_username: str = Depends(admin_or_delivery_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
@@ -816,6 +868,7 @@ def delivery_sf_pushes_export_xlsx(
     try:
         st = _normalize_sf_monitor_create_status(sf_create_status)
         pk = _normalize_sf_monitor_push_kind(push_kind)
+        mp = _normalize_sf_monitor_meal_period(meal_period)
         rows = list_sf_same_city_pushes_for_monitor_export(
             db,
             delivery_date=delivery_date,
@@ -826,11 +879,12 @@ def delivery_sf_pushes_export_xlsx(
             sf_order_id_contains=(sf_order_id or "").strip() or None,
             member_phone_contains=(member_phone or "").strip() or None,
             push_kind=pk,
+            meal_period=mp,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     try:
-        from app.services.sf_same_city_monitor_xlsx import build_sf_push_monitor_xlsx
+        from app.services.admin.sf_same_city_monitor_xlsx import build_sf_push_monitor_xlsx
     except ImportError as e:
         raise HTTPException(
             status_code=503,
@@ -852,12 +906,9 @@ def delivery_sf_retry_push(
     admin_username: str = Depends(admin_or_delivery_staff_subject),
 ):
     """创单失败或已取消的成功单：按当前配送大表数据重推该停靠点（更新原记录）。"""
-    from app.models.sf_same_city_push import SfSameCityPush
-
-    _ = admin_username
-    push_row = db.get(SfSameCityPush, int(push_id))
-    if push_row is None:
-        raise HTTPException(status_code=404, detail="推单记录不存在")
+    push_row, _, _ = require_sf_push_in_admin_tenant(
+        db, admin_username=admin_username, push_id=int(push_id)
+    )
     try:
         r = retry_sf_same_city_push_by_id(db, push_id=push_id)
     except ValueError as e:
@@ -887,7 +938,7 @@ def delivery_sf_cancel_push(
     admin_username: str = Depends(admin_or_delivery_staff_subject),
 ):
     """调用顺丰 ``cancelorder`` 取消配送（商家异常场景）；同步返回顺丰响应 JSON。"""
-    _ = admin_username
+    require_sf_push_in_admin_tenant(db, admin_username=admin_username, push_id=int(push_id))
     raw = cancel_sf_same_city_push(db, push_id=push_id, cancel_reason=body.cancel_reason)
     out = SfSameCityCancelOut.model_validate(raw)
     return success(data=dump_model(out), msg="取消请求已提交")
@@ -904,7 +955,7 @@ def delivery_sf_apply_fulfillment(
 
     须创单成功且顺丰回调状态已为妥投完单 (17)；幂等，已扣次会员不会重复扣减。
     """
-    _ = admin_username
+    require_sf_push_in_admin_tenant(db, admin_username=admin_username, push_id=int(push_id))
     try:
         out = admin_apply_sf_fulfillment_for_push_id(db, push_id=int(push_id))
     except ValueError as e:
@@ -921,6 +972,10 @@ def delivery_sf_sync_subscription_fulfillment(
         date | None,
         Query(description="配送业务日（上海日历日），默认当天"),
     ] = None,
+    meal_period: Annotated[
+        str | None,
+        Query(description="餐段：lunch=午餐大表；dinner=晚餐大表；默认 lunch"),
+    ] = None,
     max_pushes: Annotated[int, Query(description="最多扫描推单条数（1～500）")] = 500,
 ):
     """
@@ -931,11 +986,13 @@ def delivery_sf_sync_subscription_fulfillment(
     _ = admin_username
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     day = delivery_date or today_shanghai()
+    mp = _normalize_sf_monitor_meal_period(meal_period) or "lunch"
     out = bulk_admin_resync_subscription_fulfilled_from_sf_monitor_for_delivery_day(
         db,
         store_id=store_id,
         delivery_date=day,
         max_pushes=max_pushes,
+        meal_period=mp,
     )
     return success(data=out, msg=str(out.get("summary") or "同步完成"))
 
@@ -1094,9 +1151,12 @@ def admin_delete_member_route(
     member_id: int,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """删除会员：无业务流水时物理删除；否则逻辑删除并保留追溯数据。"""
-    _ = admin_username
+    require_member_in_admin_store(
+        db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
+    )
     out = admin_delete_member(db, member_id)
     return success(data=out, msg=out.get("msg") or "已删除")
 
@@ -1715,6 +1775,7 @@ def member_leave(
         typ=body.type,
         start=body.start,
         end=body.end,
+        meal_period=body.meal_period,
         operator=admin_username,
         ip_address=ip,
     )
@@ -1726,12 +1787,12 @@ def admin_member_addresses_list(
     member_id: int,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """会员档案：列出该会员全部配送地址（含地图文案、门牌、经纬度与省市区）。"""
-    _ = admin_username
-    m = db.get(Member, member_id)
-    if not m or m.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="会员不存在")
+    require_member_in_admin_store(
+        db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
+    )
     items = list_addresses(db, member_id)
     return success(data=[dump_model(i) for i in items], msg="获取成功")
 
@@ -1741,12 +1802,12 @@ def admin_member_delivered_dates(
     member_id: int,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """会员档案：消费记录（套餐送达扣次 + 单次购买会员卡扣次）。"""
-    _ = admin_username
-    m = db.get(Member, member_id)
-    if not m or m.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="会员不存在")
+    require_member_in_admin_store(
+        db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
+    )
     items, total, total_meal_units, truncated = list_member_delivered_dates_admin(db, member_id)
     return success(
         data={
@@ -1767,11 +1828,12 @@ def admin_member_address_patch(
     body: MemberAddressUpdateIn,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """管理端保存会员地址：可与小程序拆分一致（地点文案 / 门牌），坐标变更时服务端逆地理写入省市区并重算片区。"""
-    m = db.get(Member, member_id)
-    if not m or m.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="会员不存在")
+    require_member_in_admin_store(
+        db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
+    )
     xf = request.headers.get("x-forwarded-for")
     ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
     out = update_address(
@@ -1791,15 +1853,15 @@ def admin_member_operation_logs(
     member_id: int,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     page: int = 1,
     page_size: int = 20,
     operation_type: str | None = None,
 ):
     """会员档案：查看该会员操作日志（小程序自助与后台档案修改；含操作人与摘要）。"""
-    _ = admin_username
-    m = db.get(Member, member_id)
-    if not m or m.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="会员不存在")
+    require_member_in_admin_store(
+        db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
+    )
     items, total = list_member_operations(
         db,
         member_id=member_id,
@@ -1824,9 +1886,10 @@ def admin_member_membership_refund_preview(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """会员档案：退卡退款预览（已消费次数、可退次数、应退金额）。"""
-    _ = admin_username
-    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    preview = member_membership_refund_preview(db, member_id=int(member_id), store_id=store_id)
+    _, sid = require_member_in_admin_store(
+        db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
+    )
+    preview = member_membership_refund_preview(db, member_id=int(member_id), store_id=sid)
     return success(data=dump_model(preview), msg="获取成功")
 
 
@@ -1840,13 +1903,15 @@ def admin_member_membership_refund_confirm(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """会员档案：确认退卡退款；清零剩余次数并写入财务扣减记录。"""
-    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    _, sid = require_member_in_admin_store(
+        db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
+    )
     xf = request.headers.get("x-forwarded-for")
     ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
     preview = member_membership_refund_confirm(
         db,
         member_id=int(member_id),
-        store_id=store_id,
+        store_id=sid,
         body=body,
         operator=f"admin:{admin_username}"[:100],
         ip_address=ip,
@@ -1864,13 +1929,15 @@ def admin_member_meal_compensation_endpoint(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """会员档案：补餐赔付；将已消费次数补回余额并写入操作审计。"""
-    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    _, sid = require_member_in_admin_store(
+        db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
+    )
     xf = request.headers.get("x-forwarded-for")
     ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
     out = admin_member_meal_compensation(
         db,
         member_id=int(member_id),
-        store_id=store_id,
+        store_id=sid,
         body=body,
         operator=f"admin:{admin_username}"[:100],
         ip_address=ip,

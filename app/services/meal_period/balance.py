@@ -80,8 +80,9 @@ def member_has_any_period_balance(db: Session, member: Member) -> bool:
 
 def sync_member_is_active_from_period_balances(db: Session, member: Member) -> None:
     """
-    激活态由「已起送且未暂停」+「任一餐段有余次」共同决定。
+    激活态由「未暂停配送」+「任一餐段有余次」共同决定。
     午餐扣至 0 但晚餐仍有余次时保持激活；反之亦然。
+    delivery_start_date 为空时仍可激活（与 eligible 起送日为空=即日生效一致）。
     """
     lunch_bal = max(0, int(member.balance or 0))
     dinner_row = db.get(
@@ -93,8 +94,9 @@ def sync_member_is_active_from_period_balances(db: Session, member: Member) -> N
     if not any_balance:
         member.is_active = False
         return
-    if member.delivery_start_date is not None and not bool(member.delivery_deferred):
-        member.is_active = True
+    if bool(member.delivery_deferred):
+        return
+    member.is_active = True
 
 
 def apply_dinner_recharge_delta(
@@ -104,6 +106,7 @@ def apply_dinner_recharge_delta(
     amount: int,
     plan_type: PlanType | None = None,
     bump_meal_quota_total: bool = False,
+    skip_plan_type_update: bool = False,
     operator: str,
     log_detail: str | None = None,
 ) -> int:
@@ -115,7 +118,8 @@ def apply_dinner_recharge_delta(
     row.balance = balance_before + int(amount)
     if row.balance < 0:
         raise HTTPException(status_code=400, detail="晚餐次数不足，无法扣减到负数")
-    if plan_type is not None and amount > 0:
+    # 开卡工单入账时由 plan_type_sync 统一写入；此处仅处理手工充值等场景
+    if plan_type is not None and amount > 0 and not skip_plan_type_update:
         member.plan_type = plan_type.value
     if amount > 0 and plan_type is not None:
         bump_q = plan_type in (PlanType.WEEK, PlanType.MONTH) or bool(bump_meal_quota_total)

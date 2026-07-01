@@ -10,7 +10,7 @@ from app.db.base import Base
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store import Store
 from app.models.tenant import Tenant
-from app.services.sf_same_city_service import _failed_push_id_by_stop
+from app.services.delivery.sf_same_city_service import _failed_push_id_by_stop
 
 
 @pytest.fixture()

@@ -13,9 +13,9 @@ from app.models.enums import BalanceReason
 from app.models.member import Member
 from app.models.member_operation_log import MemberOperationLog
 from app.schemas.admin import MemberMealCompensationIn
-from app.services.member_delivery_deduction_service import _meal_compensation_items
-from app.services.member_meal_compensation_service import admin_member_meal_compensation
-from app.services.member_operation_log_service import OP_MEAL_COMPENSATION
+from app.services.admin.member_delivery_deduction_service import _meal_compensation_items
+from app.services.admin.member_meal_compensation_service import admin_member_meal_compensation
+from app.services.member.member_operation_log_service import OP_MEAL_COMPENSATION
 
 
 @pytest.fixture()

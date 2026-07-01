@@ -17,7 +17,7 @@ from app.models.member import Member
 from app.models.single_meal_order import SingleMealOrder
 from app.models.store import Store
 from app.models.tenant import Tenant
-from app.services.member_delivery_deduction_service import (
+from app.services.admin.member_delivery_deduction_service import (
     list_member_delivery_deductions,
     total_member_consumption_meal_units,
 )

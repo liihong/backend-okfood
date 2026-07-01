@@ -11,7 +11,7 @@ from app.core.timeutil import today_shanghai
 from app.models.enums import MealPeriod
 from app.models.member import Member
 from app.models.member_meal_period_state import MemberMealPeriodState
-from app.services.member_service import MAX_DAILY_MEAL_UNITS
+from app.services.member.member_service import MAX_DAILY_MEAL_UNITS
 from app.services.meal_period.units import effective_daily_meal_units_for_period
 
 DailyMealUnitsChangeMode = Literal["immediate", "scheduled", "unchanged"]
@@ -50,7 +50,7 @@ def pending_dinner_daily_meal_units(row: MemberMealPeriodState | None) -> int | 
 
 
 def dinner_delivery_sheet_pushed_today(db: Session, *, store_id: int) -> bool:
-    from app.services.delivery_day_lock_service import has_dinner_delivery_sheet_sf_push_on_date
+    from app.services.delivery.delivery_day_lock_service import has_dinner_delivery_sheet_sf_push_on_date
 
     return has_dinner_delivery_sheet_sf_push_on_date(
         db,
@@ -86,11 +86,14 @@ def set_dinner_daily_meal_units_change(
 
 
 def apply_all_pending_dinner_daily_meal_units(db: Session) -> int:
-    """00:01 任务：将晚餐 pending 份数落库。"""
+    """00:01 任务：将晚餐 pending 份数落库（仅处理未删除会员的有效行）。"""
     rows = db.scalars(
-        select(MemberMealPeriodState).where(
+        select(MemberMealPeriodState)
+        .join(Member, Member.id == MemberMealPeriodState.member_id)
+        .where(
             MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
             MemberMealPeriodState.daily_meal_units_pending.isnot(None),
+            Member.deleted_at.is_(None),
         )
     ).all()
     n = 0

@@ -20,9 +20,9 @@ from app.models.membership_card_template import MembershipCardTemplate
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.schemas.admin import CardOrderCreateIn, RechargeIn
-from app.services.admin_service import apply_member_recharge_delta
+from app.services.admin.admin_service import apply_member_recharge_delta
 from app.services.meal_period.balance import apply_dinner_recharge_delta
-from app.services.member_card_order_service import (
+from app.services.member.member_card_order_service import (
     apply_paid_card_order_to_member_if_pending,
     create_card_order,
     revoke_paid_card_order_member_sync,

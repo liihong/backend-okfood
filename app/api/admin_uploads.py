@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, Request, UploadFile
 from app.core.deps import admin_staff_subject
 from app.core.limiter import limiter
 from app.schemas.admin import FileUploadOut
-from app.services.oss_upload_service import upload_image_bytes
+from app.services.shared.oss_upload_service import upload_image_bytes
 from app.utils.response import dump_model, success
 
 router = APIRouter(prefix="/admin", tags=["管理端"])

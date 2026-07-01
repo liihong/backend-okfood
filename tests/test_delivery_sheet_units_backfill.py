@@ -11,7 +11,7 @@ from app.models.member import Member
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store import Store
 from app.models.tenant import Tenant
-from app.services.delivery_sheet_units_backfill_service import (
+from app.services.delivery.delivery_sheet_units_backfill_service import (
     build_member_meal_units_from_sf_pushes,
     upsert_delivery_sheet_units_snapshot,
 )

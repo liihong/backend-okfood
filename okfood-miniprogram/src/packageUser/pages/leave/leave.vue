@@ -12,18 +12,13 @@
       <view class="page-leave">
         <view v-if="showMealPeriodTabs" class="leave-period-tabs">
           <view
+            v-for="tab in leavePeriodTabs"
+            :key="tab"
             class="leave-period-tab"
-            :class="{ 'leave-period-tab--active': mealPeriod === 'lunch' }"
-            @tap="switchMealPeriod('lunch')"
+            :class="{ 'leave-period-tab--active': mealPeriod === tab }"
+            @tap="switchMealPeriod(tab)"
           >
-            午餐
-          </view>
-          <view
-            class="leave-period-tab"
-            :class="{ 'leave-period-tab--active': mealPeriod === 'dinner' }"
-            @tap="switchMealPeriod('dinner')"
-          >
-            晚餐
+            {{ mealPeriodLabel(tab) }}
           </view>
         </view>
         <view v-if="leaveRefreshing" class="leave-sync-hint">
@@ -136,21 +131,45 @@ import { guardMemberDeliverySelfService } from '@/utils/memberSelfServiceGuard.j
 import {
   MEAL_PERIOD_LUNCH,
   MEAL_PERIOD_DINNER,
-  hasDinnerEntitlement,
+  MEAL_PERIOD_ALL,
+  leaveMealPeriodTabOptions,
   leaveFieldsForPeriod,
   mealPeriodLabel,
 } from '@/utils/memberMealPeriod.js'
 
 const mealPeriod = ref(MEAL_PERIOD_LUNCH)
 const memberProfileCache = ref(null)
-const showMealPeriodTabs = computed(() => hasDinnerEntitlement(memberProfileCache.value))
+const leavePeriodTabs = computed(() => leaveMealPeriodTabOptions(memberProfileCache.value))
+const showMealPeriodTabs = computed(() => leavePeriodTabs.value.length > 1)
+
+function leaveFieldsForActiveTab(me) {
+  if (mealPeriod.value === MEAL_PERIOD_ALL) {
+    const lunch = leaveFieldsForPeriod(me, MEAL_PERIOD_LUNCH)
+    const dinner = leaveFieldsForPeriod(me, MEAL_PERIOD_DINNER)
+    const lrL = lunch.leave_range
+    const lrD = dinner.leave_range
+    const range =
+      lrL && lrL.start && lrL.end
+        ? lrL
+        : lrD && lrD.start && lrD.end
+          ? lrD
+          : null
+    return {
+      is_leaved_tomorrow: Boolean(lunch.is_leaved_tomorrow || dinner.is_leaved_tomorrow),
+      tomorrow_leave_target_date:
+        lunch.tomorrow_leave_target_date || dinner.tomorrow_leave_target_date || null,
+      leave_range: range,
+    }
+  }
+  return leaveFieldsForPeriod(me, mealPeriod.value)
+}
 
 function leavePostBody(extra = {}) {
   return { meal_period: mealPeriod.value, ...extra }
 }
 
 function applyLeaveFieldsFromProfile(me) {
-  const f = leaveFieldsForPeriod(me, mealPeriod.value)
+  const f = leaveFieldsForActiveTab(me)
   isTomorrowLeave.value = Boolean(f.is_leaved_tomorrow)
   tomorrowTargetYmd.value = ymdFromApi(f.tomorrow_leave_target_date)
   const lr = f.leave_range
@@ -555,6 +574,10 @@ async function syncLeaveFromServer(opts = {}) {
     ])
     if (gen !== leaveSyncGeneration) return
     memberProfileCache.value = me
+    const tabs = leaveMealPeriodTabOptions(me)
+    if (tabs.length && !tabs.includes(mealPeriod.value)) {
+      mealPeriod.value = tabs[0]
+    }
     leavePrepLocked.value = Boolean(me?.leave_prep_locked)
     applyLeaveFieldsFromProfile(me)
     redirectLeaveIfNoCardAndNotOnLeave(me)

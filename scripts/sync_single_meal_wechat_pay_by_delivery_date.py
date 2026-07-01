@@ -31,7 +31,7 @@ from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models.single_meal_order import SingleMealOrder
-from app.services.single_meal_order_service import sync_single_meal_order_from_wechat_query
+from app.services.order.single_meal_order_service import sync_single_meal_order_from_wechat_query
 
 
 def _parse_args() -> argparse.Namespace:

@@ -8,7 +8,7 @@ from app.core.deps import MemberIdScoped, SessionDep
 from app.core.limiter import limiter
 from app.integrations.wechat_pay_v2 import resolve_request_client_ip
 from app.schemas.store_retail_order import StoreRetailOrderCreateIn
-from app.services.store_retail_order_service import (
+from app.services.client.store_retail_order_service import (
     create_store_retail_order,
     get_member_store_retail_order,
     list_member_store_retail_orders,

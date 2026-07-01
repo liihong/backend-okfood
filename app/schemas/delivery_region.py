@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.user import Location
-from app.services.region_geo import extract_outer_ring
+from app.services.shared.region_geo import extract_outer_ring
 
 
 class RegionCourierAssignIn(BaseModel):

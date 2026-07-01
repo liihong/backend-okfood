@@ -10,8 +10,8 @@ from app.db.base import Base
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store import Store
 from app.models.tenant import Tenant
-from app.services.delivery_day_lock_service import sf_cancelled_sheet_member_ids_for_delivery_date
-from app.services.sf_same_city_service import (
+from app.services.delivery.delivery_day_lock_service import sf_cancelled_sheet_member_ids_for_delivery_date
+from app.services.delivery.sf_same_city_service import (
     _active_success_push_stop_ids_set,
     _cancelled_success_push_id_by_stop,
     _sf_push_row_is_cancelled,

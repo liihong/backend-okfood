@@ -25,7 +25,6 @@ const exporting = ref(false)
 const cancelBusyId = ref(null)
 const retryBusyId = ref(null)
 const fulfillBusyId = ref(null)
-const bulkFulfillLoading = ref(false)
 const items = ref([])
 const total = ref(0)
 const page = ref(1)
@@ -39,7 +38,7 @@ const orderStatusFilter = ref('')
 const createStatusFilter = ref('')
 const memberPhoneFilter = ref('')
 const sfOrderIdFilter = ref('')
-/** 订单类别：空=全部；delivery_sheet=大表合并；single_meal_retail=单次零售 */
+/** 订单类别：空=全部；lunch/dinner=餐段；其余为 push_kind */
 const pushKindFilter = ref('')
 
 const createStatusOptions = [
@@ -51,9 +50,26 @@ const createStatusOptions = [
 
 const pushKindOptions = [
   { value: '', label: '全部类别' },
-  { value: 'delivery_sheet', label: '大表合并' },
+  { value: 'lunch', label: '午餐' },
+  { value: 'dinner', label: '晚餐' },
+  { value: 'delivery_sheet', label: '午餐大表' },
+  { value: 'dinner_delivery_sheet', label: '晚餐大表' },
   { value: 'single_meal_retail', label: '单次零售' },
 ]
+
+const activeCategoryLabel = computed(() => {
+  const opt = pushKindOptions.find((o) => o.value === (pushKindFilter.value || ''))
+  return opt?.label || '全部类别'
+})
+
+function applyCategoryFilterToQuery(q) {
+  const pk = (pushKindFilter.value || '').trim()
+  if (pk === 'lunch' || pk === 'dinner') {
+    q.set('meal_period', pk)
+  } else if (pk) {
+    q.set('push_kind', pk)
+  }
+}
 
 const pushStats = ref(null)
 const statsLoading = ref(false)
@@ -76,6 +92,7 @@ async function fetchPushStats() {
   try {
     const q = new URLSearchParams()
     q.set('delivery_date', d)
+    applyCategoryFilterToQuery(q)
     const data = await apiJson(`/api/admin/delivery-sf/pushes/stats?${q.toString()}`, {}, { auth: true })
     pushStats.value = data && typeof data === 'object' ? data : null
   } catch (e) {
@@ -107,8 +124,7 @@ function appendMonitorListQuery(q) {
   if (ph) q.set('member_phone', ph)
   const oid = (sfOrderIdFilter.value || '').trim()
   if (oid) q.set('sf_order_id', oid)
-  const pk = (pushKindFilter.value || '').trim()
-  if (pk) q.set('push_kind', pk)
+  applyCategoryFilterToQuery(q)
 }
 
 async function fetchList() {
@@ -143,7 +159,7 @@ function onDateChange() {
 
 function onPushKindChange() {
   page.value = 1
-  void fetchList()
+  void refreshMonitor()
 }
 
 function onOrderStatusChange() {
@@ -183,7 +199,7 @@ async function exportExcel() {
     try {
       const a = document.createElement('a')
       a.href = href
-      a.download = `顺丰订单监控_${d}.xlsx`
+      a.download = `顺丰订单监控_${d}_${activeCategoryLabel.value}.xlsx`
       a.rel = 'noopener'
       document.body.appendChild(a)
       a.click()
@@ -325,7 +341,7 @@ function canRedispatchSfRow(row) {
   const code = row?.error_code
   if (code !== 0 && code !== '0') return false
   const kind = String(row?.push_kind || '').trim()
-  if (kind && kind !== 'delivery_sheet') return false
+  if (kind && kind !== 'delivery_sheet' && kind !== 'dinner_delivery_sheet') return false
   if (row?.merchant_cancel_requested_at) return true
   const stRaw = row?.sf_callback_order_status
   if (stRaw !== undefined && stRaw !== null && stRaw !== '') {
@@ -462,48 +478,6 @@ async function onApplyFulfillmentSf(row) {
   }
 }
 
-async function onBulkSyncSubscriptionFulfillment() {
-  const d = (deliveryDate.value || '').trim()
-  if (!d) {
-    showToast('请先选择业务日', 'warning')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      `将扫描业务日 ${d} 下所有大表合并推单，对顺丰已妥投(17)但未扣次的订阅会员批量补标送达。`,
-      '批量补标送达',
-      {
-        confirmButtonText: '确认',
-        cancelButtonText: '关闭',
-        type: 'info',
-        distinguishCancelAndClose: true,
-      },
-    )
-  } catch {
-    return
-  }
-  bulkFulfillLoading.value = true
-  try {
-    const q = new URLSearchParams()
-    q.set('delivery_date', d)
-    const res = await apiJson(
-      `/api/admin/delivery-sf/pushes/sync-subscription-fulfillment?${q.toString()}`,
-      { method: 'POST', body: JSON.stringify({}) },
-      { auth: true },
-    )
-    showToast((res && res.summary) || '同步完成', 'success')
-  } catch (e) {
-    const status = e && typeof e.status === 'number' ? e.status : 0
-    if (status === 401) {
-      handleAdminLogout()
-      return
-    }
-    showToast(e instanceof Error ? e.message : '批量补标失败', 'error')
-  } finally {
-    bulkFulfillLoading.value = false
-  }
-}
-
 onMounted(() => {
   void refreshMonitor()
 })
@@ -517,7 +491,7 @@ onMounted(() => {
           顺丰侧「订单完成」回调或配送状态中<strong>妥投完单 (17)</strong>通过后，系统将按停靠点对订阅会员<strong>标记送达并扣次数</strong>（与配送大表「标记送达」一致）；单点餐仅更新履约状态。
         </p>
         <p v-if="pushStats" class="sf-monitor-stats">
-          <strong>业务日 {{ pushStats.delivery_date }}</strong>：共 {{ pushStats.total }} 单（大表合并
+          <strong>{{ activeCategoryLabel }} · 业务日 {{ pushStats.delivery_date }}</strong>：共 {{ pushStats.total }} 单（大表
           {{ pushStats.delivery_sheet?.total ?? 0 }} · 单次零售
           {{ pushStats.single_meal_retail?.total ?? 0 }}）· 成功 {{ pushStats.success }} · 失败
           {{ pushStats.failed }} · 取消 {{ pushStats.cancelled != null ? pushStats.cancelled : 0 }}
@@ -543,7 +517,7 @@ onMounted(() => {
               placeholder="全部类别"
               :disabled="loading"
               clearable
-              class="sf-monitor-select-narrow"
+              class="sf-monitor-select-category"
               @change="onPushKindChange"
             >
               <el-option
@@ -618,15 +592,6 @@ onMounted(() => {
               <RefreshCw v-if="!loading" :size="16" stroke-width="2" />
               刷新
             </span>
-          </el-button>
-          <el-button
-            type="primary"
-            plain
-            :loading="bulkFulfillLoading"
-            :disabled="loading || !(deliveryDate || '').trim()"
-            @click="onBulkSyncSubscriptionFulfillment"
-          >
-            批量补标送达
           </el-button>
           <el-button
             type="primary"
@@ -829,6 +794,9 @@ onMounted(() => {
 }
 .sf-monitor-select-narrow {
   width: 132px;
+}
+.sf-monitor-select-category {
+  width: 148px;
 }
 .sf-monitor-input-phone {
   width: 168px;

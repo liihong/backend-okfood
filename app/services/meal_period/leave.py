@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.enums import MealPeriod
 from app.models.member import Member
 from app.models.member_meal_period_state import MemberMealPeriodState
-from app.services.leave import is_absent_on_delivery_date, is_absent_on_delivery_date_for_leave_fields
+from app.services.member.leave import is_absent_on_delivery_date, is_absent_on_delivery_date_for_leave_fields
 
 
 def is_dinner_absent_on_delivery_date(
