@@ -1886,7 +1886,7 @@ def admin_member_membership_refund_preview(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """会员档案：退卡退款预览（已消费次数、可退次数、应退金额）。"""
-    _, sid = require_member_in_admin_store(
+    _, _, sid = require_member_in_admin_store(
         db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
     )
     preview = member_membership_refund_preview(db, member_id=int(member_id), store_id=sid)
@@ -1903,7 +1903,7 @@ def admin_member_membership_refund_confirm(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """会员档案：确认退卡退款；清零剩余次数并写入财务扣减记录。"""
-    _, sid = require_member_in_admin_store(
+    _, _, sid = require_member_in_admin_store(
         db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
     )
     xf = request.headers.get("x-forwarded-for")
@@ -1929,7 +1929,7 @@ def admin_member_meal_compensation_endpoint(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """会员档案：补餐赔付；将已消费次数补回余额并写入操作审计。"""
-    _, sid = require_member_in_admin_store(
+    _, _, sid = require_member_in_admin_store(
         db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
     )
     xf = request.headers.get("x-forwarded-for")
