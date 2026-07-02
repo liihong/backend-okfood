@@ -42,6 +42,49 @@ def _leave_operation_meta(typ: LeaveType, after: dict, *, scope_label: str) -> t
     return OP_LEAVE_CANCEL, f"{scope_label}取消所有请假"
 
 
+def _sync_frozen_delivery_sheet_after_admin_same_day_leave(
+    db: Session,
+    *,
+    member: Member,
+    source: str,
+    targets: frozenset[str],
+    before_absent_lunch: bool,
+    after_absent_lunch: bool,
+    before_absent_dinner: bool,
+    after_absent_dinner: bool,
+) -> None:
+    """管理端：当日请假生效时，从冻结大表快照剔除并写入 absent（幂等，可补历史未同步数据）。"""
+    if source != "admin":
+        return
+    today_d = today_shanghai()
+    from app.services.delivery.delivery_sheet_push_snapshot_service import (
+        apply_admin_same_day_leave_to_frozen_delivery_sheet_snapshots,
+    )
+
+    if (
+        MealPeriod.LUNCH.value in targets
+        and after_absent_lunch
+    ):
+        apply_admin_same_day_leave_to_frozen_delivery_sheet_snapshots(
+            db,
+            store_id=int(member.store_id),
+            delivery_date=today_d,
+            member_id=int(member.id),
+            meal_period=MealPeriod.LUNCH.value,
+        )
+    if (
+        MealPeriod.DINNER.value in targets
+        and after_absent_dinner
+    ):
+        apply_admin_same_day_leave_to_frozen_delivery_sheet_snapshots(
+            db,
+            store_id=int(member.store_id),
+            delivery_date=today_d,
+            member_id=int(member.id),
+            meal_period=MealPeriod.DINNER.value,
+        )
+
+
 def _try_notify_leave_cancel_after_prep(
     db: Session,
     *,
@@ -252,6 +295,17 @@ def coordinated_leave_request(
             source=source,
             meal_period=MealPeriod.LUNCH.value,
         )
+
+    _sync_frozen_delivery_sheet_after_admin_same_day_leave(
+        db,
+        member=m,
+        source=source,
+        targets=targets,
+        before_absent_lunch=before_absent_lunch,
+        after_absent_lunch=after_absent_lunch,
+        before_absent_dinner=before_absent_dinner,
+        after_absent_dinner=after_absent_dinner,
+    )
 
     db.commit()
     db.refresh(m)

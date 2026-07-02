@@ -32,7 +32,7 @@ const props = defineProps({
 
 const emit = defineEmits(['menu-day-stock-saved'])
 
-/** @typedef {{ kind: 'subscription', member_id: number, name: string, phone: string, balance: number, meal_quota_total: number, is_delivered: boolean }} SubscriptionPickupRow */
+/** @typedef {{ kind: 'subscription', member_id: number, name: string, phone: string, daily_meal_units: number, balance: number, meal_quota_total: number, is_delivered: boolean }} SubscriptionPickupRow */
 /** @typedef {{ kind: 'retail', order_id: number, name: string, phone: string, dish_title: string, quantity: number, is_delivered: boolean }} RetailPickupRow */
 /** @typedef {SubscriptionPickupRow | RetailPickupRow} PickupRow */
 
@@ -40,6 +40,8 @@ const pickupSearch = ref('')
 const pickupLoading = ref(false)
 /** @type {import('vue').Ref<PickupRow[]>} */
 const pickupRows = ref([])
+/** 接口返回的待自提份数合计（订阅 daily_meal_units + 零售 quantity） */
+const pickupPendingCount = ref(0)
 /** 核销中行的唯一键：订阅 sub:{member_id}，零售 retail:{order_id} */
 const markingKey = ref(null)
 
@@ -112,7 +114,24 @@ watch(
   { immediate: true },
 )
 
-const pendingPickupCount = computed(() => pickupRows.value.filter((r) => !r.is_delivered).length)
+const pendingPickupCount = computed(() => pickupPendingCount.value)
+
+/** 单行当日自提份数：订阅取 daily_meal_units，零售取 quantity */
+function pickupPortionCount(row) {
+  if (row.kind === 'retail') {
+    return Math.max(1, Math.trunc(Number(row.quantity) || 1))
+  }
+  return Math.max(1, Math.trunc(Number(row.daily_meal_units) || 1))
+}
+
+function formatPickupPortionLabel(row) {
+  const count = pickupPortionCount(row)
+  if (row.kind === 'retail') {
+    const dish = String(row.dish_title || '').trim()
+    return dish ? `${dish} · ${count} 份` : `${count} 份`
+  }
+  return `${count} 份`
+}
 
 const filteredPickupRows = computed(() => {
   const q = pickupSearch.value.trim().toLowerCase()
@@ -147,6 +166,7 @@ async function fetchPickupList() {
   const today = (props.shanghaiToday || '').trim()
   if (today && d0 > today) {
     pickupRows.value = []
+    pickupPendingCount.value = 0
     return
   }
   pickupLoading.value = true
@@ -157,6 +177,7 @@ async function fetchPickupList() {
       { auth: true },
     )
     pickupRows.value = Array.isArray(data?.rows) ? data.rows : []
+    pickupPendingCount.value = Math.max(0, Math.trunc(Number(data?.pending_count) || 0))
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -165,6 +186,7 @@ async function fetchPickupList() {
       return
     }
     pickupRows.value = []
+    pickupPendingCount.value = 0
     showToast(e instanceof Error ? e.message : '加载自提列表失败', 'error')
   } finally {
     pickupLoading.value = false
@@ -486,8 +508,7 @@ watch(
           <thead>
             <tr>
               <th>名称</th>
-              <th>电话</th>
-              <th>次数/菜品</th>
+              <th>自提份数</th>
               <th>状态</th>
               <th class="dpk-th-action">操作</th>
             </tr>
@@ -498,21 +519,19 @@ watch(
                 {{ row.name || '—' }}
                 <span v-if="row.kind === 'retail'" class="dpk-retail-tag">零售</span>
               </td>
-              <td class="dpk-td-phone">{{ row.phone || '—' }}</td>
               <td>
                 <span
-                  v-if="row.kind === 'subscription'"
-                  class="dpk-quota"
-                  :class="{ 'dpk-quota--muted': row.is_delivered }"
+                  class="dpk-portion"
+                  :class="{ 'dpk-portion--muted': row.is_delivered }"
                 >
-                  {{ formatQuotaDisplay(row).bal }} 次 / 共 {{ formatQuotaDisplay(row).total }} 次
+                  {{ formatPickupPortionLabel(row) }}
                 </span>
                 <span
-                  v-else
-                  class="dpk-quota"
-                  :class="{ 'dpk-quota--muted': row.is_delivered }"
+                  v-if="row.kind === 'subscription'"
+                  class="dpk-balance-hint"
+                  :class="{ 'dpk-balance-hint--muted': row.is_delivered }"
                 >
-                  {{ row.dish_title || '—' }} × {{ row.quantity }}
+                  卡包 {{ formatQuotaDisplay(row).bal }} / {{ formatQuotaDisplay(row).total }} 次
                 </span>
               </td>
               <td>
@@ -541,7 +560,7 @@ watch(
               </td>
             </tr>
             <tr v-if="pickupRows.length && !filteredPickupRows.length">
-              <td colspan="5" class="dpk-empty-filter">无匹配客户，请调整搜索条件</td>
+              <td colspan="4" class="dpk-empty-filter">无匹配客户，请调整搜索条件</td>
             </tr>
           </tbody>
         </table>
@@ -712,20 +731,28 @@ watch(
   vertical-align: middle;
 }
 
-.dpk-td-phone {
-  font-family: var(--okfood-font-number);
-  font-weight: 700;
-  color: #64748b;
-}
-
-.dpk-quota {
+.dpk-portion {
+  display: block;
   font-family: var(--okfood-font-number);
   font-weight: 900;
+  font-size: 13px;
   color: #0d5c46;
 }
 
-.dpk-quota--muted {
+.dpk-portion--muted {
   color: #64748b;
+}
+
+.dpk-balance-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.dpk-balance-hint--muted {
+  color: #cbd5e1;
 }
 
 .dpk-badge {

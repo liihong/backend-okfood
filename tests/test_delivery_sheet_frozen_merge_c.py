@@ -9,11 +9,15 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.base import Base
 from app.models.delivery_sheet_push_absent_snapshot import DeliverySheetPushAbsentSnapshot
+from app.models.delivery_sheet_push_units_snapshot import DeliverySheetPushUnitsSnapshot
 from app.models.member import Member
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store import Store
 from app.models.tenant import Tenant
+from app.core.timeutil import beijing_now_naive
 from app.services.delivery.delivery_sheet_push_snapshot_service import (
+    FROZEN_MEMBER_IDS_SNAPSHOT_KEY,
+    apply_admin_same_day_leave_to_frozen_delivery_sheet_snapshots,
     capture_delivery_sheet_absent_members_on_first_push,
     member_qualifies_post_push_whitelist,
 )
@@ -29,6 +33,7 @@ def merge_db() -> Session:
         Member.__table__,
         SfSameCityPush.__table__,
         DeliverySheetPushAbsentSnapshot.__table__,
+        DeliverySheetPushUnitsSnapshot.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -165,3 +170,106 @@ def test_merged_without_absent_snapshot_only_frozen(merge_db: Session):
             merge_db, delivery_date=d, store_id=1
         )
     assert merged == {10}
+
+
+def test_admin_same_day_leave_excludes_member_from_frozen_merged(merge_db: Session):
+    """推单后管理端当日请假：写入 absent 并从份数快照剔除，大表与取消重推路径均不再计入。"""
+    d = date(2026, 6, 5)
+    _add_member(merge_db, mid=20, phone="17638337665")
+    merge_db.add(
+        SfSameCityPush(
+            store_id=1,
+            delivery_date=d,
+            stop_id="stop-c",
+            push_kind="delivery_sheet",
+            shop_order_id="shop-c",
+            error_code=0,
+            request_snapshot={"fulfillment_member_ids": [20]},
+        )
+    )
+    merge_db.add(
+        SfSameCityPush(
+            store_id=1,
+            delivery_date=d,
+            stop_id="stop-c",
+            push_kind="delivery_sheet",
+            shop_order_id="shop-c-cancel",
+            error_code=0,
+            merchant_cancel_requested_at=beijing_now_naive(),
+            request_snapshot={"fulfillment_member_ids": [20]},
+        )
+    )
+    merge_db.add(
+        DeliverySheetPushUnitsSnapshot(
+            store_id=1,
+            delivery_date=d,
+            meal_period="lunch",
+            member_meal_units={"20": 1, FROZEN_MEMBER_IDS_SNAPSHOT_KEY: [20]},
+        )
+    )
+    merge_db.commit()
+
+    apply_admin_same_day_leave_to_frozen_delivery_sheet_snapshots(
+        merge_db, store_id=1, delivery_date=d, member_id=20, meal_period="lunch"
+    )
+    merge_db.commit()
+
+    with patch(
+        "app.services.delivery.delivery_sheet_service.post_push_first_day_whitelist_member_ids",
+        return_value=set(),
+    ):
+        merged = _merged_home_member_ids_when_sheet_frozen(
+            merge_db, delivery_date=d, store_id=1
+        )
+    assert 20 not in merged
+
+    absent_row = merge_db.get(
+        DeliverySheetPushAbsentSnapshot,
+        {"store_id": 1, "delivery_date": d, "meal_period": "lunch"},
+    )
+    assert absent_row is not None
+    assert 20 in absent_row.absent_member_ids
+
+    units_row = merge_db.get(
+        DeliverySheetPushUnitsSnapshot,
+        {"store_id": 1, "delivery_date": d, "meal_period": "lunch"},
+    )
+    assert units_row is not None
+    assert "20" not in units_row.member_meal_units
+    assert 20 not in units_row.member_meal_units[FROZEN_MEMBER_IDS_SNAPSHOT_KEY]
+
+
+def test_cancelled_sf_without_leave_keeps_member_for_repush(merge_db: Session):
+    """仅取消顺丰、未请假：会员仍保留在冻结大表待送名单，便于重推。"""
+    d = date(2026, 6, 6)
+    _add_member(merge_db, mid=21, phone="13000000021")
+    merge_db.add(
+        DeliverySheetPushUnitsSnapshot(
+            store_id=1,
+            delivery_date=d,
+            meal_period="lunch",
+            member_meal_units={"21": 1, FROZEN_MEMBER_IDS_SNAPSHOT_KEY: [21]},
+        )
+    )
+    merge_db.add(
+        SfSameCityPush(
+            store_id=1,
+            delivery_date=d,
+            stop_id="stop-d",
+            push_kind="delivery_sheet",
+            shop_order_id="shop-d",
+            error_code=0,
+            merchant_cancel_requested_at=beijing_now_naive(),
+            request_snapshot={"fulfillment_member_ids": [21]},
+        )
+    )
+    merge_db.commit()
+
+    with patch(
+        "app.services.delivery.delivery_sheet_service.post_push_first_day_whitelist_member_ids",
+        return_value=set(),
+    ):
+        merged = _merged_home_member_ids_when_sheet_frozen(
+            merge_db, delivery_date=d, store_id=1
+        )
+    assert merged == {21}

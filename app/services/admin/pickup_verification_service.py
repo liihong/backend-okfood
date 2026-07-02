@@ -21,6 +21,7 @@ from app.services.delivery.courier_service import (
     eligible_members_for_store_pickup,
     extra_delivered_ineligible_subscribers,
 )
+from app.services.delivery.delivery_sheet_meal_units_service import DeliverySheetMealUnitsContext
 from app.services.delivery.delivery_sheet_service import (
     _member_balance_quota,
     _store_delivered_member_ids_on_date,
@@ -59,6 +60,7 @@ def _subscription_pickup_rows(
         day_delivered_member_ids=day_delivered_ids,
     )
     all_pu = list(pu_members) + list(ex_pu)
+    units_ctx = DeliverySheetMealUnitsContext.load(db, store_id=sid, delivery_date=d)
 
     rows: list[PickupVerificationSubscriptionRowOut] = []
     for mem in sorted(all_pu, key=lambda x: (x.id in day_delivered_ids, (x.phone or ""))):
@@ -68,6 +70,7 @@ def _subscription_pickup_rows(
                 member_id=int(mem.id),
                 name=(mem.name or "").strip(),
                 phone=(mem.phone or "").strip(),
+                daily_meal_units=units_ctx.units_for(mem),
                 balance=bal,
                 meal_quota_total=quota,
                 is_delivered=int(mem.id) in day_delivered_ids,
@@ -122,7 +125,15 @@ def list_pickup_verification_panel(
     sub_rows = _subscription_pickup_rows(db, store_id=store_id, delivery_date=delivery_date)
     retail_rows = _retail_pickup_rows(db, store_id=store_id, delivery_date=delivery_date)
     combined = [*sub_rows, *retail_rows]
-    pending = sum(1 for r in combined if not r.is_delivered)
+
+    def _row_pending_units(row: PickupVerificationSubscriptionRowOut | PickupVerificationRetailRowOut) -> int:
+        if row.is_delivered:
+            return 0
+        if isinstance(row, PickupVerificationRetailRowOut):
+            return max(1, int(row.quantity))
+        return max(1, int(row.daily_meal_units))
+
+    pending = sum(_row_pending_units(r) for r in combined)
     return PickupVerificationListOut(
         delivery_date=delivery_date,
         pending_count=pending,

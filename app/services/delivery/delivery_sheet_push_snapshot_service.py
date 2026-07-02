@@ -93,6 +93,151 @@ def capture_delivery_sheet_absent_members_on_first_push(
     db.flush()
 
 
+def _delivery_sheet_frozen_for_period(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
+) -> bool:
+    """当日该餐段是否已进入推单冻结口径（份数快照或有效大表推单记录）。"""
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    if _get_units_snapshot_row(
+        db, store_id=int(store_id), delivery_date=delivery_date, meal_period=period
+    ) is not None:
+        return True
+    from app.services.delivery.delivery_day_lock_service import (
+        has_delivery_sheet_sf_push_on_date,
+        has_dinner_delivery_sheet_sf_push_on_date,
+    )
+
+    if period == MealPeriod.DINNER.value:
+        return has_dinner_delivery_sheet_sf_push_on_date(
+            db, store_id=int(store_id), delivery_date=delivery_date
+        )
+    return has_delivery_sheet_sf_push_on_date(
+        db, store_id=int(store_id), delivery_date=delivery_date
+    )
+
+
+def merge_member_into_delivery_sheet_absent_snapshot(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    member_id: int,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
+) -> None:
+    """将会员并入当日 absent 快照（推单后新增请假：阻止取消顺丰重推路径再次并入大表）。"""
+    pk = _snapshot_pk(
+        store_id=int(store_id), delivery_date=delivery_date, meal_period=meal_period
+    )
+    mid = int(member_id)
+    row = db.get(DeliverySheetPushAbsentSnapshot, pk)
+    if row is None:
+        db.add(
+            DeliverySheetPushAbsentSnapshot(
+                store_id=pk["store_id"],
+                delivery_date=pk["delivery_date"],
+                meal_period=pk["meal_period"],
+                absent_member_ids=[mid],
+            )
+        )
+        db.flush()
+        return
+    raw = row.absent_member_ids
+    seen: set[int] = set()
+    if isinstance(raw, list):
+        for x in raw:
+            try:
+                seen.add(int(x))
+            except (TypeError, ValueError):
+                continue
+    if mid in seen:
+        return
+    seen.add(mid)
+    row.absent_member_ids = sorted(seen)
+    db.flush()
+
+
+def remove_member_from_delivery_sheet_units_snapshot(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    member_id: int,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
+) -> bool:
+    """从份数快照剔除会员（含 ``__frozen_member_ids__``），释放锁单日应配送份数。"""
+    row = _get_units_snapshot_row(
+        db, store_id=int(store_id), delivery_date=delivery_date, meal_period=meal_period
+    )
+    if row is None:
+        return False
+    raw = row.member_meal_units
+    if not isinstance(raw, dict):
+        return False
+    mid = int(member_id)
+    payload: dict[str, object] = dict(raw)
+    changed = False
+    key = str(mid)
+    if key in payload:
+        del payload[key]
+        changed = True
+    frozen_raw = payload.get(FROZEN_MEMBER_IDS_SNAPSHOT_KEY)
+    if isinstance(frozen_raw, list):
+        new_frozen: list[int] = []
+        for x in frozen_raw:
+            try:
+                if int(x) != mid:
+                    new_frozen.append(int(x))
+            except (TypeError, ValueError):
+                continue
+        if len(new_frozen) != len(frozen_raw):
+            payload[FROZEN_MEMBER_IDS_SNAPSHOT_KEY] = sorted(new_frozen)
+            changed = True
+    if not changed:
+        return False
+    row.member_meal_units = payload
+    db.flush()
+    return True
+
+
+def apply_admin_same_day_leave_to_frozen_delivery_sheet_snapshots(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    member_id: int,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
+) -> bool:
+    """
+    推单冻结日：管理端代会员当日请假生效后，写入 absent 快照并从份数快照 frozen 剔除。
+    不单独 commit；无推单冻结时不写库。
+    """
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    sid = int(store_id)
+    if not _delivery_sheet_frozen_for_period(
+        db, store_id=sid, delivery_date=delivery_date, meal_period=period
+    ):
+        return False
+    merge_member_into_delivery_sheet_absent_snapshot(
+        db,
+        store_id=sid,
+        delivery_date=delivery_date,
+        member_id=int(member_id),
+        meal_period=period,
+    )
+    remove_member_from_delivery_sheet_units_snapshot(
+        db,
+        store_id=sid,
+        delivery_date=delivery_date,
+        member_id=int(member_id),
+        meal_period=period,
+    )
+    return True
+
+
 def absent_member_ids_at_first_push(
     db: Session,
     *,
