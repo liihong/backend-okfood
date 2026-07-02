@@ -175,7 +175,7 @@ const router = createRouter({
           meta: {
             title: '会员统计',
             pageSubtitle: '周/月卡档案库总览、套餐结构、续卡率与运营状态分布',
-            ownerAdminOnly: true,
+            fullAdminOnly: true,
             hidePageTitle: true,
           },
         },

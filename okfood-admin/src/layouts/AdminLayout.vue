@@ -390,7 +390,7 @@ function onTabClose(tab) {
           <el-menu-item index="/couriers">配送员管理</el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="showOwnerAdminMenus" index="sub-stats">
+        <el-sub-menu v-if="showFullAdminMenus" index="sub-stats">
           <template #title>
             <div class="menu-item-inner">
               <PieChart :size="20" stroke-width="2" />
@@ -398,7 +398,7 @@ function onTabClose(tab) {
             </div>
           </template>
           <el-menu-item index="/stats/members">会员统计</el-menu-item>
-          <el-menu-item index="/stats/finance">财务统计</el-menu-item>
+          <el-menu-item v-if="showOwnerAdminMenus" index="/stats/finance">财务统计</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu v-if="showFullAdminMenus" index="sub-menu-mgmt">

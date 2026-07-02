@@ -23,6 +23,7 @@ from app.schemas.marketing.coupon import (
     MemberCouponBatchGrantIn,
     MemberCouponBatchGrantOut,
     MemberCouponGrantIn,
+    MemberCouponListSummaryOut,
     MemberCouponOut,
     UserMemberCouponAvailableOut,
     UserMemberCouponReminderOut,
@@ -289,18 +290,16 @@ def revoke_member_coupon(db: Session, *, coupon_id: int, store_id: int) -> Membe
     return _member_coupon_to_out(db, row)
 
 
-def list_member_coupons_paged(
-    db: Session,
+def _member_coupons_list_query(
     *,
     store_id: int,
-    page: int = 1,
-    page_size: int = 20,
     member_id: int | None = None,
     member_phone: str | None = None,
     template_id: int | None = None,
     status: str | None = None,
     biz_type: str | None = None,
-) -> tuple[list[MemberCouponOut], int]:
+):
+    """构建发放记录列表/统计共用查询（不含排序分页）。"""
     q = select(MemberCoupon).where(MemberCoupon.store_id == int(store_id))
     if member_id is not None:
         q = q.where(MemberCoupon.member_id == int(member_id))
@@ -316,6 +315,66 @@ def list_member_coupons_paged(
         q = q.where(MemberCoupon.status == status.strip())
     if biz_type:
         q = q.where(MemberCoupon.biz_type == biz_type.strip())
+    return q
+
+
+def summarize_member_coupons(
+    db: Session,
+    *,
+    store_id: int,
+    member_id: int | None = None,
+    member_phone: str | None = None,
+    template_id: int | None = None,
+    status: str | None = None,
+    biz_type: str | None = None,
+) -> MemberCouponListSummaryOut:
+    """按当前筛选条件统计已使用/未使用张数。"""
+    base = _member_coupons_list_query(
+        store_id=store_id,
+        member_id=member_id,
+        member_phone=member_phone,
+        template_id=template_id,
+        status=status,
+        biz_type=biz_type,
+    ).subquery()
+    used_count = db.scalar(
+        select(func.count()).select_from(base).where(base.c.status == MemberCouponStatus.USED.value)
+    ) or 0
+    unused_count = db.scalar(
+        select(func.count())
+        .select_from(base)
+        .where(
+            base.c.status.in_(
+                (
+                    MemberCouponStatus.AVAILABLE.value,
+                    MemberCouponStatus.LOCKED.value,
+                )
+            )
+        )
+    ) or 0
+    return MemberCouponListSummaryOut(used_count=int(used_count), unused_count=int(unused_count))
+
+
+def list_member_coupons_paged(
+    db: Session,
+    *,
+    store_id: int,
+    page: int = 1,
+    page_size: int = 20,
+    member_id: int | None = None,
+    member_phone: str | None = None,
+    template_id: int | None = None,
+    status: str | None = None,
+    biz_type: str | None = None,
+) -> tuple[list[MemberCouponOut], int]:
+    q = _member_coupons_list_query(
+        store_id=store_id,
+        member_id=member_id,
+        member_phone=member_phone,
+        template_id=template_id,
+        status=status,
+        biz_type=biz_type,
+    )
     total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows = db.scalars(
         q.order_by(MemberCoupon.id.desc())

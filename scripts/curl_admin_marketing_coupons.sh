@@ -43,7 +43,7 @@ curl -sS -X POST "${BASE}/api/admin/marketing/member-coupons/grant-batch?store_i
   -d "{\"template_id\": ${TPL_ID}, \"member_phones\": [\"${MEMBER_PHONE}\"], \"remark\": \"curl批量测试\"}" \
   | python3 -m json.tool
 
-echo "== 发放记录 =="
+echo "== 发放记录（含 summary 统计） =="
 curl -sS "${BASE}/api/admin/marketing/member-coupons?store_id=${STORE_ID}&page=1" \
   -H "Authorization: Bearer ${TOKEN}" | python3 -m json.tool
 

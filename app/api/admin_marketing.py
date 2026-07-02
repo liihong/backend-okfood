@@ -25,6 +25,7 @@ from app.services.marketing.member_coupon_service import (
     grant_member_coupons_batch,
     list_member_coupons_paged,
     revoke_member_coupon,
+    summarize_member_coupons,
 )
 from app.schemas.marketing.home_banner import (
     HomeBannerActiveIn,
@@ -134,6 +135,10 @@ def marketing_list_member_coupons(
     template_id: Annotated[int | None, Query()] = None,
     status: Annotated[str | None, Query()] = None,
     biz_type: Annotated[str | None, Query()] = None,
+    include_summary: Annotated[
+        bool,
+        Query(description="是否返回 summary 统计；翻页时可传 false 跳过重复统计"),
+    ] = True,
 ):
     """用户持券发放记录。"""
     _ = admin_username
@@ -149,12 +154,24 @@ def marketing_list_member_coupons(
         status=status,
         biz_type=biz_type,
     )
+    summary = None
+    if include_summary:
+        summary = summarize_member_coupons(
+            db,
+            store_id=sid,
+            member_id=member_id,
+            member_phone=member_phone,
+            template_id=template_id,
+            status=status,
+            biz_type=biz_type,
+        )
     return page_response(
         items=[dump_model(x) for x in items],
         total=total,
         page=page,
         page_size=page_size,
         msg="获取成功",
+        summary=dump_model(summary) if summary is not None else None,
     )
 
 

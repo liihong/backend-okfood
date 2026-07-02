@@ -172,3 +172,10 @@ class UserMemberCouponReminderOut(BaseModel):
     count: int = Field(..., ge=0)
     max_discount_yuan: str
     coupons: list[UserMemberCouponAvailableOut] = Field(default_factory=list)
+
+
+class MemberCouponListSummaryOut(BaseModel):
+    """管理端发放记录：按当前筛选条件统计已用/未用张数。"""
+
+    used_count: int = Field(..., ge=0, description="已使用（status=used）")
+    unused_count: int = Field(..., ge=0, description="未使用（status=available 或 locked）")

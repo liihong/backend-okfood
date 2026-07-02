@@ -25,6 +25,8 @@ const grantPrefill = ref({
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+/** 当前筛选下已用/未用张数（来自接口 summary） */
+const summary = ref({ used_count: null, unused_count: null })
 const pageSizeOptions = [10, 20, 50, 100]
 const filters = ref({
   member_phone: '',
@@ -38,18 +40,25 @@ const STATUS_LABEL = {
   expired: '已过期',
 }
 
-async function loadList() {
+async function loadList({ includeSummary = true } = {}) {
   loading.value = true
   try {
     const q = new URLSearchParams()
     q.set('store_id', String(storeId.value))
     q.set('page', String(page.value))
     q.set('page_size', String(pageSize.value))
+    if (!includeSummary) q.set('include_summary', 'false')
     const ph = filters.value.member_phone.trim()
     if (ph) q.set('member_phone', ph)
     const data = await apiJson(`/api/admin/marketing/member-coupons?${q.toString()}`, {}, { auth: true })
     list.value = Array.isArray(data?.items) ? data.items : []
     total.value = Number(data?.total) || 0
+    if (includeSummary && data?.summary && typeof data.summary === 'object') {
+      summary.value = {
+        used_count: Number(data.summary.used_count) || 0,
+        unused_count: Number(data.summary.unused_count) || 0,
+      }
+    }
     // 作废等操作后，当前页可能已无数据，自动回退一页
     if (list.value.length === 0 && page.value > 1) {
       page.value -= 1
@@ -60,6 +69,7 @@ async function loadList() {
     showToast(e instanceof Error ? e.message : '加载失败', 'error')
     list.value = []
     total.value = 0
+    summary.value = { used_count: null, unused_count: null }
   } finally {
     loading.value = false
   }
@@ -150,7 +160,7 @@ function onReset() {
 
 function onPageChange(nextPage) {
   page.value = nextPage
-  void loadList()
+  void loadList({ includeSummary: false })
 }
 
 function onPageSizeChange(nextSize) {
@@ -193,6 +203,15 @@ onMounted(async () => {
     <div class="table-container">
       <div class="table-header">
         <h2 class="table-title">优惠券发放记录</h2>
+        <div v-if="summary.used_count != null" class="coupon-grants-summary" aria-label="优惠券使用统计">
+          <span class="coupon-grants-summary__item">
+            已使用 <strong class="coupon-grants-summary__value coupon-grants-summary__value--used">{{ summary.used_count }}</strong> 张
+          </span>
+          <span class="coupon-grants-summary__sep">·</span>
+          <span class="coupon-grants-summary__item">
+            未使用 <strong class="coupon-grants-summary__value coupon-grants-summary__value--unused">{{ summary.unused_count }}</strong> 张
+          </span>
+        </div>
       </div>
 
       <div class="coupon-grants-toolbar">
@@ -279,6 +298,30 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.table-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.coupon-grants-summary {
+  font-size: 14px;
+  color: #64748b;
+}
+.coupon-grants-summary__item strong {
+  font-weight: 700;
+}
+.coupon-grants-summary__value--used {
+  color: #16a34a;
+}
+.coupon-grants-summary__value--unused {
+  color: #d97706;
+}
+.coupon-grants-summary__sep {
+  margin: 0 8px;
+  color: #cbd5e1;
+}
 .coupon-grants-toolbar {
   display: flex;
   align-items: center;
