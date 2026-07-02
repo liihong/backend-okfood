@@ -26,7 +26,6 @@ import {
   Sparkles,
   ArrowUpRight,
   UtensilsCrossed,
-  Banknote,
 } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
@@ -54,14 +53,6 @@ function fmtCount(raw) {
   if (raw == null || raw === '') return '—'
   const n = Number(raw)
   return Number.isFinite(n) ? String(Math.trunc(n)) : '—'
-}
-
-/** 金额展示（保留两位小数） */
-function fmtYuan(raw) {
-  if (loading.value) return '…'
-  if (raw == null || raw === '') return '—'
-  const n = Number(raw)
-  return Number.isFinite(n) ? n.toFixed(2) : '—'
 }
 
 /** SVG 圆环进度：pct 0–100 */
@@ -502,22 +493,6 @@ onActivated(() => {
           <p class="member-stats-ops-summary__hint">
             午餐 {{ fmtCount(analytics?.unconsumed_meals?.lunch_total) }} 次
             · 晚餐 {{ fmtCount(analytics?.unconsumed_meals?.dinner_total) }} 次
-          </p>
-        </div>
-        <div class="member-stats-ops-summary member-stats-ops-summary--amount" aria-label="未消费金额汇总">
-          <span class="member-stats-ops-summary__icon member-stats-ops-summary__icon--amount" aria-hidden="true">
-            <Banknote :size="18" stroke-width="2.25" />
-          </span>
-          <div class="member-stats-ops-summary__main">
-            <span class="member-stats-ops-summary__label">未消费金额</span>
-            <strong class="member-stats-ops-summary__value">
-              ¥ {{ fmtYuan(analytics?.unconsumed_meals?.total_amount_yuan) }}
-            </strong>
-          </div>
-          <p class="member-stats-ops-summary__hint">
-            午餐 ¥ {{ fmtYuan(analytics?.unconsumed_meals?.lunch_amount_yuan) }}
-            · 晚餐 ¥ {{ fmtYuan(analytics?.unconsumed_meals?.dinner_amount_yuan) }}
-            <span class="member-stats-ops-summary__hint-note">（实收×剩余/入账，档案库不含已退款）</span>
           </p>
         </div>
       </div>
@@ -1247,16 +1222,7 @@ onActivated(() => {
 }
 
 .member-stats-ops-summary-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
   margin-bottom: 1rem;
-}
-
-@media (max-width: 960px) {
-  .member-stats-ops-summary-row {
-    grid-template-columns: 1fr;
-  }
 }
 
 .member-stats-ops-summary {
@@ -1271,11 +1237,6 @@ onActivated(() => {
   background: linear-gradient(135deg, #f0fdf4 0%, #fafbfc 100%);
 }
 
-.member-stats-ops-summary--amount {
-  border-color: #bfdbfe;
-  background: linear-gradient(135deg, #eff6ff 0%, #fafbfc 100%);
-}
-
 .member-stats-ops-summary__icon {
   grid-row: 1 / span 2;
   display: inline-flex;
@@ -1286,11 +1247,6 @@ onActivated(() => {
   border-radius: 12px;
   background: #dcfce7;
   color: #059669;
-}
-
-.member-stats-ops-summary__icon--amount {
-  background: #dbeafe;
-  color: #2563eb;
 }
 
 .member-stats-ops-summary__main {
@@ -1321,10 +1277,6 @@ onActivated(() => {
   color: var(--ms-muted);
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
-}
-
-.member-stats-ops-summary__hint-note {
-  color: #94a3b8;
 }
 
 .member-stats-ops-list {

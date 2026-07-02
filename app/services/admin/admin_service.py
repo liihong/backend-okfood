@@ -15,7 +15,7 @@ from app.models.admin_dashboard_biz_day_snapshot import AdminDashboardBizDaySnap
 from app.models.admin_user import AdminUser
 from app.models.balance_log import BalanceLog
 from app.models.delivery_log import DeliveryLog
-from app.models.enums import BalanceReason, CardOrderPayStatus, MealPeriod, PlanType
+from app.models.enums import BalanceReason, MealPeriod, PlanType
 from app.constants import UNASSIGNED_DELIVERY_AREA
 from app.models.member import Member
 from app.models.member_address import MemberAddress
@@ -28,7 +28,6 @@ from app.models.menu_schedule import MenuSchedule
 from app.models.product_category import ProductCategory
 from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
-from app.services.shared.store_config_service import get_member_card_prices_yuan
 from app.utils.sql_like import escape_like_fragment
 from app.schemas.admin import (
     CategoryAdminOut,
@@ -335,74 +334,26 @@ def _reorder_rate_percent(reorder: int, base: int) -> Decimal:
     return (Decimal(reorder) * Decimal("100") / Decimal(base)).quantize(Decimal("0.01"))
 
 
-def _member_unconsumed_amount_expr(*, rem_expr, credited, paid, fallback_unit):
-    """按实收比例折算未消费金额；无入账配额时用卡型单价估算。"""
-    return case(
-        (and_(credited > 0, paid > 0), rem_expr * paid / credited),
-        (and_(credited <= 0, rem_expr > 0), rem_expr * fallback_unit),
-        else_=0,
-    )
-
-
 def _member_unconsumed_meals_total(db: Session, *, store_id: int) -> MemberUnconsumedMealsOut:
-    """档案库未消费餐次与金额：午餐池 + 晚餐池；排除已退款，与档案库 scope 一致。"""
+    """档案库未消费餐次：午餐池 + 晚餐池；排除已退款，与档案库 scope 一致。"""
     sid = int(store_id)
-    two_places = Decimal("0.01")
     archive_scope = and_(
         Member.deleted_at.is_(None),
         _member_archive_scope(),
         Member.membership_refunded_at.is_(None),
         Member.store_id == sid,
     )
-    week_price, month_price = get_member_card_prices_yuan(db, store_id=sid)
-    week_unit = (week_price / Decimal(6)).quantize(two_places, rounding=ROUND_HALF_UP)
-    month_unit = (month_price / Decimal(24)).quantize(two_places, rounding=ROUND_HALF_UP)
-
-    paid_subq = (
-        select(
-            MemberCardOrder.member_id.label("member_id"),
-            func.coalesce(func.sum(MemberCardOrder.amount_yuan), 0).label("paid_total"),
-        )
-        .where(
-            MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
-            MemberCardOrder.applied_to_member.is_(True),
-        )
-        .group_by(MemberCardOrder.member_id)
-    ).subquery()
 
     dinner_state = aliased(MemberMealPeriodState)
     lunch_rem = func.greatest(Member.balance, 0)
     dinner_rem = func.coalesce(func.greatest(dinner_state.balance, 0), 0)
-    lunch_cred = func.greatest(Member.meal_quota_total, 0)
-    dinner_cred = func.coalesce(func.greatest(dinner_state.meal_quota_total, 0), 0)
-    credited = lunch_cred + dinner_cred
-    paid = func.coalesce(paid_subq.c.paid_total, 0)
-    fallback_unit = case(
-        (Member.plan_type == PlanType.WEEK.value, week_unit),
-        else_=month_unit,
-    )
-    lunch_amount_expr = _member_unconsumed_amount_expr(
-        rem_expr=lunch_rem,
-        credited=credited,
-        paid=paid,
-        fallback_unit=fallback_unit,
-    )
-    dinner_amount_expr = _member_unconsumed_amount_expr(
-        rem_expr=dinner_rem,
-        credited=credited,
-        paid=paid,
-        fallback_unit=fallback_unit,
-    )
 
     row = db.execute(
         select(
             func.coalesce(func.sum(lunch_rem), 0).label("lunch_total"),
             func.coalesce(func.sum(dinner_rem), 0).label("dinner_total"),
-            func.coalesce(func.sum(lunch_amount_expr), 0).label("lunch_amount"),
-            func.coalesce(func.sum(dinner_amount_expr), 0).label("dinner_amount"),
         )
         .select_from(Member)
-        .outerjoin(paid_subq, paid_subq.c.member_id == Member.id)
         .outerjoin(
             dinner_state,
             and_(
@@ -415,16 +366,10 @@ def _member_unconsumed_meals_total(db: Session, *, store_id: int) -> MemberUncon
 
     lunch_total = int(row.lunch_total or 0)
     dinner_total = int(row.dinner_total or 0)
-    lunch_amount = Decimal(str(row.lunch_amount or 0)).quantize(two_places, rounding=ROUND_HALF_UP)
-    dinner_amount = Decimal(str(row.dinner_amount or 0)).quantize(two_places, rounding=ROUND_HALF_UP)
-    total_amount = (lunch_amount + dinner_amount).quantize(two_places, rounding=ROUND_HALF_UP)
     return MemberUnconsumedMealsOut(
         total=lunch_total + dinner_total,
         lunch_total=lunch_total,
         dinner_total=dinner_total,
-        total_amount_yuan=total_amount,
-        lunch_amount_yuan=lunch_amount,
-        dinner_amount_yuan=dinner_amount,
     )
 
 

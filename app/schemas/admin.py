@@ -518,20 +518,11 @@ class MemberReorderStatsOut(BaseModel):
 
 
 class MemberUnconsumedMealsOut(BaseModel):
-    """档案库未消费餐次与金额：午餐池 members.balance + 晚餐池 member_meal_period_state。"""
+    """档案库未消费餐次：午餐池 members.balance + 晚餐池 member_meal_period_state。"""
 
     total: int = Field(..., ge=0, description="未消费餐次总数（午餐+晚餐）")
     lunch_total: int = Field(..., ge=0, description="午餐次数池剩余合计")
     dinner_total: int = Field(..., ge=0, description="晚餐次数池剩余合计")
-    total_amount_yuan: Decimal = Field(
-        ...,
-        ge=0,
-        max_digits=14,
-        decimal_places=2,
-        description="未消费金额合计（按实收×剩余/累计入账；无入账记录时用卡型单价估算）",
-    )
-    lunch_amount_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="午餐池未消费金额")
-    dinner_amount_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="晚餐池未消费金额")
 
 
 class MemberRenewPendingStatsOut(BaseModel):
