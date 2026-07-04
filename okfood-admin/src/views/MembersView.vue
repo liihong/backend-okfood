@@ -424,7 +424,10 @@ const memberStatusClass = (status) => {
   return 'member-pill member-pill--emerald'
 }
 
-function planTagClass(plan, planBase) {
+function planTagClass(plan, planBase, mealScopeLabel) {
+  // 全餐（午+晚）单独配色，与仅午餐的周卡/月卡标签区分
+  const scope = (mealScopeLabel || String(plan || '').split(' · ')[1] || '').trim()
+  if (scope === '全餐') return 't-plan--full-meal'
   const base = (planBase || String(plan || '').split(' · ')[0] || '').trim()
   if (base === '周卡') return 't-plan--week'
   if (base === '月卡') return 't-plan--month'
@@ -1180,7 +1183,7 @@ onUnmounted(() => {
         </el-table-column>
         <el-table-column label="套餐类型" align="center" min-width="108">
           <template #default="{ row: u }">
-            <span class="t-plan" :class="planTagClass(u.plan, u.planBase)">{{ u.plan }}</span>
+            <span class="t-plan" :class="planTagClass(u.plan, u.planBase, u.meal_scope_label)">{{ u.plan }}</span>
           </template>
         </el-table-column>
         <el-table-column

@@ -169,8 +169,16 @@ def build_member_meal_units_from_sf_pushes(
             continue
 
         if len(mids) == 1:
-            member_units[int(mids[0])] = max(1, stop_total or 1)
-            stats["from_sf_pushes"] += 1
+            mid = int(mids[0])
+            # 独占停靠点：推单快照份数可能与实际扣次不一致（推单后改份数/预约次日生效等），
+            # 已送达时以 balance_logs 扣次绝对值为准，与大表/营业概览对齐。
+            deducted = _delivery_deduct_units_on_date(db, member_id=mid, delivery_date=delivery_date)
+            if deducted is not None:
+                member_units[mid] = deducted
+                stats["from_balance_log"] += 1
+            else:
+                member_units[mid] = max(1, stop_total or 1)
+                stats["from_sf_pushes"] += 1
             continue
 
         for mid in pending:
@@ -248,6 +256,51 @@ def upsert_delivery_sheet_units_snapshot(
     else:
         row.member_meal_units = payload
         row.recorded_at = beijing_now_naive()
+    db.flush()
+    return True
+
+
+def patch_member_meal_units_in_units_snapshot(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    member_id: int,
+    meal_units: int,
+    meal_period: str | None = None,
+) -> bool:
+    """
+    修正推单后份数快照中某一会员的当日份数（与实际扣次/送达对齐）。
+    仅更新该会员键值，frozen 列表与其余会员份数不变。
+    返回是否实际写入变更。
+    """
+    from app.services.delivery.delivery_sheet_push_snapshot_service import _snapshot_pk
+
+    sid = int(store_id)
+    mid = int(member_id)
+    units = max(1, int(meal_units))
+    pk = _snapshot_pk(store_id=sid, delivery_date=delivery_date, meal_period=meal_period or "lunch")
+    row = db.get(DeliverySheetPushUnitsSnapshot, pk)
+    if row is None:
+        return False
+    raw = row.member_meal_units
+    payload: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
+    key = str(mid)
+    prev = payload.get(key)
+    try:
+        prev_i = int(prev) if prev is not None else None
+    except (TypeError, ValueError):
+        prev_i = None
+    if prev_i == units:
+        return False
+    payload[key] = units
+    frozen_raw = payload.get(FROZEN_MEMBER_IDS_SNAPSHOT_KEY)
+    if isinstance(frozen_raw, list):
+        frozen_set = {int(x) for x in frozen_raw if x is not None}
+        if mid not in frozen_set:
+            payload[FROZEN_MEMBER_IDS_SNAPSHOT_KEY] = sorted(frozen_set | {mid})
+    row.member_meal_units = payload
+    row.recorded_at = beijing_now_naive()
     db.flush()
     return True
 

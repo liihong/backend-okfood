@@ -856,13 +856,30 @@ def _is_miniprogram_self_service_card_order(order: MemberCardOrder) -> bool:
     return (order.created_by or "").strip() == "miniprogram"
 
 
+def _card_kind_label_for_miniprogram_notification(db: Session, order: MemberCardOrder) -> str:
+    """系统消息卡型：优先展示卡包模版名称，避免全餐卡仅显示「周卡」误导核对。"""
+    tpl_id = getattr(order, "membership_template_id", None)
+    if tpl_id is not None:
+        tpl = db.get(MembershipCardTemplate, int(tpl_id))
+        if tpl is not None:
+            name = (tpl.name or "").strip()
+            kind = (tpl.kind_label or "").strip()
+            if name and kind:
+                return f"{name}（{kind}）"
+            if name:
+                return name
+            if kind:
+                return kind
+    return (order.card_kind or "").strip() or "会员卡"
+
+
 def _notify_miniprogram_card_order_pending_cs_review(db: Session, order: MemberCardOrder) -> None:
     member = db.get(Member, int(order.member_id))
     create_miniprogram_card_order_pending_notification(
         db,
         store_id=int(order.store_id),
         order_id=int(order.id),
-        card_kind=(order.card_kind or "").strip(),
+        card_kind=_card_kind_label_for_miniprogram_notification(db, order),
         member_id=int(order.member_id),
         member_phone=(member.phone if member else None),
         member_name=(member.name if member else None),

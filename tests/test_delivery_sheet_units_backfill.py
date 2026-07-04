@@ -1,6 +1,6 @@
 """历史顺丰推单回填份数快照。"""
 
-from datetime import date, time
+from datetime import date, datetime, time
 
 import pytest
 from sqlalchemy import create_engine
@@ -11,6 +11,8 @@ from app.models.member import Member
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store import Store
 from app.models.tenant import Tenant
+from app.models.balance_log import BalanceLog
+from app.models.delivery_log import DeliveryLog
 from app.services.delivery.delivery_sheet_units_backfill_service import (
     build_member_meal_units_from_sf_pushes,
     upsert_delivery_sheet_units_snapshot,
@@ -27,6 +29,8 @@ def backfill_db() -> Session:
         Member.__table__,
         SfSameCityPush.__table__,
         DeliverySheetPushUnitsSnapshot.__table__,
+        DeliveryLog.__table__,
+        BalanceLog.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -82,6 +86,37 @@ def test_build_units_from_single_member_push(backfill_db: Session):
     )
     assert units.get(7) == 1
     assert stats["from_sf_pushes"] == 1
+
+
+def test_build_units_single_member_uses_balance_log_when_delivered(backfill_db: Session):
+    """独占停靠点已送达时，以 balance_logs 扣次份数为准（推单快照可能仍为 1）。"""
+    from app.models.enums import BalanceReason, DeliveryStatus
+
+    backfill_db.add(
+        DeliveryLog(
+            member_id=7,
+            delivery_date=date(2026, 6, 11),
+            meal_period="lunch",
+            status=DeliveryStatus.DELIVERED.value,
+        )
+    )
+    backfill_db.add(
+        BalanceLog(
+            member_id=7,
+            meal_period="lunch",
+            change=-2,
+            reason=BalanceReason.DELIVERY.value,
+            operator="sf:order_complete",
+            created_at=datetime(2026, 6, 11, 12, 0, 0),
+        )
+    )
+    backfill_db.commit()
+    units, stats = build_member_meal_units_from_sf_pushes(
+        backfill_db, store_id=1, delivery_date=date(2026, 6, 11)
+    )
+    assert units.get(7) == 2
+    assert stats["from_balance_log"] == 1
+    assert stats["from_sf_pushes"] == 0
 
 
 def test_upsert_overwrites(backfill_db: Session):

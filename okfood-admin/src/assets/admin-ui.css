@@ -2199,6 +2199,13 @@
   border-color: #93c5fd;
 }
 
+/* 全餐（午+晚）：翠绿配色，与仅午餐的周卡/月卡蓝色/紫色区分 */
+.t-plan--full-meal {
+  color: #047857;
+  background: #d1fae5;
+  border-color: #6ee7b7;
+}
+
 .t-plan--month {
   color: #6d28d9;
   background: #ede9fe;

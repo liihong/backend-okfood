@@ -172,6 +172,69 @@ def test_dinner_balance_independent_from_members_balance(dinner_balance_db: Sess
     assert int(m.balance) == 0
 
 
+def test_miniprogram_finalize_full_meal_template_credits_both_pools(dinner_balance_db: Session):
+    """全餐卡模版 meal_periods 漏配晚餐时：须同时入账午餐与晚餐次数池。"""
+    dinner_balance_db.add(
+        MembershipCardTemplate(
+            id=5,
+            tenant_id=1,
+            store_id=1,
+            kind_label="周卡",
+            name="午餐晚餐全餐卡",
+            meals_grant=6,
+            meal_periods=["lunch"],
+            is_active=True,
+        )
+    )
+    dinner_balance_db.commit()
+    order = MemberCardOrder(
+        member_id=201,
+        tenant_id=1,
+        store_id=1,
+        membership_template_id=5,
+        card_kind="周卡",
+        pay_channel="微信",
+        pay_status="已缴",
+        amount_yuan=Decimal("268.00"),
+        applied_to_member=False,
+        meal_periods_snapshot=["lunch"],
+        created_by="miniprogram",
+    )
+    dinner_balance_db.add(order)
+    dinner_balance_db.flush()
+    apply_paid_card_order_to_member_if_pending(
+        dinner_balance_db, order, operator="wechat_notify"
+    )
+    dinner_balance_db.commit()
+    m = dinner_balance_db.get(Member, 201)
+    row = dinner_balance_db.get(
+        MemberMealPeriodState,
+        {"member_id": 201, "meal_period": MealPeriod.DINNER.value},
+    )
+    assert m is not None and row is not None
+    assert order.applied_to_member is True
+    assert order.meal_periods_snapshot == ["lunch", "dinner"]
+    assert int(m.balance) == 11
+    assert int(row.balance) == 6
+    assert int(row.meal_quota_total) == 6
+    lunch_log = dinner_balance_db.scalars(
+        select(BalanceLog).where(
+            BalanceLog.member_id == 201,
+            BalanceLog.meal_period == MealPeriod.LUNCH.value,
+            BalanceLog.change == 6,
+        )
+    ).first()
+    dinner_log = dinner_balance_db.scalars(
+        select(BalanceLog).where(
+            BalanceLog.member_id == 201,
+            BalanceLog.meal_period == MealPeriod.DINNER.value,
+            BalanceLog.change == 6,
+        )
+    ).first()
+    assert lunch_log is not None
+    assert dinner_log is not None
+
+
 def test_miniprogram_finalize_dinner_template_credits_dinner_only(dinner_balance_db: Session):
     """小程序购卡支付回调：晚餐模版入账至 member_meal_period_state，不写 members.balance。"""
     order = MemberCardOrder(

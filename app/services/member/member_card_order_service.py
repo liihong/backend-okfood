@@ -332,15 +332,22 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
         plan = _plan_for_membership_template(tpl)
         amt = int(tpl.meals_grant)
         kind_label = f"{tpl.name}（{tpl.kind_label}）"
-        from app.services.meal_period.template_periods import meal_periods_from_template
+        from app.services.meal_period.template_periods import resolve_meal_periods_for_card_order_credit
 
-        order.meal_periods_snapshot = meal_periods_from_template(tpl)
+        order.meal_periods_snapshot = resolve_meal_periods_for_card_order_credit(
+            order_meal_periods_snapshot=order.meal_periods_snapshot,
+            template=tpl,
+        )
     else:
         plan, amt = _quota_for_card_kind(order.card_kind)
         kind_label = order.card_kind
-        from app.services.meal_period.template_periods import classic_card_meal_periods_snapshot
+        from app.services.meal_period.template_periods import resolve_meal_periods_for_card_order_credit
 
-        order.meal_periods_snapshot = classic_card_meal_periods_snapshot()
+        order.meal_periods_snapshot = resolve_meal_periods_for_card_order_credit(
+            order_meal_periods_snapshot=order.meal_periods_snapshot,
+            template=None,
+            use_classic_lunch_only=True,
+        )
     parts = [
         f"开卡工单#{order.id}",
         f"{kind_label}",
@@ -370,9 +377,7 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
         reset_dinner_quota_on_membership_reopen,
         sync_member_is_active_from_period_balances,
     )
-    from app.services.meal_period.template_periods import normalize_meal_periods_list
-
-    periods = normalize_meal_periods_list(order.meal_periods_snapshot)
+    periods = list(order.meal_periods_snapshot or [])
     # 退卡后重新开卡：清除退款标记并重置总次数，避免状态仍为「已退款」、剩余/总叠加旧周期
     if m.membership_refunded_at is not None:
         m.membership_refunded_at = None
