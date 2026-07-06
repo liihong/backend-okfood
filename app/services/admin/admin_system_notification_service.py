@@ -329,6 +329,32 @@ def _is_legacy_miniprogram_card_order_pending_notification_message(message: str 
     return "mid=" in msg or "已微信支付购买" in msg
 
 
+def _meal_period_label_from_snapshot(snapshot: object | None) -> str:
+    """工单餐段快照 → 管理端展示：午餐 / 晚餐 / 全餐。"""
+    from app.services.meal_period.card_eligibility import meal_periods_from_snapshot_value
+    from app.services.meal_period.plan_type_sync import meal_scope_label_from_periods
+
+    return meal_scope_label_from_periods(meal_periods_from_snapshot_value(snapshot))
+
+
+def _meal_period_label_for_card_order(db: Session, order: object) -> str:
+    """从工单快照或绑定模版解析餐次标签（兼容旧库无 snapshot 的工单）。"""
+    snap = getattr(order, "meal_periods_snapshot", None)
+    if snap is not None:
+        return _meal_period_label_from_snapshot(snap)
+    tpl_id = getattr(order, "membership_template_id", None)
+    if tpl_id is not None:
+        from app.models.membership_card_template import MembershipCardTemplate
+        from app.services.meal_period.template_periods import meal_periods_from_template
+
+        tpl = db.get(MembershipCardTemplate, int(tpl_id))
+        if tpl is not None:
+            return _meal_period_label_from_snapshot(meal_periods_from_template(tpl))
+    from app.services.meal_period.template_periods import classic_card_meal_periods_snapshot
+
+    return _meal_period_label_from_snapshot(classic_card_meal_periods_snapshot())
+
+
 def _miniprogram_card_order_pending_message(
     *,
     order_id: int,
@@ -337,6 +363,7 @@ def _miniprogram_card_order_pending_message(
     member_phone: str | None,
     member_name: str | None,
     delivery_start_date: date | None,
+    meal_period_label: str = "午餐",
 ) -> tuple[str, str]:
     """生成小程序自助购卡待核对消息（多行，pre-line 展示）。"""
     phone = _mask_phone_middle_four(member_phone)
@@ -344,6 +371,7 @@ def _miniprogram_card_order_pending_message(
     naming = (naming[:24] + "…") if len(naming) > 24 else (naming or "会员")
 
     kind_label = str(card_kind or "").strip() or "会员卡"
+    period_label = str(meal_period_label or "").strip() or "午餐"
     ds_text = delivery_start_date.isoformat() if delivery_start_date else "未填写"
     title = f"小程序自助购卡待核对 · 工单#{int(order_id)}"
     body_lines = [
@@ -351,6 +379,7 @@ def _miniprogram_card_order_pending_message(
         f"会员UID：{int(member_id)}",
         f"手机号：{phone}",
         f"卡型：{kind_label}",
+        f"餐次：{period_label}",
         "支付方式：微信支付",
         "入账状态：餐次已入账",
         f"起送日：{ds_text}",
@@ -372,7 +401,8 @@ def try_refresh_legacy_miniprogram_card_order_pending_notification(
         return False
     needs_legacy = _is_legacy_miniprogram_card_order_pending_notification_message(row.message)
     needs_mask = _system_notification_message_phone_unmasked(row.message)
-    if not needs_legacy and not needs_mask:
+    needs_meal_period = "餐次：" not in str(row.message or "")
+    if not needs_legacy and not needs_mask and not needs_meal_period:
         return False
     oid = _order_id_from_miniprogram_card_pending_skip_reason(row.skip_reason)
     if oid is None:
@@ -392,6 +422,7 @@ def try_refresh_legacy_miniprogram_card_order_pending_notification(
         member_phone=(member.phone if member else None),
         member_name=(member.name if member else None),
         delivery_start_date=order.delivery_start_date,
+        meal_period_label=_meal_period_label_for_card_order(db, order),
     )
     row.title = title
     row.message = body
@@ -428,6 +459,7 @@ def create_miniprogram_card_order_pending_notification(
     member_phone: str | None,
     member_name: str | None,
     delivery_start_date: date | None,
+    meal_period_label: str = "午餐",
 ) -> AdminSystemNotification | None:
     """小程序自助购卡支付成功：每工单仅 1 条待核对配送提醒，供客服核对履约信息。"""
     sid = int(store_id)
@@ -448,6 +480,7 @@ def create_miniprogram_card_order_pending_notification(
         member_phone=member_phone,
         member_name=member_name,
         delivery_start_date=delivery_start_date,
+        meal_period_label=meal_period_label,
     )
     marker = _miniprogram_card_order_pending_notification_marker(order_id)
 
@@ -477,6 +510,7 @@ def refresh_miniprogram_card_order_pending_notification(
     member_phone: str | None,
     member_name: str | None,
     delivery_start_date: date | None,
+    meal_period_label: str = "午餐",
 ) -> AdminSystemNotification | None:
     """用户完善配送信息后刷新待审批消息中的起送日（未确认前）。"""
     row = _miniprogram_card_order_pending_notification_row(
@@ -491,6 +525,7 @@ def refresh_miniprogram_card_order_pending_notification(
         member_phone=member_phone,
         member_name=member_name,
         delivery_start_date=delivery_start_date,
+        meal_period_label=meal_period_label,
     )
     row.title = title
     row.message = body

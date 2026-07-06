@@ -238,6 +238,7 @@ def apply_delivery_start_to_pending_miniprogram_card_order(
     db.flush()
     member = db.get(Member, int(member_id))
     from app.services.admin.admin_system_notification_service import (
+        _meal_period_label_for_card_order,
         refresh_miniprogram_card_order_pending_notification,
     )
 
@@ -250,6 +251,7 @@ def apply_delivery_start_to_pending_miniprogram_card_order(
         member_phone=(member.phone if member else None),
         member_name=(member.name if member else None),
         delivery_start_date=delivery_start_date,
+        meal_period_label=_meal_period_label_for_card_order(db, order),
     )
     return order
 

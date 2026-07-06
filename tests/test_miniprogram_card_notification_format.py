@@ -7,6 +7,7 @@ from datetime import date
 from app.services.admin.admin_system_notification_service import (
     _is_legacy_miniprogram_card_order_pending_notification_message,
     _mask_phone_middle_four,
+    _meal_period_label_from_snapshot,
     _miniprogram_card_order_pending_message,
     _system_notification_message_phone_unmasked,
 )
@@ -39,6 +40,7 @@ def test_build_new_format_separates_uid_and_phone() -> None:
         member_phone="13800138000",
         member_name="雪",
         delivery_start_date=date(2026, 6, 16),
+        meal_period_label="午餐",
     )
     assert title == "小程序自助购卡待核对 · 工单#969"
     assert "用户：雪" in body
@@ -46,10 +48,53 @@ def test_build_new_format_separates_uid_and_phone() -> None:
     assert "手机号：138****8000" in body
     assert "13800138000" not in body
     assert "卡型：周卡" in body
+    assert "餐次：午餐" in body
     assert "支付方式：微信支付" in body
     assert "入账状态：餐次已入账" in body
     assert "起送日：2026-06-16" in body
     assert "mid=" not in body
+
+
+def test_meal_period_label_in_message() -> None:
+    _, lunch_body = _miniprogram_card_order_pending_message(
+        order_id=1,
+        card_kind="周卡",
+        member_id=1,
+        member_phone="13800138000",
+        member_name="a",
+        delivery_start_date=None,
+        meal_period_label="午餐",
+    )
+    assert "餐次：午餐" in lunch_body
+
+    _, dinner_body = _miniprogram_card_order_pending_message(
+        order_id=1,
+        card_kind="晚餐周卡",
+        member_id=1,
+        member_phone="13800138000",
+        member_name="a",
+        delivery_start_date=None,
+        meal_period_label="晚餐",
+    )
+    assert "餐次：晚餐" in dinner_body
+
+    _, full_body = _miniprogram_card_order_pending_message(
+        order_id=1,
+        card_kind="全餐周卡",
+        member_id=1,
+        member_phone="13800138000",
+        member_name="a",
+        delivery_start_date=None,
+        meal_period_label="全餐",
+    )
+    assert "餐次：全餐" in full_body
+
+
+def test_meal_period_label_from_snapshot() -> None:
+    assert _meal_period_label_from_snapshot(["lunch"]) == "午餐"
+    assert _meal_period_label_from_snapshot(["dinner"]) == "晚餐"
+    assert _meal_period_label_from_snapshot(["lunch", "dinner"]) == "全餐"
+    assert _meal_period_label_from_snapshot(None) == "午餐"
 
 
 def test_legacy_detection() -> None:

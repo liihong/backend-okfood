@@ -875,6 +875,8 @@ def _card_kind_label_for_miniprogram_notification(db: Session, order: MemberCard
 
 def _notify_miniprogram_card_order_pending_cs_review(db: Session, order: MemberCardOrder) -> None:
     member = db.get(Member, int(order.member_id))
+    from app.services.admin.admin_system_notification_service import _meal_period_label_from_snapshot
+
     create_miniprogram_card_order_pending_notification(
         db,
         store_id=int(order.store_id),
@@ -884,6 +886,7 @@ def _notify_miniprogram_card_order_pending_cs_review(db: Session, order: MemberC
         member_phone=(member.phone if member else None),
         member_name=(member.name if member else None),
         delivery_start_date=order.delivery_start_date,
+        meal_period_label=_meal_period_label_from_snapshot(order.meal_periods_snapshot),
     )
 
 

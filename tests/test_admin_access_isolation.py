@@ -101,6 +101,19 @@ def test_admin_can_access_own_store_member(access_db: Session) -> None:
     assert sid == 1
 
 
+def test_require_member_in_admin_store_must_unpack_three_values(access_db: Session) -> None:
+    """退卡退款等接口须解包 (member, tenant_id, store_id)；只解包两个会 ValueError → 500。"""
+    result = require_member_in_admin_store(
+        access_db,
+        admin_username="admin_a",
+        member_id=101,
+        store_id=1,
+    )
+    assert len(result) == 3
+    with pytest.raises(ValueError, match="too many values to unpack"):
+        _, sid = result  # type: ignore[misc]
+
+
 def test_admin_cannot_operate_other_tenant_sf_push(access_db: Session) -> None:
     with pytest.raises(HTTPException) as exc:
         require_sf_push_in_admin_tenant(access_db, admin_username="admin_a", push_id=1)
