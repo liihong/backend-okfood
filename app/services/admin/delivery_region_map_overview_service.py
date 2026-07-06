@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
 from app.core.timeutil import today_shanghai, tomorrow_shanghai
 from app.models.delivery_log import DeliveryLog
 from app.models.enums import DeliveryStatus
@@ -27,8 +27,13 @@ from app.services.member.leave import is_absent_on_delivery_date
 
 def delivery_region_map_overview(db: Session, *, store_id: int) -> DeliveryRegionMapOverviewOut:
     """有余额会员（与列表 active 口径一致）及其默认地址上的坐标与展示片区。"""
-    st = db.get(Store, int(store_id))
-    tenant_id = int(st.tenant_id) if st is not None else int(get_settings().DEFAULT_TENANT_ID)
+    from app.core.tenant_scope import require_store_id_for_service
+
+    sid = require_store_id_for_service(store_id, operation="配送区域地图概览")
+    st = db.get(Store, sid)
+    if st is None or not st.is_active:
+        raise HTTPException(status_code=404, detail="门店不存在或已停用")
+    tenant_id = int(st.tenant_id)
     regions = list_delivery_regions(db, include_polygon=True, tenant_id=tenant_id)
 
     default_addr_pick = (

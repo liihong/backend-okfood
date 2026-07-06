@@ -45,8 +45,8 @@ from app.services.member.member_address_service import (
 from app.services.order.single_meal_order_service import primary_courier_for_region_id
 from app.services.shared.store_config_service import get_store_base_delivery_fee_yuan, get_store_config
 from app.services.shared.tenant_integration_service import (
+    assert_tenant_pay_config_ready,
     get_merged_pay_config,
-    wechat_pay_misconfiguration_detail_merged,
 )
 logger = logging.getLogger(__name__)
 
@@ -346,10 +346,7 @@ def prepare_wechat_jsapi_for_retail_order(
 
     _revalidate_product_before_pay(db, order)
 
-    pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
-    perr = wechat_pay_misconfiguration_detail_merged(pay_cfg)
-    if perr:
-        raise HTTPException(status_code=503, detail=perr)
+    pay_cfg = assert_tenant_pay_config_ready(db, int(order.tenant_id), store_id=int(order.store_id))
 
     member = db.get(Member, member_id)
     if not member or member.deleted_at is not None:

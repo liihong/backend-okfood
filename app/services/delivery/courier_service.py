@@ -38,18 +38,10 @@ from app.services.order.single_meal_order_service import list_courier_single_ord
 
 
 def _member_scope_clause(*, tenant_id: int | None, store_id: int | None):
-    """会员名单范围：优先按门店；否则按租户；均未指定时回落默认租户+门店（兼容单店）。"""
-    from app.core.config import get_settings
+    """会员名单范围：委托 ``tenant_scope.sql_member_scope_clause``，禁止双空回落主租户。"""
+    from app.core.tenant_scope import sql_member_scope_clause
 
-    s = get_settings()
-    if store_id is not None:
-        return Member.store_id == int(store_id)
-    if tenant_id is not None:
-        return Member.tenant_id == int(tenant_id)
-    return and_(
-        Member.tenant_id == int(s.DEFAULT_TENANT_ID),
-        Member.store_id == int(s.DEFAULT_STORE_ID),
-    )
+    return sql_member_scope_clause(tenant_id=tenant_id, store_id=store_id)
 
 
 def _member_not_skip_subscription_saturday(delivery_date: date):

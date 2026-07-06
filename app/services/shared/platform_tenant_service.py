@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app.core.security import hash_password
+from app.core.tenant_subscription import build_tenant_subscription_out
 from app.models.admin_user import AdminUser
 from app.models.store import Store
 from app.models.tenant import Tenant
@@ -156,6 +157,26 @@ def patch_store_for_platform(
     return _store_to_out(st)
 
 
+def _tenant_to_out(
+    t: Tenant,
+    *,
+    store_count: int = 0,
+    admin_count: int = 0,
+) -> PlatformTenantOut:
+    sub = build_tenant_subscription_out(t)
+    return PlatformTenantOut(
+        id=t.id,
+        name=t.name,
+        is_active=t.is_active,
+        expires_at=sub["expires_at"],
+        days_until_expiry=sub["days_until_expiry"],
+        subscription_status=sub["status"],
+        created_at=_fmt_dt(t.created_at),
+        store_count=int(store_count),
+        admin_count=int(admin_count),
+    )
+
+
 def list_platform_tenants(db: Session) -> list[PlatformTenantOut]:
     tenants = list(db.scalars(select(Tenant).order_by(Tenant.id)).all())
     if not tenants:
@@ -174,11 +195,8 @@ def list_platform_tenants(db: Session) -> list[PlatformTenantOut]:
     ).all()
     admin_map = {int(r[0]): int(r[1]) for r in admin_rows}
     return [
-        PlatformTenantOut(
-            id=t.id,
-            name=t.name,
-            is_active=t.is_active,
-            created_at=_fmt_dt(t.created_at),
+        _tenant_to_out(
+            t,
             store_count=int(store_map.get(t.id, 0)),
             admin_count=int(admin_map.get(t.id, 0)),
         )
@@ -190,18 +208,11 @@ def create_platform_tenant(db: Session, body: PlatformTenantCreateIn) -> Platfor
     name = (body.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="租户名称不能为空")
-    t = Tenant(name=name, is_active=body.is_active)
+    t = Tenant(name=name, is_active=body.is_active, expires_at=body.expires_at)
     db.add(t)
     db.commit()
     db.refresh(t)
-    return PlatformTenantOut(
-        id=t.id,
-        name=t.name,
-        is_active=t.is_active,
-        created_at=_fmt_dt(t.created_at),
-        store_count=0,
-        admin_count=0,
-    )
+    return _tenant_to_out(t)
 
 
 def patch_platform_tenant(db: Session, tenant_id: int, body: PlatformTenantPatchIn) -> PlatformTenantOut:
@@ -213,6 +224,8 @@ def patch_platform_tenant(db: Session, tenant_id: int, body: PlatformTenantPatch
         t.name = n
     if body.is_active is not None:
         t.is_active = body.is_active
+    if body.expires_at is not None:
+        t.expires_at = body.expires_at
     db.commit()
     db.refresh(t)
     store_n = int(
@@ -226,14 +239,7 @@ def patch_platform_tenant(db: Session, tenant_id: int, body: PlatformTenantPatch
         )
         or 0
     )
-    return PlatformTenantOut(
-        id=t.id,
-        name=t.name,
-        is_active=t.is_active,
-        created_at=_fmt_dt(t.created_at),
-        store_count=store_n,
-        admin_count=admin_n,
-    )
+    return _tenant_to_out(t, store_count=store_n, admin_count=admin_n)
 
 
 def soft_delete_platform_tenant(db: Session, tenant_id: int) -> None:

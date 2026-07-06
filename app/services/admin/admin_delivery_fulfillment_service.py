@@ -236,10 +236,10 @@ def subscription_fulfilled_try_sf_home_no_commit(
     ``extra_ok_member_ids``：推单快照中已锁定的会员，即使当前 SQL 应送名单未命中也允许扣次（顺丰已妥投）。
     """
     d = delivery_date
-    from app.core.config import get_settings
+    from app.core.tenant_scope import require_store_id_for_service
 
     period = _normalize_meal_period(meal_period)
-    sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
+    sid = require_store_id_for_service(store_id, operation="订阅履约扣次")
     effective_ok_ids = ok_ids if ok_ids is not None else _eligible_ids_home(
         db, d, store_id=sid, meal_period=period
     )

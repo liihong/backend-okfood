@@ -1073,8 +1073,9 @@ def total_meal_units_for_delivery_sheet(
     """
     if not is_subscription_delivery_day(delivery_date):
         return 0
-    cfg = get_settings()
-    sid = int(store_id) if store_id is not None else int(cfg.DEFAULT_STORE_ID)
+    from app.core.tenant_scope import require_store_id_for_service
+
+    sid = require_store_id_for_service(store_id, operation="配送大表份数统计")
     from app.services.delivery.delivery_day_lock_service import is_delivery_day_sheet_frozen_after_sf_push
 
     if is_delivery_day_sheet_frozen_after_sf_push(
@@ -1101,8 +1102,9 @@ def meal_units_totals_for_delivery_dates(
 
     ``sql_sum_only=True``：同比基线等仅需整数份数时使用，锁单日也不触发 ``delivery_sheet_metrics``。
     """
-    cfg = get_settings()
-    sid = int(store_id) if store_id is not None else int(cfg.DEFAULT_STORE_ID)
+    from app.core.tenant_scope import require_store_id_for_service
+
+    sid = require_store_id_for_service(store_id, operation="配送大表对日份数")
     snap = snapshot_meal_totals or {}
 
     uniq: list[date] = []
@@ -1167,8 +1169,9 @@ def build_delivery_sheet(
     else:
         meal_period = MealPeriod.LUNCH.value
 
-    cfg = get_settings()
-    sid = int(store_id) if store_id is not None else int(cfg.DEFAULT_STORE_ID)
+    from app.core.tenant_scope import require_store_id_for_service
+
+    sid = require_store_id_for_service(store_id, operation="配送大表")
     st = db.get(Store, sid)
     if not st or not st.is_active:
         raise HTTPException(status_code=404, detail="门店不存在或已停用")

@@ -63,6 +63,13 @@ def _credentials_for_call(db: "Session | None", tenant_id: int | None) -> tuple[
 
         appid, secret = get_merged_wx_credentials(db, int(tenant_id))
         if not appid or not secret:
+            from app.core.tenant_scope import TENANT_INTEGRATION_INCOMPLETE_HINT, allows_global_env_fallback
+
+            if tenant_id is not None and not allows_global_env_fallback(int(tenant_id)):
+                raise WeChatMiniError(
+                    f"微信小程序未配置；{TENANT_INTEGRATION_INCOMPLETE_HINT}",
+                    status_code=503,
+                )
             raise WeChatMiniError("微信小程序未配置（请配置租户对接或全局 WX_MINI_*）", status_code=503)
         return appid, secret
     return _app_credentials()

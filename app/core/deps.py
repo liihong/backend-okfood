@@ -21,6 +21,8 @@ from app.db.session import get_db
 from app.models.admin_user import AdminUser
 from app.models.member import Member
 from app.models.store import Store
+from app.models.tenant import Tenant
+from app.core.tenant_subscription import assert_admin_tenant_subscription_active
 
 logger = logging.getLogger(__name__)
 
@@ -83,24 +85,45 @@ def courier_subject(creds: HTTPAuthorizationCredentials | None = Depends(bearer_
     return sub
 
 
-def admin_subject(creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> str:
+def _ensure_admin_tenant_subscription(db: Session, *, admin_username: str, jwt_role: str) -> None:
+    """非平台管理员访问管理端 API 时校验租户订阅未过期。"""
+    if jwt_role == ROLE_ADMIN_SYSTEM:
+        return
+    u = db.scalar(select(AdminUser).where(AdminUser.username == admin_username))
+    if not u:
+        raise HTTPException(status_code=401, detail="账号不存在")
+    assert_admin_tenant_subscription_active(db, u, jwt_role=jwt_role)
+
+
+def admin_subject(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> str:
     sub, role = _subject_from_bearer(creds)
     if role != ROLE_ADMIN:
         raise HTTPException(status_code=403, detail="需要管理员令牌")
+    _ensure_admin_tenant_subscription(db, admin_username=sub, jwt_role=role)
     return sub
 
 
-def admin_staff_subject(creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> str:
+def admin_staff_subject(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> str:
     """完整管理员或客服账号（不含财务中心、门店配置等「店主」专属接口）。"""
     sub, role = _subject_from_bearer(creds)
     if role not in (ROLE_ADMIN, ROLE_ADMIN_SUPPORT):
         raise HTTPException(status_code=403, detail="需要管理端令牌")
+    _ensure_admin_tenant_subscription(db, admin_username=sub, jwt_role=role)
     return sub
 
 
-def admin_full_subject(creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> str:
+def admin_full_subject(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> str:
     """仅完整管理员（店主）：财务汇总、门店配置等。"""
-    return admin_subject(creds)
+    return admin_subject(creds, db)
 
 
 def admin_system_subject(creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> str:
@@ -113,11 +136,13 @@ def admin_system_subject(creds: HTTPAuthorizationCredentials | None = Depends(be
 
 def admin_or_delivery_staff_subject(
     creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
 ) -> str:
     """完整管理员、客服或「仅配送管理」后台账号 JWT。"""
     sub, role = _subject_from_bearer(creds)
     if role not in (ROLE_ADMIN, ROLE_ADMIN_DELIVERY, ROLE_ADMIN_SUPPORT):
         raise HTTPException(status_code=403, detail="需要管理员或配送管理账号令牌")
+    _ensure_admin_tenant_subscription(db, admin_username=sub, jwt_role=role)
     return sub
 
 

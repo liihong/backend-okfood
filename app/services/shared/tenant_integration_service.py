@@ -1,4 +1,9 @@
-"""租户对接配置：读库合并 + 平台管理读写。"""
+"""租户对接配置：读库合并 + 平台管理读写。
+
+多租户合并规则（见 ``app.core.tenant_scope``）：
+- **主租户**（``DEFAULT_TENANT_ID``）：未填字段可回退全局 ``.env``，兼容历史单店。
+- **其它租户**：禁止回退全局配置，避免主租户密钥/商户号暴露或支付串账。
+"""
 
 from __future__ import annotations
 
@@ -12,7 +17,13 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models.member import Member
+from app.core.tenant_scope import (
+    TENANT_INTEGRATION_INCOMPLETE_HINT,
+    allows_global_env_fallback,
+    legacy_default_tenant_id,
+    merge_tenant_field_or_global,
+    merge_tenant_int_or_global,
+)
 from app.models.member_card_order import MemberCardOrder
 from app.models.single_meal_order import SingleMealOrder
 from app.models.tenant import Tenant
@@ -30,14 +41,16 @@ def get_tenant_integration_row(db: Session, tenant_id: int) -> TenantIntegration
 
 
 def get_merged_wx_credentials(db: Session, tenant_id: int) -> tuple[str, str]:
+    """小程序 AppId/Secret：非主租户缺省不回退全局，由 ``wx_mini_configured_for_tenant`` 拦截登录。"""
     base = get_settings()
     row = get_tenant_integration_row(db, tenant_id)
-    appid = _s(row.wx_mini_appid) if row else ""
-    secret = _s(row.wx_mini_secret) if row else ""
-    if not appid:
-        appid = _s(base.WX_MINI_APPID)
-    if not secret:
-        secret = _s(base.WX_MINI_SECRET)
+    tid = int(tenant_id)
+    appid = merge_tenant_field_or_global(
+        row.wx_mini_appid if row else None, base.WX_MINI_APPID, tenant_id=tid
+    )
+    secret = merge_tenant_field_or_global(
+        row.wx_mini_secret if row else None, base.WX_MINI_SECRET, tenant_id=tid
+    )
     return appid, secret
 
 
@@ -52,12 +65,22 @@ class MergedPayConfig:
 
 
 def get_merged_pay_config(db: Session, tenant_id: int, store_id: int | None = None) -> MergedPayConfig:
+    """支付配置合并：非主租户须独立配置商户号与 API 密钥，禁止串用主租户 .env。"""
     base = get_settings()
     row = get_tenant_integration_row(db, tenant_id)
-    appid = _s(row.wx_mini_appid) if row else ""
-    mch = _s(row.wechat_pay_mch_id) if row else ""
-    key = _s(row.wechat_pay_api_key) if row else ""
-    notify = _s(row.wechat_pay_notify_url) if row else ""
+    tid = int(tenant_id)
+    appid = merge_tenant_field_or_global(
+        row.wx_mini_appid if row else None, base.WX_MINI_APPID, tenant_id=tid
+    )
+    mch = merge_tenant_field_or_global(
+        row.wechat_pay_mch_id if row else None, base.WECHAT_PAY_MCH_ID, tenant_id=tid
+    )
+    key = merge_tenant_field_or_global(
+        row.wechat_pay_api_key if row else None, base.WECHAT_PAY_API_KEY, tenant_id=tid
+    )
+    notify = merge_tenant_field_or_global(
+        row.wechat_pay_notify_url if row else None, base.WECHAT_PAY_NOTIFY_URL, tenant_id=tid
+    )
     cert_t = _s(row.wechat_pay_ssl_cert_path) if row else ""
     keyp_t = _s(row.wechat_pay_ssl_key_path) if row else ""
     cert_s, keyp_s = "", ""
@@ -70,14 +93,6 @@ def get_merged_pay_config(db: Session, tenant_id: int, store_id: int | None = No
             keyp_s = _s(getattr(st_row, "wechat_pay_ssl_key_path", None))
     cert_merged = cert_s or cert_t
     keyp_merged = keyp_s or keyp_t
-    if not appid:
-        appid = _s(base.WX_MINI_APPID)
-    if not mch:
-        mch = _s(base.WECHAT_PAY_MCH_ID)
-    if not key:
-        key = _s(base.WECHAT_PAY_API_KEY)
-    if not notify:
-        notify = _s(base.WECHAT_PAY_NOTIFY_URL)
     return MergedPayConfig(
         wx_mini_appid=appid,
         wechat_pay_mch_id=mch,
@@ -88,60 +103,160 @@ def get_merged_pay_config(db: Session, tenant_id: int, store_id: int | None = No
     )
 
 
-def wechat_pay_misconfiguration_detail_merged(cfg: MergedPayConfig) -> str | None:
+def wechat_pay_misconfiguration_detail_merged(
+    cfg: MergedPayConfig, *, tenant_id: int | None = None
+) -> str | None:
+    """支付配置完整性检查；非主租户缺项时附带对接设置引导文案。"""
+    hint_suffix = ""
+    if tenant_id is not None and not allows_global_env_fallback(int(tenant_id)):
+        hint_suffix = f"；{TENANT_INTEGRATION_INCOMPLETE_HINT}"
+
     if not cfg.wechat_pay_mch_id:
-        return "未配置微信支付商户号（租户或全局 WECHAT_PAY_MCH_ID）"
+        return f"未配置微信支付商户号{hint_suffix}"
     if not cfg.wechat_pay_api_key:
-        return "未配置微信 APIv2 密钥（租户或全局 WECHAT_PAY_API_KEY）"
+        return f"未配置微信 APIv2 密钥{hint_suffix}"
     if len(cfg.wechat_pay_api_key) != 32:
         return (
             f"WECHAT_PAY_API_KEY 必须为 32 位，当前 {len(cfg.wechat_pay_api_key)} 位。"
-            "请到 pay.weixin.qq.com 核对后填入租户对接配置或全局 .env"
+            f"请到 pay.weixin.qq.com 核对后填入租户对接配置{hint_suffix}"
         )
     if not cfg.wechat_pay_notify_url:
-        return "未配置支付回调 notify_url（租户或全局 WECHAT_PAY_NOTIFY_URL）"
+        return f"未配置支付回调 notify_url{hint_suffix}"
     if not cfg.wx_mini_appid:
-        return "未配置小程序 AppId（租户或全局 WX_MINI_APPID）"
+        return f"未配置小程序 AppId{hint_suffix}"
     return None
 
 
-def resolve_tenant_id_for_wechat_out_trade_no(db: Session, out_trade_no: str) -> int:
+def assert_tenant_pay_config_ready(
+    db: Session, tenant_id: int, store_id: int | None = None
+) -> MergedPayConfig:
+    """下单/退款前校验：配置不全时 503，非主租户不会落到主租户支付密钥。"""
+    cfg = get_merged_pay_config(db, int(tenant_id), store_id=store_id)
+    detail = wechat_pay_misconfiguration_detail_merged(cfg, tenant_id=int(tenant_id))
+    if detail:
+        raise HTTPException(status_code=503, detail=detail)
+    return cfg
+
+
+def resolve_tenant_id_for_wechat_out_trade_no(
+    db: Session, out_trade_no: str, *, allow_legacy_default_fallback: bool = False
+) -> int | None:
+    """
+    按商户单号反查订单所属租户。
+
+    - 找到订单：返回其 ``tenant_id``（支付验签/入账须用该租户密钥）。
+    - 未找到：**禁止**默认回落主租户（避免租户 2 回调误用租户 1 密钥）；仅当
+      ``allow_legacy_default_fallback=True`` 且调用方明确兼容单店历史行为时才回落。
+    """
     otn = _s(out_trade_no)
     if not otn:
-        return int(get_settings().DEFAULT_TENANT_ID)
+        if allow_legacy_default_fallback:
+            return legacy_default_tenant_id()
+        return None
     for model in (SingleMealOrder, MemberCardOrder):
         tid = db.scalar(select(model.tenant_id).where(model.out_trade_no == otn).limit(1))
         if tid is not None:
             return int(tid)
-    return int(get_settings().DEFAULT_TENANT_ID)
+    if allow_legacy_default_fallback:
+        return legacy_default_tenant_id()
+    return None
+
+
+def list_tenant_ids_by_wechat_mch_id(db: Session, mch_id: str) -> list[int]:
+    """回调报文中的 ``mch_id`` → 配置了该商户号的租户 id 列表（去重保序）。"""
+    mid = _s(mch_id)
+    if not mid:
+        return []
+    out: list[int] = []
+    base = get_settings()
+    global_mch = _s(base.WECHAT_PAY_MCH_ID)
+
+    def add(tid: int) -> None:
+        t = int(tid)
+        if t not in out:
+            out.append(t)
+
+    rows = db.scalars(select(TenantIntegrationSettings)).all()
+    for row in rows:
+        m = _s(row.wechat_pay_mch_id)
+        if m and m == mid:
+            add(int(row.tenant_id))
+    if global_mch and global_mch == mid:
+        add(legacy_default_tenant_id())
+    return out
+
+
+def resolve_wechat_pay_notify_api_key_candidates(
+    db: Session, data: dict[str, str]
+) -> list[str]:
+    """
+    微信异步通知验签密钥候选（去重保序）。
+
+    优先级：
+    1. 商户单号命中订单 → 该租户密钥；
+    2. 报文 ``mch_id`` 命中租户对接配置；
+    3. 各租户已配置的 API 密钥（覆盖「订单尚未入库」的竞态回调）；
+    4. 主租户全局 .env 密钥（仅主租户兼容）。
+    """
+    out: list[str] = []
+
+    def add(key: str | None) -> None:
+        kk = _s(key)
+        if kk and kk not in out:
+            out.append(kk)
+
+    otn = _s(data.get("out_trade_no"))
+    mch_id = _s(data.get("mch_id"))
+
+    tid = resolve_tenant_id_for_wechat_out_trade_no(db, otn, allow_legacy_default_fallback=False)
+    if tid is not None:
+        add(get_merged_pay_config(db, tid).wechat_pay_api_key)
+
+    for t in list_tenant_ids_by_wechat_mch_id(db, mch_id):
+        add(get_merged_pay_config(db, t).wechat_pay_api_key)
+
+    for row in db.scalars(select(TenantIntegrationSettings)).all():
+        add(row.wechat_pay_api_key)
+
+    base = get_settings()
+    if allows_global_env_fallback(legacy_default_tenant_id()):
+        add(base.WECHAT_PAY_API_KEY)
+
+    return out
 
 
 def merged_sf_integration_namespace(db: Session, tenant_id: int) -> SimpleNamespace:
-    """供顺丰预览/推单/取消使用：与现有代码中 gset 属性名一致。"""
+    """顺丰预览/推单参数：非主租户缺省不回退全局，避免串用主租户顺丰账号。"""
     base = get_settings()
     row = get_tenant_integration_row(db, tenant_id)
+    tid = int(tenant_id)
     ns = SimpleNamespace()
 
-    ns.SF_OPEN_DEV_ID = (
-        int(row.sf_open_dev_id)
-        if row and row.sf_open_dev_id is not None
-        else int(base.SF_OPEN_DEV_ID or 0)
+    ns.SF_OPEN_DEV_ID = merge_tenant_int_or_global(
+        row.sf_open_dev_id if row else None,
+        int(base.SF_OPEN_DEV_ID or 0),
+        tenant_id=tid,
     )
-    sec = _s(row.sf_open_secret) if row else ""
-    ns.SF_OPEN_SECRET = sec if sec else _s(base.SF_OPEN_SECRET)
-    shop = _s(row.sf_open_shop_id) if row else ""
-    ns.SF_OPEN_SHOP_ID = shop if shop else _s(base.SF_OPEN_SHOP_ID)
-    ns.SF_OPEN_SHOP_TYPE = (
-        int(row.sf_open_shop_type)
-        if row and row.sf_open_shop_type is not None
-        else int(base.SF_OPEN_SHOP_TYPE or 1)
+    ns.SF_OPEN_SECRET = merge_tenant_field_or_global(
+        row.sf_open_secret if row else None, base.SF_OPEN_SECRET, tenant_id=tid
     )
-    pp = _s(row.sf_pickup_phone) if row else ""
-    ns.SF_PICKUP_PHONE = pp if pp else _s(base.SF_PICKUP_PHONE)
-    pa = _s(row.sf_pickup_address) if row else ""
-    ns.SF_PICKUP_ADDRESS = pa if pa else _s(base.SF_PICKUP_ADDRESS)
-    cn = _s(row.sf_city_name) if row else ""
-    ns.SF_CITY_NAME = cn if cn else _s(base.SF_CITY_NAME)
+    ns.SF_OPEN_SHOP_ID = merge_tenant_field_or_global(
+        row.sf_open_shop_id if row else None, base.SF_OPEN_SHOP_ID, tenant_id=tid
+    )
+    ns.SF_OPEN_SHOP_TYPE = merge_tenant_int_or_global(
+        row.sf_open_shop_type if row else None,
+        int(base.SF_OPEN_SHOP_TYPE or 1),
+        tenant_id=tid,
+    )
+    ns.SF_PICKUP_PHONE = merge_tenant_field_or_global(
+        row.sf_pickup_phone if row else None, base.SF_PICKUP_PHONE, tenant_id=tid
+    )
+    ns.SF_PICKUP_ADDRESS = merge_tenant_field_or_global(
+        row.sf_pickup_address if row else None, base.SF_PICKUP_ADDRESS, tenant_id=tid
+    )
+    ns.SF_CITY_NAME = merge_tenant_field_or_global(
+        row.sf_city_name if row else None, base.SF_CITY_NAME, tenant_id=tid
+    )
 
     ns.SF_ORDER_SOURCE = base.SF_ORDER_SOURCE
     ns.SF_API_VERSION = base.SF_API_VERSION
@@ -155,20 +270,26 @@ def merged_sf_integration_namespace(db: Session, tenant_id: int) -> SimpleNamesp
 
 
 def resolve_sf_notify_app_key(db: Session, payload: dict[str, Any] | None) -> str:
-    """顺丰回调验签密钥：须与 ``sf_same_city_push`` 门店所属租户配置一致。
-
-    开放平台报文常为嵌套 JSON（字段在 ``data``/``result``/``post_data`` 内）；仅用顶层取值会走错密钥并验签失败。
-    """
+    """顺丰回调验签密钥：取候选列表首项。"""
     keys = resolve_sf_notify_app_key_candidates(db, payload)
-    return keys[0] if keys else _s(get_settings().SF_OPEN_SECRET)
+    if keys:
+        return keys[0]
+    base = get_settings()
+    if allows_global_env_fallback(legacy_default_tenant_id()):
+        return _s(base.SF_OPEN_SECRET)
+    return ""
 
 
 def resolve_sf_notify_app_key_candidates(db: Session, payload: dict[str, Any] | None) -> list[str]:
-    """按推单租户密钥优先、全局 .env 密钥兜底的验签密钥候选（去重保序）。"""
+    """
+    顺丰回调验签密钥候选。
+
+    - 能定位推单/门店：仅用该租户密钥；主租户可追加全局兜底。
+    - 无法定位：遍历各租户已配置密钥 + 主租户全局（不用主租户密钥替非主租户验签）。
+    """
     from app.services.delivery.sf_open_notify_payload import normalize_sf_callback_payload
 
     base = get_settings()
-    global_key = _s(base.SF_OPEN_SECRET)
     out: list[str] = []
 
     def add(k: str) -> None:
@@ -177,7 +298,10 @@ def resolve_sf_notify_app_key_candidates(db: Session, payload: dict[str, Any] | 
             out.append(kk)
 
     if not payload or not isinstance(payload, dict):
-        add(global_key)
+        for row in db.scalars(select(TenantIntegrationSettings)).all():
+            add(row.sf_open_secret)
+        if allows_global_env_fallback(legacy_default_tenant_id()):
+            add(base.SF_OPEN_SECRET)
         return out
 
     norm = normalize_sf_callback_payload(payload)
@@ -203,19 +327,24 @@ def resolve_sf_notify_app_key_candidates(db: Session, payload: dict[str, Any] | 
             .limit(1)
         )
 
-    if push_id is None:
-        add(global_key)
-        return out
-    prow = db.get(SfSameCityPush, int(push_id))
-    if prow and prow.store_id:
-        from app.models.store import Store
+    if push_id is not None:
+        prow = db.get(SfSameCityPush, int(push_id))
+        if prow and prow.store_id:
+            from app.models.store import Store
 
-        st = db.get(Store, int(prow.store_id))
-        if st:
-            row = get_tenant_integration_row(db, int(st.tenant_id))
-            if row and _s(row.sf_open_secret):
-                add(_s(row.sf_open_secret))
-    add(global_key)
+            st = db.get(Store, int(prow.store_id))
+            if st:
+                row = get_tenant_integration_row(db, int(st.tenant_id))
+                if row and _s(row.sf_open_secret):
+                    add(_s(row.sf_open_secret))
+                if allows_global_env_fallback(int(st.tenant_id)):
+                    add(base.SF_OPEN_SECRET)
+        return out
+
+    for row in db.scalars(select(TenantIntegrationSettings)).all():
+        add(row.sf_open_secret)
+    if allows_global_env_fallback(legacy_default_tenant_id()):
+        add(base.SF_OPEN_SECRET)
     return out
 
 

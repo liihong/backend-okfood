@@ -12,10 +12,20 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class AdminTenantSubscriptionOut(BaseModel):
+    """租户订阅摘要（店主/配送/客服登录后用于续费提醒）。"""
+
+    expires_at: str | None = None
+    days_until_expiry: int | None = None
+    status: Literal["ok", "expiring_soon", "expired", "unset"] = "unset"
+    remind_days: int = 30
+
+
 class AdminLoginTokenOut(TokenResponse):
     """登录响应：`admin_kind` 与 JWT `role`（admin / admin_delivery / admin_support / admin_system）一致。"""
 
     admin_kind: Literal["full", "delivery", "support", "system"] = "full"
+    tenant_subscription: AdminTenantSubscriptionOut | None = None
 
 
 class Pagination(BaseModel):

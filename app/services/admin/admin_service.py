@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, aliased, load_only
 
 from app.core.delivery_calendar import is_subscription_delivery_day
 from app.core.security import verify_password
+from app.core.tenant_subscription import assert_admin_tenant_subscription_active
 from app.core.timeutil import beijing_now_naive, today_shanghai, tomorrow_shanghai
 from app.models.admin_dashboard_biz_day_snapshot import AdminDashboardBizDaySnapshot
 from app.models.admin_user import AdminUser
@@ -271,6 +272,8 @@ def admin_login_user(db: Session, username: str, password: str) -> AdminUser:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     if not verify_password(password, u.password_hash):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
+    # 非平台管理员：租户到期后禁止登录
+    assert_admin_tenant_subscription_active(db, u)
     return u
 
 
@@ -1348,9 +1351,9 @@ def update_settings(db: Session, body: SettingsIn, *, store_id: int) -> None:
 
 
 def count_leave_members_for_delivery_day(db: Session, d: date, *, store_id: int | None = None) -> int:
-    from app.core.config import get_settings
+    from app.core.tenant_scope import require_store_id_for_service
 
-    sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
+    sid = require_store_id_for_service(store_id, operation="请假人数统计")
     if not is_subscription_delivery_day(d):
         return 0
     tomorrow_as_date = tomorrow_shanghai()
@@ -1606,11 +1609,14 @@ def dashboard_meal_summary(
     from app.core.config import get_settings
     from app.models.enums import MealPeriod
 
-    sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
-    anchor = business_anchor_date or today_shanghai()
+    from app.core.tenant_scope import require_store_id_for_service
+
+    sid = require_store_id_for_service(store_id, operation="仪表盘备餐汇总")
+    cal_today = today_shanghai()
+    # 未传 business_anchor_date 时默认锚定上海当日
+    anchor = business_anchor_date or cal_today
     day_after = date.fromordinal(anchor.toordinal() + 1)
     day_after_tomorrow = date.fromordinal(day_after.toordinal() + 1)
-    cal_today = today_shanghai()
 
     if not force_recompute:
         cache_key = (sid, anchor)

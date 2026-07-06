@@ -21,6 +21,8 @@ const ENV_DEFAULT_STORE_ID = Number(import.meta.env.VITE_ADMIN_DEFAULT_STORE_ID)
 export const adminStoreId = ref(ENV_DEFAULT_STORE_ID)
 /** `full` | `delivery` | `support` | `system`，与登录 JWT / 接口 admin_kind 一致 */
 export const adminKind = ref('full')
+/** 租户订阅状态（店主/配送/客服续费提醒） */
+export const adminTenantSubscription = ref(null)
 /** 会员列表：会员档案页写入，营业概览预览读取 */
 export const memberList = ref([])
 
@@ -128,6 +130,44 @@ function applyAdminKindFromCurrentToken(loginPayload = null) {
 /** 登录成功后须先 setAdminToken，再调用本函数传入登录返回的 data。 */
 export function syncAdminKindFromLoginPayload(data) {
   applyAdminKindFromCurrentToken(data && typeof data === 'object' ? data : null)
+  syncAdminTenantSubscriptionFromPayload(data)
+}
+
+/** 从登录或订阅接口同步租户续费状态 */
+export function syncAdminTenantSubscriptionFromPayload(data) {
+  const raw = data && typeof data === 'object' ? data.tenant_subscription : null
+  if (!raw || typeof raw !== 'object') {
+    adminTenantSubscription.value = null
+    return
+  }
+  adminTenantSubscription.value = {
+    expires_at: raw.expires_at != null ? String(raw.expires_at) : null,
+    days_until_expiry:
+      raw.days_until_expiry == null || Number.isNaN(Number(raw.days_until_expiry))
+        ? null
+        : Number(raw.days_until_expiry),
+    status: typeof raw.status === 'string' ? raw.status : 'unset',
+    remind_days: Number(raw.remind_days) > 0 ? Number(raw.remind_days) : 30,
+  }
+}
+
+/** 拉取当前租户订阅状态（续费提醒横幅） */
+export async function fetchAdminTenantSubscription() {
+  if (!String(adminAccessToken.value || '').trim()) {
+    adminTenantSubscription.value = null
+    return null
+  }
+  if (adminKind.value === 'system') {
+    adminTenantSubscription.value = null
+    return null
+  }
+  try {
+    const data = await apiJson('/api/admin/tenant-subscription', {}, { auth: true })
+    syncAdminTenantSubscriptionFromPayload({ tenant_subscription: data })
+    return adminTenantSubscription.value
+  } catch {
+    return adminTenantSubscription.value
+  }
 }
 
 export function hydrateTokenFromStorage() {
@@ -202,6 +242,7 @@ export function setAdminToken(token) {
 export function clearAdminToken() {
   adminAccessToken.value = ''
   adminKind.value = 'full'
+  adminTenantSubscription.value = null
   try {
     sessionStorage.removeItem(ADMIN_TOKEN_KEY)
     localStorage.removeItem(ADMIN_TOKEN_KEY)

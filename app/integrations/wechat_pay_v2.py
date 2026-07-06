@@ -97,16 +97,24 @@ def parse_wechat_pay_notify(
     """校验微信异步通知签名与 return/result_code，解析 out_trade_no、transaction_id、total_fee（分）。"""
     if (data.get("return_code") or "").upper() != "SUCCESS":
         return False, (data.get("return_msg") or "return_fail")[:200], None
-    api_key: str | None = None
+    # 多租户：按订单/mch_id/各租户密钥依次尝试验签，禁止未命中订单时仅用主租户密钥
     if db is not None:
         from app.services.shared.tenant_integration_service import (
-            get_merged_pay_config,
-            resolve_tenant_id_for_wechat_out_trade_no,
+            resolve_wechat_pay_notify_api_key_candidates,
         )
 
-        tid = resolve_tenant_id_for_wechat_out_trade_no(db, (data.get("out_trade_no") or "").strip())
-        api_key = get_merged_pay_config(db, tid).wechat_pay_api_key
-    if not verify_response_sign(data, api_key=api_key):
+        candidates = resolve_wechat_pay_notify_api_key_candidates(db, data)
+        for api_key in candidates:
+            if verify_response_sign(data, api_key=api_key):
+                break
+        else:
+            logger.error(
+                "微信回调签名校验失败（已尝试 %s 组租户密钥）: %s",
+                len(candidates),
+                {k: data.get(k) for k in ("out_trade_no", "mch_id", "result_code")},
+            )
+            return False, "sign", None
+    elif not verify_response_sign(data, api_key=None):
         logger.error("微信回调签名校验失败: %s", {k: data.get(k) for k in ("out_trade_no", "result_code")})
         return False, "sign", None
     if (data.get("result_code") or "").upper() != "SUCCESS":

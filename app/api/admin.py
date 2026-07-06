@@ -18,6 +18,7 @@ from app.core.deps import (
     admin_or_delivery_staff_subject,
     admin_staff_subject,
     issue_admin_token,
+    require_admin_tenant_id,
     require_admin_tenant_store,
 )
 from app.models.member import Member
@@ -65,7 +66,9 @@ from app.schemas.admin import (
     MemberMembershipRefundConfirmIn,
     MemberMealCompensationIn,
 )
-from app.schemas.common import AdminLoginTokenOut
+from app.schemas.common import AdminLoginTokenOut, AdminTenantSubscriptionOut
+from app.core.tenant_subscription import build_tenant_subscription_out
+from app.models.tenant import Tenant
 from app.services.admin.admin_service import (
     admin_delete_member,
     admin_login_user,
@@ -240,8 +243,29 @@ def login(request: Request, body: AdminLoginIn, db: SessionDep):
     else:
         kind = "full"
         jwt_role = ROLE_ADMIN
-    token = AdminLoginTokenOut(access_token=issue_admin_token(body.username, jwt_role=jwt_role), admin_kind=kind)
+    tenant_subscription = None
+    if kind != "system":
+        tenant = db.get(Tenant, int(u.tenant_id))
+        sub_payload = build_tenant_subscription_out(tenant)
+        tenant_subscription = AdminTenantSubscriptionOut(**sub_payload)
+    token = AdminLoginTokenOut(
+        access_token=issue_admin_token(body.username, jwt_role=jwt_role),
+        admin_kind=kind,
+        tenant_subscription=tenant_subscription,
+    )
     return success(data=dump_model(token), msg="登录成功")
+
+
+@router.get("/tenant-subscription")
+def admin_tenant_subscription(
+    db: SessionDep,
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
+):
+    """当前登录管理员所属租户的订阅状态（续费提醒横幅用）。"""
+    tid = require_admin_tenant_id(db, admin_username=admin_username)
+    tenant = db.get(Tenant, tid)
+    payload = build_tenant_subscription_out(tenant)
+    return success(data=payload, msg="获取成功")
 
 
 @router.get("/dashboard-summary", response_model=AdminDashboardSummaryApiOut)

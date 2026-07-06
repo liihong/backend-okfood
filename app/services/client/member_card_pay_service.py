@@ -25,8 +25,8 @@ from app.integrations.wechat_pay_v2 import (
     yuan_decimal_to_fen,
 )
 from app.services.shared.tenant_integration_service import (
+    assert_tenant_pay_config_ready,
     get_merged_pay_config,
-    wechat_pay_misconfiguration_detail_merged,
 )
 from app.models.enums import CardOrderKind, CardOrderPayStatus, CardPayChannel, CouponLockedOrderBiz
 from app.models.member import Member
@@ -705,10 +705,7 @@ def prepare_wechat_jsapi_for_member_card_order(
     if is_member_card_order_cancelled(order):
         raise HTTPException(status_code=400, detail="订单已取消")
 
-    pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
-    perr = wechat_pay_misconfiguration_detail_merged(pay_cfg)
-    if perr:
-        raise HTTPException(status_code=503, detail=perr)
+    pay_cfg = assert_tenant_pay_config_ready(db, int(order.tenant_id), store_id=int(order.store_id))
 
     member = db.get(Member, member_id)
     if not member or member.deleted_at is not None:

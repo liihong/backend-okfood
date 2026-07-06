@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def assign_region_for_coords(
     db: Session, lng: float, lat: float, *, tenant_id: int | None = None
 ) -> DeliveryRegion | None:
-    """按启用区域的 priority 顺序做点选，返回首个命中的区域行；否则 None（未分配）。"""
+    """按启用区域的 priority 顺序做点选；``tenant_id`` 必填于多租户环境，避免片区重叠时跨租户命中。"""
     stmt = (
         select(DeliveryRegion)
         .where(DeliveryRegion.is_active.is_(True))

@@ -24,8 +24,8 @@ from app.integrations.wechat_pay_v2 import (
     yuan_decimal_to_fen,
 )
 from app.services.shared.tenant_integration_service import (
+    assert_tenant_pay_config_ready,
     get_merged_pay_config,
-    wechat_pay_misconfiguration_detail_merged,
 )
 from app.models.enums import CouponLockedOrderBiz
 from app.models.courier import Courier
@@ -1101,10 +1101,7 @@ def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, c
     if str(order.fulfillment_status or "").strip().lower() == "cancelled":
         raise HTTPException(status_code=400, detail="订单已超时关闭，请重新下单")
 
-    pay_cfg = get_merged_pay_config(db, int(order.tenant_id), store_id=int(order.store_id))
-    perr = wechat_pay_misconfiguration_detail_merged(pay_cfg)
-    if perr:
-        raise HTTPException(status_code=503, detail=perr)
+    pay_cfg = assert_tenant_pay_config_ready(db, int(order.tenant_id), store_id=int(order.store_id))
 
     member = db.get(Member, member_id)
     if not member or member.deleted_at is not None:

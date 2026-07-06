@@ -1514,6 +1514,9 @@ class PlatformTenantOut(BaseModel):
     id: int
     name: str
     is_active: bool
+    expires_at: str | None = None
+    days_until_expiry: int | None = None
+    subscription_status: Literal["ok", "expiring_soon", "expired", "unset"] = "unset"
     created_at: str
     store_count: int = 0
     admin_count: int = 0
@@ -1522,11 +1525,13 @@ class PlatformTenantOut(BaseModel):
 class PlatformTenantCreateIn(BaseModel):
     name: str = Field(..., max_length=128)
     is_active: bool = True
+    expires_at: date = Field(..., description="按年订阅到期日（含当日仍有效）")
 
 
 class PlatformTenantPatchIn(BaseModel):
     name: str | None = Field(None, max_length=128)
     is_active: bool | None = None
+    expires_at: date | None = Field(None, description="续费后更新到期日")
 
 
 class PlatformTenantAdminOut(BaseModel):

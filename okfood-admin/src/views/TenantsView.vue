@@ -12,7 +12,46 @@ const tenants = ref([])
 const tenantDialog = ref(false)
 const tenantSaving = ref(false)
 const tenantEditId = ref(null)
-const tenantForm = ref({ name: '', is_active: true })
+const tenantForm = ref({ name: '', is_active: true, expires_at: '' })
+
+/** 新建租户默认到期日：当前日期 + 1 年（按年收费） */
+function defaultTenantExpiresAt() {
+  const d = new Date()
+  d.setFullYear(d.getFullYear() + 1)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+const subscriptionStatusLabel = (status) => {
+  const s = String(status || '').toLowerCase()
+  if (s === 'expired') return '已过期'
+  if (s === 'expiring_soon') return '即将到期'
+  if (s === 'ok') return '正常'
+  return '未设置'
+}
+
+const subscriptionStatusTagType = (status) => {
+  const s = String(status || '').toLowerCase()
+  if (s === 'expired') return 'danger'
+  if (s === 'expiring_soon') return 'warning'
+  if (s === 'ok') return 'success'
+  return 'info'
+}
+
+function formatExpiresAt(row) {
+  const raw = row && row.expires_at
+  if (!raw) return '—'
+  const days = row.days_until_expiry
+  if (typeof days === 'number' && days < 0) {
+    return `${raw}（已过期）`
+  }
+  if (typeof days === 'number' && days <= 30) {
+    return `${raw}（剩 ${days} 天）`
+  }
+  return String(raw)
+}
 
 const adminsDialog = ref(false)
 const adminsLoading = ref(false)
@@ -115,13 +154,17 @@ async function loadTenants() {
 
 function openCreateTenant() {
   tenantEditId.value = null
-  tenantForm.value = { name: '', is_active: true }
+  tenantForm.value = { name: '', is_active: true, expires_at: defaultTenantExpiresAt() }
   tenantDialog.value = true
 }
 
 function openEditTenant(row) {
   tenantEditId.value = row.id
-  tenantForm.value = { name: row.name || '', is_active: row.is_active !== false }
+  tenantForm.value = {
+    name: row.name || '',
+    is_active: row.is_active !== false,
+    expires_at: row.expires_at || '',
+  }
   tenantDialog.value = true
 }
 
@@ -131,6 +174,11 @@ async function saveTenant() {
     showToast('请填写租户名称', 'error')
     return
   }
+  const expiresAt = String(tenantForm.value.expires_at || '').trim()
+  if (!expiresAt) {
+    showToast('请选择订阅到期日', 'error')
+    return
+  }
   tenantSaving.value = true
   try {
     if (tenantEditId.value == null) {
@@ -138,17 +186,19 @@ async function saveTenant() {
         '/api/admin/system/tenants',
         {
           method: 'POST',
-          body: JSON.stringify({ name, is_active: tenantForm.value.is_active }),
+          body: JSON.stringify({ name, is_active: tenantForm.value.is_active, expires_at: expiresAt }),
         },
         { auth: true },
       )
       showToast('已创建', 'success')
     } else {
+      const body = { name, is_active: tenantForm.value.is_active }
+      if (expiresAt) body.expires_at = expiresAt
       await apiJson(
         `/api/admin/system/tenants/${tenantEditId.value}`,
         {
           method: 'PATCH',
-          body: JSON.stringify({ name, is_active: tenantForm.value.is_active }),
+          body: JSON.stringify(body),
         },
         { auth: true },
       )
@@ -626,6 +676,18 @@ onMounted(async () => {
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="订阅到期" min-width="168">
+          <template #default="{ row }">
+            <span>{{ formatExpiresAt(row) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="订阅状态" width="108">
+          <template #default="{ row }">
+            <el-tag :type="subscriptionStatusTagType(row.subscription_status)" size="small">
+              {{ subscriptionStatusLabel(row.subscription_status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="store_count" label="门店数" width="90" />
         <el-table-column prop="admin_count" label="管理员(活跃)" width="120" />
         <el-table-column label="操作" width="360" fixed="right">
@@ -647,6 +709,16 @@ onMounted(async () => {
       <el-form label-position="top">
         <el-form-item label="租户名称">
           <el-input v-model="tenantForm.name" maxlength="128" show-word-limit placeholder="例如：某某餐饮" />
+        </el-form-item>
+        <el-form-item label="订阅到期日">
+          <el-date-picker
+            v-model="tenantForm.expires_at"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="按年收费，请选择到期日"
+            style="width: 100%"
+          />
+          <p class="tenant-expires-hint">到期后该租户下所有管理账号将无法登录；到期前 30 天起提醒续费。</p>
         </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="tenantForm.is_active" />
@@ -1047,6 +1119,12 @@ onMounted(async () => {
   line-height: 1.45;
 }
 .admin-password-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.45;
+}
+.tenant-expires-hint {
   margin: 6px 0 0;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.55);

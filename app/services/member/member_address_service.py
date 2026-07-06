@@ -359,16 +359,35 @@ def _geocode_bundle(
     return None, None, None
 
 
-def apply_auto_area_from_coords_or_geocode(db: Session, row: MemberAddress) -> None:
-    """管理端「恢复自动划区」：已有坐标则按多边形划区；无坐标则按拼接地址尝试高德地理编码后再划区。"""
+def apply_auto_area_from_coords_or_geocode(
+    db: Session, row: MemberAddress, *, tenant_id: int | None = None
+) -> None:
+    """
+    管理端「恢复自动划区」：已有坐标则按多边形划区；无坐标则按拼接地址尝试高德地理编码后再划区。
+
+    必须按会员所属 ``tenant_id`` 过滤配送区域，避免多租户片区重叠时误划到其它租户区域。
+    """
+    tid = int(tenant_id) if tenant_id is not None else _resolve_tenant_id_for_member_address(db, row)
     if row.lng is not None and row.lat is not None:
-        r = assign_region_for_coords(db, float(row.lng), float(row.lat))
+        r = assign_region_for_coords(db, float(row.lng), float(row.lat), tenant_id=tid)
         row.delivery_region_id = int(r.id) if r else None
         return
     line = full_address_line(row.map_location_text, row.door_detail)
-    lng, lat, rid = _geocode_bundle(db, line)
+    lng, lat, rid = _geocode_bundle(db, line, tenant_id=tid)
     row.lng, row.lat = lng, lat
     row.delivery_region_id = rid
+
+
+def _resolve_tenant_id_for_member_address(db: Session, row: MemberAddress) -> int:
+    """从地址关联会员解析租户 id；无法确定时拒绝自动划区。"""
+    from fastapi import HTTPException
+
+    from app.models.member import Member
+
+    m = db.get(Member, int(row.member_id))
+    if m is None or m.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="会员不存在，无法自动划区")
+    return int(m.tenant_id)
 
 
 def _to_out(row: MemberAddress, id_to_name: dict[int, str]) -> MemberAddressOut:

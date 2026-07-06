@@ -31,6 +31,8 @@ import {
   adminAccessToken,
   hydrateTokenFromStorage,
   peekAdminJwtUsername,
+  adminTenantSubscription,
+  fetchAdminTenantSubscription,
 } from '../admin/core.js'
 import { useAdminTabsStore } from '../stores/adminTabs.js'
 import {
@@ -70,6 +72,22 @@ const isSystemOnly = computed(() => adminKind.value === 'system')
 
 /** 店主、配送、客服账号展示系统消息铃铛（平台管理员除外） */
 const showSystemNotifications = computed(() => !isSystemOnly.value)
+
+/** 租户订阅即将到期时顶栏下方续费提醒 */
+const showTenantRenewBanner = computed(() => {
+  if (isSystemOnly.value) return false
+  const sub = adminTenantSubscription.value
+  return sub && sub.status === 'expiring_soon'
+})
+
+const tenantRenewBannerText = computed(() => {
+  const sub = adminTenantSubscription.value
+  if (!sub || sub.status !== 'expiring_soon') return ''
+  const exp = sub.expires_at ? String(sub.expires_at) : '—'
+  const days = sub.days_until_expiry
+  const daysText = typeof days === 'number' ? `剩余 ${days} 天` : '即将到期'
+  return `您的租户服务将于 ${exp} 到期（${daysText}），请及时联系平台续费，到期后将无法登录管理后台。`
+})
 
 const notificationBadgeText = computed(() => {
   const n = Number(unacknowledgedCount.value) || 0
@@ -243,6 +261,9 @@ onMounted(() => {
   hydrateTokenFromStorage()
   if (showSystemNotifications.value) {
     subscribeLayoutPolling()
+  }
+  if (!isSystemOnly.value && adminAccessToken.value) {
+    void fetchAdminTenantSubscription()
   }
   sidebarMediaQuery = window.matchMedia('(max-width: 900px)')
   syncNarrowScreen()
@@ -596,6 +617,14 @@ function onTabClose(tab) {
       />
 
       <div class="main-body__router-host">
+        <el-alert
+          v-if="showTenantRenewBanner"
+          class="tenant-renew-banner"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="tenantRenewBannerText"
+        />
         <router-view v-slot="{ Component, route: viewRoute }">
           <keep-alive :include="keepAliveInclude" :max="ADMIN_TABS_MAX_CACHE">
             <component :is="Component" :key="viewRoute.name" />

@@ -1791,7 +1791,9 @@ def cancel_sf_same_city_push(
     if row is None:
         raise HTTPException(status_code=404, detail="推单记录不存在")
     st_row = db.get(Store, int(row.store_id)) if row.store_id else None
-    tid = int(st_row.tenant_id) if st_row else int(get_settings().DEFAULT_TENANT_ID)
+    if st_row is None:
+        raise HTTPException(status_code=400, detail="推单记录缺少门店，无法确定租户顺丰配置")
+    tid = int(st_row.tenant_id)
     gset = merged_sf_integration_namespace(db, tid)
     if not gset.SF_OPEN_DEV_ID or not (gset.SF_OPEN_SHOP_ID or "").strip() or not (
         gset.SF_OPEN_SECRET or ""
