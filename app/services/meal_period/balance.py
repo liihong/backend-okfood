@@ -80,9 +80,9 @@ def member_has_any_period_balance(db: Session, member: Member) -> bool:
 
 def sync_member_is_active_from_period_balances(db: Session, member: Member) -> None:
     """
-    激活态由「未暂停配送」+「任一餐段有余次」共同决定。
+    激活态由「未暂停配送/待完善配送（delivery_deferred）」+「任一餐段有余次」共同决定。
     午餐扣至 0 但晚餐仍有余次时保持激活；反之亦然。
-    delivery_start_date 为空时仍可激活（与 eligible 起送日为空=即日生效一致）。
+    起送日为空时仍可激活（仅历史老会员即日生效；新购卡待完善时 delivery_deferred=true 不会激活）。
     """
     lunch_bal = max(0, int(member.balance or 0))
     dinner_row = db.get(

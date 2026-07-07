@@ -781,9 +781,9 @@ def patch_member_profile(
 
             m.delivery_deferred = False
 
-            if m.balance > 0:
+            from app.services.meal_period.balance import sync_member_is_active_from_period_balances
 
-                m.is_active = True
+            sync_member_is_active_from_period_balances(db, m)
 
         else:
 

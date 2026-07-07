@@ -65,7 +65,7 @@ class MemberOut(BaseModel):
     )
     paid_card_awaiting_setup: bool = Field(
         False,
-        description="小程序自助购卡微信已缴、尚未入账（balance 仍为 0）；须引导完善配送/自提信息",
+        description="小程序自助购卡微信已缴且履约信息未齐备（无起送日或配送到家无默认地址）；须引导完善后再派单",
     )
     entitled_meal_periods: list[str] = Field(
         default_factory=lambda: ["lunch"],

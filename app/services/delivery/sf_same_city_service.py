@@ -976,9 +976,10 @@ def preview_sf_same_city(
 ) -> SfSameCityPreviewOut:
     sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
     d = delivery_date or today_shanghai()
-    rows, _ags, sf_configured, instant_sf_configured = _build_sf_same_city_preview_bundle(
+    rows, ags, sf_configured, instant_sf_configured = _build_sf_same_city_preview_bundle(
         db, delivery_date=d, store_id=sid, area=area, phone=phone
     )
+    _assert_sf_preview_rows_ready(db, rows=rows, ags=ags, delivery_date=d)
     return SfSameCityPreviewOut(
         delivery_date=d.isoformat(),
         rows=rows,
@@ -1000,7 +1001,7 @@ def preview_sf_dinner_same_city(
 
     sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
     d = delivery_date or today_shanghai()
-    rows, _ags, sf_configured, instant_sf_configured = _build_sf_same_city_preview_bundle(
+    rows, ags, sf_configured, instant_sf_configured = _build_sf_same_city_preview_bundle(
         db,
         delivery_date=d,
         store_id=sid,
@@ -1008,6 +1009,7 @@ def preview_sf_dinner_same_city(
         phone=phone,
         meal_period=MealPeriod.DINNER.value,
     )
+    _assert_sf_preview_rows_ready(db, rows=rows, ags=ags, delivery_date=d)
     return SfSameCityPreviewOut(
         delivery_date=d.isoformat(),
         rows=rows,
@@ -1190,6 +1192,83 @@ def _delivery_sheet_push_row(item: SfSameCityPreviewRow) -> SfSameCityPreviewRow
     return item.model_copy(update={"single_meal_count": 0, "weight_kg": round(wkg, 2)})
 
 
+def _member_label_for_sf_error(member: Member | None, member_id: int) -> str:
+    if member is None:
+        return str(member_id)
+    return (member.phone or member.name or str(member_id)).strip()
+
+
+def _member_address_has_valid_coords(addr: MemberAddress | None) -> bool:
+    if addr is None or addr.lng is None or addr.lat is None:
+        return False
+    try:
+        lg = float(addr.lng)
+        lt = float(addr.lat)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(lg) and math.isfinite(lt)
+
+
+def _validate_agg_subscription_sf_readiness(
+    db: Session,
+    agg: _Agg,
+    *,
+    delivery_date: date,
+) -> str | None:
+    """订阅合并推单：须起送日不晚于业务日，配送到家须有默认地址有效坐标。"""
+    for x in agg.sub_lines:
+        if x.get("is_delivered"):
+            continue
+        if int(x.get("units") or 0) <= 0:
+            continue
+        mid = int(x["member_id"])
+        member = db.get(Member, mid)
+        label = _member_label_for_sf_error(member, mid)
+        if member is None:
+            return f"会员{label}不存在"
+        if bool(member.delivery_deferred):
+            return f"会员{label}待完善配送信息，不可推顺丰"
+        ds = member.delivery_start_date
+        if ds is None:
+            return f"会员{label}未设置起送日，不可推顺丰"
+        if ds > delivery_date:
+            return (
+                f"会员{label}起送日({ds.isoformat()})晚于业务日({delivery_date.isoformat()})，不可推顺丰"
+            )
+        if bool(member.store_pickup):
+            continue
+        addr = _load_default_address(db, mid, {})
+        if not _member_address_has_valid_coords(addr):
+            return f"会员{label}默认配送地址缺少有效坐标，不可推顺丰"
+    return None
+
+
+def _assert_sf_preview_rows_ready(
+    db: Session,
+    *,
+    rows: list[SfSameCityPreviewRow],
+    ags: dict[str, _Agg],
+    delivery_date: date,
+) -> None:
+    """预览推单：订阅停靠点须满足起送日与地址坐标，否则整批报错便于管理端修正。"""
+    errors: list[str] = []
+    for row in rows:
+        if int(row.subscription_pending_units or 0) <= 0:
+            continue
+        agg = ags.get(row.stop_id)
+        if agg is None:
+            continue
+        stop_label = (row.group_area or row.address_line or row.stop_id[:8]).strip()
+        err = _validate_agg_subscription_sf_readiness(db, agg, delivery_date=delivery_date)
+        if err:
+            errors.append(f"{stop_label}：{err}")
+            continue
+        if row.recv_lng is None or row.recv_lat is None:
+            errors.append(f"{stop_label}：配送地址缺少有效坐标，不可推顺丰")
+    if errors:
+        raise ValueError("；".join(errors[:20]))
+
+
 def _validate_sf_push_row(
     db: Session,
     item: SfSameCityPreviewRow,
@@ -1220,6 +1299,22 @@ def _validate_sf_push_row(
                 message="本配送日内有会员已在其他停靠点成功推单，不能重复创单。",
                 sf_order_id=None,
             )
+        if int(item.subscription_pending_units or 0) > 0:
+            err = _validate_agg_subscription_sf_readiness(db, agg_cur, delivery_date=d)
+            if err:
+                return SfSameCityPushItemResult(
+                    stop_id=item.stop_id,
+                    ok=False,
+                    message=err,
+                    sf_order_id=None,
+                )
+            if item.recv_lng is None or item.recv_lat is None:
+                return SfSameCityPushItemResult(
+                    stop_id=item.stop_id,
+                    ok=False,
+                    message="配送地址缺少有效坐标，不可推顺丰",
+                    sf_order_id=None,
+                )
     if item.is_insured and item.goods_value_yuan is None:
         return SfSameCityPushItemResult(
             stop_id=item.stop_id,

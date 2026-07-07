@@ -1375,11 +1375,15 @@ def count_leave_members_for_delivery_day(db: Session, d: date, *, store_id: int 
     )
     tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
     absent = or_(in_leave_range, tomorrow_leave_hit)
-    started = or_(
-        Member.delivery_start_date.is_(None),
-        Member.delivery_start_date <= d,
+    from app.services.delivery.courier_service import subscription_delivery_started_clause
+
+    started = subscription_delivery_started_clause(d)
+    base = and_(
+        Member.is_active.is_(True),
+        Member.delivery_deferred.is_(False),
+        Member.balance >= units_sql,
+        started,
     )
-    base = and_(Member.is_active.is_(True), Member.balance >= units_sql, started)
     if d.weekday() == 5:
         base = and_(base, Member.skip_subscription_saturday.is_(False))
     active_only = Member.deleted_at.is_(None)

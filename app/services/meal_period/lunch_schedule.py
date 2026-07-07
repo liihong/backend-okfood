@@ -27,4 +27,8 @@ def member_on_lunch_delivery_schedule(
         member, delivery_date=delivery_date, today=today
     ):
         return False
+    from app.services.member.member_card_order_service import member_paid_card_awaiting_setup
+
+    if member_paid_card_awaiting_setup(db, int(member.id)):
+        return False
     return member_entitled_for_sheet(db, int(member.id), DeliverySheetView.LUNCH.value)

@@ -16,6 +16,7 @@ from app.models.member_meal_period_state import MemberMealPeriodState
 from app.services.delivery.courier_service import (
     _member_not_skip_subscription_saturday,
     _member_scope_clause,
+    subscription_delivery_started_clause,
 )
 from app.services.meal_period.card_eligibility import (
     _periods_match_sheet,
@@ -46,10 +47,7 @@ def eligible_members_for_dinner_delivery(
 
     today = today_shanghai()
     d = delivery_date
-    started = or_(
-        Member.delivery_start_date.is_(None),
-        Member.delivery_start_date <= d,
-    )
+    started = subscription_delivery_started_clause(d)
     daf = default_address_pick_subquery()
     dinner_state = (
         select(MemberMealPeriodState)
@@ -68,6 +66,7 @@ def eligible_members_for_dinner_delivery(
         .where(
             Member.deleted_at.is_(None),
             Member.is_active.is_(True),
+            Member.delivery_deferred.is_(False),
             dinner_state,
             Member.store_pickup.is_(False),
             started,
@@ -97,6 +96,8 @@ def eligible_members_for_dinner_delivery(
 
     members: list[Member] = []
     defaults: dict[int, MemberAddress | None] = {}
+    from app.services.member.member_card_order_service import member_paid_card_awaiting_setup
+
     for m, addr in candidates:
         state_row = state_map.get(int(m.id))
         units = dinner_daily_meal_units_from_state(state_row)
@@ -105,6 +106,8 @@ def eligible_members_for_dinner_delivery(
             continue
         # 仅晚餐分餐段请假判定；午餐 members 表请假不影响晚餐名单
         if is_dinner_absent_on_delivery_date(state_row, d, today=today):
+            continue
+        if member_paid_card_awaiting_setup(db, int(m.id)):
             continue
         members.append(m)
         defaults[m.id] = addr

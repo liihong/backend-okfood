@@ -219,6 +219,23 @@ def post_push_first_day_whitelist_member_ids(
     return {int(x) for x in db.scalars(q).all()}
 
 
+def subscription_delivery_started_clause(delivery_date: date):
+    """
+    起送日门禁（与配送大表、备餐、顺丰推单口径一致）。
+
+    - 已设起送日：仅当 ``delivery_date >= delivery_start_date`` 入选；
+    - 起送日为空：仅历史老会员（``delivery_deferred=false``，即日生效）；
+    - 新购卡包待完善（``delivery_deferred=true``）即使起送日为空也不入选。
+    """
+    return or_(
+        and_(
+            Member.delivery_start_date.is_(None),
+            Member.delivery_deferred.is_(False),
+        ),
+        Member.delivery_start_date <= delivery_date,
+    )
+
+
 def eligible_members_for_delivery(
     db: Session,
     *,
@@ -231,6 +248,7 @@ def eligible_members_for_delivery(
     应配送会员（Member 行）及每人默认地址（与 is_absent_on_delivery_date / 配送清单同一规则）。
     「仅明天请假」相对业务 today（上海），与 delivery_date 比较。
     若会员设置了 delivery_start_date，仅当 delivery_date 不早于该日才入选。
+    起送日为空仅历史老会员（未暂停配送）；小程序购卡待完善（paid_card_awaiting_setup）一律排除。
     周日与法定节假日不配送，直接返回空列表（与配送大表、备餐口径一致）。
     普通周六且会员开启「固定周六不履约」时，该会员不进入名单（到家）；与 `store_pickup`/自提同类规则见本模块自提函数。
     单次查询 OUTER JOIN 默认地址；按片区筛选时在 SQL 中过滤，避免「全员查完再内存过滤」的二次往返。
@@ -238,10 +256,7 @@ def eligible_members_for_delivery(
     if not is_subscription_delivery_day(delivery_date):
         return [], {}
     absent = _home_delivery_absent_clause(delivery_date)
-    started = or_(
-        Member.delivery_start_date.is_(None),
-        Member.delivery_start_date <= delivery_date,
-    )
+    started = subscription_delivery_started_clause(delivery_date)
     units_sql = sql_effective_daily_meal_units_column()
     daf = default_address_pick_subquery()
     q = (
@@ -251,6 +266,7 @@ def eligible_members_for_delivery(
         .where(
             Member.deleted_at.is_(None),
             Member.is_active.is_(True),
+            Member.delivery_deferred.is_(False),
             Member.balance >= units_sql,
             Member.store_pickup.is_(False),
             not_(absent),
@@ -263,7 +279,11 @@ def eligible_members_for_delivery(
         q = q.where(MemberAddress.delivery_region_id == delivery_region_id)
     members: list[Member] = []
     defaults: dict[int, MemberAddress | None] = {}
+    from app.services.member.member_card_order_service import member_paid_card_awaiting_setup
+
     for m, addr in db.execute(q).all():
+        if member_paid_card_awaiting_setup(db, int(m.id)):
+            continue
         members.append(m)
         defaults[m.id] = addr
     return members, defaults
@@ -295,13 +315,11 @@ def _member_subscription_schedule_where(
     )
     tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
     absent = or_(in_leave_range, tomorrow_leave_hit)
-    started = or_(
-        Member.delivery_start_date.is_(None),
-        Member.delivery_start_date <= delivery_date,
-    )
+    started = subscription_delivery_started_clause(delivery_date)
     return [
         Member.deleted_at.is_(None),
         Member.is_active.is_(True),
+        Member.delivery_deferred.is_(False),
         not_(absent),
         started,
         _member_not_skip_subscription_saturday(delivery_date),
@@ -383,10 +401,7 @@ def _list_dinner_members_insufficient_balance_for_delivery_day(
     from app.services.meal_period.units import dinner_daily_meal_units_from_state
 
     today = today_shanghai()
-    started = or_(
-        Member.delivery_start_date.is_(None),
-        Member.delivery_start_date <= delivery_date,
-    )
+    started = subscription_delivery_started_clause(delivery_date)
     stmt = (
         select(Member)
         .join(
@@ -539,10 +554,7 @@ def eligible_members_for_store_pickup(
     )
     tomorrow_leave_hit = or_(target_hit, legacy_tomorrow)
     absent = or_(in_leave_range, tomorrow_leave_hit)
-    started = or_(
-        Member.delivery_start_date.is_(None),
-        Member.delivery_start_date <= delivery_date,
-    )
+    started = subscription_delivery_started_clause(delivery_date)
     units_sql = sql_effective_daily_meal_units_column()
     daf = default_address_pick_subquery()
     q = (
@@ -552,6 +564,7 @@ def eligible_members_for_store_pickup(
         .where(
             Member.deleted_at.is_(None),
             Member.is_active.is_(True),
+            Member.delivery_deferred.is_(False),
             Member.balance >= units_sql,
             Member.store_pickup.is_(True),
             not_(absent),
@@ -582,10 +595,7 @@ def count_expire_one_unit_members_for_business_day(
     """
     if not is_subscription_delivery_day(delivery_date):
         return 0
-    started = or_(
-        Member.delivery_start_date.is_(None),
-        Member.delivery_start_date <= delivery_date,
-    )
+    started = subscription_delivery_started_clause(delivery_date)
     units_sql = sql_effective_daily_meal_units_column()
     scope = _member_scope_clause(tenant_id=tenant_id, store_id=store_id)
     saturday = _member_not_skip_subscription_saturday(delivery_date)

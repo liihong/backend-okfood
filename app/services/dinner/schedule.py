@@ -39,6 +39,10 @@ def member_on_dinner_delivery_schedule(
         return False
     if not member_entitled_for_sheet(db, int(member.id), DeliverySheetView.DINNER.value):
         return False
+    from app.services.member.member_card_order_service import member_paid_card_awaiting_setup
+
+    if member_paid_card_awaiting_setup(db, int(member.id)):
+        return False
     ds = member.delivery_start_date
     if ds is not None and ds > delivery_date:
         return False

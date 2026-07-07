@@ -924,7 +924,7 @@ def finalize_member_card_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     order.pay_channel = CardPayChannel.WECHAT.value
     tid = (parsed.transaction_id or "").strip()
     order.wx_transaction_id = tid or order.wx_transaction_id
-    # 支付成功即写入会员次数；无起送日时不激活，待用户完善配送后再派单
+    # 支付成功即写入会员次数；无起送日则 delivery_deferred=true、暂不激活，待用户完善配送后再派单
     apply_paid_card_order_to_member_if_pending(db, order, operator="wechat_notify")
     if _is_miniprogram_self_service_card_order(order):
         oid = int(order.id)

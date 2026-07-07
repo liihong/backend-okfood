@@ -146,20 +146,29 @@ def ensure_miniprogram_offline_claim_order(
     return order
 
 
+def member_delivery_setup_incomplete(db: Session, member: Member) -> bool:
+    """配送到家订阅：无起送日，或配送到家但无默认地址，视为待完善履约信息。"""
+    if member.delivery_start_date is None:
+        return True
+    if bool(member.store_pickup):
+        return False
+    from app.services.member.member_address_service import get_default_address
+
+    return get_default_address(db, int(member.id)) is None
+
+
 def member_paid_card_awaiting_setup(db: Session, member_id: int) -> bool:
     """
-    小程序自助购卡：微信已缴且工单未入账、会员各餐段余次均为 0。
-    用于「我的」页引导完善配送信息，避免误判为未购卡。
+    小程序自助购卡已缴且履约信息未齐备（无起送日，或配送到家无默认地址）。
+    支付成功即入账，与 balance 无关；用于「我的」引导完善配送后再派单。
     """
-    from app.services.meal_period.balance import member_has_any_period_balance
-
     m = db.get(Member, int(member_id))
-    if not m or member_has_any_period_balance(db, m):
+    if not m or m.deleted_at is not None:
         return False
-    order = _latest_miniprogram_self_service_card_order(
-        db, int(member_id), applied_to_member=False
-    )
-    return order is not None
+    order = _latest_miniprogram_self_service_card_order(db, int(member_id))
+    if order is None:
+        return False
+    return member_delivery_setup_incomplete(db, m)
 
 
 def _latest_miniprogram_self_service_card_order(
@@ -377,7 +386,6 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
     from app.services.meal_period.balance import (
         apply_dinner_recharge_delta,
         reset_dinner_quota_on_membership_reopen,
-        sync_member_is_active_from_period_balances,
     )
     periods = list(order.meal_periods_snapshot or [])
     # 退卡后重新开卡：清除退款标记并重置总次数，避免状态仍为「已退款」、剩余/总叠加旧周期
@@ -410,7 +418,9 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
         m.delivery_start_date = order.delivery_start_date
         m.delivery_deferred = False
     else:
-        sync_member_is_active_from_period_balances(db, m)
+        # 无起送日：仅入账，待小程序完善配送信息后再激活派单
+        m.is_active = False
+        m.delivery_deferred = True
     from app.services.meal_period.apply_side_effects import ensure_meal_period_states_after_card_apply
 
     ensure_meal_period_states_after_card_apply(db, m, order.meal_periods_snapshot)

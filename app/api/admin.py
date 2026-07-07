@@ -598,9 +598,12 @@ def delivery_sf_preview(
     需配置：``SF_OPEN_*``、``SF_PICKUP_PHONE``、``SF_PICKUP_ADDRESS``。
     """
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    out: SfSameCityPreviewOut = preview_sf_same_city(
-        db, delivery_date=delivery_date, area=area, phone=phone, store_id=store_id
-    )
+    try:
+        out: SfSameCityPreviewOut = preview_sf_same_city(
+            db, delivery_date=delivery_date, area=area, phone=phone, store_id=store_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return success(data=dump_model(out), msg="获取成功")
 
 
@@ -680,9 +683,12 @@ def delivery_sf_dinner_preview(
 ):
     """晚餐配送大表顺丰创单前预览（push_kind=dinner_delivery_sheet，与午餐推单隔离）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    out: SfSameCityPreviewOut = preview_sf_dinner_same_city(
-        db, delivery_date=delivery_date, area=area, phone=phone, store_id=store_id
-    )
+    try:
+        out: SfSameCityPreviewOut = preview_sf_dinner_same_city(
+            db, delivery_date=delivery_date, area=area, phone=phone, store_id=store_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return success(data=dump_model(out), msg="获取成功")
 
 
