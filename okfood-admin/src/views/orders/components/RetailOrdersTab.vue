@@ -77,6 +77,11 @@ const {
         row.store_pickup ? '门店自提' : singleOrderDeliveryAddressTextOnly(row)
       }}</template>
     </el-table-column>
+    <el-table-column label="备注" min-width="140" show-overflow-tooltip class-name="td-remarks">
+      <template #default="{ row }">{{
+        (row.remark || '').trim() ? row.remark : '—'
+      }}</template>
+    </el-table-column>
     <el-table-column label="操作" width="92" fixed="right" align="center">
       <template #default="{ row }">
         <el-dropdown trigger="click" @command="(cmd) => onRetailRowMoreCommand(row, cmd)">
@@ -101,6 +106,7 @@ const {
               <el-dropdown-item command="refund" divided :disabled="!canRefundWechatRetail(row)">
                 退款
               </el-dropdown-item>
+              <el-dropdown-item command="remark">编辑备注</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>

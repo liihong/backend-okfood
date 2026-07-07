@@ -7,6 +7,7 @@ import OrdersPagination from './OrdersPagination.vue'
 import OrdersRefundDialog from './OrdersRefundDialog.vue'
 import OrdersAssignCourierDialog from './OrdersAssignCourierDialog.vue'
 import OrdersEditOrderDialog from './OrdersEditOrderDialog.vue'
+import OrdersRetailRemarkDialog from './OrdersRetailRemarkDialog.vue'
 import '../orders-manage.css'
 
 /** @type {{ orderKind: 'single' | 'retail' | 'mall' }} */
@@ -34,5 +35,6 @@ provide(ORDERS_MANAGE_KEY, ordersManage)
     <OrdersRefundDialog />
     <OrdersAssignCourierDialog />
     <OrdersEditOrderDialog />
+    <OrdersRetailRemarkDialog />
   </section>
 </template>

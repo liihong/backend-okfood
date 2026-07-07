@@ -52,6 +52,13 @@ class AdminStoreRetailOrderListOut(StoreRetailOrderOut):
     member_name: str = ""
     recipient_contact_name: str = ""
     address_remarks: str = ""
+    remark: str | None = None
+
+
+class StoreRetailOrderRemarkPatchIn(BaseModel):
+    """管理端：更新商城订单后台备注。"""
+
+    remark: str | None = Field(None, max_length=500)
 
 
 class StoreRetailOrderIdsIn(BaseModel):

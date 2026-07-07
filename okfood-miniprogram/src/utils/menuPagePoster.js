@@ -4,7 +4,26 @@ import { entryPosterVisible } from '@/utils/entryPosterState.js'
 import { couponReminderVisible } from '@/utils/memberCouponReminderState.js'
 import { showMenuPagePosterModal, menuPagePosterVisible } from '@/utils/menuPagePosterState.js'
 
+const STORAGE_KEY = 'okfood_menu_page_poster_shown_v1'
+
 let posterInFlight = false
+
+/** 本机是否已展示过菜单页海报（仅弹一次） */
+function hasMenuPagePosterShown() {
+  try {
+    return !!uni.getStorageSync(STORAGE_KEY)
+  } catch {
+    return false
+  }
+}
+
+function markMenuPagePosterShown() {
+  try {
+    uni.setStorageSync(STORAGE_KEY, '1')
+  } catch {
+    /* ignore */
+  }
+}
 
 /** 等待其他弹窗关闭后再展示菜单页海报 */
 function waitForOtherModalsClosed(maxWaitMs = 1200) {
@@ -26,13 +45,14 @@ function waitForOtherModalsClosed(maxWaitMs = 1200) {
 }
 
 /**
- * 进入菜单页时弹出配置海报（每次进入均展示；与其他弹窗错开）。
+ * 进入菜单页时弹出配置海报（本机仅弹一次；与其他弹窗错开）。
  * @returns {Promise<boolean>} 是否已弹出海报
  */
 export async function tryShowMenuPagePoster() {
   if (posterInFlight) return false
   if (menuPagePosterVisible.value) return false
   if (getCourierToken()) return false
+  if (hasMenuPagePosterShown()) return false
 
   posterInFlight = true
   try {
@@ -45,6 +65,7 @@ export async function tryShowMenuPagePoster() {
 
     if (entryPosterVisible.value || couponReminderVisible.value) return false
 
+    markMenuPagePosterShown()
     showMenuPagePosterModal(imageUrl)
     return true
   } catch {

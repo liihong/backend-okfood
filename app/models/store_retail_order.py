@@ -62,5 +62,6 @@ class StoreRetailOrder(Base):
         index=True,
     )
     sf_order_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    remark: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="后台备注（不对会员端展示）")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

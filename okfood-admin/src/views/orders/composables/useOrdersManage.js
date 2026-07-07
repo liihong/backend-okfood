@@ -58,6 +58,11 @@ export function useOrdersManage(orderKind = 'single') {
   const refundOpen = ref(false)
   /** @type {import('vue').Ref<{ kind: 'single' | 'mall' | 'retail'; row: Record<string, unknown> } | null>} */
   const refundTarget = ref(null)
+  const retailRemarkOpen = ref(false)
+  /** @type {import('vue').Ref<Record<string, unknown> | null>} */
+  const retailRemarkTarget = ref(null)
+  const retailRemarkDraft = ref('')
+  const retailRemarkSaving = ref(false)
   const syncDeliveryLoading = ref(false)
   /** @type {import('vue').Ref<import('vue').ComponentPublicInstance | null>} */
   const singleTableRef = ref(null)
@@ -508,6 +513,45 @@ export function useOrdersManage(orderKind = 'single') {
     else if (cmd === 'complete') void onMarkRetailOrderComplete(row)
     else if (cmd === 'cancel') void onCancelRetailOrder(row)
     else if (cmd === 'refund') onRefundWechatRetail(row)
+    else if (cmd === 'remark') openRetailRemarkDialog(row)
+  }
+
+  function openRetailRemarkDialog(row) {
+    retailRemarkTarget.value = row
+    retailRemarkDraft.value = String(row.remark || '')
+    retailRemarkOpen.value = true
+  }
+
+  function onRetailRemarkDialogClosed() {
+    retailRemarkTarget.value = null
+    retailRemarkDraft.value = ''
+    retailRemarkSaving.value = false
+  }
+
+  async function submitRetailRemark() {
+    const row = retailRemarkTarget.value
+    if (!row) return
+    retailRemarkSaving.value = true
+    try {
+      const remark = String(retailRemarkDraft.value || '').trim() || null
+      await apiJson(
+        `/api/admin/orders/retail-orders/${row.id}/remark`,
+        { method: 'PATCH', body: JSON.stringify({ remark }) },
+        { auth: true },
+      )
+      showToast('备注已保存', 'success')
+      retailRemarkOpen.value = false
+      await fetchRetailOrders()
+    } catch (e) {
+      const status = e && typeof e.status === 'number' ? e.status : 0
+      if (status === 401) {
+        showToast('登录已过期，请重新登录', 'error')
+        return
+      }
+      showToast(e?.message || '保存备注失败', 'error')
+    } finally {
+      retailRemarkSaving.value = false
+    }
   }
 
   async function onPushSfRetailOrder(row) {
@@ -1190,6 +1234,10 @@ export function useOrdersManage(orderKind = 'single') {
     refundLoadingId,
     refundOpen,
     refundTarget,
+    retailRemarkOpen,
+    retailRemarkTarget,
+    retailRemarkDraft,
+    retailRemarkSaving,
     syncDeliveryLoading,
     singleTableRef,
     selectedSingleRows,
@@ -1223,6 +1271,9 @@ export function useOrdersManage(orderKind = 'single') {
     onSingleRowMoreCommand,
     onMallRowMoreCommand,
     onRetailRowMoreCommand,
+    openRetailRemarkDialog,
+    submitRetailRemark,
+    onRetailRemarkDialogClosed,
     onBatchPushSfRetail,
     openBatchAssignCourier,
     onBatchMarkComplete,

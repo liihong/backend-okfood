@@ -12,6 +12,7 @@ from app.schemas.store_retail_order import (
     StoreRetailBatchAssignCourierIn,
     StoreRetailCancelIn,
     StoreRetailOrderIdsIn,
+    StoreRetailOrderRemarkPatchIn,
 )
 from app.services.admin.store_retail_order_admin_service import (
     admin_assign_courier_store_retail_order,
@@ -23,6 +24,7 @@ from app.services.admin.store_retail_order_admin_service import (
     bulk_push_store_retail_orders_to_sf,
     list_admin_store_retail_orders_by_order_day,
     push_store_retail_order_to_sf,
+    update_admin_store_retail_order_remark,
 )
 from app.utils.response import dump_model, page_response, success
 
@@ -70,6 +72,28 @@ def admin_orders_daily_retail_orders(
         page_size=page_size,
         msg="获取成功",
     )
+
+
+@router.patch("/orders/retail-orders/{order_id}/remark")
+def admin_retail_order_patch_remark(
+    order_id: int,
+    body: StoreRetailOrderRemarkPatchIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """商城零售：更新后台备注（不对会员端展示）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        out = update_admin_store_retail_order_remark(
+            db,
+            order_id=int(order_id),
+            store_id=int(store_id),
+            remark=body.remark,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=dump_model(out), msg="备注已更新")
 
 
 @router.post("/orders/retail-orders/{order_id}/dispatch/sf-retail")

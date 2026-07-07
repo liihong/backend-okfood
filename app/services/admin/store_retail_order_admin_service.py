@@ -62,7 +62,27 @@ def _build_admin_list_out(
         member_name=_admin_member_display_name(m, addr),
         recipient_contact_name=(addr.contact_name or "").strip() if addr else "",
         address_remarks=(addr.remarks or "").strip() if addr else "",
+        remark=(row.remark or "").strip() or None,
     )
+
+
+def update_admin_store_retail_order_remark(
+    db: Session,
+    *,
+    order_id: int,
+    store_id: int,
+    remark: str | None,
+) -> AdminStoreRetailOrderListOut:
+    """管理端：更新商城订单后台备注。"""
+    row = db.get(StoreRetailOrder, int(order_id))
+    if row is None or int(row.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    cleaned = (remark or "").strip() or None
+    row.remark = cleaned
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _build_admin_list_out(db, row)
 
 
 def _apply_admin_retail_fulfillment_phase_filter(filters: list, fulfillment_phase: str | None) -> None:
