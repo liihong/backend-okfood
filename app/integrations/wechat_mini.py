@@ -17,6 +17,8 @@ JSCODE2SESSION_URL = "https://api.weixin.qq.com/sns/jscode2session"
 TOKEN_URL = "https://api.weixin.qq.com/cgi-bin/token"
 GET_PHONE_URL = "https://api.weixin.qq.com/wxa/business/getuserphonenumber"
 SUBSCRIBE_SEND_URL = "https://api.weixin.qq.com/cgi-bin/message/subscribe/send"
+# 微信通用：access_token 无效或已被其它实例刷新
+WX_ERRCODE_INVALID_ACCESS_TOKEN = 40001
 
 
 class WeChatMiniError(Exception):
@@ -151,12 +153,15 @@ def get_stable_access_token() -> str:
     return get_stable_access_token_for_app(appid, secret)
 
 
-def get_phone_pure_number(
-    phone_code: str, *, db: "Session | None" = None, tenant_id: int | None = None
-) -> str:
-    """通过手机号动态令牌换取用户手机号。"""
-    appid, secret = _credentials_for_call(db, tenant_id)
-    access_token = get_stable_access_token_for_app(appid, secret)
+def _invalidate_access_token_for_app(appid: str) -> None:
+    """清除指定 appid 的 access_token 内存缓存，供 40001 后强制重新拉取。"""
+    aid = (appid or "").strip()
+    if aid:
+        _access_token_by_appid.pop(aid, None)
+
+
+def _request_getuserphonenumber(phone_code: str, access_token: str) -> dict[str, Any]:
+    """调用微信 getuserphonenumber，返回原始 JSON。"""
     try:
         with httpx.Client(timeout=10.0) as client:
             r = client.post(
@@ -164,13 +169,35 @@ def get_phone_pure_number(
                 json={"code": phone_code},
             )
             r.raise_for_status()
-            data: dict[str, Any] = r.json()
+            return r.json()
     except httpx.HTTPError as e:
         logger.exception("微信 getuserphonenumber 请求失败")
         raise WeChatMiniError("获取手机号服务暂时不可用", status_code=502) from e
 
+
+def get_phone_pure_number(
+    phone_code: str, *, db: "Session | None" = None, tenant_id: int | None = None
+) -> str:
+    """通过手机号动态令牌换取用户手机号。"""
+    appid, secret = _credentials_for_call(db, tenant_id)
+    access_token = get_stable_access_token_for_app(appid, secret)
+    data = _request_getuserphonenumber(phone_code, access_token)
+
     info = data.get("phone_info")
     errcode = data.get("errcode")
+    if not info and errcode not in (None, 0):
+        # access_token 被其它进程刷新或已过期：清缓存、重拉 token 后仅重试一次
+        if errcode == WX_ERRCODE_INVALID_ACCESS_TOKEN:
+            logger.warning(
+                "getuserphonenumber access_token 失效，清缓存后重试: appid=%s…",
+                appid[:8] if len(appid) > 8 else appid,
+            )
+            _invalidate_access_token_for_app(appid)
+            access_token = get_stable_access_token_for_app(appid, secret)
+            data = _request_getuserphonenumber(phone_code, access_token)
+            info = data.get("phone_info")
+            errcode = data.get("errcode")
+
     if not info and errcode not in (None, 0):
         msg = str(data.get("errmsg") or "未知错误")
         logger.warning("getuserphonenumber 业务失败: errcode=%s errmsg=%s", errcode, msg)

@@ -4,8 +4,8 @@ from app.core.deps import SessionDep, public_store_dep, PublicStoreContext
 from app.schemas.user import MembershipCardTemplateMemberOut
 from app.services.admin.catalog_admin_service import list_membership_templates, membership_template_public_dump
 from app.services.client.home_banner_service import list_active_home_banners
-from app.services.client.home_entry_poster_service import get_active_entry_poster
-from app.services.shared.store_config_service import get_store_config
+from app.services.client.home_entry_poster_service import get_active_entry_poster, get_active_menu_poster
+from app.services.shared.store_config_service import get_store_base_delivery_fee_yuan, get_store_config
 from app.services.shared.tenant_integration_service import merged_sf_integration_namespace
 from app.utils.response import dump_model, success
 
@@ -46,6 +46,13 @@ def home_entry_poster(db: SessionDep, store_ctx: PublicStoreContext = Depends(pu
     return success(data=dump_model(item) if item else None, msg="获取成功")
 
 
+@router.get("/menu-poster")
+def home_menu_page_poster(db: SessionDep, store_ctx: PublicStoreContext = Depends(public_store_dep)):
+    """小程序菜单页弹窗海报（仅启用且有图片时返回）。"""
+    item = get_active_menu_poster(db, store_id=int(store_ctx.store_id))
+    return success(data=dump_model(item) if item else None, msg="获取成功")
+
+
 @router.get("/store-info")
 def home_store_info(db: SessionDep, store_ctx: PublicStoreContext = Depends(public_store_dep)):
     """小程序菜单页门店信息（无需登录）。"""
@@ -61,6 +68,9 @@ def home_store_info(db: SessionDep, store_ctx: PublicStoreContext = Depends(publ
             "store_lng": cfg.store_lng,
             "store_lat": cfg.store_lat,
             "store_pickup_address": pickup_addr,
+            "base_delivery_fee_yuan": float(
+                get_store_base_delivery_fee_yuan(db, store_id=int(store_ctx.store_id))
+            ),
         },
         msg="获取成功",
     )

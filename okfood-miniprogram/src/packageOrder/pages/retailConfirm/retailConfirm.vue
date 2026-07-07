@@ -5,97 +5,49 @@
     <view v-else-if="loadError" class="state state--err">{{ loadError }}</view>
     <scroll-view v-else scroll-y class="scroll" :show-scrollbar="false" :style="scrollStyle">
       <view class="body">
-        <!-- 取货方式 + 配送地址 -->
+        <!-- 配送地址（普通零售商品仅支持配送到家） -->
         <view class="card delivery-card">
           <view class="delivery-head">
-            <text class="delivery-tag">{{ fulfillMode === 'delivery' ? '外送' : '自提' }}</text>
+            <text class="delivery-tag">外送</text>
             <text class="delivery-store">{{ storeName || '门店商城' }}</text>
           </view>
           <view class="delivery-divider" />
-          <text class="card-label">取货方式</text>
-          <view class="mode-tabs">
-            <view
-              class="mode-tab"
-              :class="{ 'mode-tab--on': fulfillMode === 'delivery' }"
-              @tap="setFulfillMode('delivery')"
-            >
-              <text class="mode-tab__txt">配送到家</text>
+          <view class="addr-head">
+            <view class="addr-head-left">
+              <text class="addr-pin">📍</text>
+              <text class="card-label card-label--inline">配送地址</text>
             </view>
+            <text class="addr-manage" @tap="goAddressList">
+              {{ addressRows.length ? '选择地址 ›' : '去添加 ›' }}
+            </text>
+          </view>
+          <view v-if="!addressRows.length" class="addr-empty">
+            <text class="addr-empty-txt">暂无地址，请先添加配送地址</text>
+            <button type="button" class="btn-ghost" hover-class="none" @tap="goAddressList">添加地址</button>
+          </view>
+          <view v-else class="addr-list">
             <view
-              class="mode-tab"
-              :class="{ 'mode-tab--on': fulfillMode === 'pickup' }"
-              @tap="setFulfillMode('pickup')"
+              v-for="(row, i) in addressRows"
+              :key="row.id || i"
+              class="addr-row"
+              :class="{ 'addr-row--on': selectedIndex === i }"
+              :data-index="i"
+              @tap="onAddressRowTap"
             >
-              <text class="mode-tab__txt">门店自提</text>
+              <view class="addr-radio">
+                <view v-if="selectedIndex === i" class="addr-dot-fill" />
+                <view v-else class="addr-ring" />
+              </view>
+              <view class="addr-body">
+                <view class="addr-line1">
+                  <text class="addr-name">{{ row.name }}</text>
+                  <text class="addr-phone">{{ row.phone }}</text>
+                  <text v-if="row.isDefault" class="addr-badge">默认</text>
+                </view>
+                <text class="addr-line2">{{ row.line }}</text>
+              </view>
             </view>
           </view>
-
-          <template v-if="fulfillMode === 'delivery'">
-            <view class="delivery-divider" />
-            <view class="addr-head">
-              <view class="addr-head-left">
-                <text class="addr-pin">📍</text>
-                <text class="card-label card-label--inline">配送地址</text>
-              </view>
-              <text class="addr-manage" @tap="goAddressList">
-                {{ addressRows.length ? '选择地址 ›' : '去添加 ›' }}
-              </text>
-            </view>
-            <view v-if="!addressRows.length" class="addr-empty">
-              <text class="addr-empty-txt">暂无地址，请先添加配送地址</text>
-              <button type="button" class="btn-ghost" hover-class="none" @tap="goAddressList">添加地址</button>
-            </view>
-            <view v-else class="addr-list">
-              <view
-                v-for="(row, i) in addressRows"
-                :key="row.id || i"
-                class="addr-row"
-                :class="{ 'addr-row--on': selectedIndex === i }"
-                :data-index="i"
-                @tap="onAddressRowTap"
-              >
-                <view class="addr-radio">
-                  <view v-if="selectedIndex === i" class="addr-dot-fill" />
-                  <view v-else class="addr-ring" />
-                </view>
-                <view class="addr-body">
-                  <view class="addr-line1">
-                    <text class="addr-name">{{ row.name }}</text>
-                    <text class="addr-phone">{{ row.phone }}</text>
-                    <text v-if="row.isDefault" class="addr-badge">默认</text>
-                  </view>
-                  <text class="addr-line2">{{ row.line }}</text>
-                </view>
-              </view>
-            </view>
-          </template>
-          <template v-else>
-            <view class="delivery-divider" />
-            <view class="pickup-store-head">
-              <text class="addr-pin">📍</text>
-              <text class="card-label card-label--inline">自提门店</text>
-            </view>
-            <view
-              class="pickup-store-card"
-              :class="{ 'pickup-store-card--tap': storeHasCoords }"
-              @tap="openStoreMap"
-            >
-              <view class="pickup-store-main">
-                <text class="pickup-store-name">{{ storeName || '门店' }}</text>
-                <text v-if="storePickupAddress" class="pickup-store-addr">{{ storePickupAddress }}</text>
-                <text v-else-if="storeHasCoords" class="pickup-store-addr pickup-store-addr--muted">
-                  点击在地图中查看位置
-                </text>
-              </view>
-              <view v-if="storeDistanceText" class="pickup-store-meta">
-                <text class="pickup-store-dist">{{ storeDistanceText }}</text>
-              </view>
-              <text v-if="storeHasCoords" class="pickup-store-nav">导航 ›</text>
-            </view>
-            <view class="pickup-hint">
-              <text class="pickup-hint-txt">支付成功后为待取货状态，请按约定时间到店自提</text>
-            </view>
-          </template>
         </view>
 
         <!-- 商品信息 -->
@@ -115,7 +67,13 @@
               <text class="product-name">{{ product.title }}</text>
               <text v-if="product.subtitle" class="product-sub">{{ product.subtitle }}</text>
               <view class="product-price-row">
-                <text class="product-price">¥ {{ unitPriceText }}</text>
+                <view class="product-price-group">
+                  <text v-if="showListPrice" class="product-price-tag">限时特惠</text>
+                  <view class="product-price-line">
+                    <text class="product-price">¥ {{ unitPriceText }}</text>
+                    <text v-if="showListPrice" class="product-list-price">¥ {{ unitListPriceText }}</text>
+                  </view>
+                </view>
                 <view class="qty-inline" @catchtap="onStopTapBubble">
                   <button type="button" class="qty-btn qty-btn--sm" @tap="decQty">−</button>
                   <text class="qty-num qty-num--sm">{{ quantity }}</text>
@@ -124,14 +82,27 @@
               </view>
             </view>
           </view>
+          <view v-if="showListPrice" class="product-discount-row">
+            <text class="product-discount-label">商品原价</text>
+            <text class="product-discount-orig">¥ {{ origSubtotalText }}</text>
+          </view>
+          <view v-if="productSaveText" class="product-discount-row">
+            <text class="product-discount-label">商品优惠</text>
+            <text class="product-discount-save">-¥ {{ productSaveText }}</text>
+          </view>
+          <view v-if="couponSaveText" class="product-discount-row">
+            <text class="product-discount-label">优惠券</text>
+            <text class="product-discount-save">-¥ {{ couponSaveText }}</text>
+          </view>
           <view class="product-total-row">
-            <text class="product-total-label">小计</text>
+            <text class="product-total-label">应付</text>
             <view class="product-total-right">
-              <text v-if="selectedCoupon" class="product-total-orig">¥ {{ subtotal }}</text>
+              <text v-if="totalBeforePayText && totalBeforePayText !== payableText" class="product-total-orig">
+                ¥ {{ totalBeforePayText }}
+              </text>
               <text class="product-total-amt">¥ {{ payableText }}</text>
             </view>
           </view>
-          <text v-if="fulfillMode === 'delivery'" class="fee-hint">配送订单含门店配送费，以下单金额为准</text>
         </view>
 
         <!-- 优惠券 -->
@@ -161,12 +132,7 @@
         <view class="hint-box">
           <text class="hint-title">支付说明</text>
           <text class="hint-text">
-            <template v-if="fulfillMode === 'delivery'">
-              点击「确定下单」将调起微信支付。支付成功后门店将安排配送。
-            </template>
-            <template v-else>
-              门店自提：支付成功后为待取货状态，请按约定时间到店取货。
-            </template>
+            点击「立即下单」将调起微信支付。支付成功后门店将安排配送。
           </text>
         </view>
       </view>
@@ -174,8 +140,13 @@
 
     <view v-if="!loading && !loadError && product" class="pay-footer">
       <view class="pay-footer-left">
-        <text class="pay-footer-label">合计</text>
-        <text class="pay-footer-amt">¥ {{ payableText }}</text>
+        <view class="pay-footer-price-col">
+          <view class="pay-footer-top">
+            <text class="pay-footer-label">合计</text>
+            <text class="pay-footer-amt">¥ {{ payableText }}</text>
+          </view>
+          <text v-if="totalSaveText" class="pay-footer-save">已优惠 ¥{{ totalSaveText }}</text>
+        </view>
       </view>
       <button
         class="btn-pay"
@@ -183,7 +154,7 @@
         :class="{ 'btn-pay--disabled': paying }"
         @tap="onPayButtonTap"
       >
-        {{ paying ? '处理中…' : '确定下单' }}
+        {{ paying ? '处理中…' : '立即下单' }}
       </button>
     </view>
   </view>
@@ -200,7 +171,7 @@ import {
 } from '@/utils/navbar.js'
 import { getMemberToken, request } from '@/utils/api.js'
 import { fetchRetailMenu, fetchStoreInfo } from '@/utils/catalogApi.js'
-import { haversineDistanceM, formatStraightDistanceM } from '@/utils/geoDistance.js'
+import { formatMenuPrice } from '@/utils/menuApi.js'
 import {
   normalizeAddressList,
   sortAddressesDefaultFirst,
@@ -210,24 +181,17 @@ import {
 import { createRetailOrder } from '@/utils/retailOrder/retailOrderApi.js'
 import { payRetailOrderWechat } from '@/utils/retailOrder/retailOrderPay.js'
 import { listAvailableMemberCoupons } from '@/utils/memberCouponApi.js'
-import { readMenuFulfillMode, writeMenuFulfillMode } from '@/utils/menuFulfillMode.js'
 import { promptUnpaidOrderConflict } from '@/utils/unpaidOrderPrompt.js'
 import { syncWxMiniOpenidFromLogin } from '@/utils/wxMemberLogin.js'
 import { showOkAlert } from '@/utils/okAlert.js'
-import { RETAIL_ORDER_ENABLED, showRetailComingSoon } from '@/utils/retailFeature.js'
 
 const scrollStyle = ref(getPageScrollStyle(0, FIXED_FOOTER_RESERVE_PX))
 const productId = ref(0)
 const product = ref(null)
 const storeName = ref('')
-const storeLng = ref(null)
-const storeLat = ref(null)
-const storePickupAddress = ref('')
-const storeDistanceM = ref(null)
 const loading = ref(true)
 const loadError = ref('')
 const quantity = ref(1)
-const fulfillMode = ref(readMenuFulfillMode())
 const paying = ref(false)
 const addressRows = ref([])
 const rawAddresses = ref([])
@@ -240,49 +204,85 @@ const selectedCoupon = computed(() => {
   return availableCoupons.value.find((c) => Number(c.id) === Number(id)) || null
 })
 
-const storeHasCoords = computed(() => {
-  const lng = Number(storeLng.value)
-  const lat = Number(storeLat.value)
-  return Number.isFinite(lng) && Number.isFinite(lat)
-})
-
-const storeDistanceText = computed(() => formatStraightDistanceM(storeDistanceM.value))
-
 const productImage = computed(() => {
   const url = product.value?.cover_image_url
   return typeof url === 'string' && url.trim() ? url.trim() : ''
 })
 
 const unitPriceText = computed(() => {
-  const p = product.value?.unit_price_yuan
-  if (p == null || p === '') return '—'
-  const n = Number(p)
-  return Number.isFinite(n) ? n.toFixed(2) : String(p)
+  const list = formatMenuPrice(product.value?.unit_price_yuan)
+  if (list == null) return '—'
+  return list.toFixed(2)
+})
+
+/** 划线原价（单价） */
+const listPriceNum = computed(() => formatMenuPrice(product.value?.list_price_yuan))
+
+/** 划线价高于售价时展示优惠感 */
+const showListPrice = computed(() => {
+  const sale = Number(unitPriceText.value)
+  const list = listPriceNum.value
+  if (!Number.isFinite(sale) || list == null) return false
+  return list > sale
+})
+
+const unitListPriceText = computed(() => {
+  if (!showListPrice.value || listPriceNum.value == null) return null
+  return listPriceNum.value.toFixed(2)
 })
 
 const subtotal = computed(() => {
-  const u = Number(product.value?.unit_price_yuan)
+  const u = Number(unitPriceText.value)
   if (!Number.isFinite(u)) return null
   return (u * Math.max(1, quantity.value)).toFixed(2)
 })
 
+/** 商品原价小计（划线价 × 数量） */
+const origSubtotalText = computed(() => {
+  if (!showListPrice.value || listPriceNum.value == null) return null
+  return (listPriceNum.value * Math.max(1, quantity.value)).toFixed(2)
+})
+
+/** 商品本身优惠金额（不含券） */
+const productSaveText = computed(() => {
+  if (!showListPrice.value || origSubtotalText.value == null || subtotal.value == null) return null
+  const save = Number(origSubtotalText.value) - Number(subtotal.value)
+  return save > 0 ? save.toFixed(2) : null
+})
+
+/** 优惠券抵扣金额 */
+const couponSaveText = computed(() => {
+  if (!selectedCoupon.value) return null
+  const n = Number(selectedCoupon.value.discount_yuan)
+  return Number.isFinite(n) && n > 0 ? n.toFixed(2) : null
+})
+
+/** 优惠前应付（商品售价小计，用于与券后价对比） */
+const totalBeforePayText = computed(() => subtotal.value)
+
+/** 合计应付（含券后） */
 const payableText = computed(() => {
   const base = subtotal.value
   if (base == null) return '—'
-  const disc = selectedCoupon.value ? Number(selectedCoupon.value.discount_yuan) : 0
-  const d = Number.isFinite(disc) ? disc : 0
-  return Math.max(0.01, Number(base) - d).toFixed(2)
+  const disc = couponSaveText.value != null ? Number(couponSaveText.value) : 0
+  return Math.max(0.01, Number(base) - disc).toFixed(2)
+})
+
+/** 底部「已优惠」合计（商品优惠 + 券） */
+const totalSaveText = computed(() => {
+  let total = 0
+  if (productSaveText.value) total += Number(productSaveText.value)
+  if (couponSaveText.value) total += Number(couponSaveText.value)
+  return total > 0 ? total.toFixed(2) : null
 })
 
 /** 不可支付时的原因（空串表示可支付） */
 const payBlockReason = computed(() => {
   if (paying.value) return ''
   if (!product.value) return '商品加载中，请稍候'
-  if (fulfillMode.value === 'delivery') {
-    if (!addressRows.value.length) return '请先添加配送地址'
-    const item = rawAddresses.value[selectedIndex.value]
-    if (!getAddressRecordId(item)) return '请选择有效配送地址'
-  }
+  if (!addressRows.value.length) return '请先添加配送地址'
+  const item = rawAddresses.value[selectedIndex.value]
+  if (!getAddressRecordId(item)) return '请选择有效配送地址'
   return ''
 })
 
@@ -294,69 +294,6 @@ function applyScrollLayout() {
 
 function applyStoreInfo(store) {
   storeName.value = store?.store_name?.trim() || ''
-  const lng = store?.store_lng != null ? Number(store.store_lng) : NaN
-  const lat = store?.store_lat != null ? Number(store.store_lat) : NaN
-  storeLng.value = Number.isFinite(lng) ? lng : null
-  storeLat.value = Number.isFinite(lat) ? lat : null
-  storePickupAddress.value =
-    typeof store?.store_pickup_address === 'string' ? store.store_pickup_address.trim() : ''
-}
-
-/** 自提模式下尝试获取用户位置并计算与门店的直线距离 */
-function refreshPickupDistance() {
-  if (fulfillMode.value !== 'pickup' || !storeHasCoords.value) {
-    storeDistanceM.value = null
-    return
-  }
-  const lng = Number(storeLng.value)
-  const lat = Number(storeLat.value)
-  uni.getLocation({
-    type: 'gcj02',
-    isHighAccuracy: true,
-    success(loc) {
-      const uLat = loc.latitude != null ? Number(loc.latitude) : NaN
-      const uLng = loc.longitude != null ? Number(loc.longitude) : NaN
-      if (!Number.isFinite(uLat) || !Number.isFinite(uLng)) {
-        storeDistanceM.value = null
-        return
-      }
-      storeDistanceM.value = haversineDistanceM(uLng, uLat, lng, lat)
-    },
-    fail() {
-      storeDistanceM.value = null
-    },
-  })
-}
-
-function openStoreMap() {
-  if (!storeHasCoords.value) return
-  const lng = Number(storeLng.value)
-  const lat = Number(storeLat.value)
-  const name = storeName.value || '自提门店'
-  const address = storePickupAddress.value || ''
-  uni.openLocation({
-    latitude: lat,
-    longitude: lng,
-    name,
-    address,
-    scale: 16,
-    fail: () => {
-      uni.showToast({ title: '打开地图失败', icon: 'none' })
-    },
-  })
-}
-
-function setFulfillMode(mode) {
-  const v = mode === 'pickup' ? 'pickup' : 'delivery'
-  if (fulfillMode.value === v) return
-  fulfillMode.value = v
-  writeMenuFulfillMode(v)
-  if (v === 'pickup') {
-    refreshPickupDistance()
-  } else {
-    storeDistanceM.value = null
-  }
-  void loadCoupons()
 }
 
 function decQty() {
@@ -402,7 +339,7 @@ async function loadCoupons() {
       biz_type: 'store_retail',
       retail_product_id: productId.value,
       quantity: quantity.value,
-      store_pickup: fulfillMode.value === 'pickup',
+      store_pickup: false,
     })
     availableCoupons.value = Array.isArray(list) ? list : []
     if (
@@ -441,9 +378,6 @@ async function loadPage() {
     applyAddressList(raw)
     selectedIndex.value = 0
     await loadCoupons()
-    if (fulfillMode.value === 'pickup') {
-      refreshPickupDistance()
-    }
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : '加载失败'
   } finally {
@@ -468,15 +402,11 @@ function onPayButtonTap() {
 
 async function handlePay() {
   if (paying.value || !product.value) return
-  const isPickup = fulfillMode.value === 'pickup'
-  let addressId = null
-  if (!isPickup) {
-    const item = rawAddresses.value[selectedIndex.value]
-    addressId = getAddressRecordId(item)
-    if (!addressId) {
-      uni.showToast({ title: '请选择有效配送地址', icon: 'none' })
-      return
-    }
+  const item = rawAddresses.value[selectedIndex.value]
+  const addressId = getAddressRecordId(item)
+  if (!addressId) {
+    uni.showToast({ title: '请选择有效配送地址', icon: 'none' })
+    return
   }
   paying.value = true
   uni.showLoading({ title: '创建订单…', mask: true })
@@ -484,10 +414,10 @@ async function handlePay() {
     await syncWxMiniOpenidFromLogin()
     const payload = {
       retail_product_id: Number(productId.value),
-      store_pickup: isPickup,
+      store_pickup: false,
       quantity: Math.max(1, quantity.value),
+      member_address_id: Number(addressId),
     }
-    if (!isPickup) payload.member_address_id = Number(addressId)
     if (selectedCouponId.value != null) {
       payload.member_coupon_id = Math.floor(Number(selectedCouponId.value))
     }
@@ -528,11 +458,6 @@ onReady(() => {
 
 onLoad((options) => {
   applyScrollLayout()
-  if (!RETAIL_ORDER_ENABLED) {
-    showRetailComingSoon()
-    setTimeout(() => uni.navigateBack(), 300)
-    return
-  }
   const raw = options?.retail_product_id || options?.product_id || ''
   const id = Math.floor(Number(decodeURIComponent(String(raw || ''))))
   if (!Number.isFinite(id) || id < 1) {
@@ -565,9 +490,6 @@ onShow(() => {
     .then(applyAddressList)
     .catch(() => {})
   void loadCoupons()
-  if (fulfillMode.value === 'pickup') {
-    refreshPickupDistance()
-  }
 })
 </script>
 
@@ -964,15 +886,75 @@ onShow(() => {
 .product-price-row {
   margin-top: 16rpx;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 16rpx;
+}
+
+.product-price-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.product-price-tag {
+  align-self: flex-start;
+  font-size: 20rpx;
+  font-weight: 900;
+  color: $ok-urgent-red;
+  background: rgba(239, 68, 68, 0.08);
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
+  line-height: 1.3;
+}
+
+.product-price-line {
+  display: flex;
+  align-items: baseline;
+  gap: 12rpx;
+  flex-wrap: wrap;
 }
 
 .product-price {
   font-size: 32rpx;
   font-weight: 1000;
   color: $ok-forest-green;
+}
+
+.product-list-price {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: $ok-slate-400;
+  text-decoration: line-through;
+  line-height: 1.2;
+}
+
+.product-discount-row {
+  margin-top: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.product-discount-label {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: $ok-slate-500;
+}
+
+.product-discount-orig {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: $ok-slate-400;
+  text-decoration: line-through;
+}
+
+.product-discount-save {
+  font-size: 26rpx;
+  font-weight: 900;
+  color: $ok-urgent-red;
 }
 
 .product-total-row {
@@ -1147,9 +1129,28 @@ onShow(() => {
 
 .pay-footer-left {
   display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.pay-footer-price-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.pay-footer-top {
+  display: flex;
   align-items: baseline;
   gap: 8rpx;
-  flex-shrink: 0;
+}
+
+.pay-footer-save {
+  font-size: 22rpx;
+  font-weight: 800;
+  color: $ok-urgent-red;
+  line-height: 1.3;
 }
 
 .pay-footer-label {

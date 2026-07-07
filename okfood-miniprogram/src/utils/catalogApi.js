@@ -9,6 +9,7 @@ import { request } from '@/utils/api.js'
  *   store_lng?: number | null,
  *   store_lat?: number | null,
  *   store_pickup_address?: string | null,
+ *   base_delivery_fee_yuan?: number | null,
  * } | null>}
  */
 export async function fetchStoreInfo() {

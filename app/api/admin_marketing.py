@@ -40,7 +40,12 @@ from app.services.client.home_banner_service import (
     set_home_banner_active,
 )
 from app.schemas.marketing.home_entry_poster import HomeEntryPosterUpsertIn
-from app.services.client.home_entry_poster_service import get_entry_poster_admin, upsert_entry_poster
+from app.services.client.home_entry_poster_service import (
+    get_entry_poster_admin,
+    get_menu_poster_admin,
+    upsert_entry_poster,
+    upsert_menu_poster,
+)
 from app.utils.response import dump_model, page_response, success
 
 router = APIRouter(prefix="/admin/marketing", tags=["管理端-小程序营销"])
@@ -313,4 +318,31 @@ def marketing_upsert_entry_poster(
     _ = admin_username
     _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     out = upsert_entry_poster(db, store_id=sid, body=body)
+    return success(data=dump_model(out), msg="保存成功")
+
+
+@router.get("/menu-poster")
+def marketing_get_menu_page_poster(
+    db: SessionDep,
+    admin_username: Annotated[str, Depends(admin_staff_subject)],
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """菜单页弹窗海报配置（每门店一条）。"""
+    _ = admin_username
+    _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = get_menu_poster_admin(db, store_id=sid)
+    return success(data=dump_model(out) if out else None, msg="获取成功")
+
+
+@router.put("/menu-poster")
+def marketing_upsert_menu_page_poster(
+    db: SessionDep,
+    admin_username: Annotated[str, Depends(admin_staff_subject)],
+    body: HomeEntryPosterUpsertIn,
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """保存菜单页弹窗海报配置。"""
+    _ = admin_username
+    _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = upsert_menu_poster(db, store_id=sid, body=body)
     return success(data=dump_model(out), msg="保存成功")

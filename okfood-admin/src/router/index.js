@@ -32,6 +32,7 @@ const DeliveryRangeCheckView = () => import('../views/DeliveryRangeCheckView.vue
 const CouponTemplatesView = () => import('../views/marketing/CouponTemplatesView.vue')
 const HomeBannersView = () => import('../views/marketing/HomeBannersView.vue')
 const EntryPosterView = () => import('../views/marketing/EntryPosterView.vue')
+const MenuPagePosterView = () => import('../views/marketing/MenuPagePosterView.vue')
 const MemberCouponGrantsView = () => import('../views/marketing/MemberCouponGrantsView.vue')
 const DouyinProductMappingsView = () => import('../views/marketing/douyin/DouyinProductMappingsView.vue')
 const DouyinRedemptionsView = () => import('../views/marketing/douyin/DouyinRedemptionsView.vue')
@@ -224,6 +225,16 @@ const router = createRouter({
           meta: {
             title: '进入弹窗海报',
             pageSubtitle: '配置用户进入小程序时的提示海报',
+            supportMarketing: true,
+          },
+        },
+        {
+          path: 'marketing/menu-poster',
+          name: 'marketing-menu-poster',
+          component: MenuPagePosterView,
+          meta: {
+            title: '菜单页弹窗海报',
+            pageSubtitle: '配置用户进入点单菜单页时的宣传海报',
             supportMarketing: true,
           },
         },

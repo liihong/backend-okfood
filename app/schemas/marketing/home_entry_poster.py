@@ -1,4 +1,4 @@
-"""小程序进入弹窗海报请求/响应模型。"""
+"""小程序弹窗海报请求/响应模型。"""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class HomeEntryPosterOut(BaseModel):
     id: int
     store_id: int
+    poster_type: str
     image_url: str
     is_active: bool = False
     created_at: str | None = None

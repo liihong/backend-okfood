@@ -697,10 +697,16 @@ def list_available_member_coupons_me(
             original = (unit * Decimal(q)).quantize(Decimal("0.01"))
     elif bt == "store_retail" and retail_product_id is not None:
         from app.models.store_retail_product import StoreRetailProduct
+        from app.services.shared.store_config_service import get_store_base_delivery_fee_yuan
 
         prod = db.get(StoreRetailProduct, int(retail_product_id))
         if prod and int(prod.store_id) == store_id:
-            original = Decimal(prod.unit_price_yuan).quantize(Decimal("0.01"))
+            q = max(1, int(quantity or 1))
+            unit = Decimal(prod.unit_price_yuan)
+            if store_pickup:
+                fee = get_store_base_delivery_fee_yuan(db, store_id=store_id)
+                unit = max(Decimal("0.01"), (unit - fee).quantize(Decimal("0.01")))
+            original = (unit * Decimal(q)).quantize(Decimal("0.01"))
 
     items = list_available_member_coupons_for_user(
         db,

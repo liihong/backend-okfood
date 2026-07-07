@@ -14,7 +14,7 @@
       <text v-if="phone" class="menu-store-header__sub">联系电话 {{ phone }}</text>
       <text v-else class="menu-store-header__sub">健康自律餐 · 每周新鲜菜单</text>
     </view>
-    <view class="menu-store-header__mode">
+    <view class="menu-store-header__mode" v-if="pickupEnabled">
       <view
         class="mode-pill"
         :class="{ 'mode-pill--active': currentMode === 'pickup' }"
@@ -44,6 +44,8 @@ const props = defineProps({
   storeContactPhone: { type: String, default: '' },
   /** pickup | delivery */
   fulfillMode: { type: String, default: 'delivery' },
+  /** 普通零售商品暂不支持自提时设为 false */
+  pickupEnabled: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['change'])

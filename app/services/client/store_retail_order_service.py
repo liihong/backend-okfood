@@ -88,11 +88,12 @@ def _assert_retail_product_orderable(db: Session, *, product: StoreRetailProduct
 def _compute_retail_order_amount(
     db: Session, *, unit_price: Decimal, quantity: int, store_pickup: bool, store_id: int
 ) -> Decimal:
-    base = (unit_price * Decimal(quantity)).quantize(Decimal("0.01"))
+    """与单次点餐一致：销售价为配送价；自提时减门店固定配送费。"""
+    unit_dec = Decimal(unit_price).quantize(Decimal("0.01"))
     if store_pickup:
-        return base
-    fee = get_store_base_delivery_fee_yuan(db, store_id=int(store_id))
-    return (base + fee).quantize(Decimal("0.01"))
+        fee = get_store_base_delivery_fee_yuan(db, store_id=int(store_id))
+        unit_dec = max(Decimal("0.01"), (unit_dec - fee).quantize(Decimal("0.01")))
+    return (unit_dec * Decimal(quantity)).quantize(Decimal("0.01"))
 
 
 def _row_address_summary(db: Session, row: StoreRetailOrder) -> str:

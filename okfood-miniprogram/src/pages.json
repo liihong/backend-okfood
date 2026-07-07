@@ -94,6 +94,10 @@
     "pages/orders/index": {
       "network": "all",
       "packages": ["packageOrder"]
+    },
+    "pages/order/index": {
+      "network": "all",
+      "packages": ["packageOrder"]
     }
   },
   "subPackages": [

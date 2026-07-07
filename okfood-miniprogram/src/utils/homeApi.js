@@ -20,6 +20,17 @@ export async function fetchEntryPoster() {
 }
 
 /**
+ * @returns {Promise<{ image_url: string } | null>}
+ */
+export async function fetchMenuPagePoster() {
+  const raw = await request('/api/home/menu-poster', { method: 'GET', retry: 1 })
+  if (!raw || typeof raw !== 'object') return null
+  const imageUrl = raw.image_url != null ? String(raw.image_url).trim() : ''
+  if (!imageUrl) return null
+  return { image_url: imageUrl }
+}
+
+/**
  * @returns {Promise<Array<{ id: number, name: string, meals_grant: number, sale_price_yuan?: string | null }>>}
  */
 export async function fetchHomeMembershipCards() {

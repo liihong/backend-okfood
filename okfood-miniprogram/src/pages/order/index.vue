@@ -3,6 +3,7 @@
    <OkNavbar title="菜单" />
     <MenuStoreHeader :store-name="storeInfo?.store_name || ''" :store-logo-url="storeInfo?.store_logo_url || ''"
       :store-contact-phone="storeInfo?.store_contact_phone || ''" :fulfill-mode="fulfillMode"
+      :pickup-enabled="activeCategoryMeta?.type !== 'retail'"
       @change="onFulfillModeChange" />
     <view class="catalog-body" :style="catalogBodyStyle">
       <scroll-view scroll-y class="catalog-sidebar" :show-scrollbar="false">
@@ -56,7 +57,7 @@
               layout="list"
               :item="m"
               :show-ingredients="true"
-              @tap="onItemTap"
+              @tap="() => onItemTap(m)"
             />
           </view>
         </view>
@@ -64,6 +65,7 @@
    </view>
     <MemberCouponReminderHost v-if="couponHostReady" />
     <EntryPosterHost />
+    <MenuPagePosterHost />
   </view>
 </template>
 
@@ -75,6 +77,7 @@ import MenuStoreHeader from '@/components/MenuStoreHeader/MenuStoreHeader.vue'
 import MenuDishCard from '@/components/MenuDishCard/MenuDishCard.vue'
 import MemberCouponReminderHost from '@/components/MemberCouponReminderHost/MemberCouponReminderHost.vue'
 import EntryPosterHost from '@/components/EntryPosterHost/EntryPosterHost.vue'
+import MenuPagePosterHost from '@/components/MenuPagePosterHost/MenuPagePosterHost.vue'
 import { fetchStoreInfo, fetchRetailMenu, mapRetailProductItem } from '@/utils/catalogApi.js'
 import {
   addDaysIso,
@@ -91,7 +94,7 @@ import { syncCustomTabBar } from '@/utils/customTabBar.js'
 import { reLaunchIfCourierModePreferred } from '@/utils/api.js'
 import { readMenuFulfillMode, writeMenuFulfillMode } from '@/utils/menuFulfillMode.js'
 import { requestDeliverySubscribeOncePerDay } from '@/utils/subscribeMsg.js'
-import { RETAIL_ORDER_ENABLED, showRetailComingSoon } from '@/utils/retailFeature.js'
+import { tryShowMenuPagePoster } from '@/utils/menuPagePoster.js'
 
 const couponHostReady = ref(false)
 const pageStyle = ref({})
@@ -109,6 +112,33 @@ const nextWeekMenu = ref([])
 const nextWeekLoading = ref(false)
 let loadWeeklySeq = 0
 let loadRetailSeq = 0
+/** 周菜单失败 toast 定时器；切到果蔬汁/跳转下单页时应取消，避免与页面切换重叠闪一下 */
+let pendingMenuErrorToastTimer = null
+
+/** 仅当前侧边栏为「本周/下周」时才弹出菜单加载失败提示 */
+function scheduleMenuLoadErrorToast(msg) {
+  if (pendingMenuErrorToastTimer != null) {
+    clearTimeout(pendingMenuErrorToastTimer)
+    pendingMenuErrorToastTimer = null
+  }
+  pendingMenuErrorToastTimer = setTimeout(() => {
+    pendingMenuErrorToastTimer = null
+    if (activeCategoryMeta.value?.type !== 'week') return
+    uni.showToast({ title: msg, icon: 'none' })
+  }, 80)
+}
+
+function clearPendingMenuErrorToast() {
+  if (pendingMenuErrorToastTimer != null) {
+    clearTimeout(pendingMenuErrorToastTimer)
+    pendingMenuErrorToastTimer = null
+  }
+  try {
+    uni.hideToast()
+  } catch {
+    /* ignore */
+  }
+}
 
 const STORE_HEADER_PX = 68
 
@@ -193,6 +223,12 @@ const activeCategoryDesc = computed(() => {
   return count > 0 ? `共 ${count} 款商品` : ''
 })
 
+function parsePriceYuan(v) {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
 const displayItems = computed(() => {
   const meta = activeCategoryMeta.value
   if (!meta) return []
@@ -201,7 +237,14 @@ const displayItems = computed(() => {
   }
   const cat = retailCategories.value.find((c) => c.id === meta.categoryId)
   if (!cat || !Array.isArray(cat.products)) return []
-  return cat.products.map(mapRetailProductItem)
+  return cat.products.map((p) => {
+    const item = mapRetailProductItem(p)
+    const list = parsePriceYuan(p?.unit_price_yuan)
+    if (list != null) {
+      item.price = list
+    }
+    return item
+  })
 })
 
 const emptyText = computed(() => {
@@ -228,6 +271,7 @@ function selectCategory(key) {
   activeCategoryKey.value = key
   const meta = sidebarCategories.value.find((c) => c.key === key)
   if (meta?.type === 'retail') {
+    clearPendingMenuErrorToast()
     void loadRetailCatalog({ forceRefresh: true })
     return
   }
@@ -290,8 +334,7 @@ async function loadThisWeek(opts = {}) {
     if (seq !== loadWeeklySeq) return
     if (!cached) {
       menu.value = []
-      const msg = e?.message || '加载失败'
-      setTimeout(() => uni.showToast({ title: msg, icon: 'none' }), 80)
+      scheduleMenuLoadErrorToast(e?.message || '加载失败')
     }
   } finally {
     if (seq === loadWeeklySeq) loading.value = false
@@ -388,6 +431,7 @@ onShow(() => {
   syncTabLayout()
   requestDeliverySubscribeOncePerDay()
   loadPageData()
+  void tryShowMenuPagePoster()
 })
 
 onMounted(() => {
@@ -405,15 +449,12 @@ function onFulfillModeChange(mode) {
 
 function onItemTap(m) {
   if (m?.isRetail) {
-    if (!RETAIL_ORDER_ENABLED) {
-      showRetailComingSoon()
-      return
-    }
     const pid = m?.retailProductId != null ? Number(m.retailProductId) : 0
     if (!Number.isFinite(pid) || pid < 1) {
       uni.showToast({ title: '商品无效', icon: 'none' })
       return
     }
+    clearPendingMenuErrorToast()
     uni.navigateTo({
       url: `/packageOrder/pages/retailConfirm/retailConfirm?retail_product_id=${encodeURIComponent(String(pid))}`,
     })
