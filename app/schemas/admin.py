@@ -1237,7 +1237,13 @@ class CardOrderCreateIn(BaseModel):
     )
     delivery_start_date: date | None = Field(
         None,
-        description="起送业务日（上海）；空表示暂不开卡：已缴入账仍加次数/套餐，但不写会员起送日、不强制激活",
+        description="起送业务日（上海）；老会员续卡「保持当前配送安排」时可空（沿用档案起送日）；"
+        "新会员或显式「暂不开卡」时为空且须配合 defer_delivery_activation=true",
+    )
+    defer_delivery_activation: bool = Field(
+        False,
+        description="暂不开卡：入账加次数但不激活配送（delivery_deferred=true）；"
+        "老会员续卡未勾选此项时不得因起送日为空而暂停配送",
     )
     card_kind: CardOrderKind | None = Field(
         None,

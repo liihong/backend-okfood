@@ -506,6 +506,7 @@ async function submitCreate() {
       phone,
       open_mode: openMode,
       delivery_start_date: keepSchedule || deferStart ? null : startD,
+      defer_delivery_activation: deferStart,
       membership_template_id: Math.floor(Number(tplId)),
       pay_channel: createForm.value.pay_channel,
       pay_status: createForm.value.pay_status,

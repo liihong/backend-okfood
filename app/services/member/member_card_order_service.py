@@ -324,8 +324,85 @@ def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
     )
 
 
-def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder, *, operator: str) -> None:
-    """已缴且未入账：按卡型叠加次数/总配额；若工单有起送日则写入会员并激活，否则仅入账（暂不开卡）。"""
+def _member_has_prior_applied_card_order(
+    db: Session, member_id: int, *, exclude_order_id: int | None = None
+) -> bool:
+    """是否已有其它已入账开卡工单（用于续卡/补单时禁止误标暂停配送）。"""
+    q = select(func.count()).select_from(MemberCardOrder).where(
+        MemberCardOrder.member_id == int(member_id),
+        MemberCardOrder.applied_to_member.is_(True),
+    )
+    if exclude_order_id is not None:
+        q = q.where(MemberCardOrder.id != int(exclude_order_id))
+    return int(db.scalar(q) or 0) > 0
+
+
+def _apply_delivery_activation_after_card_credit(
+    db: Session,
+    member: Member,
+    order: MemberCardOrder,
+    *,
+    open_mode: CardOpenMode | None = None,
+    defer_delivery_activation: bool = False,
+) -> None:
+    """
+    入账后的起送日/激活口径。
+
+    - 工单显式起送日：写入并激活；
+    - 显式「暂不开卡」：仅入账，标 delivery_deferred；
+    - 老会员续卡或未选暂不开卡：保持档案起送日与 delivery_deferred，按余次恢复 is_active；
+    - 禁止续卡时因起送日为空自动暂停配送。
+    """
+    from app.services.meal_period.balance import sync_member_is_active_from_period_balances
+
+    if order.delivery_start_date is not None:
+        member.is_active = True
+        member.delivery_start_date = order.delivery_start_date
+        member.delivery_deferred = False
+        db.add(member)
+        return
+
+    if defer_delivery_activation:
+        member.is_active = False
+        member.delivery_deferred = True
+        db.add(member)
+        return
+
+    is_renew_apply = open_mode == CardOpenMode.RENEW or _member_has_prior_applied_card_order(
+        db, int(member.id), exclude_order_id=int(order.id)
+    )
+    if is_renew_apply or member.delivery_start_date is not None:
+        sync_member_is_active_from_period_balances(db, member)
+        db.add(member)
+        return
+
+    if (order.created_by or "").strip() == MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR:
+        # 小程序首购待完善：上面已尝试从档案复制起送日，仍为 None 则暂不开卡
+        member.is_active = False
+        member.delivery_deferred = True
+        db.add(member)
+        return
+
+    if open_mode == CardOpenMode.NEW_MEMBER:
+        member.is_active = False
+        member.delivery_deferred = True
+        db.add(member)
+        return
+
+    # 历史老会员（起送日为空、即日生效）：仅入账，不误标暂停
+    sync_member_is_active_from_period_balances(db, member)
+    db.add(member)
+
+
+def _apply_paid_card_order_to_member_balance(
+    db: Session,
+    order: MemberCardOrder,
+    *,
+    operator: str,
+    open_mode: CardOpenMode | None = None,
+    defer_delivery_activation: bool = False,
+) -> None:
+    """已缴且未入账：按卡型叠加次数/总配额；续卡默认延续档案起送日与配送状态。"""
     m = db.get(Member, order.member_id)
     if not m:
         raise HTTPException(status_code=404, detail="会员不存在")
@@ -413,14 +490,13 @@ def _apply_paid_card_order_to_member_balance(db: Session, order: MemberCardOrder
             operator=operator,
             log_detail=log_detail,
         )
-    if order.delivery_start_date is not None:
-        m.is_active = True
-        m.delivery_start_date = order.delivery_start_date
-        m.delivery_deferred = False
-    else:
-        # 无起送日：仅入账，待小程序完善配送信息后再激活派单
-        m.is_active = False
-        m.delivery_deferred = True
+    _apply_delivery_activation_after_card_credit(
+        db,
+        m,
+        order,
+        open_mode=open_mode,
+        defer_delivery_activation=defer_delivery_activation,
+    )
     from app.services.meal_period.apply_side_effects import ensure_meal_period_states_after_card_apply
 
     ensure_meal_period_states_after_card_apply(db, m, order.meal_periods_snapshot)
@@ -546,15 +622,38 @@ def apply_paid_card_order_to_member_if_pending(db: Session, order: MemberCardOrd
         return
     if order.pay_status != CardOrderPayStatus.PAID.value:
         return
-    _apply_paid_card_order_to_member_balance(db, order, operator=operator)
+    renew = _member_has_prior_applied_card_order(db, int(order.member_id), exclude_order_id=int(order.id))
+    _apply_paid_card_order_to_member_balance(
+        db,
+        order,
+        operator=operator,
+        open_mode=CardOpenMode.RENEW if renew else None,
+    )
 
 
-def _sync_order_to_member(db: Session, order: MemberCardOrder, *, operator: str) -> None:
+def _sync_order_to_member(
+    db: Session,
+    order: MemberCardOrder,
+    *,
+    operator: str,
+    open_mode: CardOpenMode | None = None,
+    defer_delivery_activation: bool = False,
+) -> None:
     if order.applied_to_member:
         raise HTTPException(status_code=400, detail="该工单已入账，请勿重复同步")
     if order.pay_status != CardOrderPayStatus.PAID.value:
         raise HTTPException(status_code=400, detail="仅「已缴」工单可同步会员次数")
-    _apply_paid_card_order_to_member_balance(db, order, operator=operator)
+    if open_mode is None and _member_has_prior_applied_card_order(
+        db, int(order.member_id), exclude_order_id=int(order.id)
+    ):
+        open_mode = CardOpenMode.RENEW
+    _apply_paid_card_order_to_member_balance(
+        db,
+        order,
+        operator=operator,
+        open_mode=open_mode,
+        defer_delivery_activation=defer_delivery_activation,
+    )
 
 
 def list_card_orders_paged(
@@ -775,7 +874,13 @@ def create_card_order(
     db.flush()
     # 已缴即入账：与是否传 sync_member 无关（避免勾选遗漏导致剩余次数仍为 0）
     if body.pay_status == CardOrderPayStatus.PAID:
-        _sync_order_to_member(db, order, operator=operator)
+        _sync_order_to_member(
+            db,
+            order,
+            operator=operator,
+            open_mode=body.open_mode,
+            defer_delivery_activation=bool(body.defer_delivery_activation),
+        )
     db.commit()
     db.refresh(order)
     return _order_to_out(db, order)
