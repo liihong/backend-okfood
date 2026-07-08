@@ -1045,8 +1045,6 @@ export function useOrdersManage(orderKind = 'single') {
         page: String(page.value),
         page_size: String(pageSize.value),
       })
-      const d = (orderDate.value || '').trim()
-      if (d) q.set('order_date', d)
       const sq = searchQuery.value.trim()
       if (sq) q.set('q', sq)
       const fp = String(retailDeliveryFilter.value || '').trim()
@@ -1143,7 +1141,18 @@ export function useOrdersManage(orderKind = 'single') {
     }, 320)
   })
 
-  watch([orderDate, singlePayFilter, singleDeliveryFilter, mallPayFilter, retailDeliveryFilter, pageSize], () => {
+  /** 商城订单不按下单日过滤，切换日期不触发零售列表刷新 */
+  const listFilterDeps = computed(() => {
+    if (orderKind === 'single') {
+      return [orderDate.value, singlePayFilter.value, singleDeliveryFilter.value, pageSize.value]
+    }
+    if (orderKind === 'retail') {
+      return [retailDeliveryFilter.value, pageSize.value]
+    }
+    return [orderDate.value, mallPayFilter.value, pageSize.value]
+  })
+
+  watch(listFilterDeps, () => {
     page.value = 1
     if (orderKind === 'single') clearSingleSelection()
     void fetchActive()

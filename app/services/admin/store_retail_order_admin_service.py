@@ -6,7 +6,6 @@ import logging
 import time
 import uuid
 from copy import copy
-from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -121,22 +120,21 @@ def _apply_admin_retail_fulfillment_phase_filter(filters: list, fulfillment_phas
         )
 
 
-def list_admin_store_retail_orders_by_order_day(
+def list_admin_store_retail_orders(
     db: Session,
     *,
     store_id: int,
-    order_day: date,
     q: str | None = None,
     fulfillment_phase: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[AdminStoreRetailOrderListOut], int]:
+    """管理端商城订单列表：仅按配送阶段 Tab 与搜索条件过滤，不按下单日限制。"""
     page = max(1, page)
     page_size = min(100, max(1, page_size))
     join_on = Member.id == StoreRetailOrder.member_id
     filters: list = [
         StoreRetailOrder.store_id == int(store_id),
-        func.date(StoreRetailOrder.created_at) == order_day,
     ]
     _apply_admin_retail_fulfillment_phase_filter(filters, fulfillment_phase)
     if q and q.strip():

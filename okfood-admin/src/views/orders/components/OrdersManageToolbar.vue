@@ -16,7 +16,7 @@ const {
 
 <template>
   <div class="table-header table-header--members table-header--couriers-row orders-manage-toolbar">
-    <label class="orders-manage-date">
+    <label v-if="activeTab !== 'retail'" class="orders-manage-date">
       <span class="orders-manage-date-label">{{ dateFilterLabel }}</span>
       <el-date-picker
         v-model="orderDate"

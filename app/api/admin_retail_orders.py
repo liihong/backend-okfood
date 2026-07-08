@@ -1,12 +1,10 @@
 """管理端：商城零售订单 API。"""
 
-from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.deps import SessionDep, admin_staff_subject, require_admin_tenant_store
-from app.core.timeutil import today_shanghai
 from app.schemas.store_retail_order import (
     StoreRetailAssignCourierIn,
     StoreRetailBatchAssignCourierIn,
@@ -22,7 +20,7 @@ from app.services.admin.store_retail_order_admin_service import (
     bulk_admin_assign_courier_store_retail_orders,
     bulk_admin_mark_store_retail_orders_delivered,
     bulk_push_store_retail_orders_to_sf,
-    list_admin_store_retail_orders_by_order_day,
+    list_admin_store_retail_orders,
     push_store_retail_order_to_sf,
     update_admin_store_retail_order_remark,
 )
@@ -36,10 +34,6 @@ def admin_orders_daily_retail_orders(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
-    order_date: Annotated[
-        date | None,
-        Query(description="下单业务日（上海日历日），默认当天"),
-    ] = None,
     q: Annotated[str | None, Query(description="会员手机前缀或姓名模糊")] = None,
     fulfillment_phase: Annotated[
         str | None,
@@ -53,13 +47,11 @@ def admin_orders_daily_retail_orders(
     page: int = 1,
     page_size: int = 20,
 ):
-    """订单管理：当日商城零售订单（按下单日 + 配送阶段 Tab）。"""
+    """订单管理：商城零售订单（按配送阶段 Tab 过滤，不按下单日限制）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    day = order_date or today_shanghai()
-    items, total = list_admin_store_retail_orders_by_order_day(
+    items, total = list_admin_store_retail_orders(
         db,
         store_id=store_id,
-        order_day=day,
         q=q,
         fulfillment_phase=fulfillment_phase,
         page=max(1, page),

@@ -40,7 +40,7 @@ const {
     :data="retailItems"
     :loading="loading && activeTab === 'retail'"
     row-key="id"
-    empty-text="当日暂无商城订单"
+    empty-text="暂无商城订单"
   >
     <el-table-column label="序号" width="72" align="center">
       <template #default="{ $index }">
