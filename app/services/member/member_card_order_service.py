@@ -11,14 +11,24 @@ from app.core.timeutil import (
     min_member_delivery_start_shanghai,
     shanghai_naive_range_for_calendar_day,
 )
-from app.models.enums import CardOpenMode, CardOrderKind, CardOrderPayStatus, CardPayChannel, CouponLockedOrderBiz, PlanType
+from app.models.enums import (
+    CardOpenMode,
+    CardOrderActivationMode,
+    CardOrderKind,
+    CardOrderPayStatus,
+    CardPayChannel,
+    CouponLockedOrderBiz,
+    PlanType,
+)
 from app.models.member import Member
+from app.models.member_address import MemberAddress
 from app.models.member_card_order import MemberCardOrder
 from app.models.membership_card_template import MembershipCardTemplate
 from app.schemas.admin import CardOrderCreateIn, CardOrderOut, CardOrderPatchIn, RechargeIn
 from app.services.admin.admin_service import apply_member_recharge_delta
 from app.utils.sql_like import escape_like_fragment
 from app.services.member.member_address_service import upsert_default_address_from_admin_map_pick
+from app.services.member.member_delivery_state_service import compute_activation_mode_for_create
 from app.services.admin.catalog_admin_service import get_membership_template_row
 from app.services.shared.store_config_service import get_member_card_prices_yuan
 from app.services.marketing.coupon_checkout_service import (
@@ -146,8 +156,27 @@ def ensure_miniprogram_offline_claim_order(
     return order
 
 
-def member_delivery_setup_incomplete(db: Session, member: Member) -> bool:
+def _member_delivery_setup_incomplete_with_addr(
+    member: Member,
+    default_address: MemberAddress | None,
+) -> bool:
+    """配送到家缺默认地址 / 无起送日（已知默认地址时不再查库）。"""
+    if member.delivery_start_date is None:
+        return True
+    if bool(member.store_pickup):
+        return False
+    return default_address is None
+
+
+def member_delivery_setup_incomplete(
+    db: Session,
+    member: Member,
+    *,
+    default_address: MemberAddress | None | object = ...,
+) -> bool:
     """配送到家订阅：无起送日，或配送到家但无默认地址，视为待完善履约信息。"""
+    if default_address is not ...:
+        return _member_delivery_setup_incomplete_with_addr(member, default_address)  # type: ignore[arg-type]
     if member.delivery_start_date is None:
         return True
     if bool(member.store_pickup):
@@ -301,6 +330,7 @@ def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
         if tpl:
             tpl_label = f"{tpl.name}（{tpl.kind_label}）"
     out_no = (order.out_trade_no or "").strip() or None
+    act_mode = (getattr(order, "activation_mode", None) or "").strip() or None
     return CardOrderOut(
         id=int(order.id),
         member_id=int(order.member_id),
@@ -309,6 +339,7 @@ def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
         member_wechat_name=wn,
         out_trade_no=out_no,
         delivery_start_date=ds,
+        activation_mode=act_mode,
         card_kind=order.card_kind,
         pay_channel=order.pay_channel,
         pay_status=order.pay_status,
@@ -345,53 +376,29 @@ def _apply_delivery_activation_after_card_credit(
     open_mode: CardOpenMode | None = None,
     defer_delivery_activation: bool = False,
 ) -> None:
-    """
-    入账后的起送日/激活口径。
-
-    - 工单显式起送日：写入并激活；
-    - 显式「暂不开卡」：仅入账，标 delivery_deferred；
-    - 老会员续卡或未选暂不开卡：保持档案起送日与 delivery_deferred，按余次恢复 is_active；
-    - 禁止续卡时因起送日为空自动暂停配送。
-    """
-    from app.services.meal_period.balance import sync_member_is_active_from_period_balances
-
-    if order.delivery_start_date is not None:
-        member.is_active = True
-        member.delivery_start_date = order.delivery_start_date
-        member.delivery_deferred = False
-        db.add(member)
-        return
-
-    if defer_delivery_activation:
-        member.is_active = False
-        member.delivery_deferred = True
-        db.add(member)
-        return
-
-    is_renew_apply = open_mode == CardOpenMode.RENEW or _member_has_prior_applied_card_order(
-        db, int(member.id), exclude_order_id=int(order.id)
+    """入账后的配送门禁写入（委托 member_delivery_state_service）。"""
+    from app.services.member.member_delivery_state_service import (
+        apply_card_order_activation_after_credit,
+        resolve_effective_activation_mode,
     )
-    if is_renew_apply or member.delivery_start_date is not None:
-        sync_member_is_active_from_period_balances(db, member)
-        db.add(member)
-        return
 
-    if (order.created_by or "").strip() == MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR:
-        # 小程序首购待完善：上面已尝试从档案复制起送日，仍为 None 则暂不开卡
-        member.is_active = False
-        member.delivery_deferred = True
-        db.add(member)
-        return
-
-    if open_mode == CardOpenMode.NEW_MEMBER:
-        member.is_active = False
-        member.delivery_deferred = True
-        db.add(member)
-        return
-
-    # 历史老会员（起送日为空、即日生效）：仅入账，不误标暂停
-    sync_member_is_active_from_period_balances(db, member)
-    db.add(member)
+    if not (order.activation_mode or "").strip():
+        mode = resolve_effective_activation_mode(
+            order,
+            open_mode=open_mode,
+            defer_delivery_activation=defer_delivery_activation,
+            member=member,
+            db=db,
+        )
+        order.activation_mode = mode.value
+        db.add(order)
+    apply_card_order_activation_after_credit(
+        db,
+        member,
+        order,
+        open_mode=open_mode,
+        defer_delivery_activation=defer_delivery_activation,
+    )
 
 
 def _apply_paid_card_order_to_member_balance(
@@ -868,6 +875,11 @@ def create_card_order(
         amount_yuan=body.amount_yuan,
         remark=body.remark,
         delivery_start_date=body.delivery_start_date,
+        activation_mode=compute_activation_mode_for_create(
+            open_mode=body.open_mode,
+            defer_delivery_activation=bool(body.defer_delivery_activation),
+            delivery_start_date=body.delivery_start_date,
+        ),
         created_by=operator,
     )
     db.add(order)
@@ -976,6 +988,8 @@ def update_card_order(
 
     if "delivery_start_date" in patch:
         ds = body.delivery_start_date
+        if order.applied_to_member and ds is None and order.delivery_start_date is not None:
+            raise HTTPException(status_code=400, detail="已入账工单不可清空起送日")
         # 后台更新工单允许选当日；小程序仍走 min_member_delivery_start_shanghai（最早明日）
         if ds is not None and ds < min_admin_card_order_delivery_start_shanghai():
             raise HTTPException(
@@ -1056,6 +1070,11 @@ def create_paid_card_order_for_douyin_redeem(
         amount_yuan=amount_yuan,
         remark=(remark or "抖音验券兑换")[:500],
         delivery_start_date=delivery_start_date,
+        activation_mode=(
+            CardOrderActivationMode.EXPLICIT_DATE.value
+            if delivery_start_date is not None
+            else CardOrderActivationMode.DEFER_NOT_OPEN.value
+        ),
         applied_to_member=False,
         out_trade_no=None,
         wx_transaction_id=None,

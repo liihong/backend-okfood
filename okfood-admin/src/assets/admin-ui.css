@@ -1830,6 +1830,9 @@
 .admin-table--members.el-table td.td-col-leave .cell {
   overflow: hidden;
 }
+.admin-table--members.el-table td.td-col-status .cell {
+  white-space: nowrap;
+}
 .admin-table--members.el-table td.td-col-delivery-address .cell {
   overflow: hidden;
   min-width: 0;
@@ -2554,6 +2557,7 @@
   border-radius: 8px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 .member-pill--emerald {
   background: #ecfdf5;

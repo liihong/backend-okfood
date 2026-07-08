@@ -103,6 +103,9 @@ export function retailOrderStatusMeta(o) {
     if (fulfill === 'delivered') {
       return { line1: '门店自提 · 已完成', line2: '感谢您的光临', tone: 'ok' }
     }
+    if (fulfill === 'awaiting_accept') {
+      return { line1: '门店自提 · 待接单', line2: '商家确认中', tone: 'info' }
+    }
     return { line1: '门店自提 · 待取货', line2: '请到店出示订单', tone: 'info' }
   }
   if (fulfill === 'delivered') {
@@ -110,6 +113,9 @@ export function retailOrderStatusMeta(o) {
   }
   if (fulfill === 'accepted' || fulfill === 'sf_awaiting_pickup') {
     return { line1: '配送中', line2: '请留意配送通知', tone: 'info' }
+  }
+  if (fulfill === 'awaiting_accept') {
+    return { line1: '待接单', line2: '商家确认中', tone: 'info' }
   }
   if (fulfill === 'pending') {
     return { line1: '待发货', line2: '商家备货中', tone: 'info' }
@@ -125,6 +131,6 @@ export function canCancelRetailOrder(o) {
   if (pay === '已退款' || f === 'delivered' || f === 'cancelled') return false
   if (pay === '未支付') return f === 'pending'
   if (pay !== '已支付') return false
-  if (o.store_pickup) return false
-  return f === 'pending'
+  if (o.store_pickup) return f === 'awaiting_accept'
+  return f === 'awaiting_accept' || f === 'pending'
 }

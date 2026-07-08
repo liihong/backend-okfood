@@ -12,14 +12,17 @@ from app.core.timeutil import today_shanghai
 from app.models.balance_log import BalanceLog
 from app.models.delivery_log import DeliveryLog
 from app.models.enums import BalanceReason, DeliveryStatus
+from app.models.member_card_order import MemberCardOrder
 from app.models.single_meal_order import SingleMealOrder
 from app.schemas.user import DeliveryDeductionOut
 
 _ADMIN_MEMBER_DELIVERED_DATES_LIMIT = 2000
 _SINGLE_MEAL_ORDER_ID_RE = re.compile(r"single_meal_orders\.id=(\d+)")
+_CARD_ORDER_ID_RE = re.compile(r"开卡工单#(\d+)")
 _DEDUCTION_KIND_SUBSCRIPTION = "subscription"
 _DEDUCTION_KIND_SINGLE_MEAL = "single_meal"
 _DEDUCTION_KIND_MEAL_COMPENSATION = "meal_compensation"
+_DEDUCTION_KIND_CARD_RECHARGE = "card_recharge"
 
 
 def _balance_log_business_date(created_at: datetime | None) -> date:
@@ -121,6 +124,50 @@ def _single_meal_deduction_items(db: Session, member_id: int) -> list[DeliveryDe
     return items
 
 
+def _parse_card_order_id_from_balance_detail(detail: str | None) -> int | None:
+    if not detail:
+        return None
+    m = _CARD_ORDER_ID_RE.search(detail)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def _card_recharge_items(db: Session, member_id: int) -> list[DeliveryDeductionOut]:
+    """开卡入账：正向 recharge 且 detail 含开卡工单#（已撤销入账工单不计）。"""
+    mid = int(member_id)
+    bl_rows = db.scalars(
+        select(BalanceLog)
+        .where(
+            BalanceLog.member_id == mid,
+            BalanceLog.reason == BalanceReason.RECHARGE.value,
+            BalanceLog.change > 0,
+            BalanceLog.detail.like("%开卡工单#%"),
+        )
+        .order_by(BalanceLog.created_at.desc(), BalanceLog.id.desc())
+    ).all()
+    items: list[DeliveryDeductionOut] = []
+    for bl in bl_rows:
+        oid = _parse_card_order_id_from_balance_detail(bl.detail)
+        if oid is not None:
+            order = db.get(MemberCardOrder, oid)
+            if order is None or int(order.member_id) != mid:
+                continue
+            if not bool(order.applied_to_member):
+                continue
+        items.append(
+            DeliveryDeductionOut(
+                delivery_date=_balance_log_business_date(bl.created_at),
+                meal_units=max(1, int(bl.change)),
+                deduction_kind=_DEDUCTION_KIND_CARD_RECHARGE,
+            )
+        )
+    return items
+
+
 def _meal_compensation_items(db: Session, member_id: int) -> list[DeliveryDeductionOut]:
     """补餐赔付：正向入账 balance_logs（供消费记录页展示补送记录）。"""
     mid = int(member_id)
@@ -166,6 +213,7 @@ def _merged_consumption_items(db: Session, member_id: int) -> list[DeliveryDeduc
         _subscription_deduction_items(db, member_id)
         + _single_meal_deduction_items(db, member_id)
         + _meal_compensation_items(db, member_id)
+        + _card_recharge_items(db, member_id)
     )
     return sorted(items, key=lambda x: x.delivery_date, reverse=True)
 

@@ -13,6 +13,7 @@ from app.schemas.store_retail_order import (
     StoreRetailOrderRemarkPatchIn,
 )
 from app.services.admin.store_retail_order_admin_service import (
+    admin_accept_store_retail_order,
     admin_assign_courier_store_retail_order,
     admin_cancel_store_retail_order,
     admin_mark_store_retail_order_delivered,
@@ -64,6 +65,22 @@ def admin_orders_daily_retail_orders(
         page_size=page_size,
         msg="获取成功",
     )
+
+
+@router.post("/orders/retail-orders/{order_id}/accept")
+def admin_retail_order_accept(
+    order_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """商城零售：后台确认接单，进入待发货备货。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        out = admin_accept_store_retail_order(db, order_id=int(order_id), store_id=int(store_id))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=dump_model(out), msg="已接单，订单进入待发货")
 
 
 @router.patch("/orders/retail-orders/{order_id}/remark")

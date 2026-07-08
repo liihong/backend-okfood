@@ -487,10 +487,7 @@ def list_members_paged(
     renew_pending_only: bool = False,
     store_id: int | None = None,
 ) -> tuple[list[MemberAdminOut], int]:
-    # 每人至多一条「默认地址」：避免多条 is_default=1 时 JOIN 放大行数、拖慢 ORDER BY + LIMIT
-    default_addr_pick = default_address_pick_subquery()
-
-    # 单次往返：总计数子查询 + 分页 id 子查询 LEFT JOIN，避免 COUNT 与列表各查一次（高延迟库上可省一整轮 RTT）
+    # 单次往返：总计数 + 分页 id；默认地址与 lifecycle 在 Python 层批量加载，避免全表地址子查询
     count_sq = _apply_member_list_filters(
         select(func.count().label("total")).select_from(Member),
         q_phone=q_phone,
@@ -525,12 +522,10 @@ def list_members_paged(
         .subquery("page")
     )
     list_stmt = (
-        select(count_sq.c.total, Member, MemberAddress)
+        select(count_sq.c.total, Member)
         .select_from(count_sq)
         .outerjoin(page_sq, true())
         .outerjoin(Member, Member.id == page_sq.c.pid)
-        .outerjoin(default_addr_pick, default_addr_pick.c.mid == Member.id)
-        .outerjoin(MemberAddress, MemberAddress.id == default_addr_pick.c.addr_id)
     )
     biz_today = today_shanghai()
     out: list[MemberAdminOut] = []
@@ -538,22 +533,42 @@ def list_members_paged(
     if not rows:
         return [], 0
     total = int(rows[0][0] or 0)
-    region_ids: set[int] = set()
-    member_rows: list[tuple[Member, MemberAddress | None]] = []
-    for _total_col, m, addr in rows:
+    members: list[Member] = []
+    for _total_col, m in rows:
         if m is None:
             continue
+        members.append(m)
+    if not members:
+        return [], total
+    member_ids = [int(m.id) for m in members]
+    from app.services.member.member_address_service import load_default_address_map
+
+    addr_by_mid = load_default_address_map(db, member_ids)
+    region_ids: set[int] = set()
+    member_rows: list[tuple[Member, MemberAddress | None]] = []
+    for m in members:
+        addr = addr_by_mid.get(int(m.id))
         member_rows.append((m, addr))
         if addr and addr.delivery_region_id is not None:
             region_ids.add(int(addr.delivery_region_id))
     id_to_name = delivery_region_name_map(db, region_ids)
-    member_ids = [int(m.id) for m, _addr in member_rows]
     from app.services.meal_period.card_eligibility import members_entitled_meal_periods_map
     from app.services.meal_period.plan_type_sync import format_plan_type_display, meal_scope_label_from_periods
     from app.services.meal_period.units import load_dinner_meal_period_states_map
+    from app.services.member.member_lifecycle_service import resolve_members_lifecycle_map
 
-    entitled_map = members_entitled_meal_periods_map(db, member_ids)
+    members_by_id = {int(m.id): m for m in members}
+    entitled_map = members_entitled_meal_periods_map(db, member_ids, members_by_id=members_by_id)
     dinner_state_map = load_dinner_meal_period_states_map(db, member_ids)
+    on_leave_by_id = {int(m.id): _member_on_leave_today(m, biz_today) for m in members}
+    lifecycle_map = resolve_members_lifecycle_map(
+        db,
+        members,
+        on_leave_by_id=on_leave_by_id,
+        dinner_state_map=dinner_state_map,
+        default_addr_by_id=addr_by_mid,
+    )
+
     for m, addr in member_rows:
         if addr:
             detail = full_address_line(addr.map_location_text, addr.door_detail)
@@ -566,6 +581,7 @@ def list_members_paged(
         dr_id = int(addr.delivery_region_id) if addr and addr.delivery_region_id is not None else None
         periods = entitled_map.get(int(m.id), frozenset())
         dinner_row = dinner_state_map.get(int(m.id))
+        lifecycle = lifecycle_map[int(m.id)]
         out.append(
             MemberAdminOut(
                 id=m.id,
@@ -607,6 +623,10 @@ def list_members_paged(
                 membership_refunded_at=(
                     m.membership_refunded_at.isoformat() if m.membership_refunded_at else None
                 ),
+                lifecycle_code=lifecycle.code,
+                lifecycle_label=lifecycle.label,
+                setup_alert=lifecycle.setup_alert,
+                lifecycle_overlays=list(lifecycle.overlays),
                 created_at=m.created_at.isoformat() if m.created_at else "",
                 updated_at=m.updated_at.isoformat() if m.updated_at else "",
             )

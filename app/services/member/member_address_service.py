@@ -153,9 +153,20 @@ def load_default_address_map(db: Session, member_ids: list[int]) -> dict[int, Me
     if not member_ids:
         return {}
     uniq = list(dict.fromkeys(member_ids))
-    daf = default_address_pick_subquery()
+    # 仅扫描本批 member_id，避免全表默认地址子查询
+    pick = (
+        select(
+            MemberAddress.member_id.label("mid"),
+            func.max(MemberAddress.id).label("addr_id"),
+        )
+        .where(
+            MemberAddress.member_id.in_(uniq),
+            MemberAddress.is_default.is_(True),
+        )
+        .group_by(MemberAddress.member_id)
+    ).subquery("daf_page")
     rows = db.scalars(
-        select(MemberAddress).join(daf, MemberAddress.id == daf.c.addr_id).where(daf.c.mid.in_(uniq))
+        select(MemberAddress).join(pick, MemberAddress.id == pick.c.addr_id)
     ).all()
     by_mid: dict[int, MemberAddress] = {int(r.member_id): r for r in rows}
     return {mid: by_mid.get(mid) for mid in uniq}

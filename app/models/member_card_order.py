@@ -52,6 +52,8 @@ class MemberCardOrder(Base):
     )
     remark: Mapped[str | None] = mapped_column(String(500), nullable=True)
     delivery_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: 入账意图：explicit_date / keep_schedule / defer_not_open / defer_pause；NULL 为历史工单
+    activation_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
     applied_to_member: Mapped[bool] = mapped_column(Boolean, default=False)
     out_trade_no: Mapped[str | None] = mapped_column(String(32), nullable=True)
     wx_transaction_id: Mapped[str | None] = mapped_column(String(32), nullable=True)

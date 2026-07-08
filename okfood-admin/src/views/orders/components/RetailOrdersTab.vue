@@ -2,9 +2,14 @@
 import { ChevronDown } from 'lucide-vue-next'
 import AdminTable from '../../../components/AdminTable.vue'
 import { RETAIL_DELIVERY_TABS } from '../constants.js'
-import { singleOrderStatusClass, singleOrderStatusLabelZh } from '../utils/orderDisplay.js'
+import {
+  retailJuiceDurationBadge,
+  singleOrderStatusClass,
+  singleOrderStatusLabelZh,
+} from '../utils/orderDisplay.js'
 import { orderCreatedAtParts, singleOrderDeliveryAddressTextOnly } from '../utils/orderFormatters.js'
 import {
+  canAcceptRetailOrder,
   canDispatchActions,
   canCancelOrder,
   canMarkOrderComplete,
@@ -59,7 +64,23 @@ const {
         <span v-if="row.member_phone" class="td-mono">{{ row.member_phone }}</span>
       </template>
     </el-table-column>
-    <el-table-column label="商品" min-width="140" prop="product_title" show-overflow-tooltip />
+    <el-table-column label="商品" min-width="180">
+      <template #default="{ row }">
+        <div class="retail-product-cell">
+          <template v-for="badge in [retailJuiceDurationBadge(row.product_title)]" :key="badge?.days ?? 'plain'">
+            <span
+              v-if="badge"
+              class="retail-juice-duration-badge"
+              :class="badge.className"
+              :title="row.product_title"
+            >
+              {{ badge.badge }}
+            </span>
+            <span v-else class="retail-product-title">{{ row.product_title || '—' }}</span>
+          </template>
+        </div>
+      </template>
+    </el-table-column>
     <el-table-column label="数量" width="72" align="center">
       <template #default="{ row }">×{{ row.quantity || 1 }}</template>
     </el-table-column>
@@ -91,6 +112,9 @@ const {
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
+              <el-dropdown-item command="accept" :disabled="!canAcceptRetailOrder(row)">
+                接单
+              </el-dropdown-item>
               <el-dropdown-item command="sf" :disabled="!canDispatchActions(row) || row.store_pickup">
                 推送到顺丰
               </el-dropdown-item>

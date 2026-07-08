@@ -67,6 +67,10 @@ class MemberOut(BaseModel):
         False,
         description="小程序自助购卡微信已缴且履约信息未齐备（无起送日或配送到家无默认地址）；须引导完善后再派单",
     )
+    lifecycle_code: str | None = Field(None, description="只读档案生命周期码")
+    lifecycle_label: str | None = Field(None, description="lifecycle_code 中文展示")
+    setup_alert: bool = Field(False, description="已入账但缺起送日或配送到家缺地址")
+    lifecycle_overlays: list[str] = Field(default_factory=list, description="叠加标签")
     entitled_meal_periods: list[str] = Field(
         default_factory=lambda: ["lunch"],
         description='当前卡种覆盖餐段，如 ["lunch"] / ["dinner"] / ["lunch","dinner"]',
@@ -114,7 +118,8 @@ class DeliveryDeductionOut(BaseModel):
     meal_units: int = Field(1, ge=1, description="本条扣减份数")
     deduction_kind: str = Field(
         default="subscription",
-        description="subscription=套餐确认送达扣次；single_meal=单次购买会员卡扣次；meal_compensation=补餐赔付",
+        description="subscription=套餐确认送达扣次；single_meal=单次购买会员卡扣次；"
+        "meal_compensation=补餐赔付；card_recharge=开卡入账",
     )
 
 

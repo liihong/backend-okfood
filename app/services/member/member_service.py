@@ -355,6 +355,12 @@ def _to_member_out(
 
     paid_card_awaiting_setup = member_paid_card_awaiting_setup(db, int(m.id))
 
+    from app.services.member.member_lifecycle_service import member_on_leave_on_date, resolve_member_lifecycle
+
+    lifecycle = resolve_member_lifecycle(
+        db, m, on_leave_today=member_on_leave_on_date(m, biz_today)
+    )
+
     from app.services.member.member_daily_meal_units_service import (
         delivery_sheet_pushed_today_for_store,
         pending_daily_meal_units,
@@ -417,6 +423,14 @@ def _to_member_out(
         sf_self_service_locked=sf_self_service_locked,
 
         paid_card_awaiting_setup=paid_card_awaiting_setup,
+
+        lifecycle_code=lifecycle.code,
+
+        lifecycle_label=lifecycle.label,
+
+        setup_alert=lifecycle.setup_alert,
+
+        lifecycle_overlays=list(lifecycle.overlays),
 
         entitled_meal_periods=entitled,
 
@@ -746,17 +760,17 @@ def patch_member_profile(
 
     if defer_applied:
 
-        m.delivery_deferred = True
+        from app.services.member.member_delivery_state_service import apply_pause_delivery
 
-        m.is_active = False
-
-        m.delivery_start_date = None
+        apply_pause_delivery(db, m)
 
         m.store_pickup = False
 
     elif set_delivery_deferred and delivery_deferred is False:
 
-        m.delivery_deferred = False
+        from app.services.member.member_delivery_state_service import apply_resume_delivery
+
+        apply_resume_delivery(db, m)
 
     if set_store_pickup and store_pickup is not None:
 
@@ -779,11 +793,9 @@ def patch_member_profile(
 
             m.delivery_start_date = delivery_start_date
 
-            m.delivery_deferred = False
+            from app.services.member.member_delivery_state_service import apply_resume_delivery
 
-            from app.services.meal_period.balance import sync_member_is_active_from_period_balances
-
-            sync_member_is_active_from_period_balances(db, m)
+            apply_resume_delivery(db, m)
 
         else:
 
@@ -1711,14 +1723,9 @@ def admin_patch_member_profile(
                 )
 
             )
+            from app.services.meal_period.balance import sync_member_is_active_from_period_balances
 
-        if new_b > 0:
-
-            m.is_active = True
-
-        else:
-
-            m.is_active = False
+            sync_member_is_active_from_period_balances(db, m)
 
     if set_delivery_start_date:
 
@@ -1726,11 +1733,9 @@ def admin_patch_member_profile(
 
             m.delivery_start_date = delivery_start_date
 
-            m.delivery_deferred = False
+            from app.services.member.member_delivery_state_service import apply_resume_delivery
 
-            if int(m.balance) > 0:
-
-                m.is_active = True
+            apply_resume_delivery(db, m)
 
         else:
 
@@ -1760,19 +1765,17 @@ def admin_patch_member_profile(
 
         if delivery_deferred:
 
-            m.delivery_deferred = True
+            from app.services.member.member_delivery_state_service import apply_pause_delivery
 
-            m.is_active = False
-
-            m.delivery_start_date = None
+            apply_pause_delivery(db, m)
 
             m.store_pickup = False
 
         else:
 
-            m.delivery_deferred = False
+            from app.services.member.member_delivery_state_service import apply_resume_delivery
 
-            m.is_active = int(m.balance) > 0
+            apply_resume_delivery(db, m)
 
     admin_units_change_mode: str | None = None
     if daily_meal_units is not None:

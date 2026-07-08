@@ -25,6 +25,7 @@ from app.schemas.store_retail_order import AdminStoreRetailOrderListOut
 from app.services.shared.store_config_service import get_store_config
 from app.services.shared.tenant_integration_service import get_merged_pay_config
 from app.services.client.store_retail_order_service import (
+    _FULFILLMENT_AWAITING_ACCEPT,
     _FULFILLMENT_SF_AWAITING_PICKUP,
     _RETAIL_STOP_PREFIX,
     _row_to_out,
@@ -65,6 +66,25 @@ def _build_admin_list_out(
     )
 
 
+def admin_accept_store_retail_order(
+    db: Session, *, order_id: int, store_id: int
+) -> AdminStoreRetailOrderListOut:
+    """管理端：确认接单，进入待发货备货阶段。"""
+    o = db.get(StoreRetailOrder, int(order_id))
+    if o is None or int(o.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    if (o.pay_status or "").strip() != "已支付":
+        raise ValueError("仅「已支付」订单可接单")
+    fs = str(o.fulfillment_status or "").strip().lower()
+    if fs != _FULFILLMENT_AWAITING_ACCEPT:
+        raise ValueError("仅「待接单」订单可执行接单")
+    o.fulfillment_status = "pending"
+    db.add(o)
+    db.commit()
+    db.refresh(o)
+    return _build_admin_list_out(db, o)
+
+
 def update_admin_store_retail_order_remark(
     db: Session,
     *,
@@ -87,7 +107,7 @@ def update_admin_store_retail_order_remark(
 def _apply_admin_retail_fulfillment_phase_filter(filters: list, fulfillment_phase: str | None) -> None:
     """管理端商城订单：按配送阶段 Tab 过滤。
 
-    - ``awaiting_accept``：待接单（未支付且待履约）
+    - ``awaiting_accept``：待接单（已支付且 fulfillment=awaiting_accept，未支付订单不展示）
     - ``pending_ship``：待发货（已支付且 pending / 顺丰取消可重推）
     - ``in_delivery``：配送中（顺丰待取货 / 门店配送中）
     - ``delivered``：已完成
@@ -95,8 +115,8 @@ def _apply_admin_retail_fulfillment_phase_filter(filters: list, fulfillment_phas
     """
     fp = (fulfillment_phase or "").strip().lower()
     if fp == "awaiting_accept":
-        filters.append(StoreRetailOrder.pay_status == "未支付")
-        filters.append(StoreRetailOrder.fulfillment_status == "pending")
+        filters.append(StoreRetailOrder.pay_status == "已支付")
+        filters.append(StoreRetailOrder.fulfillment_status == _FULFILLMENT_AWAITING_ACCEPT)
     elif fp == "pending_ship":
         filters.append(StoreRetailOrder.pay_status == "已支付")
         filters.append(

@@ -16,6 +16,7 @@ from app.models.enums import CardOrderPayStatus
 from app.models.member_card_order import MemberCardOrder
 from app.models.member_membership_refund import MemberMembershipRefund
 from app.models.single_meal_order import SingleMealOrder
+from app.models.store_retail_order import StoreRetailOrder
 from app.schemas.admin import (
     FinanceReceivedBucketOut,
     FinanceReceivedDayOut,
@@ -113,6 +114,22 @@ def _window_paid(
         ).where(*sm_conds)
     ).one()
 
+    # 商城订单：仅统计当前仍为已支付的微信实收（已退款订单不计入）
+    sr_conds = [StoreRetailOrder.pay_status == "已支付"]
+    if store_id is not None:
+        sr_conds.append(StoreRetailOrder.store_id == int(store_id))
+    if start is not None:
+        sr_conds.append(StoreRetailOrder.created_at >= start)
+    if end is not None:
+        sr_conds.append(StoreRetailOrder.created_at < end)
+
+    sr_cnt, sr_sum = db.execute(
+        select(
+            func.count(StoreRetailOrder.id),
+            func.coalesce(func.sum(StoreRetailOrder.amount_yuan), 0),
+        ).where(*sr_conds)
+    ).one()
+
     refund_conds = []
     if store_id is not None:
         refund_conds.append(MemberMembershipRefund.store_id == int(store_id))
@@ -137,19 +154,22 @@ def _window_paid(
 
     c_amt = Decimal(str(c_sum))
     s_amt = Decimal(str(s_sum))
+    sr_amt = Decimal(str(sr_sum))
     r_amt = Decimal(str(r_sum)).quantize(Decimal("0.01"))
     c_n = int(c_cnt or 0)
     s_n = int(s_cnt or 0)
+    sr_n = int(sr_cnt or 0)
     r_n = int(r_cnt or 0)
-    gross = c_amt + s_amt
+    gross = c_amt + s_amt + sr_amt
     net = (gross - r_amt).quantize(Decimal("0.01"))
     return FinanceReceivedWindowOut(
         total_amount_yuan=gross,
-        total_count=c_n + s_n,
+        total_count=c_n + s_n + sr_n,
         card_orders=FinanceReceivedBucketOut(count=c_n, amount_yuan=c_amt),
         card_orders_weekly=card_weekly,
         card_orders_monthly=card_monthly,
         single_meal_orders=FinanceReceivedBucketOut(count=s_n, amount_yuan=s_amt),
+        store_retail_orders=FinanceReceivedBucketOut(count=sr_n, amount_yuan=sr_amt),
         membership_refunds=FinanceReceivedBucketOut(count=r_n, amount_yuan=r_amt),
         net_total_amount_yuan=net,
     )
@@ -219,7 +239,7 @@ def finance_received_day_window(
 def finance_received_summary(db: Session, *, store_id: int | None = None) -> FinanceReceivedSummaryOut:
     """汇总已收：累计、本月（上海自然月）、今日（上海自然日）。
 
-    开卡工单与单次点餐按 ``created_at``（北京时间 naive）落入日界；退卡按 ``created_at``。
+    开卡工单、单次点餐与商城订单按 ``created_at``（北京时间 naive）落入日界；退卡按 ``created_at``。
     无单独 paid_at 字段时，以工单/订单创建时刻近似收款时刻。
     """
     day = today_shanghai()

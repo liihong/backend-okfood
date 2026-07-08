@@ -671,6 +671,11 @@ export function mapAdminUserToRow(raw, idx) {
     leave_badge: leaveList.leave_badge,
     leave_detail: leaveList.leave_detail,
     status,
+    lifecycle_code:
+      raw.lifecycle_code != null && String(raw.lifecycle_code).trim()
+        ? String(raw.lifecycle_code).trim()
+        : '',
+    setup_alert: raw.setup_alert === true,
     membership_refunded_at: membershipRefundedAt,
     store_pickup: raw.store_pickup === true,
     skip_subscription_saturday: raw.skip_subscription_saturday === true,

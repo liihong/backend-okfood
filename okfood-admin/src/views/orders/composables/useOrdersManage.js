@@ -7,6 +7,7 @@ import { toastSfPushBatchOutcome, toastSfPushError } from '../../../utils/sfPush
 import { todayShanghaiStr } from '../utils/orderFormatters.js'
 import { mallPayFilterApiValue, resolveSingleOrderMemberDisplayName } from '../utils/orderDisplay.js'
 import {
+  canAcceptRetailOrder,
   canDispatchActions,
   canCancelOrder,
   canMarkOrderComplete,
@@ -508,7 +509,8 @@ export function useOrdersManage(orderKind = 'single') {
   }
 
   function onRetailRowMoreCommand(row, cmd) {
-    if (cmd === 'sf') void onPushSfRetailOrder(row)
+    if (cmd === 'accept') void onAcceptRetailOrder(row)
+    else if (cmd === 'sf') void onPushSfRetailOrder(row)
     else if (cmd === 'courier') openAssignCourierRetail(row)
     else if (cmd === 'complete') void onMarkRetailOrderComplete(row)
     else if (cmd === 'cancel') void onCancelRetailOrder(row)
@@ -551,6 +553,41 @@ export function useOrdersManage(orderKind = 'single') {
       showToast(e?.message || '保存备注失败', 'error')
     } finally {
       retailRemarkSaving.value = false
+    }
+  }
+
+  async function onAcceptRetailOrder(row) {
+    if (!canAcceptRetailOrder(row)) {
+      showToast('仅「待接单」且已支付订单可接单', 'error')
+      return
+    }
+    try {
+      await ElMessageBox.confirm('确认接单后订单将进入「待发货」，可安排备货与配送。', '确认接单', {
+        confirmButtonText: '接单',
+        cancelButtonText: '取消',
+        type: 'info',
+      })
+    } catch {
+      return
+    }
+    dispatchLoadingId.value = Number(row.id)
+    try {
+      await apiJson(
+        `/api/admin/orders/retail-orders/${row.id}/accept`,
+        { method: 'POST' },
+        { auth: true },
+      )
+      showToast('已接单，订单进入待发货', 'success')
+      await fetchRetailOrders()
+    } catch (e) {
+      const status = e && typeof e.status === 'number' ? e.status : 0
+      if (status === 401) {
+        handleAdminLogout()
+        return
+      }
+      showToast(e instanceof Error ? e.message : '接单失败', 'error')
+    } finally {
+      dispatchLoadingId.value = 0
     }
   }
 

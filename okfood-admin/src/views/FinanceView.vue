@@ -94,6 +94,14 @@ function breakdownRows(kpi) {
       amount: kpi.smAmt,
     },
     {
+      key: 'mall',
+      label: '商城订单',
+      dot: 'mall',
+      count: kpi.mallCount,
+      unit: '笔',
+      amount: kpi.mallAmt,
+    },
+    {
       key: 'refund',
       label: '会员退卡',
       dot: 'refund',
@@ -113,21 +121,24 @@ function breakdownDotClass(dot, onPrimary) {
     week: 'finance-breakdown-dot--week',
     month: 'finance-breakdown-dot--month',
     meal: 'finance-breakdown-dot--meal',
+    mall: 'finance-breakdown-dot--mall',
     refund: 'finance-breakdown-dot--refund-hot',
   }
   return `finance-breakdown-dot ${map[dot] || ''}`
 }
 
-/** 周卡+月卡 vs 单次点餐金额占比（比例条，与参考稿一致：不含退卡） */
+/** 开卡 / 单次点餐 / 商城订单金额占比（比例条，与参考稿一致：不含退卡） */
 function ratioPct(w) {
   const card =
     safeNum(w?.card_orders_weekly?.amount_yuan) + safeNum(w?.card_orders_monthly?.amount_yuan)
   const meal = safeNum(w?.single_meal_orders?.amount_yuan)
-  const total = card + meal
-  if (total <= 0) return { cardPct: 0, mealPct: 0 }
+  const mall = safeNum(w?.store_retail_orders?.amount_yuan)
+  const total = card + meal + mall
+  if (total <= 0) return { cardPct: 0, mealPct: 0, mallPct: 0 }
   const cardPct = Math.round((card / total) * 100)
-  const mealPct = 100 - cardPct
-  return { cardPct, mealPct }
+  const mealPct = Math.round((meal / total) * 100)
+  const mallPct = Math.max(0, 100 - cardPct - mealPct)
+  return { cardPct, mealPct, mallPct }
 }
 
 /** 将 summary 中某区间窗口转为 KPI 卡片展示字段 */
@@ -146,13 +157,16 @@ function buildKpi(w) {
       cardParentAmt: '—',
       smCount: 0,
       smAmt: '—',
+      mallCount: 0,
+      mallAmt: '—',
       refundCount: 0,
       refundAmt: '—',
       cardPct: 0,
       mealPct: 0,
+      mallPct: 0,
     }
   }
-  const { cardPct, mealPct } = ratioPct(w)
+  const { cardPct, mealPct, mallPct } = ratioPct(w)
   const netRaw = w.net_total_amount_yuan ?? w.total_amount_yuan
   const weekCount = w.card_orders_weekly?.count ?? 0
   const monthCount = w.card_orders_monthly?.count ?? 0
@@ -171,10 +185,13 @@ function buildKpi(w) {
     cardParentAmt: fmtYuan(weekAmtRaw + monthAmtRaw),
     smCount: w.single_meal_orders?.count ?? 0,
     smAmt: fmtYuan(w.single_meal_orders?.amount_yuan),
+    mallCount: w.store_retail_orders?.count ?? 0,
+    mallAmt: fmtYuan(w.store_retail_orders?.amount_yuan),
     refundCount: w.membership_refunds?.count ?? 0,
     refundAmt: fmtYuan(w.membership_refunds?.amount_yuan),
     cardPct,
     mealPct,
+    mallPct,
   }
 }
 
@@ -478,6 +495,7 @@ onActivated(() => {
         <div class="finance-ratio-bar finance-ratio-bar--on-primary">
           <div class="finance-ratio-seg finance-ratio-seg--card" :style="{ width: todayKpi.cardPct + '%' }" />
           <div class="finance-ratio-seg finance-ratio-seg--meal" :style="{ width: todayKpi.mealPct + '%' }" />
+          <div class="finance-ratio-seg finance-ratio-seg--mall" :style="{ width: todayKpi.mallPct + '%' }" />
         </div>
         <div class="finance-breakdown-grid finance-breakdown-grid--on-primary">
           <template v-for="row in breakdownRows(todayKpi)" :key="`${selectedDay}-${row.key}`">
@@ -537,6 +555,7 @@ onActivated(() => {
         <div class="finance-ratio-bar">
           <div class="finance-ratio-seg finance-ratio-seg--card-green" :style="{ width: monthKpi.cardPct + '%' }" />
           <div class="finance-ratio-seg finance-ratio-seg--meal" :style="{ width: monthKpi.mealPct + '%' }" />
+          <div class="finance-ratio-seg finance-ratio-seg--mall" :style="{ width: monthKpi.mallPct + '%' }" />
         </div>
         <div class="finance-breakdown-grid">
           <template v-for="row in breakdownRows(monthKpi)" :key="`${selectedMonth}-${row.key}`">
@@ -580,6 +599,7 @@ onActivated(() => {
         <div class="finance-ratio-bar">
           <div class="finance-ratio-seg finance-ratio-seg--card-green" :style="{ width: cumulativeKpi.cardPct + '%' }" />
           <div class="finance-ratio-seg finance-ratio-seg--meal" :style="{ width: cumulativeKpi.mealPct + '%' }" />
+          <div class="finance-ratio-seg finance-ratio-seg--mall" :style="{ width: cumulativeKpi.mallPct + '%' }" />
         </div>
         <div class="finance-breakdown-grid">
           <template v-for="row in breakdownRows(cumulativeKpi)" :key="row.key">
@@ -655,6 +675,7 @@ onActivated(() => {
   --finance-primary: #0d5c46;
   --finance-card-dark: #093f30;
   --finance-meal: #3b82f6;
+  --finance-mall: #8b5cf6;
   --finance-week: #10b981;
   --finance-week-bg: #ecfdf5;
   --finance-week-text: #0369a1;
@@ -986,6 +1007,10 @@ onActivated(() => {
   background-color: var(--finance-meal);
 }
 
+.finance-ratio-seg--mall {
+  background-color: var(--finance-mall);
+}
+
 /**
  * 拆账三列网格：标签 | 笔数 | 金额
  * 列宽与行列间距固定，保证各卡、各行数字纵向对齐。
@@ -1082,6 +1107,10 @@ onActivated(() => {
 
 .finance-breakdown-dot--meal {
   background-color: var(--finance-meal);
+}
+
+.finance-breakdown-dot--mall {
+  background-color: var(--finance-mall);
 }
 
 .finance-breakdown-dot--refund-hot {

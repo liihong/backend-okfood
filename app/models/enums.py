@@ -72,6 +72,28 @@ class CardOpenMode(str, Enum):
     RENEW = "renew"
 
 
+class CardOrderActivationMode(str, Enum):
+    """开卡工单入账意图（落库 member_card_orders.activation_mode；NULL=legacy 推断）。"""
+
+    EXPLICIT_DATE = "explicit_date"
+    KEEP_SCHEDULE = "keep_schedule"
+    DEFER_NOT_OPEN = "defer_not_open"
+    DEFER_PAUSE = "defer_pause"
+
+
+class MemberLifecycleCode(str, Enum):
+    """会员档案只读生命周期视图（API 输出，不落 members 表）。"""
+
+    REFUNDED = "refunded"
+    CARD_NOT_OPEN = "card_not_open"
+    PAUSED = "paused"
+    AWAITING_SETUP = "awaiting_setup"
+    BALANCE_EXHAUSTED = "balance_exhausted"
+    NEVER_OPENED = "never_opened"
+    RENEW_PENDING = "renew_pending"
+    DELIVERING = "delivering"
+
+
 class CardPayChannel(str, Enum):
     WECHAT = "微信"
     ALIPAY = "支付宝"

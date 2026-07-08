@@ -823,7 +823,7 @@ def _build_store_retail_order_paid_notification_text(
         f"配送方式：{fulfill}",
         f"订单号：{order_no}",
         "",
-        "请尽快在「订单管理」商城订单 Tab 推送配送或安排自提。",
+        "请尽快在「订单管理」商城订单「待接单」Tab 确认接单后再安排配送或自提。",
     ]
     body = "\n".join(body_lines)
     if len(body) > 500:

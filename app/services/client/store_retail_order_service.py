@@ -52,6 +52,8 @@ logger = logging.getLogger(__name__)
 
 UNPAID_STORE_RETAIL_ORDER_EXPIRE_MINUTES = 30
 _FULFILLMENT_SF_AWAITING_PICKUP = "sf_awaiting_pickup"
+# 已支付、待后台确认接单（确认后才进入 pending 备货/发货）
+_FULFILLMENT_AWAITING_ACCEPT = "awaiting_accept"
 _RETAIL_STOP_PREFIX = "retail-sro-"
 
 
@@ -305,7 +307,9 @@ def list_member_store_retail_orders(
     elif ls == "pending_delivery":
         filters.append(StoreRetailOrder.pay_status == "已支付")
         filters.append(
-            StoreRetailOrder.fulfillment_status.in_(("pending", _FULFILLMENT_SF_AWAITING_PICKUP, "accepted"))
+            StoreRetailOrder.fulfillment_status.in_(
+                (_FULFILLMENT_AWAITING_ACCEPT, "pending", _FULFILLMENT_SF_AWAITING_PICKUP, "accepted")
+            )
         )
     elif ls == "completed":
         filters.append(StoreRetailOrder.pay_status == "已支付")
@@ -436,8 +440,10 @@ def finalize_store_retail_order_wechat_pay(
     order.pay_channel = "微信"
     tid = (parsed.transaction_id or "").strip()
     order.wx_transaction_id = tid or order.wx_transaction_id
-    if str(order.fulfillment_status or "").strip().lower() == "cancelled":
-        order.fulfillment_status = "pending"
+    # 支付成功后进入「待接单」，后台手动接单后再进入待发货备货
+    fs = str(order.fulfillment_status or "").strip().lower()
+    if fs in ("pending", "cancelled"):
+        order.fulfillment_status = _FULFILLMENT_AWAITING_ACCEPT
     if bool(order.store_pickup):
         order.courier_id = None
     else:
@@ -508,9 +514,11 @@ def member_cancel_store_retail_order(db: Session, *, member_id: int, order_id: i
     if fs in ("delivered", "cancelled"):
         raise HTTPException(status_code=400, detail="订单当前状态不可取消")
     if pay == "已支付":
-        if row.store_pickup:
+        if fs == _FULFILLMENT_AWAITING_ACCEPT:
+            pass
+        elif row.store_pickup:
             raise HTTPException(status_code=400, detail="订单已进入待取货阶段，请联系客服处理")
-        if fs != "pending":
+        elif fs != "pending":
             raise HTTPException(status_code=400, detail="订单已进入配送流程，请联系客服处理")
         from app.services.admin.store_retail_order_admin_service import admin_wechat_refund_store_retail_order
 

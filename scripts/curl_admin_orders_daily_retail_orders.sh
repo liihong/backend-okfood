@@ -9,7 +9,7 @@
 set -euo pipefail
 API_BASE="${API_BASE_URL:-http://127.0.0.1:8000/api}"
 STORE_ID="${STORE_ID:-1}"
-PHASE="${FULFILLMENT_PHASE:-pending_ship}"
+PHASE="${FULFILLMENT_PHASE:-awaiting_accept}"
 
 if [[ -z "${ADMIN_TOKEN:-}" ]]; then
   echo "请先 export ADMIN_TOKEN=管理端 JWT" >&2
@@ -18,7 +18,7 @@ fi
 
 QS="store_id=${STORE_ID}&page=1&page_size=20&fulfillment_phase=${PHASE}"
 
-echo "=== GET /admin/orders/daily/retail-orders（待发货：跨日期汇总）==="
+echo "=== GET /admin/orders/daily/retail-orders（待接单：跨日期汇总）==="
 curl -sS "${API_BASE}/admin/orders/daily/retail-orders?${QS}" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}"
 echo ""

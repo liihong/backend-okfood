@@ -476,6 +476,16 @@ class MemberAdminOut(BaseModel):
         None,
         description="退卡退款确认时刻（ISO）；非空则档案状态为已退款",
     )
+    lifecycle_code: str | None = Field(
+        None,
+        description="只读档案生命周期码：delivering/paused/card_not_open/awaiting_setup 等",
+    )
+    lifecycle_label: str | None = Field(None, description="lifecycle_code 中文展示")
+    setup_alert: bool = Field(False, description="已入账但缺起送日或配送到家缺地址")
+    lifecycle_overlays: list[str] = Field(
+        default_factory=list,
+        description="叠加标签，如请假中、待续费",
+    )
     created_at: str
     updated_at: str = Field("", description="用户操作时间（档案最近更新时间，ISO 上海墙钟；列表默认按此倒序）")
 
@@ -952,7 +962,7 @@ class MemberMealCompensationOut(BaseModel):
 
 
 class FinanceReceivedWindowOut(BaseModel):
-    """某一统计窗口内：开卡工单已缴 + 单次点餐已支付 − 会员退卡退款。"""
+    """某一统计窗口内：开卡工单已缴 + 单次点餐已支付 + 商城订单已支付 − 会员退卡退款。"""
 
     total_amount_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="已收毛额")
     total_count: int = Field(..., ge=0, description="已收笔数合计")
@@ -966,6 +976,10 @@ class FinanceReceivedWindowOut(BaseModel):
         description="开卡工单中卡型为月卡的笔数与实收",
     )
     single_meal_orders: FinanceReceivedBucketOut = Field(..., description="单次点餐 pay_status=已支付")
+    store_retail_orders: FinanceReceivedBucketOut = Field(
+        ...,
+        description="商城订单 pay_status=已支付（当前仍为已支付状态者计入实收）",
+    )
     membership_refunds: FinanceReceivedBucketOut = Field(
         ...,
         description="会员退卡退款（按退卡确认时刻 created_at 落入窗口）",
@@ -1492,6 +1506,10 @@ class CardOrderOut(BaseModel):
     member_wechat_name: str | None = Field(None, description="会员微信昵称")
     out_trade_no: str | None = Field(None, description="商户订单号（微信退款用）")
     delivery_start_date: str | None = Field(None, description="起送业务日 ISO")
+    activation_mode: str | None = Field(
+        None,
+        description="入账意图：explicit_date|keep_schedule|defer_not_open|defer_pause",
+    )
     card_kind: str
     pay_channel: str
     pay_status: str

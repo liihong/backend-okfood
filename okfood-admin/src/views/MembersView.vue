@@ -1235,7 +1235,7 @@ onUnmounted(() => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="状态" min-width="80">
+        <el-table-column label="状态" min-width="108" width="108" class-name="td-col-status">
           <template #default="{ row: u }">
             <span :class="memberStatusClass(u.status)">{{ u.status }}</span>
           </template>

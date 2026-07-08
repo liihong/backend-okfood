@@ -23,8 +23,9 @@ export const MALL_PAY_TABS = [
   { label: '已取消', value: '已取消' },
 ]
 
-/** 单次点餐订单状态（与接口 fulfillment_status 对应） */
+/** 单次点餐 / 商城订单状态（与接口 fulfillment_status 对应） */
 export const SINGLE_ORDER_STATUS_ZH = {
+  awaiting_accept: '待接单',
   pending: '待发货',
   sf_awaiting_pickup: '待取货',
   accepted: '配送中',

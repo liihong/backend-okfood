@@ -1,3 +1,9 @@
+/** 商城订单：是否可确认接单 */
+export function canAcceptRetailOrder(row) {
+  if (!row || row.pay_status !== '已支付') return false
+  return String(row.fulfillment_status || '').toLowerCase() === 'awaiting_accept'
+}
+
 /** 单次点餐 / 商城：是否可推送顺丰、指派配送员等 */
 export function canDispatchActions(row) {
   if (!row || row.pay_status !== '已支付') return false
@@ -17,7 +23,7 @@ export function canCancelOrder(row) {
   if (f === 'delivered' || f === 'cancelled') return false
   if (pay === '已退款') return f !== 'cancelled'
   if (pay === '未支付') return f === 'pending'
-  if (pay === '已支付') return f === 'pending' || f === 'sf_awaiting_pickup' || f === 'accepted' || f === 'sf_cancelled'
+  if (pay === '已支付') return f === 'awaiting_accept' || f === 'pending' || f === 'sf_awaiting_pickup' || f === 'accepted' || f === 'sf_cancelled'
   return false
 }
 

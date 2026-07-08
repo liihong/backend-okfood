@@ -19,7 +19,7 @@ export function singleOrderStatusLabelZh(row) {
   const s = row.fulfillment_status
   if (s == null || s === '') return '—'
   const k = String(s).trim().toLowerCase()
-  if (k === 'pending' && pay === '未支付') return '待接单'
+  if (k === 'awaiting_accept') return '待接单'
   if (k === 'pending' && row.store_pickup) return '待自提'
   return SINGLE_ORDER_STATUS_ZH[k] ?? String(s).trim()
 }
@@ -47,7 +47,7 @@ export function singleOrderStatusClass(row) {
   if (x === 'sf_cancelled' || x === 'cancelled') return 'member-pill member-pill--rose'
   if (x === 'accepted') return 'member-pill member-pill--sky'
   if (x === 'sf_awaiting_pickup') return 'member-pill member-pill--amber'
-  if (x === 'pending') return 'member-pill member-pill--amber'
+  if (x === 'pending' || x === 'awaiting_accept') return 'member-pill member-pill--amber'
   return 'member-pill member-pill--slate'
 }
 
@@ -57,4 +57,20 @@ export function mallPayFilterApiValue(tabValue) {
   if (v === '未支付') return '未缴'
   if (v === '已取消') return '已退款'
   return v
+}
+
+/**
+ * 从商城商品标题识别果蔬汁套餐天数，用于列表快速区分 1 日 / 3 日。
+ * @returns {{ days: 1 | 3, badge: string, className: string } | null}
+ */
+export function retailJuiceDurationBadge(title) {
+  const t = String(title || '').trim()
+  if (!t) return null
+  if (t.includes('3日') || t.includes('液断')) {
+    return { days: 3, badge: '3日液断', className: 'retail-juice-duration-badge--3' }
+  }
+  if (t.includes('1日') || t.includes('体验')) {
+    return { days: 1, badge: '1日体验', className: 'retail-juice-duration-badge--1' }
+  }
+  return null
 }
