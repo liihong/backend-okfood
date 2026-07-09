@@ -20,6 +20,7 @@ from app.models.store_retail_product import StoreRetailProduct
 from app.models.tenant import Tenant
 from app.services.admin.store_retail_order_admin_service import (
     admin_accept_store_retail_order,
+    admin_revoke_accept_store_retail_order,
     admin_update_store_retail_order_delivery,
     list_admin_store_retail_orders,
 )
@@ -136,6 +137,28 @@ def test_admin_accept_moves_to_pending_ship(retail_db: Session) -> None:
         retail_db, store_id=1, fulfillment_phase="pending_ship"
     )
     assert pending_total == 1
+
+
+def test_admin_revoke_accept_moves_back_to_awaiting_accept(retail_db: Session) -> None:
+    _add_order(retail_db, oid=1, pay_status="已支付", fulfillment_status="pending")
+    retail_db.commit()
+
+    out = admin_revoke_accept_store_retail_order(retail_db, order_id=1, store_id=1)
+    assert out.fulfillment_status == _FULFILLMENT_AWAITING_ACCEPT
+
+    items, total = list_admin_store_retail_orders(
+        retail_db, store_id=1, fulfillment_phase="awaiting_accept"
+    )
+    assert total == 1
+    assert items[0].id == 1
+
+
+def test_admin_revoke_accept_rejects_non_pending(retail_db: Session) -> None:
+    _add_order(retail_db, oid=1, pay_status="已支付", fulfillment_status=_FULFILLMENT_AWAITING_ACCEPT)
+    retail_db.commit()
+
+    with pytest.raises(ValueError, match="待发货"):
+        admin_revoke_accept_store_retail_order(retail_db, order_id=1, store_id=1)
 
 
 def test_admin_update_delivery_awaiting_accept(retail_db: Session) -> None:

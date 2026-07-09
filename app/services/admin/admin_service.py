@@ -156,9 +156,12 @@ def _member_renew_pending_scope(*, threshold: int):
 
 def _member_awaiting_setup_scope_clause():
     """
-    待完善履约：小程序自助购卡 / 抖音验券已缴且缺起送日或配送到家缺地址。
+    待完善履约：小程序自助购卡 / 抖音验券已缴、缺起送日或配送到家缺地址，且从未确认送达。
+    曾送达后仅缺起送日的归「已暂停」侧，避免与主动暂停混淆。
     仅用于管理端筛选与统计，不修改会员档案、不影响配送大表门禁。
     """
+    from app.models.delivery_log import DeliveryLog
+    from app.models.enums import DeliveryStatus
     from app.services.member.member_card_order_service import SELF_SERVICE_CARD_ORDER_CREATORS
 
     has_self_service_paid = exists(
@@ -168,6 +171,14 @@ def _member_awaiting_setup_scope_clause():
             MemberCardOrder.member_id == Member.id,
             MemberCardOrder.created_by.in_(tuple(SELF_SERVICE_CARD_ORDER_CREATORS)),
             MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+        )
+    )
+    has_delivered = exists(
+        select(1)
+        .select_from(DeliveryLog)
+        .where(
+            DeliveryLog.member_id == Member.id,
+            DeliveryLog.status == DeliveryStatus.DELIVERED.value,
         )
     )
     dap = default_address_pick_subquery()
@@ -181,6 +192,7 @@ def _member_awaiting_setup_scope_clause():
         Member.membership_refunded_at.is_(None),
         has_self_service_paid,
         setup_incomplete,
+        ~has_delivered,
     )
 
 

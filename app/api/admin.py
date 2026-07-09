@@ -1126,7 +1126,7 @@ def users(
     awaiting_setup_only: Annotated[
         bool,
         Query(
-            description="true=仅待完善履约：小程序/抖音自助已缴且缺起送日或配送到家缺地址（供人工复核，不改档案）"
+            description="true=仅待完善履约：小程序/抖音自助已缴且缺起送日或配送地址、且从未确认送达（供人工复核，不改档案）"
         ),
     ] = False,
     delivery_region_id: Annotated[
@@ -1338,7 +1338,13 @@ def admin_orders_daily_single_meals(
     ] = None,
     delivery_phase: Annotated[
         str | None,
-        Query(description="配送阶段：awaiting=待配送（未送达）；delivered=已送达；留空=全部"),
+        Query(description="（旧版）配送阶段：awaiting=待配送；delivered=已送达；留空=全部"),
+    ] = None,
+    fulfillment_phase: Annotated[
+        str | None,
+        Query(
+            description="发货 Tab：pending_ship=待发货；in_delivery=配送中；delivered=已完成；after_sale=售后（含未支付）",
+        ),
     ] = None,
     page: int = 1,
     page_size: int = 20,
@@ -1359,6 +1365,7 @@ def admin_orders_daily_single_meals(
         q=q,
         pay_status=pay_status,
         delivery_phase=delivery_phase,
+        fulfillment_phase=fulfillment_phase,
         page=page,
         page_size=page_size,
     )
@@ -1369,7 +1376,6 @@ def admin_orders_daily_single_meals(
             store_id=store_id,
             delivery_day=day,
             q=q,
-            delivery_phase=delivery_phase,
         )
     return page_response(
         items=[dump_model(i) for i in items],

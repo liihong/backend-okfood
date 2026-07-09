@@ -739,6 +739,39 @@ def _single_meal_order_row_to_out(
     )
 
 
+def _apply_admin_single_fulfillment_phase_filter(filters: list, fulfillment_phase: str | None) -> None:
+    """管理端单次点餐：按发货状态 Tab 过滤（不再按支付状态 Tab）。
+
+    - ``pending_ship``：待发货（已支付且 pending / 顺丰取消可重推）
+    - ``in_delivery``：配送中（顺丰待取货 / 门店配送中）
+    - ``delivered``：已完成
+    - ``after_sale``：售后（未支付、已取消、已退款）
+    """
+    fp = (fulfillment_phase or "").strip().lower()
+    if fp == "pending_ship":
+        filters.append(SingleMealOrder.pay_status == "已支付")
+        filters.append(
+            SingleMealOrder.fulfillment_status.in_(("pending", "sf_cancelled")),
+        )
+    elif fp == "in_delivery":
+        filters.append(SingleMealOrder.pay_status == "已支付")
+        filters.append(
+            SingleMealOrder.fulfillment_status.in_(
+                (_FULFILLMENT_SF_AWAITING_PICKUP, "accepted"),
+            ),
+        )
+    elif fp == "delivered":
+        filters.append(SingleMealOrder.fulfillment_status == "delivered")
+    elif fp == "after_sale":
+        filters.append(
+            or_(
+                SingleMealOrder.pay_status == "未支付",
+                SingleMealOrder.fulfillment_status == "cancelled",
+                SingleMealOrder.pay_status == "已退款",
+            ),
+        )
+
+
 def _admin_store_single_meal_scope_filters_for_delivery_day(
     *,
     store_id: int,
@@ -746,7 +779,7 @@ def _admin_store_single_meal_scope_filters_for_delivery_day(
     q: str | None,
     delivery_phase: str | None,
 ) -> list:
-    """单次点餐：供餐日列表/统计的公共范围（不含支付 Tab 对应条件）。
+    """单次点餐：供餐日列表/统计的公共范围（不含发货 Tab / 支付 Tab 对应条件）。
 
     ``delivery_phase``：``awaiting``=待配送（pending/accepted）；``delivered``=已送达；留空=不按阶段过滤。
     """
@@ -811,16 +844,17 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
     q: str | None = None,
     delivery_phase: str | None = None,
 ) -> dict[str, int]:
-    """订单管理：统计当前范围下各状态笔数（与供餐日、搜索、配送维度一致，不含支付 Tab）。
+    """订单管理：供餐日全天各状态笔数概览（与供餐日、搜索一致；不受发货 Tab 影响）。
 
     - ``pending_ship``：已支付且履约 pending（含待发货与待自提口径，与列表「订单状态」pending 一致）。
     """
     need_join = _admin_single_meal_needs_member_join(q)
+    # 汇总行展示全天概览，不按发货 Tab / 旧版配送下拉过滤
     base = _admin_store_single_meal_scope_filters_for_delivery_day(
         store_id=store_id,
         delivery_day=delivery_day,
         q=q,
-        delivery_phase=delivery_phase,
+        delivery_phase=None,
     )
 
     paid_cond = SingleMealOrder.pay_status == "已支付"
@@ -885,29 +919,36 @@ def list_admin_store_single_meal_orders_by_delivery_day(
     q: str | None = None,
     pay_status: str | None = None,
     delivery_phase: str | None = None,
+    fulfillment_phase: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[AdminSingleMealOrderListOut], int]:
     """管理端：按供餐日筛选单次点餐订单（``delivery_date``）。
 
-    ``delivery_phase``：``awaiting``=待配送（履约未完成，含 pending/accepted）；``delivered``=已配送（delivered）。
+    ``fulfillment_phase``：发货 Tab（``pending_ship`` / ``in_delivery`` / ``delivered`` / ``after_sale``）。
+    旧版 ``pay_status`` / ``delivery_phase`` 仍兼容，但 ``fulfillment_phase`` 优先。
     """
     page = max(1, page)
     page_size = min(100, max(1, page_size))
     need_join = _admin_single_meal_needs_member_join(q)
+    fp = (fulfillment_phase or "").strip().lower()
+    use_fulfillment_tab = fp in ("pending_ship", "in_delivery", "delivered", "after_sale")
     filters = list(
         _admin_store_single_meal_scope_filters_for_delivery_day(
             store_id=store_id,
             delivery_day=delivery_day,
             q=q,
-            delivery_phase=delivery_phase,
+            delivery_phase=None if use_fulfillment_tab else delivery_phase,
         )
     )
-    ps = (pay_status or "").strip()
-    if ps == "已取消":
-        filters.append(SingleMealOrder.fulfillment_status == "cancelled")
-    elif ps:
-        filters.append(SingleMealOrder.pay_status == ps)
+    if use_fulfillment_tab:
+        _apply_admin_single_fulfillment_phase_filter(filters, fp)
+    else:
+        ps = (pay_status or "").strip()
+        if ps == "已取消":
+            filters.append(SingleMealOrder.fulfillment_status == "cancelled")
+        elif ps:
+            filters.append(SingleMealOrder.pay_status == ps)
 
     list_stmt = _admin_single_meal_list_page_stmt(need_member_join=need_join).order_by(
         SingleMealOrder.created_at.desc(),

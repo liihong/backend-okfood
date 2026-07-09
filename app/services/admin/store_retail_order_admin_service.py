@@ -86,6 +86,26 @@ def admin_accept_store_retail_order(
     return _build_admin_list_out(db, o)
 
 
+def admin_revoke_accept_store_retail_order(
+    db: Session, *, order_id: int, store_id: int
+) -> AdminStoreRetailOrderListOut:
+    """管理端：取消接单，将订单从待发货退回待接单。"""
+    o = db.get(StoreRetailOrder, int(order_id))
+    if o is None or int(o.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    if (o.pay_status or "").strip() != "已支付":
+        raise ValueError("仅「已支付」订单可取消接单")
+    fs = str(o.fulfillment_status or "").strip().lower()
+    if fs != "pending":
+        raise ValueError("仅「待发货」订单可取消接单")
+    o.fulfillment_status = _FULFILLMENT_AWAITING_ACCEPT
+    o.courier_id = None
+    db.add(o)
+    db.commit()
+    db.refresh(o)
+    return _build_admin_list_out(db, o)
+
+
 def update_admin_store_retail_order_remark(
     db: Session,
     *,
@@ -438,7 +458,7 @@ def link_store_retail_order_to_sf_push_no_commit(
 
 def push_store_retail_order_to_sf(db: Session, *, order_id: int, store_id: int) -> dict[str, Any]:
     """商城零售订单推顺丰（stop_id=retail-sro-{id}）。"""
-    from app.integrations.sf_open_client import SfOpenApiError, SfOpenClient
+    from app.services.sf_open.client import SfOpenApiError, SfOpenClient
     from app.services.delivery.sf_same_city_service import (
         _create_order_payload,
         _has_active_success_push,

@@ -8,6 +8,7 @@ import { todayShanghaiStr } from '../utils/orderFormatters.js'
 import { mallPayFilterApiValue, resolveSingleOrderMemberDisplayName } from '../utils/orderDisplay.js'
 import {
   canAcceptRetailOrder,
+  canRevokeAcceptRetailOrder,
   canDispatchActions,
   canCancelOrder,
   canMarkOrderComplete,
@@ -28,8 +29,7 @@ export function useOrdersManage(orderKind = 'single') {
   const orderDate = ref(todayShanghaiStr())
   const route = useRoute()
   const searchQuery = ref('')
-  const singlePayFilter = ref('all')
-  const singleDeliveryFilter = ref('')
+  const singleFulfillmentFilter = ref('pending_ship')
   const mallPayFilter = ref('all')
   const retailDeliveryFilter = ref('awaiting_accept')
 
@@ -68,8 +68,12 @@ export function useOrdersManage(orderKind = 'single') {
   const syncDeliveryLoading = ref(false)
   /** @type {import('vue').Ref<import('vue').ComponentPublicInstance | null>} */
   const singleTableRef = ref(null)
+  /** @type {import('vue').Ref<import('vue').ComponentPublicInstance | null>} */
+  const retailTableRef = ref(null)
   /** @type {import('vue').Ref<Array<Record<string, unknown>>>} */
   const selectedSingleRows = ref([])
+  /** @type {import('vue').Ref<Array<Record<string, unknown>>>} */
+  const selectedRetailRows = ref([])
   const batchDispatchLoading = ref(false)
   const batchCancelLoading = ref(false)
   const batchMarkCompleteLoading = ref(false)
@@ -168,8 +172,21 @@ export function useOrdersManage(orderKind = 'single') {
     selectedSingleRows.value = []
   }
 
+  function onRetailSelectionChange(rows) {
+    selectedRetailRows.value = Array.isArray(rows) ? rows : []
+  }
+
+  function clearRetailSelection() {
+    retailTableRef.value?.clearSelection?.()
+    selectedRetailRows.value = []
+  }
+
   const selectedDispatchableRows = computed(() =>
     selectedSingleRows.value.filter((row) => canDispatchActions(row) && !row.store_pickup),
+  )
+
+  const selectedRetailDispatchableRows = computed(() =>
+    selectedRetailRows.value.filter((row) => canDispatchActions(row) && !row.store_pickup),
   )
 
   const selectedCancellableRows = computed(() =>
@@ -527,6 +544,7 @@ export function useOrdersManage(orderKind = 'single') {
   function onRetailRowMoreCommand(row, cmd) {
     if (cmd === 'modify') openEditOrder(row, 'retail')
     else if (cmd === 'accept') void onAcceptRetailOrder(row)
+    else if (cmd === 'revokeAccept') void onRevokeAcceptRetailOrder(row)
     else if (cmd === 'sf') void onPushSfRetailOrder(row)
     else if (cmd === 'courier') openAssignCourierRetail(row)
     else if (cmd === 'complete') void onMarkRetailOrderComplete(row)
@@ -603,6 +621,45 @@ export function useOrdersManage(orderKind = 'single') {
         return
       }
       showToast(e instanceof Error ? e.message : '接单失败', 'error')
+    } finally {
+      dispatchLoadingId.value = 0
+    }
+  }
+
+  async function onRevokeAcceptRetailOrder(row) {
+    if (!canRevokeAcceptRetailOrder(row)) {
+      showToast('仅「待发货」且已支付订单可取消接单', 'error')
+      return
+    }
+    try {
+      await ElMessageBox.confirm(
+        '取消接单后订单将退回「待接单」，需重新确认接单后再安排备货与配送。',
+        '取消接单',
+        {
+          confirmButtonText: '取消接单',
+          cancelButtonText: '返回',
+          type: 'warning',
+        },
+      )
+    } catch {
+      return
+    }
+    dispatchLoadingId.value = Number(row.id)
+    try {
+      await apiJson(
+        `/api/admin/orders/retail-orders/${row.id}/revoke-accept`,
+        { method: 'POST' },
+        { auth: true },
+      )
+      showToast('已取消接单，订单退回待接单', 'success')
+      await fetchRetailOrders()
+    } catch (e) {
+      const status = e && typeof e.status === 'number' ? e.status : 0
+      if (status === 401) {
+        handleAdminLogout()
+        return
+      }
+      showToast(e instanceof Error ? e.message : '取消接单失败', 'error')
     } finally {
       dispatchLoadingId.value = 0
     }
@@ -874,6 +931,49 @@ export function useOrdersManage(orderKind = 'single') {
     }
   }
 
+  async function onBatchPushSfRetailOrders() {
+    const rows = selectedRetailDispatchableRows.value
+    if (!rows.length) {
+      showToast('请勾选可推顺丰的订单（待发货或顺丰已取消，不含门店自提）', 'error')
+      return
+    }
+    try {
+      await ElMessageBox.confirm(
+        `将为 ${rows.length} 笔商城订单调用顺丰创单（使用门店「零售推顺丰店铺ID」）。是否继续？`,
+        '批量推送到顺丰',
+        { type: 'warning', confirmButtonText: '确定推送', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+    batchDispatchLoading.value = true
+    try {
+      const ids = rows.map((r) => Number(r.id)).filter((id) => id > 0)
+      const data = await apiJson(
+        '/api/admin/orders/retail-orders/batch-dispatch/sf-retail',
+        { method: 'POST', body: JSON.stringify({ order_ids: ids }) },
+        { auth: true },
+      )
+      const results = Array.isArray(data?.results) ? data.results : []
+      const okCount = results.filter((x) => x && x.ok).length
+      toastSfPushBatchOutcome(data, showToast, {
+        successText: `已全部提交顺丰（${okCount} 笔）`,
+        formatFailLine: (f) => `#${f.order_id}: ${f.message || ''}`,
+      })
+      clearRetailSelection()
+      await fetchRetailOrders()
+    } catch (e) {
+      const status = e && typeof e.status === 'number' ? e.status : 0
+      if (status === 401) {
+        handleAdminLogout()
+        return
+      }
+      toastSfPushError(e instanceof Error ? e.message : '批量推送失败', showToast)
+    } finally {
+      batchDispatchLoading.value = false
+    }
+  }
+
   async function onCancelOrder(row) {
     if (!canCancelOrder(row)) {
       showToast('当前订单不可取消', 'error')
@@ -1055,10 +1155,15 @@ export function useOrdersManage(orderKind = 'single') {
       if (d) q.set('delivery_date', d)
       const sq = searchQuery.value.trim()
       if (sq) q.set('q', sq)
-      const pf = String(singlePayFilter.value ?? '').trim()
-      if (pf === '未支付' || pf === '已支付' || pf === '已取消') q.set('pay_status', pf)
-      const ds = String(singleDeliveryFilter.value ?? '').trim()
-      if (ds === 'awaiting' || ds === 'delivered') q.set('delivery_phase', ds)
+      const fp = String(singleFulfillmentFilter.value || '').trim()
+      if (
+        fp === 'pending_ship' ||
+        fp === 'in_delivery' ||
+        fp === 'delivered' ||
+        fp === 'after_sale'
+      ) {
+        q.set('fulfillment_phase', fp)
+      }
       const data = await apiJson(`/api/admin/orders/daily/single-meals?${q.toString()}`, {}, { auth: true })
       singleItems.value = Array.isArray(data.items) ? data.items : []
       singleTotal.value = Number(data.total) || 0
@@ -1198,7 +1303,7 @@ export function useOrdersManage(orderKind = 'single') {
   /** 商城订单不按下单日过滤，切换日期不触发零售列表刷新 */
   const listFilterDeps = computed(() => {
     if (orderKind === 'single') {
-      return [orderDate.value, singlePayFilter.value, singleDeliveryFilter.value, pageSize.value]
+      return [orderDate.value, singleFulfillmentFilter.value, pageSize.value]
     }
     if (orderKind === 'retail') {
       return [retailDeliveryFilter.value, pageSize.value]
@@ -1209,6 +1314,7 @@ export function useOrdersManage(orderKind = 'single') {
   watch(listFilterDeps, () => {
     page.value = 1
     if (orderKind === 'single') clearSingleSelection()
+    if (orderKind === 'retail') clearRetailSelection()
     void fetchActive()
   })
 
@@ -1273,8 +1379,7 @@ export function useOrdersManage(orderKind = 'single') {
     activeTab,
     orderDate,
     searchQuery,
-    singlePayFilter,
-    singleDeliveryFilter,
+    singleFulfillmentFilter,
     mallPayFilter,
     retailDeliveryFilter,
     dateFilterLabel,
@@ -1303,7 +1408,9 @@ export function useOrdersManage(orderKind = 'single') {
     retailRemarkSaving,
     syncDeliveryLoading,
     singleTableRef,
+    retailTableRef,
     selectedSingleRows,
+    selectedRetailRows,
     batchDispatchLoading,
     batchCancelLoading,
     batchMarkCompleteLoading,
@@ -1326,11 +1433,14 @@ export function useOrdersManage(orderKind = 'single') {
     activeTabTotal,
     editHeadCoordDisplay,
     selectedDispatchableRows,
+    selectedRetailDispatchableRows,
     selectedCancellableRows,
     selectedCompletableRows,
     batchActionBusy,
     onSingleSelectionChange,
+    onRetailSelectionChange,
     clearSingleSelection,
+    clearRetailSelection,
     singleRowActionLoading,
     onSingleRowMoreCommand,
     onMallRowMoreCommand,
@@ -1339,6 +1449,7 @@ export function useOrdersManage(orderKind = 'single') {
     submitRetailRemark,
     onRetailRemarkDialogClosed,
     onBatchPushSfRetail,
+    onBatchPushSfRetailOrders,
     openBatchAssignCourier,
     onBatchMarkComplete,
     onBatchCancelOrders,

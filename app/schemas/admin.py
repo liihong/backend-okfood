@@ -590,7 +590,7 @@ class MemberAnalyticsOut(BaseModel):
     awaiting_setup_count: int = Field(
         ...,
         ge=0,
-        description="待完善履约：小程序/抖音自助已缴且缺起送日或配送到家缺地址",
+        description="待完善履约：小程序/抖音自助已缴且缺起送日或配送地址，且从未确认送达",
     )
     paused_delivery_count: int = Field(
         ...,
@@ -668,7 +668,7 @@ class AdminMemberPatchIn(BaseModel):
     )
     delivery_deferred: bool | None = Field(
         None,
-        description="会员卡停用(暂停配送/先不开卡)：与小程序「暂不配送」同字段；为 true 时 is_active=false 并清空起送日；提交则总是更新本项时传入 true/false",
+        description="会员卡停用(暂停配送/先不开卡)：与小程序「暂不配送」同字段；为 true 时 is_active=false 且保留起送日；提交则总是更新本项时传入 true/false",
     )
 
     @field_validator("daily_meal_units", mode="before")

@@ -149,7 +149,7 @@ class ProfilePatchIn(BaseModel):
     )
     delivery_deferred: bool | None = Field(
         default=None,
-        description="为 true 时表示暂不配送：清空起送日并 is_active=false；为 false 时取消该标记",
+        description="为 true 时表示暂停配送：仅阻断履约（保留起送日），is_active=false；为 false 时取消该标记",
     )
     store_pickup: bool | None = Field(
         default=None,

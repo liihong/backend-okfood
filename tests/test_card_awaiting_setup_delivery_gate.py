@@ -17,6 +17,7 @@ from app.models.member_address import MemberAddress
 from app.models.member_card_order import MemberCardOrder
 from app.models.member_meal_period_state import MemberMealPeriodState
 from app.models.membership_card_template import MembershipCardTemplate
+from app.models.delivery_log import DeliveryLog
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.services.delivery.courier_service import (
@@ -46,6 +47,7 @@ def gate_db() -> Session:
         BalanceLog.__table__,
         MembershipCardTemplate.__table__,
         MemberCardOrder.__table__,
+        DeliveryLog.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)

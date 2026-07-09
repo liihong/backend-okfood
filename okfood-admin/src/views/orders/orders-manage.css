@@ -64,6 +64,39 @@
 .orders-manage-tab-bar {
   margin-bottom: 0.65rem;
 }
+.orders-manage-page .single-orders-tab {
+  padding: 0 1rem 0.5rem;
+}
+.single-orders-tab__summary {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.single-orders-tab__filter-bar {
+  margin-bottom: 0.65rem;
+}
+.orders-manage-page .retail-orders-tab {
+  padding: 0 1rem 0.5rem;
+}
+.retail-orders-tab__filter-bar {
+  margin-top: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+.orders-tab-bar--inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+.orders-tab-bar--inline .orders-tab-bar__tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+.orders-tab-bar--inline .orders-batch-bar__actions {
+  flex: 0 1 auto;
+  margin-left: auto;
+}
 .orders-manage-stats-line {
   margin: 0 0 0.65rem;
   padding: 0.5rem 0.75rem;
@@ -283,6 +316,17 @@
   background: #f8fafc;
   border: 1px solid #e2e8f0;
 }
+/* 商城订单：数据库主键 id，醒目标识便于对单 */
+.orders-cell-pill--order-id {
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: #065f46;
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border: 1px solid #6ee7b7;
+  box-shadow: 0 1px 3px -1px rgba(5, 150, 105, 0.22);
+}
 .orders-cell-pill--card-kind {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
@@ -315,7 +359,8 @@
 .orders-manage-page td.orders-qty-col .cell,
 .orders-manage-page td.orders-meal-date-col .cell,
 .orders-manage-page td.orders-amount-col .cell,
-.orders-manage-page td.orders-trade-no-col .cell {
+.orders-manage-page td.orders-trade-no-col .cell,
+.orders-manage-page td.orders-order-id-col .cell {
   overflow: visible;
 }
 .orders-m-cell {
@@ -612,4 +657,283 @@
 }
 .retail-juice-duration-badge--3 {
   background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+}
+
+/* —— 订单手机端卡片（商城 / 零售共用） —— */
+.retail-orders-tab-bar .retail-orders-pay-tabs .el-tabs__nav-wrap,
+.single-orders-tab-bar .single-orders-pay-tabs .el-tabs__nav-wrap {
+  overflow: visible;
+}
+.retail-orders-tab-bar .retail-orders-pay-tabs .el-tabs__nav-scroll,
+.single-orders-tab-bar .single-orders-pay-tabs .el-tabs__nav-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+.retail-orders-tab-bar .retail-orders-pay-tabs .el-tabs__nav,
+.single-orders-tab-bar .single-orders-pay-tabs .el-tabs__nav {
+  flex-wrap: nowrap;
+}
+.retail-orders-tab-bar .retail-orders-pay-tabs .el-tabs__item,
+.single-orders-tab-bar .single-orders-pay-tabs .el-tabs__item {
+  flex-shrink: 0;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.retail-orders-mobile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem 0.85rem;
+  min-height: 120px;
+}
+.retail-orders-mobile-empty {
+  margin: 2rem 0;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+.retail-order-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem 0.9rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid #e8edf3;
+  background: #fff;
+}
+.retail-order-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+.retail-order-card__head-left {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.retail-order-card__check {
+  flex-shrink: 0;
+  height: auto;
+  margin-right: 0;
+}
+.retail-order-card__order-id {
+  flex-shrink: 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  color: #065f46;
+}
+.retail-order-card__time {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  color: #94a3b8;
+}
+
+/* 商品区：左商品、右价格/数量 */
+.retail-order-card__goods {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+.retail-order-card__goods-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+.retail-order-card__meal-date {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+.retail-order-card__amount--member-card {
+  font-size: 11px;
+  color: #059669;
+}
+.retail-order-card__goods-meta {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+}
+.retail-order-card__amount {
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: #64748b;
+}
+.retail-order-card__qty {
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: #94a3b8;
+}
+
+/* 配送区：灰底信息块 */
+.retail-order-card__ship {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.retail-order-card__ship-contact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.55rem;
+}
+.retail-order-card__ship-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+}
+.retail-order-card__ship-phone {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+}
+.retail-order-card__ship-addr {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #475569;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* 备注：浅黄提示块 */
+.retail-order-card__remark {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+.retail-order-card__remark-label {
+  flex-shrink: 0;
+  font-weight: 700;
+  color: #b45309;
+}
+.retail-order-card__remark-text {
+  flex: 1;
+  min-width: 0;
+  color: #92400e;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.retail-order-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 0.1rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid #f1f5f9;
+}
+.retail-order-card__more-btn {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+@media (max-width: 768px) {
+  .orders-manage-page .table-container {
+    border-radius: 1.25rem;
+  }
+  .orders-manage-page .table-header {
+    padding: 0.85rem;
+  }
+  .orders-manage-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .orders-manage-search {
+    min-width: 0;
+    width: 100%;
+  }
+  .orders-manage-refresh {
+    width: 100%;
+    justify-content: center;
+  }
+  .orders-manage-tab-bar--filters .orders-manage-tab-bar__row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+  }
+  .orders-tab-bar--inline {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+  }
+  .orders-tab-bar--inline .orders-tab-bar__tabs {
+    width: 100%;
+  }
+  .orders-tab-bar--inline .orders-batch-bar__actions {
+    margin-left: 0;
+    width: 100%;
+  }
+  .orders-manage-tab-bar--filters .orders-manage-tab-bar__filters {
+    width: 100%;
+  }
+  .orders-manage-tab-bar--filters .orders-filter-el-select--wide {
+    width: 100%;
+  }
+  .orders-batch-bar__actions {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    max-width: 100%;
+    padding-bottom: 2px;
+  }
+  .orders-batch-bar__actions .el-button {
+    flex-shrink: 0;
+  }
+  .orders-manage-stats-line__hint {
+    display: none;
+  }
+  .orders-manage-stats-line {
+    margin-left: 0.75rem;
+    margin-right: 0.75rem;
+    font-size: 12px;
+  }
+  .orders-manage-page .members-pagination {
+    justify-content: center;
+    gap: 0.65rem;
+    padding: 1rem;
+  }
+  .orders-manage-page .members-page-meta {
+    width: 100%;
+    text-align: center;
+    order: -1;
+  }
+  .orders-manage-page .orders-page-size {
+    margin-right: 0;
+  }
 }

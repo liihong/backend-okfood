@@ -182,7 +182,7 @@ const submitButtonText = computed(() =>
 )
 
 const leadText = computed(() => {
-  if (resumeOnlyMode.value) return '请选择恢复方式与开始的业务日期，提交后立即生效。'
+  if (resumeOnlyMode.value) return '请确认配送方式与开始业务日期（可沿用原起送日），提交后立即生效。'
   if (postPaySetupMode.value) {
     return '支付已成功，餐次已入账。请完善配送方式与收货信息并选择开始业务日期，完成后即可开始用餐。'
   }
@@ -302,7 +302,11 @@ async function loadProfile() {
 
     if (data.delivery_deferred === true) {
       deliveryMode.value = data.store_pickup ? 'pickup' : 'delivery'
-      deliveryYmd.value = ''
+      // 暂停保留起送日：恢复时预填原日期（早于最早可选日则清空让用户重选）
+      const ds = data.delivery_start_date != null ? String(data.delivery_start_date).trim() : ''
+      let dPick = ds.length >= 10 ? ds.slice(0, 10) : ''
+      if (dPick && dPick < minDeliveryYmd.value) dPick = ''
+      deliveryYmd.value = dPick
       if (
         resumeOnlyMode.value &&
         serverBalance.value > 0 &&
@@ -311,7 +315,7 @@ async function loadProfile() {
         resumeHintShown.value = true
         setTimeout(() => {
           uni.showToast({
-            title: '请选择配送方式与开始日期',
+            title: dPick ? '可沿用原起送日或重选后恢复' : '请选择配送方式与开始日期',
             icon: 'none',
             duration: 2400,
           })

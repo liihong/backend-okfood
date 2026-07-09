@@ -197,6 +197,7 @@ def member_delivery_setup_incomplete(
 def member_paid_card_awaiting_setup(db: Session, member_id: int) -> bool:
     """
     小程序自助购卡 / 抖音自助验券：已缴且履约信息未齐备（无起送日，或配送到家无默认地址）。
+    曾确认送达后仅缺起送日的不视为待完善（多为主动暂停/历史清空），走恢复配送。
     支付成功即入账，与 balance 无关；用于「我的」引导完善配送后再派单。
     仅只读判断，不修改会员档案。
     """
@@ -206,7 +207,24 @@ def member_paid_card_awaiting_setup(db: Session, member_id: int) -> bool:
     order = _latest_self_service_paid_card_order(db, int(member_id))
     if order is None:
         return False
-    return member_delivery_setup_incomplete(db, m)
+    if not member_delivery_setup_incomplete(db, m):
+        return False
+    # 与 lifecycle「待完善」口径对齐：曾送达则不再引导待完善
+    from app.models.delivery_log import DeliveryLog
+    from app.models.enums import DeliveryStatus
+
+    hit = db.scalar(
+        select(func.count())
+        .select_from(DeliveryLog)
+        .where(
+            DeliveryLog.member_id == int(member_id),
+            DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+        )
+        .limit(1)
+    )
+    if int(hit or 0) > 0:
+        return False
+    return True
 
 
 def _latest_self_service_paid_card_order(

@@ -4,6 +4,12 @@ export function canAcceptRetailOrder(row) {
   return String(row.fulfillment_status || '').toLowerCase() === 'awaiting_accept'
 }
 
+/** 商城订单：是否可取消接单（待发货退回待接单） */
+export function canRevokeAcceptRetailOrder(row) {
+  if (!row || row.pay_status !== '已支付') return false
+  return String(row.fulfillment_status || '').toLowerCase() === 'pending'
+}
+
 /** 单次点餐 / 商城：是否可推送顺丰、指派配送员等 */
 export function canDispatchActions(row) {
   if (!row || row.pay_status !== '已支付') return false
@@ -52,6 +58,11 @@ export function canModifyRetailOrder(row) {
 
 export function isSingleRowSelectable(row) {
   return canDispatchActions(row) || canCancelOrder(row) || canMarkOrderComplete(row)
+}
+
+/** 商城订单：是否可勾选（批量推顺丰，不含门店自提） */
+export function isRetailRowSelectable(row) {
+  return canDispatchActions(row) && !row.store_pickup
 }
 
 export function canRefundWechatSingle(row) {

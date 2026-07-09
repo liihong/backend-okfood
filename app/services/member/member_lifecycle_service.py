@@ -272,12 +272,16 @@ def _resolve_member_lifecycle_with_ctx(
     setup_alert = _member_needs_setup_alert_ctx(member, ctx)
     mid = int(member.id)
     latest_mode, latest_created_by = ctx.latest_order_meta_by_id.get(mid, (None, ""))
+    self_service_latest = _is_self_service_card_order_creator(latest_created_by)
+    # 曾确认送达：缺起送日多半是历史「暂停清空」或主动停送，不应盖成「待完善」
+    ever_delivered = mid in ctx.delivery_history_ids
 
-    # 小程序/抖音自助：待完善履约（与 paid_card_awaiting_setup 展示口径一致，不改档案）
+    # 小程序/抖音自助：仅「从未履约」的缺信息才算待完善（与暂停配送区分）
     if (
         setup_alert
         and latest_mode == CardOrderActivationMode.DEFER_NOT_OPEN
-        and _is_self_service_card_order_creator(latest_created_by)
+        and self_service_latest
+        and not ever_delivered
     ):
         return MemberLifecycleView(
             code=MemberLifecycleCode.AWAITING_SETUP.value,
@@ -286,11 +290,25 @@ def _resolve_member_lifecycle_with_ctx(
             overlays=tuple(overlays),
         )
 
-    if latest_mode == CardOrderActivationMode.DEFER_NOT_OPEN and bool(member.delivery_deferred):
+    # 后台「暂不开卡」：非自助工单的 DEFER_NOT_OPEN
+    if (
+        latest_mode == CardOrderActivationMode.DEFER_NOT_OPEN
+        and bool(member.delivery_deferred)
+        and not self_service_latest
+    ):
         return MemberLifecycleView(
             code=MemberLifecycleCode.CARD_NOT_OPEN.value,
             label=_LIFECYCLE_LABELS[MemberLifecycleCode.CARD_NOT_OPEN.value],
             setup_alert=setup_alert,
+            overlays=tuple(overlays),
+        )
+
+    # 暂停优先：只看 delivery_deferred，不因空起送日改判待完善
+    if bool(member.delivery_deferred):
+        return MemberLifecycleView(
+            code=MemberLifecycleCode.PAUSED.value,
+            label=_LIFECYCLE_LABELS[MemberLifecycleCode.PAUSED.value],
+            setup_alert=False,
             overlays=tuple(overlays),
         )
 
@@ -299,14 +317,6 @@ def _resolve_member_lifecycle_with_ctx(
             code=MemberLifecycleCode.AWAITING_SETUP.value,
             label=_LIFECYCLE_LABELS[MemberLifecycleCode.AWAITING_SETUP.value],
             setup_alert=True,
-            overlays=tuple(overlays),
-        )
-
-    if bool(member.delivery_deferred):
-        return MemberLifecycleView(
-            code=MemberLifecycleCode.PAUSED.value,
-            label=_LIFECYCLE_LABELS[MemberLifecycleCode.PAUSED.value],
-            setup_alert=False,
             overlays=tuple(overlays),
         )
 

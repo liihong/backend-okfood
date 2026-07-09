@@ -1564,6 +1564,22 @@
   gap: 0.35rem 0.45rem;
 }
 
+@media (max-width: 768px) {
+  .table-container.table-container--members-fill {
+    border-radius: 1.25rem;
+  }
+
+  .table-header--members {
+    padding: 0.85rem;
+  }
+
+  .table-container.table-container--members-fill > .members-pagination {
+    justify-content: center;
+    gap: 0.65rem;
+    padding: 1rem;
+  }
+}
+
 .search-box.search-box--members-inline {
   width: auto;
   flex: 1 1 auto;

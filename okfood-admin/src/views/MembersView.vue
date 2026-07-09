@@ -32,6 +32,24 @@ import MemberEditModal from './components/MemberEditModal.vue'
 import MemberAddressesModal from './components/MemberAddressesModal.vue'
 import MemberMealCompensationModal from './components/MemberMealCompensationModal.vue'
 
+const MOBILE_MEDIA = '(max-width: 768px)'
+
+/** 窄屏（手机）使用卡片列表，桌面保留表格 */
+const isNarrowScreen = ref(
+  typeof window !== 'undefined' && window.matchMedia(MOBILE_MEDIA).matches,
+)
+
+/** @type {MediaQueryList | null} */
+let mobileMediaQuery = null
+
+function syncNarrowScreen() {
+  if (!mobileMediaQuery) return
+  isNarrowScreen.value = mobileMediaQuery.matches
+  if (!isNarrowScreen.value) {
+    void nextTick(() => updateMembersTableHeight())
+  }
+}
+
 /** 本页表格数据（本地 ref；同步写入 memberList 供登出清空等兼容） */
 const membersRows = ref([])
 
@@ -993,6 +1011,11 @@ onMounted(async () => {
   await loadRegionFilterOptions()
   await fetchMemberStats()
   await fetchMembers()
+  if (typeof window !== 'undefined') {
+    mobileMediaQuery = window.matchMedia(MOBILE_MEDIA)
+    syncNarrowScreen()
+    mobileMediaQuery.addEventListener('change', syncNarrowScreen)
+  }
   await nextTick()
   updateMembersTableHeight()
   membersTableResizeObserver = new ResizeObserver(() => {
@@ -1006,6 +1029,7 @@ onMounted(async () => {
 onUnmounted(() => {
   membersTableResizeObserver?.disconnect()
   membersTableResizeObserver = null
+  mobileMediaQuery?.removeEventListener('change', syncNarrowScreen)
 })
 </script>
 
@@ -1157,12 +1181,19 @@ onUnmounted(() => {
       </div>
      <div v-if="isAwaitingSetupFilter" class="members-awaiting-banner" role="status">
         <p class="members-awaiting-banner__text">
-          当前展示<strong>待完善履约</strong>会员（小程序购卡 / 抖音验券已入账，缺起送日或配送地址）。
+          当前展示<strong>待完善履约</strong>会员（小程序购卡 / 抖音验券已入账，缺起送日或配送地址，且从未确认送达）。
           本列表仅用于人工复核与联系用户完善信息，<strong>不会自动修改</strong>会员档案或配送安排。
+          主动暂停配送的会员请用「已暂停」筛选，不在此列。
         </p>
       </div>
-      <div ref="membersTableHostRef" class="members-table-host">
+      <div
+        ref="membersTableHostRef"
+        class="members-table-host"
+        :class="{ 'members-table-host--mobile-cards': isNarrowScreen }"
+      >
+        <!-- 桌面：表格 -->
         <AdminTable
+          v-if="!isNarrowScreen"
           variant="members"
           class="members-el-table-body-scroll"
           size="small"
@@ -1359,6 +1390,168 @@ onUnmounted(() => {
           </template>
         </el-table-column>
         </AdminTable>
+
+        <!-- 手机：卡片列表 -->
+        <div v-else v-loading="membersLoading" class="members-mobile-list">
+          <p v-if="!membersRows.length && !membersLoading" class="members-mobile-empty">暂无会员数据</p>
+          <article
+            v-for="(u, idx) in membersRows"
+            :key="memberRowKey(u)"
+            class="member-profile-card"
+          >
+            <header class="member-profile-card__head">
+              <div class="member-profile-card__head-left">
+                <span class="members-cell-pill members-cell-pill--idx">{{ tableRowIndex(idx) }}</span>
+                <div class="member-profile-card__identity">
+                  <span class="member-profile-card__name">{{ u.name || '—' }}</span>
+                  <span v-if="u.wechat_name" class="member-profile-card__wechat">微信 {{ u.wechat_name }}</span>
+                </div>
+              </div>
+              <span :class="memberStatusClass(u.status)">{{ u.status }}</span>
+            </header>
+
+            <section class="member-profile-card__meta">
+              <span class="t-plan" :class="planTagClass(u.plan, u.planBase, u.meal_scope_label)">{{
+                u.plan
+              }}</span>
+              <span
+                class="balance-text member-profile-card__balance"
+                :class="{ warning: u.balance <= 2 && u.is_active }"
+                >{{ u.balanceLabel }}</span
+              >
+              <span v-if="u.delivery_start_date" class="member-profile-card__start-date">
+                起送 {{ u.delivery_start_date }}
+              </span>
+            </section>
+
+            <section class="member-profile-card__ship">
+              <div class="member-profile-card__contact">
+                <a
+                  v-if="(u.phone || '').trim()"
+                  :href="`tel:${String(u.phone).replace(/\s/g, '')}`"
+                  class="member-phone-num member-profile-card__phone td-mono"
+                  @click.stop
+                  >{{ u.phone }}</a
+                >
+                <span v-else class="member-profile-card__phone td-mono">—</span>
+              </div>
+              <p class="member-profile-card__addr">
+                {{ memberAddressDetailWithoutArea(u) || '—' }}
+              </p>
+              <p
+                v-if="String(u.area || '').trim() && u.area !== '—'"
+                class="member-profile-card__area"
+              >
+                {{ u.area }}
+              </p>
+            </section>
+
+            <p v-if="u.leave_kind" class="member-profile-card__leave">
+              <span class="member-profile-card__leave-label">请假</span>
+              <span class="member-profile-card__leave-text">{{ u.leave_detail }}</span>
+            </p>
+            <p
+              v-if="u.tomorrow_leave && !u.is_on_leave_today"
+              class="balance-leave-hint balance-leave-hint--tomorrow member-profile-card__tomorrow-leave"
+            >
+              明日配送请假
+            </p>
+
+            <p v-if="(u.remarks || '').trim()" class="member-profile-card__remark">
+              <span class="member-profile-card__remark-label">备注</span>
+              <span class="member-profile-card__remark-text">{{ u.remarks }}</span>
+            </p>
+
+            <footer class="member-profile-card__footer">
+              <time class="member-profile-card__time" :title="u.updated_at || ''">
+                {{ formatMemberOperationTime(u.updated_at) }}
+              </time>
+              <el-dropdown trigger="click" @command="(cmd) => onMembersActionDropdown(cmd, u)">
+                <el-button type="primary" size="small" plain class="member-profile-card__more-btn">
+                  更多操作
+                  <ChevronDown :size="14" aria-hidden="true" class="members-more-chevron" />
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="leave">
+                      <span class="members-dropdown-item-inner" title="手工请假">
+                        <CalendarOff :size="14" aria-hidden="true" />
+                        请假
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="addresses">
+                      <span
+                        class="members-dropdown-item-inner"
+                        title="地址管理：查看全部配送地址，编辑、地图选点，并可代为切换默认地址"
+                      >
+                        <MapPin :size="14" aria-hidden="true" />
+                        地址
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="edit">
+                      <span class="members-dropdown-item-inner" title="修改会员信息">
+                        <Pencil :size="14" aria-hidden="true" />
+                        修改
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="records" divided>
+                      <span class="members-dropdown-item-inner" title="套餐已确认送达的业务日（扣次记录）">
+                        <Receipt :size="14" aria-hidden="true" />
+                        消费记录
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="operation_logs">
+                      <span
+                        class="members-dropdown-item-inner"
+                        title="该会员在小程序或后台触发的配送、地址、请假等操作留痕"
+                      >
+                        <History :size="14" aria-hidden="true" />
+                        操作记录
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="meal_compensation" divided>
+                      <span
+                        class="members-dropdown-item-inner"
+                        title="餐品问题赔付：将已消费次数补回余额，并写入操作审计"
+                      >
+                        <UtensilsCrossed :size="14" aria-hidden="true" />
+                        补餐赔付
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="grant_coupon">
+                      <span
+                        class="members-dropdown-item-inner"
+                        title="跳转优惠券发放页，向该会员发放续卡优惠券"
+                      >
+                        <Ticket :size="14" aria-hidden="true" />
+                        发优惠券
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="refund" :disabled="!canMemberRefund(u)">
+                      <span
+                        class="members-dropdown-item-inner"
+                        title="按已消费/剩余次数计算应退金额，确认后写入财务扣减"
+                      >
+                        <Banknote :size="14" aria-hidden="true" />
+                        退卡退款
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      command="delete"
+                      :disabled="memberDeletingId === u.id"
+                      class="members-dd-item-delete"
+                    >
+                      <span class="members-dropdown-item-inner">
+                        <Trash2 :size="14" aria-hidden="true" />
+                        {{ memberDeletingId === u.id ? '删除中…' : '删除' }}
+                      </span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </footer>
+          </article>
+        </div>
       </div>
       <div v-if="adminAccessToken" class="members-pagination">
         <button type="button" class="btn-sm" :disabled="membersPage <= 1" @click="goMembersPrev">上一页</button>
@@ -1925,5 +2118,267 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
   color: var(--el-text-color-regular, #606266);
   white-space: nowrap;
+}
+
+/* 手机端：卡片列表 */
+.members-table-host--mobile-cards {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.members-mobile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem 0.85rem;
+  min-height: 120px;
+}
+
+.members-mobile-empty {
+  margin: 2rem 0;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.member-profile-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.85rem 0.9rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid #e8edf3;
+  background: #fff;
+}
+
+.member-profile-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.member-profile-card__head-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.member-profile-card__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.member-profile-card__name {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.3;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.member-profile-card__wechat {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.member-profile-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+}
+
+.member-profile-card__balance {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.member-profile-card__start-date {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #64748b;
+}
+
+.member-profile-card__ship {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.member-profile-card__contact {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.member-profile-card__phone {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0d5c46;
+  text-decoration: none;
+}
+
+.member-profile-card__addr {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #475569;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.member-profile-card__area {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.member-profile-card__leave {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+}
+
+.member-profile-card__leave-label {
+  flex-shrink: 0;
+  font-weight: 700;
+  color: #be123c;
+}
+
+.member-profile-card__leave-text {
+  flex: 1;
+  min-width: 0;
+  color: #9f1239;
+  word-break: break-word;
+}
+
+.member-profile-card__tomorrow-leave {
+  margin: 0;
+}
+
+.member-profile-card__remark {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+
+.member-profile-card__remark-label {
+  flex-shrink: 0;
+  font-weight: 700;
+  color: #b45309;
+}
+
+.member-profile-card__remark-text {
+  flex: 1;
+  min-width: 0;
+  color: #92400e;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.member-profile-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-top: 0.1rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid #f1f5f9;
+}
+
+.member-profile-card__time {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: #94a3b8;
+}
+
+.member-profile-card__more-btn {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+@media (max-width: 768px) {
+  .members-search-el-input {
+    min-width: 0;
+  }
+
+  .members-toolbar-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .members-toolbar-primary {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .members-toolbar-row .members-toolbar-primary .search-box.search-box--members-inline {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .members-toolbar-trailing {
+    width: 100%;
+    margin-left: 0;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .members-overview-stats {
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    flex-wrap: nowrap;
+    padding-bottom: 2px;
+  }
+
+  .members-export-actions {
+    width: 100%;
+  }
+
+  .members-export-actions .members-export-btn {
+    width: 100%;
+  }
+
+  .members-renew-banner,
+  .members-awaiting-banner {
+    margin-left: 0.75rem;
+    margin-right: 0.75rem;
+  }
 }
 </style>

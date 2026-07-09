@@ -267,6 +267,66 @@ def test_lifecycle_douyin_redeem_awaiting_setup(v3_db: Session) -> None:
     assert view.setup_alert is True
 
 
+def test_lifecycle_paused_with_null_start_after_delivery(v3_db: Session) -> None:
+    """曾送达后缺起送日 + 暂停：显示已暂停，不盖成待完善。"""
+    from app.models.enums import DeliveryStatus
+
+    m = _member(v3_db, mid=26, phone="19900001115", deferred=True, balance=6, start=None)
+    v3_db.add(
+        MemberCardOrder(
+            id=6,
+            member_id=26,
+            tenant_id=1,
+            store_id=1,
+            membership_template_id=1,
+            card_kind="周卡",
+            pay_channel=CardPayChannel.WECHAT.value,
+            pay_status=CardOrderPayStatus.PAID.value,
+            amount_yuan=Decimal("99.00"),
+            applied_to_member=True,
+            activation_mode=CardOrderActivationMode.DEFER_NOT_OPEN.value,
+            meal_periods_snapshot=["lunch"],
+            created_by="miniprogram",
+        )
+    )
+    v3_db.add(
+        DeliveryLog(
+            member_id=26,
+            delivery_date=date(2026, 7, 1),
+            status=DeliveryStatus.DELIVERED.value,
+        )
+    )
+    v3_db.commit()
+    view = resolve_member_lifecycle(v3_db, m)
+    assert view.code == MemberLifecycleCode.PAUSED.value
+    assert view.setup_alert is False
+
+
+def test_lifecycle_pause_beats_generic_setup_alert(v3_db: Session) -> None:
+    """非自助缺起送日但已暂停：优先已暂停。"""
+    m = _member(v3_db, mid=27, phone="19900001116", deferred=True, balance=3, start=None)
+    v3_db.add(
+        MemberCardOrder(
+            id=7,
+            member_id=27,
+            tenant_id=1,
+            store_id=1,
+            membership_template_id=1,
+            card_kind="周卡",
+            pay_channel=CardPayChannel.WECHAT.value,
+            pay_status=CardOrderPayStatus.PAID.value,
+            amount_yuan=Decimal("99.00"),
+            applied_to_member=True,
+            activation_mode=CardOrderActivationMode.EXPLICIT_DATE.value,
+            meal_periods_snapshot=["lunch"],
+            created_by="admin",
+        )
+    )
+    v3_db.commit()
+    view = resolve_member_lifecycle(v3_db, m)
+    assert view.code == MemberLifecycleCode.PAUSED.value
+
+
 def test_resolve_members_lifecycle_map_matches_single(v3_db: Session) -> None:
     """批量 lifecycle 与逐条 resolve 结果一致。"""
     m1 = _member(v3_db, mid=30, phone="19900001112", deferred=True, balance=5, start=date(2026, 3, 1))

@@ -1285,7 +1285,7 @@ function onPauseDeliveryTap() {
   uni.showModal({
     title: '暂停配送',
     content:
-      '确认后暂停会员卡配送（剩余餐次保留）。恢复时需重新选择开始的业务日期。是否暂停？',
+      '确认后暂停会员卡配送（剩余餐次与起送日保留，不会进入配送大表）。恢复时可沿用原起送日或重选。是否暂停？',
     confirmText: '暂停配送',
     cancelText: '取消',
     confirmColor: '#73B054',
