@@ -23,7 +23,7 @@ const {
 <template>
   <el-dialog
     v-model="editOpen"
-    title="修改订单 · 配送/自提与收货地址"
+    :title="'修改订单 · 配送/自提与收货地址'"
     width="920px"
     class="orders-edit-order-dialog"
     destroy-on-close
@@ -34,7 +34,9 @@ const {
   >
     <template v-if="editOrder">
       <p class="orders-edit-hint">
-        订单 #{{ editOrder.id }} · {{ editDialogMemberDisplayName }}
+        订单 #{{ editOrder.id }}
+        <template v-if="editOrder.product_title"> · {{ editOrder.product_title }}</template>
+        · {{ editDialogMemberDisplayName }}
         {{ (editOrder.member_phone || '').trim() }}
       </p>
       <div class="orders-edit-field">

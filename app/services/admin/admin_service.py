@@ -16,7 +16,7 @@ from app.models.admin_dashboard_biz_day_snapshot import AdminDashboardBizDaySnap
 from app.models.admin_user import AdminUser
 from app.models.balance_log import BalanceLog
 from app.models.delivery_log import DeliveryLog
-from app.models.enums import BalanceReason, MealPeriod, PlanType
+from app.models.enums import BalanceReason, CardOrderPayStatus, MealPeriod, PlanType
 from app.constants import UNASSIGNED_DELIVERY_AREA
 from app.models.member import Member
 from app.models.member_address import MemberAddress
@@ -154,6 +154,36 @@ def _member_renew_pending_scope(*, threshold: int):
     )
 
 
+def _member_awaiting_setup_scope_clause():
+    """
+    待完善履约：小程序自助购卡 / 抖音验券已缴且缺起送日或配送到家缺地址。
+    仅用于管理端筛选与统计，不修改会员档案、不影响配送大表门禁。
+    """
+    from app.services.member.member_card_order_service import SELF_SERVICE_CARD_ORDER_CREATORS
+
+    has_self_service_paid = exists(
+        select(1)
+        .select_from(MemberCardOrder)
+        .where(
+            MemberCardOrder.member_id == Member.id,
+            MemberCardOrder.created_by.in_(tuple(SELF_SERVICE_CARD_ORDER_CREATORS)),
+            MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+        )
+    )
+    dap = default_address_pick_subquery()
+    has_no_default = ~exists(select(1).select_from(dap).where(dap.c.mid == Member.id))
+    setup_incomplete = or_(
+        Member.delivery_start_date.is_(None),
+        and_(Member.store_pickup.is_(False), has_no_default),
+    )
+    return and_(
+        Member.balance > 0,
+        Member.membership_refunded_at.is_(None),
+        has_self_service_paid,
+        setup_incomplete,
+    )
+
+
 def _apply_member_list_filters(
     stmt,
     *,
@@ -161,6 +191,7 @@ def _apply_member_list_filters(
     validity: str | None,
     inactive_only: bool = False,
     delivery_deferred_only: bool = False,
+    awaiting_setup_only: bool = False,
     delivery_region_id: int | None = None,
     unassigned_region: bool = False,
     plan_type: str | None = None,
@@ -216,9 +247,16 @@ def _apply_member_list_filters(
             ),
         )
     if delivery_deferred_only:
+        # 真·暂停配送：排除小程序/抖音待完善（便于人工复核与「暂停」Tab 区分）
         stmt = stmt.where(
-            and_(Member.is_active.is_(False), Member.delivery_deferred.is_(True)),
+            and_(
+                Member.is_active.is_(False),
+                Member.delivery_deferred.is_(True),
+                ~_member_awaiting_setup_scope_clause(),
+            ),
         )
+    if awaiting_setup_only:
+        stmt = stmt.where(_member_awaiting_setup_scope_clause())
     if unassigned_region:
         dap = default_address_pick_subquery()
         ma = aliased(MemberAddress)
@@ -308,6 +346,7 @@ def _member_filter_count(
     store_id: int,
     inactive_only: bool = False,
     delivery_deferred_only: bool = False,
+    awaiting_setup_only: bool = False,
     on_leave_only: bool = False,
     unassigned_region: bool = False,
     store_pickup_active: bool = False,
@@ -320,6 +359,7 @@ def _member_filter_count(
         validity=None,
         inactive_only=inactive_only,
         delivery_deferred_only=delivery_deferred_only,
+        awaiting_setup_only=awaiting_setup_only,
         on_leave_only=on_leave_only,
         unassigned_region=unassigned_region,
         store_id=int(store_id),
@@ -464,6 +504,7 @@ def member_analytics_summary(db: Session, *, store_id: int) -> MemberAnalyticsOu
         renew_pending=renew_pending,
         unconsumed_meals=unconsumed_meals,
         inactive_count=_member_filter_count(db, store_id=sid, inactive_only=True),
+        awaiting_setup_count=_member_filter_count(db, store_id=sid, awaiting_setup_only=True),
         paused_delivery_count=_member_filter_count(db, store_id=sid, delivery_deferred_only=True),
         on_leave_count=_member_filter_count(db, store_id=sid, on_leave_only=True),
         store_pickup_active_count=_member_filter_count(db, store_id=sid, store_pickup_active=True),
@@ -480,6 +521,7 @@ def list_members_paged(
     validity: str | None = None,
     inactive_only: bool = False,
     delivery_deferred_only: bool = False,
+    awaiting_setup_only: bool = False,
     delivery_region_id: int | None = None,
     unassigned_region: bool = False,
     plan_type: str | None = None,
@@ -494,6 +536,7 @@ def list_members_paged(
         validity=validity,
         inactive_only=inactive_only,
         delivery_deferred_only=delivery_deferred_only,
+        awaiting_setup_only=awaiting_setup_only,
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=plan_type,
@@ -507,6 +550,7 @@ def list_members_paged(
         validity=validity,
         inactive_only=inactive_only,
         delivery_deferred_only=delivery_deferred_only,
+        awaiting_setup_only=awaiting_setup_only,
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=plan_type,

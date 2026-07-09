@@ -66,7 +66,8 @@ export function shouldOpenMemberSetup(profile) {
   const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
   const paidPending = isPaidCardAwaitingSetup(profile)
   if (balance <= 0 && !paidPending) return false
-  if (profile.delivery_deferred === true) return false
+  // 自助购卡/抖音验券待完善：delivery_deferred 仍可能为 true，须引导补齐履约信息
+  if (profile.delivery_deferred === true && !paidPending) return false
 
   const start = ymdFromApiField(profile.delivery_start_date)
   if (!start) return true

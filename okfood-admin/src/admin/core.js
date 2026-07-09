@@ -543,6 +543,40 @@ export function memberCardExpired(raw, balance = null) {
   return Number.isFinite(mqt) && mqt > 0
 }
 
+/**
+ * 会员状态展示：优先使用后端 lifecycle_label（只读，不改档案）。
+ * overlays 中「请假中」「待续费」覆盖主标签，与 member_lifecycle_service 一致。
+ */
+export function resolveMemberStatusFromLifecycle(raw, balance = null) {
+  if (!raw || typeof raw !== 'object') return '未开卡'
+  const overlays = Array.isArray(raw.lifecycle_overlays) ? raw.lifecycle_overlays : []
+  if (overlays.includes('请假中')) return '请假中'
+  if (overlays.includes('待续费')) return '待续费'
+
+  const label =
+    raw.lifecycle_label != null && String(raw.lifecycle_label).trim()
+      ? String(raw.lifecycle_label).trim()
+      : ''
+  if (label) return label
+
+  // 兼容未返回 lifecycle 的旧响应（兜底，不影响档案）
+  const bal = balance != null ? Number(balance) || 0 : Number(raw.balance) || 0
+  const active = raw.is_active !== false
+  const deferred = raw.delivery_deferred === true
+  const onLeaveToday = raw.is_on_leave_today === true
+  const membershipRefundedAt =
+    raw.membership_refunded_at != null && String(raw.membership_refunded_at).trim()
+      ? String(raw.membership_refunded_at).trim()
+      : null
+  if (membershipRefundedAt) return '已退款'
+  if (deferred) return '已暂停'
+  if (active && onLeaveToday) return '请假中'
+  if (memberCardExpired(raw, bal) || (active && bal === 0)) return '已过期'
+  if (!active) return '未开卡'
+  if (bal <= 2) return '待续费'
+  return '配送中'
+}
+
 /** GET /api/admin/users 单条映射为表格行 */
 export function mapAdminUserToRow(raw, idx) {
   if (!raw || typeof raw !== 'object') {
@@ -591,20 +625,7 @@ export function mapAdminUserToRow(raw, idx) {
       ? String(raw.membership_refunded_at).trim()
       : null
 
-  let status = '活跃中'
-  if (membershipRefundedAt) {
-    status = '已退款'
-  } else if (deferred) {
-    status = '暂停配送'
-  } else if (active && onLeaveToday) {
-    status = '请假中'
-  } else if (memberCardExpired(raw, balance) || (active && balance === 0)) {
-    status = '已过期'
-  } else if (!active) {
-    status = '未开卡'
-  } else if (balance <= 2) {
-    status = '待续费'
-  }
+  const status = resolveMemberStatusFromLifecycle(raw, balance)
 
   const planBase = raw.plan_type || '次卡'
   const entitledPeriods = Array.isArray(raw.entitled_meal_periods) ? raw.entitled_meal_periods : []
@@ -675,6 +696,11 @@ export function mapAdminUserToRow(raw, idx) {
       raw.lifecycle_code != null && String(raw.lifecycle_code).trim()
         ? String(raw.lifecycle_code).trim()
         : '',
+    lifecycle_label:
+      raw.lifecycle_label != null && String(raw.lifecycle_label).trim()
+        ? String(raw.lifecycle_label).trim()
+        : '',
+    lifecycle_overlays: Array.isArray(raw.lifecycle_overlays) ? raw.lifecycle_overlays : [],
     setup_alert: raw.setup_alert === true,
     membership_refunded_at: membershipRefundedAt,
     store_pickup: raw.store_pickup === true,

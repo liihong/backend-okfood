@@ -12,6 +12,7 @@ import {
   canCancelOrder,
   canMarkOrderComplete,
   canModifyOrder,
+  canModifyRetailOrder,
   isSfCancelledRedispatch,
   canRefundWechatSingle,
   canRefundWechatMall,
@@ -78,6 +79,8 @@ export function useOrdersManage(orderKind = 'single') {
   /** @type {import('vue').Ref<Array<Record<string, unknown>>>} */
   const batchAssignOrders = ref([])
   const editOpen = ref(false)
+  /** @type {'single' | 'retail'} */
+  const editKind = ref('single')
   /** @type {import('vue').Ref<Record<string, unknown> | null>} */
   const editOrder = ref(null)
   const editSaving = ref(false)
@@ -268,11 +271,18 @@ export function useOrdersManage(orderKind = 'single') {
     },
   )
 
-  function openEditOrder(row) {
-    if (!canModifyOrder(row)) {
-      showToast('当前订单不可修改（配送中、已取消或已退款）', 'error')
+  function openEditOrder(row, kind = 'single') {
+    const canModify = kind === 'retail' ? canModifyRetailOrder(row) : canModifyOrder(row)
+    if (!canModify) {
+      showToast(
+        kind === 'retail'
+          ? '当前订单不可修改（配送中、已取消或已退款）'
+          : '当前订单不可修改（配送中、已取消或已退款）',
+        'error',
+      )
       return
     }
+    editKind.value = kind
     editOrder.value = row
     editAddrDraft.value = null
     editAddrAlsoDefault.value = false
@@ -346,14 +356,19 @@ export function useOrdersManage(orderKind = 'single') {
 
       const body = { store_pickup: pickup }
       if (!pickup) body.member_address_id = Number(addrId)
+      const patchPath =
+        editKind.value === 'retail'
+          ? `/api/admin/orders/retail-orders/${row.id}`
+          : `/api/admin/orders/single-meals/${row.id}`
       await apiJson(
-        `/api/admin/orders/single-meals/${row.id}`,
+        patchPath,
         { method: 'PATCH', body: JSON.stringify(body) },
         { auth: true },
       )
       showToast('订单与收货信息已保存', 'success')
       editOpen.value = false
-      await fetchSingleMeals()
+      if (editKind.value === 'retail') await fetchRetailOrders()
+      else await fetchSingleMeals()
     } catch (e) {
       const status = e && typeof e.status === 'number' ? e.status : 0
       if (status === 401) {
@@ -368,6 +383,7 @@ export function useOrdersManage(orderKind = 'single') {
 
   function onEditDialogClosed() {
     editOrder.value = null
+    editKind.value = 'single'
     editMemberAddresses.value = []
     editAddrDraft.value = null
     editAddrAlsoDefault.value = false
@@ -509,7 +525,8 @@ export function useOrdersManage(orderKind = 'single') {
   }
 
   function onRetailRowMoreCommand(row, cmd) {
-    if (cmd === 'accept') void onAcceptRetailOrder(row)
+    if (cmd === 'modify') openEditOrder(row, 'retail')
+    else if (cmd === 'accept') void onAcceptRetailOrder(row)
     else if (cmd === 'sf') void onPushSfRetailOrder(row)
     else if (cmd === 'courier') openAssignCourierRetail(row)
     else if (cmd === 'complete') void onMarkRetailOrderComplete(row)
@@ -1295,6 +1312,7 @@ export function useOrdersManage(orderKind = 'single') {
     batchAssignMode,
     batchAssignOrders,
     editOpen,
+    editKind,
     editOrder,
     editSaving,
     editAddrLoading,

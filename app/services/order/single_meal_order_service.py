@@ -1359,9 +1359,12 @@ def list_courier_single_order_tasks(
         )
     )
     store_lng, store_lat = load_store_coordinates_for_sorting(db)
+    task_rows = db.execute(stmt).all()
+    # 批量加载片区名称，避免逐单独立查询
+    region_ids = {int(a.delivery_region_id) for _, _, a, _ in task_rows if a.delivery_region_id}
+    nm = delivery_region_name_map(db, region_ids)
     out: list[CourierTaskMemberOut] = []
-    for order, member, a, dsh in db.execute(stmt).all():
-        nm = delivery_region_name_map(db, {int(a.delivery_region_id)} if a.delivery_region_id else set())
+    for order, member, a, dsh in task_rows:
         ar = (order.routing_area or "").strip() or routing_area_label(a, nm)
         detail = full_address_line(a.map_location_text, a.door_detail)
         display_addr = f"{ar} {detail}".strip()

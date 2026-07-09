@@ -13,6 +13,7 @@ import {
   canDispatchActions,
   canCancelOrder,
   canMarkOrderComplete,
+  canModifyRetailOrder,
   canRefundWechatRetail,
 } from '../utils/orderPermissions.js'
 import { useOrdersManageInject } from '../composables/useOrdersManageInject.js'
@@ -112,6 +113,9 @@ const {
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
+              <el-dropdown-item command="modify" :disabled="!canModifyRetailOrder(row)">
+                修改
+              </el-dropdown-item>
               <el-dropdown-item command="accept" :disabled="!canAcceptRetailOrder(row)">
                 接单
               </el-dropdown-item>

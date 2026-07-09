@@ -241,6 +241,32 @@ def test_lifecycle_card_not_open(v3_db: Session) -> None:
     assert view.code == MemberLifecycleCode.CARD_NOT_OPEN.value
 
 
+def test_lifecycle_douyin_redeem_awaiting_setup(v3_db: Session) -> None:
+    """抖音验券 defer_not_open + 缺履约信息 → 待完善履约（非暂停配送）。"""
+    m = _member(v3_db, mid=25, phone="19900001114", deferred=True, balance=5)
+    v3_db.add(
+        MemberCardOrder(
+            id=5,
+            member_id=25,
+            tenant_id=1,
+            store_id=1,
+            membership_template_id=1,
+            card_kind="周卡",
+            pay_channel=CardPayChannel.DOUYIN.value,
+            pay_status=CardOrderPayStatus.PAID.value,
+            amount_yuan=Decimal("188.00"),
+            applied_to_member=True,
+            activation_mode=CardOrderActivationMode.DEFER_NOT_OPEN.value,
+            meal_periods_snapshot=["lunch"],
+            created_by="douyin_redeem",
+        )
+    )
+    v3_db.commit()
+    view = resolve_member_lifecycle(v3_db, m)
+    assert view.code == MemberLifecycleCode.AWAITING_SETUP.value
+    assert view.setup_alert is True
+
+
 def test_resolve_members_lifecycle_map_matches_single(v3_db: Session) -> None:
     """批量 lifecycle 与逐条 resolve 结果一致。"""
     m1 = _member(v3_db, mid=30, phone="19900001112", deferred=True, balance=5, start=date(2026, 3, 1))

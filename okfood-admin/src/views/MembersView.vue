@@ -65,7 +65,7 @@ const membersValidityFilter = ref('')
 const membersPlanFilter = ref('')
 /** 片区：'' | 'unassigned' | 区域 id 字符串 */
 const membersRegionFilter = ref('')
-/** 会员卡状态：'' 全部 | inactive 未开卡 | paused 暂停配送 | leave 请假中 */
+/** 会员卡状态：'' 全部 | inactive 未开卡 | awaiting_setup 待完善履约 | paused 暂停配送 | leave 请假中 */
 const membersStatusSegment = ref('')
 const regionFilterOptions = ref([])
 
@@ -74,6 +74,8 @@ const router = useRouter()
 
 /** 当前是否为待续费筛选（客服续卡提醒场景） */
 const isRenewPendingFilter = computed(() => membersStatusSegment.value === 'renew_pending')
+/** 当前是否为待完善履约筛选（抖音/小程序新购卡人工复核） */
+const isAwaitingSetupFilter = computed(() => membersStatusSegment.value === 'awaiting_setup')
 
 /** 从路由 query 恢复筛选（会员统计页跳转带参） */
 function applyMembersRouteQueryFilters() {
@@ -83,7 +85,7 @@ function applyMembersRouteQueryFilters() {
     membersValidityFilter.value = validity
   }
   const segment = String(q.segment ?? '').trim()
-  if (['inactive', 'paused', 'leave', 'renew_pending'].includes(segment)) {
+  if (['inactive', 'awaiting_setup', 'paused', 'leave', 'renew_pending'].includes(segment)) {
     membersStatusSegment.value = segment
   }
   const region = String(q.region ?? '').trim()
@@ -273,6 +275,7 @@ function buildMembersListParams(page, pageSize, { exportMode = false } = {}) {
   const q = searchQuery.value.trim()
   if (q) params.set('q', q)
   if (membersStatusSegment.value === 'inactive') params.set('inactive_only', '1')
+  else if (membersStatusSegment.value === 'awaiting_setup') params.set('awaiting_setup_only', '1')
   else if (membersStatusSegment.value === 'paused') params.set('delivery_deferred_only', '1')
   else if (membersStatusSegment.value === 'leave') params.set('on_leave_only', '1')
   else if (membersStatusSegment.value === 'renew_pending') params.set('renew_pending_only', '1')
@@ -418,9 +421,11 @@ const memberStatusClass = (status) => {
   if (status === '已退款') return 'member-pill member-pill--rose'
   if (status === '请假中') return 'member-pill member-pill--rose'
   if (status === '待续费') return 'member-pill member-pill--amber'
+  if (status === '待完善') return 'member-pill member-pill--amber'
   if (status === '已过期') return 'member-pill member-pill--slate'
   if (status === '未开卡') return 'member-pill member-pill--slate'
-  if (status === '暂停配送') return 'member-pill member-pill--slate'
+  if (status === '暂不开卡') return 'member-pill member-pill--slate'
+  if (status === '已暂停') return 'member-pill member-pill--slate'
   return 'member-pill member-pill--emerald'
 }
 
@@ -1078,7 +1083,8 @@ onUnmounted(() => {
                   >
                     <el-option label="全部" value="" />
                     <el-option label="未开卡" value="inactive" />
-                    <el-option label="暂停配送" value="paused" />
+                   <el-option label="待完善" value="awaiting_setup" />
+                    <el-option label="已暂停" value="paused" />
                     <el-option label="请假中" value="leave" />
                     <el-option label="待续费" value="renew_pending" />
                   </el-select>
@@ -1148,6 +1154,12 @@ onUnmounted(() => {
           <Ticket :size="14" aria-hidden="true" style="margin-right: 4px; vertical-align: -2px" />
           批量发券
         </el-button>
+      </div>
+     <div v-if="isAwaitingSetupFilter" class="members-awaiting-banner" role="status">
+        <p class="members-awaiting-banner__text">
+          当前展示<strong>待完善履约</strong>会员（小程序购卡 / 抖音验券已入账，缺起送日或配送地址）。
+          本列表仅用于人工复核与联系用户完善信息，<strong>不会自动修改</strong>会员档案或配送安排。
+        </p>
       </div>
       <div ref="membersTableHostRef" class="members-table-host">
         <AdminTable
@@ -1778,6 +1790,24 @@ onUnmounted(() => {
   color: #b45309;
 }
 
+.members-awaiting-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 14px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+}
+
+.members-awaiting-banner__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1e40af;
+}
+
+.members-awaiting-banner__text strong {
+  color: #1d4ed8;
+}
 .members-region-select-el {
   width: 118px;
 }

@@ -38,6 +38,14 @@ from app.services.marketing.coupon_checkout_service import (
 
 MINIPROGRAM_OFFLINE_CLAIM_ORDER_CREATOR = "miniprogram-offline"
 MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR = "miniprogram"
+DOUYIN_REDEEM_ORDER_CREATOR = "douyin_redeem"
+# 小程序自助购卡 + 抖音自助验券（待完善履约口径一致）
+SELF_SERVICE_CARD_ORDER_CREATORS: frozenset[str] = frozenset(
+    {
+        MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR,
+        DOUYIN_REDEEM_ORDER_CREATOR,
+    }
+)
 
 
 def _quota_for_card_kind(kind: str) -> tuple[PlanType, int]:
@@ -188,16 +196,42 @@ def member_delivery_setup_incomplete(
 
 def member_paid_card_awaiting_setup(db: Session, member_id: int) -> bool:
     """
-    小程序自助购卡已缴且履约信息未齐备（无起送日，或配送到家无默认地址）。
+    小程序自助购卡 / 抖音自助验券：已缴且履约信息未齐备（无起送日，或配送到家无默认地址）。
     支付成功即入账，与 balance 无关；用于「我的」引导完善配送后再派单。
+    仅只读判断，不修改会员档案。
     """
     m = db.get(Member, int(member_id))
     if not m or m.deleted_at is not None:
         return False
-    order = _latest_miniprogram_self_service_card_order(db, int(member_id))
+    order = _latest_self_service_paid_card_order(db, int(member_id))
     if order is None:
         return False
     return member_delivery_setup_incomplete(db, m)
+
+
+def _latest_self_service_paid_card_order(
+    db: Session,
+    member_id: int,
+    *,
+    applied_to_member: bool | None = None,
+    delivery_start_missing: bool = False,
+) -> MemberCardOrder | None:
+    """最近一条小程序自助 / 抖音验券已缴开卡工单。"""
+    filters = [
+        MemberCardOrder.member_id == int(member_id),
+        MemberCardOrder.created_by.in_(tuple(SELF_SERVICE_CARD_ORDER_CREATORS)),
+        MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+    ]
+    if applied_to_member is not None:
+        filters.append(MemberCardOrder.applied_to_member.is_(applied_to_member))
+    if delivery_start_missing:
+        filters.append(MemberCardOrder.delivery_start_date.is_(None))
+    return db.scalars(
+        select(MemberCardOrder)
+        .where(*filters)
+        .order_by(MemberCardOrder.id.desc())
+        .limit(1)
+    ).first()
 
 
 def _latest_miniprogram_self_service_card_order(
@@ -207,6 +241,7 @@ def _latest_miniprogram_self_service_card_order(
     applied_to_member: bool | None = None,
     delivery_start_missing: bool = False,
 ) -> MemberCardOrder | None:
+    """兼容旧调用：仅小程序自助工单。"""
     filters = [
         MemberCardOrder.member_id == int(member_id),
         MemberCardOrder.created_by == MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR,

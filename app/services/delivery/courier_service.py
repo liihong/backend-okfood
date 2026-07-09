@@ -121,18 +121,26 @@ def courier_login(db: Session, courier_id: str, pin: str) -> Courier:
 
 def courier_login_by_phone(db: Session, phone_raw: str) -> Courier:
     norm = normalize_cn_mobile(phone_raw)
-    stmt = select(Courier).where(Courier.is_active.is_(True), Courier.phone.isnot(None))
-    candidates = list(db.scalars(stmt).all())
-    matched = []
-    for c in candidates:
-        p = (c.phone or "").strip()
-        if not p:
-            continue
-        cand_digits = re.sub(r"\D", "", p)
-        if len(cand_digits) == 13 and cand_digits.startswith("86"):
-            cand_digits = cand_digits[2:]
-        if cand_digits == norm or p == norm:
-            matched.append(c)
+    # 先用 SQL 按标准格式精确匹配，覆盖绝大多数情况
+    stmt = select(Courier).where(
+        Courier.is_active.is_(True),
+        Courier.phone.in_([norm, f"86{norm}", f"+86{norm}"]),
+    )
+    matched = list(db.scalars(stmt).all())
+    if not matched:
+        # 降级：少量存储格式不规范的号码（全库扫描，但仅在精确匹配失败时触发）
+        all_candidates = db.scalars(
+            select(Courier).where(Courier.is_active.is_(True), Courier.phone.isnot(None))
+        ).all()
+        for c in all_candidates:
+            p = (c.phone or "").strip()
+            if not p:
+                continue
+            cand_digits = re.sub(r"\D", "", p)
+            if len(cand_digits) == 13 and cand_digits.startswith("86"):
+                cand_digits = cand_digits[2:]
+            if cand_digits == norm:
+                matched.append(c)
     if not matched:
         raise HTTPException(status_code=401, detail="手机号未登记或已停用")
     if len(matched) > 1:
@@ -277,13 +285,36 @@ def eligible_members_for_delivery(
     )
     if delivery_region_id is not None:
         q = q.where(MemberAddress.delivery_region_id == delivery_region_id)
+    rows = db.execute(q).all()
+    if not rows:
+        return [], {}
+
+    # 批量查询「有小程序自助付款工单」的会员 ID，避免逐条 N+1 查询
+    # 原逻辑：有已支付小程序工单 + 履约信息未完善（无起送日 或 无默认地址）则排除
+    # 主查询已过滤 store_pickup=False，故只需检查 delivery_start_date 和默认地址
+    from app.models.member_card_order import MemberCardOrder
+    from app.models.enums import CardOrderPayStatus
+
+    all_member_ids = [int(m.id) for m, _ in rows]
+    _has_paid_order_subq = (
+        select(MemberCardOrder.member_id)
+        .where(
+            MemberCardOrder.member_id.in_(all_member_ids),
+            MemberCardOrder.created_by == "miniprogram",
+            MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+        )
+        .distinct()
+    )
+    has_paid_order_ids: set[int] = {int(r) for r in db.scalars(_has_paid_order_subq).all()}
+
     members: list[Member] = []
     defaults: dict[int, MemberAddress | None] = {}
-    from app.services.member.member_card_order_service import member_paid_card_awaiting_setup
-
-    for m, addr in db.execute(q).all():
-        if member_paid_card_awaiting_setup(db, int(m.id)):
-            continue
+    for m, addr in rows:
+        mid = int(m.id)
+        if mid in has_paid_order_ids:
+            # 履约信息未完善则跳过（store_pickup 已被主查询排除）
+            if m.delivery_start_date is None or addr is None:
+                continue
         members.append(m)
         defaults[m.id] = addr
     return members, defaults

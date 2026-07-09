@@ -41,6 +41,15 @@ export function canModifyOrder(row) {
   return f === 'pending' || f === 'sf_cancelled' || f === 'delivered'
 }
 
+/** 商城订单：是否可修改配送方式与收货地址 */
+export function canModifyRetailOrder(row) {
+  if (!row) return false
+  const pay = String(row.pay_status || '').trim()
+  const f = String(row.fulfillment_status || '').trim().toLowerCase()
+  if (pay === '已退款' || f === 'cancelled' || f === 'accepted' || f === 'sf_awaiting_pickup') return false
+  return f === 'awaiting_accept' || f === 'pending' || f === 'sf_cancelled' || f === 'delivered'
+}
+
 export function isSingleRowSelectable(row) {
   return canDispatchActions(row) || canCancelOrder(row) || canMarkOrderComplete(row)
 }

@@ -1121,7 +1121,13 @@ def users(
     ] = False,
     delivery_deferred_only: Annotated[
         bool,
-        Query(description="true=仅暂停配送：is_active=false 且 delivery_deferred=true"),
+        Query(description="true=仅暂停配送：is_active=false 且 delivery_deferred=true，排除待完善履约"),
+    ] = False,
+    awaiting_setup_only: Annotated[
+        bool,
+        Query(
+            description="true=仅待完善履约：小程序/抖音自助已缴且缺起送日或配送到家缺地址（供人工复核，不改档案）"
+        ),
     ] = False,
     delivery_region_id: Annotated[
         int | None,
@@ -1155,8 +1161,18 @@ def users(
         raise HTTPException(status_code=400, detail="不能同时指定 delivery_region_id 与 unassigned_region")
     if inactive_only and delivery_deferred_only:
         raise HTTPException(status_code=400, detail="inactive_only 与 delivery_deferred_only 不能同时为 true")
-    if renew_pending_only and (inactive_only or delivery_deferred_only or on_leave_only):
-        raise HTTPException(status_code=400, detail="renew_pending_only 与 inactive/delivery_deferred/on_leave 筛选互斥")
+    if awaiting_setup_only and (inactive_only or delivery_deferred_only):
+        raise HTTPException(
+            status_code=400,
+            detail="awaiting_setup_only 与 inactive_only / delivery_deferred_only 不能同时为 true",
+        )
+    if renew_pending_only and (
+        inactive_only or delivery_deferred_only or on_leave_only or awaiting_setup_only
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="renew_pending_only 与 inactive/delivery_deferred/awaiting_setup/on_leave 筛选互斥",
+        )
     items, total = list_members_paged(
         db,
         q_phone=q,
@@ -1165,6 +1181,7 @@ def users(
         validity=v or None,
         inactive_only=inactive_only,
         delivery_deferred_only=delivery_deferred_only,
+        awaiting_setup_only=awaiting_setup_only,
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=pt or None,

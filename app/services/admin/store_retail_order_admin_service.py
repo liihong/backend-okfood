@@ -31,6 +31,7 @@ from app.services.client.store_retail_order_service import (
     _row_to_out,
     store_retail_fulfillment_allows_dispatch,
 )
+from app.services.member.member_address_service import delivery_region_name_map, routing_area_label
 from app.utils.sql_like import escape_like_fragment
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,61 @@ def update_admin_store_retail_order_remark(
     db.commit()
     db.refresh(row)
     return _build_admin_list_out(db, row)
+
+
+def _can_admin_update_store_retail_delivery(o: StoreRetailOrder) -> tuple[bool, str]:
+    """管理端：是否允许修改商城订单配送方式与收货地址。"""
+    pay = (o.pay_status or "").strip()
+    f = str(o.fulfillment_status or "").strip().lower()
+    if pay == "已退款":
+        return False, "已退款订单不可修改"
+    if f == "cancelled":
+        return False, "已取消订单不可修改"
+    if f in ("accepted", _FULFILLMENT_SF_AWAITING_PICKUP):
+        return False, "配送中订单不可修改，请先取消配送或标记完成"
+    if f in (_FULFILLMENT_AWAITING_ACCEPT, "pending", "sf_cancelled", "delivered"):
+        return True, ""
+    return False, f"当前状态不可修改（履约={f or '—'}）"
+
+
+def admin_update_store_retail_order_delivery(
+    db: Session,
+    *,
+    order_id: int,
+    store_id: int,
+    store_pickup: bool,
+    member_address_id: int | None,
+) -> AdminStoreRetailOrderListOut:
+    """管理端：修改商城订单配送方式与收货地址。"""
+    o = db.get(StoreRetailOrder, int(order_id))
+    if o is None or int(o.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    ok, err = _can_admin_update_store_retail_delivery(o)
+    if not ok:
+        raise ValueError(err)
+
+    addr_id: int | None
+    area: str
+    if store_pickup:
+        addr_id = None
+        area = "门店自提"
+    else:
+        addr = db.get(MemberAddress, int(member_address_id or 0))
+        if not addr or int(addr.member_id) != int(o.member_id):
+            raise ValueError("配送地址不存在或不属于该会员")
+        nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
+        area = routing_area_label(addr, nm)
+        addr_id = int(addr.id)
+
+    o.store_pickup = bool(store_pickup)
+    o.member_address_id = addr_id
+    o.routing_area = area
+    if store_pickup:
+        o.courier_id = None
+    db.add(o)
+    db.commit()
+    db.refresh(o)
+    return _build_admin_list_out(db, o)
 
 
 def _apply_admin_retail_fulfillment_phase_filter(filters: list, fulfillment_phase: str | None) -> None:

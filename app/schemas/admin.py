@@ -587,7 +587,16 @@ class MemberAnalyticsOut(BaseModel):
     renew_pending: MemberRenewPendingStatsOut
     unconsumed_meals: MemberUnconsumedMealsOut
     inactive_count: int = Field(..., ge=0, description="未开卡：is_active=false 且非暂停配送")
-    paused_delivery_count: int = Field(..., ge=0, description="暂停配送：delivery_deferred=true")
+    awaiting_setup_count: int = Field(
+        ...,
+        ge=0,
+        description="待完善履约：小程序/抖音自助已缴且缺起送日或配送到家缺地址",
+    )
+    paused_delivery_count: int = Field(
+        ...,
+        ge=0,
+        description="暂停配送：delivery_deferred=true 且非待完善履约",
+    )
     on_leave_count: int = Field(..., ge=0, description="请假中（含区间请假与明日请假）")
     store_pickup_active_count: int = Field(..., ge=0, description="门店自提且 balance>0")
     unassigned_region_count: int = Field(..., ge=0, description="默认地址片区未分配")

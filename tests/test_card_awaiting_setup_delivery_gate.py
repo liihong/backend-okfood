@@ -27,6 +27,7 @@ from app.services.delivery.sf_same_city_service import (
     _validate_agg_subscription_sf_readiness,
 )
 from app.services.member.member_card_order_service import (
+    DOUYIN_REDEEM_ORDER_CREATOR,
     MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR,
     _apply_paid_card_order_to_member_balance,
     member_paid_card_awaiting_setup,
@@ -220,3 +221,31 @@ def test_awaiting_setup_false_after_start_and_address(gate_db: Session) -> None:
     )
     gate_db.commit()
     assert member_paid_card_awaiting_setup(gate_db, 10) is False
+
+
+def test_douyin_redeem_awaiting_setup_same_as_miniprogram(gate_db: Session) -> None:
+    """抖音验券入账后纳入待完善口径，与小程序购卡一致（只读判断，不改档案）。"""
+    order = MemberCardOrder(
+        member_id=10,
+        tenant_id=1,
+        store_id=1,
+        membership_template_id=1,
+        card_kind="周卡",
+        pay_channel=CardPayChannel.DOUYIN.value,
+        pay_status=CardOrderPayStatus.PAID.value,
+        amount_yuan=Decimal("188.00"),
+        applied_to_member=False,
+        delivery_start_date=None,
+        activation_mode="defer_not_open",
+        meal_periods_snapshot=["lunch"],
+        created_by=DOUYIN_REDEEM_ORDER_CREATOR,
+    )
+    gate_db.add(order)
+    gate_db.flush()
+    _apply_paid_card_order_to_member_balance(gate_db, order, operator=DOUYIN_REDEEM_ORDER_CREATOR)
+    gate_db.commit()
+    m = gate_db.get(Member, 10)
+    assert m is not None
+    assert int(m.balance) == 5
+    assert m.delivery_deferred is True
+    assert member_paid_card_awaiting_setup(gate_db, 10) is True

@@ -37,11 +37,51 @@ def _http_detail_to_msg(detail: str | list | dict) -> str:
     return str(detail)
 
 
+def _prewarm() -> None:
+    """
+    服务启动预热：
+    1. 建立连接池（避免首请求 TCP 握手延迟）
+    2. 触发循环依赖模块的首次 import（避免首请求 Python 模块解析延迟）
+    3. 对核销舱高频表预热 InnoDB buffer pool
+
+    任何异常不影响启动流程。
+    """
+    try:
+        from sqlalchemy import text
+        from app.db.session import SessionLocal
+
+        db = SessionLocal()
+        try:
+            # 1. 建立连接池 + 验证 DB 可达
+            db.execute(text("SELECT 1"))
+
+            # 2. 预热 InnoDB buffer pool：核销舱涉及的核心表
+            #    小数据量下这几张表全部进内存，后续查询直接命中缓存
+            db.execute(text("SELECT id FROM members WHERE deleted_at IS NULL LIMIT 1"))
+            db.execute(text("SELECT id FROM member_addresses WHERE is_default = 1 LIMIT 1"))
+            db.execute(text("SELECT member_id FROM delivery_logs WHERE delivery_date >= CURDATE() - INTERVAL 7 DAY LIMIT 1"))
+            db.execute(text("SELECT member_id FROM member_card_orders WHERE pay_status = 'paid' LIMIT 1"))
+        finally:
+            db.close()
+
+        # 3. 触发循环依赖模块的首次 import，消除首请求模块解析开销
+        import app.services.delivery.delivery_day_lock_service  # noqa: F401
+        import app.services.delivery.delivery_sheet_push_snapshot_service  # noqa: F401
+        import app.services.delivery.delivery_sheet_meal_units_service  # noqa: F401
+        import app.services.member.member_card_order_service  # noqa: F401
+        import app.services.admin.pickup_verification_service  # noqa: F401
+
+        logger.info("DB 连接池与模块预热完成")
+    except Exception:
+        logger.warning("预热失败（不影响启动）", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _ = app
     ensure_upload_root()
     setup_scheduler()
+    _prewarm()
     yield
     shutdown_scheduler()
 

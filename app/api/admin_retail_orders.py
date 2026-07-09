@@ -9,6 +9,7 @@ from app.schemas.store_retail_order import (
     StoreRetailAssignCourierIn,
     StoreRetailBatchAssignCourierIn,
     StoreRetailCancelIn,
+    StoreRetailOrderDeliveryPatchIn,
     StoreRetailOrderIdsIn,
     StoreRetailOrderRemarkPatchIn,
 )
@@ -17,6 +18,7 @@ from app.services.admin.store_retail_order_admin_service import (
     admin_assign_courier_store_retail_order,
     admin_cancel_store_retail_order,
     admin_mark_store_retail_order_delivered,
+    admin_update_store_retail_order_delivery,
     admin_wechat_refund_store_retail_order,
     bulk_admin_assign_courier_store_retail_orders,
     bulk_admin_mark_store_retail_orders_delivered,
@@ -81,6 +83,29 @@ def admin_retail_order_accept(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return success(data=dump_model(out), msg="已接单，订单进入待发货")
+
+
+@router.patch("/orders/retail-orders/{order_id}")
+def admin_retail_order_patch_delivery(
+    order_id: int,
+    body: StoreRetailOrderDeliveryPatchIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """商城零售：修改配送方式（配送/自提）与收货地址。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        out = admin_update_store_retail_order_delivery(
+            db,
+            order_id=int(order_id),
+            store_id=int(store_id),
+            store_pickup=bool(body.store_pickup),
+            member_address_id=body.member_address_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=dump_model(out), msg="订单已更新")
 
 
 @router.patch("/orders/retail-orders/{order_id}/remark")

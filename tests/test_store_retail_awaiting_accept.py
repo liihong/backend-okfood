@@ -13,12 +13,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.base import Base
 from app.models.member import Member
+from app.models.member_address import MemberAddress
 from app.models.store import Store
 from app.models.store_retail_order import StoreRetailOrder
 from app.models.store_retail_product import StoreRetailProduct
 from app.models.tenant import Tenant
 from app.services.admin.store_retail_order_admin_service import (
     admin_accept_store_retail_order,
+    admin_update_store_retail_order_delivery,
     list_admin_store_retail_orders,
 )
 from app.services.client.store_retail_order_service import (
@@ -35,6 +37,7 @@ def retail_db() -> Session:
         Tenant.__table__,
         Store.__table__,
         Member.__table__,
+        MemberAddress.__table__,
         StoreRetailProduct.__table__,
         StoreRetailOrder.__table__,
     ]
@@ -133,3 +136,57 @@ def test_admin_accept_moves_to_pending_ship(retail_db: Session) -> None:
         retail_db, store_id=1, fulfillment_phase="pending_ship"
     )
     assert pending_total == 1
+
+
+def test_admin_update_delivery_awaiting_accept(retail_db: Session) -> None:
+    retail_db.add(
+        MemberAddress(
+            id=10,
+            member_id=1,
+            contact_name="张三",
+            contact_phone="13800000000",
+            map_location_text="某小区",
+            door_detail="1号楼",
+            lng=121.0,
+            lat=31.0,
+            is_default=True,
+        )
+    )
+    _add_order(
+        retail_db,
+        oid=1,
+        pay_status="已支付",
+        fulfillment_status=_FULFILLMENT_AWAITING_ACCEPT,
+        store_pickup=True,
+    )
+    retail_db.commit()
+
+    out = admin_update_store_retail_order_delivery(
+        retail_db,
+        order_id=1,
+        store_id=1,
+        store_pickup=False,
+        member_address_id=10,
+    )
+    assert out.store_pickup is False
+    assert out.member_address_id == 10
+    assert out.routing_area != "门店自提"
+
+    order = retail_db.get(StoreRetailOrder, 1)
+    assert order is not None
+    assert order.store_pickup is False
+    assert int(order.member_address_id or 0) == 10
+
+
+def test_admin_update_delivery_rejects_in_delivery(retail_db: Session) -> None:
+    _add_order(retail_db, oid=1, pay_status="已支付", fulfillment_status="accepted")
+    retail_db.commit()
+
+    with pytest.raises(ValueError, match="配送中"):
+        admin_update_store_retail_order_delivery(
+            retail_db,
+            order_id=1,
+            store_id=1,
+            store_pickup=True,
+            member_address_id=None,
+        )

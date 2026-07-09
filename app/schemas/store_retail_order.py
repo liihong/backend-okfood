@@ -61,6 +61,23 @@ class StoreRetailOrderRemarkPatchIn(BaseModel):
     remark: str | None = Field(None, max_length=500)
 
 
+class StoreRetailOrderDeliveryPatchIn(BaseModel):
+    """管理端：修改商城订单配送方式与收货地址。"""
+
+    store_pickup: bool = Field(..., description="true=门店自提；false=配送到家")
+    member_address_id: int | None = Field(
+        None,
+        ge=1,
+        description="配送到家时必填：会员已保存的配送地址 id；门店自提勿传",
+    )
+
+    @model_validator(mode="after")
+    def _address_when_delivery(self) -> "StoreRetailOrderDeliveryPatchIn":
+        if not self.store_pickup and self.member_address_id is None:
+            raise ValueError("配送到家须选择配送地址")
+        return self
+
+
 class StoreRetailOrderIdsIn(BaseModel):
     order_ids: list[int] = Field(..., min_length=1)
 

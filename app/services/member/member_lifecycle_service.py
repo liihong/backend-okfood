@@ -21,15 +21,16 @@ from app.services.member.member_card_order_service import (
 )
 
 
+# 管理端状态列统一三字展示
 _LIFECYCLE_LABELS: dict[str, str] = {
     MemberLifecycleCode.REFUNDED.value: "已退款",
-    MemberLifecycleCode.CARD_NOT_OPEN.value: "暂不开卡",
-    MemberLifecycleCode.PAUSED.value: "暂停配送",
-    MemberLifecycleCode.AWAITING_SETUP.value: "待完善履约",
+    MemberLifecycleCode.CARD_NOT_OPEN.value: "暂不开",
+    MemberLifecycleCode.PAUSED.value: "已暂停",
+    MemberLifecycleCode.AWAITING_SETUP.value: "待完善",
     MemberLifecycleCode.BALANCE_EXHAUSTED.value: "已过期",
     MemberLifecycleCode.NEVER_OPENED.value: "未开卡",
     MemberLifecycleCode.RENEW_PENDING.value: "待续费",
-    MemberLifecycleCode.DELIVERING.value: "正常配送中",
+    MemberLifecycleCode.DELIVERING.value: "配送中",
 }
 
 
@@ -47,7 +48,7 @@ class _MemberLifecycleContext:
 
     applied_card_order_ids: frozenset[int]
     delivery_history_ids: frozenset[int]
-    latest_mode_by_id: dict[int, CardOrderActivationMode | None]
+    latest_order_meta_by_id: dict[int, tuple[CardOrderActivationMode | None, str]]
     dinner_state_by_id: dict[int, MemberMealPeriodState | None]
     default_addr_by_id: dict[int, MemberAddress | None]
 
@@ -128,12 +129,12 @@ def _load_delivery_history_member_ids(db: Session, member_ids: list[int]) -> fro
     return frozenset(int(x) for x in rows)
 
 
-def _load_latest_activation_mode_map(
+def _load_latest_applied_card_order_meta_map(
     db: Session, member_ids: list[int]
-) -> dict[int, CardOrderActivationMode | None]:
-    """各会员最近一条已入账工单的 activation_mode。"""
+) -> dict[int, tuple[CardOrderActivationMode | None, str]]:
+    """各会员最近一条已入账工单的 activation_mode 与 created_by。"""
     ids = sorted({int(x) for x in member_ids if x is not None})
-    out: dict[int, CardOrderActivationMode | None] = {mid: None for mid in ids}
+    out: dict[int, tuple[CardOrderActivationMode | None, str]] = {mid: (None, "") for mid in ids}
     if not ids:
         return out
     latest_sq = (
@@ -148,7 +149,11 @@ def _load_latest_activation_mode_map(
         .group_by(MemberCardOrder.member_id)
     ).subquery("latest_card")
     rows = db.execute(
-        select(MemberCardOrder.member_id, MemberCardOrder.activation_mode)
+        select(
+            MemberCardOrder.member_id,
+            MemberCardOrder.activation_mode,
+            MemberCardOrder.created_by,
+        )
         .select_from(MemberCardOrder)
         .join(
             latest_sq,
@@ -158,16 +163,23 @@ def _load_latest_activation_mode_map(
             ),
         )
     ).all()
-    for mid, raw_mode in rows:
-        if raw_mode is None:
-            out[int(mid)] = None
-            continue
-        raw = str(raw_mode).strip().lower()
-        try:
-            out[int(mid)] = CardOrderActivationMode(raw)
-        except ValueError:
-            out[int(mid)] = None
+    for mid, raw_mode, created_by in rows:
+        mode: CardOrderActivationMode | None = None
+        if raw_mode is not None:
+            raw = str(raw_mode).strip().lower()
+            try:
+                mode = CardOrderActivationMode(raw)
+            except ValueError:
+                mode = None
+        out[int(mid)] = (mode, (created_by or "").strip())
     return out
+
+
+def _is_self_service_card_order_creator(created_by: str) -> bool:
+    """小程序自助购卡 / 抖音验券工单来源。"""
+    from app.services.member.member_card_order_service import SELF_SERVICE_CARD_ORDER_CREATORS
+
+    return (created_by or "").strip() in SELF_SERVICE_CARD_ORDER_CREATORS
 
 
 def _build_lifecycle_context(
@@ -201,7 +213,7 @@ def _build_lifecycle_context(
     return _MemberLifecycleContext(
         applied_card_order_ids=_load_applied_card_order_member_ids(db, ids),
         delivery_history_ids=_load_delivery_history_member_ids(db, ids),
-        latest_mode_by_id=_load_latest_activation_mode_map(db, ids),
+        latest_order_meta_by_id=_load_latest_applied_card_order_meta_map(db, ids),
         dinner_state_by_id=dinner_by_id,
         default_addr_by_id=addr_by_id,
     )
@@ -259,7 +271,20 @@ def _resolve_member_lifecycle_with_ctx(
 
     setup_alert = _member_needs_setup_alert_ctx(member, ctx)
     mid = int(member.id)
-    latest_mode = ctx.latest_mode_by_id.get(mid)
+    latest_mode, latest_created_by = ctx.latest_order_meta_by_id.get(mid, (None, ""))
+
+    # 小程序/抖音自助：待完善履约（与 paid_card_awaiting_setup 展示口径一致，不改档案）
+    if (
+        setup_alert
+        and latest_mode == CardOrderActivationMode.DEFER_NOT_OPEN
+        and _is_self_service_card_order_creator(latest_created_by)
+    ):
+        return MemberLifecycleView(
+            code=MemberLifecycleCode.AWAITING_SETUP.value,
+            label=_LIFECYCLE_LABELS[MemberLifecycleCode.AWAITING_SETUP.value],
+            setup_alert=True,
+            overlays=tuple(overlays),
+        )
 
     if latest_mode == CardOrderActivationMode.DEFER_NOT_OPEN and bool(member.delivery_deferred):
         return MemberLifecycleView(
