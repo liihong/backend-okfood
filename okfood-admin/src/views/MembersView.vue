@@ -664,21 +664,21 @@ const deliveryRecordTotal = ref(0)
 const deliveryRecordTotalMeals = ref(0)
 const deliveryRecordTruncated = ref(false)
 
-function formatDeliveryBizYmdLabel(ymd) {
-  const s = typeof ymd === 'string' ? ymd.trim().slice(0, 10) : ''
-  if (s.length !== 10) return ymd != null ? String(ymd) : '—'
-  try {
-    const d = new Date(`${s}T12:00:00+08:00`)
-    return new Intl.DateTimeFormat('zh-CN', {
-      timeZone: 'Asia/Shanghai',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      weekday: 'short',
-    }).format(d)
-  } catch {
-    return s
-  }
+/** 消费记录：入账类（购买/补餐）用 +，扣次类用 - */
+function isConsumptionAdditionKind(kind) {
+  return kind === 'meal_compensation' || kind === 'card_recharge'
+}
+
+function formatSignedMealUnits(kind, units) {
+  const n = Math.max(1, Number(units) || 1)
+  return `${isConsumptionAdditionKind(kind) ? '+' : '-'}${n} 份`
+}
+
+function normalizeConsumptionRecordKind(kindRaw) {
+  if (kindRaw === 'single_meal') return 'single_meal'
+  if (kindRaw === 'meal_compensation') return 'meal_compensation'
+  if (kindRaw === 'card_recharge') return 'card_recharge'
+  return 'subscription'
 }
 
 async function openMemberDeliveryRecords(u) {
@@ -699,13 +699,7 @@ async function openMemberDeliveryRecords(u) {
         const ymd = String(row.delivery_date).slice(0, 10)
         if (!ymd) return null
         const mealUnits = Math.max(1, Number(row.meal_units) || 1)
-        const kindRaw = row.deduction_kind
-        const kind =
-          kindRaw === 'single_meal'
-            ? 'single_meal'
-            : kindRaw === 'meal_compensation'
-              ? 'meal_compensation'
-              : 'subscription'
+        const kind = normalizeConsumptionRecordKind(row.deduction_kind)
         return { delivery_date: ymd, meal_units: mealUnits, deduction_kind: kind }
       })
       .filter(Boolean)
@@ -1682,7 +1676,7 @@ onUnmounted(() => {
             {{ deliveryRecordTarget.name || '—' }} · {{ deliveryRecordTarget.phone || '' }}
           </p>
           <p class="modal-hint delivery-records-caption">
-            下列包含订阅套餐确认送达扣次、单次购买使用会员卡扣次的供餐日，以及补餐赔付记录，按新到旧排列。
+            下列包含订阅套餐确认送达扣次、单次购买使用会员卡扣次的供餐日，以及补餐赔付与开卡入账记录；入账显示 +，扣次显示 -，按新到旧排列。
           </p>
           <div v-if="deliveryRecordLoading" class="delivery-records-loading">加载中…</div>
           <template v-else>
@@ -1697,8 +1691,7 @@ onUnmounted(() => {
               >
                 <span class="delivery-records-idx">{{ idx + 1 }}</span>
                 <span class="delivery-records-line">
-                  {{ formatDeliveryBizYmdLabel(row.delivery_date) }}
-                  <span class="delivery-records-ymd-muted">（{{ row.delivery_date }}）</span>
+                  {{ row.delivery_date }}
                   <span
                     v-if="row.deduction_kind === 'single_meal'"
                     class="delivery-records-kind-badge"
@@ -1707,12 +1700,19 @@ onUnmounted(() => {
                     v-else-if="row.deduction_kind === 'meal_compensation'"
                     class="delivery-records-kind-badge delivery-records-kind-badge--compensation"
                   >补餐</span>
+                  <span
+                    v-else-if="row.deduction_kind === 'card_recharge'"
+                    class="delivery-records-kind-badge delivery-records-kind-badge--recharge"
+                  >开卡入账</span>
                 </span>
                 <span
                   class="delivery-records-units"
-                  :class="{ 'delivery-records-units--compensation': row.deduction_kind === 'meal_compensation' }"
+                  :class="{
+                    'delivery-records-units--addition': isConsumptionAdditionKind(row.deduction_kind),
+                    'delivery-records-units--deduction': !isConsumptionAdditionKind(row.deduction_kind),
+                  }"
                 >
-                  {{ row.deduction_kind === 'meal_compensation' ? '+' : '' }}{{ row.meal_units }} 份
+                  {{ formatSignedMealUnits(row.deduction_kind, row.meal_units) }}
                 </span>
               </li>
             </ul>

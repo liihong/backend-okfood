@@ -1088,6 +1088,7 @@ class PickupVerificationSubscriptionRowOut(BaseModel):
 
     kind: Literal["subscription"] = "subscription"
     member_id: int = Field(..., ge=1)
+    plan_type: str | None = Field(None, description="周卡 / 月卡 / 次卡；用于前端展示会员 ID")
     name: str = ""
     phone: str = ""
     daily_meal_units: int = Field(1, ge=1, description="当日自提份数（与配送大表 daily_meal_units 一致）")

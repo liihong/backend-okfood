@@ -79,7 +79,7 @@ class StoreRetailOrderDeliveryPatchIn(BaseModel):
 
 
 class StoreRetailOrderIdsIn(BaseModel):
-    order_ids: list[int] = Field(..., min_length=1)
+    order_ids: list[int] = Field(..., min_length=1, max_length=100)
 
 
 class StoreRetailAssignCourierIn(BaseModel):

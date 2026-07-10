@@ -68,6 +68,7 @@ def _subscription_pickup_rows(
         rows.append(
             PickupVerificationSubscriptionRowOut(
                 member_id=int(mem.id),
+                plan_type=(mem.plan_type or "").strip() or None,
                 name=(mem.name or "").strip(),
                 phone=(mem.phone or "").strip(),
                 daily_meal_units=units_ctx.units_for(mem),

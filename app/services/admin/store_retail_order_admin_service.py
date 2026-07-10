@@ -555,20 +555,20 @@ def push_store_retail_order_to_sf(db: Session, *, order_id: int, store_id: int) 
     now_ts = int(time.time())
     soid = f"OKRSRO{order.id}{uuid.uuid4().hex[:10]}"[:64]
     snap_preview = row_sfc.model_dump(mode="json")
+    pld = _create_order_payload(
+        row_sfc,
+        shop_order_id=soid,
+        gset=gset,
+        store=store,
+        now_ts=now_ts,
+        delivery_date=d,
+    )
+    snap_db = _sf_push_request_snapshot(snap_preview, pld, gset=gset)
 
     with SfOpenClient() as httpc:
         with _sf_retail_order_push_lock(db, order_id=int(order.id)):
             if _has_active_success_push(db, d, stop_id, store_id=int(store_id)):
                 raise ValueError("该订单仍有进行中的顺丰单，请勿重复推送")
-            pld = _create_order_payload(
-                row_sfc,
-                shop_order_id=soid,
-                gset=gset,
-                store=store,
-                now_ts=now_ts,
-                delivery_date=d,
-            )
-            snap_db = _sf_push_request_snapshot(snap_preview, pld, gset=gset)
             try:
                 res = httpc.create_order(
                     pld,
@@ -624,14 +624,23 @@ def push_store_retail_order_to_sf(db: Session, *, order_id: int, store_id: int) 
 def bulk_push_store_retail_orders_to_sf(
     db: Session, *, order_ids: list[int], store_id: int
 ) -> dict[str, Any]:
-    results: list[dict[str, Any]] = []
-    for oid in order_ids:
+    from app.db.session import SessionLocal
+    from app.services.delivery.sf_same_city_service import run_retail_sf_bulk_in_waves
+
+    _ = db
+
+    def _push_one(oid: int) -> dict[str, Any]:
+        sdb = SessionLocal()
         try:
-            out = push_store_retail_order_to_sf(db, order_id=int(oid), store_id=int(store_id))
-            results.append({"order_id": int(oid), "ok": True, "message": out.get("message", "ok")})
-        except ValueError as e:
-            results.append({"order_id": int(oid), "ok": False, "message": str(e)})
-    return {"results": results}
+            try:
+                out = push_store_retail_order_to_sf(db=sdb, order_id=int(oid), store_id=int(store_id))
+                return {"order_id": int(oid), "ok": True, "message": out.get("message", "ok")}
+            except ValueError as e:
+                return {"order_id": int(oid), "ok": False, "message": str(e)}
+        finally:
+            sdb.close()
+
+    return run_retail_sf_bulk_in_waves([int(x) for x in order_ids], push_one=_push_one)
 
 
 def bulk_admin_assign_courier_store_retail_orders(

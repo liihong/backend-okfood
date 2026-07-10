@@ -1500,7 +1500,13 @@ def mark_single_meals_sf_awaiting_pickup_on_push_no_commit(
 def mark_single_meals_in_delivery_on_sf_pickup_no_commit(
     db: Session, order_ids: list[int] | tuple[int, ...]
 ) -> int:
-    """顺丰回调已取货（order_status≥15）：「顺丰待取货」→「配送中」。"""
+    """
+    顺丰回调已取货（order_status≥15）：标为「配送中」。
+
+    支持：
+    - ``sf_awaiting_pickup`` → ``accepted``（正常取货）
+    - ``sf_cancelled`` → ``accepted``（骑士撤单后重派并取货，纠正误标取消）
+    """
     updated = 0
     for raw in order_ids:
         try:
@@ -1517,7 +1523,7 @@ def mark_single_meals_in_delivery_on_sf_pickup_no_commit(
         prev = str(row.fulfillment_status or "").strip().lower()
         if prev == "accepted":
             continue
-        if prev != _FULFILLMENT_SF_AWAITING_PICKUP:
+        if prev not in (_FULFILLMENT_SF_AWAITING_PICKUP, "sf_cancelled"):
             continue
         row.fulfillment_status = "accepted"
         updated += 1
@@ -2136,75 +2142,19 @@ def bulk_push_single_meal_retail_to_sf(
     order_ids: list[int],
     store_id: int,
 ) -> dict[str, Any]:
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    from app.core.config import get_settings
-    from app.db.session import SessionLocal
-    from app.services.delivery.sf_same_city_service import push_single_meal_retail_to_sf
-
-    oids = [int(x) for x in order_ids]
-    if not oids:
-        return {"results": []}
-
-    def _push_one(oid: int) -> dict[str, Any]:
-        sdb = SessionLocal()
-        try:
-            try:
-                r = push_single_meal_retail_to_sf(sdb, order_id=int(oid), store_id=int(store_id))
-                return {
-                    "order_id": int(oid),
-                    "ok": True,
-                    "message": r.message or "已提交顺丰",
-                    "sf_order_id": r.sf_order_id,
-                }
-            except ValueError as e:
-                return {"order_id": int(oid), "ok": False, "message": str(e)}
-        finally:
-            sdb.close()
-
-    from app.services.sf_open.user_messages import (
-        MSG_BALANCE_INSUFFICIENT,
-        MSG_SKIPPED_AFTER_BALANCE,
-        is_sf_balance_insufficient,
+    from app.services.delivery.sf_same_city_service import (
+        push_single_meal_retail_to_sf_bulk_item,
+        run_retail_sf_bulk_in_waves,
     )
 
-    balance_halt = False
-    hint: str | None = None
-
-    def _append_result(item: dict[str, Any]) -> None:
-        nonlocal balance_halt, hint
-        results.append(item)
-        if not item.get("ok") and is_sf_balance_insufficient(
-            error_code=None, message=str(item.get("message") or "")
-        ):
-            balance_halt = True
-            hint = MSG_BALANCE_INSUFFICIENT
-
-    results: list[dict[str, Any]] = []
-    concurrency = int(get_settings().SF_PUSH_HTTP_CONCURRENCY or 1)
-    if concurrency <= 1 or len(oids) == 1:
-        for oid in oids:
-            if balance_halt:
-                _append_result(
-                    {"order_id": int(oid), "ok": False, "message": MSG_SKIPPED_AFTER_BALANCE}
-                )
-                continue
-            _append_result(_push_one(oid))
-        return {"results": results, "hint": hint}
-
-    workers = min(concurrency, len(oids))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        fut_map = {pool.submit(_push_one, oid): oid for oid in oids}
-        for fut in as_completed(fut_map):
-            _append_result(fut.result())
-    results.sort(key=lambda x: int(x["order_id"]))
-    if hint is None and any(
-        not r.get("ok")
-        and is_sf_balance_insufficient(error_code=None, message=str(r.get("message") or ""))
-        for r in results
-    ):
-        hint = MSG_BALANCE_INSUFFICIENT
-    return {"results": results, "hint": hint}
+    _ = db
+    oids = [int(x) for x in order_ids]
+    return run_retail_sf_bulk_in_waves(
+        oids,
+        push_one=lambda oid: push_single_meal_retail_to_sf_bulk_item(
+            order_id=int(oid), store_id=int(store_id)
+        ),
+    )
 
 
 def bulk_admin_assign_courier_single_meal_orders(

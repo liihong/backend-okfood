@@ -3097,8 +3097,15 @@
   background: rgba(245, 158, 11, 0.16);
   color: #d97706;
 }
-.delivery-records-units--compensation {
+.delivery-records-kind-badge--recharge {
+  background: rgba(14, 90, 68, 0.12);
+  color: #0e5a44;
+}
+.delivery-records-units--addition {
   color: #d97706;
+}
+.delivery-records-units--deduction {
+  color: #0e5a44;
 }
 .delivery-records-ymd-muted {
   font-weight: 500;

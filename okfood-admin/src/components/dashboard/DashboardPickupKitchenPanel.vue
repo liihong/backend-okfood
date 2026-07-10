@@ -32,7 +32,7 @@ const props = defineProps({
 
 const emit = defineEmits(['menu-day-stock-saved'])
 
-/** @typedef {{ kind: 'subscription', member_id: number, name: string, phone: string, daily_meal_units: number, balance: number, meal_quota_total: number, is_delivered: boolean }} SubscriptionPickupRow */
+/** @typedef {{ kind: 'subscription', member_id: number, plan_type?: string | null, name: string, phone: string, daily_meal_units: number, balance: number, meal_quota_total: number, is_delivered: boolean }} SubscriptionPickupRow */
 /** @typedef {{ kind: 'retail', order_id: number, name: string, phone: string, dish_title: string, quantity: number, is_delivered: boolean }} RetailPickupRow */
 /** @typedef {SubscriptionPickupRow | RetailPickupRow} PickupRow */
 
@@ -139,7 +139,12 @@ const filteredPickupRows = computed(() => {
   return pickupRows.value.filter((r) => {
     const name = String(r.name || '').toLowerCase()
     const phone = String(r.phone || '')
-    return name.includes(q) || phone.includes(q)
+    const refNo = pickupRefNo(r)
+    const refText = refNo ? refNo.text.toLowerCase() : ''
+    const refId = String(
+      r.kind === 'retail' ? Math.trunc(Number(r.order_id) || 0) : Math.trunc(Number(r.member_id) || 0),
+    )
+    return name.includes(q) || phone.includes(q) || refText.includes(q) || refId.includes(q)
   })
 })
 
@@ -153,6 +158,18 @@ function formatQuotaDisplay(row) {
 
 function pickupRowKey(row) {
   return row.kind === 'retail' ? `retail:${row.order_id}` : `sub:${row.member_id}`
+}
+
+/** 单号列：零售为订单号，周/月卡为会员 ID */
+function pickupRefNo(row) {
+  if (row.kind === 'retail') {
+    const id = Math.trunc(Number(row.order_id) || 0)
+    return id > 0 ? { text: `#${id}`, title: `订单 #${id}` } : null
+  }
+  const plan = String(row.plan_type || '').trim()
+  if (plan !== '周卡' && plan !== '月卡') return null
+  const id = Math.trunc(Number(row.member_id) || 0)
+  return id > 0 ? { text: `#${id}`, title: `会员ID #${id}` } : null
 }
 
 function pickupRowMarkKey(row) {
@@ -496,7 +513,7 @@ watch(
           v-model="pickupSearch"
           type="search"
           class="dpk-search-input"
-          placeholder="输入自提客户姓名或手机号后四位模糊搜索..."
+          placeholder="输入姓名、手机号后四位或单号模糊搜索..."
           autocomplete="off"
         />
       </div>
@@ -507,6 +524,7 @@ watch(
         <table v-else class="dpk-table">
           <thead>
             <tr>
+              <th class="dpk-th-ref">会员ID/单号</th>
               <th>名称</th>
               <th>自提份数</th>
               <th>状态</th>
@@ -515,6 +533,14 @@ watch(
           </thead>
           <tbody>
             <tr v-for="row in filteredPickupRows" :key="pickupRowKey(row)">
+              <td class="dpk-td-ref">
+                <template v-if="pickupRefNo(row)">
+                  <span class="dpk-ref-no" :title="pickupRefNo(row).title">
+                    {{ pickupRefNo(row).text }}
+                  </span>
+                </template>
+                <span v-else class="dpk-ref-empty">—</span>
+              </td>
               <td class="dpk-td-name">
                 {{ row.name || '—' }}
                 <span v-if="row.kind === 'retail'" class="dpk-retail-tag">零售</span>
@@ -560,7 +586,7 @@ watch(
               </td>
             </tr>
             <tr v-if="pickupRows.length && !filteredPickupRows.length">
-              <td colspan="4" class="dpk-empty-filter">无匹配客户，请调整搜索条件</td>
+              <td colspan="5" class="dpk-empty-filter">无匹配客户，请调整搜索条件</td>
             </tr>
           </tbody>
         </table>
@@ -717,6 +743,32 @@ watch(
 .dpk-td-name {
   font-weight: 800;
   color: #0f172a;
+}
+
+.dpk-th-ref,
+.dpk-td-ref {
+  width: 88px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.dpk-ref-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-family: var(--okfood-font-number);
+  font-size: 12px;
+  font-weight: 900;
+  color: #0f172a;
+  background: #f1f5f9;
+}
+
+.dpk-ref-empty {
+  color: #cbd5e1;
+  font-weight: 700;
 }
 
 .dpk-retail-tag {

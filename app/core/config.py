@@ -35,8 +35,8 @@ class Settings(BaseSettings):
 
     # 进程内 APScheduler：生产环境应 false，由独立 worker（python -m app.jobs.worker）跑定时任务
     ENABLE_IN_PROCESS_SCHEDULER: bool = False
-    # 批量推顺丰 createorder 并发数（独立 HTTP，落库仍串行；1=完全顺序）
-    SF_PUSH_HTTP_CONCURRENCY: int = Field(default=12, ge=1, le=32)
+    # 批量推顺丰 createorder 并发数（按波次执行；1=完全顺序并节流，生产建议保持 1）
+    SF_PUSH_HTTP_CONCURRENCY: int = Field(default=1, ge=1, le=32)
 
     MYSQL_HOST: str = "127.0.0.1"
     MYSQL_PORT: int = 3306

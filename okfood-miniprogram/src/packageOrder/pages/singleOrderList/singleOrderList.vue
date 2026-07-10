@@ -19,7 +19,7 @@
             <text class="summary-title">累计消费</text>
             <text class="summary-num">{{ totalMealUnits }} 份餐</text>
             <text class="summary-hint">
-              共 {{ total }} 条 · 含套餐送达扣次与单次购买（会员卡）扣次
+              共 {{ total }} 条 · 扣次显示 -，入账显示 +
             </text>
           </view>
           <view
@@ -33,10 +33,24 @@
                   {{ row.deduction_kind === 'single_meal' ? '供餐日' : '配送日' }}
                 </text>
                 <text v-if="row.deduction_kind === 'single_meal'" class="record-kind-tag">单次购买</text>
+                <text
+                  v-else-if="row.deduction_kind === 'meal_compensation'"
+                  class="record-kind-tag record-kind-tag--compensation"
+                >补餐</text>
+                <text
+                  v-else-if="row.deduction_kind === 'card_recharge'"
+                  class="record-kind-tag record-kind-tag--recharge"
+                >开卡入账</text>
               </view>
               <text class="record-date">{{ row.delivery_date || '—' }}</text>
             </view>
-            <text class="record-units">{{ row.meal_units || 1 }} 份</text>
+            <text
+              class="record-units"
+              :class="{
+                'record-units--addition': isConsumptionAdditionKind(row.deduction_kind),
+                'record-units--deduction': !isConsumptionAdditionKind(row.deduction_kind),
+              }"
+            >{{ formatSignedMealUnits(row.deduction_kind, row.meal_units) }}</text>
           </view>
         </template>
         <view v-if="loadingMore" class="state-text state-text--small">加载更多…</view>
@@ -73,6 +87,16 @@ const loadingMore = ref(false)
 let fetchSeq = 0
 
 const hasMore = computed(() => items.value.length < total.value)
+
+/** 消费记录：入账类（购买/补餐）用 +，扣次类用 - */
+function isConsumptionAdditionKind(kind) {
+  return kind === 'meal_compensation' || kind === 'card_recharge'
+}
+
+function formatSignedMealUnits(kind, units) {
+  const n = Math.max(1, Number(units) || 1)
+  return `${isConsumptionAdditionKind(kind) ? '+' : '-'}${n} 份`
+}
 
 async function fetchPage(reset) {
   const token = getMemberToken()
@@ -241,6 +265,16 @@ onShow(() => {
   border-radius: 8rpx;
 }
 
+.record-kind-tag--compensation {
+  color: #d97706;
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.record-kind-tag--recharge {
+  color: #0e5a44;
+  background: rgba(14, 90, 68, 0.1);
+}
+
 .record-date {
   font-size: 30rpx;
   font-weight: 900;
@@ -252,8 +286,15 @@ onShow(() => {
   flex-shrink: 0;
   font-size: 28rpx;
   font-weight: 900;
-  color: $ok-forest-green;
   font-variant-numeric: tabular-nums;
+}
+
+.record-units--addition {
+  color: #d97706;
+}
+
+.record-units--deduction {
+  color: $ok-forest-green;
 }
 
 .state-text {
