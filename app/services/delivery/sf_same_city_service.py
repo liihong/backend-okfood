@@ -1034,6 +1034,85 @@ def preview_sf_dinner_same_city(
     )
 
 
+def _strip_sf_remark_noise(text: str) -> str:
+    """去掉历史/冗余备注片段（车型、类别、外部落地配、期望送达等）。"""
+    s = (text or "").strip()
+    if not s:
+        return ""
+    for pat in (
+        r"车型[:：][^；;]*",
+        r"类别[:：][^；;]*",
+        r"外部落地配",
+        r"期望送达[^；;]*",
+    ):
+        s = re.sub(pat, "", s)
+    s = re.sub(r"[；;]{2,}", "；", s)
+    return s.strip("；; ").strip()
+
+
+def _subscription_remarks_from_agg(agg: _Agg | None) -> str | None:
+    """大表订阅推单：仅合并待送会员的用户备注与地址备注（不含单次点餐标签）。"""
+    if agg is None:
+        return None
+    parts: list[str] = []
+    for x in agg.sub_lines:
+        if x.get("is_delivered"):
+            continue
+        if int(x.get("units") or 0) <= 0:
+            continue
+        t = _strip_sf_remark_noise(str(x.get("remarks") or ""))
+        if t:
+            parts.append(t)
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for p in parts:
+        if p not in seen:
+            seen.add(p)
+            uniq.append(p)
+    return "；".join(uniq) if uniq else None
+
+
+def _strip_single_meal_labels_from_remark(text: str) -> str:
+    """去掉备注中的单次点餐标签（如「宫保鸡丁x1」），订阅合并单不需要。"""
+    parts = [p.strip() for p in re.split(r"[；;]", text or "") if p.strip()]
+    kept = [p for p in parts if not re.search(r"x\d+$", p, flags=re.IGNORECASE)]
+    return "；".join(kept)
+
+
+def _resolve_delivery_sheet_push_remark(
+    item_remark: str | None,
+    agg: _Agg | None,
+) -> str | None:
+    """大表推单备注：优先订阅会员用户/地址备注；保留管理端改写或追加的商家说明。"""
+    sub_remark = _subscription_remarks_from_agg(agg)
+    raw_item_remark = _strip_single_meal_labels_from_remark(
+        _strip_sf_remark_noise((item_remark or "").strip())
+    )
+    if sub_remark and raw_item_remark:
+        if raw_item_remark == sub_remark or sub_remark in raw_item_remark:
+            return raw_item_remark or sub_remark
+        if len(raw_item_remark) > len(sub_remark):
+            return raw_item_remark
+        return sub_remark
+    return sub_remark or raw_item_remark or None
+
+
+def _build_sf_delivery_sheet_remark(*, meal_count: int, remark: str | None) -> str:
+    """顺丰骑士端备注：份数 + 用户/地址备注；不传车型、类别、期望送达等文案。"""
+    meal_note = f"{max(1, int(meal_count))}份餐"
+    rmk0 = _strip_sf_remark_noise((remark or "").strip())
+    return f"{meal_note} {rmk0}".strip() if rmk0 else meal_note
+
+
+def _sf_product_display_name(row: SfSameCityRowBase, *, n_meals: int, gset: Any) -> str:
+    """货品名称：订阅合并单用「餐品」；零售/单点保留菜品名，不写「外部落地配」。"""
+    cat = (row.product_category or "").strip()
+    generic = (gset.SF_PRODUCT_CATEGORY_LABEL or "餐品").strip()
+    if not cat or cat in (generic, "外部落地配"):
+        return f"餐品{n_meals}份"
+    return f"{cat[:80]} {n_meals}份"[:200]
+
+
 def _create_order_payload(
     row: SfSameCityRowBase,
     *,
@@ -1054,10 +1133,7 @@ def _create_order_payload(
     decl = None
     if is_insu and row.goods_value_yuan is not None:
         decl = int(Decimal(str(row.goods_value_yuan)) * 100)
-    # 备注：仅体现当次停靠点份数（如「2份餐」）；可选拼接管理端备注，不传车型/类别文案
-    meal_note = f"{int(n_meals)}份餐"
-    rmk0 = (row.remark or "").strip()
-    rmk_final = f"{meal_note} {rmk0}".strip() if rmk0 else meal_note
+    rmk_final = _build_sf_delivery_sheet_remark(meal_count=n_meals, remark=row.remark)
 
     # 无会员坐标时的回退中心点（河南省新乡市，GCJ-02 约值，与默认 SF_CITY_NAME 一致）
     recv_lng, recv_lat = 113.883991, 35.303257
@@ -1135,7 +1211,7 @@ def _create_order_payload(
         "shop_money": 0,
         "product_detail": [
             {
-                "product_name": f"{(row.product_category or '餐品')[:80]} {n_meals}份"[:200],
+                "product_name": _sf_product_display_name(row, n_meals=n_meals, gset=gset),
                 "product_num": int(n_meals),
             }
         ],
@@ -1673,8 +1749,11 @@ def push_sf_same_city(
             soid = f"OKF{d:%Y%m%d}{item.stop_id[:12]}{uuid.uuid4().hex[:8]}"
             if len(soid) > 64:
                 soid = soid[:64]
-            snap_preview: dict[str, Any] = item.model_dump(mode="json")
-            item_ds = _delivery_sheet_push_row(item)
+            # 大表推单备注：份数 + 用户/地址备注 + 可选商家说明；去掉单次点餐标签与历史冗余
+            final_remark = _resolve_delivery_sheet_push_remark(item.remark, agg_cur)
+            item_push = item.model_copy(update={"remark": final_remark})
+            snap_preview: dict[str, Any] = item_push.model_dump(mode="json")
+            item_ds = _delivery_sheet_push_row(item_push)
             pld = _create_order_payload(
                 item_ds,
                 shop_order_id=soid,
@@ -2002,11 +2081,21 @@ def auto_push_sf_today_business_day_for_store(
     if not sf_configured:
         logger.info("顺丰自动推单跳过（未配置顺丰） store_id=%s", store_id)
         return SfNightlyAutoPushStoreResult(skip_reason="未配置顺丰")
-    pending = [
-        r
-        for r in rows
-        if r.selected and not r.already_pushed and int(r.subscription_pending_units or 0) > 0
-    ]
+    # 定时推单走立即推单，不传 expect_time，避免骑士端展示期望送达时间
+    pending: list[SfSameCityPreviewRow] = []
+    for r in rows:
+        if not (r.selected and not r.already_pushed and int(r.subscription_pending_units or 0) > 0):
+            continue
+        agg = ags.get(r.stop_id)
+        pending.append(
+            r.model_copy(
+                update={
+                    "push_immediately": True,
+                    "expect_delivery_at": None,
+                    "remark": _resolve_delivery_sheet_push_remark(r.remark, agg),
+                }
+            )
+        )
     if not pending:
         logger.info("顺丰自动推单跳过（无待推停靠点） store_id=%s date=%s", store_id, d)
         return SfNightlyAutoPushStoreResult(skip_reason="无待推停靠点")
