@@ -191,6 +191,51 @@ def _assert_no_pending_unpaid_retail_order(db: Session, member_id: int) -> None:
         )
 
 
+def create_paid_store_retail_order_for_douyin_redeem(
+    db: Session,
+    *,
+    member: Member,
+    retail_product_id: int,
+    amount_yuan: Decimal | None = None,
+    remark: str | None = None,
+) -> StoreRetailOrder:
+    """抖音验券成功后创建已支付商城零售订单（默认门店自提，待后台接单）。"""
+    prod = db.get(StoreRetailProduct, int(retail_product_id))
+    if not prod:
+        raise HTTPException(status_code=404, detail="商城商品不存在")
+    _assert_retail_product_orderable(db, product=prod, store_id=int(member.store_id))
+
+    if amount_yuan is None:
+        amount_yuan = Decimal(prod.unit_price_yuan).quantize(Decimal("0.01"))
+    else:
+        amount_yuan = Decimal(amount_yuan).quantize(Decimal("0.01"))
+
+    row = StoreRetailOrder(
+        tenant_id=int(member.tenant_id),
+        store_id=int(member.store_id),
+        out_trade_no=_new_temp_out_trade_no(),
+        member_id=int(member.id),
+        retail_product_id=int(prod.id),
+        product_title=(prod.title or "").strip() or "商品",
+        member_address_id=None,
+        store_pickup=True,
+        quantity=1,
+        fulfillment_date=today_shanghai(),
+        routing_area="门店自提",
+        amount_yuan=amount_yuan,
+        pay_status="已支付",
+        pay_channel="抖音",
+        fulfillment_status=_FULFILLMENT_AWAITING_ACCEPT,
+        courier_id=None,
+        remark=(remark or "抖音验券兑换")[:500],
+    )
+    db.add(row)
+    db.flush()
+    row.out_trade_no = _final_out_trade_no(int(row.id))
+    _notify_store_retail_order_paid(db, row)
+    return row
+
+
 def create_store_retail_order(
     db: Session, member_id: int, body: StoreRetailOrderCreateIn
 ) -> StoreRetailOrderOut:

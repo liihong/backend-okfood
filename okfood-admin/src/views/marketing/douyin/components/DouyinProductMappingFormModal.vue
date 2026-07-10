@@ -21,6 +21,7 @@ const refsLoading = ref(false)
 const formRef = ref(null)
 const couponTemplates = ref([])
 const membershipTemplates = ref([])
+const retailProducts = ref([])
 
 const form = ref(emptyForm())
 
@@ -29,20 +30,26 @@ const GRANT_OPTIONS = [
   { value: 'month_card', label: '月卡' },
   { value: 'membership_template', label: '会员卡包' },
   { value: 'coupon_template', label: '优惠券' },
+  { value: 'retail_product', label: '商城商品' },
 ]
 
 const needsTarget = computed(() =>
-  ['membership_template', 'coupon_template'].includes(form.value.grant_type),
+  ['membership_template', 'coupon_template', 'retail_product'].includes(form.value.grant_type),
 )
 
-const targetLabel = computed(() =>
-  form.value.grant_type === 'coupon_template' ? '关联优惠券' : '关联会员卡包',
-)
+const targetLabel = computed(() => {
+  if (form.value.grant_type === 'coupon_template') return '关联优惠券'
+  if (form.value.grant_type === 'retail_product') return '关联商城商品'
+  return '关联会员卡包'
+})
 
 const targetPlaceholder = computed(() => {
   if (refsLoading.value) return '加载中…'
   if (form.value.grant_type === 'coupon_template') {
     return couponTemplates.value.length ? '请选择优惠券券种' : '暂无可用券种，请先在优惠券管理创建'
+  }
+  if (form.value.grant_type === 'retail_product') {
+    return retailProducts.value.length ? '请选择商城商品' : '暂无上架商品，请先在商城商品管理创建'
   }
   if (form.value.grant_type === 'membership_template') {
     return membershipTemplates.value.length ? '请选择会员卡包' : '暂无可用卡包，请先在会员卡管理创建'
@@ -55,6 +62,12 @@ const targetOptions = computed(() => {
     return couponTemplates.value.map((t) => ({
       id: Number(t.id),
       label: `${t.name}（减 ${t.discount_yuan} 元）`,
+    }))
+  }
+  if (form.value.grant_type === 'retail_product') {
+    return retailProducts.value.map((p) => ({
+      id: Number(p.id),
+      label: `${p.title}（¥${p.unit_price_yuan}）`,
     }))
   }
   if (form.value.grant_type === 'membership_template') {
@@ -108,16 +121,20 @@ async function loadRefs() {
   refsLoading.value = true
   const sid = props.storeId
   try {
-    const [couponData, membershipData] = await Promise.all([
+    const [couponData, membershipData, retailData] = await Promise.all([
       apiJson(
         `/api/admin/marketing/coupon-templates?store_id=${sid}&active_only=true&page_size=100`,
         {},
         { auth: true },
       ),
       apiJson(`/api/admin/catalog/membership-templates?store_id=${sid}`, {}, { auth: true }),
+      apiJson(`/api/admin/catalog/retail-products?store_id=${sid}&shelf_only=true`, {}, { auth: true }).catch(
+        () => [],
+      ),
     ])
     couponTemplates.value = Array.isArray(couponData?.items) ? couponData.items : []
     membershipTemplates.value = Array.isArray(membershipData) ? membershipData : []
+    retailProducts.value = Array.isArray(retailData) ? retailData : []
   } catch (e) {
     if (handleAdminLogout(e)) return
     showToast(e instanceof Error ? e.message : '加载关联选项失败', 'error')
@@ -252,7 +269,13 @@ async function onSubmit() {
           <el-option v-for="o in targetOptions" :key="o.id" :label="o.label" :value="o.id" />
         </el-select>
         <p v-if="!refsLoading && !targetOptions.length" class="field-hint field-hint--warn">
-          当前门店暂无可选{{ form.grant_type === 'coupon_template' ? '优惠券券种' : '会员卡包' }}，请先创建并上架。
+          当前门店暂无可选{{
+            form.grant_type === 'coupon_template'
+              ? '优惠券券种'
+              : form.grant_type === 'retail_product'
+                ? '商城商品'
+                : '会员卡包'
+          }}，请先创建并上架。
         </p>
       </el-form-item>
       <el-form-item label="启用">

@@ -108,6 +108,7 @@ class DouyinGrantType(str, Enum):
     MONTH_CARD = "month_card"
     MEMBERSHIP_TEMPLATE = "membership_template"
     COUPON_TEMPLATE = "coupon_template"
+    RETAIL_PRODUCT = "retail_product"
 
 
 class DouyinRedemptionStatus(str, Enum):

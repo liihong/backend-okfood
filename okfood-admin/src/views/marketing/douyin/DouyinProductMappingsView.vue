@@ -17,6 +17,7 @@ const GRANT_LABEL = {
   month_card: '月卡',
   membership_template: '会员卡包',
   coupon_template: '优惠券',
+  retail_product: '商城商品',
 }
 
 async function loadList() {
@@ -90,7 +91,7 @@ onMounted(() => {
         type="info"
         :closable="false"
         show-icon
-        title="将抖音来客商品 ID 与本地权益（周卡/月卡/卡包/优惠券）关联；用户验券成功后按映射发放。"
+        title="将抖音来客商品 ID 与本地权益（周卡/月卡/卡包/优惠券/商城商品）关联；用户验券成功后按映射发放或生成商城订单。"
         class="dy-alert"
       />
 

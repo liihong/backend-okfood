@@ -63,6 +63,10 @@ async function onSubmit() {
         if (!r.confirm) return
         if (data?.grant_type === 'coupon_template') {
           uni.navigateTo({ url: '/packageUser/pages/myCoupons/myCoupons' })
+        } else if (data?.grant_type === 'retail_product' && data?.grant_result_id) {
+          uni.navigateTo({
+            url: `/packageOrder/pages/retailOrderDetail/retailOrderDetail?id=${encodeURIComponent(String(data.grant_result_id))}`,
+          })
         } else {
           uni.switchTab({ url: '/pages/mine/index' })
         }

@@ -31,9 +31,13 @@ class DouyinProductMappingCreateIn(BaseModel):
         if not any(keys):
             raise ValueError("至少填写一个抖音商品标识（product_id / sku_id / product_out_id）")
         gt = self.grant_type
-        if gt in (DouyinGrantType.MEMBERSHIP_TEMPLATE, DouyinGrantType.COUPON_TEMPLATE):
+        if gt in (
+            DouyinGrantType.MEMBERSHIP_TEMPLATE,
+            DouyinGrantType.COUPON_TEMPLATE,
+            DouyinGrantType.RETAIL_PRODUCT,
+        ):
             if self.target_id is None:
-                raise ValueError("卡包或优惠券映射须指定 target_id")
+                raise ValueError("卡包、优惠券或商城商品映射须指定 target_id")
         elif self.target_id is not None:
             raise ValueError("周卡/月卡映射无需 target_id")
         return self

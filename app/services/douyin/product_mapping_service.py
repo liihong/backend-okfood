@@ -10,6 +10,7 @@ from app.models.douyin.product_mapping import DouyinProductMapping
 from app.models.enums import DouyinGrantType
 from app.models.marketing_coupon_template import MarketingCouponTemplate
 from app.models.membership_card_template import MembershipCardTemplate
+from app.models.store_retail_product import StoreRetailProduct
 from app.schemas.douyin import (
     DouyinProductMappingCreateIn,
     DouyinProductMappingOut,
@@ -137,7 +138,7 @@ def _validate_grant_target(
             raise HTTPException(status_code=400, detail="周卡/月卡映射无需 target_id")
         return
     if target_id is None:
-        raise HTTPException(status_code=400, detail="卡包或优惠券映射须选择关联目标")
+        raise HTTPException(status_code=400, detail="卡包、优惠券或商城商品映射须选择关联目标")
     if gt == DouyinGrantType.COUPON_TEMPLATE:
         tpl = db.get(MarketingCouponTemplate, int(target_id))
         if not tpl or int(tpl.store_id) != int(store_id):
@@ -151,6 +152,13 @@ def _validate_grant_target(
             raise HTTPException(status_code=400, detail="会员卡包不存在或不属于当前门店")
         if not bool(tpl.is_active):
             raise HTTPException(status_code=400, detail="会员卡包已下架，不可关联")
+        return
+    if gt == DouyinGrantType.RETAIL_PRODUCT:
+        prod = db.get(StoreRetailProduct, int(target_id))
+        if not prod or int(prod.store_id) != int(store_id):
+            raise HTTPException(status_code=400, detail="商城商品不存在或不属于当前门店")
+        if not bool(prod.is_on_shelf):
+            raise HTTPException(status_code=400, detail="商城商品已下架，不可关联")
         return
     raise HTTPException(status_code=400, detail="未知映射类型")
 
@@ -219,9 +227,13 @@ def patch_douyin_product_mapping(
     if not any(keys):
         raise HTTPException(status_code=400, detail="至少保留一个抖音商品标识")
     gt = DouyinGrantType(str(row.grant_type))
-    if gt in (DouyinGrantType.MEMBERSHIP_TEMPLATE, DouyinGrantType.COUPON_TEMPLATE):
+    if gt in (
+        DouyinGrantType.MEMBERSHIP_TEMPLATE,
+        DouyinGrantType.COUPON_TEMPLATE,
+        DouyinGrantType.RETAIL_PRODUCT,
+    ):
         if row.target_id is None:
-            raise HTTPException(status_code=400, detail="卡包或优惠券映射须指定 target_id")
+            raise HTTPException(status_code=400, detail="卡包、优惠券或商城商品映射须指定 target_id")
     _validate_grant_target(
         db,
         store_id=int(store_id),
@@ -244,4 +256,6 @@ def grant_type_label(grant_type: str, *, display_name: str | None = None) -> str
         return display_name or "会员卡包"
     if gt == DouyinGrantType.COUPON_TEMPLATE.value:
         return display_name or "优惠券"
+    if gt == DouyinGrantType.RETAIL_PRODUCT.value:
+        return display_name or "商城商品"
     return display_name or gt

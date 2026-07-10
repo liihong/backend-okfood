@@ -19,7 +19,10 @@ from app.models.membership_card_template import MembershipCardTemplate
 from app.models.store import Store
 from app.models.tenant import Tenant
 from app.services.delivery.courier_service import member_on_subscription_delivery_schedule
-from app.services.member.member_card_order_service import _apply_paid_card_order_to_member_balance
+from app.services.member.member_card_order_service import (
+    _apply_paid_card_order_to_member_balance,
+    create_paid_card_order_for_douyin_redeem,
+)
 
 
 @pytest.fixture()
@@ -140,3 +143,44 @@ def test_renew_explicit_defer_still_pauses(renew_db: Session) -> None:
     assert int(m.balance) == 5
     assert m.delivery_deferred is True
     assert m.is_active is False
+
+
+def test_douyin_renew_keep_schedule_does_not_pause_delivery(renew_db: Session, monkeypatch) -> None:
+    """老会员抖音验券续卡：不得误标 delivery_deferred，状态应为配送中而非已暂停。"""
+    monkeypatch.setattr(
+        "app.services.delivery.courier_service.is_subscription_delivery_day",
+        lambda _d: True,
+    )
+    renew_db.add(
+        MemberCardOrder(
+            id=99,
+            member_id=20,
+            tenant_id=1,
+            store_id=1,
+            membership_template_id=1,
+            card_kind="周卡",
+            pay_channel=CardPayChannel.WECHAT.value,
+            pay_status=CardOrderPayStatus.PAID.value,
+            amount_yuan=Decimal("99.00"),
+            applied_to_member=True,
+            delivery_start_date=date(2026, 3, 1),
+            meal_periods_snapshot=["lunch"],
+            created_by="miniprogram",
+        )
+    )
+    renew_db.commit()
+
+    order = create_paid_card_order_for_douyin_redeem(
+        renew_db,
+        member=renew_db.get(Member, 20),
+        membership_template_id=1,
+        amount_yuan=Decimal("188.00"),
+    )
+    renew_db.commit()
+    m = renew_db.get(Member, 20)
+    assert m is not None
+    assert int(m.balance) == 5
+    assert m.delivery_deferred is False
+    assert m.is_active is True
+    assert m.delivery_start_date == date(2026, 3, 1)
+    assert order.activation_mode == "keep_schedule"

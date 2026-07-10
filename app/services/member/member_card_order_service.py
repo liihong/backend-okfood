@@ -466,9 +466,10 @@ def _apply_paid_card_order_to_member_balance(
     m = db.get(Member, order.member_id)
     if not m:
         raise HTTPException(status_code=404, detail="会员不存在")
+    # 老会员自助续卡：工单不填起送日时沿用档案起送日（小程序购卡、抖音验券一致）
     if (
         order.delivery_start_date is None
-        and (order.created_by or "").strip() == MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR
+        and (order.created_by or "").strip() in SELF_SERVICE_CARD_ORDER_CREATORS
         and m.delivery_start_date is not None
     ):
         order.delivery_start_date = m.delivery_start_date
@@ -1112,6 +1113,15 @@ def create_paid_card_order_for_douyin_redeem(
     if delivery_start_date is not None and delivery_start_date < min_member_delivery_start_shanghai():
         raise HTTPException(status_code=400, detail="起送日期须不早于明日（上海业务日）")
 
+    # 老会员续卡：与小程序购卡一致，保持配送安排，不得误标暂停配送
+    is_renewal = _member_has_prior_applied_card_order(db, int(member.id))
+    if delivery_start_date is not None:
+        activation_mode = CardOrderActivationMode.EXPLICIT_DATE.value
+    elif is_renewal:
+        activation_mode = CardOrderActivationMode.KEEP_SCHEDULE.value
+    else:
+        activation_mode = CardOrderActivationMode.DEFER_NOT_OPEN.value
+
     order = MemberCardOrder(
         member_id=int(member.id),
         tenant_id=int(member.tenant_id),
@@ -1123,11 +1133,7 @@ def create_paid_card_order_for_douyin_redeem(
         amount_yuan=amount_yuan,
         remark=(remark or "抖音验券兑换")[:500],
         delivery_start_date=delivery_start_date,
-        activation_mode=(
-            CardOrderActivationMode.EXPLICIT_DATE.value
-            if delivery_start_date is not None
-            else CardOrderActivationMode.DEFER_NOT_OPEN.value
-        ),
+        activation_mode=activation_mode,
         applied_to_member=False,
         out_trade_no=None,
         wx_transaction_id=None,
@@ -1135,5 +1141,10 @@ def create_paid_card_order_for_douyin_redeem(
     )
     db.add(order)
     db.flush()
-    _apply_paid_card_order_to_member_balance(db, order, operator=operator)
+    _apply_paid_card_order_to_member_balance(
+        db,
+        order,
+        operator=operator,
+        open_mode=CardOpenMode.RENEW if is_renewal else None,
+    )
     return order

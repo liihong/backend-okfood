@@ -22,12 +22,14 @@ from app.models.enums import DouyinGrantType, DouyinRedemptionStatus
 from app.models.marketing_coupon_template import MarketingCouponTemplate
 from app.models.member import Member
 from app.models.membership_card_template import MembershipCardTemplate
+from app.models.store_retail_product import StoreRetailProduct
 from app.core.timeutil import beijing_now_naive
 from app.schemas.douyin import DouyinCertificateRedeemIn, DouyinCertificateRedeemOut
 from app.services.douyin.config_service import get_douyin_access_token, get_douyin_store_config
 from app.services.douyin.product_mapping_service import find_active_mapping_for_certificate, grant_type_label
 from app.services.marketing.member_coupon_service import _grant_member_coupon_to_member
 from app.services.member.member_card_order_service import create_paid_card_order_for_douyin_redeem
+from app.services.client.store_retail_order_service import create_paid_store_retail_order_for_douyin_redeem
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +238,24 @@ def _apply_local_grant(
         db.flush()
         return "member_coupon", int(coupon_row.id), grant_type_label(gt.value, display_name=tpl.name)
 
+    if gt == DouyinGrantType.RETAIL_PRODUCT:
+        if mapping.target_id is None:
+            raise HTTPException(status_code=400, detail="商城商品映射缺少商品 ID")
+        prod = db.get(StoreRetailProduct, int(mapping.target_id))
+        if not prod or int(prod.store_id) != int(member.store_id):
+            raise HTTPException(status_code=404, detail="商城商品不存在")
+        if not bool(prod.is_on_shelf):
+            raise HTTPException(status_code=400, detail="商城商品已下架，无法核销")
+        grant_label = grant_type_label(gt.value, display_name=prod.title)
+        order = create_paid_store_retail_order_for_douyin_redeem(
+            db,
+            member=member,
+            retail_product_id=int(prod.id),
+            amount_yuan=amount_yuan,
+            remark=remark,
+        )
+        return "store_retail_order", int(order.id), grant_label
+
     card_kind: str | None = None
     membership_template_id: int | None = None
     grant_label = mapping.display_name
@@ -277,6 +297,8 @@ def _build_redeem_out(
     msg = f"兑换成功，已获得{grant_label}"
     if grant_kind == "member_card_order" and delivery_start_date is None:
         msg += "；请完善配送信息后开始履约"
+    elif grant_kind == "store_retail_order":
+        msg += "；已生成商城订单，请到店自提或联系门店安排配送"
     return DouyinCertificateRedeemOut(
         grant_type=str(mapping.grant_type),
         grant_label=grant_label,
