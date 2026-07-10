@@ -7,12 +7,16 @@ from fastapi import APIRouter, Query, Request
 from app.core.deps import MemberIdScoped, SessionDep
 from app.core.limiter import limiter
 from app.integrations.wechat_pay_v2 import resolve_request_client_ip
-from app.schemas.store_retail_order import StoreRetailOrderCreateIn
+from app.schemas.store_retail_order import (
+    StoreRetailOrderCreateIn,
+    StoreRetailOrderMemberAddressPatchIn,
+)
 from app.services.client.store_retail_order_service import (
     create_store_retail_order,
     get_member_store_retail_order,
     list_member_store_retail_orders,
     member_cancel_store_retail_order,
+    member_update_store_retail_order_address,
     prepare_wechat_jsapi_for_retail_order,
     sync_store_retail_order_from_wechat_or_raise,
 )
@@ -98,6 +102,26 @@ def sync_retail_order_after_pay(
     sync_store_retail_order_from_wechat_or_raise(db, member_id, order_id)
     out = get_member_store_retail_order(db, member_id, order_id)
     return success(data=dump_model(out), msg="支付结果已同步")
+
+
+@router.patch("/retail-orders/{order_id}/delivery")
+@limiter.limit("30/minute")
+def patch_retail_order_delivery_me(
+    request: Request,
+    order_id: int,
+    body: StoreRetailOrderMemberAddressPatchIn,
+    db: SessionDep,
+    member_id: MemberIdScoped,
+):
+    """待接单状态下修改配送到家收货地址。"""
+    _ = request
+    out = member_update_store_retail_order_address(
+        db,
+        member_id=member_id,
+        order_id=order_id,
+        member_address_id=int(body.member_address_id),
+    )
+    return success(data=dump_model(out), msg="配送地址已更新")
 
 
 @router.post("/retail-orders/{order_id}/cancel")

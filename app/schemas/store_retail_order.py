@@ -1,4 +1,6 @@
 from datetime import date, datetime
+from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -78,6 +80,12 @@ class StoreRetailOrderDeliveryPatchIn(BaseModel):
         return self
 
 
+class StoreRetailOrderMemberAddressPatchIn(BaseModel):
+    """会员端：待接单状态下修改配送到家收货地址。"""
+
+    member_address_id: int = Field(..., ge=1, description="会员已保存的配送地址 id")
+
+
 class StoreRetailOrderIdsIn(BaseModel):
     order_ids: list[int] = Field(..., min_length=1, max_length=100)
 
@@ -94,3 +102,38 @@ class StoreRetailBatchAssignCourierIn(BaseModel):
 class StoreRetailCancelIn(BaseModel):
     cancel_reason: str | None = Field(None, max_length=200)
     cancel_sf: bool = Field(True, description="若已推顺丰则同步请求取消")
+
+
+class AdminStoreRetailOrderCreateIn(BaseModel):
+    """管理端：手动创建商城零售订单。"""
+
+    phone: str = Field(..., min_length=5, max_length=20, description="会员手机号")
+    name: str | None = Field(
+        None,
+        max_length=100,
+        description="会员不存在时须填写姓名以创建新会员",
+    )
+    retail_product_id: int = Field(..., ge=1, description="商城商品 id")
+    quantity: int = Field(1, ge=1, le=50)
+    store_pickup: bool = Field(False, description="门店自提")
+    member_address_id: int | None = Field(
+        None,
+        ge=1,
+        description="配送到家时必填：会员已保存的配送地址 id",
+    )
+    pay_channel: Literal["微信", "线下", "抖音"] = Field(..., description="支付渠道")
+    pay_status: Literal["已支付", "未支付"] = Field("已支付", description="支付状态")
+    amount_yuan: Decimal | None = Field(
+        None,
+        ge=Decimal("0"),
+        max_digits=12,
+        decimal_places=2,
+        description="实收金额；空则按商品售价与配送方式自动计算",
+    )
+    remark: str | None = Field(None, max_length=500, description="后台备注")
+
+    @model_validator(mode="after")
+    def _address_when_delivery(self) -> "AdminStoreRetailOrderCreateIn":
+        if not self.store_pickup and self.member_address_id is None:
+            raise ValueError("配送到家须选择配送地址")
+        return self

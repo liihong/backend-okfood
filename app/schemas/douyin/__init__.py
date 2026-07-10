@@ -103,6 +103,22 @@ class DouyinCertificateRedeemIn(BaseModel):
     )
 
 
+class AdminDouyinCertificateRedeemIn(BaseModel):
+    """管理端：协助会员抖音验券兑换。"""
+
+    phone: str = Field(..., min_length=5, max_length=20, description="会员手机号")
+    code: str = Field(..., min_length=4, max_length=128, description="抖音订单券码明文")
+    name: str | None = Field(
+        None,
+        max_length=100,
+        description="会员不存在时须填写姓名以创建新会员",
+    )
+    delivery_start_date: date | None = Field(
+        None,
+        description="开卡类权益可选起送日；商城商品映射忽略",
+    )
+
+
 class DouyinCertificateRedeemOut(BaseModel):
     """小程序：兑换结果。"""
 

@@ -8,8 +8,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app.core.deps import SessionDep, admin_staff_subject, require_admin_tenant_store
-from app.schemas.douyin import DouyinProductMappingCreateIn, DouyinProductMappingPatchIn
+from app.schemas.douyin import (
+    AdminDouyinCertificateRedeemIn,
+    DouyinProductMappingCreateIn,
+    DouyinProductMappingPatchIn,
+)
 from app.services.douyin import (
+    admin_redeem_douyin_certificate,
     create_douyin_product_mapping,
     list_douyin_product_mappings_paged,
     list_douyin_redemptions_paged,
@@ -113,3 +118,22 @@ def admin_list_douyin_redemptions(
         page_size=page_size,
         msg="获取成功",
     )
+
+
+@router.post("/certificates/redeem")
+def admin_redeem_douyin_certificate_api(
+    db: SessionDep,
+    admin_username: Annotated[str, Depends(admin_staff_subject)],
+    body: AdminDouyinCertificateRedeemIn,
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """管理端：协助会员抖音验券兑换（商城商品映射将自动建单）。"""
+    tid, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = admin_redeem_douyin_certificate(
+        db,
+        tenant_id=int(tid),
+        store_id=int(sid),
+        body=body,
+        operator=admin_username,
+    )
+    return success(data=dump_model(out), msg=out.message or "验券成功")

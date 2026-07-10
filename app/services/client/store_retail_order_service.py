@@ -583,5 +583,50 @@ def member_cancel_store_retail_order(db: Session, *, member_id: int, order_id: i
     return "订单已取消"
 
 
+def _can_member_update_store_retail_address(o: StoreRetailOrder) -> tuple[bool, str]:
+    """会员端：待接单且配送到家时允许修改收货地址。"""
+    pay = (o.pay_status or "").strip()
+    fs = str(o.fulfillment_status or "").strip().lower()
+    if pay != "已支付":
+        return False, "仅已支付订单可修改配送地址"
+    if fs != _FULFILLMENT_AWAITING_ACCEPT:
+        return False, "商家已接单，无法修改配送地址"
+    if bool(o.store_pickup):
+        return False, "门店自提订单请联系商家修改"
+    return True, ""
+
+
+def member_update_store_retail_order_address(
+    db: Session,
+    *,
+    member_id: int,
+    order_id: int,
+    member_address_id: int,
+) -> StoreRetailOrderOut:
+    """会员端：待接单状态下修改配送到家收货地址。"""
+    row = db.get(StoreRetailOrder, int(order_id))
+    if not row or int(row.member_id) != int(member_id):
+        raise HTTPException(status_code=404, detail="订单不存在")
+    ok, err = _can_member_update_store_retail_address(row)
+    if not ok:
+        raise HTTPException(status_code=400, detail=err)
+
+    addr = db.get(MemberAddress, int(member_address_id))
+    if not addr or int(addr.member_id) != int(member_id):
+        raise HTTPException(status_code=400, detail="配送地址不存在或不属于当前会员")
+
+    nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
+    area = routing_area_label(addr, nm)
+    detail_line = full_address_line(addr.map_location_text, addr.door_detail)
+    address_summary = f"{area} {detail_line}".strip()
+
+    row.member_address_id = int(addr.id)
+    row.routing_area = area
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _row_to_out(db, row, address_summary=address_summary)
+
+
 def store_retail_fulfillment_allows_dispatch(fs: str | None) -> bool:
     return str(fs or "").strip().lower() in ("pending", "sf_cancelled")

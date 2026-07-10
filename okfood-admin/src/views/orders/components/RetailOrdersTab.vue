@@ -1,7 +1,8 @@
 <script setup>
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown, Plus } from 'lucide-vue-next'
 import { onMounted, onUnmounted, ref } from 'vue'
 import AdminTable from '../../../components/AdminTable.vue'
+import RetailManualOrderDialog from './RetailManualOrderDialog.vue'
 import { RETAIL_DELIVERY_TABS } from '../constants.js'
 import {
   retailJuiceDurationBadge,
@@ -40,7 +41,14 @@ const {
   onBatchPushSfRetailOrders,
   clearRetailSelection,
   onRetailRowMoreCommand,
+  fetchActive,
 } = useOrdersManageInject()
+
+const manualOrderOpen = ref(false)
+
+function onManualOrderSuccess() {
+  void fetchActive()
+}
 
 /** 窄屏（手机）使用卡片列表，桌面保留表格 */
 const isNarrowScreen = ref(
@@ -100,6 +108,10 @@ function onRetailMobileSelectChange(row, checked) {
         />
       </el-tabs>
       <div class="orders-batch-bar__actions">
+        <el-button type="primary" size="small" @click="manualOrderOpen = true">
+          <Plus :size="14" style="margin-right: 4px" />
+          手动建单
+        </el-button>
         <span v-if="selectedRetailRows.length" class="orders-batch-bar__count">
           已选 {{ selectedRetailRows.length }} 笔
         </span>
@@ -366,5 +378,7 @@ function onRetailMobileSelectChange(row, checked) {
         </footer>
       </article>
     </div>
+
+    <RetailManualOrderDialog v-model="manualOrderOpen" @success="onManualOrderSuccess" />
   </div>
 </template>

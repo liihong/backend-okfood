@@ -24,7 +24,8 @@ from app.models.member import Member
 from app.models.membership_card_template import MembershipCardTemplate
 from app.models.store_retail_product import StoreRetailProduct
 from app.core.timeutil import beijing_now_naive
-from app.schemas.douyin import DouyinCertificateRedeemIn, DouyinCertificateRedeemOut
+from app.schemas.douyin import AdminDouyinCertificateRedeemIn, DouyinCertificateRedeemIn, DouyinCertificateRedeemOut
+from app.services.admin.store_retail_order_admin_service import _resolve_member_for_admin_retail_order
 from app.services.douyin.config_service import get_douyin_access_token, get_douyin_store_config
 from app.services.douyin.product_mapping_service import find_active_mapping_for_certificate, grant_type_label
 from app.services.marketing.member_coupon_service import _grant_member_coupon_to_member
@@ -678,3 +679,27 @@ def redeem_douyin_certificate(
             grant_error=_grant_error_message(exc),
         )
         raise  # pragma: no cover
+
+
+def admin_redeem_douyin_certificate(
+    db: Session,
+    *,
+    tenant_id: int,
+    store_id: int,
+    body: AdminDouyinCertificateRedeemIn,
+    operator: str,
+) -> DouyinCertificateRedeemOut:
+    """管理端：协助会员完成抖音验券兑换（按手机号匹配或创建会员）。"""
+    _ = operator
+    member = _resolve_member_for_admin_retail_order(
+        db,
+        phone=body.phone,
+        name=body.name,
+        tenant_id=int(tenant_id),
+        store_id=int(store_id),
+    )
+    redeem_body = DouyinCertificateRedeemIn(
+        code=body.code,
+        delivery_start_date=body.delivery_start_date,
+    )
+    return redeem_douyin_certificate(db, member_id=int(member.id), body=redeem_body)

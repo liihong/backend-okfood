@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.deps import SessionDep, admin_staff_subject, require_admin_tenant_store
 from app.schemas.store_retail_order import (
+    AdminStoreRetailOrderCreateIn,
     StoreRetailAssignCourierIn,
     StoreRetailBatchAssignCourierIn,
     StoreRetailCancelIn,
@@ -24,6 +25,7 @@ from app.services.admin.store_retail_order_admin_service import (
     bulk_admin_assign_courier_store_retail_orders,
     bulk_admin_mark_store_retail_orders_delivered,
     bulk_push_store_retail_orders_to_sf,
+    create_admin_store_retail_order,
     list_admin_store_retail_orders,
     push_store_retail_order_to_sf,
     update_admin_store_retail_order_remark,
@@ -68,6 +70,25 @@ def admin_orders_daily_retail_orders(
         page_size=page_size,
         msg="获取成功",
     )
+
+
+@router.post("/orders/retail-orders")
+def admin_create_retail_order(
+    body: AdminStoreRetailOrderCreateIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """商城零售：管理员手动建单（线下/微信/抖音已支付或未支付）。"""
+    tid, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = create_admin_store_retail_order(
+        db,
+        body=body,
+        tenant_id=int(tid),
+        store_id=int(sid),
+        operator=admin_username,
+    )
+    return success(data=dump_model(out), msg="商城订单已创建")
 
 
 @router.post("/orders/retail-orders/{order_id}/accept")

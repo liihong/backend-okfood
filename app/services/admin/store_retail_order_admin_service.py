@@ -9,6 +9,7 @@ from copy import copy
 from decimal import Decimal
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -21,16 +22,24 @@ from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store import Store
 from app.models.store_retail_order import StoreRetailOrder
 from app.schemas.admin import SfSameCityRowBase
-from app.schemas.store_retail_order import AdminStoreRetailOrderListOut
+from app.models.store_retail_product import StoreRetailProduct
+from app.schemas.store_retail_order import AdminStoreRetailOrderCreateIn, AdminStoreRetailOrderListOut
 from app.services.shared.store_config_service import get_store_config
 from app.services.shared.tenant_integration_service import get_merged_pay_config
 from app.services.client.store_retail_order_service import (
     _FULFILLMENT_AWAITING_ACCEPT,
     _FULFILLMENT_SF_AWAITING_PICKUP,
     _RETAIL_STOP_PREFIX,
+    _assert_retail_product_orderable,
+    _compute_retail_order_amount,
+    _final_out_trade_no,
+    _new_temp_out_trade_no,
+    _notify_store_retail_order_paid,
     _row_to_out,
     store_retail_fulfillment_allows_dispatch,
 )
+from app.core.timeutil import today_shanghai
+from app.services.member.member_address_service import full_address_line
 from app.services.member.member_address_service import delivery_region_name_map, routing_area_label
 from app.utils.sql_like import escape_like_fragment
 
@@ -678,3 +687,130 @@ def bulk_admin_mark_store_retail_orders_delivered(
         except ValueError as e:
             results.append({"order_id": int(oid), "ok": False, "message": str(e)})
     return {"results": results}
+
+
+def _resolve_member_for_admin_retail_order(
+    db: Session,
+    *,
+    phone: str,
+    name: str | None,
+    tenant_id: int,
+    store_id: int,
+) -> Member:
+    """管理端建单：按手机号匹配会员；不存在时按姓名创建新会员。"""
+    ph = phone.strip()
+    m = db.scalar(
+        select(Member).where(
+            Member.phone == ph,
+            Member.store_id == int(store_id),
+            Member.deleted_at.is_(None),
+        )
+    )
+    if m:
+        return m
+    nm = (name or "").strip()
+    if not nm:
+        raise HTTPException(status_code=404, detail="会员不存在，请填写姓名以创建新会员")
+    m = Member(
+        phone=ph[:20],
+        name=nm[:100],
+        tenant_id=int(tenant_id),
+        store_id=int(store_id),
+        wechat_name=None,
+        remarks=None,
+        avatar_url=None,
+        balance=0,
+        daily_meal_units=1,
+        meal_quota_total=0,
+        plan_type=None,
+        is_active=False,
+        is_leaved_tomorrow=False,
+        leave_range_start=None,
+        leave_range_end=None,
+        wx_mini_openid=None,
+    )
+    db.add(m)
+    db.flush()
+    return m
+
+
+def create_admin_store_retail_order(
+    db: Session,
+    *,
+    body: AdminStoreRetailOrderCreateIn,
+    tenant_id: int,
+    store_id: int,
+    operator: str,
+) -> AdminStoreRetailOrderListOut:
+    """管理端：手动创建商城零售订单（可已支付待接单或未支付）。"""
+    _ = operator
+    member = _resolve_member_for_admin_retail_order(
+        db,
+        phone=body.phone,
+        name=body.name,
+        tenant_id=int(tenant_id),
+        store_id=int(store_id),
+    )
+
+    prod = db.get(StoreRetailProduct, int(body.retail_product_id))
+    if not prod:
+        raise HTTPException(status_code=404, detail="商城商品不存在")
+    _assert_retail_product_orderable(db, product=prod, store_id=int(store_id))
+
+    qty = int(body.quantity)
+    if body.store_pickup:
+        area = "门店自提"
+        addr_id = None
+    else:
+        addr = db.get(MemberAddress, int(body.member_address_id or 0))
+        if not addr or int(addr.member_id) != int(member.id):
+            raise HTTPException(status_code=404, detail="配送地址不存在或不属于该会员")
+        nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
+        area = routing_area_label(addr, nm)
+        addr_id = int(addr.id)
+
+    if body.amount_yuan is not None:
+        amount = Decimal(body.amount_yuan).quantize(Decimal("0.01"))
+    else:
+        amount = _compute_retail_order_amount(
+            db,
+            unit_price=Decimal(prod.unit_price_yuan),
+            quantity=qty,
+            store_pickup=bool(body.store_pickup),
+            store_id=int(store_id),
+        )
+
+    pay_status = str(body.pay_status)
+    pay_channel = str(body.pay_channel)
+    if pay_status == "已支付":
+        fulfillment_status = _FULFILLMENT_AWAITING_ACCEPT
+    else:
+        fulfillment_status = "pending"
+
+    row = StoreRetailOrder(
+        tenant_id=int(tenant_id),
+        store_id=int(store_id),
+        out_trade_no=_new_temp_out_trade_no(),
+        member_id=int(member.id),
+        retail_product_id=int(prod.id),
+        product_title=(prod.title or "").strip() or "商品",
+        member_address_id=addr_id,
+        store_pickup=bool(body.store_pickup),
+        quantity=qty,
+        fulfillment_date=today_shanghai(),
+        routing_area=area,
+        amount_yuan=amount,
+        pay_status=pay_status,
+        pay_channel=pay_channel if pay_status == "已支付" else None,
+        fulfillment_status=fulfillment_status,
+        courier_id=None,
+        remark=(body.remark or "管理员手动建单")[:500],
+    )
+    db.add(row)
+    db.flush()
+    row.out_trade_no = _final_out_trade_no(int(row.id))
+    if pay_status == "已支付":
+        _notify_store_retail_order_paid(db, row)
+    db.commit()
+    db.refresh(row)
+    return _build_admin_list_out(db, row)

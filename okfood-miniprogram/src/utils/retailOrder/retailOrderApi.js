@@ -61,6 +61,21 @@ export async function cancelRetailOrder(orderId) {
   })
 }
 
+/**
+ * 待接单状态下修改配送到家收货地址
+ * @param {number} orderId
+ * @param {number} memberAddressId
+ */
+export async function updateRetailOrderDeliveryAddress(orderId, memberAddressId) {
+  const id = Math.floor(Number(orderId))
+  const addrId = Math.floor(Number(memberAddressId))
+  return request(`/api/user/retail-orders/${encodeURIComponent(String(id))}/delivery`, {
+    method: 'PATCH',
+    data: { member_address_id: addrId },
+    retry: 0,
+  })
+}
+
 /** @param {unknown} iso */
 export function formatRetailOrderCreatedAt(iso) {
   if (iso == null || iso === '') return '—'
@@ -133,4 +148,12 @@ export function canCancelRetailOrder(o) {
   if (pay !== '已支付') return false
   if (o.store_pickup) return f === 'awaiting_accept'
   return f === 'awaiting_accept' || f === 'pending'
+}
+
+/** @param {Record<string, unknown>} o 待接单且配送到家时可修改地址 */
+export function canModifyRetailOrderAddress(o) {
+  if (!o || typeof o !== 'object') return false
+  const pay = String(o.pay_status || '').trim()
+  const f = String(o.fulfillment_status || '').trim().toLowerCase()
+  return pay === '已支付' && f === 'awaiting_accept' && !o.store_pickup
 }
