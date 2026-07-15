@@ -94,6 +94,8 @@ const router = useRouter()
 const isRenewPendingFilter = computed(() => membersStatusSegment.value === 'renew_pending')
 /** 当前是否为待完善履约筛选（抖音/小程序新购卡人工复核） */
 const isAwaitingSetupFilter = computed(() => membersStatusSegment.value === 'awaiting_setup')
+/** 当前是否为暂停配送筛选 */
+const isPausedFilter = computed(() => membersStatusSegment.value === 'paused')
 
 /** 从路由 query 恢复筛选（会员统计页跳转带参） */
 function applyMembersRouteQueryFilters() {
@@ -1175,9 +1177,15 @@ onUnmounted(() => {
       </div>
      <div v-if="isAwaitingSetupFilter" class="members-awaiting-banner" role="status">
         <p class="members-awaiting-banner__text">
-          当前展示<strong>待完善履约</strong>会员（小程序购卡 / 抖音验券已入账，缺起送日或配送地址，且从未确认送达）。
+          当前展示<strong>待完善履约</strong>会员（已入账开卡工单，缺起送日或配送地址，且从未确认送达）。
           本列表仅用于人工复核与联系用户完善信息，<strong>不会自动修改</strong>会员档案或配送安排。
-          主动暂停配送的会员请用「已暂停」筛选，不在此列。
+          主动暂停配送的会员请用「已暂停」筛选，不在此列；状态列应与筛选一致，均显示「待完善」。
+        </p>
+      </div>
+      <div v-if="isPausedFilter" class="members-awaiting-banner" role="status">
+        <p class="members-awaiting-banner__text">
+          当前展示<strong>已暂停配送</strong>会员（主动暂停且仍有剩余次数，非待完善/请假/退款/已过期）。
+          状态列与筛选口径一致，应均显示「已暂停」；请假中请用「请假中」筛选，待完善请用「待完善」筛选。
         </p>
       </div>
       <div

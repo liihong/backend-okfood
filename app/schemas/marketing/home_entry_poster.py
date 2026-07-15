@@ -17,6 +17,7 @@ class HomeEntryPosterOut(BaseModel):
 
 class HomeEntryPosterPublicOut(BaseModel):
     image_url: str
+    image_thumb_url: str | None = None
 
 
 class HomeEntryPosterUpsertIn(BaseModel):

@@ -11,16 +11,26 @@
       indicator-color="rgba(255,255,255,0.45)"
       indicator-active-color="#ffffff"
     >
-      <swiper-item v-for="item in banners" :key="item.id" class="home-banner-swiper__item" @click="onTap(item)">
-        <image class="home-banner-swiper__img" :src="item.image_url" mode="aspectFill" />
+      <swiper-item v-for="(item, idx) in banners" :key="item.id" class="home-banner-swiper__item" @click="onTap(item)">
+        <image
+          class="home-banner-swiper__img"
+          :src="bannerSrc(item)"
+          mode="aspectFill"
+          :lazy-load="idx > 0"
+          @error="() => onBannerImgErr(item)"
+        />
       </swiper-item>
     </swiper>
   </view>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { navigateHomeBanner } from '@/utils/homeApi.js'
+import { optimizeImageUrl } from '@/utils/imageUrl.js'
+
+/** 加载失败时回退原图 URL */
+const bannerFallback = ref({})
 
 /** 与 tabPageLayout 一致：Tab 页可用高度（扣除底栏） */
 function tabPageViewportHeightPx(win) {
@@ -48,6 +58,23 @@ const props = defineProps({
 
 function onTap(item) {
   navigateHomeBanner(item, props.todayYmd)
+}
+
+function bannerSrc(item) {
+  if (!item || typeof item !== 'object') return ''
+  const id = item.id
+  if (id != null && bannerFallback.value[id]) {
+    return bannerFallback.value[id]
+  }
+  const orig = item.image_url != null ? String(item.image_url).trim() : ''
+  const thumb = item.image_thumb_url ?? item.imageThumbUrl
+  return optimizeImageUrl(orig, thumb, 'banner')
+}
+
+function onBannerImgErr(item) {
+  if (!item || item.id == null) return
+  const orig = item.image_url != null ? String(item.image_url).trim() : ''
+  if (orig) bannerFallback.value = { ...bannerFallback.value, [item.id]: orig }
 }
 </script>
 

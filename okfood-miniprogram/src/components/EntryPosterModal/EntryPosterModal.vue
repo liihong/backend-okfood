@@ -12,6 +12,7 @@
             class="poster-img"
             :src="imageUrl"
             mode="widthFix"
+            lazy-load
             show-menu-by-longpress
           />
         </scroll-view>

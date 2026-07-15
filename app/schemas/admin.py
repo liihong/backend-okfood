@@ -590,7 +590,7 @@ class MemberAnalyticsOut(BaseModel):
     awaiting_setup_count: int = Field(
         ...,
         ge=0,
-        description="待完善履约：小程序/抖音自助已缴且缺起送日或配送地址，且从未确认送达",
+        description="待完善履约：已入账开卡工单且缺起送日或配送地址，且从未确认送达",
     )
     paused_delivery_count: int = Field(
         ...,

@@ -1,5 +1,6 @@
 import { request, getMemberToken, getCourierToken } from '@/utils/api.js'
 import { fetchEntryPoster } from '@/utils/homeApi.js'
+import { optimizeImageUrl } from '@/utils/imageUrl.js'
 import { shouldPromptMemberCardPay, isPaidCardAwaitingSetup } from '@/utils/memberProfile.js'
 import { showEntryPosterModal, entryPosterVisible } from '@/utils/entryPosterState.js'
 
@@ -56,9 +57,11 @@ export async function tryShowEntryPoster() {
     const poster = await fetchEntryPoster()
     const imageUrl = poster?.image_url != null ? String(poster.image_url).trim() : ''
     if (!imageUrl) return false
+    const thumb = poster?.image_thumb_url ?? poster?.imageThumbUrl
+    const displayUrl = optimizeImageUrl(imageUrl, thumb, 'poster')
 
     markEntryPosterShown()
-    showEntryPosterModal(imageUrl)
+    showEntryPosterModal(displayUrl)
     return true
   } catch {
     /* 静默失败，不影响主流程 */

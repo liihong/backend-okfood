@@ -59,7 +59,6 @@ from app.services.delivery.delivery_sheet_service import (
     DeliverySheetDayMetrics,
     _store_card_reorder_stats,
     _store_membership_counts,
-    delivery_sheet_metrics_for_date,
     delivery_sheet_metrics_pending_sql_for_future_date,
     delivery_sheet_metrics_via_sql_for_unlocked_date,
     meal_units_totals_for_delivery_dates,
@@ -112,14 +111,43 @@ def _member_refunded_scope():
 
 
 def _member_card_expired_scope():
-    """周/月卡次数用尽：balance=0 且曾有起送日、累计总次数或仍标记为活跃；不含已退款。"""
+    """周/月卡次数用尽：任一餐段无余次，且曾有开卡/履约痕迹；不含已退款。"""
+    has_dinner_balance = exists(
+        select(1)
+        .select_from(MemberMealPeriodState)
+        .where(
+            MemberMealPeriodState.member_id == Member.id,
+            MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+            MemberMealPeriodState.balance > 0,
+        )
+    )
+    has_dinner_quota = exists(
+        select(1)
+        .select_from(MemberMealPeriodState)
+        .where(
+            MemberMealPeriodState.member_id == Member.id,
+            MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+            func.coalesce(MemberMealPeriodState.meal_quota_total, 0) > 0,
+        )
+    )
+    has_applied_order = exists(
+        select(1)
+        .select_from(MemberCardOrder)
+        .where(
+            MemberCardOrder.member_id == Member.id,
+            MemberCardOrder.applied_to_member.is_(True),
+        )
+    )
     return and_(
         Member.balance == 0,
+        ~has_dinner_balance,
         Member.membership_refunded_at.is_(None),
         or_(
             Member.delivery_start_date.isnot(None),
             func.coalesce(Member.meal_quota_total, 0) > 0,
+            has_dinner_quota,
             Member.is_active.is_(True),
+            has_applied_order,
         ),
     )
 
@@ -154,26 +182,55 @@ def _member_renew_pending_scope(*, threshold: int):
     )
 
 
-def _member_awaiting_setup_scope_clause():
-    """
-    待完善履约：小程序自助购卡 / 抖音验券已缴、缺起送日或配送到家缺地址，且从未确认送达。
-    曾送达后仅缺起送日的归「已暂停」侧，避免与主动暂停混淆。
-    仅用于管理端筛选与统计，不修改会员档案、不影响配送大表门禁。
-    """
-    from app.models.delivery_log import DeliveryLog
-    from app.models.enums import DeliveryStatus
-    from app.services.member.member_card_order_service import SELF_SERVICE_CARD_ORDER_CREATORS
+def _member_has_any_period_balance_scope():
+    """任一餐段有余次（午餐 members.balance 或晚餐 member_meal_period_state）。"""
+    has_dinner_balance = exists(
+        select(1)
+        .select_from(MemberMealPeriodState)
+        .where(
+            MemberMealPeriodState.member_id == Member.id,
+            MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+            MemberMealPeriodState.balance > 0,
+        )
+    )
+    return or_(Member.balance > 0, has_dinner_balance)
 
-    has_self_service_paid = exists(
+
+def _member_never_opened_scope():
+    """未开卡：从未入账开卡工单、任一餐段有余次、非暂停/退款（与 lifecycle NEVER_OPENED 一致）。"""
+    has_applied_order = exists(
         select(1)
         .select_from(MemberCardOrder)
         .where(
             MemberCardOrder.member_id == Member.id,
-            MemberCardOrder.created_by.in_(tuple(SELF_SERVICE_CARD_ORDER_CREATORS)),
-            MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+            MemberCardOrder.applied_to_member.is_(True),
         )
     )
-    has_delivered = exists(
+    return and_(
+        Member.is_active.is_(False),
+        Member.delivery_deferred.is_(False),
+        Member.membership_refunded_at.is_(None),
+        ~has_applied_order,
+        _member_has_any_period_balance_scope(),
+    )
+
+
+def _member_setup_incomplete_scope():
+    """缺起送日，或配送到家缺默认地址（与 lifecycle setup_alert 结构条件一致）。"""
+    dap = default_address_pick_subquery()
+    has_no_default = ~exists(select(1).select_from(dap).where(dap.c.mid == Member.id))
+    return or_(
+        Member.delivery_start_date.is_(None),
+        and_(Member.store_pickup.is_(False), has_no_default),
+    )
+
+
+def _member_has_delivered_scope():
+    """是否曾有确认送达（与 lifecycle delivery_history_ids 一致）。"""
+    from app.models.delivery_log import DeliveryLog
+    from app.models.enums import DeliveryStatus
+
+    return exists(
         select(1)
         .select_from(DeliveryLog)
         .where(
@@ -181,18 +238,54 @@ def _member_awaiting_setup_scope_clause():
             DeliveryLog.status == DeliveryStatus.DELIVERED.value,
         )
     )
-    dap = default_address_pick_subquery()
-    has_no_default = ~exists(select(1).select_from(dap).where(dap.c.mid == Member.id))
-    setup_incomplete = or_(
-        Member.delivery_start_date.is_(None),
-        and_(Member.store_pickup.is_(False), has_no_default),
+
+
+def _member_has_applied_card_order_scope():
+    """是否已有入账开卡工单（与 lifecycle applied_card_order_ids 一致）。"""
+    return exists(
+        select(1)
+        .select_from(MemberCardOrder)
+        .where(
+            MemberCardOrder.member_id == Member.id,
+            MemberCardOrder.applied_to_member.is_(True),
+        )
     )
+
+
+def _member_lifecycle_awaiting_setup_core_scope():
+    """
+    lifecycle 主状态为「待完善」的 SQL 镜像（用于各 Tab 互斥筛选）。
+    对应 member_lifecycle_service：setup_alert 且从未确认送达；不要求 delivery_deferred=false。
+    """
     return and_(
-        Member.balance > 0,
+        _member_has_any_period_balance_scope(),
         Member.membership_refunded_at.is_(None),
-        has_self_service_paid,
-        setup_incomplete,
-        ~has_delivered,
+        _member_has_applied_card_order_scope(),
+        _member_setup_incomplete_scope(),
+        ~_member_has_delivered_scope(),
+    )
+
+
+def _member_paused_delivery_scope():
+    """真·暂停配送：与 lifecycle PAUSED 主状态一致；排除待完善、请假中、退款与次数用尽。"""
+    return and_(
+        Member.is_active.is_(False),
+        Member.delivery_deferred.is_(True),
+        Member.membership_refunded_at.is_(None),
+        _member_has_any_period_balance_scope(),
+        ~_member_lifecycle_awaiting_setup_core_scope(),
+        _member_exclude_on_leave_scope(),
+    )
+
+
+def _member_awaiting_setup_scope_clause():
+    """
+    待完善履约列表：lifecycle 待完善 + 非主动暂停（delivery_deferred=false）。
+    主动暂停缺信息的会员归「已暂停」Tab，不在此列。
+    """
+    return and_(
+        _member_lifecycle_awaiting_setup_core_scope(),
+        Member.delivery_deferred.is_(False),
     )
 
 
@@ -250,23 +343,11 @@ def _apply_member_list_filters(
     if plan_type:
         stmt = stmt.where(Member.plan_type == plan_type)
     if inactive_only:
-        # 与前台「未开卡」一致：排除暂停配送与次数已用尽的已过期档案
-        stmt = stmt.where(
-            and_(
-                Member.is_active.is_(False),
-                Member.delivery_deferred.is_(False),
-                ~_member_card_expired_scope(),
-            ),
-        )
+        # 与 lifecycle「未开卡」一致：从未入账工单且有余次，排除已过期/暂停/退款
+        stmt = stmt.where(_member_never_opened_scope())
     if delivery_deferred_only:
-        # 真·暂停配送：排除小程序/抖音待完善（便于人工复核与「暂停」Tab 区分）
-        stmt = stmt.where(
-            and_(
-                Member.is_active.is_(False),
-                Member.delivery_deferred.is_(True),
-                ~_member_awaiting_setup_scope_clause(),
-            ),
-        )
+        # 与 lifecycle PAUSED 主状态一致：排除待完善、请假中、退款与次数用尽
+        stmt = stmt.where(_member_paused_delivery_scope())
     if awaiting_setup_only:
         stmt = stmt.where(_member_awaiting_setup_scope_clause())
     if unassigned_region:
@@ -1545,6 +1626,7 @@ def _dashboard_meal_period_stock_fields(
     anchor: date,
     day_after: date,
     day_after_tomorrow: date,
+    metrics_cache: dict | None = None,
 ) -> dict:
     """顶卡午/晚餐库存扩展字段（损耗、剩余、晚餐 metrics）；午餐/晚餐 total_stock 分字段读取，互不覆盖。"""
     from app.models.enums import MealPeriod
@@ -1556,9 +1638,20 @@ def _dashboard_meal_period_stock_fields(
     )
 
     sid = int(store_id)
-    metrics_cache: dict = {}
-    lunch_bd = get_day_stock_breakdown(db, store_id=sid, business_date=anchor, meal_period=MealPeriod.LUNCH.value)
-    dinner_bd = get_day_stock_breakdown(db, store_id=sid, business_date=anchor, meal_period=MealPeriod.DINNER.value)
+    lunch_bd = get_day_stock_breakdown(
+        db,
+        store_id=sid,
+        business_date=anchor,
+        meal_period=MealPeriod.LUNCH.value,
+        metrics_cache=metrics_cache,
+    )
+    dinner_bd = get_day_stock_breakdown(
+        db,
+        store_id=sid,
+        business_date=anchor,
+        meal_period=MealPeriod.DINNER.value,
+        metrics_cache=metrics_cache,
+    )
     today_dinner_m = delivery_sheet_metrics_for_period(
         db,
         delivery_date=anchor,
@@ -1606,40 +1699,51 @@ def _dashboard_cached_sheet_metrics(
     metrics_cache: dict[date, DeliverySheetDayMetrics],
 ) -> DeliverySheetDayMetrics:
     """同一 dashboard-summary 请求内，每个业务日最多算一次大表拆分指标。"""
-    if delivery_date not in metrics_cache:
-        cal_today = today_shanghai()
-        if delivery_date > cal_today:
-            metrics_cache[delivery_date] = delivery_sheet_metrics_pending_sql_for_future_date(
+    from app.models.enums import MealPeriod
+    from app.services.delivery.delivery_sheet_service import (
+        delivery_sheet_metrics_pending_sql_for_future_date,
+        delivery_sheet_metrics_via_sql_for_locked_date,
+        delivery_sheet_metrics_via_sql_for_unlocked_date,
+        period_metrics_cache_get,
+        period_metrics_cache_put,
+    )
+
+    cached = period_metrics_cache_get(metrics_cache, delivery_date, MealPeriod.LUNCH.value)
+    if cached is not None:
+        return cached
+    cal_today = today_shanghai()
+    if delivery_date > cal_today:
+        result = delivery_sheet_metrics_pending_sql_for_future_date(
+            db,
+            delivery_date=delivery_date,
+            store_id=store_id,
+        )
+    else:
+        from app.services.delivery.delivery_day_lock_service import (
+            is_delivery_day_sheet_frozen_after_sf_push,
+        )
+
+        if is_delivery_day_sheet_frozen_after_sf_push(
+            db, store_id=store_id, delivery_date=delivery_date
+        ):
+            result = delivery_sheet_metrics_via_sql_for_locked_date(
                 db,
                 delivery_date=delivery_date,
                 store_id=store_id,
             )
         else:
-            from app.services.delivery.delivery_day_lock_service import (
-                is_delivery_day_sheet_frozen_after_sf_push,
+            result = delivery_sheet_metrics_via_sql_for_unlocked_date(
+                db,
+                delivery_date=delivery_date,
+                store_id=store_id,
             )
-
-            if is_delivery_day_sheet_frozen_after_sf_push(
-                db, store_id=store_id, delivery_date=delivery_date
-            ):
-                metrics_cache[delivery_date] = delivery_sheet_metrics_for_date(
-                    db,
-                    delivery_date=delivery_date,
-                    store_id=store_id,
-                    metrics_cache=metrics_cache,
-                )
-            else:
-                metrics_cache[delivery_date] = delivery_sheet_metrics_via_sql_for_unlocked_date(
-                    db,
-                    delivery_date=delivery_date,
-                    store_id=store_id,
-                )
-    return metrics_cache[delivery_date]
+    period_metrics_cache_put(metrics_cache, delivery_date, MealPeriod.LUNCH.value, result)
+    return result
 
 
-# 地图会员库/续卡率与锚定日无关，短 TTL 复用，避免换日时重复扫 member 表
+# 地图会员库/续卡率与锚定日无关，单独加长 TTL，避免每次换日/冷启动重复扫 member 表
 _dashboard_membership_kw_cache: dict[int, tuple[float, dict[str, int]]] = {}
-_DASHBOARD_MEMBERSHIP_KW_TTL_SEC = 90.0
+_DASHBOARD_MEMBERSHIP_KW_TTL_SEC = 300.0
 
 
 def _dashboard_membership_kw(db: Session, *, store_id: int) -> dict[str, int]:
@@ -1716,6 +1820,11 @@ def dashboard_meal_summary(
     mem_kw = _dashboard_membership_kw(db, store_id=sid)
     from app.services.admin.menu_day_stock_service import weekly_menu_lunch_day_total_stock
 
+    # 请求内共享 metrics_cache：先预热锚日/次日午餐大表，再算库存拆解，避免重复扫表
+    metrics_cache: dict[date, DeliverySheetDayMetrics] = {}
+    _dashboard_cached_sheet_metrics(db, delivery_date=anchor, store_id=sid, metrics_cache=metrics_cache)
+    _dashboard_cached_sheet_metrics(db, delivery_date=day_after, store_id=sid, metrics_cache=metrics_cache)
+
     # 午餐顶卡「后厨产出量」→ today_menu_day_total_stock（meal_period=lunch，与晚餐字段严格分离）
     today_menu_day_total_stock = weekly_menu_lunch_day_total_stock(db, anchor, store_id=sid)
     tomorrow_menu_day_total_stock = weekly_menu_lunch_day_total_stock(db, day_after, store_id=sid)
@@ -1723,9 +1832,13 @@ def dashboard_meal_summary(
         db, day_after_tomorrow, store_id=sid
     )
     period_stock_kw = _dashboard_meal_period_stock_fields(
-        db, store_id=sid, anchor=anchor, day_after=day_after, day_after_tomorrow=day_after_tomorrow
+        db,
+        store_id=sid,
+        anchor=anchor,
+        day_after=day_after,
+        day_after_tomorrow=day_after_tomorrow,
+        metrics_cache=metrics_cache,
     )
-    metrics_cache: dict[date, DeliverySheetDayMetrics] = {}
     snapshot_meal_totals = _dashboard_snapshot_meal_totals(
         db,
         store_id=sid,

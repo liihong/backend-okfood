@@ -97,10 +97,11 @@ export function resolveWeeklyMenuCacheKey(opts = {}) {
 
 /**
  * @param {WeeklyMenuCacheEntry} entry
- * @param {string} expectedWeekStart
+ * @param {string} cacheKey resolveWeeklyMenuCacheKey 返回值（weekStart:mealPeriod）
  */
-function isEntryValid(entry, expectedWeekStart) {
+function isEntryValid(entry, cacheKey) {
   if (!entry || typeof entry !== 'object') return false
+  const expectedWeekStart = String(cacheKey || '').split(':')[0] || ''
   if (!expectedWeekStart || entry.weekStart !== expectedWeekStart) return false
   if (!Array.isArray(entry.items)) return false
   if (entry.asOf !== ymdTodayShanghai()) return false
@@ -128,14 +129,16 @@ export function peekWeeklyMenuCache(opts = {}) {
   }
 }
 
-/** @param {{ weekStart: string, items: unknown[] }} payload */
-export function writeWeeklyMenuCache(payload) {
+/** @param {{ weekStart: string, items: unknown[] }} payload @param {{ weekStart?: string, mealPeriod?: string }} [cacheOpts] */
+export function writeWeeklyMenuCache(payload, cacheOpts = {}) {
   const weekStart =
     typeof payload.weekStart === 'string' ? payload.weekStart.trim() : ''
   if (!weekStart || !Array.isArray(payload.items)) return
+  const key = resolveWeeklyMenuCacheKey({ weekStart, ...cacheOpts })
+  if (!key) return
   let store = readStore()
   if (!store || store.apiBase !== API_BASE) store = emptyStore()
-  store.weeks[weekStart] = {
+  store.weeks[key] = {
     weekStart,
     asOf: ymdTodayShanghai(),
     fetchedAt: Date.now(),

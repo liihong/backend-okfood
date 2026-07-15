@@ -1,5 +1,6 @@
 import { getCourierToken } from '@/utils/api.js'
 import { fetchMenuPagePoster } from '@/utils/homeApi.js'
+import { optimizeImageUrl } from '@/utils/imageUrl.js'
 import { entryPosterVisible } from '@/utils/entryPosterState.js'
 import { couponReminderVisible } from '@/utils/memberCouponReminderState.js'
 import { showMenuPagePosterModal, menuPagePosterVisible } from '@/utils/menuPagePosterState.js'
@@ -62,11 +63,13 @@ export async function tryShowMenuPagePoster() {
     const poster = await fetchMenuPagePoster()
     const imageUrl = poster?.image_url != null ? String(poster.image_url).trim() : ''
     if (!imageUrl) return false
+    const thumb = poster?.image_thumb_url ?? poster?.imageThumbUrl
+    const displayUrl = optimizeImageUrl(imageUrl, thumb, 'poster')
 
     if (entryPosterVisible.value || couponReminderVisible.value) return false
 
     markMenuPagePosterShown()
-    showMenuPagePosterModal(imageUrl)
+    showMenuPagePosterModal(displayUrl)
     return true
   } catch {
     /* 静默失败，不影响主流程 */

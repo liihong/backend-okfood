@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Iterable
@@ -29,6 +30,24 @@ from app.services.delivery.delivery_sheet_service import (
     meal_units_totals_for_delivery_dates,
     total_meal_units_sql_sum_only,
 )
+
+
+# 小程序读库存：短 TTL 跨请求复用订阅份数/零售占用，午晚餐切换时减少重复扫表
+_STOCK_SUB_TOTALS_CACHE: dict[tuple[int, tuple[date, ...], str], tuple[float, dict[date, int]]] = {}
+_STOCK_PAID_SINGLE_CACHE: dict[tuple[int, tuple[date, ...], str], tuple[float, dict[date, int]]] = {}
+_STOCK_READ_CACHE_TTL_SEC = 60.0
+_process_metrics_cache: dict = {}
+_process_metrics_cache_at: float = 0.0
+
+
+def _process_metrics_cache_ref() -> dict:
+    """delivery_sheet_metrics 进程内短 TTL 缓存（键为 (date, period)）。"""
+    global _process_metrics_cache, _process_metrics_cache_at
+    now = time.time()
+    if now - _process_metrics_cache_at > _STOCK_READ_CACHE_TTL_SEC:
+        _process_metrics_cache = {}
+        _process_metrics_cache_at = now
+    return _process_metrics_cache
 
 
 def _week_start(d: date) -> date:
@@ -134,7 +153,16 @@ def dashboard_meal_totals_by_dates(
     uniq = list(dict.fromkeys(dates))
     if not uniq:
         return {}
-    cache = metrics_cache if metrics_cache is not None else {}
+
+    use_process_cache = metrics_cache is None
+    if use_process_cache:
+        cache_key = (sid, tuple(uniq), period)
+        now = time.time()
+        hit = _STOCK_SUB_TOTALS_CACHE.get(cache_key)
+        if hit and now - hit[0] < _STOCK_READ_CACHE_TTL_SEC:
+            return dict(hit[1])
+
+    cache = metrics_cache if metrics_cache is not None else _process_metrics_cache_ref()
     out: dict[date, int] = {}
     for d in uniq:
         m = delivery_sheet_metrics_for_period(
@@ -145,6 +173,9 @@ def dashboard_meal_totals_by_dates(
             metrics_cache=cache,
         )
         out[d] = int(m.meal_total)
+
+    if use_process_cache:
+        _STOCK_SUB_TOTALS_CACHE[cache_key] = (time.time(), dict(out))
     return out
 
 
@@ -180,6 +211,13 @@ def paid_single_retail_portions_by_dates(
         return {}
     sid = int(store_id)
     period = normalize_meal_period(meal_period)
+
+    cache_key = (sid, tuple(uniq), period)
+    now = time.time()
+    hit = _STOCK_PAID_SINGLE_CACHE.get(cache_key)
+    if hit and now - hit[0] < _STOCK_READ_CACHE_TTL_SEC:
+        return dict(hit[1])
+
     rows = db.execute(
         select(
             SingleMealOrder.delivery_date,
@@ -196,6 +234,7 @@ def paid_single_retail_portions_by_dates(
     for d, qty in rows:
         if d is not None:
             out[d] = int(qty or 0)
+    _STOCK_PAID_SINGLE_CACHE[cache_key] = (time.time(), dict(out))
     return out
 
 

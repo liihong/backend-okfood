@@ -221,8 +221,8 @@ def _build_lifecycle_context(
 
 def _is_legacy_immediate_delivery_member_ctx(member: Member, ctx: _MemberLifecycleContext) -> bool:
     """
-    历史老会员即日生效：无起送日、未暂停、有余次且曾有履约或入账。
-    此类会员不应触发「待完善」提醒。
+    历史老会员即日生效：无起送日、未暂停、有余次且曾有确认送达。
+    仅「已履约」才算 legacy；仅入账未履约的缺起送日应归「待完善」。
     """
     if member.delivery_start_date is not None:
         return False
@@ -232,7 +232,7 @@ def _is_legacy_immediate_delivery_member_ctx(member: Member, ctx: _MemberLifecyc
     dinner_row = ctx.dinner_state_by_id.get(mid)
     if not _member_has_any_period_balance_from_state(member, dinner_row):
         return False
-    return mid in ctx.delivery_history_ids or mid in ctx.applied_card_order_ids
+    return mid in ctx.delivery_history_ids
 
 
 def _member_needs_setup_alert_ctx(member: Member, ctx: _MemberLifecycleContext) -> bool:
@@ -275,6 +275,8 @@ def _resolve_member_lifecycle_with_ctx(
     self_service_latest = _is_self_service_card_order_creator(latest_created_by)
     # 曾确认送达：缺起送日多半是历史「暂停清空」或主动停送，不应盖成「待完善」
     ever_delivered = mid in ctx.delivery_history_ids
+    dinner_row = ctx.dinner_state_by_id.get(mid)
+    has_balance = _member_has_any_period_balance_from_state(member, dinner_row)
 
     # 小程序/抖音自助：仅「从未履约」的缺信息才算待完善（与暂停配送区分）
     if (
@@ -303,16 +305,8 @@ def _resolve_member_lifecycle_with_ctx(
             overlays=tuple(overlays),
         )
 
-    # 暂停优先：只看 delivery_deferred，不因空起送日改判待完善
-    if bool(member.delivery_deferred):
-        return MemberLifecycleView(
-            code=MemberLifecycleCode.PAUSED.value,
-            label=_LIFECYCLE_LABELS[MemberLifecycleCode.PAUSED.value],
-            setup_alert=False,
-            overlays=tuple(overlays),
-        )
-
-    if setup_alert:
+    # 待完善：已入账但缺起送日/地址；须在暂停之前判定（delivery_deferred 未清零时也不应盖成配送中/已暂停）
+    if setup_alert and not ever_delivered:
         return MemberLifecycleView(
             code=MemberLifecycleCode.AWAITING_SETUP.value,
             label=_LIFECYCLE_LABELS[MemberLifecycleCode.AWAITING_SETUP.value],
@@ -320,8 +314,15 @@ def _resolve_member_lifecycle_with_ctx(
             overlays=tuple(overlays),
         )
 
-    dinner_row = ctx.dinner_state_by_id.get(mid)
-    has_balance = _member_has_any_period_balance_from_state(member, dinner_row)
+    # 暂停配送：须有余次；扣次用尽后 delivery_deferred 不会自动清零
+    if bool(member.delivery_deferred) and has_balance:
+        return MemberLifecycleView(
+            code=MemberLifecycleCode.PAUSED.value,
+            label=_LIFECYCLE_LABELS[MemberLifecycleCode.PAUSED.value],
+            setup_alert=False,
+            overlays=tuple(overlays),
+        )
+
     if not has_balance:
         return MemberLifecycleView(
             code=MemberLifecycleCode.BALANCE_EXHAUSTED.value,
@@ -386,8 +387,8 @@ def resolve_members_lifecycle_map(
 
 def _is_legacy_immediate_delivery_member(db: Session, member: Member) -> bool:
     """
-    历史老会员即日生效：无起送日、未暂停、有余次且曾有履约或入账。
-    此类会员不应触发「待完善」提醒。
+    历史老会员即日生效：无起送日、未暂停、有余次且曾有确认送达。
+    仅「已履约」才算 legacy；仅入账未履约的缺起送日应归「待完善」。
     """
     if member.delivery_start_date is not None:
         return False
@@ -397,8 +398,7 @@ def _is_legacy_immediate_delivery_member(db: Session, member: Member) -> bool:
 
     if not member_has_any_period_balance(db, member):
         return False
-    mid = int(member.id)
-    return _member_has_delivery_history(db, mid) or _member_has_applied_card_order(db, mid)
+    return _member_has_delivery_history(db, int(member.id))
 
 
 def member_needs_setup_alert(db: Session, member: Member) -> bool:

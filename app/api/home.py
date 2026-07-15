@@ -7,6 +7,7 @@ from app.services.client.home_banner_service import list_active_home_banners
 from app.services.client.home_entry_poster_service import get_active_entry_poster, get_active_menu_poster
 from app.services.shared.store_config_service import get_store_base_delivery_fee_yuan, get_store_config
 from app.services.shared.tenant_integration_service import merged_sf_integration_namespace
+from app.services.shared.image_url_service import image_logo_url
 from app.utils.response import dump_model, success
 
 router = APIRouter(prefix="/home", tags=["首页"])
@@ -64,6 +65,7 @@ def home_store_info(db: SessionDep, store_ctx: PublicStoreContext = Depends(publ
             "store_id": int(cfg.store_id),
             "store_name": cfg.store_name,
             "store_logo_url": cfg.store_logo_url,
+            "store_logo_thumb_url": image_logo_url(cfg.store_logo_url),
             "store_contact_phone": cfg.store_contact_phone,
             "store_lng": cfg.store_lng,
             "store_lat": cfg.store_lat,

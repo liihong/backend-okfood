@@ -8,7 +8,13 @@ import oss2
 from fastapi import HTTPException
 
 from app.core.config import settings
-from app.services.shared.upload_service import save_image_bytes, validate_image_bytes
+from app.services.shared.image_process_service import (
+    THUMB_WIDTH,
+    MEDIUM_WIDTH,
+    process_image_upload_bytes,
+    upload_cache_control_header,
+)
+from app.services.shared.upload_service import save_image_bytes, save_processed_image_variants, validate_image_bytes
 
 
 def oss_configured() -> bool:
@@ -44,7 +50,13 @@ def _build_object_key(*segments: str) -> str:
     return "/".join(parts)
 
 
-def _put_object_to_oss(data: bytes, content_type: str, object_key: str) -> str:
+def _put_object_to_oss(
+    data: bytes,
+    content_type: str,
+    object_key: str,
+    *,
+    cache_control: str | None = None,
+) -> str:
     endpoint = settings.OSS_ENDPOINT.strip()
     if not endpoint.startswith("http://") and not endpoint.startswith("https://"):
         endpoint = f"https://{endpoint}"
@@ -55,7 +67,9 @@ def _put_object_to_oss(data: bytes, content_type: str, object_key: str) -> str:
             settings.OSS_ACCESS_KEY_SECRET.strip(),
         )
         bucket = oss2.Bucket(auth, endpoint, settings.OSS_BUCKET.strip())
-        headers = {"Content-Type": content_type}
+        headers: dict[str, str] = {"Content-Type": content_type}
+        if cache_control:
+            headers["Cache-Control"] = cache_control
         bucket.put_object(object_key, data, headers=headers)
     except oss2.exceptions.OssError as e:
         msg = getattr(getattr(e, "result", None), "message", None) or str(e)
@@ -67,24 +81,41 @@ def _put_object_to_oss(data: bytes, content_type: str, object_key: str) -> str:
 
 
 def upload_image_bytes(data: bytes, content_type: str | None, filename: str | None) -> str:
-    """管理端通用图片（菜品、Banner 等）：优先 OSS，否则写入本地 UPLOAD_DIR。"""
-    ct, ext = validate_image_bytes(data, content_type, filename)
+    """管理端通用图片：压缩原图并写入 thumb/medium 变体；优先 OSS，否则本地磁盘。"""
+    variants = process_image_upload_bytes(data, content_type, filename)
+    cache = upload_cache_control_header()
 
     if not oss_configured():
-        return save_image_bytes(data, content_type, filename)
+        return save_processed_image_variants(variants)
 
     now = datetime.now()
-    object_key = _build_object_key("images", f"{now:%Y}", f"{now:%m}", f"{uuid.uuid4().hex}{ext}")
-    return _put_object_to_oss(data, ct, object_key)
+    stem = uuid.uuid4().hex
+    month_seg = f"{now:%Y}/{now:%m}"
+    orig_key = _build_object_key("images", month_seg, f"{stem}{variants.original_ext}")
+    thumb_key = _build_object_key("images", month_seg, f"{stem}_w{THUMB_WIDTH}.webp")
+    medium_key = _build_object_key("images", month_seg, f"{stem}_w{MEDIUM_WIDTH}.webp")
+
+    orig_url = _put_object_to_oss(
+        variants.original_bytes,
+        variants.original_content_type,
+        orig_key,
+        cache_control=cache,
+    )
+    _put_object_to_oss(variants.thumb_bytes, "image/webp", thumb_key, cache_control=cache)
+    _put_object_to_oss(variants.medium_bytes, "image/webp", medium_key, cache_control=cache)
+    return orig_url
 
 
 def upload_member_avatar_bytes(data: bytes, content_type: str | None, filename: str | None) -> str:
-    """会员头像：优先 OSS，否则与菜品图相同写入本地 UPLOAD_DIR。"""
-    ct, ext = validate_image_bytes(data, content_type, filename)
+    """会员头像：压缩后上传（不做多规格，避免与菜品变体混淆）。"""
+    from app.services.shared.image_process_service import process_avatar_upload_bytes
+
+    processed = process_avatar_upload_bytes(data, content_type, filename)
+    cache = upload_cache_control_header()
 
     if not oss_configured():
-        return save_image_bytes(data, content_type, filename)
+        return save_image_bytes(processed, "image/jpeg", "avatar.jpg")
 
     now = datetime.now()
-    object_key = _build_object_key("avatars", f"{now:%Y}", f"{now:%m}", f"{uuid.uuid4().hex}{ext}")
-    return _put_object_to_oss(data, ct, object_key)
+    object_key = _build_object_key("avatars", f"{now:%Y}", f"{now:%m}", f"{uuid.uuid4().hex}.jpg")
+    return _put_object_to_oss(processed, "image/jpeg", object_key, cache_control=cache)

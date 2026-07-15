@@ -46,6 +46,7 @@ const searchQuery = ref('')
 const payFilter = ref('')
 /** 默认 true：进入页面即查全部历史；取消勾选则仅待处理（未缴或已缴未入账） */
 const includeHistory = ref(true)
+const hasMore = ref(false)
 
 function ymdInTimeZone(date, timeZone) {
   const fmt = new Intl.DateTimeFormat('en-CA', {
@@ -80,6 +81,9 @@ function todayInputDate() {
 }
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+
+/** 是否可翻下一页：有 has_more 或尚未到末页 */
+const canGoNext = computed(() => hasMore.value || page.value < totalPages.value)
 
 /** 表格序号（跨页连续） */
 function tableRowIndex(index) {
@@ -173,7 +177,10 @@ async function fetchList(extraParams = {}) {
     }
     const data = await apiJson(`/api/admin/card-orders?${params.toString()}`, {}, { auth: true })
     list.value = Array.isArray(data.items) ? data.items : []
-    total.value = Number(data.total) || 0
+    if (data.total != null) {
+      total.value = Number(data.total) || 0
+    }
+    hasMore.value = Boolean(data.has_more)
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -214,7 +221,7 @@ const goPrev = () => {
 }
 
 const goNext = () => {
-  if (page.value >= totalPages.value) return
+  if (!canGoNext.value) return
   page.value += 1
   void fetchList()
 }
@@ -958,7 +965,7 @@ class="member-pill"
       <div v-if="adminAccessToken" class="members-pagination">
         <button type="button" class="btn-sm" :disabled="page <= 1" @click="goPrev">上一页</button>
         <span class="members-page-meta">第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 条</span>
-        <button type="button" class="btn-sm" :disabled="page >= totalPages" @click="goNext">
+        <button type="button" class="btn-sm" :disabled="!canGoNext" @click="goNext">
           下一页
         </button>
       </div>

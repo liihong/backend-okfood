@@ -1117,16 +1117,16 @@ def users(
     ] = None,
     inactive_only: Annotated[
         bool,
-        Query(description="true=仅未开卡：is_active=false 且非暂停配送 delivery_deferred=false"),
+        Query(description="true=仅未开卡：从未入账开卡工单且有余次，非暂停/退款/已过期"),
     ] = False,
     delivery_deferred_only: Annotated[
         bool,
-        Query(description="true=仅暂停配送：is_active=false 且 delivery_deferred=true，排除待完善履约"),
+        Query(description="true=仅暂停配送：lifecycle 主状态为已暂停；排除待完善、请假中、退款与次数用尽"),
     ] = False,
     awaiting_setup_only: Annotated[
         bool,
         Query(
-            description="true=仅待完善履约：小程序/抖音自助已缴且缺起送日或配送地址、且从未确认送达（供人工复核，不改档案）"
+            description="true=仅待完善履约：已入账开卡工单且缺起送日或配送地址、从未确认送达（供人工复核，不改档案）"
         ),
     ] = False,
     delivery_region_id: Annotated[
@@ -1241,7 +1241,7 @@ def card_orders(
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
-    items, total = list_card_orders_paged(
+    items, total, has_more = list_card_orders_paged(
         db,
         q=q,
         pay_status=pay_status,
@@ -1253,7 +1253,12 @@ def card_orders(
     )
     serialized = [dump_model(i) for i in items]
     return page_response(
-        items=serialized, total=total, page=page, page_size=page_size, msg="获取成功"
+        items=serialized,
+        total=total,
+        page=page,
+        page_size=page_size,
+        has_more=has_more,
+        msg="获取成功",
     )
 
 
@@ -1297,7 +1302,7 @@ def card_orders_sync_wechat_pay(
     _ = admin_username
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     sync_member_card_from_wechat_admin_or_raise(db, order_id, store_id=store_id)
-    items, _ = list_card_orders_paged(
+    items, _, _ = list_card_orders_paged(
         db,
         order_id=order_id,
         page=1,

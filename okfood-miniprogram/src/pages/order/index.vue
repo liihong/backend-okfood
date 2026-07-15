@@ -1,7 +1,10 @@
 <template>
   <view class="page" :style="pageStyle">
    <OkNavbar title="菜单" />
-    <MenuStoreHeader :store-name="storeInfo?.store_name || ''" :store-logo-url="storeInfo?.store_logo_url || ''"
+    <MenuStoreHeader
+      :store-name="storeInfo?.store_name || ''"
+      :store-logo-url="storeInfo?.store_logo_url || ''"
+      :store-logo-thumb-url="storeInfo?.store_logo_thumb_url || ''"
       :store-contact-phone="storeInfo?.store_contact_phone || ''" :fulfill-mode="fulfillMode"
       :pickup-enabled="activeCategoryMeta?.type !== 'retail'"
       @change="onFulfillModeChange" />
@@ -81,10 +84,12 @@ import MenuPagePosterHost from '@/components/MenuPagePosterHost/MenuPagePosterHo
 import { fetchStoreInfo, fetchRetailMenu, mapRetailProductItem } from '@/utils/catalogApi.js'
 import {
   addDaysIso,
+  defaultMenuStockDates,
   fetchWeeklyMenu,
   mondayOfWeekShanghai,
-  prefetchWeeklyMenu,
-  weeklyMenuItemsHaveStock,
+  weeklyMenuStockLoadedForDates,
+  ymdTodayShanghai,
+  ymdTomorrowShanghai,
 } from '@/utils/menuApi.js'
 import { peekWeeklyMenuCache } from '@/utils/weeklyMenuCache.js'
 import { MEAL_PERIOD_DINNER, MEAL_PERIOD_LUNCH } from '@/utils/memberMealPeriod.js'
@@ -298,12 +303,23 @@ function switchMealPeriod(period) {
   }
 }
 
+function menuStockDatesForWeek(weekStartIso) {
+  const today = ymdTodayShanghai()
+  const tomorrow = ymdTomorrowShanghai()
+  const mon = weekStartIso || mondayOfWeekShanghai()
+  const sun = mon ? addDaysIso(mon, 6) : ''
+  if (!mon || !sun) return defaultMenuStockDates()
+  const inWeek = (d) => d >= mon && d <= sun
+  return [today, tomorrow].filter(inWeek)
+}
+
 async function loadThisWeek(opts = {}) {
   const forceRefresh = opts.forceRefresh === true
   const seq = ++loadWeeklySeq
   const cacheOpts = weekMenuCacheOpts({})
+  const stockDates = menuStockDatesForWeek(peekWeeklyMenuCache(cacheOpts)?.weekStart || mondayOfWeekShanghai())
   const cached = peekWeeklyMenuCache(cacheOpts)
-  const cacheHasStock = cached ? weeklyMenuItemsHaveStock(cached.items) : false
+  const cacheHasStock = cached ? weeklyMenuStockLoadedForDates(cached.items, stockDates) : false
 
   if (cached && !forceRefresh) {
     if (seq !== loadWeeklySeq) return
@@ -311,9 +327,6 @@ async function loadThisWeek(opts = {}) {
     if (cached.weekStart) cachedThisWeekMonday.value = cached.weekStart
     loading.value = false
     if (!cached.stale && cacheHasStock) {
-      if (cached.weekStart) {
-        prefetchWeeklyMenu({ weekStart: addDaysIso(cached.weekStart, 7), mealPeriod: mealPeriod.value })
-      }
       return
     }
   } else if (!forceRefresh) {
@@ -324,12 +337,12 @@ async function loadThisWeek(opts = {}) {
     const fresh = await fetchWeeklyMenu({
       ...cacheOpts,
       includeStock: true,
+      stockDates,
       forceRefresh: forceRefresh || !!cached?.stale || !cacheHasStock,
     })
     if (seq !== loadWeeklySeq) return
     if (fresh.weekStart) cachedThisWeekMonday.value = fresh.weekStart
     menu.value = fresh.items
-    if (fresh.weekStart) prefetchWeeklyMenu({ weekStart: addDaysIso(fresh.weekStart, 7), mealPeriod: mealPeriod.value })
   } catch (e) {
     if (seq !== loadWeeklySeq) return
     if (!cached) {
@@ -353,17 +366,16 @@ async function loadNextWeek(opts = {}) {
   const requestWeekStart = mon ? addDaysIso(mon, 7) : ''
   const cacheOpts = requestWeekStart ? weekMenuCacheOpts({ weekStart: requestWeekStart }) : weekMenuCacheOpts({})
   const cached = peekWeeklyMenuCache(cacheOpts)
-  const cacheHasStock = cached ? weeklyMenuItemsHaveStock(cached.items) : false
 
   try {
-    if (cached && !forceRefresh && !cached.stale && cacheHasStock) {
+    if (cached && !forceRefresh && !cached.stale) {
       nextWeekMenu.value = cached.items
       return
     }
     const fresh = await fetchWeeklyMenu({
       ...cacheOpts,
-      includeStock: true,
-      forceRefresh: forceRefresh || !!cached?.stale || !cacheHasStock,
+      includeStock: false,
+      forceRefresh: forceRefresh || !!cached?.stale,
     })
     nextWeekMenu.value = fresh.items
   } catch (e) {
@@ -396,9 +408,6 @@ async function loadStoreInfo() {
 
 async function loadPageData(opts = {}) {
   await Promise.all([loadThisWeek(opts), loadRetailCatalog(opts), loadStoreInfo()])
-  if (activeCategoryMeta.value?.type === 'week' && activeCategoryMeta.value.weekTab === 'next') {
-    await loadNextWeek(opts)
-  }
 }
 
 async function onMenuRefresherRefresh() {

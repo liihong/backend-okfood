@@ -25,14 +25,19 @@ def fail(*, msg: str, code: int = 400) -> dict[str, Any]:
 def page_response(
     *,
     items: Any,
-    total: int,
+    total: int | None,
     page: int = 1,
     page_size: int = 20,
     msg: str = "获取成功",
     summary: Any | None = None,
+    has_more: bool | None = None,
 ) -> dict[str, Any]:
-    """分页列表成功响应。可选 ``summary`` 附在 data 内，供管理端统计条等场景。"""
-    data: dict[str, Any] = {"items": items, "total": total, "page": page, "page_size": page_size}
+    """分页列表成功响应。可选 ``summary`` 附在 data 内；``total=None`` 表示未统计（客户端沿用缓存）。"""
+    data: dict[str, Any] = {"items": items, "page": page, "page_size": page_size}
+    if total is not None:
+        data["total"] = total
+    if has_more is not None:
+        data["has_more"] = has_more
     if summary is not None:
         data["summary"] = summary
     return success(data=data, msg=msg)

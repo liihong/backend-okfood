@@ -108,7 +108,12 @@ def waste_total_display(adjustment_delta_sum: int) -> int:
 
 
 def _prep_metrics_for_period(
-    db: Session, *, store_id: int, business_date: date, meal_period: str
+    db: Session,
+    *,
+    store_id: int,
+    business_date: date,
+    meal_period: str,
+    metrics_cache: dict | None = None,
 ):
     from app.core.timeutil import today_shanghai
     from app.services.delivery.delivery_day_lock_service import (
@@ -116,32 +121,40 @@ def _prep_metrics_for_period(
         is_delivery_day_sheet_frozen_after_sf_push,
     )
     from app.services.delivery.delivery_sheet_service import (
-        delivery_sheet_metrics_for_date,
         delivery_sheet_metrics_for_dinner_date,
         delivery_sheet_metrics_pending_sql_for_dinner_future_date,
         delivery_sheet_metrics_pending_sql_for_future_date,
+        delivery_sheet_metrics_via_sql_for_locked_date,
         delivery_sheet_metrics_via_sql_for_unlocked_date,
+        period_metrics_cache_get,
+        period_metrics_cache_put,
     )
 
     sid = int(store_id)
     d = business_date
     period = normalize_meal_period(meal_period)
+    cached = period_metrics_cache_get(metrics_cache, d, period)
+    if cached is not None:
+        return cached
     cal_today = today_shanghai()
 
     if period == MealPeriod.DINNER.value:
         if d > cal_today:
-            return delivery_sheet_metrics_pending_sql_for_dinner_future_date(
+            result = delivery_sheet_metrics_pending_sql_for_dinner_future_date(
                 db, delivery_date=d, store_id=sid
             )
-        if has_dinner_delivery_sheet_sf_push_on_date(db, store_id=sid, delivery_date=d):
-            return delivery_sheet_metrics_for_dinner_date(db, delivery_date=d, store_id=sid)
-        return delivery_sheet_metrics_for_dinner_date(db, delivery_date=d, store_id=sid)
-
-    if d > cal_today:
-        return delivery_sheet_metrics_pending_sql_for_future_date(db, delivery_date=d, store_id=sid)
-    if is_delivery_day_sheet_frozen_after_sf_push(db, store_id=sid, delivery_date=d):
-        return delivery_sheet_metrics_for_date(db, delivery_date=d, store_id=sid)
-    return delivery_sheet_metrics_via_sql_for_unlocked_date(db, delivery_date=d, store_id=sid)
+        elif has_dinner_delivery_sheet_sf_push_on_date(db, store_id=sid, delivery_date=d):
+            result = delivery_sheet_metrics_for_dinner_date(db, delivery_date=d, store_id=sid)
+        else:
+            result = delivery_sheet_metrics_for_dinner_date(db, delivery_date=d, store_id=sid)
+    elif d > cal_today:
+        result = delivery_sheet_metrics_pending_sql_for_future_date(db, delivery_date=d, store_id=sid)
+    elif is_delivery_day_sheet_frozen_after_sf_push(db, store_id=sid, delivery_date=d):
+        result = delivery_sheet_metrics_via_sql_for_locked_date(db, delivery_date=d, store_id=sid)
+    else:
+        result = delivery_sheet_metrics_via_sql_for_unlocked_date(db, delivery_date=d, store_id=sid)
+    period_metrics_cache_put(metrics_cache, d, period, result)
+    return result
 
 
 def get_day_stock_breakdown(
@@ -150,12 +163,19 @@ def get_day_stock_breakdown(
     store_id: int,
     business_date: date,
     meal_period: str,
+    metrics_cache: dict | None = None,
 ) -> DayStockBreakdown:
     """剩余 = 后厨出餐 − 到家配送 − 自提(午) − 单次零售 + sum(流水 delta)。"""
     sid = int(store_id)
     period = normalize_meal_period(meal_period)
     kitchen = weekly_menu_day_total_stock(db, business_date, store_id=sid, meal_period=period)
-    metrics = _prep_metrics_for_period(db, store_id=sid, business_date=business_date, meal_period=period)
+    metrics = _prep_metrics_for_period(
+        db,
+        store_id=sid,
+        business_date=business_date,
+        meal_period=period,
+        metrics_cache=metrics_cache,
+    )
     home_total = int(metrics.home_pending_meal_total) + int(metrics.home_delivered_meal_total)
     pickup_total = int(metrics.pickup_meal_total) if period == MealPeriod.LUNCH.value else 0
     retail_map = paid_single_retail_portions_by_dates(db, [business_date], store_id=sid, meal_period=period)

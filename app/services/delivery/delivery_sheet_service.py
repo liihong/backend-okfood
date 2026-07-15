@@ -632,9 +632,9 @@ def delivery_sheet_metrics_for_period(
 ) -> DeliverySheetDayMetrics:
     """分餐段 metrics；metrics_cache 键为 (date, period) 或 date（仅 lunch 兼容旧调用）。"""
     period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
-    cache_key = (delivery_date, period)
-    if metrics_cache is not None and cache_key in metrics_cache:
-        return metrics_cache[cache_key]
+    cached = period_metrics_cache_get(metrics_cache, delivery_date, period)
+    if cached is not None:
+        return cached
     if period == MealPeriod.DINNER.value:
         result = delivery_sheet_metrics_for_dinner_date(
             db, delivery_date=delivery_date, store_id=int(store_id)
@@ -649,11 +649,10 @@ def delivery_sheet_metrics_for_period(
         if d > cal_today:
             result = delivery_sheet_metrics_pending_sql_for_future_date(db, delivery_date=d, store_id=sid)
         elif is_delivery_day_sheet_frozen_after_sf_push(db, store_id=sid, delivery_date=d):
-            result = delivery_sheet_metrics_for_date(db, delivery_date=d, store_id=sid)
+            result = delivery_sheet_metrics_via_sql_for_locked_date(db, delivery_date=d, store_id=sid)
         else:
             result = delivery_sheet_metrics_via_sql_for_unlocked_date(db, delivery_date=d, store_id=sid)
-    if metrics_cache is not None:
-        metrics_cache[cache_key] = result
+    period_metrics_cache_put(metrics_cache, delivery_date, period, result)
     return result
 
 
@@ -1018,6 +1017,137 @@ def delivery_sheet_metrics_pending_sql_for_future_date(
         pickup_meal_total=pickup_pending,
         pickup_pending_meal_total=pickup_pending,
         pickup_delivered_meal_total=0,
+        home_stop_count=0,
+    )
+
+
+def period_metrics_cache_get(
+    metrics_cache: dict | None,
+    delivery_date: date,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
+) -> DeliverySheetDayMetrics | None:
+    """请求内 metrics 缓存读取：午餐兼容 ``date`` 与 ``(date, period)`` 双键。"""
+    if metrics_cache is None:
+        return None
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    hit = metrics_cache.get((delivery_date, period))
+    if hit is not None:
+        return hit
+    if period == MealPeriod.LUNCH.value:
+        return metrics_cache.get(delivery_date)
+    return None
+
+
+def period_metrics_cache_put(
+    metrics_cache: dict | None,
+    delivery_date: date,
+    meal_period: str,
+    result: DeliverySheetDayMetrics,
+) -> None:
+    """请求内 metrics 缓存写入：午餐同时写 ``date`` 与 ``(date, lunch)``。"""
+    if metrics_cache is None:
+        return
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    metrics_cache[(delivery_date, period)] = result
+    if period == MealPeriod.LUNCH.value:
+        metrics_cache[delivery_date] = result
+
+
+def _sum_frozen_home_units_for_member_ids(
+    member_ids: set[int],
+    *,
+    snapshot: dict[int, int] | None,
+    members_by_id: dict[int, Member],
+) -> int:
+    """锁单日到家名单（快照份数 + 批量会员）求和。"""
+    from app.services.delivery.delivery_sheet_meal_units_service import _clamp_units
+
+    total = 0
+    for mid in member_ids:
+        m = members_by_id.get(int(mid))
+        if m is None:
+            continue
+        if snapshot and int(mid) in snapshot:
+            total += _clamp_units(snapshot[int(mid)])
+        else:
+            total += effective_daily_meal_units(m)
+    return total
+
+
+def delivery_sheet_metrics_via_sql_for_locked_date(
+    db: Session, *, delivery_date: date, store_id: int
+) -> DeliverySheetDayMetrics:
+    """锁单日：快照聚合拆分已送/待送，dashboard 用，不加载地址/停靠点。"""
+    from app.services.delivery.delivery_sheet_push_snapshot_service import (
+        member_meal_units_snapshot_for_date,
+    )
+
+    empty = DeliverySheetDayMetrics(0, 0, 0, 0, 0, 0)
+    if not is_subscription_delivery_day(delivery_date):
+        return empty
+    sid = int(store_id)
+    d = delivery_date
+    day_snap = DeliverySheetDaySnapshots.load(db, store_id=sid, delivery_date=d)
+    merged_home_ids = _merged_home_member_ids_when_sheet_frozen(
+        db,
+        delivery_date=d,
+        store_id=sid,
+        frozen_ids=day_snap.frozen_member_ids or frozenset(),
+        absent_at_push=day_snap.absent_member_ids,
+    )
+    delivered_subq = _delivered_member_ids_subquery(db, delivery_date=d, store_id=sid)
+    if merged_home_ids:
+        delivered_home_ids = {
+            int(x)
+            for x in db.scalars(
+                select(Member.id).where(
+                    Member.id.in_(merged_home_ids),
+                    Member.id.in_(delivered_subq),
+                    Member.deleted_at.is_(None),
+                )
+            ).all()
+        }
+        pending_home_ids = merged_home_ids - delivered_home_ids
+    else:
+        delivered_home_ids = set()
+        pending_home_ids = set()
+
+    snap = member_meal_units_snapshot_for_date(db, store_id=sid, delivery_date=d)
+    all_home_ids = delivered_home_ids | pending_home_ids
+    members_by_id: dict[int, Member] = {}
+    if all_home_ids:
+        for m in db.scalars(
+            select(Member).where(
+                Member.id.in_(all_home_ids),
+                Member.deleted_at.is_(None),
+            )
+        ).all():
+            members_by_id[int(m.id)] = m
+
+    home_delivered = _sum_frozen_home_units_for_member_ids(
+        delivered_home_ids, snapshot=snap, members_by_id=members_by_id
+    )
+    home_pending = _sum_frozen_home_units_for_member_ids(
+        pending_home_ids, snapshot=snap, members_by_id=members_by_id
+    )
+
+    pu_base = (
+        *_member_subscription_eligibility_where(d, store_id=sid),
+        Member.store_pickup.is_(True),
+    )
+    pu_delivered, pu_pending = _sum_meal_units_split_by_delivery_status(
+        db, delivery_date=d, store_id=sid, base_filters=pu_base
+    )
+    # 锁单日到家名单已含推单快照 merged 集合，勿再叠加 extra_home（会与 eligibility 口径重复计 15 份等）
+    pu_delivered += _sum_extra_delivered_by_pickup_on_date(
+        db, delivery_date=d, store_id=sid, store_pickup=True
+    )
+    return DeliverySheetDayMetrics(
+        home_pending_meal_total=home_pending,
+        home_delivered_meal_total=home_delivered,
+        pickup_meal_total=pu_delivered + pu_pending,
+        pickup_pending_meal_total=pu_pending,
+        pickup_delivered_meal_total=pu_delivered,
         home_stop_count=0,
     )
 

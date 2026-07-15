@@ -1,4 +1,5 @@
 import { request } from '@/utils/api.js'
+import { optimizeImageUrl } from '@/utils/imageUrl.js'
 
 /**
  * @returns {Promise<{
@@ -43,6 +44,11 @@ export function mapRetailProductItem(p) {
     ingredients: desc,
     price: p?.unit_price_yuan,
     listPrice: p?.list_price_yuan,
-    img: typeof p?.cover_image_url === 'string' ? p.cover_image_url : '',
+    img: optimizeImageUrl(
+      typeof p?.cover_image_url === 'string' ? p.cover_image_url : '',
+      typeof p?.cover_image_thumb_url === 'string' ? p.cover_image_thumb_url : null,
+      'list',
+    ),
+    imgOriginal: typeof p?.cover_image_url === 'string' ? p.cover_image_url : '',
   }
 }

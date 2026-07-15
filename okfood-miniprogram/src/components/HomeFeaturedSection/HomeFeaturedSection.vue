@@ -15,6 +15,7 @@
       :item="dish"
       :show-day-label="false"
       :show-ingredients="true"
+      :lazy-load="false"
       @tap="emit('tap', dish)"
     />
   </view>

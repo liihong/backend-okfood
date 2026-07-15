@@ -347,7 +347,12 @@ def apply_delivery_start_to_pending_miniprogram_card_order(
     return order
 
 
-def _meal_periods_for_order(db: Session, order: MemberCardOrder) -> list[str]:
+def _meal_periods_for_order(
+    order: MemberCardOrder,
+    *,
+    tpl: MembershipCardTemplate | None = None,
+    db: Session | None = None,
+) -> list[str]:
     """已入账用工单快照；未入账优先读绑定模版，经典卡默认午餐。"""
     from app.services.meal_period.template_periods import (
         classic_card_meal_periods_snapshot,
@@ -360,14 +365,22 @@ def _meal_periods_for_order(db: Session, order: MemberCardOrder) -> list[str]:
         return normalize_meal_periods_list(snap)
     tpl_id = getattr(order, "membership_template_id", None)
     if tpl_id is not None:
-        tpl = db.get(MembershipCardTemplate, int(tpl_id))
-        if tpl:
-            return meal_periods_from_template(tpl)
+        resolved_tpl = tpl
+        if resolved_tpl is None and db is not None:
+            resolved_tpl = db.get(MembershipCardTemplate, int(tpl_id))
+        if resolved_tpl:
+            return meal_periods_from_template(resolved_tpl)
     return classic_card_meal_periods_snapshot()
 
 
-def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
-    m = db.get(Member, order.member_id)
+def _order_to_out_from_maps(
+    order: MemberCardOrder,
+    *,
+    member_map: dict[int, Member],
+    tpl_map: dict[int, MembershipCardTemplate],
+) -> CardOrderOut:
+    """单条工单序列化（使用预加载的会员/模版 map，避免 N+1）。"""
+    m = member_map.get(int(order.member_id))
     name = (m.name if m else "") or ""
     phone = (m.phone if m else "") or ""
     ca = order.created_at.isoformat() if order.created_at else ""
@@ -377,11 +390,10 @@ def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
     if wn is not None:
         wn = str(wn).strip() or None
     tpl_id = getattr(order, "membership_template_id", None)
+    tpl = tpl_map.get(int(tpl_id)) if tpl_id is not None else None
     tpl_label: str | None = None
-    if tpl_id is not None:
-        tpl = db.get(MembershipCardTemplate, int(tpl_id))
-        if tpl:
-            tpl_label = f"{tpl.name}（{tpl.kind_label}）"
+    if tpl:
+        tpl_label = f"{tpl.name}（{tpl.kind_label}）"
     out_no = (order.out_trade_no or "").strip() or None
     act_mode = (getattr(order, "activation_mode", None) or "").strip() or None
     return CardOrderOut(
@@ -404,8 +416,45 @@ def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
         updated_at=ua,
         membership_template_id=int(tpl_id) if tpl_id is not None else None,
         template_product_label=tpl_label,
-        meal_periods=_meal_periods_for_order(db, order),
+        meal_periods=_meal_periods_for_order(order, tpl=tpl),
     )
+
+
+def _load_member_map(db: Session, member_ids: list[int]) -> dict[int, Member]:
+    """批量加载会员，供列表序列化复用。"""
+    if not member_ids:
+        return {}
+    rows = db.scalars(select(Member).where(Member.id.in_(member_ids))).all()
+    return {int(m.id): m for m in rows}
+
+
+def _load_template_map(db: Session, template_ids: list[int]) -> dict[int, MembershipCardTemplate]:
+    """批量加载会员卡模版，供列表序列化复用。"""
+    if not template_ids:
+        return {}
+    rows = db.scalars(select(MembershipCardTemplate).where(MembershipCardTemplate.id.in_(template_ids))).all()
+    return {int(t.id): t for t in rows}
+
+
+def _orders_to_out_batch(db: Session, orders: list[MemberCardOrder]) -> list[CardOrderOut]:
+    """批量序列化工单列表，Member/Template 各查一次。"""
+    if not orders:
+        return []
+    member_ids = list({int(o.member_id) for o in orders})
+    tpl_ids = list(
+        {
+            int(o.membership_template_id)
+            for o in orders
+            if getattr(o, "membership_template_id", None) is not None
+        }
+    )
+    member_map = _load_member_map(db, member_ids)
+    tpl_map = _load_template_map(db, tpl_ids)
+    return [_order_to_out_from_maps(o, member_map=member_map, tpl_map=tpl_map) for o in orders]
+
+
+def _order_to_out(db: Session, order: MemberCardOrder) -> CardOrderOut:
+    return _orders_to_out_batch(db, [order])[0]
 
 
 def _member_has_prior_applied_card_order(
@@ -612,7 +661,7 @@ def _revoke_target_periods_for_card_order(db: Session, order: MemberCardOrder) -
     actual = _actual_credit_periods_for_card_order(db, order)
     if actual:
         return actual
-    return frozenset(_meal_periods_for_order(db, order))
+    return frozenset(_meal_periods_for_order(order, db=db))
 
 
 def revoke_paid_card_order_member_sync(db: Session, order: MemberCardOrder, *, operator: str) -> None:
@@ -727,9 +776,11 @@ def list_card_orders_paged(
     include_history: bool = False,
     store_id: int | None = None,
     order_id: int | None = None,
-) -> tuple[list[CardOrderOut], int]:
+) -> tuple[list[CardOrderOut], int | None, bool]:
+    """分页列表。返回 (items, total, has_more)；全量历史第 2 页起跳过 COUNT，total 为 None。"""
     join_on = Member.id == MemberCardOrder.member_id
     filters = []
+    needs_member_join = False
     if store_id is not None:
         filters.append(MemberCardOrder.store_id == int(store_id))
     if order_id is not None:
@@ -743,6 +794,7 @@ def list_card_orders_paged(
             )
         )
     if q and q.strip():
+        needs_member_join = True
         esc = escape_like_fragment(q.strip())
         filters.append(
             or_(
@@ -760,22 +812,42 @@ def list_card_orders_paged(
     ):
         filters.append(MemberCardOrder.pay_status == ps)
 
-    count_stmt = select(func.count()).select_from(MemberCardOrder).join(Member, join_on)
-    for f in filters:
-        count_stmt = count_stmt.where(f)
-    total = int(db.scalar(count_stmt) or 0)
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    # 全量历史深分页：第 2 页起用 limit+1 探测 has_more，跳过全表 COUNT
+    skip_count = bool(include_history and page > 1 and order_id is None)
+    fetch_limit = page_size + 1 if skip_count else page_size
 
+    total: int | None
+    if skip_count:
+        total = None
+    else:
+        count_stmt = select(func.count()).select_from(MemberCardOrder)
+        if needs_member_join:
+            count_stmt = count_stmt.join(Member, join_on)
+        for f in filters:
+            count_stmt = count_stmt.where(f)
+        total = int(db.scalar(count_stmt) or 0)
+
+    list_stmt = select(MemberCardOrder)
+    if needs_member_join:
+        list_stmt = list_stmt.join(Member, join_on)
     list_stmt = (
-        select(MemberCardOrder)
-        .join(Member, join_on)
-        .order_by(MemberCardOrder.created_at.desc())
+        list_stmt.order_by(MemberCardOrder.created_at.desc(), MemberCardOrder.id.desc())
         .offset((page - 1) * page_size)
-        .limit(page_size)
+        .limit(fetch_limit)
     )
     for f in filters:
         list_stmt = list_stmt.where(f)
     rows = db.scalars(list_stmt).all()
-    return [_order_to_out(db, r) for r in rows], total
+
+    if skip_count:
+        has_more = len(rows) > page_size
+        rows = rows[:page_size]
+    else:
+        has_more = page * page_size < int(total or 0)
+
+    return _orders_to_out_batch(db, rows), total, has_more
 
 
 def list_mall_template_card_orders_for_order_day(

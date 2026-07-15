@@ -180,8 +180,13 @@ const TAB_ROUTE_ICONS = {
   'system-tenants': Building2,
   'system-membership-templates': CreditCard,
   'system-dish-categories': Tags,
+  'marketing-home-banners': Megaphone,
+  'marketing-entry-poster': Megaphone,
+  'marketing-menu-poster': Megaphone,
   'marketing-coupon-templates': Megaphone,
   'marketing-member-coupons': Megaphone,
+  'marketing-douyin-products': Megaphone,
+  'marketing-douyin-redemptions': Megaphone,
 }
 
 function tabLeadingIcon(routeName) {

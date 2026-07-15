@@ -1,4 +1,5 @@
 import { request } from '@/utils/api.js'
+import { optimizeImageUrl } from '@/utils/imageUrl.js'
 import {
   invalidateWeeklyMenuCache,
   mondayOfWeekShanghai,
@@ -105,6 +106,9 @@ function mapWeeklyListItem(item, index) {
   const idRaw = weeklyRowDishIdRaw(item)
   const dishId = idRaw != null && idRaw !== '' ? String(idRaw) : ''
   const pic = item.pic ?? item.image_url ?? item.img
+  const picThumb = item.pic_thumb ?? item.picThumb ?? item.picThumbUrl
+  const picOriginal =
+    typeof pic === 'string' && pic.trim() ? pic.trim() : ''
   const rowKey =
     dishId || (date ? `${date}-${slot != null ? slot : index}` : `week-${index}`)
   const spiceLabel =
@@ -140,13 +144,22 @@ function mapWeeklyListItem(item, index) {
       item.price ??
       item.single_order_price_yuan ??
       item.singleOrderPriceYuan,
-    img:
-      (typeof pic === 'string' && pic) || (dishId ? PLACEHOLDER_IMG : ''),
+    img: picOriginal
+      ? optimizeImageUrl(picOriginal, picThumb, 'list')
+      : dishId
+        ? PLACEHOLDER_IMG
+        : '',
+    imgOriginal: picOriginal || (dishId ? PLACEHOLDER_IMG : ''),
     spiceLabel,
     singleStockLimited,
     singleStockRemaining,
     stockLoaded,
   }
+}
+
+/** 周菜单需拉库存的供餐日（上海业务日：今天 + 明天） */
+export function defaultMenuStockDates() {
+  return [ymdTodayShanghai(), ymdTomorrowShanghai()]
 }
 
 /** @param {unknown[] | null | undefined} items */
@@ -156,24 +169,46 @@ export function weeklyMenuItemsHaveStock(items) {
 }
 
 /**
+ * 指定供餐日是否均已附带库存字段（用于「仅今/明算库存」的列表缓存校验）。
+ * @param {unknown[] | null | undefined} items
+ * @param {string[]} stockDates YYYY-MM-DD
+ */
+export function weeklyMenuStockLoadedForDates(items, stockDates) {
+  if (!Array.isArray(items) || !Array.isArray(stockDates) || stockDates.length === 0) {
+    return false
+  }
+  const need = new Set(stockDates.map((d) => String(d).trim()).filter(Boolean))
+  if (need.size === 0) return false
+  for (const i of items) {
+    if (!i || typeof i !== 'object') continue
+    if (!i.dishId || !i.serviceDate) continue
+    if (!need.has(i.serviceDate)) continue
+    if (i.stockLoaded !== true) return false
+  }
+  return true
+}
+
+/**
  * 写入周菜单缓存；若已有带库存条目，则不用无库存预取结果覆盖。
  * @param {{ weekStart: string, items: unknown[] }} payload
- * @param {{ weekStart?: string }} [cacheOpts]
+ * @param {{ weekStart?: string, mealPeriod?: string, stockDates?: string[] }} [cacheOpts]
  */
 function writeWeeklyMenuCacheIfNotDowngrade(payload, cacheOpts = {}) {
   const weekStart = typeof payload.weekStart === 'string' ? payload.weekStart.trim() : ''
   if (!weekStart || !Array.isArray(payload.items)) return
-  const existing = peekWeeklyMenuCache(
-    weekStart ? { weekStart } : cacheOpts,
-  )
-  if (
-    existing &&
-    weeklyMenuItemsHaveStock(existing.items) &&
-    !weeklyMenuItemsHaveStock(payload.items)
-  ) {
-    return
+  const peekOpts = weekStart ? { weekStart, ...cacheOpts } : cacheOpts
+  const existing = peekWeeklyMenuCache(peekOpts)
+  const stockDates = Array.isArray(cacheOpts.stockDates) ? cacheOpts.stockDates : null
+  if (existing) {
+    const existingOk = stockDates
+      ? weeklyMenuStockLoadedForDates(existing.items, stockDates)
+      : weeklyMenuItemsHaveStock(existing.items)
+    const incomingOk = stockDates
+      ? weeklyMenuStockLoadedForDates(payload.items, stockDates)
+      : weeklyMenuItemsHaveStock(payload.items)
+    if (existingOk && !incomingOk) return
   }
-  writeWeeklyMenuCache(payload)
+  writeWeeklyMenuCache(payload, cacheOpts)
 }
 
 /**
@@ -277,7 +312,7 @@ function normalizeWeeklyMenuResponse(data) {
 }
 
 /**
- * @param {{ weekStart?: string, includeStock?: boolean }} opts
+ * @param {{ weekStart?: string, includeStock?: boolean, stockDates?: string[], mealPeriod?: string }} opts
  */
 async function fetchWeeklyMenuFromNetwork(opts = {}) {
   const weekStart =
@@ -285,6 +320,9 @@ async function fetchWeeklyMenuFromNetwork(opts = {}) {
       ? opts.weekStart.trim()
       : ''
   const includeStock = opts.includeStock === true
+  const stockDates = Array.isArray(opts.stockDates)
+    ? opts.stockDates.map((d) => String(d).trim()).filter(Boolean)
+    : []
   const mealPeriod =
     typeof opts.mealPeriod === 'string' && opts.mealPeriod.trim()
       ? opts.mealPeriod.trim().toLowerCase()
@@ -295,19 +333,32 @@ async function fetchWeeklyMenuFromNetwork(opts = {}) {
       ...(weekStart ? { week_start: weekStart } : {}),
       meal_period: mealPeriod,
       include_stock: includeStock,
-      ...(includeStock ? { as_of_date: ymdTodayShanghai() } : {}),
+      ...(includeStock && stockDates.length
+        ? {
+            as_of_date: ymdTodayShanghai(),
+            stock_dates: stockDates.join(','),
+          }
+        : includeStock
+          ? { as_of_date: ymdTodayShanghai() }
+          : {}),
     },
     retry: 1,
   })
   return normalizeWeeklyMenuResponse(data)
 }
 
+function stockDatesCacheSuffix(stockDates) {
+  if (!Array.isArray(stockDates) || stockDates.length === 0) return ''
+  return `:sd:${stockDates.map((d) => String(d).trim()).filter(Boolean).sort().join(',')}`
+}
+
 /**
- * @param {{ weekStart?: string, includeStock?: boolean, mealPeriod?: string }} [opts]
+ * @param {{ weekStart?: string, includeStock?: boolean, stockDates?: string[], mealPeriod?: string }} [opts]
  */
 function weeklyInflightKey(opts = {}) {
   const base = resolveWeeklyMenuCacheKey(opts) || '__this__'
-  return opts.includeStock === true ? `${base}:stock` : base
+  if (opts.includeStock !== true) return base
+  return `${base}:stock${stockDatesCacheSuffix(opts.stockDates)}`
 }
 
 /**
@@ -332,10 +383,11 @@ export function prefetchWeeklyMenu(opts = {}) {
 }
 
 /**
- * @param {{ weekStart?: string, forceRefresh?: boolean, skipCache?: boolean, includeStock?: boolean, mealPeriod?: string }} [opts]
+ * @param {{ weekStart?: string, forceRefresh?: boolean, skipCache?: boolean, includeStock?: boolean, stockDates?: string[], mealPeriod?: string }} [opts]
  *   - `forceRefresh` 忽略缓存直接请求
  *   - `skipCache` 不读不写缓存（调试用）
- *   - `includeStock` 列表展示剩余库存时传 true（仅当前可见周请求，预取仍不带库存）
+ *   - `includeStock` 列表展示剩余库存时传 true
+ *   - `stockDates` 与 includeStock 联用，仅今/明等指定日算库存
  *   - `mealPeriod` lunch/dinner，默认 lunch
  * @returns {Promise<{ weekStart: string, items: ReturnType<typeof mapWeeklyListItem>[] }>}
  */
@@ -343,18 +395,19 @@ export async function fetchWeeklyMenu(opts = {}) {
   const forceRefresh = opts.forceRefresh === true
   const skipCache = opts.skipCache === true
   const includeStock = opts.includeStock === true
+  const stockDates = Array.isArray(opts.stockDates) ? opts.stockDates : defaultMenuStockDates()
 
   if (!forceRefresh && !skipCache) {
     const cached = peekWeeklyMenuCache(opts)
     if (cached && !cached.stale) {
-      const cacheOk = !includeStock || weeklyMenuItemsHaveStock(cached.items)
+      const cacheOk = !includeStock || weeklyMenuStockLoadedForDates(cached.items, stockDates)
       if (cacheOk) {
         return { weekStart: cached.weekStart, items: cached.items }
       }
     }
   }
 
-  const networkOpts = { ...opts, includeStock }
+  const networkOpts = { ...opts, includeStock, stockDates: includeStock ? stockDates : undefined }
   const key = weeklyInflightKey(networkOpts)
   let inflight = weeklyMenuInflight.get(key)
   if (!inflight) {
@@ -366,7 +419,10 @@ export async function fetchWeeklyMenu(opts = {}) {
 
   const data = await inflight
   if (!skipCache && data.weekStart) {
-    writeWeeklyMenuCacheIfNotDowngrade(data, opts)
+    writeWeeklyMenuCacheIfNotDowngrade(data, {
+      ...opts,
+      stockDates: includeStock ? stockDates : undefined,
+    })
   }
   return data
 }
@@ -376,6 +432,14 @@ export function mapMenuDetail(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const date = raw.date != null ? String(raw.date) : ''
   const pic = raw.pic ?? raw.image_url ?? raw.img
+  const picMediumRaw = raw.pic_medium ?? raw.picMedium
+  const picMedium =
+    typeof picMediumRaw === 'string' && picMediumRaw.trim() ? picMediumRaw.trim() : ''
+  const picOriginal = pic != null ? String(pic).trim() : ''
+  const optimized =
+    picOriginal && (picMedium || picOriginal)
+      ? optimizeImageUrl(picOriginal, picMedium || null, 'detail')
+      : ''
   return {
     dishId:
       raw.dish_id != null
@@ -408,7 +472,8 @@ export function mapMenuDetail(raw) {
       raw.price ??
       raw.single_order_price_yuan ??
       raw.singleOrderPriceYuan,
-    img: (typeof pic === 'string' && pic) || PLACEHOLDER_IMG,
+    img: optimized || picOriginal || PLACEHOLDER_IMG,
+    imgOriginal: picOriginal || PLACEHOLDER_IMG,
     singleStockLimited: raw.single_stock_limited === true,
     singleStockRemaining:
       raw.single_stock_remaining != null && raw.single_stock_remaining !== ''

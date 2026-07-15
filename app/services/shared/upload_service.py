@@ -73,3 +73,29 @@ def save_image_bytes(data: bytes, content_type: str | None, filename: str | None
 
     rel_url_path = f"/static/uploads/images/{now:%Y}/{now:%m}/{safe_name}"
     return settings.public_url_for_upload_path(rel_url_path)
+
+
+def save_processed_image_variants(variants) -> str:
+    """写入原图 + WebP 变体到本地 UPLOAD_DIR，返回原图对外 URL。"""
+    from app.services.shared.image_process_service import ProcessedImageVariants, MEDIUM_WIDTH, THUMB_WIDTH
+
+    if not isinstance(variants, ProcessedImageVariants):
+        raise TypeError("variants must be ProcessedImageVariants")
+
+    root = ensure_upload_root()
+    now = datetime.now()
+    rel_dir = Path("static") / "uploads" / "images" / f"{now:%Y}" / f"{now:%m}"
+    out_dir = root / rel_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    stem = uuid.uuid4().hex
+    orig_name = f"{stem}{variants.original_ext}"
+    thumb_name = f"{stem}_w{THUMB_WIDTH}.webp"
+    medium_name = f"{stem}_w{MEDIUM_WIDTH}.webp"
+
+    (out_dir / orig_name).write_bytes(variants.original_bytes)
+    (out_dir / thumb_name).write_bytes(variants.thumb_bytes)
+    (out_dir / medium_name).write_bytes(variants.medium_bytes)
+
+    rel_url_path = f"/static/uploads/images/{now:%Y}/{now:%m}/{orig_name}"
+    return settings.public_url_for_upload_path(rel_url_path)

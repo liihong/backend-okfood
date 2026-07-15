@@ -10,16 +10,40 @@ from app.utils.response import success
 router = APIRouter(prefix="/menu", tags=["菜单"])
 
 
+def _parse_stock_dates(raw: str | None) -> list[date] | None:
+    """解析 stock_dates 查询参数（逗号分隔 YYYY-MM-DD）；空串视为未指定。"""
+    if raw is None:
+        return None
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    if not parts:
+        return None
+    return [date.fromisoformat(p) for p in parts]
+
+
 @router.get("/today")
-def today_menu(db: SessionDep, store_ctx: PublicStoreContext = Depends(public_store_dep)):
-    """查询今日餐谱（上海业务日）。"""
-    return success(data=get_today_menu(db, store_id=int(store_ctx.store_id)), msg="获取成功")
+def today_menu(
+    db: SessionDep,
+    store_ctx: PublicStoreContext = Depends(public_store_dep),
+    meal_period: Annotated[str, Query(description="lunch/dinner，默认 lunch")] = "lunch",
+):
+    """查询今日餐谱（上海业务日）；不含库存字段，详情页或下单接口另行查询。"""
+    return success(
+        data=get_today_menu(db, store_id=int(store_ctx.store_id), meal_period=meal_period),
+        msg="获取成功",
+    )
 
 
 @router.get("/tomorrow")
-def tomorrow_menu(db: SessionDep, store_ctx: PublicStoreContext = Depends(public_store_dep)):
+def tomorrow_menu(
+    db: SessionDep,
+    store_ctx: PublicStoreContext = Depends(public_store_dep),
+    meal_period: Annotated[str, Query(description="lunch/dinner，默认 lunch")] = "lunch",
+):
     """查询明日餐谱（上海业务日）。"""
-    return success(data=get_tomorrow_menu(db, store_id=int(store_ctx.store_id)), msg="获取成功")
+    return success(
+        data=get_tomorrow_menu(db, store_id=int(store_ctx.store_id), meal_period=meal_period),
+        msg="获取成功",
+    )
 
 
 @router.get("/weekly")
@@ -48,6 +72,15 @@ def weekly_menu(
             )
         ),
     ] = False,
+    stock_dates: Annotated[
+        str | None,
+        Query(
+            description=(
+                "include_stock=true 时生效：仅计算这些供餐日的库存，逗号分隔 YYYY-MM-DD。"
+                "不传则计算整周（兼容旧客户端）。"
+            )
+        ),
+    ] = None,
     meal_period: Annotated[str, Query(description="lunch/dinner，默认 lunch")] = "lunch",
 ):
     """一周菜单（周一至周日）：每日 `date`、`dish_id`（可空）、`title`/`desc`/`pic`。详情用 `dish_id` 调 `/menu/detail/{dish_id}`。无需登录。"""
@@ -58,6 +91,7 @@ def weekly_menu(
             store_id=int(store_ctx.store_id),
             as_of_date=as_of_date,
             include_stock=include_stock,
+            stock_dates=_parse_stock_dates(stock_dates),
             meal_period=meal_period,
         ),
         msg="获取成功",

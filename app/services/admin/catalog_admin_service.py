@@ -381,6 +381,9 @@ def retail_product_dump(row: StoreRetailProduct) -> dict:
 
 def retail_product_public_dump(row: StoreRetailProduct) -> dict:
     """小程序菜单页零售商品（仅上架项）。"""
+    from app.services.shared.image_url_service import image_list_thumb_url
+
+    cover = row.cover_image_url
     return {
         "id": int(row.id),
         "category_id": int(row.category_id) if row.category_id is not None else None,
@@ -389,7 +392,8 @@ def retail_product_public_dump(row: StoreRetailProduct) -> dict:
         "description": row.description,
         "unit_price_yuan": decimal_to_str_money(row.unit_price_yuan),
         "list_price_yuan": decimal_to_str_money(row.list_price_yuan),
-        "cover_image_url": row.cover_image_url,
+        "cover_image_url": cover,
+        "cover_image_thumb_url": image_list_thumb_url(cover) if cover else None,
         "sort_order": int(row.sort_order),
     }
 

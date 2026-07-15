@@ -10,6 +10,7 @@ from app.models.home_entry_poster import (
     POSTER_TYPE_MENU,
     HomeEntryPoster,
 )
+from app.services.shared.image_url_service import image_poster_url
 from app.schemas.marketing.home_entry_poster import (
     HomeEntryPosterOut,
     HomeEntryPosterPublicOut,
@@ -56,7 +57,7 @@ def get_active_poster(
     image_url = str(row.image_url or "").strip()
     if not image_url:
         return None
-    return HomeEntryPosterPublicOut(image_url=image_url)
+    return HomeEntryPosterPublicOut(image_url=image_url, image_thumb_url=image_poster_url(image_url))
 
 
 def get_poster_admin(

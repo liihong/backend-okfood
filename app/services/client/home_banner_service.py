@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.home_banner import HomeBanner
+from app.services.shared.image_url_service import image_banner_url
 from app.schemas.marketing.home_banner import (
     LINK_TYPES,
     HomeBannerCreateIn,
@@ -51,9 +52,11 @@ def _to_out(row: HomeBanner) -> HomeBannerOut:
 
 
 def _to_public(row: HomeBanner) -> HomeBannerPublicOut:
+    img = str(row.image_url)
     return HomeBannerPublicOut(
         id=int(row.id),
-        image_url=str(row.image_url),
+        image_url=img,
+        image_thumb_url=image_banner_url(img),
         link_type=str(row.link_type or "none"),
         link_target=(row.link_target or "").strip() or None,
     )

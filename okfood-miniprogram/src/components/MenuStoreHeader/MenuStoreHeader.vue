@@ -5,6 +5,7 @@
       class="menu-store-header__logo"
       :src="logoUrl"
       mode="aspectFill"
+      lazy-load
     />
     <view v-else class="menu-store-header__logo menu-store-header__logo--placeholder">
       <text class="menu-store-header__logo-txt">OK</text>
@@ -37,10 +38,12 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { optimizeImageUrl } from '@/utils/imageUrl.js'
 
 const props = defineProps({
   storeName: { type: String, default: '' },
   storeLogoUrl: { type: String, default: '' },
+  storeLogoThumbUrl: { type: String, default: '' },
   storeContactPhone: { type: String, default: '' },
   /** pickup | delivery */
   fulfillMode: { type: String, default: 'delivery' },
@@ -65,8 +68,10 @@ const displayName = computed(() => {
 })
 
 const logoUrl = computed(() => {
-  const u = String(props.storeLogoUrl || '').trim()
-  return u || ''
+  const orig = String(props.storeLogoUrl || '').trim()
+  if (!orig) return ''
+  const thumb = String(props.storeLogoThumbUrl || '').trim()
+  return optimizeImageUrl(orig, thumb || null, 'logo')
 })
 
 const phone = computed(() => {

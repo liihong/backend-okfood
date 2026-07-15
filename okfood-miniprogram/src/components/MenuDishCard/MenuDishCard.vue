@@ -10,6 +10,7 @@
         class="featured-dish-card__img"
         :src="displayImg"
         mode="aspectFill"
+        :lazy-load="lazyLoad"
         @error="onImgErr"
       />
     </view>
@@ -48,6 +49,7 @@
       class="menu-dish-card__list-img"
       :src="displayImg"
       mode="aspectFill"
+      lazy-load
       @error="onImgErr"
     />
     <view class="menu-dish-card__list-body">
@@ -90,6 +92,7 @@
         class="menu-dish-card__img"
         :src="displayImg"
         mode="aspectFill"
+        lazy-load
         @error="onImgErr"
       />
     </view>
@@ -117,6 +120,8 @@ const props = defineProps({
   layout: { type: String, default: 'grid' },
   showDayLabel: { type: Boolean, default: true },
   showIngredients: { type: Boolean, default: true },
+  /** 首页推荐首屏可关 lazy-load */
+  lazyLoad: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['tap'])
@@ -195,8 +200,15 @@ watch(
   { immediate: true },
 )
 
+function originalImgFallback() {
+  const raw = props.item?.imgOriginal ?? props.item?.pic ?? props.item?.img
+  if (typeof raw === 'string' && raw.trim()) return raw.trim()
+  return fallbackImg
+}
+
 function onImgErr() {
-  if (displayImg.value !== fallbackImg) displayImg.value = fallbackImg
+  const fallback = originalImgFallback()
+  if (displayImg.value !== fallback) displayImg.value = fallback
 }
 </script>
 

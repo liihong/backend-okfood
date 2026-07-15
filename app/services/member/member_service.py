@@ -1131,20 +1131,31 @@ def _attach_single_order_stock_for_menu_date(
     dish_id: int,
     menu_date: date,
     store_id: int,
+    meal_period: str = "lunch",
 ) -> None:
-    """今日/明日餐谱附带单次卡剩余库存，供首页推荐展示售罄。"""
+    """指定日餐谱附带单次卡剩余库存（详情/按需场景）。"""
     from app.services.admin.menu_day_stock_service import single_order_stock_for_dish_date
 
     out.update(
         single_order_stock_for_dish_date(
-            db, int(dish_id), menu_date, store_id=int(store_id)
+            db, int(dish_id), menu_date, store_id=int(store_id), meal_period=meal_period
         ).to_detail_dict()
     )
 
 
-def _get_menu_for_date(db: Session, *, d: date, store_id: int) -> dict:
+def _get_menu_for_date(
+    db: Session,
+    *,
+    d: date,
+    store_id: int,
+    meal_period: str = "lunch",
+    include_stock: bool = False,
+) -> dict:
+    from app.services.meal_period.normalize import normalize_meal_period
+
     ws, slot = _week_start_and_slot(d)
     sid = int(store_id)
+    period = normalize_meal_period(meal_period)
 
     row = db.execute(
         select(WeeklyMenuSlot, MenuDish)
@@ -1153,6 +1164,7 @@ def _get_menu_for_date(db: Session, *, d: date, store_id: int) -> dict:
             WeeklyMenuSlot.store_id == sid,
             WeeklyMenuSlot.week_start == ws,
             WeeklyMenuSlot.slot == slot,
+            WeeklyMenuSlot.meal_period == period,
         )
     ).first()
 
@@ -1163,19 +1175,24 @@ def _get_menu_for_date(db: Session, *, d: date, store_id: int) -> dict:
             "dish_id": dish.id,
             "title": dish.name,
             "desc": dish.description,
-            "pic": dish.image_url,
             "price": _member_menu_price(dish),
         }
+        out.update(_member_dish_pic_fields(dish))
         out.update(_member_spice_public_fields(dish))
-        _attach_single_order_stock_for_menu_date(
-            db, out, dish_id=int(dish.id), menu_date=d, store_id=sid
-        )
+        if include_stock:
+            _attach_single_order_stock_for_menu_date(
+                db, out, dish_id=int(dish.id), menu_date=d, store_id=sid, meal_period=period
+            )
         return out
 
     row2 = db.execute(
         select(MenuSchedule, MenuDish)
         .join(MenuDish, MenuSchedule.dish_id == MenuDish.id)
-        .where(MenuSchedule.menu_date == d, MenuSchedule.store_id == sid)
+        .where(
+            MenuSchedule.menu_date == d,
+            MenuSchedule.store_id == sid,
+            MenuSchedule.meal_period == period,
+        )
     ).first()
 
     if not row2:
@@ -1194,22 +1211,28 @@ def _get_menu_for_date(db: Session, *, d: date, store_id: int) -> dict:
         "dish_id": dish.id,
         "title": dish.name,
         "desc": dish.description,
-        "pic": dish.image_url,
         "price": _member_menu_price(dish),
     }
+    out.update(_member_dish_pic_fields(dish))
     out.update(_member_spice_public_fields(dish))
-    _attach_single_order_stock_for_menu_date(
-        db, out, dish_id=int(dish.id), menu_date=d, store_id=sid
-    )
+    if include_stock:
+        _attach_single_order_stock_for_menu_date(
+            db, out, dish_id=int(dish.id), menu_date=d, store_id=sid, meal_period=period
+        )
     return out
 
 
-def get_today_menu(db: Session, *, store_id: int) -> dict:
-    return _get_menu_for_date(db, d=today_shanghai(), store_id=store_id)
+def get_today_menu(db: Session, *, store_id: int, meal_period: str = "lunch") -> dict:
+    """今日餐谱；默认不含库存（首页展示用，详情/下单另行查询）。"""
+    return _get_menu_for_date(
+        db, d=today_shanghai(), store_id=store_id, meal_period=meal_period, include_stock=False
+    )
 
 
-def get_tomorrow_menu(db: Session, *, store_id: int) -> dict:
-    return _get_menu_for_date(db, d=tomorrow_shanghai(), store_id=store_id)
+def get_tomorrow_menu(db: Session, *, store_id: int, meal_period: str = "lunch") -> dict:
+    return _get_menu_for_date(
+        db, d=tomorrow_shanghai(), store_id=store_id, meal_period=meal_period, include_stock=False
+    )
 
 
 
@@ -1245,6 +1268,13 @@ def _member_spice_public_fields(dish: MenuDish | None) -> dict[str, str]:
     return {"spice_level": raw, "spice_label": label}
 
 
+def _member_dish_pic_fields(dish: MenuDish | None) -> dict[str, str | None]:
+    """菜品图：pic 原图地址，pic_thumb 列表缩略（additive）。"""
+    from app.services.shared.image_url_service import member_dish_image_fields
+
+    return member_dish_image_fields(dish.image_url if dish else None)
+
+
 
 
 
@@ -1255,8 +1285,6 @@ def _dish_to_member_card(*, menu_date: date, dish: MenuDish | None, slot: int | 
         "date": menu_date.isoformat(),
 
         "dish_id": dish.id if dish else None,
-
-        "pic": dish.image_url if dish else None,
 
         "title": dish.name if dish else None,
 
@@ -1273,6 +1301,9 @@ def _dish_to_member_card(*, menu_date: date, dish: MenuDish | None, slot: int | 
     if dish is not None:
 
         o.update(_member_spice_public_fields(dish))
+        o.update(_member_dish_pic_fields(dish))
+    else:
+        o.update(_member_dish_pic_fields(None))
 
     return o
 
@@ -1287,6 +1318,7 @@ def get_weekly_menu(
     store_id: int,
     as_of_date: date | None = None,
     include_stock: bool = False,
+    stock_dates: list[date] | None = None,
     meal_period: str = "lunch",
 ) -> dict:
     from app.services.meal_period.normalize import normalize_meal_period
@@ -1342,22 +1374,30 @@ def get_weekly_menu(
     if include_stock:
         from app.services.admin.menu_day_stock_service import single_order_stock_by_date_for_week
 
-        stocks = single_order_stock_by_date_for_week(
-            db,
-            week_start_anchor=anchor,
-            dates=dates,
-            dishes_by_date=by_date,
-            weekly_slot_rows=weekly_rows,
-            store_id=sid,
-            subscription_floor_date=as_of_eff,
-            meal_period=period,
-        )
+        # 未指定 stock_dates 时保持原行为：整周都算库存；指定则仅算交集日期（如今/明）
+        if stock_dates is not None:
+            stock_date_set = set(stock_dates)
+            compute_dates = [d for d in dates if d in stock_date_set]
+        else:
+            compute_dates = list(dates)
+
+        if compute_dates:
+            stocks = single_order_stock_by_date_for_week(
+                db,
+                week_start_anchor=anchor,
+                dates=compute_dates,
+                dishes_by_date=by_date,
+                weekly_slot_rows=weekly_rows,
+                store_id=sid,
+                subscription_floor_date=as_of_eff,
+                meal_period=period,
+            )
 
     items: list[dict] = []
     for i, d in enumerate(dates):
         dish = by_date.get(d)
         card = _dish_to_member_card(menu_date=d, dish=dish, slot=i + 1)
-        if include_stock and dish is not None:
+        if include_stock and dish is not None and d in stocks:
             card.update(stocks[d].to_detail_dict())
         items.append(card)
 
@@ -1396,8 +1436,6 @@ def get_menu_detail_by_dish_id(
 
         "desc": dish.description,
 
-        "pic": dish.image_url,
-
         "is_enabled": dish.is_enabled,
 
         "category_id": dish.category_id,
@@ -1409,6 +1447,11 @@ def get_menu_detail_by_dish_id(
         "price": _member_menu_price(dish),
 
     }
+
+    out.update(_member_dish_pic_fields(dish))
+    from app.services.shared.image_url_service import image_detail_medium_url
+
+    out["pic_medium"] = image_detail_medium_url(dish.image_url)
 
     out.update(_member_spice_public_fields(dish))
 

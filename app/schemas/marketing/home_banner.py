@@ -24,6 +24,7 @@ class HomeBannerOut(BaseModel):
 class HomeBannerPublicOut(BaseModel):
     id: int
     image_url: str
+    image_thumb_url: str | None = None
     link_type: str
     link_target: str | None = None
 
