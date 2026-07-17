@@ -1234,6 +1234,14 @@ def card_orders(
         Query(description="true=含已缴且已入账等全部历史；默认 false 仅待处理工单"),
     ] = False,
     order_id: Annotated[int | None, Query(description="按工单 id 精确筛选（通知跳转用）")] = None,
+    date_from: Annotated[
+        date | None,
+        Query(description="创建时间起（上海自然日 YYYY-MM-DD，含当日 00:00 起）"),
+    ] = None,
+    date_to: Annotated[
+        date | None,
+        Query(description="创建时间止（上海自然日 YYYY-MM-DD，含当日 23:59:59）"),
+    ] = None,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -1250,6 +1258,8 @@ def card_orders(
         include_history=include_history,
         store_id=store_id,
         order_id=order_id,
+        date_from=date_from,
+        date_to=date_to,
     )
     serialized = [dump_model(i) for i in items]
     return page_response(

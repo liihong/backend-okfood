@@ -49,6 +49,16 @@ def pending_dinner_daily_meal_units(row: MemberMealPeriodState | None) -> int | 
     return u
 
 
+def prep_preview_dinner_daily_meal_units(row: MemberMealPeriodState | None) -> int:
+    """营业概览明日晚餐备餐预览份数：pending 优先，否则取当日生效值。"""
+    pending = pending_dinner_daily_meal_units(row)
+    if pending is not None:
+        return pending
+    from app.services.meal_period.units import dinner_daily_meal_units_from_state
+
+    return dinner_daily_meal_units_from_state(row)
+
+
 def dinner_delivery_sheet_pushed_today(db: Session, *, store_id: int) -> bool:
     from app.services.delivery.delivery_day_lock_service import has_dinner_delivery_sheet_sf_push_on_date
 

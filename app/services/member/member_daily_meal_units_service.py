@@ -37,6 +37,14 @@ def pending_daily_meal_units(member: Member) -> int | None:
     return u
 
 
+def prep_preview_lunch_daily_meal_units(member: Member) -> int:
+    """营业概览明日午餐备餐预览份数：pending 优先，否则取当日生效值。"""
+    pending = pending_daily_meal_units(member)
+    if pending is not None:
+        return pending
+    return effective_daily_meal_units(member)
+
+
 def delivery_sheet_pushed_today_for_store(db: Session, *, store_id: int) -> bool:
     """当日该门店是否已有成功的智能配送大表（订阅合并）顺丰推单。"""
     from app.services.delivery.delivery_day_lock_service import has_delivery_sheet_sf_push_on_date

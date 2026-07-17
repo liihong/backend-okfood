@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 from fastapi import HTTPException
 
-from sqlalchemy import func, literal, select, update
+from sqlalchemy import and_, case, func, literal, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -114,6 +114,24 @@ def sql_effective_daily_meal_units_column():
         literal(MAX_DAILY_MEAL_UNITS),
         func.greatest(literal(1), func.coalesce(Member.daily_meal_units, 1)),
     )
+
+
+def sql_prep_preview_daily_meal_units_column():
+    """营业概览「明日备餐」预览：pending 有效时取 pending，否则取 daily_meal_units。
+
+    仅用于 dashboard 未来日预览，不影响推单冻结、扣次及当日大表统计。
+    """
+
+    pending_ok = and_(
+        Member.daily_meal_units_pending.isnot(None),
+        Member.daily_meal_units_pending >= 1,
+        Member.daily_meal_units_pending <= literal(MAX_DAILY_MEAL_UNITS),
+    )
+    raw = case(
+        (pending_ok, Member.daily_meal_units_pending),
+        else_=func.coalesce(Member.daily_meal_units, 1),
+    )
+    return func.least(literal(MAX_DAILY_MEAL_UNITS), func.greatest(literal(1), raw))
 
 
 def _member_by_phone(db: Session, phone: str, store_id: int) -> Member | None:

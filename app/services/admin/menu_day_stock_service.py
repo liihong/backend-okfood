@@ -1,4 +1,4 @@
-"""日菜单总库存存于 weekly_menu_slot.total_stock。单次卡剩余=总份数−应配送(与配送大表一致)−已付单次。"""
+"""日菜单总库存存于 weekly_menu_slot.total_stock。单次卡剩余=总份数−应配送(与配送大表一致)−已付单次+损耗/回补流水 delta。"""
 
 from __future__ import annotations
 
@@ -453,6 +453,12 @@ def single_order_stock_by_date_for_week(
     paid_by_date = paid_single_retail_portions_by_dates(
         db, dates, store_id=sid, meal_period=period
     )
+    from app.services.admin.day_stock_service import sum_adjustment_deltas_by_dates
+
+    # 与 get_day_stock_breakdown / weekly_slot_stock_extras 同源：批量预取损耗流水
+    delta_by_date = sum_adjustment_deltas_by_dates(
+        db, store_id=sid, dates=dates, meal_period=period
+    )
 
     out: dict[date, SingleOrderStockInfo] = {}
     for d in dates:
@@ -469,8 +475,9 @@ def single_order_stock_by_date_for_week(
             )
         else:
             cap = int(w.total_stock or 0)
-            single_cap = max(0, cap - sub)
-            rem = max(0, single_cap - paid_n)
+            delta_sum = int(delta_by_date.get(d, 0))
+            # 与 get_day_stock_breakdown 同源：后厨出餐 − 应配送 − 单次零售 + 流水 delta（负=损耗）
+            rem = max(0, cap - sub - paid_n + delta_sum)
             # 已过供餐日不可下单；省略订阅统计时 sub=0 会导致 remaining 虚高（如 cap-paid）
             if subscription_floor is not None and d < subscription_floor:
                 rem = 0

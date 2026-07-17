@@ -43,6 +43,8 @@ function updateCardOrdersTableHeight() {
   }
 }
 const searchQuery = ref('')
+/** 创建时间区间 [YYYY-MM-DD, YYYY-MM-DD]；空表示不限 */
+const createdDateRange = ref(null)
 const payFilter = ref('')
 /** 默认 true：进入页面即查全部历史；取消勾选则仅待处理（未缴或已缴未入账） */
 const includeHistory = ref(true)
@@ -172,6 +174,12 @@ async function fetchList(extraParams = {}) {
     const pf = String(payFilter.value ?? '').trim()
     if (pf === '未缴' || pf === '已缴') params.set('pay_status', pf)
     if (includeHistory.value) params.set('include_history', 'true')
+    const dr = createdDateRange.value
+    if (Array.isArray(dr) && dr.length === 2) {
+      const [from, to] = dr
+      if (from) params.set('date_from', String(from))
+      if (to) params.set('date_to', String(to))
+    }
     for (const [k, v] of Object.entries(extraParams)) {
       if (v != null && String(v).trim() !== '') params.set(k, String(v))
     }
@@ -210,6 +218,11 @@ watch(payFilter, () => {
 })
 
 watch(includeHistory, () => {
+  page.value = 1
+  void fetchList()
+})
+
+watch(createdDateRange, () => {
   page.value = 1
   void fetchList()
 })
@@ -803,6 +816,21 @@ onUnmounted(() => {
         <div class="search-box search-box--flex">
           <Search :size="18" />
           <el-input v-model="searchQuery" clearable placeholder="搜索手机、姓名或微信昵称…" />
+        </div>
+        <div class="card-orders-filter-label card-orders-filter-el card-orders-created-range">
+          <span class="card-orders-filter-el-text">创建</span>
+          <el-date-picker
+            v-model="createdDateRange"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            format="YYYY-MM-DD"
+            range-separator="至"
+            start-placeholder="开始"
+            end-placeholder="结束"
+            clearable
+            teleported
+            class="card-orders-created-picker"
+          />
         </div>
         <div class="card-orders-filters">
          <div class="card-orders-filter-label card-orders-filter-label--check">
@@ -2106,6 +2134,15 @@ class="member-pill"
 }
 .card-orders-pay-select {
   width: 120px;
+}
+.card-orders-created-range {
+  flex-shrink: 0;
+}
+.card-orders-created-picker {
+  width: 240px;
+}
+.card-orders-created-picker :deep(.el-range-input) {
+  font-size: 13px;
 }
 .co-create-fees-select,
 .co-edit-row-select,

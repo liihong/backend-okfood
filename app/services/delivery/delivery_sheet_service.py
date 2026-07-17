@@ -39,7 +39,11 @@ from app.services.delivery.courier_service import (
 from app.services.member.member_address_service import delivery_region_name_map, full_address_line, load_default_address_map, routing_area_label
 from app.services.delivery.delivery_sheet_meal_units_service import DeliverySheetMealUnitsContext
 from app.services.delivery.delivery_sheet_push_snapshot_service import DeliverySheetDaySnapshots
-from app.services.member.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
+from app.services.member.member_service import (
+    effective_daily_meal_units,
+    sql_effective_daily_meal_units_column,
+    sql_prep_preview_daily_meal_units_column,
+)
 from app.models.enums import DeliverySheetView, MealPeriod
 from app.services.meal_period.card_eligibility import filter_member_groups_for_sheet_view
 from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
@@ -1039,6 +1043,112 @@ def delivery_sheet_metrics_pending_sql_for_future_date(
         home_delivered_meal_total=0,
         pickup_meal_total=pickup_pending,
         pickup_pending_meal_total=pickup_pending,
+        pickup_delivered_meal_total=0,
+        home_stop_count=0,
+    )
+
+
+def _member_subscription_eligibility_where_prep_preview(
+    delivery_date: date,
+    *,
+    tenant_id: int | None = None,
+    store_id: int | None = None,
+) -> list:
+    """明日备餐预览专用：资格判定与 SUM 均使用 pending 优先份数。"""
+    from app.services.delivery.courier_service import _member_subscription_schedule_where
+
+    units_sql = sql_prep_preview_daily_meal_units_column()
+    return [
+        *_member_subscription_schedule_where(
+            delivery_date, tenant_id=tenant_id, store_id=store_id
+        ),
+        Member.balance >= units_sql,
+    ]
+
+
+def _sum_meal_units_home_eligible_on_date_prep_preview(
+    db: Session, *, delivery_date: date, store_id: int
+) -> int:
+    units_sql = sql_prep_preview_daily_meal_units_column()
+    q = select(func.coalesce(func.sum(units_sql), 0)).where(
+        *_member_subscription_eligibility_where_prep_preview(
+            delivery_date, store_id=int(store_id)
+        ),
+        Member.store_pickup.is_(False),
+    )
+    return int(db.scalar(q) or 0)
+
+
+def _sum_meal_units_pickup_eligible_on_date_prep_preview(
+    db: Session, *, delivery_date: date, store_id: int
+) -> int:
+    units_sql = sql_prep_preview_daily_meal_units_column()
+    q = select(func.coalesce(func.sum(units_sql), 0)).where(
+        *_member_subscription_eligibility_where_prep_preview(
+            delivery_date, store_id=int(store_id)
+        ),
+        Member.store_pickup.is_(True),
+    )
+    return int(db.scalar(q) or 0)
+
+
+def delivery_sheet_metrics_prep_preview_for_future_date(
+    db: Session, *, delivery_date: date, store_id: int
+) -> DeliverySheetDayMetrics:
+    """营业概览「明日备餐」专用：未来供餐日纳入 daily_meal_units_pending 预览，不影响其它统计口径。"""
+    empty = DeliverySheetDayMetrics(0, 0, 0, 0, 0, 0)
+    if not is_subscription_delivery_day(delivery_date):
+        return empty
+    sid = int(store_id)
+    home_pending = _sum_meal_units_home_eligible_on_date_prep_preview(
+        db, delivery_date=delivery_date, store_id=sid
+    )
+    pickup_pending = _sum_meal_units_pickup_eligible_on_date_prep_preview(
+        db, delivery_date=delivery_date, store_id=sid
+    )
+    return DeliverySheetDayMetrics(
+        home_pending_meal_total=home_pending,
+        home_delivered_meal_total=0,
+        pickup_meal_total=pickup_pending,
+        pickup_pending_meal_total=pickup_pending,
+        pickup_delivered_meal_total=0,
+        home_stop_count=0,
+    )
+
+
+def delivery_sheet_metrics_prep_preview_for_dinner_future_date(
+    db: Session, *, delivery_date: date, store_id: int
+) -> DeliverySheetDayMetrics:
+    """营业概览「明日晚餐备餐」专用：未来供餐日纳入晚餐 pending 预览。"""
+    from app.services.dinner.eligibility import eligible_members_for_dinner_delivery
+    from app.services.meal_period.dinner_units import prep_preview_dinner_daily_meal_units
+    from app.services.meal_period.units import (
+        dinner_daily_meal_units_from_state,
+        load_dinner_meal_period_states_map,
+    )
+
+    empty = DeliverySheetDayMetrics(0, 0, 0, 0, 0, 0)
+    if not is_subscription_delivery_day(delivery_date):
+        return empty
+    members, _ = eligible_members_for_dinner_delivery(
+        db, delivery_date=delivery_date, delivery_region_id=None, store_id=int(store_id)
+    )
+    state_map = load_dinner_meal_period_states_map(db, [int(m.id) for m in members])
+    total = 0
+    for m in members:
+        row = state_map.get(int(m.id))
+        preview_units = prep_preview_dinner_daily_meal_units(row)
+        d_bal = max(0, int(row.balance or 0)) if row is not None else 0
+        current_units = dinner_daily_meal_units_from_state(row)
+        # pending 增份后余额不足时，00:01 落库后将退出大表，预览不计入
+        if preview_units > current_units and d_bal < preview_units:
+            continue
+        total += preview_units
+    return DeliverySheetDayMetrics(
+        home_pending_meal_total=int(total),
+        home_delivered_meal_total=0,
+        pickup_meal_total=0,
+        pickup_pending_meal_total=0,
         pickup_delivered_meal_total=0,
         home_stop_count=0,
     )

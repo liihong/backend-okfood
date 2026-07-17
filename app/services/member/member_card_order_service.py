@@ -776,6 +776,8 @@ def list_card_orders_paged(
     include_history: bool = False,
     store_id: int | None = None,
     order_id: int | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> tuple[list[CardOrderOut], int | None, bool]:
     """分页列表。返回 (items, total, has_more)；全量历史第 2 页起跳过 COUNT，total 为 None。"""
     join_on = Member.id == MemberCardOrder.member_id
@@ -811,6 +813,13 @@ def list_card_orders_paged(
         CardOrderPayStatus.CANCELLED.value,
     ):
         filters.append(MemberCardOrder.pay_status == ps)
+    # 按工单创建时间（上海自然日）筛选：左闭右开，与财务/抖音核销等口径一致
+    if date_from is not None:
+        start_bj, _ = shanghai_naive_range_for_calendar_day(date_from)
+        filters.append(MemberCardOrder.created_at >= start_bj)
+    if date_to is not None:
+        _, end_bj = shanghai_naive_range_for_calendar_day(date_to)
+        filters.append(MemberCardOrder.created_at < end_bj)
 
     page = max(1, page)
     page_size = min(max(1, page_size), 100)

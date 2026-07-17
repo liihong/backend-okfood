@@ -59,7 +59,8 @@ from app.services.delivery.delivery_sheet_service import (
     DeliverySheetDayMetrics,
     _store_card_reorder_stats,
     _store_membership_counts,
-    delivery_sheet_metrics_pending_sql_for_future_date,
+    delivery_sheet_metrics_prep_preview_for_dinner_future_date,
+    delivery_sheet_metrics_prep_preview_for_future_date,
     delivery_sheet_metrics_via_sql_for_unlocked_date,
     meal_units_totals_for_delivery_dates,
 )
@@ -1659,13 +1660,21 @@ def _dashboard_meal_period_stock_fields(
         meal_period=MealPeriod.DINNER.value,
         metrics_cache=metrics_cache,
     )
-    tomorrow_dinner_m = delivery_sheet_metrics_for_period(
-        db,
-        delivery_date=day_after,
-        store_id=sid,
-        meal_period=MealPeriod.DINNER.value,
-        metrics_cache=metrics_cache,
-    )
+    cal_today = today_shanghai()
+    if day_after > cal_today:
+        tomorrow_dinner_m = delivery_sheet_metrics_prep_preview_for_dinner_future_date(
+            db,
+            delivery_date=day_after,
+            store_id=sid,
+        )
+    else:
+        tomorrow_dinner_m = delivery_sheet_metrics_for_period(
+            db,
+            delivery_date=day_after,
+            store_id=sid,
+            meal_period=MealPeriod.DINNER.value,
+            metrics_cache=metrics_cache,
+        )
     tomorrow_dinner_retail = paid_single_retail_portions_by_dates(
         db, [day_after], store_id=sid, meal_period=MealPeriod.DINNER.value
     )
@@ -1701,7 +1710,7 @@ def _dashboard_cached_sheet_metrics(
     """同一 dashboard-summary 请求内，每个业务日最多算一次大表拆分指标。"""
     from app.models.enums import MealPeriod
     from app.services.delivery.delivery_sheet_service import (
-        delivery_sheet_metrics_pending_sql_for_future_date,
+        delivery_sheet_metrics_prep_preview_for_future_date,
         delivery_sheet_metrics_via_sql_for_locked_date,
         delivery_sheet_metrics_via_sql_for_unlocked_date,
         period_metrics_cache_get,
@@ -1713,7 +1722,7 @@ def _dashboard_cached_sheet_metrics(
         return cached
     cal_today = today_shanghai()
     if delivery_date > cal_today:
-        result = delivery_sheet_metrics_pending_sql_for_future_date(
+        result = delivery_sheet_metrics_prep_preview_for_future_date(
             db,
             delivery_date=delivery_date,
             store_id=store_id,

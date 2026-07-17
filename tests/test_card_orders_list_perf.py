@@ -134,3 +134,53 @@ def test_list_card_orders_history_page2_skips_count(db: Session, new_member: Mem
     assert total_last is None
     assert len(last_page) >= 1
     assert has_more_last is False
+
+
+def test_list_card_orders_date_range_filter(db: Session, new_member: Member):
+    """按创建时间（上海自然日）筛选工单。"""
+    from datetime import timedelta
+
+    from app.core.timeutil import beijing_now_naive, today_shanghai
+
+    today = today_shanghai()
+    yesterday = today - timedelta(days=1)
+
+    old_order = _seed_card_order(db, member=new_member, applied=False)
+    old_order.created_at = beijing_now_naive().replace(
+        year=yesterday.year, month=yesterday.month, day=yesterday.day, hour=10, minute=0, second=0
+    )
+    new_order = _seed_card_order(db, member=new_member, applied=False)
+    new_order.created_at = beijing_now_naive().replace(
+        year=today.year, month=today.month, day=today.day, hour=15, minute=0, second=0
+    )
+    db.commit()
+
+    items, total, _ = list_card_orders_paged(
+        db,
+        q=None,
+        pay_status=None,
+        page=1,
+        page_size=10,
+        include_history=True,
+        store_id=1,
+        date_from=today,
+        date_to=today,
+    )
+    assert total == 1
+    assert len(items) == 1
+    assert items[0].id == new_order.id
+
+    items_y, total_y, _ = list_card_orders_paged(
+        db,
+        q=None,
+        pay_status=None,
+        page=1,
+        page_size=10,
+        include_history=True,
+        store_id=1,
+        date_from=yesterday,
+        date_to=yesterday,
+    )
+    assert total_y == 1
+    assert len(items_y) == 1
+    assert items_y[0].id == old_order.id
