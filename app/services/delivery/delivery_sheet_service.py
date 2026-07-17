@@ -899,6 +899,26 @@ def total_meal_units_sql_sum_only(
     )
 
 
+def _exclude_store_pickup_members_from_frozen_home_ids(
+    db: Session,
+    member_ids: set[int],
+) -> set[int]:
+    """锁单后改自提：仍可能在顺丰快照 merged 集合，库存/到家份数应从 frozen 侧剔除（自提侧按现库统计）。"""
+    if not member_ids:
+        return set()
+    pickup_ids = {
+        int(x)
+        for x in db.scalars(
+            select(Member.id).where(
+                Member.id.in_(member_ids),
+                Member.deleted_at.is_(None),
+                Member.store_pickup.is_(True),
+            )
+        ).all()
+    }
+    return member_ids - pickup_ids
+
+
 def _total_meal_units_locked_date_sql(
     db: Session, *, delivery_date: date, store_id: int
 ) -> int:
@@ -907,8 +927,11 @@ def _total_meal_units_locked_date_sql(
     与 ``delivery_sheet_metrics_for_date(...).meal_total`` 口径一致，但不加载会员行与地址。
     """
     sid = int(store_id)
-    merged = _merged_home_member_ids_when_sheet_frozen(
-        db, delivery_date=delivery_date, store_id=sid
+    merged = _exclude_store_pickup_members_from_frozen_home_ids(
+        db,
+        _merged_home_member_ids_when_sheet_frozen(
+            db, delivery_date=delivery_date, store_id=sid
+        ),
     )
     from app.services.delivery.delivery_sheet_meal_units_service import (
         sum_meal_units_for_member_ids_on_frozen_sheet,
@@ -1088,12 +1111,15 @@ def delivery_sheet_metrics_via_sql_for_locked_date(
     sid = int(store_id)
     d = delivery_date
     day_snap = DeliverySheetDaySnapshots.load(db, store_id=sid, delivery_date=d)
-    merged_home_ids = _merged_home_member_ids_when_sheet_frozen(
+    merged_home_ids = _exclude_store_pickup_members_from_frozen_home_ids(
         db,
-        delivery_date=d,
-        store_id=sid,
-        frozen_ids=day_snap.frozen_member_ids or frozenset(),
-        absent_at_push=day_snap.absent_member_ids,
+        _merged_home_member_ids_when_sheet_frozen(
+            db,
+            delivery_date=d,
+            store_id=sid,
+            frozen_ids=day_snap.frozen_member_ids or frozenset(),
+            absent_at_push=day_snap.absent_member_ids,
+        ),
     )
     delivered_subq = _delivered_member_ids_subquery(db, delivery_date=d, store_id=sid)
     if merged_home_ids:
