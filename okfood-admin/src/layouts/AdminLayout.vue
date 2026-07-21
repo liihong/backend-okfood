@@ -29,10 +29,15 @@ import {
   handleAdminLogout,
   adminKind,
   adminAccessToken,
+  adminDisplayName,
   hydrateTokenFromStorage,
   peekAdminJwtUsername,
   adminTenantSubscription,
   fetchAdminTenantSubscription,
+  adminStoreBranding,
+  fetchAdminStoreBranding,
+  DEFAULT_SIDEBAR_STORE_NAME,
+  dishImageDisplayUrl,
 } from '../admin/core.js'
 import { useAdminTabsStore } from '../stores/adminTabs.js'
 import {
@@ -154,6 +159,19 @@ const portalSubtitle = computed(() => {
   return '会员制经营系统'
 })
 
+/** 侧栏品牌：有门店配置则用配置，否则回落默认 OK饭 / OK */
+const sidebarStoreName = computed(() => {
+  const name = String(adminStoreBranding.value?.store_name || '').trim()
+  return name || DEFAULT_SIDEBAR_STORE_NAME
+})
+
+const sidebarStoreLogoUrl = computed(() => {
+  const url = dishImageDisplayUrl(adminStoreBranding.value?.store_logo_url)
+  return url || ''
+})
+
+const sidebarUsesDefaultLogo = computed(() => !sidebarStoreLogoUrl.value)
+
 /** 配送大表：第二行挂载筛选工具条（Teleport 目标） */
 const isDeliveryPage = computed(() => route.name === 'delivery')
 
@@ -199,6 +217,8 @@ const activeMenuPath = computed(() => route.path)
 const adminJwtLoginId = computed(() => peekAdminJwtUsername(adminAccessToken.value))
 
 const adminNavbarDisplayName = computed(() => {
+  const name = String(adminDisplayName.value || '').trim()
+  if (name) return name
   const id = adminJwtLoginId.value
   if (id) return id
   if (isDeliveryOnly.value) return '配送工作台'
@@ -207,11 +227,12 @@ const adminNavbarDisplayName = computed(() => {
   return '管理员'
 })
 
-/** 头像圈内短字：优先登录名首字，其次占位名首字 */
+/** 头像圈内短字：优先展示名称首字，其次登录账号首字 */
 const adminNavbarAvatarChar = computed(() => {
+  const name = String(adminDisplayName.value || '').trim()
   const id = adminJwtLoginId.value
   const fallback = adminNavbarDisplayName.value
-  const src = id || fallback
+  const src = name || id || fallback
   if (!src) return '?'
   const ch = src[0]
   return /[a-z]/i.test(ch) ? ch.toUpperCase() : ch
@@ -269,6 +290,7 @@ onMounted(() => {
   }
   if (!isSystemOnly.value && adminAccessToken.value) {
     void fetchAdminTenantSubscription()
+    void fetchAdminStoreBranding()
   }
   sidebarMediaQuery = window.matchMedia('(max-width: 900px)')
   syncNarrowScreen()
@@ -343,9 +365,21 @@ function onTabClose(tab) {
   <div class="admin-layout" :class="{ 'admin-layout--sidebar-collapsed': sidebarCollapsed }">
     <aside class="sidebar" :class="{ 'sidebar--collapsed': sidebarCollapsed }">
       <div class="logo-area">
-        <div class="logo-box" aria-hidden="true">OK</div>
+        <div
+          class="logo-box"
+          :class="{ 'logo-box--image': !sidebarUsesDefaultLogo }"
+          aria-hidden="true"
+        >
+          <img
+            v-if="!sidebarUsesDefaultLogo"
+            :src="sidebarStoreLogoUrl"
+            alt=""
+            class="logo-box__img"
+          />
+          <span v-else class="logo-box__text">OK</span>
+        </div>
         <div v-show="!sidebarCollapsed" class="logo-text">
-          <h1>OK饭</h1>
+          <h1 :title="sidebarStoreName">{{ sidebarStoreName }}</h1>
           <span>{{ portalSubtitle }}</span>
         </div>
         <button

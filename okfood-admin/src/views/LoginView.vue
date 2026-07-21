@@ -11,6 +11,7 @@ import {
   adminKind,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import companyLogo from '../assets/company-logo.png'
 
 const router = useRouter()
 
@@ -75,8 +76,15 @@ const handleAdminLogin = async () => {
       <div class="brand-side">
         <div class="brand-side-bg"></div>
         <div class="brand-side-content">
-          <div class="logo-box brand-logo-mark">&#128076;</div>
-          <h1>OK饭-会员制经营系统</h1>
+          <img
+            class="brand-logo-mark"
+            :src="companyLogo"
+            alt="火源网络科技"
+            width="160"
+            height="160"
+          />
+          <h1>轻食解决方案管理系统</h1>
+          <h2>火源网络科技</h2>
           <div class="brand-features">
             <div v-for="item in brandFeatures" :key="item.label" class="feature-item">
               <div class="feature-icon-wrap">

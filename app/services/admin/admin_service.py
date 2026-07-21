@@ -409,6 +409,49 @@ def admin_login_user(db: Session, username: str, password: str) -> AdminUser:
     return u
 
 
+def extract_admin_username_from_operator(operator: str | None) -> str | None:
+    """从 member_operation_logs.operator 解析后台登录账号。"""
+    s = (operator or "").strip()
+    if not s.startswith("admin:"):
+        return None
+    uname = s[6:].strip()
+    return uname or None
+
+
+def build_admin_display_name_map(db: Session, operators: list[str | None]) -> dict[str, str]:
+    """批量解析 admin:<username> 对应的展示名称（无名称时回落为 username）。"""
+    usernames: set[str] = set()
+    for op in operators:
+        uname = extract_admin_username_from_operator(op)
+        if uname:
+            usernames.add(uname)
+    if not usernames:
+        return {}
+    rows = db.scalars(select(AdminUser).where(AdminUser.username.in_(usernames))).all()
+    out: dict[str, str] = {}
+    for row in rows:
+        dn = (row.display_name or "").strip()
+        out[row.username] = dn if dn else row.username
+    return out
+
+
+def format_operator_label(operator: str | None, *, admin_name_map: dict[str, str] | None = None) -> str:
+    """操作记录展示用操作人文案。"""
+    s = (operator or "").strip()
+    if not s:
+        return "—"
+    if s.startswith("admin:"):
+        uname = s[6:].strip()
+        if not uname:
+            return "后台"
+        if admin_name_map and uname in admin_name_map:
+            return admin_name_map[uname]
+        return uname
+    if s.startswith("member:"):
+        return "会员本人"
+    return s
+
+
 def member_list_overview_counts(db: Session, *, store_id: int | None = None) -> MemberListStatsOut:
     """档案库户数：与列表 `_member_archive_scope` + validity 筛选口径一致。"""
     expired_scope = _member_card_expired_scope()

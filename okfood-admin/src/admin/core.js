@@ -9,6 +9,8 @@ export const LOGIN_PRESET_PASSWORD = String(
 ).trim()
 export const ADMIN_TOKEN_KEY = 'okfood_admin_access_token'
 export const ADMIN_KIND_KEY = 'okfood_admin_kind'
+/** 管理端登录展示名称（与 JWT sub 登录账号区分） */
+export const ADMIN_DISPLAY_NAME_KEY = 'okfood_admin_display_name'
 /** 管理端当前操作门店（多店时须与后端 store_id 一致） */
 export const ADMIN_STORE_ID_KEY = 'okfood_admin_store_id'
 const ENV_API_BASE = String(import.meta.env.VITE_API_BASE_URL || '').trim()
@@ -23,6 +25,12 @@ export const adminStoreId = ref(ENV_DEFAULT_STORE_ID)
 export const adminKind = ref('full')
 /** 租户订阅状态（店主/配送/客服续费提醒） */
 export const adminTenantSubscription = ref(null)
+/** 侧栏门店品牌（名称、Logo；未配置时前端回落默认 OK饭） */
+export const adminStoreBranding = ref(null)
+/** 默认侧栏品牌文案 */
+export const DEFAULT_SIDEBAR_STORE_NAME = 'OK饭'
+/** 登录后展示名称（优先于 JWT 登录账号显示） */
+export const adminDisplayName = ref('')
 /** 会员列表：会员档案页写入，营业概览预览读取 */
 export const memberList = ref([])
 
@@ -127,10 +135,30 @@ function applyAdminKindFromCurrentToken(loginPayload = null) {
   persistAdminKind(kind)
 }
 
+function persistAdminDisplayName(name) {
+  const n = String(name || '').trim()
+  adminDisplayName.value = n
+  try {
+    if (rememberLogin.value) {
+      if (n) localStorage.setItem(ADMIN_DISPLAY_NAME_KEY, n)
+      else localStorage.removeItem(ADMIN_DISPLAY_NAME_KEY)
+      sessionStorage.removeItem(ADMIN_DISPLAY_NAME_KEY)
+    } else {
+      if (n) sessionStorage.setItem(ADMIN_DISPLAY_NAME_KEY, n)
+      else sessionStorage.removeItem(ADMIN_DISPLAY_NAME_KEY)
+      localStorage.removeItem(ADMIN_DISPLAY_NAME_KEY)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 /** 登录成功后须先 setAdminToken，再调用本函数传入登录返回的 data。 */
 export function syncAdminKindFromLoginPayload(data) {
   applyAdminKindFromCurrentToken(data && typeof data === 'object' ? data : null)
   syncAdminTenantSubscriptionFromPayload(data)
+  const raw = data && typeof data === 'object' ? data.display_name : null
+  persistAdminDisplayName(typeof raw === 'string' ? raw : '')
 }
 
 /** 从登录或订阅接口同步租户续费状态 */
@@ -170,6 +198,44 @@ export async function fetchAdminTenantSubscription() {
   }
 }
 
+/** 从门店配置或品牌接口同步侧栏展示 */
+export function syncAdminStoreBrandingFromPayload(data) {
+  const raw = data && typeof data === 'object' ? data : null
+  if (!raw) {
+    adminStoreBranding.value = null
+    return
+  }
+  const nameRaw = raw.store_name != null ? String(raw.store_name).trim() : ''
+  const logoRaw = raw.store_logo_url != null ? String(raw.store_logo_url).trim() : ''
+  if (!nameRaw && !logoRaw) {
+    adminStoreBranding.value = null
+    return
+  }
+  adminStoreBranding.value = {
+    store_name: nameRaw || null,
+    store_logo_url: logoRaw || null,
+  }
+}
+
+/** 拉取当前门店侧栏品牌（店主/配送/客服登录后） */
+export async function fetchAdminStoreBranding() {
+  if (!String(adminAccessToken.value || '').trim()) {
+    adminStoreBranding.value = null
+    return null
+  }
+  if (adminKind.value === 'system') {
+    adminStoreBranding.value = null
+    return null
+  }
+  try {
+    const data = await apiJson('/api/admin/store-branding', {}, { auth: true })
+    syncAdminStoreBrandingFromPayload(data)
+    return adminStoreBranding.value
+  } catch {
+    return adminStoreBranding.value
+  }
+}
+
 export function hydrateTokenFromStorage() {
   try {
     const fromLocal = localStorage.getItem(ADMIN_TOKEN_KEY)
@@ -177,6 +243,11 @@ export function hydrateTokenFromStorage() {
     adminAccessToken.value = (fromLocal || fromSess || '').trim()
     rememberLogin.value = Boolean(fromLocal)
     applyAdminKindFromCurrentToken()
+    adminDisplayName.value = (
+      localStorage.getItem(ADMIN_DISPLAY_NAME_KEY) ||
+      sessionStorage.getItem(ADMIN_DISPLAY_NAME_KEY) ||
+      ''
+    ).trim()
     hydrateAdminStoreFromStorage()
   } catch {
     /* ignore */
@@ -243,11 +314,15 @@ export function clearAdminToken() {
   adminAccessToken.value = ''
   adminKind.value = 'full'
   adminTenantSubscription.value = null
+  adminStoreBranding.value = null
+  adminDisplayName.value = ''
   try {
     sessionStorage.removeItem(ADMIN_TOKEN_KEY)
     localStorage.removeItem(ADMIN_TOKEN_KEY)
     sessionStorage.removeItem(ADMIN_KIND_KEY)
     localStorage.removeItem(ADMIN_KIND_KEY)
+    sessionStorage.removeItem(ADMIN_DISPLAY_NAME_KEY)
+    localStorage.removeItem(ADMIN_DISPLAY_NAME_KEY)
   } catch {
     /* ignore */
   }

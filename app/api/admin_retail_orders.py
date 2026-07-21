@@ -2,6 +2,8 @@
 
 from typing import Annotated
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.deps import SessionDep, admin_staff_subject, require_admin_tenant_store
@@ -20,10 +22,12 @@ from app.services.admin.store_retail_order_admin_service import (
     admin_assign_courier_store_retail_order,
     admin_cancel_store_retail_order,
     admin_mark_store_retail_order_delivered,
+    admin_resync_store_retail_from_sf_monitor,
     admin_update_store_retail_order_delivery,
     admin_wechat_refund_store_retail_order,
     bulk_admin_assign_courier_store_retail_orders,
     bulk_admin_mark_store_retail_orders_delivered,
+    bulk_admin_resync_store_retail_from_sf_monitor,
     bulk_push_store_retail_orders_to_sf,
     create_admin_store_retail_order,
     list_admin_store_retail_orders,
@@ -196,6 +200,54 @@ def admin_retail_orders_batch_dispatch_sf(
         db, order_ids=[int(x) for x in body.order_ids], store_id=int(store_id)
     )
     return success(data=out, msg="批量推顺丰处理完成")
+
+
+@router.post("/orders/retail-orders/sync-delivery-status")
+def admin_retail_orders_sync_delivery_status(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    fulfillment_date: Annotated[
+        date | None,
+        Query(description="履约日（上海日历日），留空则扫描全部门店未完成顺丰商城单"),
+    ] = None,
+    max_orders: Annotated[int, Query(description="最多扫描订单条数（1～500）")] = 500,
+):
+    """
+    批量对齐：商城零售订单中，顺丰推送表已回调但未回写到订单的条目。
+
+    取货(≥15)→配送中；妥投(17)→已完成；取消/撤单→顺丰取消。
+    """
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    mo = max(1, min(500, int(max_orders or 500)))
+    out = bulk_admin_resync_store_retail_from_sf_monitor(
+        db,
+        store_id=store_id,
+        max_orders=mo,
+        fulfillment_date=fulfillment_date,
+    )
+    msg = str(out.get("summary") or "同步完成")
+    return success(data=out, msg=msg)
+
+
+@router.post("/orders/retail-orders/{order_id}/sync-delivered-from-sf-monitor")
+def admin_retail_order_sync_delivered_from_sf_monitor(
+    order_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """商城零售顺丰单：按「顺丰订单监控」状态幂等对齐订单。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        msg = admin_resync_store_retail_from_sf_monitor(
+            db,
+            order_id=int(order_id),
+            store_id=store_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=None, msg=msg)
 
 
 @router.post("/orders/retail-orders/batch-dispatch/store-courier")

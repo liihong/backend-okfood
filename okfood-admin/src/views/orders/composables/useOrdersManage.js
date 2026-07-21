@@ -1319,11 +1319,49 @@ export function useOrdersManage(orderKind = 'single') {
   })
 
   async function onSyncDeliveryStatus() {
-    if (!adminAccessToken.value || activeTab.value !== 'single') return
-    const d0 = String(orderDate.value || '').trim() || todayShanghaiStr()
+    if (!adminAccessToken.value) return
+    if (activeTab.value === 'single') {
+      const d0 = String(orderDate.value || '').trim() || todayShanghaiStr()
+      try {
+        await ElMessageBox.confirm(
+          `将 ${d0} 供餐日单次点餐中，顺丰监控已为「妥投」或「取消/撤单」但未回写系统的订单，同步为「已完成」或「顺丰取消」。是否继续？`,
+          '同步订单状态',
+          { type: 'info', confirmButtonText: '开始同步', cancelButtonText: '取消' },
+        )
+      } catch {
+        return
+      }
+      syncDeliveryLoading.value = true
+      try {
+        const q = new URLSearchParams()
+        q.set('delivery_date', d0)
+        q.set('max_orders', '500')
+        const d = await apiJson(
+          `/api/admin/orders/daily/single-meals/sync-delivery-status?${q.toString()}`,
+          { method: 'POST' },
+          { auth: true },
+        )
+        const msg = typeof d?.summary === 'string' ? d.summary : '同步已完成'
+        showToast(msg, 'success')
+        await fetchSingleMeals()
+      } catch (e) {
+        const status = e && typeof e.status === 'number' ? e.status : 0
+        if (status === 401) {
+          handleAdminLogout()
+          return
+        }
+        showToast(e instanceof Error ? e.message : '同步失败', 'error')
+      } finally {
+        syncDeliveryLoading.value = false
+      }
+      return
+    }
+
+    if (activeTab.value !== 'retail') return
+
     try {
       await ElMessageBox.confirm(
-        `将 ${d0} 供餐日单次点餐中，顺丰监控已为「妥投」或「取消/撤单」但未回写系统的订单，同步为「已完成」或「顺丰取消」。是否继续？`,
+        '将商城订单中，顺丰监控已回调（取货/妥投/取消）但未回写系统的订单，同步为「配送中」「已完成」或「顺丰取消」。是否继续？',
         '同步订单状态',
         { type: 'info', confirmButtonText: '开始同步', cancelButtonText: '取消' },
       )
@@ -1333,16 +1371,15 @@ export function useOrdersManage(orderKind = 'single') {
     syncDeliveryLoading.value = true
     try {
       const q = new URLSearchParams()
-      q.set('delivery_date', d0)
       q.set('max_orders', '500')
       const d = await apiJson(
-        `/api/admin/orders/daily/single-meals/sync-delivery-status?${q.toString()}`,
+        `/api/admin/orders/retail-orders/sync-delivery-status?${q.toString()}`,
         { method: 'POST' },
         { auth: true },
       )
       const msg = typeof d?.summary === 'string' ? d.summary : '同步已完成'
       showToast(msg, 'success')
-      await fetchSingleMeals()
+      await fetchRetailOrders()
     } catch (e) {
       const status = e && typeof e.status === 'number' ? e.status : 0
       if (status === 401) {

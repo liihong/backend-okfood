@@ -7,6 +7,7 @@ import {
   adminAccessToken,
   handleAdminLogout,
   dishImageDisplayUrl,
+  syncAdminStoreBrandingFromPayload,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import StoreLocationPicker from '../components/StoreLocationPicker.vue'
@@ -70,6 +71,10 @@ async function loadConfig() {
     form.value.douyin_poi_id = d?.douyin_poi_id != null ? String(d.douyin_poi_id).trim() : ''
     form.value.douyin_account_id =
       d?.douyin_account_id != null ? String(d.douyin_account_id).trim() : ''
+    syncAdminStoreBrandingFromPayload({
+      store_name: form.value.store_name,
+      store_logo_url: form.value.store_logo_url,
+    })
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {

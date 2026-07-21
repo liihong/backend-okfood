@@ -37,6 +37,11 @@ def main() -> None:
         default=1,
         help="租户 id（默认 1）",
     )
+    parser.add_argument(
+        "--display-name",
+        default="",
+        help="展示名称（登录后与操作记录中显示）",
+    )
     args = parser.parse_args()
 
     try:
@@ -54,6 +59,7 @@ def main() -> None:
         db.add(
             AdminUser(
                 username=args.username,
+                display_name=(args.display_name or "").strip() or None,
                 tenant_id=args.tenant_id,
                 password_hash=hash_password(args.password),
                 role=args.role,

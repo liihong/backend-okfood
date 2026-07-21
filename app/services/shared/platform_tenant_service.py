@@ -258,6 +258,7 @@ def list_tenant_admins_for_platform(db: Session, tenant_id: int) -> list[Platfor
             id=r.id,
             tenant_id=r.tenant_id,
             username=r.username,
+            display_name=(r.display_name or "").strip() or None,
             role=r.role,
             is_active=r.is_active,
             created_at=_fmt_dt(r.created_at),
@@ -276,11 +277,13 @@ def create_tenant_admin_for_platform(
     uname = (body.username or "").strip()
     if not uname:
         raise HTTPException(status_code=400, detail="用户名不能为空")
+    display_name = (body.display_name or "").strip() or None
     if db.scalar(select(AdminUser.id).where(AdminUser.username == uname)):
         raise HTTPException(status_code=400, detail="用户名已存在")
     u = AdminUser(
         tenant_id=tenant_id,
         username=uname,
+        display_name=display_name,
         password_hash=hash_password(body.password),
         role=role,
         is_active=True,
@@ -292,6 +295,7 @@ def create_tenant_admin_for_platform(
         id=u.id,
         tenant_id=u.tenant_id,
         username=u.username,
+        display_name=(u.display_name or "").strip() or None,
         role=u.role,
         is_active=u.is_active,
         created_at=_fmt_dt(u.created_at),
@@ -316,6 +320,8 @@ def patch_tenant_admin_for_platform(
     operator_username: str,
 ) -> PlatformTenantAdminOut:
     u = _managed_admin_or_404(db, tenant_id=tenant_id, admin_id=admin_id)
+    if body.display_name is not None:
+        u.display_name = (body.display_name or "").strip() or None
     if body.password is not None:
         u.password_hash = hash_password(body.password)
     if body.role is not None:
@@ -333,6 +339,7 @@ def patch_tenant_admin_for_platform(
         id=u.id,
         tenant_id=u.tenant_id,
         username=u.username,
+        display_name=(u.display_name or "").strip() or None,
         role=u.role,
         is_active=u.is_active,
         created_at=_fmt_dt(u.created_at),

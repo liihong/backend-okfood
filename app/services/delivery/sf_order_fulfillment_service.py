@@ -16,6 +16,7 @@ from app.models.delivery_log import DeliveryLog
 from app.models.enums import DeliveryStatus
 from app.models.member import Member
 from app.models.single_meal_order import SingleMealOrder
+from app.models.store_retail_order import StoreRetailOrder
 from app.models.sf_same_city_push import SfSameCityPush
 from app.services.admin.admin_delivery_fulfillment_service import subscription_fulfilled_try_sf_home_no_commit
 from app.services.delivery.sf_same_city_service import aggs_for_delivery_date, load_agg_for_stop_id
@@ -24,6 +25,11 @@ from app.services.order.single_meal_order_service import (
     mark_single_meal_sf_cancelled_no_commit,
     sf_push_create_succeeded,
     sf_push_is_terminal_cancel,
+)
+from app.services.admin.store_retail_order_admin_service import (
+    mark_store_retail_delivered_sf_completion_no_commit,
+    mark_store_retail_sf_cancelled_no_commit,
+    _store_retail_order_bound_to_push,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,6 +42,7 @@ SF_ORDER_STATUS_CANCELLED = (2, 22)
 SF_PUSH_KIND_DELIVERY_SHEET = "delivery_sheet"
 SF_PUSH_KIND_DINNER_DELIVERY_SHEET = "dinner_delivery_sheet"
 SF_PUSH_KIND_SINGLE_MEAL_RETAIL = "single_meal_retail"
+SF_PUSH_KIND_STORE_RETAIL = "store_retail_order"
 
 
 def _meal_period_from_push_kind(kind: str | None) -> str:
@@ -108,6 +115,14 @@ def sf_push_fulfilled_quick_check(
         return True
 
     kind = (getattr(pus, "push_kind", None) or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
+    oid_sro = _retail_sro_order_id_from_stop(str(pus.stop_id or ""))
+    if kind == SF_PUSH_KIND_STORE_RETAIL or oid_sro is not None:
+        oid = oid_sro
+        if oid is None:
+            return False
+        o = db.get(StoreRetailOrder, oid)
+        return o is not None and str(getattr(o, "fulfillment_status", "") or "").strip().lower() == "delivered"
+
     oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
     if kind == SF_PUSH_KIND_SINGLE_MEAL_RETAIL or oid_retail is not None:
         oid = oid_retail
@@ -146,6 +161,19 @@ def _retail_smo_order_id_from_stop(stop_id: str | None) -> int | None:
         return None
 
 
+def _retail_sro_order_id_from_stop(stop_id: str | None) -> int | None:
+    """商城零售推单 stop_id 形如 retail-sro-{store_retail_orders.id}。"""
+    s = (stop_id or "").strip()
+    prefix = "retail-sro-"
+    if not s.startswith(prefix):
+        return None
+    tail = s[len(prefix) :].strip()
+    try:
+        return int(tail)
+    except (TypeError, ValueError):
+        return None
+
+
 def _single_meal_order_bound_to_push(db: Session, order_id: int, pus: SfSameCityPush) -> bool:
     """订单已绑定 push 时，回调/同步须 push.id 一致（防同址多单串单）。"""
     o = db.get(SingleMealOrder, int(order_id))
@@ -162,6 +190,8 @@ def _push_kind_label(kind: str | None) -> str:
     k = (kind or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
     if k == SF_PUSH_KIND_SINGLE_MEAL_RETAIL:
         return "单次零售"
+    if k == SF_PUSH_KIND_STORE_RETAIL:
+        return "商城零售"
     if k == SF_PUSH_KIND_DINNER_DELIVERY_SHEET:
         return "晚餐大表"
     return "午餐大表"
@@ -244,6 +274,21 @@ def _members_from_retail_single_meal_order(db: Session, order_id: int) -> list[d
             "name": ((m.name or "").strip() if m else "") or "—",
             "phone": ((m.phone or "").strip() if m else "") or "—",
             "kind": "single_meal",
+        }
+    ]
+
+
+def _members_from_retail_store_retail_order(db: Session, order_id: int) -> list[dict[str, Any]]:
+    row = db.get(StoreRetailOrder, int(order_id))
+    if not row:
+        return []
+    m = db.get(Member, int(row.member_id)) if row.member_id else None
+    return [
+        {
+            "member_id": int(row.member_id) if row.member_id is not None else None,
+            "name": ((m.name or "").strip() if m else "") or "—",
+            "phone": ((m.phone or "").strip() if m else "") or "—",
+            "kind": "store_retail",
         }
     ]
 
@@ -424,12 +469,17 @@ def _sf_push_monitor_row_dict(
     agg = aggs.get(str(r.stop_id)) if aggs else None
     kind_raw = (getattr(r, "push_kind", None) or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
     oid_retail = _retail_smo_order_id_from_stop(str(r.stop_id or ""))
+    oid_sro = _retail_sro_order_id_from_stop(str(r.stop_id or ""))
 
     members = _member_rows_from_agg(db, agg) if agg is not None else []
     if not members:
         members = _fallback_members_from_snapshot(r.request_snapshot)
     if oid_retail is not None and kind_raw == SF_PUSH_KIND_SINGLE_MEAL_RETAIL:
         alt = _members_from_retail_single_meal_order(db, oid_retail)
+        if alt:
+            members = alt
+    if oid_sro is not None and kind_raw == SF_PUSH_KIND_STORE_RETAIL:
+        alt = _members_from_retail_store_retail_order(db, oid_sro)
         if alt:
             members = alt
 
@@ -524,6 +574,32 @@ def _apply_sf_cancel_to_single_meal_orders_for_push(
         return result
 
     kind = (getattr(pus, "push_kind", None) or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
+    oid_sro = _retail_sro_order_id_from_stop(str(pus.stop_id or ""))
+    if kind == SF_PUSH_KIND_STORE_RETAIL or oid_sro is not None:
+        result["store_retail_applied"] = 0
+        result["store_retail_skipped"] = 0
+        if oid_sro is not None:
+            if not _store_retail_order_bound_to_push(db, oid_sro, pus):
+                result["store_retail_skipped"] = 1
+                result["warnings"].append(
+                    f"商城订单#{oid_sro}绑定的推单与当前 push#{pus.id} 不一致，跳过取消同步"
+                )
+                return result
+            prev = db.get(StoreRetailOrder, oid_sro)
+            before = str(getattr(prev, "fulfillment_status", "") or "").strip().lower() if prev else ""
+            mark_store_retail_sf_cancelled_no_commit(db, oid_sro)
+            after_row = db.get(StoreRetailOrder, oid_sro)
+            after = str(getattr(after_row, "fulfillment_status", "") or "").strip().lower() if after_row else ""
+            if after == "sf_cancelled" and before != "sf_cancelled":
+                result["store_retail_applied"] = 1
+            else:
+                result["store_retail_skipped"] = 1
+        else:
+            msg = f"顺丰商城推单无法解析订单号 push_kind={kind} stop_id={pus.stop_id}"
+            result["warnings"].append(msg)
+            logger.warning(msg)
+        return result
+
     oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
     if kind == SF_PUSH_KIND_SINGLE_MEAL_RETAIL or oid_retail is not None:
         if oid_retail is not None:
@@ -683,6 +759,14 @@ def sf_same_city_push_fully_fulfilled(
         return True
 
     kind = (getattr(pus, "push_kind", None) or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
+    oid_sro = _retail_sro_order_id_from_stop(str(pus.stop_id or ""))
+    if kind == SF_PUSH_KIND_STORE_RETAIL or oid_sro is not None:
+        oid = oid_sro
+        if oid is None:
+            return False
+        o = db.get(StoreRetailOrder, oid)
+        return o is not None and str(getattr(o, "fulfillment_status", "") or "").strip().lower() == "delivered"
+
     oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
     if kind == SF_PUSH_KIND_SINGLE_MEAL_RETAIL or oid_retail is not None:
         oid = oid_retail
@@ -1168,6 +1252,32 @@ def _apply_sf_same_city_stop_fulfillment(
         result["warnings"].append("订单已取消或取消中，跳过履约")
         return result
     kind = (getattr(pus, "push_kind", None) or "").strip() or SF_PUSH_KIND_DELIVERY_SHEET
+    oid_sro = _retail_sro_order_id_from_stop(str(pus.stop_id or ""))
+    if kind == SF_PUSH_KIND_STORE_RETAIL or oid_sro is not None:
+        result["store_retail_applied"] = 0
+        result["store_retail_skipped"] = 0
+        if oid_sro is not None:
+            if not _store_retail_order_bound_to_push(db, oid_sro, pus):
+                result["store_retail_skipped"] = 1
+                result["warnings"].append(
+                    f"商城订单#{oid_sro}绑定的推单与当前 push#{pus.id} 不一致，跳过标履约"
+                )
+                return result
+            prev = db.get(StoreRetailOrder, oid_sro)
+            before = str(getattr(prev, "fulfillment_status", "") or "").strip().lower() if prev else ""
+            mark_store_retail_delivered_sf_completion_no_commit(db, oid_sro)
+            after_row = db.get(StoreRetailOrder, oid_sro)
+            after = str(getattr(after_row, "fulfillment_status", "") or "").strip().lower() if after_row else ""
+            if after == "delivered" and before != "delivered":
+                result["store_retail_applied"] = 1
+            else:
+                result["store_retail_skipped"] = 1
+        else:
+            msg = f"顺丰商城推单无法解析订单号 push_kind={kind} stop_id={pus.stop_id}"
+            result["warnings"].append(msg)
+            logger.warning(msg)
+        return result
+
     oid_retail = _retail_smo_order_id_from_stop(str(pus.stop_id or ""))
     if kind == SF_PUSH_KIND_SINGLE_MEAL_RETAIL or oid_retail is not None:
         if oid_retail is not None:

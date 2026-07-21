@@ -1572,6 +1572,7 @@ class PlatformTenantAdminOut(BaseModel):
     id: int
     tenant_id: int
     username: str
+    display_name: str | None = None
     role: str
     is_active: bool
     created_at: str
@@ -1579,6 +1580,7 @@ class PlatformTenantAdminOut(BaseModel):
 
 class PlatformTenantAdminCreateIn(BaseModel):
     username: str = Field(..., max_length=64)
+    display_name: str | None = Field(None, max_length=64, description="展示名称，登录后与操作记录中显示")
     password: str = Field(..., min_length=8, max_length=128)
     role: TenantManagedAdminRole = "full"
 
@@ -1590,6 +1592,7 @@ class PlatformTenantAdminCreateIn(BaseModel):
 
 
 class PlatformTenantAdminPatchIn(BaseModel):
+    display_name: str | None = Field(None, max_length=64, description="展示名称；传空字符串表示清除")
     password: str | None = Field(None, min_length=8, max_length=128)
     role: TenantManagedAdminRole | None = None
     is_active: bool | None = None

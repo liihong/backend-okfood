@@ -40,7 +40,7 @@ const {
       刷新
     </button>
     <button
-      v-if="activeTab === 'single'"
+      v-if="activeTab === 'single' || activeTab === 'retail'"
       type="button"
       class="btn-sm orders-manage-sync-delivery"
       :disabled="syncDeliveryLoading || loading"

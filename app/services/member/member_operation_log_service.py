@@ -161,7 +161,11 @@ def list_member_operations(
     return items, total
 
 
-def operation_log_to_dict(row: MemberOperationLog) -> dict[str, Any]:
+def operation_log_to_dict(
+    row: MemberOperationLog,
+    *,
+    admin_name_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """转为管理端展示用字典。"""
 
     def _loads(s: str | None) -> Any:
@@ -172,6 +176,7 @@ def operation_log_to_dict(row: MemberOperationLog) -> dict[str, Any]:
         except (TypeError, ValueError):
             return s
 
+    operator = row.operator
     return {
         "id": int(row.id),
         "member_id": int(row.member_id),
@@ -182,6 +187,14 @@ def operation_log_to_dict(row: MemberOperationLog) -> dict[str, Any]:
         "before": _loads(row.before_json),
         "after": _loads(row.after_json),
         "ip_address": row.ip_address,
-        "operator": row.operator,
+        "operator": operator,
+        "operator_label": _format_operator_label(operator, admin_name_map=admin_name_map),
         "created_at": row.created_at.isoformat() if row.created_at else "",
     }
+
+
+def _format_operator_label(operator: str | None, *, admin_name_map: dict[str, str] | None = None) -> str:
+    """避免 member_operation_log_service 与 admin_service 循环依赖，本地薄封装。"""
+    from app.services.admin.admin_service import format_operator_label
+
+    return format_operator_label(operator, admin_name_map=admin_name_map)

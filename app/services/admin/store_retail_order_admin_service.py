@@ -6,6 +6,7 @@ import logging
 import time
 import uuid
 from copy import copy
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -43,9 +44,17 @@ from app.services.member.member_address_service import full_address_line
 from app.services.member.member_address_service import delivery_region_name_map, routing_area_label
 from app.utils.sql_like import escape_like_fragment
 
+from app.services.order.single_meal_order_service import (
+    sf_push_create_succeeded,
+    sf_push_is_terminal_cancel,
+    sf_push_is_terminal_delivered,
+)
+
 logger = logging.getLogger(__name__)
 
 _SF_PUSH_KIND_STORE_RETAIL = "store_retail_order"
+_SF_ORDER_STATUS_PICKED_UP = 15  # 顺丰：配送员已取货
+_SF_CANCEL_CALLBACK_KINDS = frozenset({"cancel_by_sf", "rider_cancel"})
 
 
 def _admin_member_display_name(member: Member | None, addr: MemberAddress | None) -> str:
@@ -814,3 +823,412 @@ def create_admin_store_retail_order(
     db.commit()
     db.refresh(row)
     return _build_admin_list_out(db, row)
+
+
+def _retail_order_id_from_stop_id(stop_id: str | None) -> int | None:
+    """商城零售推单 stop_id 形如 retail-sro-{store_retail_orders.id}。"""
+    s = (stop_id or "").strip()
+    if not s.startswith(_RETAIL_STOP_PREFIX):
+        return None
+    try:
+        return int(s[len(_RETAIL_STOP_PREFIX) :])
+    except (TypeError, ValueError):
+        return None
+
+
+def _store_retail_order_bound_to_push(db: Session, order_id: int, pus: SfSameCityPush) -> bool:
+    """订单已绑定 push 时，回调/同步须 push.id 一致（防同址多单串单）。"""
+    o = db.get(StoreRetailOrder, int(order_id))
+    if o is None:
+        return False
+    if o.sf_same_city_push_id is None:
+        return True
+    if pus.id is None:
+        return False
+    return int(o.sf_same_city_push_id) == int(pus.id)
+
+
+def sync_store_retail_sf_order_id_for_push_no_commit(db: Session, pus: SfSameCityPush) -> int:
+    """顺丰回调写入 push.sf_order_id 后，同步到已绑定该 push 的商城订单。"""
+    sf_oid = (pus.sf_order_id or "").strip() or None
+    if pus.id is None or not sf_oid:
+        return 0
+    rows = db.scalars(
+        select(StoreRetailOrder).where(StoreRetailOrder.sf_same_city_push_id == int(pus.id))
+    ).all()
+    n = 0
+    for row in rows:
+        if row.sf_order_id != sf_oid:
+            row.sf_order_id = sf_oid
+            n += 1
+    return n
+
+
+def mark_store_retail_orders_in_delivery_on_sf_pickup_no_commit(
+    db: Session, order_ids: list[int] | tuple[int, ...]
+) -> int:
+    """
+    顺丰回调已取货（order_status≥15）：商城订单标为「配送中」。
+
+    支持：
+    - ``sf_awaiting_pickup`` → ``accepted``
+    - ``sf_cancelled`` → ``accepted``（骑士撤单后重派并取货）
+    """
+    updated = 0
+    for raw in order_ids:
+        try:
+            oid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        row = db.get(StoreRetailOrder, oid)
+        if not row:
+            continue
+        if (row.pay_status or "").strip() != "已支付":
+            continue
+        if bool(row.store_pickup):
+            continue
+        prev = str(row.fulfillment_status or "").strip().lower()
+        if prev == "accepted":
+            continue
+        if prev not in (_FULFILLMENT_SF_AWAITING_PICKUP, "sf_cancelled"):
+            continue
+        row.fulfillment_status = "accepted"
+        updated += 1
+    return updated
+
+
+def mark_store_retail_delivered_sf_completion_no_commit(db: Session, order_id: int) -> None:
+    """顺丰妥投：商城订单标履约已送达（幂等）。"""
+    row = db.get(StoreRetailOrder, int(order_id))
+    if not row:
+        return
+    if (row.pay_status or "").strip() != "已支付":
+        return
+    if str(row.fulfillment_status or "").strip().lower() == "delivered":
+        return
+    if bool(row.store_pickup):
+        return
+    row.fulfillment_status = "delivered"
+
+
+def mark_store_retail_sf_cancelled_no_commit(db: Session, order_id: int) -> None:
+    """顺丰取消/撤单：商城订单标 ``sf_cancelled``（已送达的不覆盖）。"""
+    row = db.get(StoreRetailOrder, int(order_id))
+    if not row:
+        return
+    if (row.pay_status or "").strip() != "已支付":
+        return
+    prev = str(row.fulfillment_status or "").strip().lower()
+    if prev in ("delivered", "sf_cancelled"):
+        return
+    if bool(row.store_pickup):
+        return
+    row.fulfillment_status = "sf_cancelled"
+
+
+def _store_retail_order_ids_for_sf_push(db: Session, pus: SfSameCityPush) -> list[int]:
+    oids: set[int] = set()
+    oid_retail = _retail_order_id_from_stop_id(str(pus.stop_id or ""))
+    if oid_retail is not None:
+        oids.add(int(oid_retail))
+    if pus.id is not None:
+        for row in db.scalars(
+            select(StoreRetailOrder.id).where(StoreRetailOrder.sf_same_city_push_id == int(pus.id))
+        ).all():
+            oids.add(int(row))
+    return sorted(oids)
+
+
+def sync_store_retail_pickup_status_from_sf_push_no_commit(db: Session, pus: SfSameCityPush) -> int:
+    """顺丰配送状态回调：已取货时把关联商城订单标为配送中。"""
+    if not sf_push_create_succeeded(pus):
+        return 0
+    if sf_push_is_terminal_cancel(pus):
+        return 0
+    st = pus.sf_callback_order_status
+    if st is None:
+        return 0
+    try:
+        n = int(st)
+    except (TypeError, ValueError):
+        return 0
+    if n == 31 or n < _SF_ORDER_STATUS_PICKED_UP:
+        return 0
+    oids = _store_retail_order_ids_for_sf_push(db, pus)
+    if not oids:
+        return 0
+    return mark_store_retail_orders_in_delivery_on_sf_pickup_no_commit(db, oids)
+
+
+def _apply_sf_monitor_status_to_store_retail_order_no_commit(
+    db: Session,
+    o: StoreRetailOrder,
+    pus: SfSameCityPush,
+) -> str | None:
+    """
+    按顺丰监控行回写商城零售订单履约状态（不 commit）。
+    返回与单次零售对齐的 outcome 字符串。
+    """
+    if (o.pay_status or "").strip() != "已支付":
+        return "skipped_unpaid"
+    if bool(o.store_pickup):
+        return "skipped_store_pickup"
+    if not sf_push_create_succeeded(pus):
+        return "skipped_sf_not_success_push"
+    pk = str(getattr(pus, "push_kind", "") or "").strip().lower()
+    if pk and pk not in (_SF_PUSH_KIND_STORE_RETAIL,):
+        return "skipped_wrong_push_kind"
+
+    if o.sf_same_city_push_id is not None and int(o.sf_same_city_push_id) != int(pus.id):
+        return "skipped_push_order_mismatch"
+
+    prev_f = str(o.fulfillment_status or "").strip().lower()
+    st = pus.sf_callback_order_status
+    try:
+        n = int(st) if st is not None else None
+    except (TypeError, ValueError):
+        n = None
+
+    if n == 31:
+        return "skipped_sf_cancel"
+    if sf_push_is_terminal_cancel(pus):
+        if prev_f == "sf_cancelled":
+            return "already_sf_cancelled"
+        mark_store_retail_sf_cancelled_no_commit(db, int(o.id))
+        after = str(o.fulfillment_status or "").strip().lower()
+        return "updated_cancel" if after == "sf_cancelled" else "skipped_sf_cancel"
+
+    if n is None or n < _SF_ORDER_STATUS_PICKED_UP:
+        if prev_f == "accepted":
+            o.fulfillment_status = _FULFILLMENT_SF_AWAITING_PICKUP
+            return "updated_awaiting_pickup"
+        if prev_f == "pending" and sf_push_create_succeeded(pus):
+            link_store_retail_order_to_sf_push_no_commit(db, int(o.id), pus)
+            if str(o.fulfillment_status or "").strip().lower() == _FULFILLMENT_SF_AWAITING_PICKUP:
+                return "updated_awaiting_pickup"
+        return "skipped_sf_status_not_terminal"
+
+    if prev_f == _FULFILLMENT_SF_AWAITING_PICKUP:
+        if mark_store_retail_orders_in_delivery_on_sf_pickup_no_commit(db, [int(o.id)]) > 0:
+            prev_f = "accepted"
+
+    if sf_push_is_terminal_delivered(pus):
+        if prev_f == "delivered":
+            return "already_completed"
+        if pus.merchant_cancel_requested_at is not None:
+            return "skipped_merchant_cancel_marker"
+        mark_store_retail_delivered_sf_completion_no_commit(db, int(o.id))
+        after = str(o.fulfillment_status or "").strip().lower()
+        return "updated" if after == "delivered" else "skipped_sf_status_not_terminal"
+
+    if prev_f == "accepted":
+        return "already_accepted"
+    if prev_f == _FULFILLMENT_SF_AWAITING_PICKUP:
+        return "skipped_sf_status_not_terminal"
+    if mark_store_retail_orders_in_delivery_on_sf_pickup_no_commit(db, [int(o.id)]) > 0:
+        return "updated_in_delivery"
+    return "skipped_sf_status_not_terminal"
+
+
+def admin_resync_store_retail_from_sf_monitor(
+    db: Session,
+    *,
+    order_id: int,
+    store_id: int,
+) -> str:
+    """商城零售顺丰单：按监控终态幂等回写 ``store_retail_orders``。"""
+    o = db.get(StoreRetailOrder, int(order_id))
+    if o is None or int(o.store_id) != int(store_id):
+        raise ValueError("订单不存在或不属于当前门店")
+    pus = _resolve_sf_push_for_store_retail_order(db, store_id=int(store_id), order_id=int(order_id))
+    if pus is None:
+        raise ValueError("未找到本订单已成功创单的顺丰推送记录（请确认已推顺丰）")
+    if pus.sf_callback_order_status is None and not (pus.last_callback_kind or "").strip():
+        raise ValueError("尚未收到顺丰配送回调（请先确认开放平台回调可达且验签通过）")
+    if not sf_push_is_terminal_cancel(pus) and not sf_push_is_terminal_delivered(pus):
+        st = pus.sf_callback_order_status
+        kind = (pus.last_callback_kind or "").strip() or "—"
+        # 非终态但已取货(≥15)仍可对齐为配送中
+        try:
+            n = int(st) if st is not None else None
+        except (TypeError, ValueError):
+            n = None
+        if n is None or n < _SF_ORDER_STATUS_PICKED_UP:
+            raise ValueError(
+                f"顺丰推送尚未处于可对齐的状态（当前状态编码 {st!r}，最近回调 {kind}）。"
+                "请在「顺丰订单监控」确认已为妥投(17)或取消/撤单，或配送员已取货(≥15)。"
+            )
+
+    prev = str(o.fulfillment_status or "").strip().lower()
+    outcome = _apply_sf_monitor_status_to_store_retail_order_no_commit(db, o, pus)
+    db.commit()
+    db.refresh(o)
+    after = str(o.fulfillment_status or "").strip().lower()
+
+    if sf_push_is_terminal_cancel(pus):
+        if after != "sf_cancelled":
+            raise ValueError("不满足标为顺丰取消条件（例如未支付、门店自提等），未修改订单状态")
+        if prev == "sf_cancelled":
+            return "订单已是顺丰取消，无需重复同步"
+        return "已同步为顺丰取消"
+
+    if sf_push_is_terminal_delivered(pus):
+        if after != "delivered":
+            raise ValueError("不满足标为已完成条件，未修改订单状态")
+        if prev == "delivered":
+            return "订单已是已完成，无需重复同步"
+        return "已同步为已完成"
+
+    if outcome == "updated_in_delivery":
+        return "已同步为配送中"
+    if outcome == "updated_awaiting_pickup":
+        return "已同步为顺丰待取货"
+    if outcome == "already_accepted":
+        return "订单已是配送中，无需重复同步"
+    raise ValueError("顺丰状态未能对齐到订单，请查看监控详情")
+
+
+def bulk_admin_resync_store_retail_from_sf_monitor(
+    db: Session,
+    *,
+    store_id: int,
+    max_orders: int = 500,
+    fulfillment_date: date | None = None,
+) -> dict[str, Any]:
+    """
+    批量对齐商城零售订单与顺丰监控状态（幂等）。
+
+    - 扫描未完成的顺丰商城订单，按 push 回调回写待取货/配送中/已完成/顺丰取消
+    - 可选 ``fulfillment_date`` 限定履约日；默认扫描全部门店未完成顺丰单
+    """
+    mx = max(1, min(500, int(max_orders or 500)))
+    filters = [
+        StoreRetailOrder.store_id == int(store_id),
+        StoreRetailOrder.pay_status == "已支付",
+        StoreRetailOrder.store_pickup.is_(False),
+        StoreRetailOrder.fulfillment_status.in_(
+            ("pending", _FULFILLMENT_SF_AWAITING_PICKUP, "accepted", "sf_cancelled")
+        ),
+    ]
+    if fulfillment_date is not None:
+        filters.append(StoreRetailOrder.fulfillment_date == fulfillment_date)
+
+    rows = list(
+        db.scalars(
+            select(StoreRetailOrder)
+            .where(*filters)
+            .order_by(StoreRetailOrder.id.desc())
+            .limit(mx)
+        ).all()
+    )
+    scanned = len(rows)
+    counts: dict[str, int] = {
+        "updated": 0,
+        "updated_in_delivery": 0,
+        "updated_awaiting_pickup": 0,
+        "updated_cancel": 0,
+        "already_completed": 0,
+        "already_sf_cancelled": 0,
+        "already_accepted": 0,
+        "skipped_unpaid": 0,
+        "skipped_store_pickup": 0,
+        "skipped_no_sf_push": 0,
+        "skipped_sf_not_success_push": 0,
+        "skipped_wrong_push_kind": 0,
+        "skipped_sf_status_not_tuotou": 0,
+        "skipped_sf_cancel": 0,
+        "skipped_merchant_cancel_marker": 0,
+    }
+    touched: set[int] = set()
+
+    def _bump(outcome: str | None) -> None:
+        if not outcome:
+            return
+        if outcome == "updated":
+            counts["updated"] += 1
+        elif outcome == "updated_in_delivery":
+            counts["updated_in_delivery"] += 1
+        elif outcome == "updated_awaiting_pickup":
+            counts["updated_awaiting_pickup"] += 1
+        elif outcome == "updated_cancel":
+            counts["updated_cancel"] += 1
+        elif outcome in counts:
+            counts[outcome] += 1
+        else:
+            counts["skipped_sf_status_not_tuotou"] += 1
+
+    for o in rows:
+        pus = _resolve_sf_push_for_store_retail_order(db, store_id=int(store_id), order_id=int(o.id))
+        if pus is None:
+            counts["skipped_no_sf_push"] += 1
+            continue
+        prev_f = str(o.fulfillment_status or "").strip().lower()
+        if prev_f in ("pending", "sf_cancelled") and sf_push_create_succeeded(pus):
+            link_store_retail_order_to_sf_push_no_commit(db, int(o.id), pus)
+            if str(o.fulfillment_status or "").strip().lower() == _FULFILLMENT_SF_AWAITING_PICKUP:
+                db.commit()
+                db.refresh(o)
+                _bump("updated_awaiting_pickup")
+                touched.add(int(o.id))
+                prev_f = str(o.fulfillment_status or "").strip().lower()
+        elif prev_f == "accepted":
+            _bump("already_accepted")
+        outcome = _apply_sf_monitor_status_to_store_retail_order_no_commit(db, o, pus)
+        if outcome in ("updated", "updated_cancel", "updated_in_delivery", "updated_awaiting_pickup"):
+            db.commit()
+            db.refresh(o)
+        _bump(outcome)
+        touched.add(int(o.id))
+
+    push_filters = [
+        SfSameCityPush.store_id == int(store_id),
+        SfSameCityPush.error_code == 0,
+        SfSameCityPush.push_kind == _SF_PUSH_KIND_STORE_RETAIL,
+        SfSameCityPush.stop_id.like(f"{_RETAIL_STOP_PREFIX}%"),
+        or_(
+            SfSameCityPush.sf_callback_order_status >= _SF_ORDER_STATUS_PICKED_UP,
+            SfSameCityPush.last_callback_kind.in_(tuple(_SF_CANCEL_CALLBACK_KINDS)),
+        ),
+    ]
+    if fulfillment_date is not None:
+        push_filters.append(SfSameCityPush.delivery_date == fulfillment_date)
+
+    push_rows = list(
+        db.scalars(
+            select(SfSameCityPush)
+            .where(*push_filters)
+            .order_by(SfSameCityPush.id.desc())
+            .limit(mx)
+        ).all()
+    )
+
+    for pus in push_rows:
+        oid = _retail_order_id_from_stop_id(str(pus.stop_id or ""))
+        if oid is None or oid in touched:
+            continue
+        o = db.get(StoreRetailOrder, oid)
+        if o is None or int(o.store_id) != int(store_id):
+            continue
+        outcome = _apply_sf_monitor_status_to_store_retail_order_no_commit(db, o, pus)
+        if outcome in ("updated", "updated_cancel", "updated_in_delivery", "updated_awaiting_pickup"):
+            db.commit()
+            db.refresh(o)
+        _bump(outcome)
+        touched.add(oid)
+
+    parts = [
+        f"扫描商城订单 {scanned} 条",
+        f"新对齐待取货 {counts['updated_awaiting_pickup']} 条",
+        f"新对齐配送中 {counts['updated_in_delivery']} 条",
+        f"新对齐妥投 {counts['updated']} 条",
+        f"新对齐顺丰取消 {counts['updated_cancel']} 条",
+        f"已是已完成 {counts['already_completed']}",
+        f"已是顺丰取消 {counts['already_sf_cancelled']}",
+        f"无顺丰推单 {counts['skipped_no_sf_push']}",
+        f"顺丰未妥投/未取货或未回调 {counts['skipped_sf_status_not_tuotou']}",
+    ]
+    summary = (
+        "；".join(parts)
+        + "。（依据本系统收到的顺丰推送落库对齐；不向运力主动查询；门店自配送仍由手工标记）"
+    )
+    return {"scanned": scanned, "sf_push_scanned": len(push_rows), **counts, "summary": summary}

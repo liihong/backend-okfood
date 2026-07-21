@@ -66,7 +66,7 @@ from app.schemas.admin import (
     MemberMembershipRefundConfirmIn,
     MemberMealCompensationIn,
 )
-from app.schemas.common import AdminLoginTokenOut, AdminTenantSubscriptionOut
+from app.schemas.common import AdminLoginTokenOut, AdminStoreBrandingOut, AdminTenantSubscriptionOut
 from app.core.tenant_subscription import build_tenant_subscription_out
 from app.models.tenant import Tenant
 from app.services.admin.admin_service import (
@@ -76,6 +76,7 @@ from app.services.admin.admin_service import (
     assign_menu_schedule,
     assign_weekly_menu_slot,
     set_weekly_slot_menu_total_stock,
+    build_admin_display_name_map,
     create_category_admin,
     delete_category_admin,
     patch_category_admin,
@@ -251,6 +252,7 @@ def login(request: Request, body: AdminLoginIn, db: SessionDep):
     token = AdminLoginTokenOut(
         access_token=issue_admin_token(body.username, jwt_role=jwt_role),
         admin_kind=kind,
+        display_name=(getattr(u, "display_name", None) or "").strip() or None,
         tenant_subscription=tenant_subscription,
     )
     return success(data=dump_model(token), msg="登录成功")
@@ -266,6 +268,22 @@ def admin_tenant_subscription(
     tenant = db.get(Tenant, tid)
     payload = build_tenant_subscription_out(tenant)
     return success(data=payload, msg="获取成功")
+
+
+@router.get("/store-branding")
+def admin_store_branding(
+    db: SessionDep,
+    admin_username: str = Depends(admin_or_delivery_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """当前门店侧栏品牌：名称与 Logo（未配置时字段为 null，前端回落默认 OK饭）。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    cfg = get_store_config(db, store_id=store_id)
+    payload = AdminStoreBrandingOut(
+        store_name=(cfg.store_name or "").strip() or None,
+        store_logo_url=(cfg.store_logo_url or "").strip() or None,
+    )
+    return success(data=dump_model(payload), msg="获取成功")
 
 
 @router.get("/dashboard-summary", response_model=AdminDashboardSummaryApiOut)
@@ -1937,8 +1955,9 @@ def admin_member_operation_logs(
         page_size=page_size,
         operation_type=operation_type,
     )
+    admin_name_map = build_admin_display_name_map(db, [x.operator for x in items])
     return page_response(
-        items=[operation_log_to_dict(x) for x in items],
+        items=[operation_log_to_dict(x, admin_name_map=admin_name_map) for x in items],
         total=total,
         page=page,
         page_size=page_size,

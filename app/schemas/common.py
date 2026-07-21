@@ -21,10 +21,18 @@ class AdminTenantSubscriptionOut(BaseModel):
     remind_days: int = 30
 
 
+class AdminStoreBrandingOut(BaseModel):
+    """侧栏门店品牌：名称与 Logo（读门店配置，全员可见）。"""
+
+    store_name: str | None = None
+    store_logo_url: str | None = None
+
+
 class AdminLoginTokenOut(TokenResponse):
     """登录响应：`admin_kind` 与 JWT `role`（admin / admin_delivery / admin_support / admin_system）一致。"""
 
     admin_kind: Literal["full", "delivery", "support", "system"] = "full"
+    display_name: str | None = None
     tenant_subscription: AdminTenantSubscriptionOut | None = None
 
 

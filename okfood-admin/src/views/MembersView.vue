@@ -1784,7 +1784,7 @@ onUnmounted(() => {
                     <td class="operation-logs-td-src">
                       <span class="operation-logs-src">{{ operationLogSourceLabel(row.source) }}</span>
                     </td>
-                    <td class="operation-logs-td-operator">{{ operationLogOperatorLabel(row.operator) }}</td>
+                    <td class="operation-logs-td-operator">{{ row.operator_label || operationLogOperatorLabel(row.operator) }}</td>
                   </tr>
                 </tbody>
               </table>

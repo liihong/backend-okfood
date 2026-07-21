@@ -61,7 +61,7 @@ const admins = ref([])
 const adminDialog = ref(false)
 const adminSaving = ref(false)
 const adminEdit = ref(null)
-const adminForm = ref({ username: '', password: '', role: 'full', is_active: true })
+const adminForm = ref({ username: '', display_name: '', password: '', role: 'full', is_active: true })
 
 const roleLabel = (r) => {
   const x = String(r || '').toLowerCase()
@@ -505,7 +505,7 @@ async function loadAdminsForTenant(tenantId) {
 
 function openCreateAdmin() {
   adminEdit.value = null
-  adminForm.value = { username: '', password: '', role: 'full', is_active: true }
+  adminForm.value = { username: '', display_name: '', password: '', role: 'full', is_active: true }
   adminDialog.value = true
 }
 
@@ -517,6 +517,7 @@ function openEditAdmin(row) {
   adminEdit.value = row
   adminForm.value = {
     username: row.username || '',
+    display_name: row.display_name || '',
     password: '',
     role: String(row.role || 'full').toLowerCase(),
     is_active: row.is_active !== false,
@@ -552,12 +553,14 @@ async function saveAdmin() {
     if (!adminEdit.value) {
       const uname = String(adminForm.value.username || '').trim()
       const pwd = String(adminForm.value.password || '')
+      const displayName = String(adminForm.value.display_name || '').trim()
       await apiJson(
         `/api/admin/system/tenants/${tid}/admins`,
         {
           method: 'POST',
           body: JSON.stringify({
             username: uname,
+            display_name: displayName || null,
             password: pwd,
             role: adminForm.value.role,
           }),
@@ -567,6 +570,8 @@ async function saveAdmin() {
       showToast('已创建', 'success')
     } else {
       const body = {}
+      const displayName = String(adminForm.value.display_name || '').trim()
+      body.display_name = displayName
       const pwd = String(adminForm.value.password || '').trim()
       if (pwd) body.password = pwd
       if (adminForm.value.role) body.role = adminForm.value.role
@@ -605,7 +610,8 @@ async function deactivateAdmin(row) {
     showToast('不能在此处停用平台管理员', 'error')
     return
   }
-  const ok = window.confirm(`确定停用管理员「${row.username}」？`)
+  const label = (row.display_name || row.username || '').trim() || row.username
+  const ok = window.confirm(`确定停用管理员「${label}」？`)
   if (!ok) return
   try {
     await apiJson(
@@ -946,7 +952,10 @@ onMounted(async () => {
         <el-button type="primary" size="small" @click="openCreateAdmin">新增管理员</el-button>
       </div>
       <el-table v-loading="adminsLoading" :data="admins" size="small" empty-text="暂无管理员">
-        <el-table-column prop="username" label="用户名" min-width="120" />
+        <el-table-column prop="display_name" label="名称" min-width="96">
+          <template #default="{ row }">{{ row.display_name || '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="username" label="登录账号" min-width="120" />
         <el-table-column label="角色" width="110">
           <template #default="{ row }">{{ roleLabel(row.role) }}</template>
         </el-table-column>
@@ -968,10 +977,18 @@ onMounted(async () => {
 
     <el-dialog v-model="adminDialog" :title="adminDialogTitle" width="440px">
       <el-form label-position="top">
-        <el-form-item v-if="!adminEdit" label="用户名">
-          <el-input v-model="adminForm.username" maxlength="64" autocomplete="off" />
+        <el-form-item label="名称">
+          <el-input
+            v-model="adminForm.display_name"
+            maxlength="64"
+            autocomplete="off"
+            placeholder="如：张店长，登录后与操作记录中展示"
+          />
         </el-form-item>
-        <el-form-item v-else label="用户名">
+        <el-form-item v-if="!adminEdit" label="登录账号">
+          <el-input v-model="adminForm.username" maxlength="64" autocomplete="off" placeholder="通常为手机号" />
+        </el-form-item>
+        <el-form-item v-else label="登录账号">
           <el-input v-model="adminForm.username" disabled />
         </el-form-item>
         <el-form-item :label="adminEdit ? '新密码（留空不改）' : '密码'">
