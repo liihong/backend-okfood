@@ -5,6 +5,7 @@ from app.models.admin_user import AdminUser
 from app.models.app_settings import AppSettings
 from app.models.tenant import Tenant
 from app.models.tenant_integration_settings import TenantIntegrationSettings
+from app.models.wx_open_component_state import WxOpenComponentState
 from app.models.store import Store
 from app.models.balance_log import BalanceLog
 from app.models.courier import Courier
@@ -43,6 +44,7 @@ __all__ = [
     "AppSettings",
     "Tenant",
     "TenantIntegrationSettings",
+    "WxOpenComponentState",
     "Store",
     "BalanceLog",
     "Courier",

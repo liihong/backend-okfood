@@ -179,8 +179,24 @@ def get_phone_pure_number(
     phone_code: str, *, db: "Session | None" = None, tenant_id: int | None = None
 ) -> str:
     """通过手机号动态令牌换取用户手机号。"""
-    appid, secret = _credentials_for_call(db, tenant_id)
-    access_token = get_stable_access_token_for_app(appid, secret)
+    if db is not None and tenant_id is not None:
+        try:
+            from app.integrations.wechat_open_platform import get_mini_program_api_access_token
+            from app.services.shared.wx_open_authorizer_service import tenant_has_authorizer_tokens
+            from app.integrations.wechat_open_platform import wechat_open_platform_configured
+
+            if wechat_open_platform_configured() and tenant_has_authorizer_tokens(db, int(tenant_id)):
+                appid, access_token = get_mini_program_api_access_token(db, int(tenant_id))
+            else:
+                appid, secret = _credentials_for_call(db, tenant_id)
+                access_token = get_stable_access_token_for_app(appid, secret)
+        except WeChatMiniError:
+            appid, secret = _credentials_for_call(db, tenant_id)
+            access_token = get_stable_access_token_for_app(appid, secret)
+    else:
+        appid, secret = _credentials_for_call(db, tenant_id)
+        access_token = get_stable_access_token_for_app(appid, secret)
+
     data = _request_getuserphonenumber(phone_code, access_token)
 
     info = data.get("phone_info")
@@ -189,11 +205,32 @@ def get_phone_pure_number(
         # access_token 被其它进程刷新或已过期：清缓存、重拉 token 后仅重试一次
         if errcode == WX_ERRCODE_INVALID_ACCESS_TOKEN:
             logger.warning(
-                "getuserphonenumber access_token 失效，清缓存后重试: appid=%s…",
+                "getuserphonenumber access_token 失效，重试: appid=%s…",
                 appid[:8] if len(appid) > 8 else appid,
             )
-            _invalidate_access_token_for_app(appid)
-            access_token = get_stable_access_token_for_app(appid, secret)
+            if db is not None and tenant_id is not None:
+                try:
+                    from app.integrations.wechat_open_platform import get_mini_program_api_access_token
+                    from app.services.shared.wx_open_authorizer_service import (
+                        refresh_authorizer_access_token,
+                        tenant_has_authorizer_tokens,
+                    )
+                    from app.integrations.wechat_open_platform import wechat_open_platform_configured
+
+                    if wechat_open_platform_configured() and tenant_has_authorizer_tokens(db, int(tenant_id)):
+                        access_token = refresh_authorizer_access_token(db, int(tenant_id))
+                    else:
+                        _invalidate_access_token_for_app(appid)
+                        _, secret_retry = _credentials_for_call(db, tenant_id)
+                        access_token = get_stable_access_token_for_app(appid, secret_retry)
+                except WeChatMiniError:
+                    _invalidate_access_token_for_app(appid)
+                    _, secret_retry = _credentials_for_call(db, tenant_id)
+                    access_token = get_stable_access_token_for_app(appid, secret_retry)
+            else:
+                _invalidate_access_token_for_app(appid)
+                _, secret_retry = _credentials_for_call(db, tenant_id)
+                access_token = get_stable_access_token_for_app(appid, secret_retry)
             data = _request_getuserphonenumber(phone_code, access_token)
             info = data.get("phone_info")
             errcode = data.get("errcode")

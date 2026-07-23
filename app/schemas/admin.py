@@ -1547,6 +1547,7 @@ TenantManagedAdminRole = Literal["full", "delivery", "support"]
 class PlatformTenantOut(BaseModel):
     id: int
     name: str
+    code: str | None = None
     is_active: bool
     expires_at: str | None = None
     days_until_expiry: int | None = None
@@ -1558,12 +1559,14 @@ class PlatformTenantOut(BaseModel):
 
 class PlatformTenantCreateIn(BaseModel):
     name: str = Field(..., max_length=128)
+    code: str | None = Field(None, max_length=64, description="SaaS 外部 tenantId，如 t_brand_a")
     is_active: bool = True
     expires_at: date = Field(..., description="按年订阅到期日（含当日仍有效）")
 
 
 class PlatformTenantPatchIn(BaseModel):
     name: str | None = Field(None, max_length=128)
+    code: str | None = Field(None, max_length=64, description="SaaS 外部 tenantId；传空字符串清除")
     is_active: bool | None = None
     expires_at: date | None = Field(None, description="续费后更新到期日")
 

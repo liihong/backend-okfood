@@ -49,6 +49,34 @@ from app.services.meal_period.card_eligibility import filter_member_groups_for_s
 from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
 
 
+def _still_absent_member_ids_from_push_snapshot(
+    db: Session,
+    *,
+    member_ids: frozenset[int],
+    delivery_date: date,
+    meal_period: str,
+) -> frozenset[int]:
+    """推单 absent 快照中的会员：仅保留业务日当前仍请假的 id（已取消请假者允许重新并入大表）。"""
+    if not member_ids:
+        return frozenset()
+    from app.services.meal_period.leave import is_absent_on_delivery_date_for_period
+
+    today = today_shanghai()
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    still: set[int] = set()
+    for m in db.scalars(
+        select(Member).where(
+            Member.id.in_(member_ids),
+            Member.deleted_at.is_(None),
+        )
+    ).all():
+        if is_absent_on_delivery_date_for_period(
+            db, m, delivery_date, meal_period=period, today=today
+        ):
+            still.add(int(m.id))
+    return frozenset(still)
+
+
 def _merged_home_member_ids_when_sheet_frozen(
     db: Session,
     *,
@@ -61,7 +89,8 @@ def _merged_home_member_ids_when_sheet_frozen(
 ) -> set[int]:
     """
     大表已推单：顺丰快照 frozen ∪ 推单后白名单（当日首餐新客）。
-    推单当日曾请假的会员（首次推单快照）不因取消请假再并入；无快照行时仅 frozen（兼容历史日）。
+    推单当日曾请假但当前已取消请假的会员重新并入；仍请假的继续排除。
+    无 absent 快照行时仅 frozen（兼容历史日）。
     meal_period 区分午/晚餐 push_kind 与白名单口径。
     """
     from app.services.delivery.delivery_day_lock_service import (
@@ -83,12 +112,25 @@ def _merged_home_member_ids_when_sheet_frozen(
         absent_at_push = absent_member_ids_at_first_push(
             db, store_id=sid, delivery_date=delivery_date, meal_period=period
         )
+    still_absent_at_push = (
+        _still_absent_member_ids_from_push_snapshot(
+            db,
+            member_ids=absent_at_push,
+            delivery_date=delivery_date,
+            meal_period=period,
+        )
+        if absent_at_push
+        else frozenset()
+    )
+    reinstated_after_leave_cancel = (
+        (absent_at_push - still_absent_at_push) if absent_at_push else frozenset()
+    )
     merged = set(frozen)
     # 已取消推单中的订阅会员仍保留在大表待送名单（便于运营核对与重推）
     for mid in sf_cancelled_sheet_member_ids_for_delivery_date(
         db, store_id=sid, delivery_date=delivery_date, meal_period=period
     ):
-        if absent_at_push is not None and mid in absent_at_push:
+        if still_absent_at_push and mid in still_absent_at_push:
             continue
         merged.add(int(mid))
     whitelist = post_push_first_day_whitelist_member_ids(
@@ -101,9 +143,11 @@ def _merged_home_member_ids_when_sheet_frozen(
     for mid in whitelist:
         if mid in merged:
             continue
-        if absent_at_push is not None and mid in absent_at_push:
+        if still_absent_at_push and mid in still_absent_at_push:
             continue
         merged.add(mid)
+    for mid in reinstated_after_leave_cancel:
+        merged.add(int(mid))
     return merged
 
 
@@ -151,7 +195,7 @@ def _home_members_for_delivery_sheet(
     day_snap: DeliverySheetDaySnapshots | None = None,
 ) -> tuple[list[Member], dict[int, MemberAddress | None]]:
     """
-    到家应配送会员。大表顺丰推单后：快照 ∪ 当日首餐白名单；推单当日曾请假者取消请假不并入。
+    到家应配送会员。大表顺丰推单后：快照 ∪ 当日首餐白名单；推单当日曾请假但已取消者重新并入。
     """
     sid = int(store_id)
     if not is_subscription_delivery_day(delivery_date):

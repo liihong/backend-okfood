@@ -1,10 +1,11 @@
 <script setup>
 defineOptions({ name: 'TenantsView' })
 import { ref, onMounted, computed } from 'vue'
-import { Plug } from 'lucide-vue-next'
+import { Plug, Palette } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import { PASSWORD_POLICY_MSG, isPasswordStrongEnough } from '../utils/passwordPolicy.js'
+import TenantSaasConfigDrawer from './components/TenantSaasConfigDrawer.vue'
 
 const loading = ref(false)
 const overview = ref(null)
@@ -12,7 +13,12 @@ const tenants = ref([])
 const tenantDialog = ref(false)
 const tenantSaving = ref(false)
 const tenantEditId = ref(null)
-const tenantForm = ref({ name: '', is_active: true, expires_at: '' })
+const tenantForm = ref({ name: '', code: '', is_active: true, expires_at: '' })
+
+const saasDrawerVisible = ref(false)
+const componentTicket = ref('')
+const componentState = ref(null)
+const componentTicketSaving = ref(false)
 
 /** 新建租户默认到期日：当前日期 + 1 年（按年收费） */
 function defaultTenantExpiresAt() {
@@ -119,6 +125,43 @@ const storesDialog = ref(false)
 const storesLoading = ref(false)
 const stores = ref([])
 
+async function loadComponentState() {
+  if (!adminAccessToken.value) return
+  try {
+    componentState.value = await apiJson('/api/admin/system/wx-open/component-state', {}, { auth: true })
+  } catch {
+    componentState.value = null
+  }
+}
+
+async function saveComponentTicket() {
+  const ticket = String(componentTicket.value || '').trim()
+  if (!ticket) {
+    showToast('请粘贴 verify_ticket', 'error')
+    return
+  }
+  componentTicketSaving.value = true
+  try {
+    await apiJson(
+      '/api/admin/system/wx-open/component-ticket',
+      { method: 'POST', body: JSON.stringify({ verify_ticket: ticket }) },
+      { auth: true },
+    )
+    componentTicket.value = ''
+    showToast('component_verify_ticket 已保存', 'success')
+    await loadComponentState()
+  } catch (e) {
+    showToast(e instanceof Error ? e.message : '保存失败', 'error')
+  } finally {
+    componentTicketSaving.value = false
+  }
+}
+
+function openSaasConfig(row) {
+  currentTenant.value = row
+  saasDrawerVisible.value = true
+}
+
 async function loadOverview() {
   if (!adminAccessToken.value) return
   try {
@@ -154,7 +197,7 @@ async function loadTenants() {
 
 function openCreateTenant() {
   tenantEditId.value = null
-  tenantForm.value = { name: '', is_active: true, expires_at: defaultTenantExpiresAt() }
+  tenantForm.value = { name: '', code: '', is_active: true, expires_at: defaultTenantExpiresAt() }
   tenantDialog.value = true
 }
 
@@ -162,6 +205,7 @@ function openEditTenant(row) {
   tenantEditId.value = row.id
   tenantForm.value = {
     name: row.name || '',
+    code: row.code || '',
     is_active: row.is_active !== false,
     expires_at: row.expires_at || '',
   }
@@ -181,18 +225,24 @@ async function saveTenant() {
   }
   tenantSaving.value = true
   try {
+    const code = String(tenantForm.value.code || '').trim()
     if (tenantEditId.value == null) {
       await apiJson(
         '/api/admin/system/tenants',
         {
           method: 'POST',
-          body: JSON.stringify({ name, is_active: tenantForm.value.is_active, expires_at: expiresAt }),
+          body: JSON.stringify({
+            name,
+            code: code || null,
+            is_active: tenantForm.value.is_active,
+            expires_at: expiresAt,
+          }),
         },
         { auth: true },
       )
       showToast('已创建', 'success')
     } else {
-      const body = { name, is_active: tenantForm.value.is_active }
+      const body = { name, is_active: tenantForm.value.is_active, code: code || '' }
       if (expiresAt) body.expires_at = expiresAt
       await apiJson(
         `/api/admin/system/tenants/${tenantEditId.value}`,
@@ -637,6 +687,7 @@ async function deactivateAdmin(row) {
 onMounted(async () => {
   await loadOverview()
   await loadTenants()
+  await loadComponentState()
 })
 </script>
 
@@ -664,6 +715,28 @@ onMounted(async () => {
       </div>
     </div>
 
+    <div v-if="componentState" class="component-ticket-panel">
+      <div class="component-ticket-head">
+        <strong>微信第三方平台</strong>
+        <el-tag :type="componentState.component_ticket_present ? 'success' : 'warning'" size="small">
+          verify_ticket：{{ componentState.component_ticket_present ? '已落库' : '未就绪' }}
+        </el-tag>
+      </div>
+      <p class="component-ticket-hint">
+        回调 URL：<code>/api/wx/open/component/callback</code>；未接通时可手动粘贴微信推送的 ticket。
+      </p>
+      <div class="component-ticket-row">
+        <el-input
+          v-model="componentTicket"
+          type="password"
+          show-password
+          placeholder="component_verify_ticket"
+          maxlength="512"
+        />
+        <el-button type="primary" :loading="componentTicketSaving" @click="saveComponentTicket">保存 Ticket</el-button>
+      </div>
+    </div>
+
     <div class="onboarding-tip">
       <strong>给新门店开账号：</strong>
       ① 新建或选中租户 → 点<strong>门店</strong>新增门店，记下列表里的<strong>门店 ID</strong>。② 同一租户下点<strong>管理员</strong>新增店主账号（role=full）。
@@ -674,7 +747,10 @@ onMounted(async () => {
     <el-card shadow="never" class="table-card" v-loading="loading">
       <el-table :data="tenants" style="width: 100%" table-layout="auto" empty-text="暂无租户">
         <el-table-column prop="id" label="ID" width="72" />
-        <el-table-column prop="name" label="名称" min-width="140" />
+        <el-table-column prop="name" label="名称" min-width="120" />
+        <el-table-column prop="code" label="tenantId" min-width="120">
+          <template #default="{ row }">{{ row.code || '—' }}</template>
+        </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
@@ -696,10 +772,14 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column prop="store_count" label="门店数" width="90" />
         <el-table-column prop="admin_count" label="管理员(活跃)" width="120" />
-        <el-table-column label="操作" width="360" fixed="right">
+        <el-table-column label="操作" width="420" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openStores(row)">门店</el-button>
             <el-button link type="primary" @click="openAdmins(row)">管理员</el-button>
+            <el-button link type="primary" @click="openSaasConfig(row)">
+              <Palette :size="14" stroke-width="2" class="btn-inline-icon" />
+              SaaS
+            </el-button>
             <el-button link type="primary" @click="openIntegration(row)">
               <Plug :size="14" stroke-width="2" class="btn-inline-icon" />
               对接
@@ -715,6 +795,9 @@ onMounted(async () => {
       <el-form label-position="top">
         <el-form-item label="租户名称">
           <el-input v-model="tenantForm.name" maxlength="128" show-word-limit placeholder="例如：某某餐饮" />
+        </el-form-item>
+        <el-form-item label="外部 tenantId（code）">
+          <el-input v-model="tenantForm.code" maxlength="64" placeholder="如 t_brand_a，与 ext.tenantId 一致" />
         </el-form-item>
         <el-form-item label="订阅到期日">
           <el-date-picker
@@ -789,6 +872,12 @@ onMounted(async () => {
         <el-button type="primary" :loading="storeSaving" @click="saveStore">创建</el-button>
       </template>
     </el-dialog>
+
+    <TenantSaasConfigDrawer
+      v-model:visible="saasDrawerVisible"
+      :tenant="currentTenant"
+      @saved="loadTenants"
+    />
 
     <el-drawer
       v-model="integrationDialog"
@@ -1146,5 +1235,35 @@ onMounted(async () => {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.55);
   line-height: 1.45;
+}
+.component-ticket-panel {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.45);
+}
+.component-ticket-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.component-ticket-hint {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  color: rgba(226, 232, 240, 0.75);
+}
+.component-ticket-hint code {
+  color: #fde047;
+  font-size: 0.78rem;
+}
+.component-ticket-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.component-ticket-row .el-input {
+  flex: 1;
 }
 </style>

@@ -167,6 +167,7 @@ def _tenant_to_out(
     return PlatformTenantOut(
         id=t.id,
         name=t.name,
+        code=(getattr(t, "code", None) or "").strip() or None,
         is_active=t.is_active,
         expires_at=sub["expires_at"],
         days_until_expiry=sub["days_until_expiry"],
@@ -208,7 +209,12 @@ def create_platform_tenant(db: Session, body: PlatformTenantCreateIn) -> Platfor
     name = (body.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="租户名称不能为空")
-    t = Tenant(name=name, is_active=body.is_active, expires_at=body.expires_at)
+    code = (body.code or "").strip() or None
+    if code:
+        dup = db.scalar(select(Tenant).where(Tenant.code == code))
+        if dup is not None:
+            raise HTTPException(status_code=400, detail="租户 code 已存在")
+    t = Tenant(name=name, code=code, is_active=body.is_active, expires_at=body.expires_at)
     db.add(t)
     db.commit()
     db.refresh(t)
@@ -222,6 +228,15 @@ def patch_platform_tenant(db: Session, tenant_id: int, body: PlatformTenantPatch
         if not n:
             raise HTTPException(status_code=400, detail="租户名称不能为空")
         t.name = n
+    if body.code is not None:
+        c = body.code.strip()
+        if not c:
+            t.code = None
+        else:
+            dup = db.scalar(select(Tenant).where(Tenant.code == c, Tenant.id != int(tenant_id)))
+            if dup is not None:
+                raise HTTPException(status_code=400, detail="租户 code 已存在")
+            t.code = c
     if body.is_active is not None:
         t.is_active = body.is_active
     if body.expires_at is not None:

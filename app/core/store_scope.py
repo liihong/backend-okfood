@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.member import Member
 from app.models.store import Store
+from app.models.tenant import Tenant
 
 
 def header_store_id_raw(request: Request) -> str | None:
@@ -33,13 +34,22 @@ def parse_store_id_from_header_or_default(request: Request | None) -> int:
 class PublicStoreContext:
     store_id: int
     tenant_id: int
+    tenant_code: str | None = None
 
 
 def resolve_public_store(db: Session, store_id: int) -> PublicStoreContext:
     st = db.get(Store, int(store_id))
     if not st or not st.is_active:
         raise HTTPException(status_code=404, detail="门店不存在或已停用")
-    return PublicStoreContext(store_id=int(st.id), tenant_id=int(st.tenant_id))
+    tenant = db.get(Tenant, int(st.tenant_id))
+    code = None
+    if tenant is not None:
+        code = (getattr(tenant, "code", None) or "").strip() or None
+    return PublicStoreContext(
+        store_id=int(st.id),
+        tenant_id=int(st.tenant_id),
+        tenant_code=code,
+    )
 
 
 def assert_member_belongs_to_header_store(request: Request, member: Member) -> int:

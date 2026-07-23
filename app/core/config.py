@@ -52,6 +52,16 @@ class Settings(BaseSettings):
     # 多门店：未传 X-Store-Id 时小程序/公开接口默认落在该门店（与迁移回填 id=1 对齐）
     DEFAULT_TENANT_ID: int = 1
     DEFAULT_STORE_ID: int = 1
+    # SaaS 严格模式：true 时非主租户公开接口必须带 X-Tenant-Id；false 兼容 OK饭 仅 X-Store-Id（默认）
+    TENANT_STRICT_MODE: bool = False
+
+    # 微信开放平台第三方平台（可选；未配置时仍走租户直连 AppID/Secret，不影响 OK饭）
+    WX_OPEN_COMPONENT_APPID: str = ""
+    WX_OPEN_COMPONENT_SECRET: str = ""
+    WX_OPEN_COMPONENT_TOKEN: str = ""
+    WX_OPEN_COMPONENT_AES_KEY: str = ""
+    # 仅本地联调：跳过第三方平台回调解密，直接解析明文 XML / 手动 ticket（生产勿开）
+    WX_OPEN_CALLBACK_SKIP_DECRYPT: bool = False
 
     JWT_SECRET: str = "change-me"
     JWT_ALGORITHM: str = "HS256"

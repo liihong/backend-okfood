@@ -21,10 +21,18 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(*, subject: str, role: str, expires_delta: timedelta) -> str:
+def create_access_token(
+    *,
+    subject: str,
+    role: str,
+    expires_delta: timedelta,
+    extra_claims: dict[str, Any] | None = None,
+) -> str:
     """签发 JWT：sub 为业务主键（会员 members.id / 配送员工号 / 管理员用户名），role 区分端。"""
     expire = datetime.now(timezone.utc) + expires_delta
     payload: dict[str, Any] = {"sub": subject, "role": role, "exp": expire}
+    if extra_claims:
+        payload.update(extra_claims)
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 

@@ -18,12 +18,14 @@ from app.core.deps import (
 
 from app.core.limiter import limiter
 
+from app.core.tenant_resolve import lookup_tenant_id_by_wx_appid
+from app.integrations.wechat_open_platform import jscode2session_via_authorizer
 from app.integrations.wechat_mini import (
     WeChatMiniError,
     get_phone_pure_number,
-    jscode2session,
     wx_mini_configured_for_tenant,
 )
+from app.services.shared.tenant_integration_service import get_merged_wx_credentials
 
 from app.schemas.common import TokenResponse
 
@@ -127,6 +129,26 @@ from app.integrations.wechat_pay_v2 import resolve_request_client_ip
 from app.utils.response import dump_model, page_response, success
 
 
+def _resolve_wx_login_tenant_id(
+    db: SessionDep,
+    request: Request,
+    store_ctx: PublicStoreContext,
+) -> int:
+    """
+    登录租户解析：默认与公开接口一致（X-Store-Id → tenant）；
+    若配置了 AppID 映射且请求带 X-Tenant-Id，做交叉校验。
+    """
+    from app.core.tenant_resolve import assert_header_tenant_matches_tenant_id
+
+    tenant_id = int(store_ctx.tenant_id)
+    assert_header_tenant_matches_tenant_id(db, request, tenant_id=tenant_id)
+    appid, _secret = get_merged_wx_credentials(db, tenant_id)
+    mapped = lookup_tenant_id_by_wx_appid(db, appid)
+    if mapped is not None and int(mapped) != tenant_id:
+        raise HTTPException(status_code=403, detail="小程序 AppID 与当前租户不匹配")
+    return tenant_id
+
+
 
 router = APIRouter(prefix="/user", tags=["会员端"])
 
@@ -151,18 +173,22 @@ def login_wx_mini(
 
     需在环境变量中配置 WX_MINI_APPID、WX_MINI_SECRET。
 
-    门店由请求头 ``X-Store-Id`` 解析（未传则默认门店）；档案按门店隔离。
+    门店由请求头 ``X-Store-Id`` 解析（未传则默认门店）；可选 ``X-Tenant-Id`` 做 SaaS 交叉校验。
 
     """
 
-    if not wx_mini_configured_for_tenant(db, int(store_ctx.tenant_id)):
+    tenant_id = _resolve_wx_login_tenant_id(db, request, store_ctx)
+
+    if not wx_mini_configured_for_tenant(db, tenant_id):
         raise HTTPException(status_code=503, detail="微信小程序登录未配置或未开放")
 
     try:
 
-        sess = jscode2session(body.js_code, db=db, tenant_id=int(store_ctx.tenant_id))
+        sess = jscode2session_via_authorizer(
+            body.js_code, db=db, tenant_id=tenant_id
+        )
 
-        phone = get_phone_pure_number(body.phone_code, db=db, tenant_id=int(store_ctx.tenant_id))
+        phone = get_phone_pure_number(body.phone_code, db=db, tenant_id=tenant_id)
 
     except WeChatMiniError as e:
 
@@ -173,12 +199,12 @@ def login_wx_mini(
     member_id = ensure_member_stub(
         db,
         phone,
-        tenant_id=int(store_ctx.tenant_id),
+        tenant_id=tenant_id,
         store_id=int(store_ctx.store_id),
         wx_mini_openid=openid,
     )
 
-    token = TokenResponse(access_token=issue_member_token(member_id))
+    token = TokenResponse(access_token=issue_member_token(member_id, tenant_id=tenant_id))
 
     return success(data=dump_model(token), msg="登录成功")
 
@@ -198,7 +224,9 @@ def sync_wx_mini_openid(
     if not wx_mini_configured_for_tenant(db, int(member.tenant_id)):
         raise HTTPException(status_code=503, detail="微信小程序登录未配置或未开放")
     try:
-        sess = jscode2session(body.js_code, db=db, tenant_id=int(member.tenant_id))
+        sess = jscode2session_via_authorizer(
+            body.js_code, db=db, tenant_id=int(member.tenant_id)
+        )
     except WeChatMiniError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e))
     openid = str(sess.get("openid") or "").strip()

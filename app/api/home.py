@@ -5,6 +5,7 @@ from app.schemas.user import MembershipCardTemplateMemberOut
 from app.services.admin.catalog_admin_service import list_membership_templates, membership_template_public_dump
 from app.services.client.home_banner_service import list_active_home_banners
 from app.services.client.home_entry_poster_service import get_active_entry_poster, get_active_menu_poster
+from app.services.client.tenant_saas_service import build_home_layout_public
 from app.services.shared.store_config_service import get_store_base_delivery_fee_yuan, get_store_config
 from app.services.shared.tenant_integration_service import merged_sf_integration_namespace
 from app.services.shared.image_url_service import image_logo_url
@@ -76,3 +77,17 @@ def home_store_info(db: SessionDep, store_ctx: PublicStoreContext = Depends(publ
         },
         msg="获取成功",
     )
+
+
+@router.get("/layout")
+def home_layout(
+    db: SessionDep,
+    store_ctx: PublicStoreContext = Depends(public_store_dep),
+):
+    """
+    首页定制 layout（方案 B）：按租户返回 template + blocks。
+
+    未配置时返回 preset 默认编排；模板库接口不可用时 fallback ext.homeLayoutPreset。
+    """
+    payload = build_home_layout_public(db, store_ctx)
+    return success(data=payload, msg="获取成功")

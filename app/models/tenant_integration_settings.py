@@ -19,6 +19,11 @@ class TenantIntegrationSettings(Base):
     )
     wx_mini_appid: Mapped[str | None] = mapped_column(String(64), nullable=True)
     wx_mini_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # 微信第三方平台代授权 token（SaaS 代运营小程序；无则回退直连 AppID/Secret）
+    wx_authorizer_access_token: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    wx_authorizer_refresh_token: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    wx_authorizer_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    wx_authorizer_authorized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     wechat_pay_mch_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     wechat_pay_api_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     wechat_pay_notify_url: Mapped[str | None] = mapped_column(String(512), nullable=True)

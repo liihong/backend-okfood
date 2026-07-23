@@ -14,9 +14,8 @@ from app.core.security import create_access_token, decode_token
 from app.core.store_scope import (
     PublicStoreContext,
     assert_member_belongs_to_header_store,
-    parse_store_id_from_header_or_default,
-    resolve_public_store,
 )
+from app.core.tenant_resolve import resolve_public_tenant_store
 from app.db.session import get_db
 from app.models.admin_user import AdminUser
 from app.models.member import Member
@@ -146,12 +145,16 @@ def admin_or_delivery_staff_subject(
     return sub
 
 
-def issue_member_token(member_id: int) -> str:
-    """会员 JWT（当前仅微信小程序登录签发）；`sub` 为 members.id。"""
+def issue_member_token(member_id: int, *, tenant_id: int | None = None) -> str:
+    """会员 JWT（当前仅微信小程序登录签发）；`sub` 为 members.id；可选写入 tenant_id 供 SaaS 校验。"""
+    extra: dict[str, int] = {}
+    if tenant_id is not None:
+        extra["tenant_id"] = int(tenant_id)
     return create_access_token(
         subject=str(member_id),
         role=ROLE_MEMBER,
         expires_delta=timedelta(minutes=settings.JWT_EXPIRE_MINUTES_MEMBER),
+        extra_claims=extra or None,
     )
 
 
@@ -206,8 +209,13 @@ MemberIdScoped = Annotated[int, Depends(member_id_scoped)]
 
 
 def public_store_dep(request: Request, db: Session = Depends(get_db)) -> PublicStoreContext:
-    sid = parse_store_id_from_header_or_default(request)
-    return resolve_public_store(db, sid)
+    """公开接口门店上下文：兼容 OK饭 仅 X-Store-Id；SaaS 可额外带 X-Tenant-Id 交叉校验。"""
+    ctx = resolve_public_tenant_store(db, request)
+    return PublicStoreContext(
+        store_id=int(ctx.store_id),
+        tenant_id=int(ctx.tenant_id),
+        tenant_code=ctx.tenant_code,
+    )
 
 
 def require_admin_tenant_store(db: Session, *, admin_username: str, store_id: int) -> tuple[int, int]:
