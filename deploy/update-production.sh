@@ -80,6 +80,15 @@ if [[ "${BUILD_ADMIN:-0}" == "1" ]]; then
   npm ci
   npm run build
   echo ">>> 管理端构建产物目录: ${ADMIN_DIR}/dist"
+
+  # 现网 Nginx root=/var/www/okfood/h5，管理端 SPA 以绝对路径 /assets/* 发布在站点根；
+  # 仅构建 dist 而不同步，线上仍会是旧包（/dish-catalog 无路由 → 空白页）
+  ADMIN_PUBLISH_ROOT="${ADMIN_PUBLISH_ROOT:-/var/www/okfood/h5}"
+  if [[ -d "${ADMIN_DIR}/dist" ]]; then
+    echo ">>> 同步管理端 dist → ${ADMIN_PUBLISH_ROOT}"
+    mkdir -p "${ADMIN_PUBLISH_ROOT}"
+    cp -a "${ADMIN_DIR}/dist/." "${ADMIN_PUBLISH_ROOT}/"
+  fi
 fi
 
 echo ">>> 完成。API 健康检查（本机）:"

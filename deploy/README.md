@@ -51,7 +51,7 @@ sudo bash /var/www/okfood/backend/deploy/update-production.sh
 ### 可选环境变量
 
 ```bash
-# 顺带在服务器构建管理端（需已安装 Node.js / npm）
+# 顺带在服务器构建管理端并同步到站点根（需已安装 Node.js / npm）
 BUILD_ADMIN=1 bash /var/www/okfood/backend/deploy/update-production.sh
 
 # 不拉 Git（例如仅改了 .env 或手动 rsync 过代码）
@@ -60,6 +60,23 @@ SKIP_GIT=1 bash /var/www/okfood/backend/deploy/update-production.sh
 # 自定义路径（非默认目录时）
 BACKEND_ROOT=/var/www/okfood/backend bash /var/www/okfood/backend/deploy/update-production.sh
 ```
+
+### 管理端 / 团餐菜品页未更新时
+
+默认 `update-production.sh` **只重启 API**，不会构建前端。团餐菜品页在管理端 Vue 内（`/dish-catalog`），须显式：
+
+```bash
+BUILD_ADMIN=1 bash /var/www/okfood/backend/deploy/update-production.sh
+```
+
+构建后脚本会把 `okfood-admin/dist` 同步到 `/var/www/okfood/h5`（可用 `ADMIN_PUBLISH_ROOT` 覆盖）。验收：
+
+```bash
+curl -sS https://ok.sourcefire.cn/dish-catalog?store_id=1 | head
+# 应看到新的 index-*.js 文件名（与旧包 hash 不同）
+```
+
+浏览器强制刷新或清缓存后再打开：`https://ok.sourcefire.cn/dish-catalog?store_id=1`。
 
 ### 更新后验收
 

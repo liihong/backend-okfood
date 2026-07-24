@@ -13,6 +13,7 @@ from app.core.tenant_subscription import build_tenant_subscription_out
 from app.models.admin_user import AdminUser
 from app.models.store import Store
 from app.models.tenant import Tenant
+from app.models.tenant_integration_settings import TenantIntegrationSettings
 from app.schemas.admin import (
     PlatformStoreCreateIn,
     PlatformStoreOut,
@@ -157,11 +158,48 @@ def patch_store_for_platform(
     return _store_to_out(st)
 
 
+def _mini_program_summary_from_integration(
+    row: TenantIntegrationSettings | None,
+) -> dict[str, object]:
+    """
+    从对接表提炼列表用小程序摘要。
+
+    无 authorizer refresh_token 时 authorizer_mode_active=False（OK饭等直连租户保持原样）。
+    """
+    import json
+
+    appid = (row.wx_mini_appid or "").strip() if row else ""
+    has_refresh = bool(row and (row.wx_authorizer_refresh_token or "").strip())
+    last_version: str | None = None
+    last_committed: str | None = None
+    if row and row.extra_json:
+        try:
+            root = json.loads(str(row.extra_json))
+        except (TypeError, json.JSONDecodeError):
+            root = {}
+        blob = root.get("wx_code_publish") if isinstance(root, dict) else None
+        if isinstance(blob, dict):
+            ver = str(blob.get("user_version") or "").strip()
+            last_version = ver or None
+            committed = str(blob.get("committed_at") or "").strip()
+            last_committed = committed or None
+    return {
+        "wx_mini_appid": appid or None,
+        "authorizer_mode_active": has_refresh,
+        "last_user_version": last_version,
+        "last_committed_at": last_committed,
+    }
+
+
 def _tenant_to_out(
     t: Tenant,
     *,
     store_count: int = 0,
     admin_count: int = 0,
+    wx_mini_appid: str | None = None,
+    authorizer_mode_active: bool = False,
+    last_user_version: str | None = None,
+    last_committed_at: str | None = None,
 ) -> PlatformTenantOut:
     sub = build_tenant_subscription_out(t)
     return PlatformTenantOut(
@@ -175,6 +213,10 @@ def _tenant_to_out(
         created_at=_fmt_dt(t.created_at),
         store_count=int(store_count),
         admin_count=int(admin_count),
+        wx_mini_appid=wx_mini_appid,
+        authorizer_mode_active=bool(authorizer_mode_active),
+        last_user_version=last_user_version,
+        last_committed_at=last_committed_at,
     )
 
 
@@ -195,14 +237,28 @@ def list_platform_tenants(db: Session) -> list[PlatformTenantOut]:
         .group_by(AdminUser.tenant_id)
     ).all()
     admin_map = {int(r[0]): int(r[1]) for r in admin_rows}
-    return [
-        _tenant_to_out(
-            t,
-            store_count=int(store_map.get(t.id, 0)),
-            admin_count=int(admin_map.get(t.id, 0)),
+    # 批量读对接表，避免 N+1；字段只读，不影响直连小程序运行时
+    integ_rows = list(
+        db.scalars(
+            select(TenantIntegrationSettings).where(TenantIntegrationSettings.tenant_id.in_(ids))
+        ).all()
+    )
+    integ_map = {int(r.tenant_id): r for r in integ_rows}
+    out: list[PlatformTenantOut] = []
+    for t in tenants:
+        mini = _mini_program_summary_from_integration(integ_map.get(int(t.id)))
+        out.append(
+            _tenant_to_out(
+                t,
+                store_count=int(store_map.get(t.id, 0)),
+                admin_count=int(admin_map.get(t.id, 0)),
+                wx_mini_appid=mini["wx_mini_appid"],  # type: ignore[arg-type]
+                authorizer_mode_active=bool(mini["authorizer_mode_active"]),
+                last_user_version=mini["last_user_version"],  # type: ignore[arg-type]
+                last_committed_at=mini["last_committed_at"],  # type: ignore[arg-type]
+            )
         )
-        for t in tenants
-    ]
+    return out
 
 
 def create_platform_tenant(db: Session, body: PlatformTenantCreateIn) -> PlatformTenantOut:
@@ -254,7 +310,18 @@ def patch_platform_tenant(db: Session, tenant_id: int, body: PlatformTenantPatch
         )
         or 0
     )
-    return _tenant_to_out(t, store_count=store_n, admin_count=admin_n)
+    return _tenant_to_out(
+        t,
+        store_count=store_n,
+        admin_count=admin_n,
+        **_mini_program_summary_from_integration(  # type: ignore[arg-type]
+            db.scalar(
+                select(TenantIntegrationSettings).where(
+                    TenantIntegrationSettings.tenant_id == int(t.id)
+                )
+            )
+        ),
+    )
 
 
 def soft_delete_platform_tenant(db: Session, tenant_id: int) -> None:

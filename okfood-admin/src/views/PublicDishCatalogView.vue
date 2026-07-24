@@ -82,9 +82,9 @@ async function loadCatalog() {
     typeFilters.value = Array.isArray(catalog?.dish_type_filters) ? catalog.dish_type_filters : []
     if (storeInfo?.store_name) {
       storeName.value = String(storeInfo.store_name)
-      document.title = `${storeInfo.store_name} · 菜品库`
+      document.title = `${storeInfo.store_name} · 团餐菜品`
     } else {
-      document.title = '菜品库'
+      document.title = '团餐菜品'
     }
     storeLogo.value = String(storeInfo?.store_logo_thumb_url || storeInfo?.store_logo_url || '').trim()
   } catch (e) {
@@ -111,17 +111,17 @@ onMounted(loadCatalog)
       <div v-else class="pdc-logo pdc-logo--fallback">{{ storeName.slice(0, 1) || '菜' }}</div>
       <div class="pdc-top-text">
         <div class="pdc-store">{{ storeName }}</div>
-        <div class="pdc-sub">公开菜品库 · 无需登录</div>
+        <div class="pdc-sub">企业团餐 · 菜品一览</div>
       </div>
     </header>
 
     <section class="pdc-hero">
-      <p class="pdc-kicker">Dish Catalog</p>
+      <p class="pdc-kicker">团餐选品</p>
       <h1 class="pdc-title">{{ storeName }}</h1>
-      <p class="pdc-desc">浏览门店全部在售菜品与简介</p>
+      <p class="pdc-desc">以下为门店可供应的团餐菜品，便于企业客户提前了解风味、品类与价格。</p>
       <div class="pdc-meta">
-        <el-tag effect="plain" round>{{ items.length }} 道菜品</el-tag>
-        <el-tag effect="plain" round type="success">公开浏览</el-tag>
+        <el-tag effect="plain" round>{{ items.length }} 道可选菜品</el-tag>
+        <el-tag effect="plain" round type="success">团餐展示</el-tag>
       </div>
     </section>
 
@@ -203,7 +203,7 @@ onMounted(loadCatalog)
       </div>
     </div>
 
-    <p class="pdc-note">仅供浏览展示 · 下单请前往小程序</p>
+    <p class="pdc-note">本页仅供团餐选品参考 · 合作事宜请联系门店</p>
 
     <el-drawer
       v-model="detailOpen"

@@ -14,7 +14,12 @@ from app.schemas.admin import (
     PlatformTenantPatchIn,
     TenantIntegrationSettingsPatchIn,
 )
-from app.schemas.tenant_saas import TenantSaasConfigPatchIn, WxAuthorizerPatchIn, WxComponentTicketIn
+from app.schemas.tenant_saas import (
+    TenantSaasConfigPatchIn,
+    WxAuthorizerPatchIn,
+    WxCodeCommitIn,
+    WxComponentTicketIn,
+)
 from app.services.client.tenant_saas_service import (
     build_tenant_saas_admin_out,
     patch_tenant_saas_admin,
@@ -26,6 +31,12 @@ from app.services.shared.wx_open_authorizer_service import (
     patch_authorizer_tokens_admin,
     refresh_authorizer_access_token,
     save_component_verify_ticket,
+)
+from app.services.shared.wx_open_code_service import (
+    commit_template_to_tenant,
+    fetch_trial_qrcode_base64,
+    get_publish_admin_state,
+    list_code_templates,
 )
 from app.services.shared.tenant_integration_service import (
     get_tenant_integration_admin_out,
@@ -293,6 +304,66 @@ def platform_refresh_wx_authorizer(
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
     row = get_authorizer_admin_state(db, tenant_id)
     return success(data=row, msg="已刷新")
+
+
+@router.get("/wx-open/templates")
+def platform_list_wx_code_templates(
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+    template_type: int | None = 0,
+):
+    """
+    平台：拉取第三方平台普通模板库列表（component_access_token）。
+
+    默认 template_type=0（普通模板）。当前业务模板 ID 一般为 1。
+    """
+    items = list_code_templates(db, template_type=template_type)
+    return success(data={"items": items, "default_template_id": 1}, msg="获取成功")
+
+
+@router.get("/tenants/{tenant_id}/wx-code/publish-state")
+def platform_get_wx_code_publish_state(
+    tenant_id: int,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    """平台：租户小程序代码发布状态与 ext 注入预览（未授权则预览报错提示）。"""
+    row = get_publish_admin_state(db, tenant_id)
+    return success(data=row, msg="获取成功")
+
+
+@router.post("/tenants/{tenant_id}/wx-code/commit")
+def platform_wx_code_commit(
+    tenant_id: int,
+    body: WxCodeCommitIn,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    """
+    平台：一键将模板库代码 commit 到已授权小程序（生成体验版）。
+
+    无 authorizer 的租户（如 OK饭直连）会返回 400，不会改动其线上包。
+    """
+    row = commit_template_to_tenant(
+        db,
+        tenant_id,
+        template_id=int(body.template_id),
+        user_version=body.user_version,
+        user_desc=body.user_desc,
+    )
+    return success(data=row, msg="已上传体验版")
+
+
+@router.get("/tenants/{tenant_id}/wx-code/trial-qrcode")
+def platform_wx_code_trial_qrcode(
+    tenant_id: int,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+    path: str | None = None,
+):
+    """平台：拉取已授权小程序体验版二维码（base64）。"""
+    row = fetch_trial_qrcode_base64(db, tenant_id, path=path)
+    return success(data=row, msg="获取成功")
 
 
 @router.get("/tenants/{tenant_id}/stores")

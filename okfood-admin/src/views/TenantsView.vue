@@ -1,11 +1,13 @@
 <script setup>
 defineOptions({ name: 'TenantsView' })
 import { ref, onMounted, computed } from 'vue'
-import { Plug, Palette } from 'lucide-vue-next'
+import { Plug, Smartphone } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import { PASSWORD_POLICY_MSG, isPasswordStrongEnough } from '../utils/passwordPolicy.js'
-import TenantSaasConfigDrawer from './components/TenantSaasConfigDrawer.vue'
+import TenantMiniProgramDrawer from './tenants/TenantMiniProgramDrawer.vue'
+import TenantComponentTicketPanel from './tenants/TenantComponentTicketPanel.vue'
+import { MINI_PROGRAM_TABS } from './tenants/tenantMiniProgramConstants.js'
 
 const loading = ref(false)
 const overview = ref(null)
@@ -15,7 +17,9 @@ const tenantSaving = ref(false)
 const tenantEditId = ref(null)
 const tenantForm = ref({ name: '', code: '', is_active: true, expires_at: '' })
 
-const saasDrawerVisible = ref(false)
+const miniProgramDrawerVisible = ref(false)
+/** 打开小程序抽屉时定位的 Tab */
+const miniProgramInitialTab = ref(MINI_PROGRAM_TABS.brand)
 const componentTicket = ref('')
 const componentState = ref(null)
 const componentTicketSaving = ref(false)
@@ -170,9 +174,26 @@ async function startPushTicket() {
   }
 }
 
-function openSaasConfig(row) {
+/** 打开小程序管理抽屉（品牌 / 授权 / 发布） */
+function openMiniProgram(row, tab = MINI_PROGRAM_TABS.brand) {
   currentTenant.value = row
-  saasDrawerVisible.value = true
+  miniProgramInitialTab.value = tab
+  miniProgramDrawerVisible.value = true
+}
+
+function openSaasConfig(row) {
+  openMiniProgram(row, MINI_PROGRAM_TABS.brand)
+}
+
+function openPublish(row) {
+  openMiniProgram(row, MINI_PROGRAM_TABS.publish)
+}
+
+/** 行内「更多」菜单：对接 / 编辑 / 停用 */
+function onTenantMoreCommand(cmd, row) {
+  if (cmd === 'integration') openIntegration(row)
+  else if (cmd === 'edit') openEditTenant(row)
+  else if (cmd === 'deactivate') void deactivateTenant(row)
 }
 
 async function loadOverview() {
@@ -728,37 +749,21 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="componentState" class="component-ticket-panel">
-      <div class="component-ticket-head">
-        <strong>微信第三方平台</strong>
-        <el-tag :type="componentState.component_ticket_present ? 'success' : 'warning'" size="small">
-          verify_ticket：{{ componentState.component_ticket_present ? '已落库' : '未就绪' }}
-        </el-tag>
-      </div>
-      <p class="component-ticket-hint">
-        回调 URL：<code>/api/wx/open/component/callback</code>。
-        控制台若显示「<strong>关闭推送Ticket</strong>」，请先点「启动 Ticket 推送」；未接通时可手动粘贴 ticket。
-      </p>
-      <div class="component-ticket-row">
-        <el-input
-          v-model="componentTicket"
-          type="password"
-          show-password
-          placeholder="component_verify_ticket"
-          maxlength="512"
-        />
-        <el-button type="primary" :loading="componentTicketSaving" @click="saveComponentTicket">保存 Ticket</el-button>
-        <el-button type="warning" plain :loading="startPushTicketLoading" @click="startPushTicket">
-          启动 Ticket 推送
-        </el-button>
-      </div>
-    </div>
+    <TenantComponentTicketPanel
+      v-model:component-ticket="componentTicket"
+      :component-state="componentState"
+      :saving="componentTicketSaving"
+      :start-push-loading="startPushTicketLoading"
+      @save="saveComponentTicket"
+      @start-push="startPushTicket"
+    />
 
     <div class="onboarding-tip">
       <strong>给新门店开账号：</strong>
       ① 新建或选中租户 → 点<strong>门店</strong>新增门店，记下列表里的<strong>门店 ID</strong>。② 同一租户下点<strong>管理员</strong>新增店主账号（role=full）。
       ③ 店主登录后，若该租户下只有一家店且 ID 为 1，管理后台默认可用；若为多门店或非 1，请求管理 API 时需带查询参数
       <code class="tip-code">store_id=&lt;门店ID&gt;</code>（当前 Vue 管理端多数仍默认 1，需扩展时可再统一加门店切换）。
+      ④ SaaS 小程序：点<strong>小程序</strong>完成品牌配置与授权，再点<strong>发布</strong>上传体验版（OK饭直连小程序勿走代发布）。
     </div>
 
     <el-card shadow="never" class="table-card" v-loading="loading">
@@ -767,6 +772,19 @@ onMounted(async () => {
         <el-table-column prop="name" label="名称" min-width="120" />
         <el-table-column prop="code" label="tenantId" min-width="120">
           <template #default="{ row }">{{ row.code || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="小程序 AppID" min-width="150">
+          <template #default="{ row }">{{ row.wx_mini_appid || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="授权" width="108">
+          <template #default="{ row }">
+            <el-tag :type="row.authorizer_mode_active ? 'success' : 'info'" size="small">
+              {{ row.authorizer_mode_active ? '已代授权' : '直连/未授权' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="体验版" min-width="120">
+          <template #default="{ row }">{{ row.last_user_version || '—' }}</template>
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
@@ -789,20 +807,37 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column prop="store_count" label="门店数" width="90" />
         <el-table-column prop="admin_count" label="管理员(活跃)" width="120" />
-        <el-table-column label="操作" width="420" fixed="right">
+        <el-table-column label="操作" width="380" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openStores(row)">门店</el-button>
             <el-button link type="primary" @click="openAdmins(row)">管理员</el-button>
-            <el-button link type="primary" @click="openSaasConfig(row)">
-              <Palette :size="14" stroke-width="2" class="btn-inline-icon" />
-              SaaS
+            <el-button link type="primary" @click="openMiniProgram(row, MINI_PROGRAM_TABS.brand)">
+              <Smartphone :size="14" stroke-width="2" class="btn-inline-icon" />
+              小程序
             </el-button>
-            <el-button link type="primary" @click="openIntegration(row)">
-              <Plug :size="14" stroke-width="2" class="btn-inline-icon" />
-              对接
+            <el-button
+              link
+              type="primary"
+              :disabled="!row.authorizer_mode_active"
+              @click="openPublish(row)"
+            >
+              发布
             </el-button>
-            <el-button link type="primary" @click="openEditTenant(row)">编辑</el-button>
-            <el-button link type="danger" @click="deactivateTenant(row)">停用</el-button>
+            <el-dropdown trigger="click" @command="(cmd) => onTenantMoreCommand(cmd, row)">
+              <el-button link type="primary">更多</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="integration">
+                    <Plug :size="14" stroke-width="2" class="btn-inline-icon" />
+                    对接
+                  </el-dropdown-item>
+                  <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                  <el-dropdown-item command="deactivate" divided>
+                    <span class="danger-text">停用</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -890,9 +925,10 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
-    <TenantSaasConfigDrawer
-      v-model:visible="saasDrawerVisible"
+    <TenantMiniProgramDrawer
+      v-model:visible="miniProgramDrawerVisible"
       :tenant="currentTenant"
+      :initial-tab="miniProgramInitialTab"
       @saved="loadTenants"
     />
 

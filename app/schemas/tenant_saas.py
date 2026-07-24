@@ -36,3 +36,11 @@ class WxAuthorizerPatchIn(BaseModel):
     authorizer_access_token: str | None = Field(None, max_length=512)
     authorization_code: str | None = Field(None, max_length=512, description="授权码，用于 exchange-code 接口")
     clear: bool = Field(False, description="true 时清除已落库的 authorizer token")
+
+
+class WxCodeCommitIn(BaseModel):
+    """平台管理：将模板库代码 commit 到已授权小程序（生成体验版）。"""
+
+    template_id: int = Field(1, ge=0, description="普通模板库 template_id，当前默认 1")
+    user_version: str = Field(..., min_length=1, max_length=64, description="代码版本号")
+    user_desc: str = Field(..., min_length=1, max_length=256, description="代码描述")

@@ -1555,6 +1555,11 @@ class PlatformTenantOut(BaseModel):
     created_at: str
     store_count: int = 0
     admin_count: int = 0
+    # 以下为小程序管理摘要（只读；无 authorizer 的 OK饭等直连租户均为空/false）
+    wx_mini_appid: str | None = None
+    authorizer_mode_active: bool = False
+    last_user_version: str | None = None
+    last_committed_at: str | None = None
 
 
 class PlatformTenantCreateIn(BaseModel):
