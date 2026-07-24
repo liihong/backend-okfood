@@ -1,12 +1,36 @@
 #!/usr/bin/env python3
-"""启动微信第三方平台 component_verify_ticket 推送（控制台显示「关闭推送Ticket」时执行）。"""
+"""启动微信第三方平台 component_verify_ticket 推送（控制台显示「关闭推送Ticket」时执行）。
+
+生产环境请用项目虚拟环境执行，勿直接用系统 python3：
+
+  bash scripts/start_wx_component_push_ticket.sh
+
+或：
+
+  /var/www/okfood/backend/.venv/bin/python scripts/start_wx_component_push_ticket.py
+"""
 
 from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
-import httpx
+# 允许 ``python scripts/xxx.py`` 直接运行（自动把项目根目录加入 sys.path）
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+try:
+    import httpx
+except ModuleNotFoundError:
+    print(
+        "缺少依赖 httpx：请使用项目虚拟环境运行，例如：\n"
+        "  bash scripts/start_wx_component_push_ticket.sh\n"
+        "或：.venv/bin/pip install -r requirements.txt",
+        file=sys.stderr,
+    )
+    raise SystemExit(1) from None
 
 from app.core.config import get_settings
 

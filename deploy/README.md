@@ -97,6 +97,17 @@ sudo systemctl restart okfine-scheduler
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+### 启动微信第三方 platform verify_ticket 推送
+
+控制台显示「关闭推送 Ticket」时，**须在服务器白名单 IP 上**执行（勿在本机调，会报 61004）：
+
+```bash
+cd /var/www/okfood/backend
+bash scripts/start_wx_component_push_ticket.sh
+```
+
+或管理后台 **租户管理 → 启动 Ticket 推送**（需已部署含该接口的后端）。
+
 ### 查看日志
 
 ```bash
