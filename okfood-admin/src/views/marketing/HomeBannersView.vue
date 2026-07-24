@@ -1,7 +1,8 @@
 <script setup>
 defineOptions({ name: 'HomeBannersView' })
 import { ref, onMounted, computed } from 'vue'
-import { Plus } from 'lucide-vue-next'
+import { Plus, Upload } from 'lucide-vue-next'
+import { ElMessageBox } from 'element-plus'
 import { apiJson, apiForm, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 
@@ -15,6 +16,9 @@ const dishes = ref([])
 const membershipTemplates = ref([])
 const photoUploading = ref(false)
 const photoUploadKey = ref(0)
+
+/** 小程序首页 Banner 建议尺寸（设计稿 750 宽，展示高度约半屏） */
+const BANNER_SIZE_HINT = '建议尺寸 750×750 px（1:1），JPG/PNG，单张 ≤ 500KB'
 
 const LINK_LABEL = {
   none: '不跳转',
@@ -206,7 +210,15 @@ async function toggleActive(row) {
 }
 
 async function removeBanner(row) {
-  if (!window.confirm('确定删除该 Banner？')) return
+  try {
+    await ElMessageBox.confirm('确定删除该 Banner？删除后不可恢复。', '删除确认', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
   try {
     await apiJson(
       `/api/admin/marketing/home-banners/${row.id}?store_id=${storeId.value}`,
@@ -234,40 +246,53 @@ onMounted(() => {
     <div class="table-container">
       <div class="table-header">
         <h2 class="table-title">首页 Banner</h2>
-        <button type="button" class="btn-primary" @click="openCreate">
-          <Plus :size="18" /> 新建 Banner
-        </button>
+        <el-button type="primary" @click="openCreate">
+          <Plus :size="16" style="margin-right: 4px" />
+          新建 Banner
+        </el-button>
       </div>
-      <p v-if="loading" class="hint">加载中…</p>
-      <el-table v-else :data="list" stripe class="admin-table">
+
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        :title="`小程序首页顶部轮播图。${BANNER_SIZE_HINT}；重要文案请放在画面中心，避免被裁切。`"
+        class="banner-alert"
+      />
+
+      <el-table
+        v-loading="loading"
+        :data="list"
+        stripe
+        class="admin-table"
+        empty-text="暂无 Banner，请点击「新建 Banner」"
+      >
         <el-table-column label="图片" width="120">
           <template #default="{ row }">
             <img v-if="row.image_url" :src="row.image_url" alt="" class="banner-thumb" />
-            <span v-else class="hint">—</span>
+            <span v-else class="muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column prop="title" label="备注标题" min-width="120" />
+        <el-table-column prop="title" label="备注标题" min-width="120" show-overflow-tooltip />
         <el-table-column label="跳转" width="120">
           <template #default="{ row }">{{ LINK_LABEL[row.link_type] || row.link_type }}</template>
         </el-table-column>
         <el-table-column prop="link_target" label="跳转目标" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="sort_order" label="排序" width="70" />
-        <el-table-column label="状态" width="80">
+        <el-table-column prop="sort_order" label="排序" width="80" align="center" />
+        <el-table-column label="状态" width="90" align="center">
           <template #default="{ row }">
-            <span :class="row.is_active ? 'pill pill--ok' : 'pill pill--muted'">
+            <el-tag size="small" :type="row.is_active ? 'success' : 'info'">
               {{ row.is_active ? '上架' : '下架' }}
-            </span>
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <button type="button" class="btn-link" @click="openEdit(row)">编辑</button>
-            <button type="button" class="btn-link" @click="toggleActive(row)">
+            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="primary" @click="toggleActive(row)">
               {{ row.is_active ? '下架' : '上架' }}
-            </button>
-            <button type="button" class="btn-link btn-link--danger" @click="removeBanner(row)">
-              删除
-            </button>
+            </el-button>
+            <el-button link type="danger" @click="removeBanner(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -276,27 +301,46 @@ onMounted(() => {
     <el-dialog
       v-model="dialogVisible"
       :title="editing ? '编辑 Banner' : '新建 Banner'"
-      width="520px"
+      width="560px"
+      align-center
       destroy-on-close
     >
-      <el-form label-width="96px" class="banner-form">
+      <el-form label-width="96px" class="banner-form" @submit.prevent="saveBanner">
         <el-form-item label="备注标题">
-          <el-input v-model="form.title" placeholder="仅管理端可见" maxlength="128" />
+          <el-input v-model="form.title" placeholder="仅管理端可见" maxlength="128" clearable />
         </el-form-item>
+
         <el-form-item label="Banner 图" required>
-          <el-upload
-            :key="photoUploadKey"
-            :auto-upload="false"
-            :show-file-list="false"
-            accept="image/*"
-            @change="onPhotoUploadChange"
-          >
-            <div class="upload-box">
-              <img v-if="form.image_url" :src="form.image_url" alt="" class="upload-preview" />
-              <span v-else>{{ photoUploading ? '上传中…' : '点击上传图片' }}</span>
-            </div>
-          </el-upload>
+          <div class="upload-wrap">
+            <el-upload
+              :key="photoUploadKey"
+              :auto-upload="false"
+              :show-file-list="false"
+              accept="image/*"
+              :disabled="photoUploading"
+              @change="onPhotoUploadChange"
+            >
+              <div v-loading="photoUploading" class="upload-box">
+                <img v-if="form.image_url" :src="form.image_url" alt="" class="upload-preview" />
+                <div v-else class="upload-placeholder">
+                  <Upload :size="28" stroke-width="1.75" />
+                  <span>点击上传图片</span>
+                </div>
+              </div>
+            </el-upload>
+            <p class="upload-tip">{{ BANNER_SIZE_HINT }}</p>
+            <el-button
+              v-if="form.image_url"
+              link
+              type="danger"
+              size="small"
+              @click="form.image_url = ''"
+            >
+              移除图片
+            </el-button>
+          </div>
         </el-form-item>
+
         <el-form-item label="跳转类型">
           <el-select v-model="form.link_type" style="width: 100%">
             <el-option value="none" label="不跳转" />
@@ -306,8 +350,14 @@ onMounted(() => {
             <el-option value="member_card" label="卡包详情" />
           </el-select>
         </el-form-item>
+
         <el-form-item v-if="form.link_type === 'dish'" label="选择菜品">
-          <el-select v-model="form.link_target" filterable placeholder="选择菜品" style="width: 100%">
+          <el-select
+            v-model="form.link_target"
+            filterable
+            placeholder="选择菜品"
+            style="width: 100%"
+          >
             <el-option
               v-for="opt in dishOptions"
               :key="opt.value"
@@ -317,6 +367,7 @@ onMounted(() => {
             />
           </el-select>
         </el-form-item>
+
         <el-form-item v-else-if="form.link_type === 'member_card'" label="选择卡包">
           <el-select
             v-model="form.link_target"
@@ -333,6 +384,7 @@ onMounted(() => {
             />
           </el-select>
         </el-form-item>
+
         <el-form-item v-else-if="form.link_type === 'tab'" label="Tab 页面">
           <el-select v-model="form.link_target" style="width: 100%">
             <el-option
@@ -343,77 +395,108 @@ onMounted(() => {
             />
           </el-select>
         </el-form-item>
+
         <el-form-item v-else-if="form.link_type === 'webview'" label="外链 URL">
-          <el-input v-model="form.link_target" placeholder="https://..." />
+          <el-input v-model="form.link_target" placeholder="https://..." clearable />
         </el-form-item>
+
         <el-form-item label="排序">
-          <el-input-number v-model="form.sort_order" :min="0" :max="9999" />
+          <el-input-number
+            v-model="form.sort_order"
+            :min="0"
+            :max="9999"
+            controls-position="right"
+          />
+          <span class="field-hint">数字越小越靠前</span>
         </el-form-item>
+
         <el-form-item label="上架">
-          <el-switch v-model="form.is_active" />
+          <el-switch v-model="form.is_active" active-text="上架" inactive-text="下架" />
         </el-form-item>
       </el-form>
+
       <template #footer>
-        <button type="button" class="btn-secondary" @click="dialogVisible = false">取消</button>
-        <button type="button" class="btn-primary" :disabled="saving" @click="saveBanner">
-          {{ saving ? '保存中…' : '保存' }}
-        </button>
+        <div class="dialog-footer">
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="saving" @click="saveBanner">保存</el-button>
+        </div>
       </template>
     </el-dialog>
   </section>
 </template>
 
 <style scoped>
-.hint {
-  padding: 24px;
-  color: var(--admin-muted, #64748b);
+.banner-alert {
+  margin-bottom: 16px;
 }
-.pill {
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 999px;
+
+.muted {
+  color: var(--el-text-color-placeholder, #94a3b8);
 }
-.pill--ok {
-  background: #dcfce7;
-  color: #166534;
-}
-.pill--muted {
-  background: #f1f5f9;
-  color: #64748b;
-}
-.btn-link {
-  background: none;
-  border: none;
-  color: var(--admin-primary, #0d9488);
-  cursor: pointer;
-  margin-right: 8px;
-  font-size: 13px;
-}
-.btn-link--danger {
-  color: #dc2626;
-}
+
 .banner-thumb {
-  width: 96px;
-  height: 48px;
+  width: 64px;
+  height: 64px;
   object-fit: cover;
   border-radius: 6px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--el-border-color, #e2e8f0);
+  display: block;
 }
+
+.upload-wrap {
+  width: 100%;
+}
+
 .upload-box {
-  width: 320px;
-  height: 120px;
-  border: 1px dashed #cbd5e1;
+  width: 240px;
+  height: 240px;
+  border: 1px dashed var(--el-border-color, #cbd5e1);
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #64748b;
+  color: var(--el-text-color-secondary, #64748b);
   cursor: pointer;
   overflow: hidden;
+  background: var(--el-fill-color-blank, #fff);
+  transition: border-color 0.2s;
 }
+
+.upload-box:hover {
+  border-color: var(--el-color-primary, #0d9488);
+}
+
+.upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
 .upload-preview {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
+}
+
+.upload-tip {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary, #64748b);
+}
+
+.field-hint {
+  margin-left: 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #64748b);
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 </style>

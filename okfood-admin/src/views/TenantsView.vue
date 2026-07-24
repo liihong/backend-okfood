@@ -181,10 +181,6 @@ function openMiniProgram(row, tab = MINI_PROGRAM_TABS.brand) {
   miniProgramDrawerVisible.value = true
 }
 
-function openSaasConfig(row) {
-  openMiniProgram(row, MINI_PROGRAM_TABS.brand)
-}
-
 function openPublish(row) {
   openMiniProgram(row, MINI_PROGRAM_TABS.publish)
 }
@@ -726,8 +722,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="tenants-page">
-    <div class="page-head page-head--actions-only">
+  <div class="tenants-page page-content-shell">
+    <div class="page-head page-head--actions-only page-content-title-row page-content-title-row--actions-only">
       <el-button type="primary" @click="openCreateTenant">新建租户</el-button>
     </div>
 
@@ -767,13 +763,13 @@ onMounted(async () => {
     </div>
 
     <el-card shadow="never" class="table-card" v-loading="loading">
-      <el-table :data="tenants" style="width: 100%" table-layout="auto" empty-text="暂无租户">
+      <el-table :data="tenants" style="width: 100%" empty-text="暂无租户">
         <el-table-column prop="id" label="ID" width="72" />
-        <el-table-column prop="name" label="名称" min-width="120" />
-        <el-table-column prop="code" label="tenantId" min-width="120">
+        <el-table-column prop="name" label="名称" min-width="100" />
+        <el-table-column prop="code" label="tenantId" min-width="100">
           <template #default="{ row }">{{ row.code || '—' }}</template>
         </el-table-column>
-        <el-table-column label="小程序 AppID" min-width="150">
+        <el-table-column label="小程序 AppID" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">{{ row.wx_mini_appid || '—' }}</template>
         </el-table-column>
         <el-table-column label="授权" width="108">
@@ -783,31 +779,31 @@ onMounted(async () => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="体验版" min-width="120">
+        <el-table-column label="体验版" min-width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ row.last_user_version || '—' }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" width="88">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
               {{ row.is_active ? '启用' : '停用' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="订阅到期" min-width="168">
+        <el-table-column label="订阅到期" min-width="140">
           <template #default="{ row }">
             <span>{{ formatExpiresAt(row) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="订阅状态" width="108">
+        <el-table-column label="订阅状态" width="100">
           <template #default="{ row }">
             <el-tag :type="subscriptionStatusTagType(row.subscription_status)" size="small">
               {{ subscriptionStatusLabel(row.subscription_status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="store_count" label="门店数" width="90" />
-        <el-table-column prop="admin_count" label="管理员(活跃)" width="120" />
-        <el-table-column label="操作" width="380" fixed="right">
+        <el-table-column prop="store_count" label="门店数" width="80" />
+        <el-table-column prop="admin_count" label="管理员(活跃)" width="110" />
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openStores(row)">门店</el-button>
             <el-button link type="primary" @click="openAdmins(row)">管理员</el-button>
@@ -815,12 +811,7 @@ onMounted(async () => {
               <Smartphone :size="14" stroke-width="2" class="btn-inline-icon" />
               小程序
             </el-button>
-            <el-button
-              link
-              type="primary"
-              :disabled="!row.authorizer_mode_active"
-              @click="openPublish(row)"
-            >
+            <el-button link type="primary" @click="openPublish(row)">
               发布
             </el-button>
             <el-dropdown trigger="click" @command="(cmd) => onTenantMoreCommand(cmd, row)">
@@ -1157,9 +1148,12 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* 与其它 hidePageTitle 列表页一致：跟随主内容区全宽，不再 1200px 居中收窄 */
 .tenants-page {
-  max-width: 1200px;
-  margin: 0 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  box-sizing: border-box;
 }
 .page-head {
   display: flex;
@@ -1174,8 +1168,19 @@ onMounted(async () => {
 }
 
 .table-card {
+  width: 100%;
+  min-width: 0;
   background: rgba(15, 23, 42, 0.55);
   border: 1px solid rgba(148, 163, 184, 0.15);
+  overflow: hidden;
+}
+.table-card :deep(.el-card__body) {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+.table-card :deep(.el-table) {
+  width: 100% !important;
 }
 .drawer-toolbar {
   margin-bottom: 12px;
@@ -1227,6 +1232,9 @@ onMounted(async () => {
   display: inline-block;
   vertical-align: -0.2em;
   margin-right: 4px;
+}
+.danger-text {
+  color: #f87171;
 }
 .integration-drawer-tip {
   margin: 0 0 12px;
