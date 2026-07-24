@@ -53,13 +53,6 @@ const filteredItems = computed(() => {
   })
 })
 
-function formatPrice(price) {
-  if (price == null || price === '') return null
-  const n = Number(price)
-  if (!Number.isFinite(n)) return String(price)
-  return Number.isInteger(n) ? String(n) : n.toFixed(2)
-}
-
 function openDetail(dish) {
   detail.value = dish
   detailOpen.value = true
@@ -118,7 +111,7 @@ onMounted(loadCatalog)
     <section class="pdc-hero">
       <p class="pdc-kicker">团餐选品</p>
       <h1 class="pdc-title">{{ storeName }}</h1>
-      <p class="pdc-desc">以下为门店可供应的团餐菜品，便于企业客户提前了解风味、品类与价格。</p>
+      <p class="pdc-desc">以下为门店可供应的团餐菜品，便于企业客户提前了解风味与品类。</p>
       <div class="pdc-meta">
         <el-tag effect="plain" round>{{ items.length }} 道可选菜品</el-tag>
         <el-tag effect="plain" round type="success">团餐展示</el-tag>
@@ -192,11 +185,7 @@ onMounted(loadCatalog)
               </el-tag>
             </div>
             <div class="pdc-card-foot">
-              <span v-if="formatPrice(d.price) != null" class="pdc-price">
-                <small>¥</small>{{ formatPrice(d.price) }}
-              </span>
-              <span v-else class="pdc-price pdc-price--pending">价格待公布</span>
-              <span class="pdc-more">详情</span>
+              <span class="pdc-more">查看介绍</span>
             </div>
           </div>
         </button>
@@ -225,10 +214,6 @@ onMounted(loadCatalog)
           </div>
           <h3 class="pdc-detail-title">{{ detail.title || '未命名菜品' }}</h3>
           <div class="pdc-detail-row">
-            <span v-if="formatPrice(detail.price) != null" class="pdc-price pdc-price--lg">
-              <small>¥</small>{{ formatPrice(detail.price) }}
-            </span>
-            <span v-else class="pdc-price pdc-price--pending">价格待公布</span>
             <el-tag v-if="detail.spice_label" size="small" type="warning" effect="plain">
               {{ detail.spice_label }}
             </el-tag>
@@ -514,29 +499,8 @@ onMounted(loadCatalog)
   margin-top: 10px;
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
-}
-
-.pdc-price {
-  color: var(--leaf);
-  font-weight: 800;
-  font-size: 18px;
-}
-
-.pdc-price small {
-  font-size: 12px;
-  margin-right: 1px;
-}
-
-.pdc-price--lg {
-  font-size: 26px;
-}
-
-.pdc-price--pending {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
 }
 
 .pdc-more {
