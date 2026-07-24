@@ -15,6 +15,6 @@ curl -sS -w "\n\nHTTP %{http_code} time_total=%{time_total}s\n" \
   -H "X-Store-Id: ${STORE_ID}"
 echo ""
 
-echo "=== H5 页面（本地 FastAPI 挂载）==="
-echo "打开: ${API_BASE%/api}/dish-catalog/?store_id=${STORE_ID}"
-echo "生产: https://ok.sourcefire.cn/dish-catalog/?store_id=${STORE_ID}"
+echo "=== 管理端公开展示页 ==="
+echo "开发: http://127.0.0.1:5173/dish-catalog?store_id=${STORE_ID}"
+echo "生产: https://ok.sourcefire.cn/dish-catalog?store_id=${STORE_ID}"

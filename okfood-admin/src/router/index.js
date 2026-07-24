@@ -7,6 +7,7 @@ import {
 } from '../admin/core.js'
 
 const LoginView = () => import('../views/LoginView.vue')
+const PublicDishCatalogView = () => import('../views/PublicDishCatalogView.vue')
 const AdminLayout = () => import('../layouts/AdminLayout.vue')
 const DashboardView = () => import('../views/DashboardView.vue')
 const MembersView = () => import('../views/MembersView.vue')
@@ -45,6 +46,13 @@ const router = createRouter({
       name: 'login',
       component: LoginView,
       meta: { guest: true },
+    },
+    {
+      // 对外公开菜品库展示（无需登录）；?store_id=1
+      path: '/dish-catalog',
+      name: 'public-dish-catalog',
+      component: PublicDishCatalogView,
+      meta: { public: true },
     },
     {
       path: '/',
@@ -312,6 +320,10 @@ registerAdminRouter(router)
 router.beforeEach((to) => {
   hydrateTokenFromStorage()
   const hasToken = Boolean(String(adminAccessToken.value || '').trim())
+  // 公开展示页：不要求登录，也不因已登录而踢回工作台
+  if (to.matched.some((record) => record.meta.public)) {
+    return true
+  }
   if (to.meta.requiresAuth && !hasToken) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
