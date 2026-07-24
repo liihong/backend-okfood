@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import HTTPException
@@ -23,6 +25,11 @@ logger = logging.getLogger(__name__)
 
 AUTHORIZER_TOKEN_URL = "https://api.weixin.qq.com/cgi-bin/component/api_authorizer_token"
 QUERY_AUTH_URL = "https://api.weixin.qq.com/cgi-bin/component/api_query_auth"
+CREATE_PREAUTH_URL = "https://api.weixin.qq.com/cgi-bin/component/api_create_preauthcode"
+COMPONENT_LOGIN_PAGE_URL = "https://mp.weixin.qq.com/cgi-bin/componentloginpage"
+
+# 传统模式：pre_auth_code -> (tenant_id, expires_at_unix)；进程内缓存，重启后需重新生成链接
+_pending_pre_auth_tenant: dict[str, tuple[int, float]] = {}
 
 
 def _s(raw: str | None) -> str:
@@ -138,6 +145,123 @@ def patch_authorizer_tokens_admin(
             row.wx_authorizer_authorized_at = beijing_now_naive()
     db.commit()
     return get_authorizer_admin_state(db, int(tenant_id))
+
+
+def _public_api_base_or_raise() -> str:
+    """生成授权回调 redirect_uri 所需的对外 API 根地址。"""
+    base = get_settings().public_base_for_assets
+    if not base:
+        raise HTTPException(
+            status_code=503,
+            detail="请先在 .env 配置 BASE_URL（对外 HTTPS 根地址），用于传统模式授权回调",
+        )
+    return base
+
+
+def build_tenant_authorize_redirect_uri(tenant_id: int) -> str:
+    """传统模式授权完成后的 redirect_uri（须与开放平台「授权发起页域名」一致）。"""
+    base = _public_api_base_or_raise()
+    query = urlencode({"tenant_id": str(int(tenant_id))})
+    return f"{base}/api/wx/open/authorize/callback?{query}"
+
+
+def _register_pending_pre_auth(pre_auth_code: str, tenant_id: int, expires_in: int) -> None:
+    """登记 pre_auth_code 与租户的临时映射，供授权事件推送兜底绑定。"""
+    code = _s(pre_auth_code)
+    if not code:
+        return
+    ttl = max(60, int(expires_in or 600))
+    _pending_pre_auth_tenant[code] = (int(tenant_id), time.time() + ttl)
+
+
+def pop_tenant_id_for_pre_auth(pre_auth_code: str | None) -> int | None:
+    """取出并消费 pre_auth_code 对应的 tenant_id（过期则忽略）。"""
+    code = _s(pre_auth_code)
+    if not code:
+        return None
+    now = time.time()
+    # 清理过期项，避免内存泄漏
+    expired = [k for k, (_, exp) in _pending_pre_auth_tenant.items() if exp <= now]
+    for k in expired:
+        _pending_pre_auth_tenant.pop(k, None)
+    item = _pending_pre_auth_tenant.pop(code, None)
+    if item is None:
+        return None
+    tenant_id, exp = item
+    if exp <= now:
+        return None
+    return int(tenant_id)
+
+
+def create_tenant_pre_auth_link(db: Session, tenant_id: int) -> dict[str, Any]:
+    """
+    传统模式：向微信申请 pre_auth_code 并拼授权链接。
+
+    商户在浏览器打开链接完成扫码授权后，微信会跳转 redirect_uri 并携带 auth_code；
+    亦可由 component 回调推送 AuthorizationCode（需 pre_auth_code 映射仍在有效期内）。
+    """
+    from app.integrations.wechat_open_platform import get_component_access_token, wechat_open_platform_configured
+    from app.models.tenant import Tenant
+
+    if not wechat_open_platform_configured():
+        raise HTTPException(status_code=503, detail="微信第三方平台 component 未配置")
+
+    tenant = db.get(Tenant, int(tenant_id))
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="租户不存在")
+
+    ticket = get_component_verify_ticket(db)
+    if not ticket:
+        raise HTTPException(
+            status_code=503,
+            detail="component_verify_ticket 未就绪，请先配置回调或手动写入 ticket",
+        )
+
+    component_token = get_component_access_token(db)
+    settings = get_settings()
+    component_appid = _s(settings.WX_OPEN_COMPONENT_APPID)
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            r = client.post(
+                CREATE_PREAUTH_URL,
+                params={"component_access_token": component_token},
+                json={"component_appid": component_appid},
+            )
+            r.raise_for_status()
+            data: dict[str, Any] = r.json()
+    except httpx.HTTPError as e:
+        logger.exception("api_create_preauthcode 请求失败 tenant_id=%s", tenant_id)
+        raise HTTPException(status_code=502, detail="微信 pre_auth_code 申请失败") from e
+
+    if data.get("errcode") not in (None, 0):
+        raise HTTPException(status_code=400, detail=str(data.get("errmsg") or "pre_auth_code 申请失败"))
+
+    pre_auth_code = _s(data.get("pre_auth_code"))
+    expires_in = int(data.get("expires_in") or 600)
+    if not pre_auth_code:
+        raise HTTPException(status_code=502, detail="微信未返回 pre_auth_code")
+
+    _register_pending_pre_auth(pre_auth_code, int(tenant_id), expires_in)
+
+    redirect_uri = build_tenant_authorize_redirect_uri(int(tenant_id))
+    # auth_type=2：仅展示小程序授权（传统模式授权页）
+    authorization_url = (
+        f"{COMPONENT_LOGIN_PAGE_URL}?component_appid={quote(component_appid, safe='')}"
+        f"&pre_auth_code={quote(pre_auth_code, safe='')}"
+        f"&redirect_uri={quote(redirect_uri, safe='')}"
+        f"&auth_type=2"
+    )
+
+    return {
+        "tenant_id": int(tenant_id),
+        "tenant_name": tenant.name,
+        "pre_auth_code": pre_auth_code,
+        "expires_in": expires_in,
+        "redirect_uri": redirect_uri,
+        "authorization_url": authorization_url,
+        "mode_hint": "traditional",
+    }
 
 
 def exchange_authorization_code(db: Session, *, authorization_code: str, tenant_id: int) -> dict[str, Any]:

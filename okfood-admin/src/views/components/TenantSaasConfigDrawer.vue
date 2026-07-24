@@ -72,6 +72,14 @@ const authorizerForm = ref({
   clear: false,
 })
 
+const preAuthLink = ref({
+  authorization_url: '',
+  redirect_uri: '',
+  expires_in: 0,
+  pre_auth_code: '',
+})
+const preAuthLoading = ref(false)
+
 function resetFormFromPayload(data) {
   const theme = data?.theme && typeof data.theme === 'object' ? data.theme : {}
   const features = data?.features && typeof data.features === 'object' ? data.features : {}
@@ -115,6 +123,12 @@ function resetAuthorizerFromPayload(data) {
     authorizer_refresh_token: '',
     authorization_code: '',
     clear: false,
+  }
+  preAuthLink.value = {
+    authorization_url: '',
+    redirect_uri: '',
+    expires_in: 0,
+    pre_auth_code: '',
   }
 }
 
@@ -267,6 +281,44 @@ async function refreshAuthorizerToken() {
     authorizerSaving.value = false
   }
 }
+
+async function generatePreAuthLink() {
+  const tid = props.tenant?.id
+  if (tid == null) return
+  preAuthLoading.value = true
+  try {
+    const data = await apiJson(
+      `/api/admin/system/tenants/${tid}/wx-authorizer/pre-auth-link`,
+      { method: 'POST', body: '{}' },
+      { auth: true },
+    )
+    preAuthLink.value = {
+      authorization_url: data?.authorization_url || '',
+      redirect_uri: data?.redirect_uri || '',
+      expires_in: Number(data?.expires_in) || 0,
+      pre_auth_code: data?.pre_auth_code || '',
+    }
+    showToast('授权链接已生成，请发给商户扫码授权', 'success')
+  } catch (e) {
+    showToast(e instanceof Error ? e.message : '生成失败', 'error')
+  } finally {
+    preAuthLoading.value = false
+  }
+}
+
+async function copyPreAuthLink() {
+  const url = String(preAuthLink.value.authorization_url || '').trim()
+  if (!url) {
+    showToast('请先生成授权链接', 'error')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    showToast('授权链接已复制', 'success')
+  } catch {
+    showToast('复制失败，请手动选中链接复制', 'error')
+  }
+}
 </script>
 
 <template>
@@ -356,9 +408,10 @@ async function refreshAuthorizerToken() {
       <el-divider content-position="left">微信第三方平台 · Authorizer</el-divider>
       <div v-loading="authorizerLoading" class="authorizer-block">
         <p class="saas-tip authorizer-tip">
-          代运营小程序登录须落库 <code>authorizer_refresh_token</code>。
-          服务器 .env 须配置 <code>WX_OPEN_COMPONENT_*</code>，回调 URL：
-          <code>/api/wx/open/component/callback</code>
+          传统模式须由平台生成授权链接，商户扫码后自动落库 authorizer token。
+          服务器 .env 须配置 <code>WX_OPEN_COMPONENT_*</code> 与 <code>BASE_URL</code>（HTTPS），
+          回调 URL：<code>/api/wx/open/component/callback</code>，
+          授权完成页：<code>/api/wx/open/authorize/callback</code>
         </p>
         <el-descriptions :column="1" border size="small" class="auth-desc">
           <el-descriptions-item label="AppID">{{ authorizer.authorizer_appid || '—' }}</el-descriptions-item>
@@ -377,6 +430,61 @@ async function refreshAuthorizerToken() {
             </el-tag>
           </el-descriptions-item>
         </el-descriptions>
+
+        <el-alert
+          v-if="!authorizer.component_platform_configured || !authorizer.component_ticket_present"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="auth-prereq-alert"
+          title="暂无法生成授权链接"
+        >
+          <template #default>
+            <ul class="auth-prereq-list">
+              <li v-if="!authorizer.component_platform_configured">
+                服务器 .env 未配置 <code>WX_OPEN_COMPONENT_APPID</code> / <code>WX_OPEN_COMPONENT_SECRET</code>
+              </li>
+              <li v-if="!authorizer.component_ticket_present">
+                <code>component_verify_ticket</code> 未就绪：与 SaaS 租户信息无关。请到<strong>租户管理页顶部</strong>粘贴微信推送的 ticket，或先配好开放平台回调
+                <code>/api/wx/open/component/callback</code> 等待微信每 10 分钟推送。
+              </li>
+            </ul>
+          </template>
+        </el-alert>
+
+        <div class="pre-auth-block">
+          <div class="pre-auth-head">
+            <strong>传统模式 · 生成授权链接</strong>
+            <el-button
+              type="primary"
+              size="small"
+              :loading="preAuthLoading"
+              :disabled="!authorizer.component_platform_configured || !authorizer.component_ticket_present"
+              @click="generatePreAuthLink"
+            >
+              生成授权链接
+            </el-button>
+          </div>
+          <p class="saas-tip pre-auth-tip">
+            为当前租户申请 <code>pre_auth_code</code>（约 10 分钟有效）。请将链接发给小程序管理员扫码；
+            授权成功后页面会提示完成，亦可在此刷新 Authorizer 状态确认。
+          </p>
+          <el-input
+            v-if="preAuthLink.authorization_url"
+            :model-value="preAuthLink.authorization_url"
+            type="textarea"
+            :rows="3"
+            readonly
+            class="pre-auth-url"
+          />
+          <div v-if="preAuthLink.authorization_url" class="pre-auth-meta">
+            <span>有效期约 {{ preAuthLink.expires_in }} 秒</span>
+            <el-button size="small" @click="copyPreAuthLink">复制链接</el-button>
+            <el-link :href="preAuthLink.authorization_url" type="primary" target="_blank" rel="noopener">
+              新窗口打开
+            </el-link>
+          </div>
+        </div>
 
         <el-form label-position="top" class="auth-form">
           <el-form-item label="authorization_code（授权完成后换取 token）">
@@ -466,6 +574,45 @@ async function refreshAuthorizerToken() {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+.pre-auth-block {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.18);
+}
+.pre-auth-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.pre-auth-tip {
+  margin-bottom: 10px;
+}
+.pre-auth-url {
+  margin-bottom: 8px;
+}
+.pre-auth-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  color: rgba(226, 232, 240, 0.75);
+}
+.auth-prereq-alert {
+  margin-bottom: 12px;
+}
+.auth-prereq-list {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.6;
+}
+.auth-prereq-list li {
+  margin-bottom: 4px;
 }
 .saas-footer {
   display: flex;

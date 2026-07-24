@@ -20,6 +20,7 @@ from app.services.client.tenant_saas_service import (
     patch_tenant_saas_admin,
 )
 from app.services.shared.wx_open_authorizer_service import (
+    create_tenant_pre_auth_link,
     exchange_authorization_code,
     get_authorizer_admin_state,
     patch_authorizer_tokens_admin,
@@ -204,6 +205,17 @@ def platform_patch_wx_authorizer(
         clear=bool(body.clear),
     )
     return success(data=row, msg="已保存")
+
+
+@router.post("/tenants/{tenant_id}/wx-authorizer/pre-auth-link")
+def platform_create_wx_pre_auth_link(
+    tenant_id: int,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    """平台：传统模式为租户生成小程序授权链接（含 pre_auth_code，约 10 分钟有效）。"""
+    row = create_tenant_pre_auth_link(db, tenant_id)
+    return success(data=row, msg="授权链接已生成")
 
 
 @router.post("/tenants/{tenant_id}/wx-authorizer/exchange-code")
