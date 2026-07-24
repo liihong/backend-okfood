@@ -47,6 +47,41 @@ def _verify_get_signature(token: str, timestamp: str, nonce: str, echostr: str) 
     return True  # echostr 场景由 msg_signature 校验；简化：生产应完整验签
 
 
+def _extract_encrypt_from_xml(raw: str) -> str | None:
+    """从加密推送 XML 中提取 Encrypt 字段。"""
+    return _text_from_xml(raw, "Encrypt") or _text_from_xml(raw, "encrypt")
+
+
+def _resolve_component_callback_xml(
+    raw_body: str,
+    *,
+    msg_signature: str = "",
+    timestamp: str = "",
+    nonce: str = "",
+) -> str:
+    """
+    将 component 回调正文转为可解析的明文 XML。
+
+    - 若含 Encrypt 字段：按 WXBizMsgCrypt 解密（生产默认）
+    - 若已开启 WX_OPEN_CALLBACK_SKIP_DECRYPT 且无 Encrypt：直接当明文（仅联调）
+    """
+    from app.integrations.wx_biz_msg_crypt import WxBizMsgCryptError, component_msg_crypt_from_settings
+
+    encrypt = _extract_encrypt_from_xml(raw_body)
+    if not encrypt:
+        return raw_body
+
+    crypt = component_msg_crypt_from_settings()
+    if crypt is None:
+        settings = get_settings()
+        if settings.WX_OPEN_CALLBACK_SKIP_DECRYPT:
+            logger.warning("收到加密 component 回调但未配置完整 Token/AESKey，无法解密")
+            return raw_body
+        raise WxBizMsgCryptError("component 加解密凭证未配置")
+
+    return crypt.decrypt(encrypt, msg_signature=msg_signature, timestamp=timestamp, nonce=nonce)
+
+
 @router.get("/component/callback")
 def wx_open_component_callback_get(
     msg_signature: str = Query(""),
@@ -59,31 +94,58 @@ def wx_open_component_callback_get(
 
     配置第三方平台「授权事件接收 URL」时微信会发 GET 验证。
     """
-    _ = (msg_signature, timestamp, nonce)
     settings = get_settings()
     token = (settings.WX_OPEN_COMPONENT_TOKEN or "").strip()
+    echostr = (echostr or "").strip()
+
+    # 微信正式校验：echostr 为加密串，需解密后原样返回
+    if msg_signature and echostr and len(echostr) > 32:
+        from app.integrations.wx_biz_msg_crypt import WxBizMsgCryptError, component_msg_crypt_from_settings
+
+        crypt = component_msg_crypt_from_settings()
+        if crypt is not None:
+            try:
+                plain = crypt.verify_url(msg_signature, timestamp, nonce, echostr)
+                return PlainTextResponse(plain)
+            except WxBizMsgCryptError as e:
+                logger.warning("component GET 解密失败: %s", e)
+                return PlainTextResponse("invalid signature", status_code=403)
+
     if token and not _verify_get_signature(token, timestamp, nonce, echostr):
         return PlainTextResponse("invalid signature", status_code=403)
     return PlainTextResponse(echostr or "")
 
 
 @router.post("/component/callback")
-async def wx_open_component_callback_post(request: Request, db: SessionDep):
+async def wx_open_component_callback_post(
+    request: Request,
+    db: SessionDep,
+    msg_signature: str = Query(""),
+    timestamp: str = Query(""),
+    nonce: str = Query(""),
+):
     """
     微信推送 component 事件：component_verify_ticket、authorized、unauthorized 等。
 
-    生产环境须配置 Token + EncodingAESKey 并解密；开发可开 WX_OPEN_CALLBACK_SKIP_DECRYPT。
+    POST 体为加密 XML 时自动解密后落库 verify_ticket。
     """
     raw_body = (await request.body()).decode("utf-8", errors="replace")
-    settings = get_settings()
 
-    xml_payload = raw_body
-    if not settings.WX_OPEN_CALLBACK_SKIP_DECRYPT:
-        # 生产：应使用 WXBizMsgCrypt 解密；此处记录待接入完整解密
-        logger.warning(
-            "收到 component 回调但未开启 SKIP_DECRYPT，且完整 AES 解密尚未接入；"
-            "请暂时开启 WX_OPEN_CALLBACK_SKIP_DECRYPT 或在管理端手动写入 verify_ticket"
+    try:
+        xml_payload = _resolve_component_callback_xml(
+            raw_body,
+            msg_signature=msg_signature,
+            timestamp=timestamp,
+            nonce=nonce,
         )
+    except Exception as e:
+        from app.integrations.wx_biz_msg_crypt import WxBizMsgCryptError
+
+        if isinstance(e, WxBizMsgCryptError):
+            logger.warning("component POST 解密失败: %s", e)
+        else:
+            logger.exception("component POST 解析失败")
+        return PlainTextResponse("success")
 
     info_type = _text_from_xml(xml_payload, "InfoType") or _text_from_xml(xml_payload, "infoType")
     if info_type == "component_verify_ticket":

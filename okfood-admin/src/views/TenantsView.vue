@@ -19,6 +19,7 @@ const saasDrawerVisible = ref(false)
 const componentTicket = ref('')
 const componentState = ref(null)
 const componentTicketSaving = ref(false)
+const startPushTicketLoading = ref(false)
 
 /** 新建租户默认到期日：当前日期 + 1 年（按年收费） */
 function defaultTenantExpiresAt() {
@@ -154,6 +155,18 @@ async function saveComponentTicket() {
     showToast(e instanceof Error ? e.message : '保存失败', 'error')
   } finally {
     componentTicketSaving.value = false
+  }
+}
+
+async function startPushTicket() {
+  startPushTicketLoading.value = true
+  try {
+    await apiJson('/api/admin/system/wx-open/start-push-ticket', { method: 'POST', body: '{}' }, { auth: true })
+    showToast('已请求启动 Ticket 推送，约 10 分钟内推送', 'success')
+  } catch (e) {
+    showToast(e instanceof Error ? e.message : '启动失败', 'error')
+  } finally {
+    startPushTicketLoading.value = false
   }
 }
 
@@ -723,7 +736,8 @@ onMounted(async () => {
         </el-tag>
       </div>
       <p class="component-ticket-hint">
-        回调 URL：<code>/api/wx/open/component/callback</code>；未接通时可手动粘贴微信推送的 ticket。
+        回调 URL：<code>/api/wx/open/component/callback</code>。
+        控制台若显示「<strong>关闭推送Ticket</strong>」，请先点「启动 Ticket 推送」；未接通时可手动粘贴 ticket。
       </p>
       <div class="component-ticket-row">
         <el-input
@@ -734,6 +748,9 @@ onMounted(async () => {
           maxlength="512"
         />
         <el-button type="primary" :loading="componentTicketSaving" @click="saveComponentTicket">保存 Ticket</el-button>
+        <el-button type="warning" plain :loading="startPushTicketLoading" @click="startPushTicket">
+          启动 Ticket 推送
+        </el-button>
       </div>
     </div>
 

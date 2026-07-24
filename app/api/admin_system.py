@@ -143,6 +143,47 @@ def platform_patch_tenant_saas_config(
     return success(data=row, msg="已保存")
 
 
+@router.post("/wx-open/start-push-ticket")
+def platform_wx_start_push_ticket(
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    """平台：启动 component_verify_ticket 推送（控制台显示「关闭推送Ticket」时调用）。"""
+    import httpx
+
+    from app.core.config import get_settings
+
+    s = get_settings()
+    appid = (s.WX_OPEN_COMPONENT_APPID or "").strip()
+    secret = (s.WX_OPEN_COMPONENT_SECRET or "").strip()
+    if not appid or not secret:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=503, detail="WX_OPEN_COMPONENT_APPID/SECRET 未配置")
+
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            r = client.post(
+                "https://api.weixin.qq.com/cgi-bin/component/api_start_push_ticket",
+                json={"component_appid": appid, "component_secret": secret},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except httpx.HTTPError as e:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=502, detail="启动 ticket 推送请求失败") from e
+
+    errcode = data.get("errcode")
+    if errcode not in (0, None):
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail=str(data.get("errmsg") or "启动失败"))
+    return success(
+        data={"errcode": errcode, "errmsg": data.get("errmsg")},
+        msg="已启动 ticket 推送，约 10 分钟内推送到授权事件接收 URL",
+    )
+
+
 @router.get("/wx-open/component-state")
 def platform_wx_component_state(
     db: SessionDep,
