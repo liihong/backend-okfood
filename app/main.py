@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -125,6 +126,15 @@ app.include_router(admin_uploads.router, prefix="/api")
 static_root = settings.upload_dir_resolved
 static_root.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_root)), name="static")
+
+# 公开菜品库 H5（本地 / 直连 API 时可用）；生产由 Nginx 从 /var/www/okfood/h5/dish-catalog 提供
+_dish_catalog_h5 = Path(__file__).resolve().parents[1] / "h5" / "dish-catalog"
+if _dish_catalog_h5.is_dir():
+    app.mount(
+        "/dish-catalog",
+        StaticFiles(directory=str(_dish_catalog_h5), html=True),
+        name="dish_catalog_h5",
+    )
 
 
 @app.exception_handler(RateLimitExceeded)

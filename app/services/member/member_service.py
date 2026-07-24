@@ -1489,7 +1489,80 @@ def get_menu_detail_by_dish_id(
     return out
 
 
+def list_enabled_dishes_public(db: Session, *, store_id: int) -> dict:
+    """公开菜品库：返回门店全部已启用菜品（无需登录）；不含内部 SOP。"""
+    from app.models.product_category import ProductCategory
 
+    sid = int(store_id)
+    dishes = db.scalars(
+        select(MenuDish)
+        .where(MenuDish.store_id == sid, MenuDish.is_enabled.is_(True))
+        .order_by(MenuDish.id.desc())
+    ).all()
+
+    # 仅加载本页需要的分类名（肉类 / 菜品类型叶子）
+    cat_ids: set[int] = set()
+    for d in dishes:
+        if d.meat_category_id is not None:
+            cat_ids.add(int(d.meat_category_id))
+        if d.dish_type_category_id is not None:
+            cat_ids.add(int(d.dish_type_category_id))
+
+    cat_name_by_id: dict[int, str] = {}
+    if cat_ids:
+        for c in db.scalars(
+            select(ProductCategory).where(
+                ProductCategory.store_id == sid,
+                ProductCategory.id.in_(cat_ids),
+            )
+        ).all():
+            cat_name_by_id[int(c.id)] = c.name
+
+    # 筛选用：启用中的菜品类型叶子分类（父级 code=dish_type）
+    dish_type_root = db.scalar(
+        select(ProductCategory).where(
+            ProductCategory.store_id == sid,
+            ProductCategory.code == "dish_type",
+            ProductCategory.parent_id.is_(None),
+        )
+    )
+    dish_type_filters: list[dict] = []
+    if dish_type_root is not None:
+        for c in db.scalars(
+            select(ProductCategory)
+            .where(
+                ProductCategory.store_id == sid,
+                ProductCategory.parent_id == int(dish_type_root.id),
+                ProductCategory.is_active.is_(True),
+            )
+            .order_by(ProductCategory.sort_order, ProductCategory.id)
+        ).all():
+            dish_type_filters.append({"id": int(c.id), "name": c.name})
+
+    items: list[dict] = []
+    for d in dishes:
+        meat_id = int(d.meat_category_id) if d.meat_category_id is not None else None
+        type_id = int(d.dish_type_category_id) if d.dish_type_category_id is not None else None
+        row: dict = {
+            "dish_id": int(d.id),
+            "title": d.name,
+            "desc": d.description,
+            "price": _member_menu_price(d),
+            "meat_category_id": meat_id,
+            "meat_category_name": cat_name_by_id.get(meat_id) if meat_id is not None else None,
+            "dish_type_category_id": type_id,
+            "dish_type_category_name": cat_name_by_id.get(type_id) if type_id is not None else None,
+        }
+        row.update(_member_dish_pic_fields(d))
+        row.update(_member_spice_public_fields(d))
+        items.append(row)
+
+    return {
+        "store_id": sid,
+        "total": len(items),
+        "items": items,
+        "dish_type_filters": dish_type_filters,
+    }
 
 
 def admin_update_member_address(

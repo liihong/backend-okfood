@@ -82,5 +82,16 @@ if [[ "${BUILD_ADMIN:-0}" == "1" ]]; then
   echo ">>> 管理端构建产物目录: ${ADMIN_DIR}/dist"
 fi
 
+# 同步公开菜品库 H5 到站点根（Nginx root=/var/www/okfood/h5）
+H5_ROOT="${H5_ROOT:-/var/www/okfood/h5}"
+DISH_CATALOG_SRC="${BACKEND_ROOT}/h5/dish-catalog"
+if [[ -d "${DISH_CATALOG_SRC}" ]]; then
+  echo ">>> 同步菜品库 H5 → ${H5_ROOT}/dish-catalog"
+  mkdir -p "${H5_ROOT}/dish-catalog"
+  cp -a "${DISH_CATALOG_SRC}/." "${H5_ROOT}/dish-catalog/"
+else
+  echo "提示: 未找到 ${DISH_CATALOG_SRC}，跳过菜品库 H5 同步"
+fi
+
 echo ">>> 完成。API 健康检查（本机）:"
 curl -sS "http://127.0.0.1:8001/health" || echo "(curl 失败，请检查服务与端口)"

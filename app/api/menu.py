@@ -4,7 +4,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app.core.deps import SessionDep, public_store_dep, PublicStoreContext
-from app.services.member.member_service import get_menu_detail_by_dish_id, get_today_menu, get_tomorrow_menu, get_weekly_menu
+from app.services.member.member_service import (
+    get_menu_detail_by_dish_id,
+    get_today_menu,
+    get_tomorrow_menu,
+    get_weekly_menu,
+    list_enabled_dishes_public,
+)
 from app.utils.response import success
 
 router = APIRouter(prefix="/menu", tags=["菜单"])
@@ -94,6 +100,18 @@ def weekly_menu(
             stock_dates=_parse_stock_dates(stock_dates),
             meal_period=meal_period,
         ),
+        msg="获取成功",
+    )
+
+
+@router.get("/dishes")
+def menu_dishes_catalog(
+    db: SessionDep,
+    store_ctx: PublicStoreContext = Depends(public_store_dep),
+):
+    """菜品库公开目录：门店全部已启用菜品（含简介/图片/辣度/分类），无需登录。"""
+    return success(
+        data=list_enabled_dishes_public(db, store_id=int(store_ctx.store_id)),
         msg="获取成功",
     )
 
