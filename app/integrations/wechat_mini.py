@@ -45,10 +45,27 @@ def wx_mini_configured() -> bool:
 
 
 def wx_mini_configured_for_tenant(db: "Session", tenant_id: int) -> bool:
+    """租户小程序是否可用于登录/订阅消息。
+
+    - 直连：合并后 AppId+Secret 齐全（主租户可回退全局 .env，OK饭现网不变）
+    - SaaS 代授权：有 AppId 且第三方平台已配、authorizer refresh_token 已落库（无需 Secret）
+    """
     from app.services.shared.tenant_integration_service import get_merged_wx_credentials
 
     a, s = get_merged_wx_credentials(db, int(tenant_id))
-    return bool(a and s)
+    # OK饭等直连：仍要求 AppId + Secret
+    if a and s:
+        return True
+    if not a:
+        return False
+    # 非主租户代授权：仅有 AppId + authorizer 即可（禁止借主租户全局 Secret）
+    from app.integrations.wechat_open_platform import wechat_open_platform_configured
+    from app.services.shared.wx_open_authorizer_service import tenant_has_authorizer_tokens
+
+    return bool(
+        wechat_open_platform_configured()
+        and tenant_has_authorizer_tokens(db, int(tenant_id))
+    )
 
 
 def _app_credentials() -> tuple[str, str]:
