@@ -36,6 +36,19 @@ def _s(raw: str | None) -> str:
     return (raw or "").strip()
 
 
+def tenant_uses_authorizer_mode(db: "Session", tenant_id: int) -> bool:
+    """该租户是否走第三方平台代调用（无需小程序 Secret）。
+
+    OK饭等未落库 authorizer 的租户返回 False，继续直连 AppId/Secret。
+    """
+    from app.services.shared.wx_open_authorizer_service import tenant_has_authorizer_tokens
+
+    return bool(
+        wechat_open_platform_configured()
+        and tenant_has_authorizer_tokens(db, int(tenant_id))
+    )
+
+
 def get_component_access_token(db: "Session | None" = None) -> str:
     """
     获取 component_access_token：优先内存缓存，否则用 DB 中的 verify_ticket 向微信换取。
@@ -115,9 +128,10 @@ def jscode2session_via_authorizer(
     tenant_id: int | None = None,
 ) -> dict[str, Any]:
     """
-    小程序登录：优先第三方平台 component/jscode2session；否则直连 AppID/Secret。
+    小程序登录：代授权租户走 component/jscode2session；否则直连 AppID/Secret。
 
-    OK饭 主租户无 authorizer token 时，与改造前行为一致。
+    - OK饭等无 authorizer：与改造前一致（直连 Secret）。
+    - SaaS 代授权：禁止回退直连 Secret（无 Secret 亦可登录）。
     """
     from app.integrations.wechat_mini import jscode2session
     from app.services.shared.tenant_integration_service import get_merged_wx_credentials
@@ -125,14 +139,15 @@ def jscode2session_via_authorizer(
     if db is None or tenant_id is None:
         return jscode2session(js_code, db=db, tenant_id=tenant_id)
 
-    from app.services.shared.wx_open_authorizer_service import tenant_has_authorizer_tokens
-
-    if not (wechat_open_platform_configured() and tenant_has_authorizer_tokens(db, int(tenant_id))):
+    if not tenant_uses_authorizer_mode(db, int(tenant_id)):
         return jscode2session(js_code, db=db, tenant_id=int(tenant_id))
 
     appid, _secret = get_merged_wx_credentials(db, int(tenant_id))
     if not appid:
-        return jscode2session(js_code, db=db, tenant_id=int(tenant_id))
+        raise WeChatMiniError(
+            "代授权小程序未配置 AppId，请先完成微信第三方平台授权",
+            status_code=503,
+        )
 
     try:
         from app.services.shared.wx_open_authorizer_service import get_valid_authorizer_access_token
@@ -165,9 +180,11 @@ def jscode2session_via_authorizer(
     if errcode not in (None, 0):
         msg = str(data.get("errmsg") or "未知错误")
         logger.warning("component jscode2session 失败: errcode=%s %s", errcode, msg)
-        # 第三方登录失败时回退直连，避免 SaaS 同时配置了 secret 时被卡死
-        logger.info("component jscode2session 失败，回退直连 tenant_id=%s", tenant_id)
-        return jscode2session(js_code, db=db, tenant_id=int(tenant_id))
+        raise WeChatMiniError(
+            f"代授权登录失败: {msg}",
+            errcode=int(errcode) if errcode is not None else None,
+            status_code=502,
+        )
 
     if not data.get("openid"):
         raise WeChatMiniError("微信未返回用户标识")
@@ -185,20 +202,18 @@ def get_mini_program_api_access_token(db: "Session", tenant_id: int) -> tuple[st
     """
     获取小程序服务端 API 用的 access_token 及 appid。
 
-    有 authorizer token 时用 authorizer_access_token；否则 client_credential。
+    - 代授权租户：authorizer_access_token（无需 Secret）
+    - 直连租户（OK饭）：client_credential（AppId+Secret）
     """
     from app.integrations.wechat_mini import get_stable_access_token_for_app
     from app.services.shared.tenant_integration_service import get_merged_wx_credentials
-    from app.services.shared.wx_open_authorizer_service import (
-        get_valid_authorizer_access_token,
-        tenant_has_authorizer_tokens,
-    )
+    from app.services.shared.wx_open_authorizer_service import get_valid_authorizer_access_token
 
     appid, secret = get_merged_wx_credentials(db, int(tenant_id))
     if not appid:
         raise WeChatMiniError("微信小程序未配置", status_code=503)
 
-    if wechat_open_platform_configured() and tenant_has_authorizer_tokens(db, int(tenant_id)):
+    if tenant_uses_authorizer_mode(db, int(tenant_id)):
         token = get_valid_authorizer_access_token(db, int(tenant_id))
         return appid, token
 

@@ -171,7 +171,7 @@ def login_wx_mini(
 
     微信小程序手机号授权登录：校验 `js_code`，用 `phone_code` 调微信接口取手机号，签发会员 JWT。
 
-    需在环境变量中配置 WX_MINI_APPID、WX_MINI_SECRET。
+    主租户（OK饭）用全局/对接 Secret 直连；SaaS 代授权租户走 authorizer，无需 Secret。
 
     门店由请求头 ``X-Store-Id`` 解析（未传则默认门店）；可选 ``X-Tenant-Id`` 做 SaaS 交叉校验。
 

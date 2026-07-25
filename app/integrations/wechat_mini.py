@@ -48,7 +48,7 @@ def wx_mini_configured_for_tenant(db: "Session", tenant_id: int) -> bool:
     """租户小程序是否可用于登录/订阅消息。
 
     - 直连：合并后 AppId+Secret 齐全（主租户可回退全局 .env，OK饭现网不变）
-    - SaaS 代授权：有 AppId 且第三方平台已配、authorizer refresh_token 已落库（无需 Secret）
+    - SaaS 代授权：有 AppId 且已启用 authorizer（无需 Secret）
     """
     from app.services.shared.tenant_integration_service import get_merged_wx_credentials
 
@@ -58,14 +58,47 @@ def wx_mini_configured_for_tenant(db: "Session", tenant_id: int) -> bool:
         return True
     if not a:
         return False
-    # 非主租户代授权：仅有 AppId + authorizer 即可（禁止借主租户全局 Secret）
-    from app.integrations.wechat_open_platform import wechat_open_platform_configured
-    from app.services.shared.wx_open_authorizer_service import tenant_has_authorizer_tokens
+    from app.integrations.wechat_open_platform import tenant_uses_authorizer_mode
 
-    return bool(
-        wechat_open_platform_configured()
-        and tenant_has_authorizer_tokens(db, int(tenant_id))
-    )
+    return tenant_uses_authorizer_mode(db, int(tenant_id))
+
+
+def _resolve_appid_and_access_token(
+    db: "Session | None", tenant_id: int | None
+) -> tuple[str, str, bool]:
+    """解析调用微信 API 所需的 appid、access_token。
+
+    返回 ``(appid, access_token, used_authorizer)``：
+    - 代授权租户：authorizer token，``used_authorizer=True``（禁止再回退 Secret）
+    - 直连/全局：AppId+Secret 换 client_credential，``used_authorizer=False``
+    """
+    if db is not None and tenant_id is not None:
+        from app.integrations.wechat_open_platform import (
+            get_mini_program_api_access_token,
+            tenant_uses_authorizer_mode,
+        )
+
+        appid, token = get_mini_program_api_access_token(db, int(tenant_id))
+        return appid, token, tenant_uses_authorizer_mode(db, int(tenant_id))
+    appid, secret = _credentials_for_call(db, tenant_id)
+    return appid, get_stable_access_token_for_app(appid, secret), False
+
+
+def _refresh_access_token_after_40001(
+    appid: str,
+    *,
+    db: "Session | None",
+    tenant_id: int | None,
+    used_authorizer: bool,
+) -> str:
+    """access_token 失效（40001）后重拉；代授权只刷新 authorizer，不碰 Secret。"""
+    if used_authorizer and db is not None and tenant_id is not None:
+        from app.services.shared.wx_open_authorizer_service import refresh_authorizer_access_token
+
+        return refresh_authorizer_access_token(db, int(tenant_id))
+    _invalidate_access_token_for_app(appid)
+    _, secret = _credentials_for_call(db, tenant_id)
+    return get_stable_access_token_for_app(appid, secret)
 
 
 def _app_credentials() -> tuple[str, str]:
@@ -195,25 +228,11 @@ def _request_getuserphonenumber(phone_code: str, access_token: str) -> dict[str,
 def get_phone_pure_number(
     phone_code: str, *, db: "Session | None" = None, tenant_id: int | None = None
 ) -> str:
-    """通过手机号动态令牌换取用户手机号。"""
-    if db is not None and tenant_id is not None:
-        try:
-            from app.integrations.wechat_open_platform import get_mini_program_api_access_token
-            from app.services.shared.wx_open_authorizer_service import tenant_has_authorizer_tokens
-            from app.integrations.wechat_open_platform import wechat_open_platform_configured
+    """通过手机号动态令牌换取用户手机号。
 
-            if wechat_open_platform_configured() and tenant_has_authorizer_tokens(db, int(tenant_id)):
-                appid, access_token = get_mini_program_api_access_token(db, int(tenant_id))
-            else:
-                appid, secret = _credentials_for_call(db, tenant_id)
-                access_token = get_stable_access_token_for_app(appid, secret)
-        except WeChatMiniError:
-            appid, secret = _credentials_for_call(db, tenant_id)
-            access_token = get_stable_access_token_for_app(appid, secret)
-    else:
-        appid, secret = _credentials_for_call(db, tenant_id)
-        access_token = get_stable_access_token_for_app(appid, secret)
-
+    代授权租户使用 authorizer access_token；OK饭等直连使用 Secret 换 token。
+    """
+    appid, access_token, used_authorizer = _resolve_appid_and_access_token(db, tenant_id)
     data = _request_getuserphonenumber(phone_code, access_token)
 
     info = data.get("phone_info")
@@ -222,32 +241,13 @@ def get_phone_pure_number(
         # access_token 被其它进程刷新或已过期：清缓存、重拉 token 后仅重试一次
         if errcode == WX_ERRCODE_INVALID_ACCESS_TOKEN:
             logger.warning(
-                "getuserphonenumber access_token 失效，重试: appid=%s…",
+                "getuserphonenumber access_token 失效，重试: appid=%s… authorizer=%s",
                 appid[:8] if len(appid) > 8 else appid,
+                used_authorizer,
             )
-            if db is not None and tenant_id is not None:
-                try:
-                    from app.integrations.wechat_open_platform import get_mini_program_api_access_token
-                    from app.services.shared.wx_open_authorizer_service import (
-                        refresh_authorizer_access_token,
-                        tenant_has_authorizer_tokens,
-                    )
-                    from app.integrations.wechat_open_platform import wechat_open_platform_configured
-
-                    if wechat_open_platform_configured() and tenant_has_authorizer_tokens(db, int(tenant_id)):
-                        access_token = refresh_authorizer_access_token(db, int(tenant_id))
-                    else:
-                        _invalidate_access_token_for_app(appid)
-                        _, secret_retry = _credentials_for_call(db, tenant_id)
-                        access_token = get_stable_access_token_for_app(appid, secret_retry)
-                except WeChatMiniError:
-                    _invalidate_access_token_for_app(appid)
-                    _, secret_retry = _credentials_for_call(db, tenant_id)
-                    access_token = get_stable_access_token_for_app(appid, secret_retry)
-            else:
-                _invalidate_access_token_for_app(appid)
-                _, secret_retry = _credentials_for_call(db, tenant_id)
-                access_token = get_stable_access_token_for_app(appid, secret_retry)
+            access_token = _refresh_access_token_after_40001(
+                appid, db=db, tenant_id=tenant_id, used_authorizer=used_authorizer
+            )
             data = _request_getuserphonenumber(phone_code, access_token)
             info = data.get("phone_info")
             errcode = data.get("errcode")
@@ -288,9 +288,11 @@ def send_subscribe_message(
     db: "Session | None" = None,
     tenant_id: int | None = None,
 ) -> dict[str, Any]:
-    """调用订阅消息下发接口；成功返回微信 JSON；失败抛 WeChatMiniError。"""
-    appid, secret = _credentials_for_call(db, tenant_id)
-    access_token = get_stable_access_token_for_app(appid, secret)
+    """调用订阅消息下发接口；成功返回微信 JSON；失败抛 WeChatMiniError。
+
+    代授权租户用 authorizer access_token；OK饭等直连仍用 Secret。
+    """
+    appid, access_token, used_authorizer = _resolve_appid_and_access_token(db, tenant_id)
     url = f"{SUBSCRIBE_SEND_URL}?access_token={access_token}"
     body: dict[str, Any] = {
         "touser": touser,
@@ -310,6 +312,27 @@ def send_subscribe_message(
         raise WeChatMiniError("订阅消息服务暂时不可用", status_code=502) from e
 
     errcode = out.get("errcode")
+    # access_token 失效时刷新后仅重试一次（代授权只刷 authorizer）
+    if errcode == WX_ERRCODE_INVALID_ACCESS_TOKEN:
+        logger.warning(
+            "subscribe.send access_token 失效，重试: appid=%s… authorizer=%s",
+            appid[:8] if len(appid) > 8 else appid,
+            used_authorizer,
+        )
+        access_token = _refresh_access_token_after_40001(
+            appid, db=db, tenant_id=tenant_id, used_authorizer=used_authorizer
+        )
+        url = f"{SUBSCRIBE_SEND_URL}?access_token={access_token}"
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                r = client.post(url, json=body)
+                r.raise_for_status()
+                out = r.json()
+        except httpx.HTTPError as e:
+            logger.exception("微信 subscribe.send 重试失败")
+            raise WeChatMiniError("订阅消息服务暂时不可用", status_code=502) from e
+        errcode = out.get("errcode")
+
     if errcode not in (None, 0):
         msg = str(out.get("errmsg") or "未知错误")
         raise WeChatMiniError(msg, errcode=int(errcode) if errcode is not None else None, status_code=400)
