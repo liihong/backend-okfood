@@ -163,6 +163,7 @@ const sfPushEnabledForView = computed(() => sheetViewSupportsSfPush(sheetView.va
 
 /** 按手机号筛选大表（与 GET delivery-sheet ?phone= 一致；可后几位或完整号码） */
 const phoneQuery = ref('')
+const reinstateBusy = ref(false)
 /** 查询用的配送业务日（日历日 YYYY-MM-DD），可与「今天」不同 */
 const deliveryDateQuery = ref(todayShanghaiStr())
 
@@ -702,6 +703,47 @@ async function markDelivery(memberId, kind) {
     markingMemberId.value = null
   }
 }
+
+/** 推单后取消请假默认不加回；极端情况由客服补进当日大表 */
+async function reinstatePhoneToSheet() {
+  const phone = (phoneQuery.value || '').trim()
+  if (!phone) {
+    showToast('请先输入手机号', 'error')
+    return
+  }
+  if (sheetView.value === SHEET_VIEW_LUNCH_DINNER) {
+    showToast('请切换到「午餐」或「晚餐」Tab 后再补进', 'error')
+    return
+  }
+  const mealPeriod = deliveryMarkMealPeriod(sheetView.value)
+  reinstateBusy.value = true
+  try {
+    await apiJson(
+      '/api/admin/delivery-sheet/reinstate-member',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          phone,
+          delivery_date: (deliveryDateQuery.value || todayShanghaiStr()).trim(),
+          meal_period: mealPeriod,
+        }),
+      },
+      { auth: true },
+    )
+    showToast('已补进今日配送大表', 'success')
+    await fetchSheet()
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '补进失败', 'error')
+  } finally {
+    reinstateBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -1124,6 +1166,17 @@ async function markDelivery(memberId, kind) {
             </template>
             <template v-else-if="(phoneQuery || '').trim()">
               该业务日无与「{{ (phoneQuery || '').trim() }}」匹配的配送记录（或该会员已请假/未在配送名单中）。
+              <template v-if="sheetView !== SHEET_VIEW_LUNCH_DINNER">
+                若为推单后取消请假需当日补送，可
+                <button
+                  type="button"
+                  class="delivery-btn delivery-btn--outline delivery-reinstate-inline"
+                  :disabled="loading || reinstateBusy"
+                  @click="reinstatePhoneToSheet"
+                >
+                  {{ reinstateBusy ? '补进中…' : '补进今日配送' }}
+                </button>
+              </template>
             </template>
             <template v-else>
               当日暂无符合大表条件的会员（请假、未激活、余额不足、起送日晚于该日、手机号筛选无匹配等）。单点餐在「顺丰同城」预览里与订阅合并，本页仅含订阅与自提。
@@ -1973,6 +2026,12 @@ async function markDelivery(memberId, kind) {
   font-size: 0.75rem;
   font-weight: 700;
   color: #cbd5e1;
+}
+.delivery-reinstate-inline {
+  margin-left: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  vertical-align: baseline;
 }
 
 .sf-warn {

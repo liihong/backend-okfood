@@ -620,6 +620,19 @@ class AdminMemberLeaveIn(BaseModel):
     )
 
 
+class AdminDeliverySheetReinstateIn(BaseModel):
+    """管理端极端补送：推单冻结后将会员补进当日大表（取消请假默认不加回时使用）。"""
+
+    phone: str = Field(..., min_length=5, max_length=20)
+    delivery_date: date | None = Field(
+        None, description="业务日；默认上海今日"
+    )
+    meal_period: Literal["lunch", "dinner"] = Field(
+        "lunch",
+        description="餐段：lunch 午餐 / dinner 晚餐",
+    )
+
+
 class AdminMemberPatchIn(BaseModel):
     """管理端修改会员档案：至少填一项；手机号不可改。"""
 

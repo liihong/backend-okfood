@@ -222,7 +222,7 @@ def _delivery_sheet_manual_attention_event_line(
     name_part = f"「{naming}」" if naming else ""
     return (
         f"小程序操作「{label_join}」，会员 mid={int(member_id)} {phones} {name_part}"
-        "今日可能已计入大表但不在早间顺丰快照，请并入配送并补链路。"
+        "推单后取消请假默认不进入当日大表；如需当日补送，请在配送大表「补进今日配送」。"
     )
 
 

@@ -160,6 +160,43 @@ def merge_member_into_delivery_sheet_absent_snapshot(
     db.flush()
 
 
+def remove_member_from_delivery_sheet_absent_snapshot(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    member_id: int,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
+) -> bool:
+    """从 absent 快照剔除会员，允许重新并入冻结大表；无行或本来不在则返回 False。"""
+    pk = _snapshot_pk(
+        store_id=int(store_id), delivery_date=delivery_date, meal_period=meal_period
+    )
+    mid = int(member_id)
+    row = db.get(DeliverySheetPushAbsentSnapshot, pk)
+    if row is None:
+        return False
+    raw = row.absent_member_ids
+    if not isinstance(raw, list):
+        return False
+    kept: list[int] = []
+    found = False
+    for x in raw:
+        try:
+            v = int(x)
+        except (TypeError, ValueError):
+            continue
+        if v == mid:
+            found = True
+            continue
+        kept.append(v)
+    if not found:
+        return False
+    row.absent_member_ids = sorted(set(kept))
+    db.flush()
+    return True
+
+
 def remove_member_from_delivery_sheet_units_snapshot(
     db: Session,
     *,
@@ -233,6 +270,47 @@ def apply_admin_same_day_leave_to_frozen_delivery_sheet_snapshots(
         store_id=sid,
         delivery_date=delivery_date,
         member_id=int(member_id),
+        meal_period=period,
+    )
+    return True
+
+
+def apply_admin_reinstate_member_to_frozen_delivery_sheet(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    member_id: int,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
+) -> bool:
+    """
+    极端补送：推单冻结日后，将会员补进当日大表快照（从 absent 剔除并并入 frozen/份数）。
+    不单独 commit；无推单冻结或无份数快照行时返回 False。
+    """
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    sid = int(store_id)
+    mid = int(member_id)
+    if not _delivery_sheet_frozen_for_period(
+        db, store_id=sid, delivery_date=delivery_date, meal_period=period
+    ):
+        return False
+    units_row = _get_units_snapshot_row(
+        db, store_id=sid, delivery_date=delivery_date, meal_period=period
+    )
+    if units_row is None:
+        return False
+    remove_member_from_delivery_sheet_absent_snapshot(
+        db,
+        store_id=sid,
+        delivery_date=delivery_date,
+        member_id=mid,
+        meal_period=period,
+    )
+    merge_delivery_sheet_push_into_units_snapshot(
+        db,
+        store_id=sid,
+        delivery_date=delivery_date,
+        fulfillment_member_ids=[mid],
         meal_period=period,
     )
     return True

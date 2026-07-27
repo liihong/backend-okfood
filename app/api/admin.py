@@ -31,6 +31,7 @@ from app.schemas.admin import (
     AdminDeliveryMarkIn,
     AdminLoginIn,
     AdminMemberLeaveIn,
+    AdminDeliverySheetReinstateIn,
     AdminMemberPatchIn,
     CardOrderCreateIn,
     CardOrderPatchIn,
@@ -111,7 +112,10 @@ from app.services.delivery.sf_same_city_service import (
 from app.services.shared.store_config_service import get_store_config, update_store_config
 from app.services.delivery.delivery_sheet_service import build_delivery_sheet
 from app.services.admin.pickup_verification_service import list_pickup_verification_panel
-from app.services.admin.admin_delivery_fulfillment_service import admin_mark_subscription_fulfilled
+from app.services.admin.admin_delivery_fulfillment_service import (
+    admin_mark_subscription_fulfilled,
+    admin_reinstate_member_to_delivery_sheet,
+)
 from app.services.admin.member_delivery_deduction_service import list_member_delivered_dates_admin
 from app.services.member.member_address_service import list_addresses, update_address
 from app.services.member.member_operation_log_service import (
@@ -1064,6 +1068,33 @@ def delivery_mark(
         meal_period=body.meal_period,
     )
     return success(msg="已标记")
+
+
+@router.post("/delivery-sheet/reinstate-member")
+def delivery_sheet_reinstate_member(
+    request: Request,
+    body: AdminDeliverySheetReinstateIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """
+    极端补送：推单冻结后将会员补进当日配送大表。
+    推单时请假后取消请假默认不加回，仅此接口可人工加回并便于顺丰补推。
+    """
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    xf = request.headers.get("x-forwarded-for")
+    ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
+    data = admin_reinstate_member_to_delivery_sheet(
+        db,
+        phone=body.phone,
+        store_id=store_id,
+        delivery_date=body.delivery_date,
+        meal_period=body.meal_period,
+        operator=admin_username,
+        ip_address=ip,
+    )
+    return success(data=data, msg="已补进今日配送大表")
 
 
 @router.post("/dinner-delivery-mark")

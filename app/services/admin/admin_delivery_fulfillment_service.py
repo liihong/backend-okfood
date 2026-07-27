@@ -255,3 +255,107 @@ def subscription_fulfilled_try_sf_home_no_commit(
         ok_ids=effective_ok_ids,
         meal_period=period,
     )
+
+
+def admin_reinstate_member_to_delivery_sheet(
+    db: Session,
+    *,
+    phone: str,
+    store_id: int,
+    delivery_date: date | None = None,
+    meal_period: str = MealPeriod.LUNCH.value,
+    operator: str | None = None,
+    ip_address: str | None = None,
+) -> dict[str, object]:
+    """
+    管理端极端补送：推单冻结日后将会员补进当日配送大表快照。
+    用于「推单时请假 → 后取消请假」等默认不加回场景。
+    """
+    from app.core.delivery_calendar import is_subscription_delivery_day
+    from app.services.delivery.delivery_sheet_push_snapshot_service import (
+        apply_admin_reinstate_member_to_frozen_delivery_sheet,
+    )
+    from app.services.dinner.schedule import member_on_dinner_delivery_schedule
+    from app.services.meal_period.lunch_schedule import member_on_lunch_delivery_schedule
+    from app.services.member.member_operation_log_service import (
+        OP_ADMIN_REINSTATE_DELIVERY_SHEET,
+        record_member_operation,
+    )
+
+    p = (phone or "").strip()
+    if not p:
+        raise HTTPException(status_code=400, detail="请填写手机号")
+    m = db.scalar(
+        select(Member).where(
+            Member.phone == p,
+            Member.store_id == int(store_id),
+            Member.deleted_at.is_(None),
+        )
+    )
+    if not m:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    period = _normalize_meal_period(meal_period)
+    d = delivery_date or today_shanghai()
+    if not is_subscription_delivery_day(d):
+        raise HTTPException(status_code=400, detail="该日非订阅配送业务日，无法补进大表")
+    if not bool(m.is_active):
+        raise HTTPException(status_code=400, detail="会员未激活，无法补进大表")
+    if bool(m.store_pickup):
+        raise HTTPException(status_code=400, detail="门店自提会员请走自提名单，无需补进到家大表")
+    if bool(m.delivery_deferred):
+        raise HTTPException(status_code=400, detail="会员已暂停配送，无法补进大表")
+
+    today = today_shanghai()
+    if is_absent_on_delivery_date_for_period(
+        db, m, d, meal_period=period, today=today
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="该会员当日仍请假中，请先取消请假后再补进大表",
+        )
+
+    on_schedule = (
+        member_on_dinner_delivery_schedule(db, m, delivery_date=d, today=today)
+        if period == MealPeriod.DINNER.value
+        else member_on_lunch_delivery_schedule(db, m, delivery_date=d, today=today)
+    )
+    if not on_schedule:
+        raise HTTPException(
+            status_code=400,
+            detail="该会员当日不符合订阅配送条件（余额/起送日/餐段资格等）",
+        )
+
+    ok = apply_admin_reinstate_member_to_frozen_delivery_sheet(
+        db,
+        store_id=int(store_id),
+        delivery_date=d,
+        member_id=int(m.id),
+        meal_period=period,
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail="当日尚未推单冻结，或缺少份数快照；推单前大表已实时反映取消请假，无需补进",
+        )
+
+    period_cn = "晚餐" if period == MealPeriod.DINNER.value else "午餐"
+    record_member_operation(
+        db,
+        member_id=int(m.id),
+        operation_type=OP_ADMIN_REINSTATE_DELIVERY_SHEET,
+        summary=f"补进{period_cn}配送大表：{d.isoformat()}",
+        before={},
+        after={"delivery_date": d.isoformat(), "meal_period": period},
+        ip_address=ip_address,
+        source="admin",
+        operator=(f"admin:{operator}" if operator else None),
+    )
+    db.commit()
+    return {
+        "member_id": int(m.id),
+        "phone": str(m.phone or ""),
+        "name": str(m.name or ""),
+        "delivery_date": d.isoformat(),
+        "meal_period": period,
+    }

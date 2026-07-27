@@ -17,6 +17,7 @@ import {
   Banknote,
   UtensilsCrossed,
   Ticket,
+  Truck,
 } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import {
@@ -239,6 +240,10 @@ async function deleteMemberRow(u) {
 function onMembersActionDropdown(command, row) {
   if (command === 'leave') {
     void openLeaveMember(row)
+    return
+  }
+  if (command === 'reinstate_delivery') {
+    void reinstateMemberToDeliverySheet(row)
     return
   }
   if (command === 'addresses') {
@@ -593,6 +598,37 @@ async function submitLeaveMember() {
     showToast(e instanceof Error ? e.message : '保存失败', 'error')
   } finally {
     leaveSaving.value = false
+  }
+}
+
+/** 推单冻结后极端补送：将会员写入当日大表快照（默认取消请假不加回） */
+async function reinstateMemberToDeliverySheet(u) {
+  if (!u?.phone) return
+  const periods = Array.isArray(u?.entitled_meal_periods) ? u.entitled_meal_periods : []
+  let mealPeriod = 'lunch'
+  if (periods.includes('dinner') && !periods.includes('lunch')) mealPeriod = 'dinner'
+  const ok = window.confirm(
+    `确认将 ${u.name || u.phone} 补进今日${mealPeriod === 'dinner' ? '晚餐' : '午餐'}配送大表？\n仅用于推单后取消请假等极端补送。`,
+  )
+  if (!ok) return
+  try {
+    await apiJson(
+      '/api/admin/delivery-sheet/reinstate-member',
+      {
+        method: 'POST',
+        body: JSON.stringify({ phone: u.phone, meal_period: mealPeriod }),
+      },
+      { auth: true },
+    )
+    showToast('已补进今日配送大表', 'success')
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '补进失败', 'error')
   }
 }
 
@@ -1318,6 +1354,15 @@ onUnmounted(() => {
                         请假
                       </span>
                     </el-dropdown-item>
+                    <el-dropdown-item command="reinstate_delivery">
+                      <span
+                        class="members-dropdown-item-inner"
+                        title="推单后取消请假默认不加回；极端补送时写入当日大表快照"
+                      >
+                        <Truck :size="14" aria-hidden="true" />
+                        补进今日配送
+                      </span>
+                    </el-dropdown-item>
                     <el-dropdown-item command="addresses">
                       <span
                         class="members-dropdown-item-inner"
@@ -1479,6 +1524,15 @@ onUnmounted(() => {
                       <span class="members-dropdown-item-inner" title="手工请假">
                         <CalendarOff :size="14" aria-hidden="true" />
                         请假
+                      </span>
+                    </el-dropdown-item>
+                    <el-dropdown-item command="reinstate_delivery">
+                      <span
+                        class="members-dropdown-item-inner"
+                        title="推单后取消请假默认不加回；极端补送时写入当日大表快照"
+                      >
+                        <Truck :size="14" aria-hidden="true" />
+                        补进今日配送
                       </span>
                     </el-dropdown-item>
                     <el-dropdown-item command="addresses">
