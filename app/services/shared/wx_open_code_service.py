@@ -34,10 +34,23 @@ from app.services.shared.wx_open_authorizer_service import (
 
 logger = logging.getLogger(__name__)
 
-# 微信开放平台 · 代码模板 / 体验版接口
+# 微信开放平台 · 代码模板 / 体验版 / 审核发布接口
 TEMPLATE_LIST_URL = "https://api.weixin.qq.com/wxa/gettemplatelist"
 COMMIT_URL = "https://api.weixin.qq.com/wxa/commit"
 TRIAL_QRCODE_URL = "https://api.weixin.qq.com/wxa/get_qrcode"
+GET_CATEGORY_URL = "https://api.weixin.qq.com/wxa/get_category"
+SUBMIT_AUDIT_URL = "https://api.weixin.qq.com/wxa/submit_audit"
+AUDIT_STATUS_URL = "https://api.weixin.qq.com/wxa/get_latest_auditstatus"
+RELEASE_URL = "https://api.weixin.qq.com/wxa/release"
+
+# 微信 get_latest_auditstatus.status 文案（管理端展示）
+AUDIT_STATUS_LABELS: dict[int, str] = {
+    0: "审核成功",
+    1: "审核被拒绝",
+    2: "审核中",
+    3: "已撤回",
+    4: "审核延后",
+}
 
 # extra_json 内发布状态键（与 saas / douyin 并列，互不覆盖）
 PUBLISH_BLOB_KEY = "wx_code_publish"
@@ -84,6 +97,50 @@ def save_publish_blob(db: Session, tenant_id: int, blob: dict[str, Any]) -> None
     db.refresh(row)
 
 
+def _patch_publish_blob(db: Session, tenant_id: int, patch: dict[str, Any]) -> dict[str, Any]:
+    """增量更新 wx_code_publish，避免覆盖审核/发布等历史字段。"""
+    blob = load_publish_blob(db, int(tenant_id))
+    blob.update(patch)
+    save_publish_blob(db, int(tenant_id), blob)
+    return blob
+
+
+def _ensure_authorizer_for_code_ops(db: Session, tenant_id: int) -> None:
+    """commit / 提审 / 发布等代开发操作的前置校验。"""
+    if not tenant_has_authorizer_tokens(db, int(tenant_id)):
+        raise HTTPException(
+            status_code=400,
+            detail="该租户未启用 Authorizer。OK饭等直连小程序请用微信开发者工具上传，勿走代发布。",
+        )
+
+
+def _authorizer_access_token_or_http(db: Session, tenant_id: int) -> str:
+    try:
+        return get_valid_authorizer_access_token(db, int(tenant_id))
+    except WeChatMiniError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e)) from e
+
+
+def _audit_fields_from_blob(blob: dict[str, Any]) -> dict[str, Any]:
+    """从 publish blob 提取审核/正式版摘要。"""
+    status_raw = blob.get("audit_status")
+    try:
+        audit_status = int(status_raw) if status_raw is not None else None
+    except (TypeError, ValueError):
+        audit_status = None
+    return {
+        "audit_id": blob.get("audit_id"),
+        "audit_status": audit_status,
+        "audit_status_label": AUDIT_STATUS_LABELS.get(audit_status) if audit_status is not None else None,
+        "audit_reason": blob.get("audit_reason"),
+        "audit_user_version": blob.get("audit_user_version"),
+        "audit_user_desc": blob.get("audit_user_desc"),
+        "audit_submitted_at": blob.get("audit_submitted_at"),
+        "released_at": blob.get("released_at"),
+        "can_release": audit_status == 0 and not blob.get("released_at"),
+    }
+
+
 def _raise_wechat(data: dict[str, Any], *, fallback: str) -> None:
     """将微信 errcode 转为 HTTPException。"""
     errcode = data.get("errcode")
@@ -106,7 +163,11 @@ def list_code_templates(db: Session, *, template_type: int | None = 0) -> list[d
     if not wechat_open_platform_configured():
         raise HTTPException(status_code=503, detail="微信第三方平台未配置")
 
-    token = get_component_access_token(db)
+    try:
+        token = get_component_access_token(db)
+    except WeChatMiniError as e:
+        # 将 token 获取失败（如 IP 白名单、ticket 未就绪）转为可读 HTTP 错误，避免 500
+        raise HTTPException(status_code=e.status_code, detail=str(e)) from e
     params: dict[str, Any] = {"access_token": token}
     if template_type is not None:
         params["template_type"] = int(template_type)
@@ -279,6 +340,7 @@ def get_publish_admin_state(db: Session, tenant_id: int) -> dict[str, Any]:
         "ext_preview": ext_preview,
         "ext_preview_error": ext_error,
         "default_template_id": 1,
+        **_audit_fields_from_blob(blob),
     }
 
 
@@ -330,21 +392,17 @@ def commit_template_to_tenant(
             data: dict[str, Any] = r.json()
     except httpx.HTTPError as e:
         logger.exception("wxa/commit 请求失败 tenant_id=%s", tenant_id)
-        err_blob = load_publish_blob(db, int(tenant_id))
-        err_blob["last_error"] = "commit 网络失败"
-        save_publish_blob(db, int(tenant_id), err_blob)
+        _patch_publish_blob(db, int(tenant_id), {"last_error": "commit 网络失败"})
         raise HTTPException(status_code=502, detail="上传体验版失败（网络）") from e
 
     errcode = data.get("errcode")
     if errcode not in (None, 0):
         msg = _s(data.get("errmsg")) or "commit 失败"
-        err_blob = load_publish_blob(db, int(tenant_id))
-        err_blob["last_error"] = f"{errcode}: {msg}"
-        save_publish_blob(db, int(tenant_id), err_blob)
+        _patch_publish_blob(db, int(tenant_id), {"last_error": f"{errcode}: {msg}"})
         _raise_wechat(data, fallback="commit 失败")
 
     now = beijing_now_naive().isoformat(timespec="seconds")
-    save_publish_blob(
+    _patch_publish_blob(
         db,
         int(tenant_id),
         {
@@ -424,3 +482,225 @@ def fetch_trial_qrcode_base64(
         "byte_length": len(body),
         "path": page_path or None,
     }
+
+
+def list_audit_categories(db: Session, tenant_id: int) -> list[dict[str, Any]]:
+    """拉取已授权小程序在微信后台配置的可选类目（提审 item_list 来源）。"""
+    _ensure_authorizer_for_code_ops(db, int(tenant_id))
+    token = _authorizer_access_token_or_http(db, int(tenant_id))
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            r = client.get(GET_CATEGORY_URL, params={"access_token": token})
+            r.raise_for_status()
+            data: dict[str, Any] = r.json()
+    except httpx.HTTPError as e:
+        logger.exception("get_category 请求失败 tenant_id=%s", tenant_id)
+        raise HTTPException(status_code=502, detail="拉取小程序类目失败（网络）") from e
+
+    _raise_wechat(data, fallback="拉取小程序类目失败")
+    raw = data.get("category_list") or []
+    if not isinstance(raw, list):
+        return []
+
+    out: list[dict[str, Any]] = []
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        first_class = _s(it.get("first_class"))
+        second_class = _s(it.get("second_class"))
+        try:
+            first_id = int(it.get("first_id"))
+            second_id = int(it.get("second_id"))
+        except (TypeError, ValueError):
+            continue
+        if not first_class or not second_class:
+            continue
+        tag = _s(it.get("tag")) or f"{first_class} {second_class}".strip()
+        out.append(
+            {
+                "first_class": first_class,
+                "second_class": second_class,
+                "first_id": first_id,
+                "second_id": second_id,
+                "tag": tag,
+            }
+        )
+    return out
+
+
+def submit_code_audit(
+    db: Session,
+    tenant_id: int,
+    *,
+    item_list: list[dict[str, Any]],
+    version_desc: str | None = None,
+    feedback_info: str | None = None,
+) -> dict[str, Any]:
+    """将当前体验版代码提交微信审核（须先 commit 体验版）。"""
+    _ensure_authorizer_for_code_ops(db, int(tenant_id))
+    if not item_list:
+        raise HTTPException(status_code=400, detail="请至少选择一个审核类目")
+
+    items: list[dict[str, Any]] = []
+    for raw in item_list[:5]:
+        if not isinstance(raw, dict):
+            continue
+        address = _s(raw.get("address")) or "pages/home/index"
+        tag = _s(raw.get("tag"))
+        first_class = _s(raw.get("first_class"))
+        second_class = _s(raw.get("second_class"))
+        title = _s(raw.get("title")) or "首页"
+        try:
+            first_id = int(raw.get("first_id"))
+            second_id = int(raw.get("second_id"))
+        except (TypeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail="类目 ID 无效") from e
+        if not tag or not first_class or not second_class:
+            raise HTTPException(status_code=400, detail="类目信息不完整")
+        items.append(
+            {
+                "address": address,
+                "tag": tag,
+                "first_class": first_class,
+                "second_class": second_class,
+                "first_id": first_id,
+                "second_id": second_id,
+                "title": title,
+            }
+        )
+    if not items:
+        raise HTTPException(status_code=400, detail="审核类目无效")
+
+    token = _authorizer_access_token_or_http(db, int(tenant_id))
+    payload: dict[str, Any] = {"item_list": items}
+    desc = _s(version_desc)
+    if desc:
+        payload["version_desc"] = desc
+    fb = _s(feedback_info)
+    if fb:
+        payload["feedback_info"] = fb[:200]
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            r = client.post(SUBMIT_AUDIT_URL, params={"access_token": token}, json=payload)
+            r.raise_for_status()
+            data: dict[str, Any] = r.json()
+    except httpx.HTTPError as e:
+        logger.exception("submit_audit 请求失败 tenant_id=%s", tenant_id)
+        raise HTTPException(status_code=502, detail="提交审核失败（网络）") from e
+
+    errcode = data.get("errcode")
+    if errcode not in (None, 0):
+        msg = _s(data.get("errmsg")) or "提交审核失败"
+        _patch_publish_blob(db, int(tenant_id), {"last_error": f"audit {errcode}: {msg}"})
+        _raise_wechat(data, fallback="提交审核失败")
+
+    audit_id = data.get("auditid")
+    now = beijing_now_naive().isoformat(timespec="seconds")
+    blob = load_publish_blob(db, int(tenant_id))
+    _patch_publish_blob(
+        db,
+        int(tenant_id),
+        {
+            "audit_id": int(audit_id) if audit_id is not None else None,
+            "audit_status": 2,
+            "audit_reason": None,
+            "audit_user_version": blob.get("user_version"),
+            "audit_user_desc": blob.get("user_desc"),
+            "audit_submitted_at": now,
+            "released_at": None,
+            "last_error": None,
+        },
+    )
+    logger.info("submit_audit 成功 tenant_id=%s audit_id=%s", tenant_id, audit_id)
+    return get_publish_admin_state(db, int(tenant_id))
+
+
+def fetch_latest_audit_status(db: Session, tenant_id: int) -> dict[str, Any]:
+    """查询最新一次提审单状态，并同步落库。"""
+    _ensure_authorizer_for_code_ops(db, int(tenant_id))
+    token = _authorizer_access_token_or_http(db, int(tenant_id))
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            r = client.get(AUDIT_STATUS_URL, params={"access_token": token})
+            r.raise_for_status()
+            data: dict[str, Any] = r.json()
+    except httpx.HTTPError as e:
+        logger.exception("get_latest_auditstatus 请求失败 tenant_id=%s", tenant_id)
+        raise HTTPException(status_code=502, detail="查询审核状态失败（网络）") from e
+
+    errcode = data.get("errcode")
+    if errcode not in (None, 0):
+        # 85058：从未提交过审核 — 不算异常，返回空状态
+        if int(errcode or 0) == 85058:
+            return get_publish_admin_state(db, int(tenant_id))
+        _raise_wechat(data, fallback="查询审核状态失败")
+
+    status_raw = data.get("status")
+    try:
+        status = int(status_raw) if status_raw is not None else None
+    except (TypeError, ValueError):
+        status = None
+
+    patch: dict[str, Any] = {
+        "audit_status": status,
+        "audit_reason": _s(data.get("reason")) or None,
+    }
+    if data.get("auditid") is not None:
+        patch["audit_id"] = int(data["auditid"])
+    if _s(data.get("user_version")):
+        patch["audit_user_version"] = _s(data.get("user_version"))
+    if _s(data.get("user_desc")):
+        patch["audit_user_desc"] = _s(data.get("user_desc"))
+    _patch_publish_blob(db, int(tenant_id), patch)
+
+    state = get_publish_admin_state(db, int(tenant_id))
+    state["audit_detail"] = {
+        "auditid": data.get("auditid"),
+        "status": status,
+        "status_label": AUDIT_STATUS_LABELS.get(status) if status is not None else None,
+        "reason": _s(data.get("reason")) or None,
+        "user_version": _s(data.get("user_version")) or None,
+        "user_desc": _s(data.get("user_desc")) or None,
+        "submit_audit_time": data.get("submit_audit_time"),
+    }
+    return state
+
+
+def release_audited_code(db: Session, tenant_id: int) -> dict[str, Any]:
+    """发布最后一个审核通过的小程序版本（全量上线）。"""
+    _ensure_authorizer_for_code_ops(db, int(tenant_id))
+    blob = load_publish_blob(db, int(tenant_id))
+    audit_fields = _audit_fields_from_blob(blob)
+    if not audit_fields.get("can_release"):
+        raise HTTPException(
+            status_code=400,
+            detail="当前不可发布：须先完成提审且审核通过（status=0），且尚未发布",
+        )
+
+    token = _authorizer_access_token_or_http(db, int(tenant_id))
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            r = client.post(RELEASE_URL, params={"access_token": token}, json={})
+            r.raise_for_status()
+            data: dict[str, Any] = r.json()
+    except httpx.HTTPError as e:
+        logger.exception("wxa/release 请求失败 tenant_id=%s", tenant_id)
+        raise HTTPException(status_code=502, detail="发布正式版失败（网络）") from e
+
+    errcode = data.get("errcode")
+    if errcode not in (None, 0):
+        msg = _s(data.get("errmsg")) or "发布失败"
+        _patch_publish_blob(db, int(tenant_id), {"last_error": f"release {errcode}: {msg}"})
+        _raise_wechat(data, fallback="发布正式版失败")
+
+    now = beijing_now_naive().isoformat(timespec="seconds")
+    _patch_publish_blob(
+        db,
+        int(tenant_id),
+        {"released_at": now, "last_error": None},
+    )
+    logger.info("wxa/release 成功 tenant_id=%s", tenant_id)
+    return get_publish_admin_state(db, int(tenant_id))

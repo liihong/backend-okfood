@@ -12,11 +12,15 @@ from fastapi import HTTPException
 from app.services.shared.wx_open_code_service import (
     build_ext_json_for_tenant,
     commit_template_to_tenant,
+    fetch_latest_audit_status,
     fetch_trial_qrcode_base64,
     get_publish_admin_state,
+    list_audit_categories,
     list_code_templates,
     load_publish_blob,
+    release_audited_code,
     save_publish_blob,
+    submit_code_audit,
 )
 
 
@@ -208,3 +212,114 @@ def test_get_publish_admin_state_with_preview_error(_build, _blob, mock_auth):
     assert out["default_template_id"] == 1
     assert out["ext_preview"] is None
     assert "缺 code" in (out["ext_preview_error"] or "")
+
+
+@patch("app.services.shared.wx_open_code_service.get_valid_authorizer_access_token", return_value="at")
+@patch("app.services.shared.wx_open_code_service.tenant_has_authorizer_tokens", return_value=True)
+@patch("app.services.shared.wx_open_code_service.httpx.Client")
+def test_list_audit_categories(mock_client_cls, _has, _token):
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {
+        "errcode": 0,
+        "category_list": [
+            {
+                "first_class": "餐饮",
+                "second_class": "点餐",
+                "first_id": 1,
+                "second_id": 2,
+            }
+        ],
+    }
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get.return_value = resp
+    mock_client_cls.return_value = client
+
+    items = list_audit_categories(MagicMock(), 3)
+    assert len(items) == 1
+    assert items[0]["first_id"] == 1
+
+
+@patch("app.services.shared.wx_open_code_service.get_publish_admin_state")
+@patch("app.services.shared.wx_open_code_service._patch_publish_blob")
+@patch("app.services.shared.wx_open_code_service.load_publish_blob", return_value={"user_version": "1.0.0"})
+@patch("app.services.shared.wx_open_code_service.get_valid_authorizer_access_token", return_value="at")
+@patch("app.services.shared.wx_open_code_service.tenant_has_authorizer_tokens", return_value=True)
+@patch("app.services.shared.wx_open_code_service.httpx.Client")
+def test_submit_code_audit_success(mock_client_cls, _has, _token, _load, _patch, mock_state):
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {"errcode": 0, "auditid": 12345}
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.post.return_value = resp
+    mock_client_cls.return_value = client
+    mock_state.return_value = {"tenant_id": 3, "audit_status": 2}
+
+    item = {
+        "address": "pages/home/index",
+        "tag": "餐饮 点餐",
+        "first_class": "餐饮",
+        "second_class": "点餐",
+        "first_id": 1,
+        "second_id": 2,
+        "title": "首页",
+    }
+    out = submit_code_audit(MagicMock(), 3, item_list=[item])
+    assert out["audit_status"] == 2
+    _patch.assert_called()
+
+
+@patch("app.services.shared.wx_open_code_service.get_publish_admin_state")
+@patch("app.services.shared.wx_open_code_service._patch_publish_blob")
+@patch("app.services.shared.wx_open_code_service.get_valid_authorizer_access_token", return_value="at")
+@patch("app.services.shared.wx_open_code_service.tenant_has_authorizer_tokens", return_value=True)
+@patch("app.services.shared.wx_open_code_service.httpx.Client")
+def test_fetch_latest_audit_status_success(mock_client_cls, _has, _token, _patch, mock_state):
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {
+        "errcode": 0,
+        "auditid": 99,
+        "status": 0,
+        "reason": "",
+        "user_version": "1.0.0",
+        "user_desc": "desc",
+    }
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get.return_value = resp
+    mock_client_cls.return_value = client
+    mock_state.return_value = {"tenant_id": 3, "can_release": True}
+
+    out = fetch_latest_audit_status(MagicMock(), 3)
+    assert out["can_release"] is True
+    assert out["audit_detail"]["status"] == 0
+
+
+@patch("app.services.shared.wx_open_code_service.get_publish_admin_state")
+@patch("app.services.shared.wx_open_code_service._patch_publish_blob")
+@patch("app.services.shared.wx_open_code_service.load_publish_blob", return_value={"audit_status": 0})
+@patch("app.services.shared.wx_open_code_service._audit_fields_from_blob", return_value={"can_release": True})
+@patch("app.services.shared.wx_open_code_service.get_valid_authorizer_access_token", return_value="at")
+@patch("app.services.shared.wx_open_code_service.tenant_has_authorizer_tokens", return_value=True)
+@patch("app.services.shared.wx_open_code_service.httpx.Client")
+def test_release_audited_code_success(
+    mock_client_cls, _has, _token, _audit, _load, _patch, mock_state
+):
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {"errcode": 0}
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.post.return_value = resp
+    mock_client_cls.return_value = client
+    mock_state.return_value = {"tenant_id": 3, "released_at": "t"}
+
+    out = release_audited_code(MagicMock(), 3)
+    assert out["released_at"] == "t"

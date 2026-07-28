@@ -26,6 +26,9 @@ const StoreConfigView = () => import('../views/StoreConfigView.vue')
 const SfOrdersMonitorView = () => import('../views/SfOrdersMonitorView.vue')
 const DeliveryGeoMapView = () => import('../views/DeliveryGeoMapView.vue')
 const TenantsView = () => import('../views/TenantsView.vue')
+const TenantMiniBrandPage = () => import('../views/tenants/mini-program/TenantBrandPage.vue')
+const TenantMiniAuthorizerPage = () => import('../views/tenants/mini-program/TenantAuthorizerPage.vue')
+const TenantMiniPublishPage = () => import('../views/tenants/mini-program/TenantPublishPage.vue')
 const MembershipTemplatesView = () => import('../views/MembershipTemplatesView.vue')
 const RetailCatalogView = () => import('../views/RetailCatalogView.vue')
 const DishCategoriesView = () => import('../views/DishCategoriesView.vue')
@@ -297,6 +300,24 @@ const router = createRouter({
           name: 'system-tenants',
           component: TenantsView,
           meta: { title: '租户管理', systemAdminOnly: true },
+        },
+        {
+          path: 'system/tenants/:tenantId/mini-program/brand',
+          name: 'tenant-mini-brand',
+          component: TenantMiniBrandPage,
+          meta: { title: '小程序 · 品牌', systemAdminOnly: true, hidePageTitle: true },
+        },
+        {
+          path: 'system/tenants/:tenantId/mini-program/authorizer',
+          name: 'tenant-mini-authorizer',
+          component: TenantMiniAuthorizerPage,
+          meta: { title: '小程序 · 授权', systemAdminOnly: true, hidePageTitle: true },
+        },
+        {
+          path: 'system/tenants/:tenantId/mini-program/publish',
+          name: 'tenant-mini-publish',
+          component: TenantMiniPublishPage,
+          meta: { title: '小程序 · 发布', systemAdminOnly: true, hidePageTitle: true },
         },
         {
           path: 'system/membership-templates',

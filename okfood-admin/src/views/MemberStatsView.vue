@@ -758,8 +758,8 @@ onActivated(() => {
   margin-bottom: 0.75rem;
 }
 
+/* 续卡率卡片内：窄列时由下方更高优先级规则自动折行 */
 .member-stats-reorder-grid--stack {
-  grid-template-columns: 1fr;
   flex: 1 1 auto;
   align-content: start;
 }
@@ -1164,6 +1164,11 @@ onActivated(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
+}
+
+/* 提高优先级，避免被上方基础两列样式覆盖 */
+.member-stats-reorder-grid.member-stats-reorder-grid--stack {
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
 }
 
 .member-stats-reorder {

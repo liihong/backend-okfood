@@ -1,13 +1,15 @@
 <script setup>
 defineOptions({ name: 'TenantsView' })
 import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { Plug, Smartphone } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import { PASSWORD_POLICY_MSG, isPasswordStrongEnough } from '../utils/passwordPolicy.js'
-import TenantMiniProgramDrawer from './tenants/TenantMiniProgramDrawer.vue'
 import TenantComponentTicketPanel from './tenants/TenantComponentTicketPanel.vue'
-import { MINI_PROGRAM_TABS } from './tenants/tenantMiniProgramConstants.js'
+import { tenantMiniProgramRoute } from './tenants/mini-program/tenantMiniProgramNav.js'
+
+const router = useRouter()
 
 const loading = ref(false)
 const overview = ref(null)
@@ -17,9 +19,6 @@ const tenantSaving = ref(false)
 const tenantEditId = ref(null)
 const tenantForm = ref({ name: '', code: '', is_active: true, expires_at: '' })
 
-const miniProgramDrawerVisible = ref(false)
-/** 打开小程序抽屉时定位的 Tab */
-const miniProgramInitialTab = ref(MINI_PROGRAM_TABS.brand)
 const componentTicket = ref('')
 const componentState = ref(null)
 const componentTicketSaving = ref(false)
@@ -174,15 +173,13 @@ async function startPushTicket() {
   }
 }
 
-/** 打开小程序管理抽屉（品牌 / 授权 / 发布） */
-function openMiniProgram(row, tab = MINI_PROGRAM_TABS.brand) {
-  currentTenant.value = row
-  miniProgramInitialTab.value = tab
-  miniProgramDrawerVisible.value = true
+/** 跳转租户小程序独立管理页（品牌 / 授权 / 发布） */
+function openMiniProgram(row, pageName = 'tenant-mini-brand') {
+  void router.push(tenantMiniProgramRoute(pageName, row.id, row.name))
 }
 
 function openPublish(row) {
-  openMiniProgram(row, MINI_PROGRAM_TABS.publish)
+  openMiniProgram(row, 'tenant-mini-publish')
 }
 
 /** 行内「更多」菜单：对接 / 编辑 / 停用 */
@@ -759,7 +756,7 @@ onMounted(async () => {
       ① 新建或选中租户 → 点<strong>门店</strong>新增门店，记下列表里的<strong>门店 ID</strong>。② 同一租户下点<strong>管理员</strong>新增店主账号（role=full）。
       ③ 店主登录后，若该租户下只有一家店且 ID 为 1，管理后台默认可用；若为多门店或非 1，请求管理 API 时需带查询参数
       <code class="tip-code">store_id=&lt;门店ID&gt;</code>（当前 Vue 管理端多数仍默认 1，需扩展时可再统一加门店切换）。
-      ④ SaaS 小程序：点<strong>小程序</strong>完成品牌配置与授权，再点<strong>发布</strong>上传体验版（OK饭直连小程序勿走代发布）。
+      ④ SaaS 小程序：点<strong>小程序</strong>进入独立管理页（品牌 / 授权 / 发布），体验版验证后可<strong>提交审核并发布正式版</strong>（OK饭直连小程序勿走代发布）。
     </div>
 
     <el-card shadow="never" class="table-card" v-loading="loading">
@@ -807,7 +804,7 @@ onMounted(async () => {
           <template #default="{ row }">
             <el-button link type="primary" @click="openStores(row)">门店</el-button>
             <el-button link type="primary" @click="openAdmins(row)">管理员</el-button>
-            <el-button link type="primary" @click="openMiniProgram(row, MINI_PROGRAM_TABS.brand)">
+            <el-button link type="primary" @click="openMiniProgram(row)">
               <Smartphone :size="14" stroke-width="2" class="btn-inline-icon" />
               小程序
             </el-button>
@@ -915,13 +912,6 @@ onMounted(async () => {
         <el-button type="primary" :loading="storeSaving" @click="saveStore">创建</el-button>
       </template>
     </el-dialog>
-
-    <TenantMiniProgramDrawer
-      v-model:visible="miniProgramDrawerVisible"
-      :tenant="currentTenant"
-      :initial-tab="miniProgramInitialTab"
-      @saved="loadTenants"
-    />
 
     <el-drawer
       v-model="integrationDialog"

@@ -44,3 +44,23 @@ class WxCodeCommitIn(BaseModel):
     template_id: int = Field(1, ge=0, description="普通模板库 template_id，当前默认 1")
     user_version: str = Field(..., min_length=1, max_length=64, description="代码版本号")
     user_desc: str = Field(..., min_length=1, max_length=256, description="代码描述")
+
+
+class WxCodeAuditItemIn(BaseModel):
+    """提审类目项（须为小程序后台已配置类目）。"""
+
+    address: str = Field("pages/home/index", min_length=1, max_length=128, description="小程序页面路径")
+    tag: str = Field(..., min_length=1, max_length=128)
+    first_class: str = Field(..., min_length=1, max_length=64)
+    second_class: str = Field(..., min_length=1, max_length=64)
+    first_id: int = Field(..., ge=1)
+    second_id: int = Field(..., ge=1)
+    title: str = Field("首页", min_length=1, max_length=32)
+
+
+class WxCodeSubmitAuditIn(BaseModel):
+    """平台管理：将体验版代码提交微信审核。"""
+
+    item_list: list[WxCodeAuditItemIn] = Field(..., min_length=1, max_length=5)
+    version_desc: str | None = Field(None, max_length=512, description="版本说明")
+    feedback_info: str | None = Field(None, max_length=200, description="反馈说明（被拒后重提时可填）")

@@ -18,6 +18,7 @@ from app.schemas.tenant_saas import (
     TenantSaasConfigPatchIn,
     WxAuthorizerPatchIn,
     WxCodeCommitIn,
+    WxCodeSubmitAuditIn,
     WxComponentTicketIn,
 )
 from app.services.client.tenant_saas_service import (
@@ -34,9 +35,13 @@ from app.services.shared.wx_open_authorizer_service import (
 )
 from app.services.shared.wx_open_code_service import (
     commit_template_to_tenant,
+    fetch_latest_audit_status,
     fetch_trial_qrcode_base64,
     get_publish_admin_state,
+    list_audit_categories,
     list_code_templates,
+    release_audited_code,
+    submit_code_audit,
 )
 from app.services.shared.tenant_integration_service import (
     get_tenant_integration_admin_out,
@@ -364,6 +369,57 @@ def platform_wx_code_trial_qrcode(
     """平台：拉取已授权小程序体验版二维码（base64）。"""
     row = fetch_trial_qrcode_base64(db, tenant_id, path=path)
     return success(data=row, msg="获取成功")
+
+
+@router.get("/tenants/{tenant_id}/wx-code/categories")
+def platform_wx_code_categories(
+    tenant_id: int,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    """平台：拉取已授权小程序可选审核类目。"""
+    items = list_audit_categories(db, tenant_id)
+    return success(data={"items": items}, msg="获取成功")
+
+
+@router.post("/tenants/{tenant_id}/wx-code/submit-audit")
+def platform_wx_code_submit_audit(
+    tenant_id: int,
+    body: WxCodeSubmitAuditIn,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    """平台：将体验版提交微信审核（须先 commit）。"""
+    row = submit_code_audit(
+        db,
+        tenant_id,
+        item_list=[x.model_dump() for x in body.item_list],
+        version_desc=body.version_desc,
+        feedback_info=body.feedback_info,
+    )
+    return success(data=row, msg="已提交审核")
+
+
+@router.get("/tenants/{tenant_id}/wx-code/audit-status")
+def platform_wx_code_audit_status(
+    tenant_id: int,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    """平台：查询最新提审单状态并同步落库。"""
+    row = fetch_latest_audit_status(db, tenant_id)
+    return success(data=row, msg="获取成功")
+
+
+@router.post("/tenants/{tenant_id}/wx-code/release")
+def platform_wx_code_release(
+    tenant_id: int,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    """平台：发布审核通过的版本为正式版（全量）。"""
+    row = release_audited_code(db, tenant_id)
+    return success(data=row, msg="已发布正式版")
 
 
 @router.get("/tenants/{tenant_id}/stores")

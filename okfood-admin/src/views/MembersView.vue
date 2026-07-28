@@ -11,6 +11,7 @@ import {
   CalendarOff,
   Pencil,
   Download,
+  Upload,
   Receipt,
   ChevronDown,
   History,
@@ -30,6 +31,7 @@ import {
 import { showToast } from '../composables/useToast.js'
 import { parseApiDateTimeBeijing } from '../utils/beijingDateTime.js'
 import MemberEditModal from './components/MemberEditModal.vue'
+import MemberImportModal from './components/MemberImportModal.vue'
 import MemberAddressesModal from './components/MemberAddressesModal.vue'
 import MemberMealCompensationModal from './components/MemberMealCompensationModal.vue'
 
@@ -200,6 +202,7 @@ async function fetchMemberStats() {
 
 const memberDeletingId = ref(null)
 const membersExporting = ref(false)
+const showImportModal = ref(false)
 
 async function deleteMemberRow(u) {
   if (!u?.id) return
@@ -1187,6 +1190,16 @@ onUnmounted(() => {
             </div>
             <div v-if="adminAccessToken" class="members-export-actions">
               <el-button
+                type="default"
+                size="small"
+                class="members-export-btn"
+                title="下载 Excel 模板，填写后批量导入会员档案"
+                @click="showImportModal = true"
+              >
+                <Upload :size="14" aria-hidden="true" style="margin-right: 4px; vertical-align: -2px" />
+                导入会员
+              </el-button>
+              <el-button
                 type="primary"
                 size="small"
                 class="members-export-btn"
@@ -1698,6 +1711,7 @@ onUnmounted(() => {
 
     <MemberEditModal v-model:open="showEditModal" :member="editTargetMember" :region-options="regionFilterOptions"
       @saved="onMemberEditSaved" />
+    <MemberImportModal v-model:open="showImportModal" @imported="loadMembersPage" />
 
     <MemberAddressesModal
       v-model:open="showAddrModal"
@@ -2431,10 +2445,14 @@ onUnmounted(() => {
 
   .members-export-actions {
     width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
   }
 
   .members-export-actions .members-export-btn {
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .members-renew-banner,

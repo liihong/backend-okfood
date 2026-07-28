@@ -18,7 +18,7 @@ export const FEATURE_KEYS = [
   { key: 'coupon', label: '优惠券' },
 ]
 
-/** 抽屉 Tab 名：与 TenantMiniProgramDrawer 保持一致 */
+/** Tab 名（历史抽屉兼容；现用独立路由 tenant-mini-*） */
 export const MINI_PROGRAM_TABS = {
   brand: 'brand',
   authorizer: 'authorizer',
