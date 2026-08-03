@@ -670,9 +670,9 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
 
     db.commit()
     db.refresh(row)
-    from app.services.admin.admin_service import invalidate_dashboard_live_summary_cache
+    from app.services.admin.day_stock_service import invalidate_stock_read_caches
 
-    invalidate_dashboard_live_summary_cache(int(mem.store_id))
+    invalidate_stock_read_caches(int(mem.store_id))
 
     return _single_meal_order_row_to_out(db, row, dish_title=str(dish.name), address_summary=address_summary)
 
@@ -1118,9 +1118,9 @@ def member_cancel_single_meal_order(db: Session, *, member_id: int, order_id: in
         )
     db.add(row)
     db.commit()
-    from app.services.admin.admin_service import invalidate_dashboard_live_summary_cache
+    from app.services.admin.day_stock_service import invalidate_stock_read_caches
 
-    invalidate_dashboard_live_summary_cache(int(row.store_id))
+    invalidate_stock_read_caches(int(row.store_id))
 
     if pay == "未支付":
         return "订单已取消"
@@ -1255,9 +1255,9 @@ def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
         db, order_biz=CouponLockedOrderBiz.SINGLE_MEAL, order_id=int(order.id)
     )
     db.commit()
-    from app.services.admin.admin_service import invalidate_dashboard_live_summary_cache
+    from app.services.admin.day_stock_service import invalidate_stock_read_caches
 
-    invalidate_dashboard_live_summary_cache(int(order.store_id))
+    invalidate_stock_read_caches(int(order.store_id))
     return True, "paid"
 
 
@@ -2102,9 +2102,9 @@ def admin_cancel_single_meal_order(
         )
     db.add(o)
     db.commit()
-    from app.services.admin.admin_service import invalidate_dashboard_live_summary_cache
+    from app.services.admin.day_stock_service import invalidate_stock_read_caches
 
-    invalidate_dashboard_live_summary_cache(int(store_id))
+    invalidate_stock_read_caches(int(store_id))
     if sf_msg:
         return f"订单已取消（{sf_msg}）"
     if pay == "已支付" and (o.pay_channel or "").strip() == "会员卡":

@@ -28,6 +28,8 @@ export const ADMIN_TAB_COMPONENT_NAMES = {
   menu: 'MenuView',
   'weekly-menu': 'WeeklyMenuView',
   'store-config': 'StoreConfigView',
+  'system-printers': 'PrinterManageView',
+  'system-print-settings': 'PrintSettingsView',
   'system-tenants': 'TenantsView',
   'tenant-mini-brand': 'TenantMiniBrandPage',
   'tenant-mini-authorizer': 'TenantMiniAuthorizerPage',

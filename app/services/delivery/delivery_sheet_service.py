@@ -27,6 +27,7 @@ from app.models.enums import CardOrderKind, CardOrderPayStatus, DeliveryStatus
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
 from app.models.member_address import MemberAddress
+from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store import Store
 from app.schemas.admin import DeliverySheetGroupOut, DeliverySheetMemberOut, DeliverySheetOut, DeliverySheetStopOut
 from app.services.delivery.courier_service import (
@@ -37,6 +38,7 @@ from app.services.delivery.courier_service import (
     post_push_first_day_whitelist_member_ids,
 )
 from app.services.member.member_address_service import delivery_region_name_map, full_address_line, load_default_address_map, routing_area_label
+from app.services.delivery.delivery_stop_id import compute_delivery_stop_id
 from app.services.delivery.delivery_sheet_meal_units_service import DeliverySheetMealUnitsContext
 from app.services.delivery.delivery_sheet_push_snapshot_service import DeliverySheetDaySnapshots
 from app.services.member.member_service import (
@@ -241,6 +243,27 @@ def _member_balance_quota(mem: Member) -> tuple[int, int]:
 
 def _normalize_address_key(s: str) -> str:
     return " ".join(s.strip().split()).casefold()
+
+
+def _sf_push_map_for_sheet(db: Session, *, store_id: int, delivery_date: date) -> dict[str, SfSameCityPush]:
+    """业务日已成功创单的停靠点 → 最新推单记录（供面单打印条码/订单号）。"""
+    rows = db.scalars(
+        select(SfSameCityPush)
+        .where(
+            and_(
+                SfSameCityPush.store_id == int(store_id),
+                SfSameCityPush.delivery_date == delivery_date,
+                SfSameCityPush.error_code == 0,
+            )
+        )
+        .order_by(SfSameCityPush.id.desc())
+    ).all()
+    out: dict[str, SfSameCityPush] = {}
+    for row in rows:
+        key = str(row.stop_id or "")
+        if key and key not in out:
+            out[key] = row
+    return out
 
 
 @dataclass(frozen=True)
@@ -1526,6 +1549,7 @@ def build_delivery_sheet(
         members = _filter_members_by_phone_hint(members, ph)
         pu_members = _filter_members_by_phone_hint(pu_members, ph)
     units_ctx = DeliverySheetMealUnitsContext.from_day_snapshots(day_snap, db=db)
+    sf_push_map = _sf_push_map_for_sheet(db, store_id=sid, delivery_date=d)
     all_member_ids = {int(m.id) for m in members} | {int(m.id) for m in pu_members}
     delivered_set = day_delivered_ids & all_member_ids
     dinner_state_map: dict[int, object] = {}
@@ -1534,6 +1558,13 @@ def build_delivery_sheet(
 
         dinner_state_map = load_dinner_meal_period_states_map(db, sorted(all_member_ids))
     from app.services.meal_period.balance import balance_quota_for_sheet_period
+    from app.services.meal_period.card_eligibility import members_entitled_meal_periods_map
+    from app.services.meal_period.plan_type_sync import load_member_card_kind_label_map
+
+    periods_map = members_entitled_meal_periods_map(db, sorted(all_member_ids))
+    card_kind_map = load_member_card_kind_label_map(
+        db, sorted(all_member_ids), periods_by_member=periods_map
+    )
 
     region_ids: set[int] = set()
     for m in members:
@@ -1579,6 +1610,7 @@ def build_delivery_sheet(
                         phone=mem.phone,
                         name=mem.name,
                         plan_type=(mem.plan_type or "").strip() or None,
+                        card_kind_label=card_kind_map.get(int(mem.id)) or None,
                         daily_meal_units=mem_units,
                         balance=bal,
                         meal_quota_total=quota,
@@ -1603,6 +1635,8 @@ def build_delivery_sheet(
             stop_meals = sum(ln.daily_meal_units for ln in lines)
             stop_delivered = sum(ln.daily_meal_units for ln in lines if ln.is_delivered)
             stop_pending = stop_meals - stop_delivered
+            stop_id = compute_delivery_stop_id(d, area_name, resolved.address_line)
+            sf_push = sf_push_map.get(stop_id)
             stops.append(
                 DeliverySheetStopOut(
                     meal_count=stop_meals,
@@ -1610,6 +1644,9 @@ def build_delivery_sheet(
                     delivered_meal_count=stop_delivered,
                     address_line=resolved.address_line,
                     area=resolved.area,
+                    stop_id=stop_id,
+                    shop_order_id=str(sf_push.shop_order_id) if sf_push else None,
+                    sf_order_id=(str(sf_push.sf_order_id).strip() if sf_push and sf_push.sf_order_id else None),
                     members=lines,
                     remarks_combined="；".join(uniq_combined) if uniq_combined else None,
                     has_area_issue=stop_area_issue,
@@ -1655,6 +1692,7 @@ def build_delivery_sheet(
                     phone=mem.phone,
                     name=mem.name,
                     plan_type=(mem.plan_type or "").strip() or None,
+                    card_kind_label=card_kind_map.get(int(mem.id)) or None,
                     daily_meal_units=mem_units,
                     balance=bal,
                     meal_quota_total=quota,

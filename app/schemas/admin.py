@@ -829,7 +829,9 @@ class DashboardMealSummaryOut(BaseModel):
         description="锚定日次日备餐拆分/履约/到家配送点数",
     )
     today_lunch_waste_total: int = Field(0, ge=0, description="锚定日午餐损耗流水合计（展示值，正数）")
-    today_lunch_remaining: int | None = Field(None, ge=0, description="锚定日午餐剩余可售；未配置后厨出餐时为 null")
+    today_lunch_remaining: int | None = Field(
+        None, ge=0, description="锚定日午餐单次可售剩余（与小程序 single_stock_remaining 同源）"
+    )
     today_dinner_menu_day_total_stock: int | None = Field(
         None, ge=0, description="锚定日晚餐周菜单「日总份数」"
     )
@@ -1068,6 +1070,10 @@ class DeliverySheetMemberOut(BaseModel):
     phone: str
     name: str
     plan_type: str | None = Field(None, description="套餐类型：次卡 / 周卡 / 月卡")
+    card_kind_label: str | None = Field(
+        None,
+        description="开卡种类名称，如 午餐卡、晚餐卡、午晚餐卡、午餐+果蔬汁卡",
+    )
     daily_meal_units: int = Field(1, ge=1, description="该会员当日计入份数")
     balance: int = Field(0, ge=0, description="会员剩余次数（核销后扣减）")
     meal_quota_total: int = Field(
@@ -1148,6 +1154,9 @@ class DeliverySheetStopOut(BaseModel):
     )
     address_line: str = Field(..., description="收件地址单行展示")
     area: str = Field(..., description="该配送点展示用片区（来自默认地址或会员主档）")
+    stop_id: str | None = Field(None, description="停靠点 id（与顺丰推单 stop_id 一致）")
+    shop_order_id: str | None = Field(None, description="顺丰商家订单号")
+    sf_order_id: str | None = Field(None, description="顺丰运单号")
     members: list[DeliverySheetMemberOut]
     remarks_combined: str | None = Field(None, description="多名会员备注去重合并")
     has_area_issue: bool = Field(

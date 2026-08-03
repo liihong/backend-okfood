@@ -42,6 +42,8 @@ GET_CATEGORY_URL = "https://api.weixin.qq.com/wxa/get_category"
 SUBMIT_AUDIT_URL = "https://api.weixin.qq.com/wxa/submit_audit"
 AUDIT_STATUS_URL = "https://api.weixin.qq.com/wxa/get_latest_auditstatus"
 RELEASE_URL = "https://api.weixin.qq.com/wxa/release"
+SET_PRIVACY_SETTING_URL = "https://api.weixin.qq.com/cgi-bin/component/setprivacysetting"
+GET_PRIVACY_SETTING_URL = "https://api.weixin.qq.com/cgi-bin/component/getprivacysetting"
 
 # 微信 get_latest_auditstatus.status 文案（管理端展示）
 AUDIT_STATUS_LABELS: dict[int, str] = {
@@ -57,6 +59,14 @@ PUBLISH_BLOB_KEY = "wx_code_publish"
 
 # 普通模板库 commit 必带隐私接口声明（缺省易报 61040）
 REQUIRED_PRIVATE_INFOS = ["getLocation", "chooseLocation"]
+
+# 小程序模板实际使用的隐私项（与 manifest / 页面能力对齐）
+DEFAULT_PRIVACY_SETTING_LIST: list[dict[str, str]] = [
+    {"privacy_key": "PhoneNumber", "privacy_text": "会员登录、订单联系与配送通知"},
+    {"privacy_key": "Location", "privacy_text": "获取当前位置并校验是否在配送范围内"},
+    {"privacy_key": "ChooseLocation", "privacy_text": "在地图中选择收货地址"},
+    {"privacy_key": "UserInfo", "privacy_text": "完善会员头像与昵称"},
+]
 
 
 def _s(raw: Any) -> str:
@@ -340,6 +350,9 @@ def get_publish_admin_state(db: Session, tenant_id: int) -> dict[str, Any]:
         "ext_preview": ext_preview,
         "ext_preview_error": ext_error,
         "default_template_id": 1,
+        "privacy_synced_at": blob.get("privacy_synced_at"),
+        "privacy_last_error": blob.get("privacy_last_error"),
+        "privacy_ver": blob.get("privacy_ver"),
         **_audit_fields_from_blob(blob),
     }
 
@@ -529,6 +542,198 @@ def list_audit_categories(db: Session, tenant_id: int) -> list[dict[str, Any]]:
     return out
 
 
+def _resolve_privacy_contact_phone(db: Session, tenant_id: int) -> str:
+    """优先租户默认门店联系电话，其次全局 .env WX_PRIVACY_CONTACT_PHONE。"""
+    from app.models.store import Store
+    from app.services.client.tenant_saas_service import load_saas_blob
+
+    saas = load_saas_blob(db, int(tenant_id))
+    default_store_raw = saas.get("defaultStoreId")
+    try:
+        default_store_id = max(1, int(default_store_raw)) if default_store_raw is not None else 1
+    except (TypeError, ValueError):
+        default_store_id = 1
+
+    store = db.get(Store, default_store_id)
+    if store is not None and int(store.tenant_id) == int(tenant_id):
+        phone = _s(getattr(store, "store_contact_phone", None))
+        if phone:
+            return phone
+
+    return _s(get_settings().WX_PRIVACY_CONTACT_PHONE)
+
+
+def build_privacy_setting_payload(
+    db: Session,
+    tenant_id: int,
+    *,
+    contact_phone: str | None = None,
+    contact_email: str | None = None,
+    contact_qq: str | None = None,
+    contact_weixin: str | None = None,
+    notice_method: str | None = None,
+    setting_list: list[dict[str, str]] | None = None,
+    privacy_ver: int = 2,
+) -> dict[str, Any]:
+    """组装 setprivacysetting 请求体（privacy_ver=2 开发版，提审前同步）。"""
+    cfg = get_settings()
+    phone = _s(contact_phone) or _resolve_privacy_contact_phone(db, int(tenant_id))
+    email = _s(contact_email) or _s(cfg.WX_PRIVACY_CONTACT_EMAIL)
+    qq = _s(contact_qq)
+    weixin = _s(contact_weixin)
+    notice = _s(notice_method) or _s(cfg.WX_PRIVACY_NOTICE_METHOD) or "弹窗提示"
+
+    if not any([phone, email, qq, weixin]):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "缺少隐私指引开发者联系方式：请配置租户默认门店联系电话、"
+                "全局 WX_PRIVACY_CONTACT_PHONE / WX_PRIVACY_CONTACT_EMAIL，或在请求体传入"
+            ),
+        )
+
+    owner_setting: dict[str, Any] = {"notice_method": notice}
+    if phone:
+        owner_setting["contact_phone"] = phone
+    if email:
+        owner_setting["contact_email"] = email
+    if qq:
+        owner_setting["contact_qq"] = qq
+    if weixin:
+        owner_setting["contact_weixin"] = weixin
+    store_region = int(cfg.WX_PRIVACY_STORE_REGION or 0)
+    if store_region > 0:
+        owner_setting["store_region"] = store_region
+
+    ver = int(privacy_ver)
+    if ver not in (1, 2):
+        raise HTTPException(status_code=400, detail="privacy_ver 仅支持 1 或 2")
+
+    payload: dict[str, Any] = {
+        "privacy_ver": ver,
+        "owner_setting": owner_setting,
+    }
+    # privacy_ver=1 现网版仅允许改 owner_setting，不可传 setting_list
+    if ver == 2:
+        items = setting_list if setting_list is not None else list(DEFAULT_PRIVACY_SETTING_LIST)
+        payload["setting_list"] = [
+            {"privacy_key": _s(x.get("privacy_key")), "privacy_text": _s(x.get("privacy_text"))}
+            for x in items
+            if _s(x.get("privacy_key")) and _s(x.get("privacy_text"))
+        ]
+        if not payload["setting_list"]:
+            raise HTTPException(status_code=400, detail="setting_list 不能为空")
+    return payload
+
+
+def get_privacy_setting_for_tenant(
+    db: Session,
+    tenant_id: int,
+    *,
+    privacy_ver: int = 2,
+) -> dict[str, Any]:
+    """查询已授权小程序的用户隐私保护指引（开发版/现网版）。"""
+    _ensure_authorizer_for_code_ops(db, int(tenant_id))
+    token = _authorizer_access_token_or_http(db, int(tenant_id))
+    ver = int(privacy_ver)
+    if ver not in (1, 2):
+        raise HTTPException(status_code=400, detail="privacy_ver 仅支持 1 或 2")
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            r = client.post(
+                GET_PRIVACY_SETTING_URL,
+                params={"access_token": token},
+                json={"privacy_ver": ver},
+            )
+            r.raise_for_status()
+            data: dict[str, Any] = r.json()
+    except httpx.HTTPError as e:
+        logger.exception("getprivacysetting 请求失败 tenant_id=%s", tenant_id)
+        raise HTTPException(status_code=502, detail="查询隐私保护指引失败（网络）") from e
+
+    _raise_wechat(data, fallback="查询隐私保护指引失败")
+    return {
+        "privacy_ver": ver,
+        "setting_list": data.get("setting_list") or [],
+        "owner_setting": data.get("owner_setting") or {},
+        "privacy_list": data.get("privacy_list") or [],
+        "sdk_privacy_info_list": data.get("sdk_privacy_info_list") or [],
+        "update_time": data.get("update_time"),
+    }
+
+
+def sync_privacy_setting_for_tenant(
+    db: Session,
+    tenant_id: int,
+    *,
+    contact_phone: str | None = None,
+    contact_email: str | None = None,
+    contact_qq: str | None = None,
+    contact_weixin: str | None = None,
+    notice_method: str | None = None,
+    setting_list: list[dict[str, str]] | None = None,
+    privacy_ver: int = 2,
+) -> dict[str, Any]:
+    """同步用户隐私保护指引到微信（开发版默认，提审前须完成）。"""
+    _ensure_authorizer_for_code_ops(db, int(tenant_id))
+    payload = build_privacy_setting_payload(
+        db,
+        int(tenant_id),
+        contact_phone=contact_phone,
+        contact_email=contact_email,
+        contact_qq=contact_qq,
+        contact_weixin=contact_weixin,
+        notice_method=notice_method,
+        setting_list=setting_list,
+        privacy_ver=privacy_ver,
+    )
+    token = _authorizer_access_token_or_http(db, int(tenant_id))
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            r = client.post(
+                SET_PRIVACY_SETTING_URL,
+                params={"access_token": token},
+                json=payload,
+            )
+            r.raise_for_status()
+            data: dict[str, Any] = r.json()
+    except httpx.HTTPError as e:
+        logger.exception("setprivacysetting 请求失败 tenant_id=%s", tenant_id)
+        _patch_publish_blob(db, int(tenant_id), {"privacy_last_error": "隐私指引同步网络失败"})
+        raise HTTPException(status_code=502, detail="同步隐私保护指引失败（网络）") from e
+
+    errcode = data.get("errcode")
+    if errcode not in (None, 0):
+        msg = _s(data.get("errmsg")) or "同步隐私保护指引失败"
+        _patch_publish_blob(db, int(tenant_id), {"privacy_last_error": f"{errcode}: {msg}"})
+        _raise_wechat(data, fallback="同步隐私保护指引失败")
+
+    now = beijing_now_naive().isoformat(timespec="seconds")
+    _patch_publish_blob(
+        db,
+        int(tenant_id),
+        {
+            "privacy_synced_at": now,
+            "privacy_last_error": None,
+            "privacy_ver": int(payload.get("privacy_ver") or 2),
+        },
+    )
+    logger.info(
+        "setprivacysetting 成功 tenant_id=%s privacy_ver=%s keys=%s",
+        tenant_id,
+        payload.get("privacy_ver"),
+        [x.get("privacy_key") for x in (payload.get("setting_list") or [])],
+    )
+    return {
+        "synced_at": now,
+        "privacy_ver": payload.get("privacy_ver"),
+        "setting_list": payload.get("setting_list") or [],
+        "owner_setting": payload.get("owner_setting") or {},
+    }
+
+
 def submit_code_audit(
     db: Session,
     tenant_id: int,
@@ -536,9 +741,15 @@ def submit_code_audit(
     item_list: list[dict[str, Any]],
     version_desc: str | None = None,
     feedback_info: str | None = None,
+    skip_privacy_sync: bool = False,
 ) -> dict[str, Any]:
     """将当前体验版代码提交微信审核（须先 commit 体验版）。"""
     _ensure_authorizer_for_code_ops(db, int(tenant_id))
+
+    # 提审前自动同步开发版隐私指引，避免「未完善用户隐私保护指引」被拒
+    if not skip_privacy_sync:
+        sync_privacy_setting_for_tenant(db, int(tenant_id), privacy_ver=2)
+
     if not item_list:
         raise HTTPException(status_code=400, detail="请至少选择一个审核类目")
 

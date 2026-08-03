@@ -271,7 +271,7 @@ const dayAfterTomorrowIsBusinessDay = computed(() =>
   isSubscriptionDeliveryDayIso(props.dayAfterTomorrowBusinessDate),
 )
 
-/** 保存今日/明日/后天午餐+晚餐日总份数，并通知顶卡刷新 dashboard-summary */
+/** 保存今日/明日/后天午餐+晚餐日总份数；保存完成后由父组件 await dashboard-summary 全量刷新 */
 async function saveKitchenPlan() {
   if (kitchenSaving.value) return
   const entries = [
@@ -373,7 +373,7 @@ async function saveKitchenPlan() {
         `${entry.label}保存失败：${err instanceof Error ? err.message : '未知错误'}`,
         'error',
       )
-      emit('menu-day-stock-saved', payload)
+      emit('menu-day-stock-saved')
       return
     }
     const savedText = saveTargets.map((e) => `${e.label} ${e.value} 份`).join('、')
@@ -381,7 +381,7 @@ async function saveKitchenPlan() {
     const skipHint =
       skipped.length > 0 ? `（${skipped.map((e) => e.label).join('、')}为非营业日已跳过）` : ''
     showToast(`${savedText}已保存，本周菜单已同步${skipHint}`, 'success')
-    emit('menu-day-stock-saved', payload)
+    emit('menu-day-stock-saved')
   } finally {
     kitchenSaving.value = false
   }

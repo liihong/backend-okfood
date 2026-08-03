@@ -498,6 +498,8 @@ function onTabClose(tab) {
           </template>
           <el-menu-item v-if="showSystemAdminMenus" index="/system/tenants">租户管理</el-menu-item>
           <el-menu-item v-if="showOwnerAdminMenus" index="/store-config">门店配置</el-menu-item>
+          <el-menu-item v-if="showOwnerAdminMenus" index="/system/printers">打印机管理</el-menu-item>
+          <el-menu-item v-if="showOwnerAdminMenus" index="/system/print-settings">打印设置</el-menu-item>
           <el-menu-item v-if="showOwnerAdminMenus" index="/system/membership-templates">会员卡管理</el-menu-item>
           <el-menu-item v-if="showOwnerAdminMenus" index="/system/dish-categories">菜品分类</el-menu-item>
         </el-sub-menu>

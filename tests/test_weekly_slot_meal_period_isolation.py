@@ -71,7 +71,11 @@ def test_set_dinner_total_stock_does_not_change_lunch(menu_db: Session, monkeypa
         lambda *a, **k: None,
     )
     monkeypatch.setattr(
-        "app.services.admin.admin_service.invalidate_dashboard_live_summary_cache",
+        "app.services.admin.day_stock_service.invalidate_stock_read_caches",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "app.services.admin.day_stock_service.get_day_stock_breakdown",
         lambda *a, **k: None,
     )
 

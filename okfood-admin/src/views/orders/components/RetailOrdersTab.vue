@@ -39,6 +39,8 @@ const {
   selectedRetailDispatchableRows,
   onRetailSelectionChange,
   onBatchPushSfRetailOrders,
+  onBatchPrintRetailOrders,
+  retailPrintLoading,
   clearRetailSelection,
   onRetailRowMoreCommand,
   fetchActive,
@@ -123,6 +125,14 @@ function onRetailMobileSelectChange(row, checked) {
           @click="onBatchPushSfRetailOrders"
         >
           批量推送到顺丰
+        </el-button>
+        <el-button
+          size="small"
+          :loading="retailPrintLoading"
+          :disabled="!selectedRetailRows.length || batchActionBusy"
+          @click="onBatchPrintRetailOrders"
+        >
+          批量打印标签
         </el-button>
         <el-button
           size="small"
@@ -247,6 +257,7 @@ function onRetailMobileSelectChange(row, checked) {
                   退款
                 </el-dropdown-item>
                 <el-dropdown-item command="remark">编辑备注</el-dropdown-item>
+                <el-dropdown-item command="print">打印标签</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -372,6 +383,7 @@ function onRetailMobileSelectChange(row, checked) {
                   退款
                 </el-dropdown-item>
                 <el-dropdown-item command="remark">编辑备注</el-dropdown-item>
+                <el-dropdown-item command="print">打印标签</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>

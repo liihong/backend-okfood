@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from app.services.shared.wx_open_code_service import (
     build_ext_json_for_tenant,
+    build_privacy_setting_payload,
     commit_template_to_tenant,
     fetch_latest_audit_status,
     fetch_trial_qrcode_base64,
@@ -21,6 +22,7 @@ from app.services.shared.wx_open_code_service import (
     release_audited_code,
     save_publish_blob,
     submit_code_audit,
+    sync_privacy_setting_for_tenant,
 )
 
 
@@ -242,13 +244,15 @@ def test_list_audit_categories(mock_client_cls, _has, _token):
     assert items[0]["first_id"] == 1
 
 
+@patch("app.services.shared.wx_open_code_service.sync_privacy_setting_for_tenant")
 @patch("app.services.shared.wx_open_code_service.get_publish_admin_state")
 @patch("app.services.shared.wx_open_code_service._patch_publish_blob")
 @patch("app.services.shared.wx_open_code_service.load_publish_blob", return_value={"user_version": "1.0.0"})
 @patch("app.services.shared.wx_open_code_service.get_valid_authorizer_access_token", return_value="at")
 @patch("app.services.shared.wx_open_code_service.tenant_has_authorizer_tokens", return_value=True)
 @patch("app.services.shared.wx_open_code_service.httpx.Client")
-def test_submit_code_audit_success(mock_client_cls, _has, _token, _load, _patch, mock_state):
+def test_submit_code_audit_success(mock_client_cls, _has, _token, _load, _patch, mock_state, mock_privacy):
+    mock_privacy.return_value = {"synced_at": "t", "privacy_ver": 2}
     resp = MagicMock()
     resp.raise_for_status = MagicMock()
     resp.json.return_value = {"errcode": 0, "auditid": 12345}
@@ -270,6 +274,49 @@ def test_submit_code_audit_success(mock_client_cls, _has, _token, _load, _patch,
     }
     out = submit_code_audit(MagicMock(), 3, item_list=[item])
     assert out["audit_status"] == 2
+    _patch.assert_called()
+    mock_privacy.assert_called_once()
+
+
+@patch("app.services.shared.wx_open_code_service.get_settings")
+@patch("app.services.shared.wx_open_code_service._resolve_privacy_contact_phone", return_value="13800138000")
+@patch("app.services.shared.wx_open_code_service.load_saas_blob", return_value={})
+def test_build_privacy_setting_payload_default_keys(_saas, _phone, mock_settings):
+    mock_settings.return_value.WX_PRIVACY_CONTACT_EMAIL = ""
+    mock_settings.return_value.WX_PRIVACY_NOTICE_METHOD = "弹窗提示"
+    mock_settings.return_value.WX_PRIVACY_STORE_REGION = 1017
+
+    payload = build_privacy_setting_payload(MagicMock(), 3)
+    assert payload["privacy_ver"] == 2
+    keys = {x["privacy_key"] for x in payload["setting_list"]}
+    assert keys == {"PhoneNumber", "Location", "ChooseLocation", "UserInfo"}
+    assert payload["owner_setting"]["contact_phone"] == "13800138000"
+    assert payload["owner_setting"]["notice_method"] == "弹窗提示"
+
+
+@patch("app.services.shared.wx_open_code_service._patch_publish_blob")
+@patch("app.services.shared.wx_open_code_service.build_privacy_setting_payload")
+@patch("app.services.shared.wx_open_code_service.get_valid_authorizer_access_token", return_value="at")
+@patch("app.services.shared.wx_open_code_service.tenant_has_authorizer_tokens", return_value=True)
+@patch("app.services.shared.wx_open_code_service.httpx.Client")
+def test_sync_privacy_setting_success(mock_client_cls, _has, _token, mock_build, _patch):
+    mock_build.return_value = {
+        "privacy_ver": 2,
+        "owner_setting": {"contact_phone": "13800138000", "notice_method": "弹窗提示"},
+        "setting_list": [{"privacy_key": "PhoneNumber", "privacy_text": "登录"}],
+    }
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {"errcode": 0, "errmsg": "ok"}
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.post.return_value = resp
+    mock_client_cls.return_value = client
+
+    out = sync_privacy_setting_for_tenant(MagicMock(), 3)
+    assert out["privacy_ver"] == 2
+    assert out["synced_at"]
     _patch.assert_called()
 
 

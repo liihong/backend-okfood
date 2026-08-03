@@ -322,11 +322,12 @@ def upsert_kitchen_plan_route(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """快捷设定营业日周菜单「日总份数」（与本周菜单配置页同源，不联动顶卡等其他数据）。"""
+    """快捷设定营业日周菜单「日总份数」（与本周菜单配置页同源）；响应含最新日库存拆解。"""
+    from app.services.admin.day_stock_service import breakdown_to_dict
     from app.services.admin.store_kitchen_plan_service import set_menu_day_total_stock_by_business_date
 
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    total = set_menu_day_total_stock_by_business_date(
+    total, bd = set_menu_day_total_stock_by_business_date(
         db,
         store_id=int(store_id),
         business_date=body.business_date,
@@ -334,14 +335,14 @@ def upsert_kitchen_plan_route(
         meal_period=body.meal_period,
         updated_by=admin_username,
     )
-    return success(
-        data={
-            "business_date": body.business_date.isoformat(),
-            "meal_period": body.meal_period,
-            "total_stock": total,
-        },
-        msg="日总份数已保存",
-    )
+    data: dict = {
+        "business_date": body.business_date.isoformat(),
+        "meal_period": body.meal_period,
+        "total_stock": total,
+    }
+    if bd is not None:
+        data["stock_breakdown"] = breakdown_to_dict(bd)
+    return success(data=data, msg="日总份数已保存")
 
 
 @router.get("/day-stock/summary")
@@ -395,7 +396,6 @@ def day_stock_adjustments_create_route(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """报损耗/回补：禁止直接改剩余，仅写流水。"""
-    from app.services.admin.admin_service import invalidate_dashboard_live_summary_cache
     from app.services.admin.day_stock_service import breakdown_to_dict, create_day_stock_adjustment
 
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
@@ -409,7 +409,6 @@ def day_stock_adjustments_create_route(
         remark=body.remark,
         operator=admin_username,
     )
-    invalidate_dashboard_live_summary_cache(int(store_id))
     return success(data=breakdown_to_dict(bd), msg="库存调整已记录")
 
 
@@ -2225,10 +2224,11 @@ def menu_day_total_stock(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """设置该周某一天对应菜品的日总份数；未配置则单次卡不可售；已配置时单次可售=总份数−当日应配送−已付单次。"""
+    """设置该周某一天对应菜品的日总份数；未配置则单次卡不可售；响应含最新日库存拆解。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    set_weekly_slot_menu_total_stock(db, body, store_id=store_id)
-    return success(msg="日总库存已保存")
+    stock_breakdown = set_weekly_slot_menu_total_stock(db, body, store_id=store_id)
+    data = {"stock_breakdown": stock_breakdown} if stock_breakdown is not None else {}
+    return success(data=data, msg="日总库存已保存")
 
 
 @router.post("/settings")

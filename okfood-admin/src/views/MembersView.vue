@@ -604,14 +604,14 @@ async function submitLeaveMember() {
   }
 }
 
-/** 推单冻结后极端补送：将会员写入当日大表快照（默认取消请假不加回） */
+/** 推单冻结后极端补送：强制将会员写入当日大表快照（默认取消请假不加回） */
 async function reinstateMemberToDeliverySheet(u) {
   if (!u?.phone) return
   const periods = Array.isArray(u?.entitled_meal_periods) ? u.entitled_meal_periods : []
   let mealPeriod = 'lunch'
   if (periods.includes('dinner') && !periods.includes('lunch')) mealPeriod = 'dinner'
   const ok = window.confirm(
-    `确认将 ${u.name || u.phone} 补进今日${mealPeriod === 'dinner' ? '晚餐' : '午餐'}配送大表？\n仅用于推单后取消请假等极端补送。`,
+    `确认将 ${u.name || u.phone} 强制加入今日${mealPeriod === 'dinner' ? '晚餐' : '午餐'}配送大表？\n仅用于推单后取消请假需当日补送；其他锁表逻辑不变。`,
   )
   if (!ok) return
   try {
@@ -623,7 +623,7 @@ async function reinstateMemberToDeliverySheet(u) {
       },
       { auth: true },
     )
-    showToast('已补进今日配送大表', 'success')
+    showToast('已强制加入当天配送大表', 'success')
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -631,7 +631,7 @@ async function reinstateMemberToDeliverySheet(u) {
       handleAdminLogout()
       return
     }
-    showToast(e instanceof Error ? e.message : '补进失败', 'error')
+    showToast(e instanceof Error ? e.message : '强制加入失败', 'error')
   }
 }
 
@@ -1370,10 +1370,10 @@ onUnmounted(() => {
                     <el-dropdown-item command="reinstate_delivery">
                       <span
                         class="members-dropdown-item-inner"
-                        title="推单后取消请假默认不加回；极端补送时写入当日大表快照"
+                        title="推单后取消请假默认不加回；仅此操作可强制写入当日配送大表"
                       >
                         <Truck :size="14" aria-hidden="true" />
-                        补进今日配送
+                        强制加入当天配送大表
                       </span>
                     </el-dropdown-item>
                     <el-dropdown-item command="addresses">
@@ -1542,10 +1542,10 @@ onUnmounted(() => {
                     <el-dropdown-item command="reinstate_delivery">
                       <span
                         class="members-dropdown-item-inner"
-                        title="推单后取消请假默认不加回；极端补送时写入当日大表快照"
+                        title="推单后取消请假默认不加回；仅此操作可强制写入当日配送大表"
                       >
                         <Truck :size="14" aria-hidden="true" />
-                        补进今日配送
+                        强制加入当天配送大表
                       </span>
                     </el-dropdown-item>
                     <el-dropdown-item command="addresses">

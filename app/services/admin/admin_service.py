@@ -1525,13 +1525,14 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: 
         )
 
 
-def set_weekly_slot_menu_total_stock(db: Session, body: MenuDayTotalStockIn, *, store_id: int) -> None:
+def set_weekly_slot_menu_total_stock(db: Session, body: MenuDayTotalStockIn, *, store_id: int):
     from app.services.meal_period.normalize import normalize_meal_period
+    from app.services.admin.day_stock_service import breakdown_to_dict
     from app.services.admin.menu_day_stock_service import set_weekly_slot_total_stock
 
     # 严格区分午/晚餐：dinner 写入不得落入 lunch 槽位
     period = normalize_meal_period(body.meal_period)
-    set_weekly_slot_total_stock(
+    bd = set_weekly_slot_total_stock(
         db,
         _monday_of_week(body.week_start),
         body.slot,
@@ -1539,6 +1540,7 @@ def set_weekly_slot_menu_total_stock(db: Session, body: MenuDayTotalStockIn, *, 
         store_id=int(store_id),
         meal_period=period,
     )
+    return breakdown_to_dict(bd) if bd is not None else None
 
 
 def update_settings(db: Session, body: SettingsIn, *, store_id: int) -> None:

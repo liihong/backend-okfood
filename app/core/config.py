@@ -104,6 +104,12 @@ class Settings(BaseSettings):
     # 顺序对应：券名称、到期时间、张数、可用范围、温馨提示（模板 33721）
     WX_MINI_SUBSCRIBE_RENEW_DATA_KEYS: str = "thing1,time2,number3,thing4,thing5"
     WX_MINI_SUBSCRIBE_RENEW_PAGE: str = "packageUser/pages/membershipCardList/membershipCardList"
+    # 代开发小程序 · 用户隐私保护指引（setprivacysetting owner_setting 兜底；可被租户门店电话覆盖）
+    WX_PRIVACY_CONTACT_PHONE: str = ""
+    WX_PRIVACY_CONTACT_EMAIL: str = ""
+    WX_PRIVACY_NOTICE_METHOD: str = "弹窗提示"
+    # 存储地区：1017=中国大陆（境外主体提审必填 store_region）
+    WX_PRIVACY_STORE_REGION: int = 1017
 
     # 小程序周卡/月卡标价（元）：以 app_settings 为准；此处为库无行时的兜底（后台「门店配置」可改库内值）
     MEMBER_CARD_WEEK_PRICE_YUAN: Decimal = Field(default=Decimal("168.00"), ge=Decimal("0"))

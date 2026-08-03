@@ -23,6 +23,8 @@ const SingleMealOrdersView = () => import('../views/orders/single-meal/SingleMea
 const MallOrdersView = () => import('../views/orders/mall/MallOrdersView.vue')
 const CardPackOrdersView = () => import('../views/orders/card-pack/CardPackOrdersView.vue')
 const StoreConfigView = () => import('../views/StoreConfigView.vue')
+const PrinterManageView = () => import('../views/print/PrinterManageView.vue')
+const PrintSettingsView = () => import('../views/print/PrintSettingsView.vue')
 const SfOrdersMonitorView = () => import('../views/SfOrdersMonitorView.vue')
 const DeliveryGeoMapView = () => import('../views/DeliveryGeoMapView.vue')
 const TenantsView = () => import('../views/TenantsView.vue')
@@ -294,6 +296,18 @@ const router = createRouter({
           name: 'store-config',
           component: StoreConfigView,
           meta: { title: '门店配置', ownerAdminOnly: true },
+        },
+        {
+          path: 'system/printers',
+          name: 'system-printers',
+          component: PrinterManageView,
+          meta: { title: '打印机管理', ownerAdminOnly: true },
+        },
+        {
+          path: 'system/print-settings',
+          name: 'system-print-settings',
+          component: PrintSettingsView,
+          meta: { title: '打印设置', ownerAdminOnly: true },
         },
         {
           path: 'system/tenants',

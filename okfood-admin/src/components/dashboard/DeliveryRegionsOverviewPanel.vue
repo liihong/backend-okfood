@@ -237,33 +237,9 @@ function refreshDashboardOverview() {
   void fetchDashboardSummary()
 }
 
-/** 后厨日总份数保存后：先乐观更新顶卡，再拉 dashboard-summary 与服务端对齐（午/晚餐字段严格分开写） */
-function onMenuDayStockSaved(payload) {
-  if (summaryMeta.value && payload && typeof payload === 'object') {
-    const next = { ...summaryMeta.value }
-    // 午餐：today_menu_day_total_stock / tomorrow_menu_day_total_stock（勿写入晚餐字段）
-    if (Number.isFinite(payload.today) && payload.today >= 0) {
-      next.today_menu_day_total_stock = Math.trunc(payload.today)
-    }
-    if (Number.isFinite(payload.tomorrow) && payload.tomorrow >= 0) {
-      next.tomorrow_menu_day_total_stock = Math.trunc(payload.tomorrow)
-    }
-    if (Number.isFinite(payload.dayAfterTomorrow) && payload.dayAfterTomorrow >= 0) {
-      next.day_after_tomorrow_menu_day_total_stock = Math.trunc(payload.dayAfterTomorrow)
-    }
-    // 晚餐：today_dinner_menu_day_total_stock / tomorrow_dinner_*（勿写入午餐字段）
-    if (Number.isFinite(payload.todayDinner) && payload.todayDinner >= 0) {
-      next.today_dinner_menu_day_total_stock = Math.trunc(payload.todayDinner)
-    }
-    if (Number.isFinite(payload.tomorrowDinner) && payload.tomorrowDinner >= 0) {
-      next.tomorrow_dinner_menu_day_total_stock = Math.trunc(payload.tomorrowDinner)
-    }
-    if (Number.isFinite(payload.dayAfterTomorrowDinner) && payload.dayAfterTomorrowDinner >= 0) {
-      next.day_after_tomorrow_dinner_menu_day_total_stock = Math.trunc(payload.dayAfterTomorrowDinner)
-    }
-    summaryMeta.value = next
-  }
-  void fetchDashboardSummary()
+/** 后厨日总份数保存后：等待 dashboard-summary 全量刷新，禁止局部 patch 导致剩余与产出不同步 */
+async function onMenuDayStockSaved() {
+  await fetchDashboardSummary()
 }
 
 async function fetchDashboardSummary() {
@@ -320,14 +296,12 @@ const todaySingleRetailTotalCount = computed(
   () => Number(summaryMeta.value?.today_single_retail_total_quantity) || 0,
 )
 const todayLunchWasteTotal = computed(() => Number(summaryMeta.value?.today_lunch_waste_total) || 0)
-/** 午餐顶卡「剩余」← today_lunch_remaining（meal_period=lunch） */
+/** 午餐顶卡「单次可售剩余」← today_lunch_remaining（与小程序 single_stock_remaining 同源，仅服务端返回值） */
 const todayLunchRemainingDisplay = computed(() => {
   const v = summaryMeta.value?.today_lunch_remaining
-  if (v != null && v !== '') {
-    const n = Number(v)
-    if (Number.isFinite(n)) return Math.max(0, Math.trunc(n))
-  }
-  return todaySellableQuantity.value
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : null
 })
 /** 晚餐顶卡「后厨产出量」← today_dinner_menu_day_total_stock（meal_period=dinner，与午餐 today_menu_day_total_stock 独立） */
 const dinnerMenuDayTotalStock = computed(() => {
@@ -468,20 +442,6 @@ const todayMealsPickup = computed(() => {
   const b = prepMetricsBreakdown(todayPrepMetrics.value)
   if (b != null) return b.pickup
   return null
-})
-
-/** 可卖数量 = 日总份数 − 配送 − 自提 − 单次零售（日总份数未配置时为 null） */
-const todaySellableQuantity = computed(() => {
-  const stock = menuDayTotalStock.value
-  if (stock == null) return null
-  if (todayMealsDelivery.value == null || todayMealsPickup.value == null) return null
-  return Math.max(
-    0,
-    stock -
-      Math.trunc(Number(todayMealsDelivery.value)) -
-      Math.trunc(Number(todayMealsPickup.value)) -
-      todaySingleRetailTotalCount.value,
-  )
 })
 
 /** 今日已售出 = 同城配送 + 门店自提 + 单次零售 */
@@ -709,7 +669,7 @@ onMounted(() => {
                   class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--sellable"
                   :class="{
                     'dro-dash-stacked-bar__seg--sellable-empty':
-                      todaySellableQuantity != null && todaySellableQuantity <= 0,
+                      todayLunchRemainingDisplay != null && todayLunchRemainingDisplay <= 0,
                   }"
                   :style="{
                     width: distributionStackWidth(todayLunchRemainingDisplay, menuDayTotalStock),

@@ -42,4 +42,12 @@ class TenantIntegrationSettings(Base):
 
     extra_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # 云打印开发者凭证（飞鹅 / 芯烨 / 易联云）
+    feie_user: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    feie_ukey: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    xprinter_user: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    xprinter_user_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    yilian_partner: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    yilian_apikey: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)

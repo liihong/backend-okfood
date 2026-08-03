@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.models.enums import CardOrderPayStatus, PlanType
@@ -23,6 +23,68 @@ def meal_scope_label_from_periods(periods: frozenset[str] | set[str]) -> str:
     if has_lunch:
         return "午餐"
     return "午餐"
+
+
+def card_kind_label_from_periods(periods: frozenset[str] | set[str]) -> str:
+    """无模版种类时的兜底：午餐卡 / 晚餐卡 / 午晚餐卡。"""
+    scope = meal_scope_label_from_periods(periods)
+    if scope == "全餐":
+        return "午晚餐卡"
+    return f"{scope}卡"
+
+
+def load_member_card_kind_label_map(
+    db: Session,
+    member_ids: list[int],
+    *,
+    periods_by_member: dict[int, frozenset[str]] | None = None,
+) -> dict[int, str]:
+    """各会员最近一笔已入账工单的卡种类（kind_label）；无模版时按餐段资格兜底。"""
+    ids = sorted({int(x) for x in member_ids if x is not None})
+    out: dict[int, str] = {}
+    if not ids:
+        return out
+    latest_sq = (
+        select(
+            MemberCardOrder.member_id.label("mid"),
+            func.max(MemberCardOrder.id).label("max_id"),
+        )
+        .where(
+            MemberCardOrder.member_id.in_(ids),
+            MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+            MemberCardOrder.applied_to_member.is_(True),
+        )
+        .group_by(MemberCardOrder.member_id)
+    ).subquery("latest_card_tpl")
+    rows = db.execute(
+        select(
+            MemberCardOrder.member_id,
+            MembershipCardTemplate.kind_label,
+        )
+        .select_from(MemberCardOrder)
+        .join(
+            latest_sq,
+            and_(
+                MemberCardOrder.member_id == latest_sq.c.mid,
+                MemberCardOrder.id == latest_sq.c.max_id,
+            ),
+        )
+        .outerjoin(
+            MembershipCardTemplate,
+            MemberCardOrder.membership_template_id == MembershipCardTemplate.id,
+        )
+    ).all()
+    tpl_by_mid: dict[int, str] = {}
+    for mid, kind_label in rows:
+        tpl_by_mid[int(mid)] = (kind_label or "").strip()
+    periods_map = periods_by_member or {}
+    for mid in ids:
+        label = tpl_by_mid.get(mid, "")
+        if label:
+            out[mid] = label
+        else:
+            out[mid] = card_kind_label_from_periods(periods_map.get(mid, frozenset()))
+    return out
 
 
 def format_plan_type_display(plan_type: str | None, periods: frozenset[str] | set[str]) -> str:

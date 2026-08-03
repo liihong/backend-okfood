@@ -1,9 +1,9 @@
 <script setup>
 defineOptions({ name: 'DeliveryView' })
 import { ref, computed, watch, onMounted } from 'vue'
-import { RefreshCw, MapPin, Truck, Zap, FileDown, Search, Loader2 } from 'lucide-vue-next'
+import { RefreshCw, MapPin, Truck, Zap, FileDown, Search, Loader2, Printer } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
-import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
+import { apiJson, adminAccessToken, adminStoreBranding, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import { toastSfPushBatchOutcome, toastSfPushError } from '../utils/sfPushMessages.js'
 import {
@@ -23,8 +23,11 @@ import {
 } from '../composables/delivery/useDeliverySfPush.js'
 import { useAnimatedInteger } from '../composables/useAnimatedInteger.js'
 import { useAdminSystemNotifications } from '../composables/useAdminSystemNotifications.js'
+import { useStorePrint } from '../composables/useStorePrint.js'
+import { buildDeliveryLabelItems } from '../utils/print/deliveryLabelAdapter.js'
 
 const { fetchNotifications } = useAdminSystemNotifications()
+const { submitPrintJob, printing: printLoading, resolveScene } = useStorePrint()
 
 /** 与后端业务日一致：Asia/Shanghai 的日历日期 YYYY-MM-DD */
 function ymdInTimeZone(date, timeZone) {
@@ -487,6 +490,35 @@ function exportSheetToExcel() {
   showToast(`已导出 ${out.length} 行`, 'success')
 }
 
+/** 打印标签：当前片区或全部（不含门店自提） */
+async function printDeliveryLabels(scope) {
+  const d = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
+  const region = scope === 'region' ? activeRegionTab.value : null
+  if (scope === 'region' && region === '门店自提') {
+    showToast('门店自提请使用商城零售打印', 'error')
+    return
+  }
+  const cfg = await resolveScene('delivery_sheet')
+  if (!cfg?.configured) {
+    showToast('请先在系统管理 → 打印设置中配置打印机', 'error')
+    return
+  }
+  const storeName =
+    String(adminStoreBranding.value?.store_name || '').trim() || 'OK饭'
+  const items = buildDeliveryLabelItems(
+    flatStops.value,
+    d,
+    region,
+    addressLineForExcelExport,
+    storeName,
+  )
+  if (!items.length) {
+    showToast('没有可打印的配送记录', 'error')
+    return
+  }
+  await submitPrintJob('delivery_sheet', items)
+}
+
 watch(adminAccessToken, (t) => {
   if (t) fetchSheet()
 })
@@ -830,6 +862,26 @@ async function reinstatePhoneToSheet() {
         >
           <FileDown :size="16" stroke-width="2" />
           导出 Excel
+        </button>
+        <button
+          type="button"
+          class="delivery-btn delivery-btn--outline"
+          :disabled="loading || printLoading || !flatStops.length"
+          title="打印当前片区标签（不含自提）"
+          @click="printDeliveryLabels('region')"
+        >
+          <Printer :size="16" stroke-width="2" />
+          打印当前片区
+        </button>
+        <button
+          type="button"
+          class="delivery-btn delivery-btn--outline"
+          :disabled="loading || printLoading || !flatStops.length"
+          title="打印当日全部到家标签"
+          @click="printDeliveryLabels('all')"
+        >
+          <Printer :size="16" stroke-width="2" />
+          打印全部
         </button>
         <button
           type="button"

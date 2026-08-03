@@ -6,7 +6,24 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models.enums import MealPeriod
+from app.services.admin.day_stock_service import DayStockBreakdown
 from app.services.admin.menu_day_stock_service import weekly_slot_stock_extras
+
+
+def _mock_breakdown(*, kitchen: int, sub: int, paid: int, delta: int) -> DayStockBreakdown:
+    """测试用拆解：remaining = kitchen - sub - paid + delta。"""
+    rem = max(0, kitchen - sub - paid + delta)
+    waste = max(0, -delta)
+    return DayStockBreakdown(
+        meal_period=MealPeriod.LUNCH.value,
+        kitchen_output=kitchen,
+        delivery_total=sub,
+        pickup_total=0,
+        single_retail_total=paid,
+        waste_total=waste,
+        adjustment_delta_sum=delta,
+        remaining=rem,
+    )
 
 
 def test_weekly_slot_stock_extras_lunch_dinner_independent(db: Session, monkeypatch):
@@ -14,17 +31,15 @@ def test_weekly_slot_stock_extras_lunch_dinner_independent(db: Session, monkeypa
     anchor = date(2026, 6, 16)  # 周一
     menu_date = anchor  # slot=1 → 周一
 
+    def _batch(db, *, store_id, dates, meal_period, metrics_cache=None):
+        period = meal_period
+        if period == MealPeriod.LUNCH.value:
+            return {menu_date: _mock_breakdown(kitchen=200, sub=40, paid=5, delta=-3)}
+        return {menu_date: _mock_breakdown(kitchen=80, sub=15, paid=2, delta=-1)}
+
     monkeypatch.setattr(
-        "app.services.admin.menu_day_stock_service.dashboard_meal_totals_by_dates",
-        lambda *a, **k: {menu_date: 40 if k.get("meal_period") == MealPeriod.LUNCH.value else 15},
-    )
-    monkeypatch.setattr(
-        "app.services.admin.menu_day_stock_service.paid_single_retail_portions_by_dates",
-        lambda *a, **k: {menu_date: 5 if k.get("meal_period") == MealPeriod.LUNCH.value else 2},
-    )
-    monkeypatch.setattr(
-        "app.services.admin.day_stock_service.sum_adjustment_deltas_by_dates",
-        lambda *a, **k: {menu_date: -3 if k.get("meal_period") == MealPeriod.LUNCH.value else -1},
+        "app.services.admin.day_stock_service.get_day_stock_breakdown_by_dates",
+        _batch,
     )
 
     payload = [
@@ -42,8 +57,6 @@ def test_weekly_slot_stock_extras_lunch_dinner_independent(db: Session, monkeypa
         payload,
         store_id=1,
         meal_period=MealPeriod.LUNCH.value,
-        sub_by_date={menu_date: 40},
-        paid_by_date={menu_date: 5},
     )
     dinner = weekly_slot_stock_extras(
         db,
@@ -51,8 +64,6 @@ def test_weekly_slot_stock_extras_lunch_dinner_independent(db: Session, monkeypa
         [{**payload[0], "total_stock": 80}],
         store_id=1,
         meal_period=MealPeriod.DINNER.value,
-        sub_by_date={menu_date: 15},
-        paid_by_date={menu_date: 2},
     )
 
     assert lunch[0]["total_stock"] == 200
@@ -63,20 +74,28 @@ def test_weekly_slot_stock_extras_lunch_dinner_independent(db: Session, monkeypa
     assert dinner[0]["waste_total"] == 1
 
 
-def test_weekly_slot_stock_extras_skips_breakdown_per_slot(db: Session, monkeypatch):
-    """本周菜单路径不应逐槽位调用 get_day_stock_breakdown。"""
+def test_weekly_slot_stock_extras_uses_batch_breakdown_once(db: Session, monkeypatch):
+    """本周菜单路径应批量调用 get_day_stock_breakdown_by_dates，禁止循环内逐槽位拆解。"""
     anchor = date(2026, 6, 16)
-    calls = {"n": 0}
+    batch_calls = {"n": 0}
+
+    def _batch(db, *, store_id, dates, meal_period, metrics_cache=None):
+        batch_calls["n"] += 1
+        return {
+            anchor + __import__("datetime").timedelta(days=i): _mock_breakdown(
+                kitchen=100, sub=10, paid=1, delta=0
+            )
+            for i in range(7)
+        }
 
     def _forbidden(*args, **kwargs):
-        calls["n"] += 1
         raise AssertionError("不应逐槽位调用 get_day_stock_breakdown")
 
-    monkeypatch.setattr("app.services.admin.day_stock_service.get_day_stock_breakdown", _forbidden)
     monkeypatch.setattr(
-        "app.services.admin.day_stock_service.sum_adjustment_deltas_by_dates",
-        lambda *a, **k: {anchor + __import__("datetime").timedelta(days=i): 0 for i in range(7)},
+        "app.services.admin.day_stock_service.get_day_stock_breakdown_by_dates",
+        _batch,
     )
+    monkeypatch.setattr("app.services.admin.day_stock_service.get_day_stock_breakdown", _forbidden)
 
     slots = [
         {"slot": i, "dish_id": i, "name": f"d{i}", "total_stock": 100}
@@ -88,8 +107,6 @@ def test_weekly_slot_stock_extras_skips_breakdown_per_slot(db: Session, monkeypa
         slots,
         store_id=1,
         meal_period=MealPeriod.LUNCH.value,
-        sub_by_date={anchor + __import__("datetime").timedelta(days=i): 10 for i in range(7)},
-        paid_by_date={anchor + __import__("datetime").timedelta(days=i): 1 for i in range(7)},
     )
     assert len(out) == 7
-    assert calls["n"] == 0
+    assert batch_calls["n"] == 1

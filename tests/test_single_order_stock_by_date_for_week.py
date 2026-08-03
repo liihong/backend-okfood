@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models.enums import MealPeriod
+from app.services.admin.day_stock_service import DayStockBreakdown
 from app.services.admin.menu_day_stock_service import single_order_stock_by_date_for_week
 
 
@@ -21,24 +22,26 @@ class _FakeDish:
 
 
 def test_single_order_stock_by_date_for_week_deducts_waste(db: Session, monkeypatch):
-    """周菜单批量库存路径应扣减损耗流水（与 weekly_slot_stock_extras 一致）。"""
+    """周菜单批量库存路径应扣减损耗流水（与 get_day_stock_breakdown 一致）。"""
     anchor = date(2026, 6, 16)  # 周一
     menu_date = anchor
 
     dish = _FakeDish(1)
     ws = _FakeSlot(1, 200)
 
-    monkeypatch.setattr(
-        "app.services.admin.menu_day_stock_service.dashboard_meal_totals_by_dates",
-        lambda *a, **k: {menu_date: 40},
+    bd = DayStockBreakdown(
+        meal_period=MealPeriod.LUNCH.value,
+        kitchen_output=200,
+        delivery_total=40,
+        pickup_total=0,
+        single_retail_total=5,
+        waste_total=3,
+        adjustment_delta_sum=-3,
+        remaining=200 - 40 - 5 + (-3),
     )
     monkeypatch.setattr(
-        "app.services.admin.menu_day_stock_service.paid_single_retail_portions_by_dates",
-        lambda *a, **k: {menu_date: 5},
-    )
-    monkeypatch.setattr(
-        "app.services.admin.day_stock_service.sum_adjustment_deltas_by_dates",
-        lambda *a, **k: {menu_date: -3},
+        "app.services.admin.day_stock_service.get_day_stock_breakdown_by_dates",
+        lambda *a, **k: {menu_date: bd},
     )
 
     out = single_order_stock_by_date_for_week(
@@ -66,17 +69,19 @@ def test_single_order_stock_by_date_for_week_past_date_zero_remaining(db: Sessio
     dish = _FakeDish(1)
     ws = _FakeSlot(1, 100)
 
-    monkeypatch.setattr(
-        "app.services.admin.menu_day_stock_service.dashboard_meal_totals_by_dates",
-        lambda *a, **k: {menu_date: 0},
+    bd = DayStockBreakdown(
+        meal_period=MealPeriod.LUNCH.value,
+        kitchen_output=100,
+        delivery_total=0,
+        pickup_total=0,
+        single_retail_total=0,
+        waste_total=0,
+        adjustment_delta_sum=0,
+        remaining=100,
     )
     monkeypatch.setattr(
-        "app.services.admin.menu_day_stock_service.paid_single_retail_portions_by_dates",
-        lambda *a, **k: {menu_date: 0},
-    )
-    monkeypatch.setattr(
-        "app.services.admin.day_stock_service.sum_adjustment_deltas_by_dates",
-        lambda *a, **k: {menu_date: 0},
+        "app.services.admin.day_stock_service.get_day_stock_breakdown_by_dates",
+        lambda *a, **k: {menu_date: bd},
     )
 
     out = single_order_stock_by_date_for_week(

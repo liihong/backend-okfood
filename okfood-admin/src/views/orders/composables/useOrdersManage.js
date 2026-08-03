@@ -3,6 +3,8 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../../../admin/core.js'
 import { showToast } from '../../../composables/useToast.js'
+import { useStorePrint } from '../../../composables/useStorePrint.js'
+import { retailOrderToLabelItem } from '../../../utils/print/retailLabelAdapter.js'
 import { toastSfPushBatchOutcome, toastSfPushError } from '../../../utils/sfPushMessages.js'
 import { todayShanghaiStr } from '../utils/orderFormatters.js'
 import { mallPayFilterApiValue, resolveSingleOrderMemberDisplayName } from '../utils/orderDisplay.js'
@@ -26,6 +28,7 @@ import {
  */
 export function useOrdersManage(orderKind = 'single') {
   const activeTab = ref(orderKind)
+  const { submitPrintJob, resolveScene, printing: retailPrintLoading } = useStorePrint()
   const orderDate = ref(todayShanghaiStr())
   const route = useRoute()
   const searchQuery = ref('')
@@ -551,6 +554,31 @@ export function useOrdersManage(orderKind = 'single') {
     else if (cmd === 'cancel') void onCancelRetailOrder(row)
     else if (cmd === 'refund') onRefundWechatRetail(row)
     else if (cmd === 'remark') openRetailRemarkDialog(row)
+    else if (cmd === 'print') void onPrintRetailOrder(row)
+  }
+
+  async function onPrintRetailOrder(row) {
+    const cfg = await resolveScene('store_retail')
+    if (!cfg?.configured) {
+      showToast('请先在系统管理 → 打印设置中配置打印机', 'error')
+      return
+    }
+    const templateKey = row.store_pickup ? 'retail_pickup' : 'retail_delivery'
+    await submitPrintJob('store_retail', [retailOrderToLabelItem(row)], { template_key: templateKey })
+  }
+
+  async function onBatchPrintRetailOrders() {
+    const rows = selectedRetailRows.value
+    if (!rows.length) return
+    const cfg = await resolveScene('store_retail')
+    if (!cfg?.configured) {
+      showToast('请先在系统管理 → 打印设置中配置打印机', 'error')
+      return
+    }
+    for (const row of rows) {
+      const templateKey = row.store_pickup ? 'retail_pickup' : 'retail_delivery'
+      await submitPrintJob('store_retail', [retailOrderToLabelItem(row)], { template_key: templateKey })
+    }
   }
 
   function openRetailRemarkDialog(row) {
@@ -1487,6 +1515,9 @@ export function useOrdersManage(orderKind = 'single') {
     onRetailRemarkDialogClosed,
     onBatchPushSfRetail,
     onBatchPushSfRetailOrders,
+    onBatchPrintRetailOrders,
+    onPrintRetailOrder,
+    retailPrintLoading,
     openBatchAssignCourier,
     onBatchMarkComplete,
     onBatchCancelOrders,

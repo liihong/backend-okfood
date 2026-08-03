@@ -32,6 +32,9 @@ from app.models.store_retail_product import StoreRetailProduct
 from app.models.sf_same_city_callback import SfSameCityCallback
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store_kitchen_plan import StoreKitchenPlan
+from app.models.store_print_profile import StorePrintProfile
+from app.models.store_print_scene_setting import StorePrintSceneSetting
+from app.models.store_print_job import StorePrintJob
 from app.models.douyin import DouyinCertificateRedemption, DouyinProductMapping
 from app.models.home_banner import HomeBanner
 from app.models.home_entry_poster import HomeEntryPoster
@@ -70,6 +73,9 @@ __all__ = [
     "StoreRetailOrder",
     "StoreRetailProduct",
     "StoreKitchenPlan",
+    "StorePrintProfile",
+    "StorePrintSceneSetting",
+    "StorePrintJob",
     "DouyinCertificateRedemption",
     "DouyinProductMapping",
     "HomeBanner",

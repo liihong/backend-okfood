@@ -64,3 +64,29 @@ class WxCodeSubmitAuditIn(BaseModel):
     item_list: list[WxCodeAuditItemIn] = Field(..., min_length=1, max_length=5)
     version_desc: str | None = Field(None, max_length=512, description="版本说明")
     feedback_info: str | None = Field(None, max_length=200, description="反馈说明（被拒后重提时可填）")
+    skip_privacy_sync: bool = Field(
+        False,
+        description="true 时跳过提审前自动同步隐私指引（仅运维兜底，正常勿开）",
+    )
+
+
+class WxCodePrivacySettingItemIn(BaseModel):
+    """用户隐私保护指引 · 单项收集说明。"""
+
+    privacy_key: str = Field(..., min_length=1, max_length=64)
+    privacy_text: str = Field(..., min_length=1, max_length=256)
+
+
+class WxCodeSyncPrivacyIn(BaseModel):
+    """平台管理：同步小程序用户隐私保护指引（开发版 privacy_ver=2）。"""
+
+    contact_phone: str | None = Field(None, max_length=32)
+    contact_email: str | None = Field(None, max_length=128)
+    contact_qq: str | None = Field(None, max_length=32)
+    contact_weixin: str | None = Field(None, max_length=64)
+    notice_method: str | None = Field(None, max_length=128, description="隐私变更通知方式，如弹窗提示")
+    setting_list: list[WxCodePrivacySettingItemIn] | None = Field(
+        None,
+        description="不传则使用 OK饭 模板默认四项：手机号/位置/选点/头像",
+    )
+    privacy_ver: int = Field(2, ge=1, le=2, description="2=开发版（提审前同步）；1=现网版")

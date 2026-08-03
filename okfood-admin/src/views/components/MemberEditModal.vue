@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
-import { X, UserPen, CircleHelp, Info, Save, MapPin } from 'lucide-vue-next'
+import { X, UserPen, CircleHelp, Info, Save, MapPin, Truck } from 'lucide-vue-next'
 import { apiJson, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 
@@ -16,6 +16,7 @@ const props = defineProps({
 const emit = defineEmits(['saved'])
 
 const editSaving = ref(false)
+const reinstateBusy = ref(false)
 /** 打开编辑弹窗时的套餐类型，用于判断是否与档案一致、是否提交 plan_type */
 const editInitialPlanType = ref('次卡')
 const editForm = ref({
@@ -94,6 +95,47 @@ watch(
 
 function close() {
   open.value = false
+}
+
+/** 从会员档案推断餐段（纯晚餐卡默认 dinner，否则 lunch） */
+function resolveMemberMealPeriod(u) {
+  const periods = Array.isArray(u?.entitled_meal_periods) ? u.entitled_meal_periods : []
+  if (periods.includes('dinner') && !periods.includes('lunch')) return 'dinner'
+  return 'lunch'
+}
+
+/** 推单冻结后取消请假：强制加入当天配送大表（独立接口，不影响其它锁表逻辑） */
+async function forceReinstateToDeliverySheet() {
+  const u = props.member
+  if (!u?.phone || reinstateBusy.value) return
+  const mealPeriod = resolveMemberMealPeriod(u)
+  const periodLabel = mealPeriod === 'dinner' ? '晚餐' : '午餐'
+  const ok = window.confirm(
+    `确认将 ${u.name || u.phone} 强制加入今日${periodLabel}配送大表？\n仅用于推单后取消请假需当日补送；其他锁表逻辑不变。`,
+  )
+  if (!ok) return
+  reinstateBusy.value = true
+  try {
+    await apiJson(
+      '/api/admin/delivery-sheet/reinstate-member',
+      {
+        method: 'POST',
+        body: JSON.stringify({ phone: u.phone, meal_period: mealPeriod }),
+      },
+      { auth: true },
+    )
+    showToast('已强制加入当天配送大表', 'success')
+  } catch (e) {
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '强制加入失败', 'error')
+  } finally {
+    reinstateBusy.value = false
+  }
 }
 
 async function submitEditMember() {
@@ -340,7 +382,20 @@ async function submitEditMember() {
                 <el-checkbox v-model="editForm.skip_subscription_saturday" class="mem-chk-el mem-chk-el--amber">
                   周六不参与
                 </el-checkbox>
+                <button
+                  type="button"
+                  class="mem-reinstate-btn"
+                  :disabled="reinstateBusy || editSaving"
+                  title="推单后取消请假默认不加回；仅此操作可强制写入当日配送大表"
+                  @click="forceReinstateToDeliverySheet"
+                >
+                  <Truck :size="14" aria-hidden="true" />
+                  {{ reinstateBusy ? '加入中…' : '强制加入当天配送大表' }}
+                </button>
               </div>
+              <p class="mem-hint-soft">
+                若会员今日已推单冻结且早上取消请假需补送，可点「强制加入当天配送大表」；须先取消请假且会员符合配送条件。
+              </p>
             </section>
 
             <!-- 4. 备注 -->
@@ -784,6 +839,31 @@ select.mem-input {
 
 .mem-chk--amber input {
   accent-color: #d97706;
+}
+
+.mem-reinstate-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.38rem 0.72rem;
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  border-radius: 8px;
+  background: rgba(236, 253, 245, 0.85);
+  color: #047857;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.mem-reinstate-btn:hover:not(:disabled) {
+  background: rgba(209, 250, 229, 0.95);
+  border-color: rgba(16, 185, 129, 0.65);
+}
+
+.mem-reinstate-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .mem-chk:hover span {

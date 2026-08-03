@@ -19,6 +19,7 @@ from app.schemas.tenant_saas import (
     WxAuthorizerPatchIn,
     WxCodeCommitIn,
     WxCodeSubmitAuditIn,
+    WxCodeSyncPrivacyIn,
     WxComponentTicketIn,
 )
 from app.services.client.tenant_saas_service import (
@@ -41,6 +42,8 @@ from app.services.shared.wx_open_code_service import (
     list_audit_categories,
     list_code_templates,
     release_audited_code,
+    get_privacy_setting_for_tenant,
+    sync_privacy_setting_for_tenant,
     submit_code_audit,
 )
 from app.services.shared.tenant_integration_service import (
@@ -382,6 +385,46 @@ def platform_wx_code_categories(
     return success(data={"items": items}, msg="获取成功")
 
 
+@router.get("/tenants/{tenant_id}/wx-code/privacy-setting")
+def platform_wx_code_get_privacy_setting(
+    tenant_id: int,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+    privacy_ver: int = 2,
+):
+    """平台：查询已授权小程序用户隐私保护指引（默认开发版 privacy_ver=2）。"""
+    row = get_privacy_setting_for_tenant(db, tenant_id, privacy_ver=privacy_ver)
+    return success(data=row, msg="获取成功")
+
+
+@router.post("/tenants/{tenant_id}/wx-code/sync-privacy-setting")
+def platform_wx_code_sync_privacy_setting(
+    tenant_id: int,
+    body: WxCodeSyncPrivacyIn,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    """平台：同步用户隐私保护指引到微信（开发版；提审前也会自动调用）。"""
+    setting_list = (
+        [{"privacy_key": x.privacy_key, "privacy_text": x.privacy_text} for x in body.setting_list]
+        if body.setting_list
+        else None
+    )
+    row = sync_privacy_setting_for_tenant(
+        db,
+        tenant_id,
+        contact_phone=body.contact_phone,
+        contact_email=body.contact_email,
+        contact_qq=body.contact_qq,
+        contact_weixin=body.contact_weixin,
+        notice_method=body.notice_method,
+        setting_list=setting_list,
+        privacy_ver=int(body.privacy_ver),
+    )
+    state = get_publish_admin_state(db, tenant_id)
+    return success(data={**row, "publish_state": state}, msg="隐私保护指引已同步")
+
+
 @router.post("/tenants/{tenant_id}/wx-code/submit-audit")
 def platform_wx_code_submit_audit(
     tenant_id: int,
@@ -396,6 +439,7 @@ def platform_wx_code_submit_audit(
         item_list=[x.model_dump() for x in body.item_list],
         version_desc=body.version_desc,
         feedback_info=body.feedback_info,
+        skip_privacy_sync=bool(body.skip_privacy_sync),
     )
     return success(data=row, msg="已提交审核")
 

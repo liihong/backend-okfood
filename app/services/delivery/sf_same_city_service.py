@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import math
 import re
@@ -36,6 +35,7 @@ from app.models.sf_same_city_push import SfSameCityPush
 from app.models.single_meal_order import SingleMealOrder
 from app.models.store import Store
 from app.services.meal_period.lunch_delivery import eligible_members_for_lunch_delivery
+from app.services.delivery.delivery_stop_id import _stop_key, compute_delivery_stop_id
 from app.services.delivery.delivery_sheet_service import (
     _filter_members_by_phone_hint,
     _member_line_remarks,
@@ -221,10 +221,6 @@ def _sf_receive_full_address(row: SfSameCityRowBase, *, snap: RegeoSnapshot | No
         combined = f"{prefix} {core}".strip()
         return combined[:1024]
     return core[:1024]
-
-
-def _stop_key(d: date, group_area: str, address_line: str) -> str:
-    return hashlib.sha256(f"{d.isoformat()}|{group_area}|{address_line}".encode()).hexdigest()[:32]
 
 
 def _address_line_without_sheet_area(stop_area: str, address_line: str) -> str:

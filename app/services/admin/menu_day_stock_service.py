@@ -1,11 +1,15 @@
-"""日菜单总库存存于 weekly_menu_slot.total_stock。单次卡剩余=总份数−应配送(与配送大表一致)−已付单次+损耗/回补流水 delta。"""
+"""日菜单总库存存于 weekly_menu_slot.total_stock。
+
+单次可售剩余统一由 ``day_stock_service.get_day_stock_breakdown`` 计算，
+本模块仅做组装与批量查询，禁止手写 cap-sub-paid 公式。
+"""
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from fastapi import HTTPException
 from sqlalchemy import and_, func, or_, select
@@ -32,6 +36,10 @@ from app.services.delivery.delivery_sheet_service import (
 )
 
 
+if TYPE_CHECKING:
+    from app.services.admin.day_stock_service import DayStockBreakdown
+
+
 # 小程序读库存：短 TTL 跨请求复用订阅份数/零售占用，午晚餐切换时减少重复扫表
 _STOCK_SUB_TOTALS_CACHE: dict[tuple[int, tuple[date, ...], str], tuple[float, dict[date, int]]] = {}
 _STOCK_PAID_SINGLE_CACHE: dict[tuple[int, tuple[date, ...], str], tuple[float, dict[date, int]]] = {}
@@ -48,6 +56,24 @@ def _process_metrics_cache_ref() -> dict:
         _process_metrics_cache = {}
         _process_metrics_cache_at = now
     return _process_metrics_cache
+
+
+def invalidate_menu_day_stock_read_caches(store_id: int | None = None) -> None:
+    """失效小程序/周菜单读路径的进程内短 TTL 缓存（订阅份数、单次零售占用、metrics）。"""
+    global _process_metrics_cache, _process_metrics_cache_at
+    _process_metrics_cache = {}
+    _process_metrics_cache_at = 0.0
+    if store_id is None:
+        _STOCK_SUB_TOTALS_CACHE.clear()
+        _STOCK_PAID_SINGLE_CACHE.clear()
+        return
+    sid = int(store_id)
+    for key in list(_STOCK_SUB_TOTALS_CACHE):
+        if key[0] == sid:
+            _STOCK_SUB_TOTALS_CACHE.pop(key, None)
+    for key in list(_STOCK_PAID_SINGLE_CACHE):
+        if key[0] == sid:
+            _STOCK_PAID_SINGLE_CACHE.pop(key, None)
 
 
 def _week_start(d: date) -> date:
@@ -382,6 +408,40 @@ class SingleOrderStockInfo:
         }
 
 
+def _single_order_stock_info_from_breakdown(
+    breakdown,
+    *,
+    total_stock: int | None,
+    business_date: date,
+    subscription_floor: date | None = None,
+) -> SingleOrderStockInfo:
+    """由 ``get_day_stock_breakdown`` 构造单次可售信息，禁止在此处重复写剩余公式。"""
+    from app.services.admin.day_stock_service import display_single_stock_remaining
+
+    sub = int(breakdown.delivery_total) + int(breakdown.pickup_total)
+    paid = int(breakdown.single_retail_total)
+    if total_stock is None:
+        return SingleOrderStockInfo(
+            limited=True,
+            total_stock=None,
+            subscription_meals=sub,
+            paid_single_portions=paid,
+            remaining=0,
+        )
+    rem = display_single_stock_remaining(
+        breakdown,
+        business_date=business_date,
+        subscription_floor=subscription_floor,
+    )
+    return SingleOrderStockInfo(
+        limited=True,
+        total_stock=int(total_stock),
+        subscription_meals=sub,
+        paid_single_portions=paid,
+        remaining=rem,
+    )
+
+
 def single_order_stock_for_dish_date(
     db: Session,
     dish_id: int,
@@ -396,17 +456,12 @@ def single_order_stock_for_dish_date(
     period = normalize_meal_period(meal_period)
     did = int(dish_id)
     w = weekly_slot_row_for_dish_date(db, did, menu_date, store_id=sid, meal_period=period)
-    sub = dashboard_meal_totals_by_dates(db, [menu_date], store_id=sid, meal_period=period).get(menu_date, 0)
-    paid = paid_single_retail_portions_by_dates(db, [menu_date], store_id=sid, meal_period=period).get(menu_date, 0)
-    if w is None or w.total_stock is None:
-        return SingleOrderStockInfo(
-            limited=True, total_stock=None, subscription_meals=sub, paid_single_portions=paid, remaining=0
-        )
-    cap = int(w.total_stock or 0)
+    cap = None if w is None or w.total_stock is None else int(w.total_stock or 0)
     breakdown = get_day_stock_breakdown(db, store_id=sid, business_date=menu_date, meal_period=period)
-    rem = breakdown.remaining
-    return SingleOrderStockInfo(
-        limited=True, total_stock=cap, subscription_meals=sub, paid_single_portions=paid, remaining=rem
+    return _single_order_stock_info_from_breakdown(
+        breakdown,
+        total_stock=cap,
+        business_date=menu_date,
     )
 
 
@@ -443,20 +498,10 @@ def single_order_stock_by_date_for_week(
         day = week_start_anchor + timedelta(days=int(ws.slot) - 1)
         ws_by_day_dish[(day, int(od.id))] = ws
 
-    dates_needing_sub = [d for d in dates if subscription_floor is None or d >= subscription_floor]
-    sub_by_date = dashboard_meal_totals_by_dates(
-        db, dates_needing_sub, store_id=sid, meal_period=period
-    )
-    for d in dates:
-        if subscription_floor is not None and d < subscription_floor:
-            sub_by_date[d] = 0
-    paid_by_date = paid_single_retail_portions_by_dates(
-        db, dates, store_id=sid, meal_period=period
-    )
-    from app.services.admin.day_stock_service import sum_adjustment_deltas_by_dates
+    from app.services.admin.day_stock_service import get_day_stock_breakdown_by_dates
 
-    # 与 get_day_stock_breakdown / weekly_slot_stock_extras 同源：批量预取损耗流水
-    delta_by_date = sum_adjustment_deltas_by_dates(
+    # 与营业概览 / 下单校验同源：批量拉拆解，禁止在此处手写 cap-sub-paid 公式
+    breakdown_by_date = get_day_stock_breakdown_by_dates(
         db, store_id=sid, dates=dates, meal_period=period
     )
 
@@ -467,23 +512,16 @@ def single_order_stock_by_date_for_week(
             continue
         did = int(dish.id)
         w = ws_by_day_dish.get((d, did))
-        sub = int(sub_by_date.get(d, 0))
-        paid_n = int(paid_by_date.get(d, 0))
-        if w is None or w.total_stock is None:
-            out[d] = SingleOrderStockInfo(
-                limited=True, total_stock=None, subscription_meals=sub, paid_single_portions=paid_n, remaining=0
-            )
-        else:
-            cap = int(w.total_stock or 0)
-            delta_sum = int(delta_by_date.get(d, 0))
-            # 与 get_day_stock_breakdown 同源：后厨出餐 − 应配送 − 单次零售 + 流水 delta（负=损耗）
-            rem = max(0, cap - sub - paid_n + delta_sum)
-            # 已过供餐日不可下单；省略订阅统计时 sub=0 会导致 remaining 虚高（如 cap-paid）
-            if subscription_floor is not None and d < subscription_floor:
-                rem = 0
-            out[d] = SingleOrderStockInfo(
-                limited=True, total_stock=cap, subscription_meals=sub, paid_single_portions=paid_n, remaining=rem
-            )
+        cap = None if w is None or w.total_stock is None else int(w.total_stock or 0)
+        breakdown = breakdown_by_date.get(d)
+        if breakdown is None:
+            continue
+        out[d] = _single_order_stock_info_from_breakdown(
+            breakdown,
+            total_stock=cap,
+            business_date=d,
+            subscription_floor=subscription_floor,
+        )
     return out
 
 
@@ -544,8 +582,8 @@ def set_weekly_slot_total_stock(
     *,
     store_id: int,
     meal_period: str = DEFAULT_MEAL_PERIOD,
-) -> None:
-    """更新周槽日总份；NULL=未配置（单次卡不可售）。槽位须已有菜品行。"""
+) -> DayStockBreakdown | None:
+    """更新周槽日总份；NULL=未配置（单次卡不可售）。槽位须已有菜品行。返回最新日库存拆解。"""
     if slot < 1 or slot > 7:
         raise HTTPException(status_code=400, detail="slot 须在 1～7 之间")
     from app.services.meal_period.normalize import normalize_meal_period
@@ -566,7 +604,10 @@ def set_weekly_slot_total_stock(
         if w is not None:
             w.total_stock = None
             db.commit()
-        return
+            from app.services.admin.day_stock_service import invalidate_stock_read_caches
+
+            invalidate_stock_read_caches(sid)
+        return None
     if not w:
         raise HTTPException(status_code=400, detail="该日期槽位无菜品，请先选菜再设总库存")
     if total_stock < 0:
@@ -584,9 +625,15 @@ def set_weekly_slot_total_stock(
         planned_total=int(total_stock),
     )
     db.commit()
-    from app.services.admin.admin_service import invalidate_dashboard_live_summary_cache
+    from app.services.admin.day_stock_service import get_day_stock_breakdown, invalidate_stock_read_caches
 
-    invalidate_dashboard_live_summary_cache(sid)
+    invalidate_stock_read_caches(sid)
+    return get_day_stock_breakdown(
+        db,
+        store_id=sid,
+        business_date=menu_date,
+        meal_period=period,
+    )
 
 
 def _paid_sums_for_dates_dishes(
@@ -636,23 +683,14 @@ def weekly_slot_stock_extras(
     period = normalize_meal_period(meal_period)
     dates = [week_start_anchor + timedelta(days=i) for i in range(7)]
     if skip_subscription_stats:
-        sub_by_date = {}
-        scheduled_by_date = {}
-        paid = {}
-        paid_by_date = {}
+        breakdown_by_date: dict[date, Any] = {}
     else:
-        if sub_by_date is None:
-            sub_by_date = dashboard_meal_totals_by_dates(db, dates, store_id=sid, meal_period=period)
-        if paid_by_date is None:
-            paid_by_date = paid_single_retail_portions_by_dates(db, dates, store_id=sid, meal_period=period)
-    from app.services.admin.day_stock_service import sum_adjustment_deltas_by_dates, waste_total_display
+        from app.services.admin.day_stock_service import get_day_stock_breakdown_by_dates
 
-    # 批量预取损耗流水，避免逐槽位调用 get_day_stock_breakdown（会重复扫配送大表）
-    delta_by_date = (
-        {}
-        if skip_subscription_stats
-        else sum_adjustment_deltas_by_dates(db, store_id=sid, dates=dates, meal_period=period)
-    )
+        # 与营业概览 / 小程序 / 下单校验同源：一次批量拉拆解，禁止在循环内逐槽位重算
+        breakdown_by_date = get_day_stock_breakdown_by_dates(
+            db, store_id=sid, dates=dates, meal_period=period
+        )
 
     out: list[dict[str, Any]] = []
     for s in slot_payload:
@@ -673,29 +711,24 @@ def weekly_slot_stock_extras(
             base["single_stock_remaining"] = None
             out.append(base)
             continue
-        did_i = int(did)
-        if paid_by_date is not None:
-            sub = sub_by_date.get(menu_date, 0)
-            paid_n = paid_by_date.get(menu_date, 0)
-        else:
-            scheduled = (scheduled_by_date or {}).get(menu_date)
-            sub = sub_by_date.get(menu_date, 0) if scheduled and int(scheduled.id) == did_i else 0
-            paid_n = (paid or {}).get((menu_date, did_i), 0)
-        base["subscription_meals_for_day"] = sub
-        base["single_retail_paid_portions"] = paid_n
+        bd = breakdown_by_date.get(menu_date)
+        if bd is None:
+            base["subscription_meals_for_day"] = 0
+            base["single_retail_paid_portions"] = 0
+            base["single_stock_remaining"] = 0
+            base["waste_total"] = 0
+            out.append(base)
+            continue
+        base["subscription_meals_for_day"] = int(bd.delivery_total) + int(bd.pickup_total)
+        base["single_retail_paid_portions"] = int(bd.single_retail_total)
         cap_raw = s.get("total_stock")
         if cap_raw is None:
             base["total_stock"] = None
             base["single_stock_remaining"] = 0
-            base["waste_total"] = 0
+            base["waste_total"] = int(bd.waste_total)
         else:
-            cap = int(cap_raw)
-            base["total_stock"] = cap
-            sub = int(sub_by_date.get(menu_date, 0))
-            paid_n = int(paid_by_date.get(menu_date, 0) if paid_by_date is not None else 0)
-            delta_sum = int(delta_by_date.get(menu_date, 0))
-            # 与 get_day_stock_breakdown 同源：后厨出餐 − 应配送 − 单次零售 + 流水 delta
-            base["single_stock_remaining"] = max(0, cap - sub - paid_n + delta_sum)
-            base["waste_total"] = waste_total_display(delta_sum)
+            base["total_stock"] = int(cap_raw)
+            base["single_stock_remaining"] = 0 if bd.remaining is None else max(0, int(bd.remaining))
+            base["waste_total"] = int(bd.waste_total)
         out.append(base)
     return out

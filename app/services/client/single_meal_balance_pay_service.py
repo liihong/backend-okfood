@@ -215,9 +215,9 @@ def pay_single_meal_order_with_member_balance(
     db.add(order)
     db.commit()
     db.refresh(order)
-    from app.services.admin.admin_service import invalidate_dashboard_live_summary_cache
+    from app.services.admin.day_stock_service import invalidate_stock_read_caches
 
-    invalidate_dashboard_live_summary_cache(int(order.store_id))
+    invalidate_stock_read_caches(int(order.store_id))
 
     try:
         from app.services.member.member_renew_subscribe_service import try_send_renew_remind_after_balance_change

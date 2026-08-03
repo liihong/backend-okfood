@@ -1,4 +1,8 @@
-"""日库存统一口径：后厨出餐 − 分配 + 损耗流水 = 剩余（只读，不可直接改值）。"""
+"""日库存统一口径（全系统单次可售剩余唯一计算源）。
+
+公式：后厨出餐 − 到家配送 − 自提(午) − 单次零售 + 损耗/回补流水 = 剩余。
+管理端顶卡、本周菜单、小程序展示与下单校验均须调用本模块，禁止重复实现。
+"""
 
 from __future__ import annotations
 
@@ -157,6 +161,22 @@ def _prep_metrics_for_period(
     return result
 
 
+def display_single_stock_remaining(
+    breakdown: DayStockBreakdown,
+    *,
+    business_date: date,
+    subscription_floor: date | None = None,
+) -> int:
+    """小程序 / 管理端展示的「单次可售剩余」：与 ``get_day_stock_breakdown`` 同源，已过供餐日或未配置后厨时为 0。"""
+    if breakdown.kitchen_output is None:
+        return 0
+    if subscription_floor is not None and business_date < subscription_floor:
+        return 0
+    if breakdown.remaining is None:
+        return 0
+    return max(0, int(breakdown.remaining))
+
+
 def get_day_stock_breakdown(
     db: Session,
     *,
@@ -201,6 +221,40 @@ def get_day_stock_breakdown(
         adjustment_delta_sum=delta_sum,
         remaining=remaining,
     )
+
+
+def get_day_stock_breakdown_by_dates(
+    db: Session,
+    *,
+    store_id: int,
+    dates: Iterable[date],
+    meal_period: str,
+    metrics_cache: dict | None = None,
+) -> dict[date, DayStockBreakdown]:
+    """批量日库存拆解；与逐日 ``get_day_stock_breakdown`` 结果一致，共享 metrics_cache 避免重复扫配送大表。"""
+    uniq = list(dict.fromkeys(dates))
+    if not uniq:
+        return {}
+    cache: dict = {} if metrics_cache is None else metrics_cache
+    return {
+        d: get_day_stock_breakdown(
+            db,
+            store_id=int(store_id),
+            business_date=d,
+            meal_period=meal_period,
+            metrics_cache=cache,
+        )
+        for d in uniq
+    }
+
+
+def invalidate_stock_read_caches(store_id: int | None = None) -> None:
+    """库存写操作后统一失效进程内读缓存：仪表盘锚点摘要 + 小程序周菜单/单次可售读路径。"""
+    from app.services.admin.admin_service import invalidate_dashboard_live_summary_cache
+    from app.services.admin.menu_day_stock_service import invalidate_menu_day_stock_read_caches
+
+    invalidate_dashboard_live_summary_cache(store_id)
+    invalidate_menu_day_stock_read_caches(store_id)
 
 
 def list_day_stock_adjustments(
@@ -305,6 +359,7 @@ def create_day_stock_adjustment(
     )
     db.add(row)
     db.commit()
+    invalidate_stock_read_caches(sid)
     return get_day_stock_breakdown(db, store_id=sid, business_date=business_date, meal_period=period)
 
 

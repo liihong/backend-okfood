@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.delivery_calendar import is_subscription_delivery_day
 from app.services.admin.menu_day_stock_service import sync_kitchen_planned_to_menu_day_total_stock
+
+if TYPE_CHECKING:
+    from app.services.admin.day_stock_service import DayStockBreakdown
 
 
 def set_menu_day_total_stock_by_business_date(
@@ -19,18 +23,26 @@ def set_menu_day_total_stock_by_business_date(
     total_stock: int,
     meal_period: str = "lunch",
     updated_by: str | None = None,
-) -> int:
-    """与「本周菜单配置」日总份数同源；槽位无菜品时拒绝保存。"""
+) -> tuple[int, DayStockBreakdown | None]:
+    """与「本周菜单配置」日总份数同源；槽位无菜品时拒绝保存。返回 (日总份数, 最新拆解)。"""
     from app.services.meal_period.normalize import normalize_meal_period
-    from app.services.admin.day_stock_service import sync_store_kitchen_plan_row
+    from app.services.admin.day_stock_service import (
+        get_day_stock_breakdown,
+        invalidate_stock_read_caches,
+        sync_store_kitchen_plan_row,
+    )
 
     total = max(0, int(total_stock))
     period = normalize_meal_period(meal_period)
+    sid = int(store_id)
     if not is_subscription_delivery_day(business_date):
-        return total
+        bd = get_day_stock_breakdown(
+            db, store_id=sid, business_date=business_date, meal_period=period
+        )
+        return total, bd
     synced = sync_kitchen_planned_to_menu_day_total_stock(
         db,
-        store_id=int(store_id),
+        store_id=sid,
         business_date=business_date,
         planned_total=total,
         meal_period=period,
@@ -42,15 +54,16 @@ def set_menu_day_total_stock_by_business_date(
         )
     sync_store_kitchen_plan_row(
         db,
-        store_id=int(store_id),
+        store_id=sid,
         business_date=business_date,
         meal_period=period,
         planned_total=total,
         updated_by=updated_by,
     )
     db.commit()
-    # 顶卡 dashboard-summary 有 90s 锚点缓存，保存后需失效以免仍展示旧「日总份数」
-    from app.services.admin.admin_service import invalidate_dashboard_live_summary_cache
-
-    invalidate_dashboard_live_summary_cache(int(store_id))
-    return total
+    # 写后统一失效读缓存，并返回与小程序 / 顶卡同源的拆解
+    invalidate_stock_read_caches(sid)
+    bd = get_day_stock_breakdown(
+        db, store_id=sid, business_date=business_date, meal_period=period
+    )
+    return total, bd
