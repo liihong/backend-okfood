@@ -1,10 +1,10 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { apiJson, adminAccessToken, handleAdminLogout } from '../../../admin/core.js'
+import { apiJson, adminAccessToken, adminStoreBranding, handleAdminLogout } from '../../../admin/core.js'
 import { showToast } from '../../../composables/useToast.js'
 import { useStorePrint } from '../../../composables/useStorePrint.js'
-import { retailOrderToLabelItem } from '../../../utils/print/retailLabelAdapter.js'
+import { mallOrderToLabelItem, singleMealOrderToLabelItem } from '../../../utils/print/retailLabelAdapter.js'
 import { toastSfPushBatchOutcome, toastSfPushError } from '../../../utils/sfPushMessages.js'
 import { todayShanghaiStr } from '../utils/orderFormatters.js'
 import { mallPayFilterApiValue, resolveSingleOrderMemberDisplayName } from '../utils/orderDisplay.js'
@@ -29,6 +29,14 @@ import {
 export function useOrdersManage(orderKind = 'single') {
   const activeTab = ref(orderKind)
   const { submitPrintJob, resolveScene, printing: retailPrintLoading } = useStorePrint()
+
+  function printStoreName() {
+    return String(adminStoreBranding.value?.store_name || '').trim() || 'OK饭'
+  }
+
+  async function submitMealFullPrintJob(scene, items) {
+    await submitPrintJob(scene, items, { template_key: 'delivery_meal_full' })
+  }
   const orderDate = ref(todayShanghaiStr())
   const route = useRoute()
   const searchQuery = ref('')
@@ -538,6 +546,7 @@ export function useOrdersManage(orderKind = 'single') {
     else if (cmd === 'complete') void onMarkOrderComplete(row)
     else if (cmd === 'cancel') void onCancelOrder(row)
     else if (cmd === 'refund') onRefundWechatSingle(row)
+    else if (cmd === 'print') void onPrintSingleMealOrder(row)
   }
 
   function onMallRowMoreCommand(row, cmd) {
@@ -557,14 +566,26 @@ export function useOrdersManage(orderKind = 'single') {
     else if (cmd === 'print') void onPrintRetailOrder(row)
   }
 
+  async function onPrintSingleMealOrder(row) {
+    const cfg = await resolveScene('store_retail')
+    if (!cfg?.configured) {
+      showToast('请先在系统管理 → 打印设置 → 配送标签 中配置打印机', 'error')
+      return
+    }
+    await submitMealFullPrintJob('store_retail', [
+      singleMealOrderToLabelItem(row, { storeName: printStoreName() }),
+    ])
+  }
+
   async function onPrintRetailOrder(row) {
     const cfg = await resolveScene('store_retail')
     if (!cfg?.configured) {
-      showToast('请先在系统管理 → 打印设置中配置打印机', 'error')
+      showToast('请先在系统管理 → 打印设置 → 配送标签 中配置打印机', 'error')
       return
     }
-    const templateKey = row.store_pickup ? 'retail_pickup' : 'retail_delivery'
-    await submitPrintJob('store_retail', [retailOrderToLabelItem(row)], { template_key: templateKey })
+    await submitMealFullPrintJob('store_retail', [
+      mallOrderToLabelItem(row, { storeName: printStoreName() }),
+    ])
   }
 
   async function onBatchPrintRetailOrders() {
@@ -572,12 +593,12 @@ export function useOrdersManage(orderKind = 'single') {
     if (!rows.length) return
     const cfg = await resolveScene('store_retail')
     if (!cfg?.configured) {
-      showToast('请先在系统管理 → 打印设置中配置打印机', 'error')
+      showToast('请先在系统管理 → 打印设置 → 配送标签 中配置打印机', 'error')
       return
     }
+    const storeName = printStoreName()
     for (const row of rows) {
-      const templateKey = row.store_pickup ? 'retail_pickup' : 'retail_delivery'
-      await submitPrintJob('store_retail', [retailOrderToLabelItem(row)], { template_key: templateKey })
+      await submitMealFullPrintJob('store_retail', [mallOrderToLabelItem(row, { storeName })])
     }
   }
 
@@ -1517,6 +1538,7 @@ export function useOrdersManage(orderKind = 'single') {
     onBatchPushSfRetailOrders,
     onBatchPrintRetailOrders,
     onPrintRetailOrder,
+    onPrintSingleMealOrder,
     retailPrintLoading,
     openBatchAssignCourier,
     onBatchMarkComplete,

@@ -56,6 +56,8 @@ const {
   clearSingleSelection,
   singleRowActionLoading,
   onSingleRowMoreCommand,
+  onPrintSingleMealOrder,
+  retailPrintLoading,
 } = useOrdersManageInject()
 
 /** 窄屏（手机）使用卡片列表，桌面保留表格 */
@@ -360,6 +362,9 @@ function onSingleMobileSelectChange(row, checked) {
                 <el-dropdown-item command="refund" divided :disabled="!canRefundWechatSingle(row)">
                   退款
                 </el-dropdown-item>
+                <el-dropdown-item command="print" divided :disabled="retailPrintLoading">
+                  打印标签
+                </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -477,6 +482,9 @@ function onSingleMobileSelectChange(row, checked) {
                 </el-dropdown-item>
                 <el-dropdown-item command="refund" divided :disabled="!canRefundWechatSingle(row)">
                   退款
+                </el-dropdown-item>
+                <el-dropdown-item command="print" divided :disabled="retailPrintLoading">
+                  打印标签
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>

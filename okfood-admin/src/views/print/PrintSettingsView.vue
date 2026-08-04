@@ -106,25 +106,40 @@ onMounted(() => {
         <div class="ps-preview">
           <p class="ps-preview__title">预览说明</p>
           <p class="ps-preview__hint">
-            推荐使用 76×130mm 顺丰面单纸，须与「打印机管理」中纸张规格一致；推单成功后条码为顺丰运单号，可扫码。
+            推荐使用 76×130mm 顺丰面单纸，须与「打印机管理」中纸张规格一致；推单成功后条码为顺丰运单号，可扫码。配送标签订单号为片区编码+序号（如 ZX001）；零售/商城与配送同款面单，右上角分别为「零售订单」「商城订单」，餐品行显示商品详情。若未单独配置「商城零售标签」，将自动使用配送标签的打印机。
           </p>
           <div
             class="ps-preview__box"
-            :class="{ 'ps-preview__box--waybill': activeScene === 'delivery_sheet' && currentSetting.template_key === 'delivery_meal_full' }"
+            :class="{
+              'ps-preview__box--waybill':
+                (activeScene === 'delivery_sheet' || activeScene === 'store_retail')
+                && currentSetting.template_key === 'delivery_meal_full',
+            }"
           >
-            <template v-if="activeScene === 'delivery_sheet' && currentSetting.template_key === 'delivery_meal_full'">
+            <template
+              v-if="
+                (activeScene === 'delivery_sheet' || activeScene === 'store_retail')
+                && currentSetting.template_key === 'delivery_meal_full'
+              "
+            >
               <div class="ps-preview__store-row">
                 <span>{{ adminStoreBranding?.store_name || 'OK饭' }}</span>
-                <span class="ps-preview__fulfillment">配送</span>
+                <span class="ps-preview__fulfillment">{{
+                  activeScene === 'store_retail' ? '商城订单' : '配送'
+                }}</span>
               </div>
               <table class="ps-preview__sf-table">
-                <tr><td>订单号：OKF20260724c69ab60ca4</td></tr>
-                <tr><td class="ps-preview__sf-region">中心医院</td></tr>
-                <tr><td class="ps-preview__sf-member">李女士 · 132****6633</td></tr>
-                <tr><td class="ps-preview__sf-meal">餐别：午+晚</td></tr>
-                <tr><td class="ps-preview__sf-meal">数量：1份</td></tr>
-                <tr><td class="ps-preview__sf-remark">备注：少辣</td></tr>
-                <tr><td>tips：1.若暂不吃，优先建议冷藏保存！</td></tr>
+                <tbody>
+                  <tr><td>订单号：{{ activeScene === 'store_retail' ? 'OKF12345' : 'ZX001' }}</td></tr>
+                  <tr><td class="ps-preview__sf-region">{{ activeScene === 'store_retail' ? '东区' : '中心医院' }}</td></tr>
+                  <tr><td class="ps-preview__sf-member">李女士 · 132****6633</td></tr>
+                  <tr><td class="ps-preview__sf-meal">{{
+                    activeScene === 'store_retail' ? '餐品：冷萃果蔬汁 500ml' : '餐别：午+晚'
+                  }}</td></tr>
+                  <tr><td class="ps-preview__sf-meal">数量：1份</td></tr>
+                  <tr><td class="ps-preview__sf-remark">备注：少辣</td></tr>
+                  <tr><td>tips：1.若暂不吃，优先建议冷藏保存！</td></tr>
+                </tbody>
               </table>
               <div class="ps-preview__sf-barcode">
                 <div class="ps-preview__sf-barcode-bars" aria-hidden="true" />

@@ -1128,6 +1128,20 @@ def delete_dish(db: Session, dish_id: int, *, store_id: int) -> None:
     row = db.get(MenuDish, dish_id)
     if not row or int(row.store_id) != sid:
         raise HTTPException(status_code=404, detail="菜品不存在")
+    did = int(dish_id)
+    # 曾排期的菜品可直接删除：先清理周槽位与按日排期引用，再删菜品库记录
+    db.execute(
+        delete(MenuSchedule).where(
+            MenuSchedule.store_id == sid,
+            MenuSchedule.dish_id == did,
+        )
+    )
+    db.execute(
+        delete(WeeklyMenuSlot).where(
+            WeeklyMenuSlot.store_id == sid,
+            WeeklyMenuSlot.dish_id == did,
+        )
+    )
     try:
         db.delete(row)
         db.commit()
@@ -1135,7 +1149,7 @@ def delete_dish(db: Session, dish_id: int, *, store_id: int) -> None:
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail="该菜品仍被周菜单槽位或按日排期引用，请先解除关联后再删除",
+            detail="该菜品仍被单次订餐订单等业务数据引用，暂无法删除",
         )
 
 

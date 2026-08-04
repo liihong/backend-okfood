@@ -25,9 +25,15 @@ export const PRINT_TEMPLATES = [
     description: '片区突出便于分拣',
   },
   {
+    key: 'delivery_meal_full',
+    scene: 'store_retail',
+    name: '备餐面单（推荐）',
+    description: '与配送标签同款 76×130：订单号/片区/会员/餐品/备注/tips',
+  },
+  {
     key: 'retail_delivery',
     scene: 'store_retail',
-    name: '商城配送标签',
+    name: '商城配送标签（旧）',
     description: '配送到家',
   },
   {

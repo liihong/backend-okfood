@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from app.services.shared.wx_open_code_service import (
     build_ext_json_for_tenant,
+    build_modify_domain_payload,
     build_privacy_setting_payload,
     commit_template_to_tenant,
     fetch_latest_audit_status,
@@ -23,6 +24,7 @@ from app.services.shared.wx_open_code_service import (
     save_publish_blob,
     submit_code_audit,
     sync_privacy_setting_for_tenant,
+    sync_server_domains_for_tenant,
 )
 
 
@@ -94,12 +96,13 @@ def test_build_ext_json_ok(mock_has_auth, mock_get_row, mock_saas, mock_settings
     assert ext["window"]["navigationBarTitleText"] == "Hello轻厨"
 
 
+@patch("app.services.shared.wx_open_code_service.sync_server_domains_for_tenant")
 @patch("app.services.shared.wx_open_code_service.save_publish_blob")
 @patch("app.services.shared.wx_open_code_service.get_publish_admin_state")
 @patch("app.services.shared.wx_open_code_service.get_valid_authorizer_access_token", return_value="at")
 @patch("app.services.shared.wx_open_code_service.build_ext_json_for_tenant")
 @patch("app.services.shared.wx_open_code_service.httpx.Client")
-def test_commit_template_success(mock_client_cls, mock_build, mock_token, mock_state, mock_save):
+def test_commit_template_success(mock_client_cls, mock_build, mock_token, mock_state, mock_save, mock_sync_domains):
     mock_build.return_value = {
         "extAppid": "wxabc",
         "ext": {"tenantId": "t_x"},
@@ -122,6 +125,7 @@ def test_commit_template_success(mock_client_cls, mock_build, mock_token, mock_s
         db, 3, template_id=1, user_version="1.0.0", user_desc="初版"
     )
     assert out["last_user_version"] == "1.0.0"
+    mock_sync_domains.assert_called_once_with(db, 3, action="add")
     mock_save.assert_called()
     saved = mock_save.call_args[0][2]
     assert saved["template_id"] == 1
@@ -370,3 +374,57 @@ def test_release_audited_code_success(
 
     out = release_audited_code(MagicMock(), 3)
     assert out["released_at"] == "t"
+
+
+@patch("app.services.shared.wx_open_code_service.get_settings")
+def test_build_modify_domain_payload(mock_settings):
+    cfg = MagicMock()
+    cfg.public_base_for_assets = "https://ok.sourcefire.cn"
+    cfg.oss_public_url_prefix = "https://okoss.sourcefire.cn"
+    mock_settings.return_value = cfg
+
+    payload = build_modify_domain_payload(action="add")
+    assert payload["action"] == "add"
+    assert payload["requestdomain"] == ["https://ok.sourcefire.cn"]
+    assert payload["uploaddomain"] == ["https://ok.sourcefire.cn"]
+    assert payload["downloaddomain"] == ["https://okoss.sourcefire.cn"]
+
+
+@patch("app.services.shared.wx_open_code_service._patch_publish_blob")
+@patch("app.services.shared.wx_open_code_service.get_effective_domains_for_tenant")
+@patch("app.services.shared.wx_open_code_service.build_modify_domain_payload")
+@patch("app.services.shared.wx_open_code_service._authorizer_access_token_or_http", return_value="at")
+@patch("app.services.shared.wx_open_code_service.tenant_has_authorizer_tokens", return_value=True)
+@patch("app.services.shared.wx_open_code_service.httpx.Client")
+def test_sync_server_domains_success(
+    mock_client_cls,
+    _has,
+    _token,
+    mock_build_payload,
+    mock_effective,
+    _patch_blob,
+):
+    mock_build_payload.return_value = {
+        "action": "add",
+        "requestdomain": ["https://ok.sourcefire.cn"],
+        "uploaddomain": ["https://ok.sourcefire.cn"],
+        "downloaddomain": ["https://okoss.sourcefire.cn"],
+    }
+    mock_effective.return_value = {
+        "requestdomain": ["https://ok.sourcefire.cn"],
+        "downloaddomain": ["https://okoss.sourcefire.cn"],
+    }
+
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {"errcode": 0}
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.post.return_value = resp
+    mock_client_cls.return_value = client
+
+    out = sync_server_domains_for_tenant(MagicMock(), 3, action="add")
+    assert out["action"] == "add"
+    assert out["requestdomain"] == ["https://ok.sourcefire.cn"]
+    assert out["effective_domain"]["requestdomain"] == ["https://ok.sourcefire.cn"]

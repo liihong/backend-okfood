@@ -10,6 +10,25 @@ export function buildTestLabelItems(scene, templateKey, storeName) {
   const store = String(storeName || 'OK饭').trim() || 'OK饭'
   const deliveryDate = todayShanghaiStr()
 
+  if (scene === 'store_retail' && templateKey === 'delivery_meal_full') {
+    return [
+      {
+        region: '东区',
+        store_name: store,
+        name: '李女士',
+        phone_masked: '132****6633',
+        units: 1,
+        remark: '测试打印',
+        delivery_date: deliveryDate,
+        product_title: '冷萃果蔬汁 500ml',
+        order_no: 'OKF12345',
+        sf_order_id: 'SF6504306526672',
+        store_pickup: false,
+        order_kind: 'mall',
+      },
+    ]
+  }
+
   if (scene === 'store_retail') {
     return [
       {
@@ -21,8 +40,9 @@ export function buildTestLabelItems(scene, templateKey, storeName) {
         remark: '测试打印',
         delivery_date: deliveryDate,
         product_title: '测试商品',
-        order_no: 'TEST',
+        order_no: 'OKF12345',
         store_pickup: templateKey === 'retail_pickup',
+        order_kind: 'mall',
       },
     ]
   }
@@ -41,8 +61,9 @@ export function buildTestLabelItems(scene, templateKey, storeName) {
         shop_order_id: 'OKF20260724c69a199b60ca4',
         sf_order_id: 'SF6504306526672',
         product_title: '',
-        order_no: 'OKF20260724c69a19474d0329b60ca4',
+        order_no: 'ZX001',
         store_pickup: false,
+        order_kind: 'delivery',
       },
     ]
   }

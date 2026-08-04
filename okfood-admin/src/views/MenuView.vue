@@ -329,7 +329,7 @@ async function saveDish() {
 
 async function deleteDish(row) {
   if (!row?.id) return
-  if (!confirm('确定删除「' + row.name + '」？若仍被排期引用，接口将拒绝删除。')) return
+  if (!confirm('确定删除「' + row.name + '」？相关周菜单与按日排期引用将一并清除。')) return
   if (!adminAccessToken.value) {
     showToast('请先登录', 'error')
     return

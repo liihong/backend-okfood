@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 PrintBrand = Literal["local_label", "xprinter_cloud_label", "feie_label", "yilian_k4"]
 PrintScene = Literal["delivery_sheet", "store_retail"]
 CopiesMode = Literal["per_unit", "per_order"]
+LabelOrderKind = Literal["", "delivery", "retail", "mall"]
 
 PRINT_SCENES: tuple[str, ...] = ("delivery_sheet", "store_retail")
 
@@ -57,9 +58,15 @@ PRINT_TEMPLATES: list[dict[str, Any]] = [
         "description": "片区突出，便于分拣",
     },
     {
+        "key": "delivery_meal_full",
+        "scene": "store_retail",
+        "name": "备餐面单（推荐）",
+        "description": "与配送标签同款 76×130：订单号/片区/会员/餐品/备注/tips",
+    },
+    {
         "key": "retail_delivery",
         "scene": "store_retail",
-        "name": "商城配送标签",
+        "name": "商城配送标签（旧）",
         "description": "配送到家：片区、地址、商品、数量",
     },
     {
@@ -78,7 +85,7 @@ PRINT_TEMPLATES: list[dict[str, Any]] = [
 
 DEFAULT_SCENE_TEMPLATE: dict[str, str] = {
     "delivery_sheet": "delivery_meal_full",
-    "store_retail": "retail_delivery",
+    "store_retail": "delivery_meal_full",
 }
 
 
@@ -102,10 +109,14 @@ class LabelItemIn(BaseModel):
     delivery_date: str = Field("", description="配送业务日")
     route_seq: int | None = Field(None, description="线路序号")
     product_title: str = Field("", description="商品名（零售）")
-    order_no: str = Field("", description="订单号（零售）")
+    order_no: str = Field("", description="展示用订单号：大表备餐短号（片区编码+序号）或零售 out_trade_no")
     shop_order_id: str = Field("", description="顺丰商家订单号（推单 shop_order_id）")
     sf_order_id: str = Field("", description="顺丰运单号（条码内容）")
     store_pickup: bool = Field(False, description="是否自提")
+    order_kind: LabelOrderKind = Field(
+        "",
+        description="订单类别：delivery=订阅配送；retail=零售单次；mall=商城零售；空=按订阅配送处理",
+    )
 
 
 class TenantPrintCloudCredentialsOut(BaseModel):

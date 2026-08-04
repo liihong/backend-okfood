@@ -361,6 +361,9 @@ export function isApiSuccessCode(code) {
   return code === 0 || code === 200
 }
 
+/** 与后端 settings.MAX_UPLOAD_BYTES 一致（5MB） */
+export const MAX_UPLOAD_MB = 5
+
 export function errorMessageFromBody(data, fallback) {
   if (data && isApiEnvelope(data) && typeof data.msg === 'string' && data.msg) {
     return data.msg
@@ -377,6 +380,18 @@ export function errorMessageFromBody(data, fallback) {
       .join('；')
   }
   return fallback
+}
+
+/** HTTP 状态码与代理英文文案 → 中文友好提示（如上传 413） */
+export function humanizeHttpErrorMessage(status, data, fallback) {
+  const uploadTooLargeMsg = `图片过大，请压缩后重试（单张不超过 ${MAX_UPLOAD_MB}MB）`
+  if (status === 413) return uploadTooLargeMsg
+
+  const msg = errorMessageFromBody(data, fallback)
+  if (/content too large|request entity too large|payload too large/i.test(msg)) {
+    return uploadTooLargeMsg
+  }
+  return msg
 }
 
 export async function apiJson(path, init = {}, { auth = false } = {}) {
@@ -403,7 +418,7 @@ export async function apiJson(path, init = {}, { auth = false } = {}) {
     /* 非 JSON */
   }
   if (!res.ok) {
-    const msg = errorMessageFromBody(data, `请求失败 (${res.status})`)
+    const msg = humanizeHttpErrorMessage(res.status, data, `请求失败 (${res.status})`)
     const err = new Error(msg)
     err.status = res.status
     throw err
@@ -453,7 +468,7 @@ export async function apiBlob(path, init = {}, { auth = false } = {}) {
     } catch {
       /* ignore */
     }
-    const msg = errorMessageFromBody(data, `请求失败 (${status})`)
+    const msg = humanizeHttpErrorMessage(status, data, `请求失败 (${status})`)
     const err = new Error(msg)
     err.status = status
     throw err
@@ -478,7 +493,7 @@ export async function apiForm(path, formData, { auth = false } = {}) {
     /* 非 JSON */
   }
   if (!res.ok) {
-    const msg = errorMessageFromBody(data, `请求失败 (${res.status})`)
+    const msg = humanizeHttpErrorMessage(res.status, data, `请求失败 (${res.status})`)
     const err = new Error(msg)
     err.status = res.status
     throw err

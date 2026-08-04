@@ -296,21 +296,25 @@ def _member_line_remarks(m: Member, addr: MemberAddress | None) -> str | None:
     return "；".join(parts) if parts else None
 
 
-def _active_regions_meta(db: Session, *, tenant_id: int) -> tuple[list[str], set[int]]:
-    """启用片区：限定租户，与会员/门店维度一致。"""
+def _active_regions_meta(db: Session, *, tenant_id: int) -> tuple[list[str], set[int], dict[str, str]]:
+    """启用片区：限定租户，与会员/门店维度一致；附带名称→编码（供标签备餐短号）。"""
     rows = db.execute(
-        select(DeliveryRegion.id, DeliveryRegion.name)
+        select(DeliveryRegion.id, DeliveryRegion.name, DeliveryRegion.code)
         .where(DeliveryRegion.is_active.is_(True), DeliveryRegion.tenant_id == int(tenant_id))
         .order_by(DeliveryRegion.priority.asc(), DeliveryRegion.id.asc())
     ).all()
     names: list[str] = []
     ids: set[int] = set()
-    for rid, n in rows:
+    region_codes: dict[str, str] = {}
+    for rid, n, code in rows:
         ids.add(int(rid))
         s = str(n).strip() if n is not None else ""
         if s:
             names.append(s)
-    return names, ids
+            c = str(code).strip().upper() if code is not None else ""
+            if c:
+                region_codes[s] = c[:32]
+    return names, ids, region_codes
 
 
 def _area_needs_attention(label: str | None, known_active_names: set[str]) -> bool:
@@ -1470,7 +1474,7 @@ def build_delivery_sheet(
     tid = int(st.tenant_id)
     d = delivery_date or today_shanghai()
     sub_ok = is_subscription_delivery_day(d)
-    active_region_list, known_ids = _active_regions_meta(db, tenant_id=tid)
+    active_region_list, known_ids, region_codes = _active_regions_meta(db, tenant_id=tid)
     known_names = set(active_region_list)
 
     region_filter_id: int | None = None
@@ -1486,6 +1490,7 @@ def build_delivery_sheet(
                 delivery_date=d.isoformat(),
                 groups=[],
                 active_regions=active_region_list,
+                region_codes=region_codes,
                 home_pending_meal_total=0,
                 home_delivered_meal_total=0,
                 pickup_meal_total=0,
@@ -1737,6 +1742,7 @@ def build_delivery_sheet(
         delivery_date=d.isoformat(),
         groups=groups_out,
         active_regions=active_region_list,
+        region_codes=region_codes,
         home_pending_meal_total=home_pending,
         home_delivered_meal_total=home_delivered,
         pickup_meal_total=pickup_total,

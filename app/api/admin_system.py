@@ -19,6 +19,7 @@ from app.schemas.tenant_saas import (
     WxAuthorizerPatchIn,
     WxCodeCommitIn,
     WxCodeSubmitAuditIn,
+    WxCodeSyncDomainsIn,
     WxCodeSyncPrivacyIn,
     WxComponentTicketIn,
 )
@@ -38,12 +39,14 @@ from app.services.shared.wx_open_code_service import (
     commit_template_to_tenant,
     fetch_latest_audit_status,
     fetch_trial_qrcode_base64,
+    get_effective_domains_for_tenant,
     get_publish_admin_state,
     list_audit_categories,
     list_code_templates,
     release_audited_code,
     get_privacy_setting_for_tenant,
     sync_privacy_setting_for_tenant,
+    sync_server_domains_for_tenant,
     submit_code_audit,
 )
 from app.services.shared.tenant_integration_service import (
@@ -310,8 +313,24 @@ def platform_refresh_wx_authorizer(
         from fastapi import HTTPException
 
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
+
+    domain_result: dict | None = None
+    domain_error: str | None = None
+    try:
+        domain_result = sync_server_domains_for_tenant(db, tenant_id, action="add")
+    except HTTPException as e:
+        domain_error = str(e.detail)
+
     row = get_authorizer_admin_state(db, tenant_id)
-    return success(data=row, msg="已刷新")
+    data = {**row}
+    if domain_result is not None:
+        data["domain_sync"] = domain_result
+    if domain_error:
+        data["domain_sync_error"] = domain_error
+    msg = "已刷新并同步服务器域名" if domain_result else "已刷新"
+    if domain_error:
+        msg = f"{msg}（域名同步失败：{domain_error}）"
+    return success(data=data, msg=msg)
 
 
 @router.get("/wx-open/templates")
@@ -423,6 +442,30 @@ def platform_wx_code_sync_privacy_setting(
     )
     state = get_publish_admin_state(db, tenant_id)
     return success(data={**row, "publish_state": state}, msg="隐私保护指引已同步")
+
+
+@router.post("/tenants/{tenant_id}/wx-code/sync-domains")
+def platform_wx_code_sync_domains(
+    tenant_id: int,
+    body: WxCodeSyncDomainsIn,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    """平台：将服务器域名下发到已授权小程序（modify_domain + 生效校验）。"""
+    row = sync_server_domains_for_tenant(db, tenant_id, action=body.action)
+    state = get_publish_admin_state(db, tenant_id)
+    return success(data={**row, "publish_state": state}, msg="服务器域名已同步")
+
+
+@router.get("/tenants/{tenant_id}/wx-code/effective-domains")
+def platform_wx_code_effective_domains(
+    tenant_id: int,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    """平台：查询已授权小程序当前生效的服务器域名。"""
+    row = get_effective_domains_for_tenant(db, tenant_id)
+    return success(data=row, msg="获取成功")
 
 
 @router.post("/tenants/{tenant_id}/wx-code/submit-audit")

@@ -645,7 +645,7 @@ onUnmounted(() => {
               </label>
               <label class="field">
                 <span>编码（可选）</span>
-                <el-input v-model="formCode" placeholder="短码" clearable />
+                <el-input v-model="formCode" placeholder="短码，如 ZX（配送标签备餐号前缀）" clearable />
               </label>
             </div>
             <div class="form-row-2">

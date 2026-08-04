@@ -90,3 +90,12 @@ class WxCodeSyncPrivacyIn(BaseModel):
         description="不传则使用 OK饭 模板默认四项：手机号/位置/选点/头像",
     )
     privacy_ver: int = Field(2, ge=1, le=2, description="2=开发版（提审前同步）；1=现网版")
+
+
+class WxCodeSyncDomainsIn(BaseModel):
+    """平台管理：同步小程序服务器域名（modify_domain）。"""
+
+    action: str = Field(
+        "add",
+        description="add=增量添加（推荐）；set=全量覆盖；get=仅查询当前配置",
+    )

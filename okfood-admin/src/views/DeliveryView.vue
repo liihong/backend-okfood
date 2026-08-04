@@ -24,7 +24,7 @@ import {
 import { useAnimatedInteger } from '../composables/useAnimatedInteger.js'
 import { useAdminSystemNotifications } from '../composables/useAdminSystemNotifications.js'
 import { useStorePrint } from '../composables/useStorePrint.js'
-import { buildDeliveryLabelItems } from '../utils/print/deliveryLabelAdapter.js'
+import { buildDeliveryLabelItems, missingRegionCodesForStops } from '../utils/print/deliveryLabelAdapter.js'
 
 const { fetchNotifications } = useAdminSystemNotifications()
 const { submitPrintJob, printing: printLoading, resolveScene } = useStorePrint()
@@ -143,6 +143,7 @@ const emptySheet = () => ({
   delivery_date: '',
   groups: [],
   active_regions: [],
+  region_codes: {},
   home_pending_meal_total: 0,
   home_delivered_meal_total: 0,
   pickup_meal_total: 0,
@@ -383,6 +384,8 @@ async function fetchSheet() {
       delivery_date: resolvedDate,
       groups: Array.isArray(data0?.groups) ? data0.groups : [],
       active_regions: regions0,
+      region_codes:
+        data0?.region_codes && typeof data0.region_codes === 'object' ? data0.region_codes : {},
       home_pending_meal_total: Number(data0?.home_pending_meal_total) || 0,
       home_delivered_meal_total: Number(data0?.home_delivered_meal_total) || 0,
       pickup_meal_total: Number(data0?.pickup_meal_total) || 0,
@@ -500,21 +503,30 @@ async function printDeliveryLabels(scope) {
   }
   const cfg = await resolveScene('delivery_sheet')
   if (!cfg?.configured) {
-    showToast('请先在系统管理 → 打印设置中配置打印机', 'error')
+    showToast('请先在系统管理 → 打印设置 → 配送标签 中配置打印机', 'error')
     return
   }
   const storeName =
     String(adminStoreBranding.value?.store_name || '').trim() || 'OK饭'
+  const regionCodes = sheetToday.value.region_codes || {}
   const items = buildDeliveryLabelItems(
     flatStops.value,
     d,
     region,
     addressLineForExcelExport,
     storeName,
+    regionCodes,
   )
   if (!items.length) {
     showToast('没有可打印的配送记录', 'error')
     return
+  }
+  const missingCodes = missingRegionCodesForStops(flatStops.value, regionCodes)
+  if (missingCodes.length) {
+    showToast(
+      `以下片区未配置编码，备餐号前缀暂用 X：${missingCodes.join('、')}（请在配送区域维护编码）`,
+      'error',
+    )
   }
   await submitPrintJob('delivery_sheet', items)
 }

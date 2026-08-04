@@ -103,13 +103,60 @@ def _sf_barcode_value(item: LabelItemIn) -> str:
 
 
 def _order_no_display(item: LabelItemIn) -> str:
+    kind = (item.order_kind or "").strip().lower()
+    if kind in ("retail", "mall"):
+        no = (item.order_no or "").strip()
+        return no or "—"
     shop = (item.shop_order_id or item.order_no or "").strip()
     return shop or "—"
 
 
-def _fulfillment_mode_label(item: LabelItemIn) -> str:
-    """履约方式：门店名称行右侧显示。"""
+def _uses_sf_waybill_layout(item: LabelItemIn, template_key: str) -> bool:
+    """备餐面单（顺丰同城风格）布局：订阅配送、零售、商城均可用。"""
+    if template_key != "delivery_meal_full":
+        return False
+    kind = (item.order_kind or "").strip().lower()
+    if kind in ("retail", "mall"):
+        return True
+    return not (item.product_title or "").strip()
+
+
+def _header_right_label(item: LabelItemIn) -> str:
+    """门店名称行右侧：零售/商城订单类型，订阅仍为配送/自提。"""
+    kind = (item.order_kind or "").strip().lower()
+    if kind == "retail":
+        return "零售订单"
+    if kind == "mall":
+        return "商城订单"
     return "自提" if item.store_pickup else "配送"
+
+
+def _meal_row_label(item: LabelItemIn) -> str:
+    kind = (item.order_kind or "").strip().lower()
+    return "餐品" if kind in ("retail", "mall") else "餐别"
+
+
+def _product_detail_text(item: LabelItemIn) -> str:
+    """零售/商城：餐品详情（商品名，多份带数量）。"""
+    title = (item.product_title or item.meal_category or "").strip()
+    if not title:
+        return "—"
+    qty = max(1, int(item.units or 1))
+    if qty > 1:
+        return f"{title} ×{qty}"
+    return title
+
+
+def _meal_row_value(item: LabelItemIn) -> str:
+    kind = (item.order_kind or "").strip().lower()
+    if kind in ("retail", "mall"):
+        return _product_detail_text(item)
+    return _format_meal_category_short(item.meal_category or "午餐卡")
+
+
+def _fulfillment_mode_label(item: LabelItemIn) -> str:
+    """履约方式：门店名称行右侧显示（兼容旧调用）。"""
+    return _header_right_label(item)
 
 
 def _build_sf_waybill_table_html(item: LabelItemIn) -> str:
@@ -120,7 +167,8 @@ def _build_sf_waybill_table_html(item: LabelItemIn) -> str:
     member_line = name
     if phone_disp:
         member_line = f"{name} · {phone_disp}" if name else phone_disp
-    meal_cat = _format_meal_category_short(item.meal_category or "午餐卡")
+    meal_label = _meal_row_label(item)
+    meal_val = _meal_row_value(item)
     units_n = max(1, int(item.units or 1))
     remark = (item.remark or "").strip() or "无"
     tips = DELIVERY_MEAL_FULL_TIPS
@@ -140,7 +188,7 @@ def _build_sf_waybill_table_html(item: LabelItemIn) -> str:
         ),
         (
             f'<tr><td style="{cell_lg}font-size:16px;font-weight:700;">'
-            f'餐别：{escape(meal_cat)}</td></tr>'
+            f'{escape(meal_label)}：{escape(meal_val)}</td></tr>'
         ),
         (
             f'<tr><td style="{cell_lg}font-size:16px;font-weight:700;">'
@@ -177,7 +225,8 @@ def _build_meal_full_lines(item: LabelItemIn) -> list[_RenderLine]:
     if phone_disp:
         member_line = f"{name} · {phone_disp}" if name else phone_disp
     remark = (item.remark or "").strip() or "无"
-    meal_cat = _format_meal_category_short(item.meal_category or "午餐卡")
+    meal_label = _meal_row_label(item)
+    meal_val = _meal_row_value(item)
     units_n = max(1, int(item.units or 1))
     sf_no = (item.sf_order_id or "").strip()
     lines: list[_RenderLine] = [
@@ -187,12 +236,12 @@ def _build_meal_full_lines(item: LabelItemIn) -> list[_RenderLine]:
             bold=True,
             line_mm=5.5,
             align="left",
-            right_text=_fulfillment_mode_label(item),
+            right_text=_header_right_label(item),
         ),
         _RenderLine(f"订单号：{_order_no_display(item)}", font_pt=9, bold=False, line_mm=5),
         _RenderLine(region or "未分配片区", font_pt=18, bold=True, line_mm=9, align="center"),
         _RenderLine(member_line or "—", font_pt=14, bold=True, line_mm=7.5),
-        _RenderLine(f"餐别：{meal_cat}", font_pt=16, bold=True, line_mm=8),
+        _RenderLine(f"{meal_label}：{meal_val}", font_pt=16, bold=True, line_mm=8),
         _RenderLine(f"数量：{units_n}份", font_pt=16, bold=True, line_mm=8),
         _RenderLine(f"备注：{remark[:100]}", font_pt=16, bold=True, line_mm=10),
         _RenderLine(f"tips：{DELIVERY_MEAL_FULL_TIPS}", font_pt=9, bold=False, line_mm=5.5),
@@ -238,7 +287,7 @@ def _to_lodop_layout_sf_waybill(
         blocks=[],
         layout_style="sf_waybill",
         header_text=store,
-        header_right_text=_fulfillment_mode_label(item),
+        header_right_text=_header_right_label(item),
         table_html=table_html,
         barcodes=barcodes,
     )
@@ -391,7 +440,7 @@ def _plan_type_label(plan_type: str) -> str:
 
 
 def _build_lines(item: LabelItemIn, template_key: str) -> list[tuple[str, int, bool]]:
-    if template_key == "delivery_meal_full" and not item.product_title:
+    if _uses_sf_waybill_layout(item, template_key):
         return [(ln.text, 2 if ln.bold and ln.font_pt >= 12 else 1, ln.bold) for ln in _build_meal_full_lines(item)]
 
     lines: list[tuple[str, int, bool]] = []
@@ -487,7 +536,7 @@ def _to_feie_xp_xml(
     y = _mm_to_dot(margin_top_mm)
     x = _mm_to_dot(margin_left_mm)
 
-    if template_key == "delivery_meal_full" and not item.product_title:
+    if _uses_sf_waybill_layout(item, template_key):
         sf = (item.sf_order_id or "").strip()
         for ln in _build_meal_full_lines(item):
             # 底部顺丰单号改条码输出，避免与正文重复
@@ -521,7 +570,7 @@ def _to_feie_xp_xml(
 
 
 def _to_yilian_content(item: LabelItemIn, template_key: str) -> str:
-    if template_key == "delivery_meal_full" and not item.product_title:
+    if _uses_sf_waybill_layout(item, template_key):
         parts: list[str] = []
         for ln in _build_meal_full_lines(item):
             if ln.right_text:
@@ -557,7 +606,7 @@ def _to_lodop_layout(
     x = float(margin_left_mm)
     content_w = float(paper_width_mm - margin_left_mm * 2)
 
-    if template_key == "delivery_meal_full" and not item.product_title:
+    if _uses_sf_waybill_layout(item, template_key):
         return _to_lodop_layout_sf_waybill(
             item,
             paper_width_mm=paper_width_mm,
@@ -648,7 +697,7 @@ def render_test_label(
         shop_order_id="OKF20260724c69a194b60ca4",
         sf_order_id="SF6504306526672",
         product_title="",
-        order_no="",
+        order_no="ZX001",
         store_pickup=False,
     )
     return render_label_payload(

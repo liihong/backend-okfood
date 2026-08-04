@@ -44,6 +44,8 @@ AUDIT_STATUS_URL = "https://api.weixin.qq.com/wxa/get_latest_auditstatus"
 RELEASE_URL = "https://api.weixin.qq.com/wxa/release"
 SET_PRIVACY_SETTING_URL = "https://api.weixin.qq.com/cgi-bin/component/setprivacysetting"
 GET_PRIVACY_SETTING_URL = "https://api.weixin.qq.com/cgi-bin/component/getprivacysetting"
+MODIFY_DOMAIN_URL = "https://api.weixin.qq.com/wxa/modify_domain"
+GET_EFFECTIVE_DOMAIN_URL = "https://api.weixin.qq.com/wxa/get_effective_domain"
 
 # 微信 get_latest_auditstatus.status 文案（管理端展示）
 AUDIT_STATUS_LABELS: dict[int, str] = {
@@ -230,6 +232,158 @@ def _resolve_api_base() -> str:
     return base.rstrip("/")
 
 
+def _ensure_https_domain(raw: str, *, label: str) -> str:
+    """将配置项规范为带 https:// 前缀的域名（微信 modify_domain 要求）。"""
+    base = _s(raw).rstrip("/")
+    if not base:
+        raise HTTPException(status_code=503, detail=f"请先在 .env 配置 {label}")
+    if base.startswith("https://"):
+        return base
+    if base.startswith("http://"):
+        return f"https://{base[len('http://'):]}"
+    return f"https://{base}"
+
+
+def build_modify_domain_payload(*, action: str = "add") -> dict[str, Any]:
+    """
+    组装 modify_domain 请求体。
+
+    - request / upload：BASE_URL（如 https://ok.sourcefire.cn）
+    - download：OSS 对外域名（如 https://okoss.sourcefire.cn）
+    """
+    act = _s(action).lower() or "add"
+    if act not in ("add", "set", "get"):
+        raise HTTPException(status_code=400, detail="action 仅支持 add / set / get")
+
+    cfg = get_settings()
+    api_domain = _ensure_https_domain(cfg.public_base_for_assets, label="BASE_URL")
+    oss_raw = _s(cfg.oss_public_url_prefix)
+    download_domains: list[str] = []
+    if oss_raw:
+        download_domains.append(_ensure_https_domain(oss_raw, label="OSS_DOMAIN / OSS_PUBLIC_BASE_URL"))
+
+    return {
+        "action": act,
+        "requestdomain": [api_domain],
+        "wsrequestdomain": [],
+        "uploaddomain": [api_domain],
+        "downloaddomain": download_domains,
+        "udpdomain": [],
+        "tcpdomain": [],
+    }
+
+
+def get_effective_domains_for_tenant(db: Session, tenant_id: int) -> dict[str, Any]:
+    """查询已授权小程序当前生效的服务器域名（get_effective_domain）。"""
+    _ensure_authorizer_for_code_ops(db, int(tenant_id))
+    token = _authorizer_access_token_or_http(db, int(tenant_id))
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            r = client.get(GET_EFFECTIVE_DOMAIN_URL, params={"access_token": token})
+            r.raise_for_status()
+            data: dict[str, Any] = r.json()
+    except httpx.HTTPError as e:
+        logger.exception("get_effective_domain 请求失败 tenant_id=%s", tenant_id)
+        raise HTTPException(status_code=502, detail="查询生效域名失败（网络）") from e
+
+    _raise_wechat(data, fallback="查询生效域名失败")
+    effective = data.get("effective_domain") if isinstance(data.get("effective_domain"), dict) else {}
+    return {
+        "requestdomain": effective.get("requestdomain") or [],
+        "wsrequestdomain": effective.get("wsrequestdomain") or [],
+        "uploaddomain": effective.get("uploaddomain") or [],
+        "downloaddomain": effective.get("downloaddomain") or [],
+        "udpdomain": effective.get("udpdomain") or [],
+        "tcpdomain": effective.get("tcpdomain") or [],
+    }
+
+
+def _domain_list_contains(domains: list[Any], target: str) -> bool:
+    """判断微信返回的域名列表是否包含目标（忽略尾部 /）。"""
+    want = _s(target).rstrip("/")
+    for item in domains:
+        got = _s(item).rstrip("/")
+        if got == want:
+            return True
+    return False
+
+
+def sync_server_domains_for_tenant(
+    db: Session,
+    tenant_id: int,
+    *,
+    action: str = "add",
+) -> dict[str, Any]:
+    """
+    通过 modify_domain 将平台服务器域名下发到已授权小程序账号，并校验 get_effective_domain。
+
+    首次建议 action=add，避免覆盖商户在小程序后台自行配置的其它域名。
+    """
+    _ensure_authorizer_for_code_ops(db, int(tenant_id))
+    payload = build_modify_domain_payload(action=action)
+    token = _authorizer_access_token_or_http(db, int(tenant_id))
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            r = client.post(MODIFY_DOMAIN_URL, params={"access_token": token}, json=payload)
+            r.raise_for_status()
+            data: dict[str, Any] = r.json()
+    except httpx.HTTPError as e:
+        logger.exception("modify_domain 请求失败 tenant_id=%s", tenant_id)
+        _patch_publish_blob(db, int(tenant_id), {"domain_last_error": "域名同步网络失败"})
+        raise HTTPException(status_code=502, detail="同步服务器域名失败（网络）") from e
+
+    errcode = data.get("errcode")
+    if errcode not in (None, 0):
+        msg = _s(data.get("errmsg")) or "同步服务器域名失败"
+        _patch_publish_blob(db, int(tenant_id), {"domain_last_error": f"{errcode}: {msg}"})
+        _raise_wechat(data, fallback="同步服务器域名失败")
+
+    effective = get_effective_domains_for_tenant(db, int(tenant_id))
+    api_domain = payload["requestdomain"][0]
+    missing: list[str] = []
+    if not _domain_list_contains(effective.get("requestdomain") or [], api_domain):
+        missing.append(api_domain)
+    for dl in payload.get("downloaddomain") or []:
+        if not _domain_list_contains(effective.get("downloaddomain") or [], _s(dl)):
+            missing.append(_s(dl))
+
+    now = beijing_now_naive().isoformat(timespec="seconds")
+    patch: dict[str, Any] = {
+        "domain_synced_at": now,
+        "domain_last_error": None,
+        "domain_action": payload.get("action"),
+        "domain_request": payload.get("requestdomain"),
+        "domain_download": payload.get("downloaddomain"),
+        "domain_effective": effective,
+    }
+    if missing:
+        patch["domain_last_error"] = f"生效域名未包含: {', '.join(missing)}"
+        _patch_publish_blob(db, int(tenant_id), patch)
+        raise HTTPException(
+            status_code=502,
+            detail=f"域名已提交但生效校验未通过，缺少: {', '.join(missing)}。请确认第三方平台「服务器域名」池已配置对应域名后重试",
+        )
+
+    _patch_publish_blob(db, int(tenant_id), patch)
+    logger.info(
+        "modify_domain 成功 tenant_id=%s action=%s request=%s download=%s",
+        tenant_id,
+        payload.get("action"),
+        payload.get("requestdomain"),
+        payload.get("downloaddomain"),
+    )
+    return {
+        "synced_at": now,
+        "action": payload.get("action"),
+        "requestdomain": payload.get("requestdomain"),
+        "uploaddomain": payload.get("uploaddomain"),
+        "downloaddomain": payload.get("downloaddomain"),
+        "effective_domain": effective,
+    }
+
+
 def build_ext_json_for_tenant(db: Session, tenant_id: int) -> dict[str, Any]:
     """
     按租户 SaaS 配置组装 commit 用的 ext_json 对象（尚未 dumps）。
@@ -353,6 +507,10 @@ def get_publish_admin_state(db: Session, tenant_id: int) -> dict[str, Any]:
         "privacy_synced_at": blob.get("privacy_synced_at"),
         "privacy_last_error": blob.get("privacy_last_error"),
         "privacy_ver": blob.get("privacy_ver"),
+        "domain_synced_at": blob.get("domain_synced_at"),
+        "domain_last_error": blob.get("domain_last_error"),
+        "domain_request": blob.get("domain_request"),
+        "domain_download": blob.get("domain_download"),
         **_audit_fields_from_blob(blob),
     }
 
@@ -382,6 +540,9 @@ def commit_template_to_tenant(
         raise HTTPException(status_code=400, detail="user_version 不能超过 64 字符")
     if not desc:
         raise HTTPException(status_code=400, detail="user_desc 不能为空")
+
+    # commit 前同步服务器域名，避免体验版/正式版出现 request:fail url not in domain list
+    sync_server_domains_for_tenant(db, int(tenant_id), action="add")
 
     ext_obj = build_ext_json_for_tenant(db, int(tenant_id))
     ext_json_str = json.dumps(ext_obj, ensure_ascii=False, separators=(",", ":"))

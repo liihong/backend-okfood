@@ -282,6 +282,16 @@ def _get_profile_for_scene(
     template_key = setting.template_key if setting else DEFAULT_SCENE_TEMPLATE.get(scene, "delivery_meal_full")
     copies_mode = setting.copies_mode if setting else "per_unit"
     pid = profile_id or (int(setting.profile_id) if setting and setting.profile_id else None)
+    # 零售/商城未单独绑定时，回退使用配送标签打印机（同款备餐面单，避免重复配置）
+    if pid is None and scene == "store_retail":
+        delivery_setting = db.get(
+            StorePrintSceneSetting, {"store_id": int(store_id), "scene": "delivery_sheet"}
+        )
+        if delivery_setting and delivery_setting.profile_id:
+            pid = int(delivery_setting.profile_id)
+            if setting is None:
+                template_key = delivery_setting.template_key or DEFAULT_SCENE_TEMPLATE["store_retail"]
+                copies_mode = delivery_setting.copies_mode or "per_unit"
     if pid is None:
         raise HTTPException(status_code=400, detail="请先在打印设置中绑定打印机")
     prof = db.get(StorePrintProfile, int(pid))

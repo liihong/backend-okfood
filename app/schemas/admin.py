@@ -1190,6 +1190,10 @@ class DeliverySheetOut(BaseModel):
         default_factory=list,
         description="delivery_regions 中 is_active=1 的名称列表，与筛选下拉同源",
     )
+    region_codes: dict[str, str] = Field(
+        default_factory=dict,
+        description="启用片区名称 → 编码（大写），供配送标签备餐短号前缀",
+    )
     home_pending_meal_total: int = Field(
         0,
         ge=0,
