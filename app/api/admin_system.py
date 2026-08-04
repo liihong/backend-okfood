@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.deps import SessionDep, admin_system_subject
 from app.schemas.admin import (
@@ -304,14 +304,12 @@ def platform_refresh_wx_authorizer(
     db: SessionDep,
     _admin: Annotated[str, Depends(admin_system_subject)],
 ):
-    """平台：强制刷新 authorizer_access_token。"""
+    """平台：强制刷新 authorizer_access_token（成功后尝试同步服务器域名，失败不影响刷新结果）。"""
     from app.integrations.wechat_mini import WeChatMiniError
 
     try:
         refresh_authorizer_access_token(db, tenant_id)
     except WeChatMiniError as e:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
 
     domain_result: dict | None = None
@@ -319,7 +317,11 @@ def platform_refresh_wx_authorizer(
     try:
         domain_result = sync_server_domains_for_tenant(db, tenant_id, action="add")
     except HTTPException as e:
-        domain_error = str(e.detail)
+        detail = e.detail
+        domain_error = detail if isinstance(detail, str) else str(detail)
+    except Exception as e:
+        # 域名同步为附加步骤，任何未预期异常不应导致刷新接口 500
+        domain_error = str(e) or "域名同步失败"
 
     row = get_authorizer_admin_state(db, tenant_id)
     data = {**row}

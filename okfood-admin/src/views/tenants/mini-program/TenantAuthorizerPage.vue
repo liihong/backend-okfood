@@ -113,7 +113,14 @@ async function refreshAuthorizerToken() {
   try {
     const data = await api.value.refreshAuthorizerToken()
     resetAuthorizerFromPayload(data)
-    showToast('access_token 已刷新', 'success')
+    const domainErr = String(data?.domain_sync_error || '').trim()
+    if (domainErr) {
+      showToast(`access_token 已刷新；域名同步失败：${domainErr}`, 'success')
+    } else if (data?.domain_sync?.synced_at) {
+      showToast('access_token 已刷新，服务器域名已同步', 'success')
+    } else {
+      showToast('access_token 已刷新', 'success')
+    }
   } catch (e) {
     toastError(e, '刷新失败')
   } finally {
