@@ -632,6 +632,7 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
         out_trade_no=_new_temp_out_trade_no(),
         member_id=member_id,
         dish_id=int(dish.id),
+        dish_name=(dish.name or "").strip() or None,
         member_address_id=addr_id,
         store_pickup=bool(body.store_pickup),
         quantity=qty,
@@ -687,8 +688,14 @@ def _single_meal_order_row_to_out(
     region_name_map: dict[int, str] | None = None,
 ) -> SingleMealOrderOut:
     if dish_title is None:
-        dsh = db.get(MenuDish, row.dish_id)
-        dish_title = (dsh.name or "").strip() if dsh else "餐品"
+        snap = (getattr(row, "dish_name", None) or "").strip()
+        if snap:
+            dish_title = snap
+        elif row.dish_id is not None:
+            dsh = db.get(MenuDish, row.dish_id)
+            dish_title = (dsh.name or "").strip() if dsh else "餐品"
+        else:
+            dish_title = "餐品"
     if address_summary is None:
         addr = order_address
         if addr is None and row.member_address_id is not None:
@@ -709,7 +716,7 @@ def _single_meal_order_row_to_out(
     return SingleMealOrderOut(
         id=int(row.id),
         out_trade_no=str(row.out_trade_no or ""),
-        dish_id=int(row.dish_id),
+        dish_id=int(row.dish_id) if row.dish_id is not None else None,
         dish_title=dish_title,
         member_address_id=int(row.member_address_id) if row.member_address_id is not None else None,
         store_pickup=bool(row.store_pickup),
@@ -1151,8 +1158,9 @@ def prepare_wechat_jsapi_for_order(db: Session, member_id: int, order_id: int, c
     if not openid:
         raise HTTPException(status_code=400, detail="请使用微信小程序授权登录后再支付")
 
-    dish = db.get(MenuDish, order.dish_id)
-    body_desc = (dish.name if dish else "") or "单次点餐"
+    dish = db.get(MenuDish, order.dish_id) if order.dish_id is not None else None
+    snap = (getattr(order, "dish_name", None) or "").strip()
+    body_desc = snap or ((dish.name if dish else "") or "单次点餐")
     out_no = (order.out_trade_no or "").strip()
     if not out_no:
         raise HTTPException(status_code=500, detail="订单缺少商户单号")
@@ -1391,7 +1399,7 @@ def list_courier_single_order_tasks(
         select(SingleMealOrder, Member, MemberAddress, MenuDish)
         .join(Member, SingleMealOrder.member_id == Member.id)
         .join(MemberAddress, SingleMealOrder.member_address_id == MemberAddress.id)
-        .join(MenuDish, SingleMealOrder.dish_id == MenuDish.id)
+        .outerjoin(MenuDish, SingleMealOrder.dish_id == MenuDish.id)
         .where(
             SingleMealOrder.delivery_date == delivery_date,
             SingleMealOrder.pay_status == "已支付",
@@ -1430,7 +1438,7 @@ def list_courier_single_order_tasks(
                 is_delivered=False,
                 task_kind="single",
                 single_order_id=int(order.id),
-                dish_title=(dsh.name or "").strip() or None,
+                dish_title=(dsh.name if dsh else (order.dish_name or "")).strip() or None,
             )
         )
     depot_lng, depot_lat = (

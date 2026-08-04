@@ -1,7 +1,7 @@
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onActivated } from 'vue'
 import { X, UserPen, CircleHelp, Info, Save, MapPin, Truck } from 'lucide-vue-next'
-import { apiJson, handleAdminLogout } from '../../admin/core.js'
+import { apiJson, handleAdminLogout, mapAdminUserToRow } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 
 const open = defineModel('open', { type: Boolean, default: false })
@@ -19,6 +19,9 @@ const editSaving = ref(false)
 const reinstateBusy = ref(false)
 /** 打开编辑弹窗时的套餐类型，用于判断是否与档案一致、是否提交 plan_type */
 const editInitialPlanType = ref('次卡')
+/** 打开/刷新表单时的剩余次数，仅用户主动修改时才提交 balance，避免 keep-alive 快照误覆盖 */
+const editInitialBalance = ref(0)
+const profileLoading = ref(false)
 const editForm = ref({
   phone: '',
   name: '',
@@ -60,11 +63,17 @@ function memberAddressDetailWithoutArea(u) {
   return rawAddr
 }
 
+function normalizeBalance(v) {
+  return Math.max(0, Math.min(999999, Math.floor(Number(v) || 0)))
+}
+
 function fillFormFromMember(u) {
   const p0 = u.plan && u.plan !== '—' ? u.plan : '次卡'
   editInitialPlanType.value = p0
   const dr =
     u.delivery_region_id != null && u.delivery_region_id !== '' ? String(u.delivery_region_id) : ''
+  const balance = normalizeBalance(u.balance)
+  editInitialBalance.value = balance
   editForm.value = {
     phone: u.phone,
     name: u.name || '',
@@ -73,7 +82,7 @@ function fillFormFromMember(u) {
     daily_meal_units: Math.max(1, Math.min(50, Number(u.daily_meal_units) || 1)),
     plan_type: p0,
     use_auto_area: false,
-    balance: Math.max(0, Math.min(999999, Math.floor(Number(u.balance) || 0))),
+    balance,
     delivery_start_date:
       typeof u.delivery_start_date === 'string' && u.delivery_start_date.trim()
         ? u.delivery_start_date.trim().slice(0, 10)
@@ -85,13 +94,47 @@ function fillFormFromMember(u) {
   }
 }
 
+/** 打开弹窗时拉取最新档案，避免列表 keep-alive 缓存与送达扣次不同步 */
+async function refreshMemberFormFromServer(u) {
+  if (!u || typeof u !== 'object') return
+  const phone = String(u.phone || '').trim()
+  if (!phone) {
+    fillFormFromMember(u)
+    return
+  }
+  profileLoading.value = true
+  try {
+    const params = new URLSearchParams({ q: phone, page: '1', page_size: '1' })
+    const data = await apiJson(`/api/admin/users?${params}`, {}, { auth: true })
+    const rawItems = Array.isArray(data?.items) ? data.items : []
+    const fresh = rawItems.length ? mapAdminUserToRow(rawItems[0], 0) : u
+    fillFormFromMember(fresh)
+  } catch (e) {
+    fillFormFromMember(u)
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) {
+      alert('登录已过期，请重新登录')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '加载最新会员档案失败，已使用列表数据', 'error')
+  } finally {
+    profileLoading.value = false
+  }
+}
+
 watch(
   [open, () => props.member],
   ([isOpen, m]) => {
-    if (isOpen && m && typeof m === 'object') fillFormFromMember(m)
+    if (isOpen && m && typeof m === 'object') void refreshMemberFormFromServer(m)
   },
   { flush: 'sync' },
 )
+
+/** 标签页 keep-alive 切回且弹窗仍打开时，同步最新剩余次数等字段 */
+onActivated(() => {
+  if (open.value && props.member) void refreshMemberFormFromServer(props.member)
+})
 
 function close() {
   open.value = false
@@ -140,25 +183,30 @@ async function forceReinstateToDeliverySheet() {
 
 async function submitEditMember() {
   if (!editForm.value.phone) return
+  if (profileLoading.value) return
   if (!(editForm.value.address || '').trim()) {
     showToast('默认配送地址为空，请先在会员列表「地址」中维护后再保存', 'error')
     return
   }
   editSaving.value = true
   try {
+    const balanceVal = normalizeBalance(editForm.value.balance)
     const payload = {
       phone: editForm.value.phone,
       name: editForm.value.name.trim(),
       remarks: editForm.value.remarks.trim() || null,
       address: editForm.value.address.trim() || null,
       daily_meal_units: Math.max(1, Math.min(50, Number(editForm.value.daily_meal_units) || 1)),
-      balance: Math.max(0, Math.min(999999, Math.floor(Number(editForm.value.balance) || 0))),
       delivery_start_date: String(editForm.value.delivery_start_date ?? '').trim()
         ? String(editForm.value.delivery_start_date).trim().slice(0, 10)
         : null,
       store_pickup: editForm.value.store_pickup === true,
       skip_subscription_saturday: editForm.value.skip_subscription_saturday === true,
       delivery_deferred: editForm.value.delivery_deferred === true,
+    }
+    // 仅运营主动修改剩余次数时才提交，避免暂停配送等操作附带过期 balance 写库
+    if (balanceVal !== editInitialBalance.value) {
+      payload.balance = balanceVal
     }
     if (editForm.value.use_auto_area) {
       payload.use_auto_area = true
@@ -419,9 +467,9 @@ async function submitEditMember() {
 
         <footer class="mem-ft">
           <div class="mem-ft-inner">
-            <button type="submit" class="mem-btn mem-btn-primary" :disabled="editSaving">
+            <button type="submit" class="mem-btn mem-btn-primary" :disabled="editSaving || profileLoading">
               <Save :size="16" aria-hidden="true" />
-              {{ editSaving ? '保存中…' : '确认并保存修改' }}
+              {{ profileLoading ? '同步档案中…' : editSaving ? '保存中…' : '确认并保存修改' }}
             </button>
             <button type="button" class="mem-btn mem-btn-ghost" @click="close">取消</button>
           </div>

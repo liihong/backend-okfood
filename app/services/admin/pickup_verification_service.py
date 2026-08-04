@@ -90,7 +90,7 @@ def _retail_pickup_rows(
     stmt = (
         select(SingleMealOrder, Member, MenuDish)
         .join(Member, Member.id == SingleMealOrder.member_id)
-        .join(MenuDish, MenuDish.id == SingleMealOrder.dish_id)
+        .outerjoin(MenuDish, MenuDish.id == SingleMealOrder.dish_id)
         .where(
             SingleMealOrder.store_id == int(store_id),
             SingleMealOrder.delivery_date == delivery_date,
@@ -107,7 +107,7 @@ def _retail_pickup_rows(
                 order_id=int(order.id),
                 name=_retail_member_display_name(member),
                 phone=(member.phone or "").strip(),
-                dish_title=(dish.name or "").strip() or "餐品",
+                dish_title=((dish.name if dish else (order.dish_name or "")) or "").strip() or "餐品",
                 quantity=max(1, int(order.quantity or 1)),
                 is_delivered=f == "delivered",
             )

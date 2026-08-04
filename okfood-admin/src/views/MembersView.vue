@@ -1,6 +1,6 @@
 <script setup>
 defineOptions({ name: 'MembersView' })
-import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, watch, computed, onMounted, onActivated, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import {
@@ -1059,6 +1059,11 @@ onMounted(async () => {
   if (membersTableHostRef.value) {
     membersTableResizeObserver.observe(membersTableHostRef.value)
   }
+})
+
+/** keep-alive 切回标签页时刷新列表，避免配送扣次后仍展示旧剩余次数 */
+onActivated(() => {
+  void fetchMembers()
 })
 
 onUnmounted(() => {

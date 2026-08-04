@@ -305,7 +305,8 @@ CREATE TABLE IF NOT EXISTS `single_meal_orders` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `out_trade_no` VARCHAR(32) NOT NULL COMMENT '商户订单号，微信统一下单',
   `member_id` BIGINT UNSIGNED NOT NULL COMMENT 'members.id',
-  `dish_id` BIGINT UNSIGNED NOT NULL COMMENT 'menu_dish.id',
+  `dish_id` BIGINT UNSIGNED NULL COMMENT 'menu_dish.id；菜品删除后为 NULL',
+  `dish_name` VARCHAR(200) NULL COMMENT '下单时菜品名快照；菜品删除后仍可读',
   `member_address_id` BIGINT UNSIGNED NULL COMMENT 'member_addresses.id；门店自提时为 NULL',
   `store_pickup` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '门店自提：支付后不派骑手',
   `quantity` INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '份数，总价=单价×份数',
@@ -327,7 +328,7 @@ CREATE TABLE IF NOT EXISTS `single_meal_orders` (
   CONSTRAINT `fk_smo_member` FOREIGN KEY (`member_id`) REFERENCES `members` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_smo_dish` FOREIGN KEY (`dish_id`) REFERENCES `menu_dish` (`id`)
-    ON DELETE RESTRICT ON UPDATE CASCADE,
+    ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_smo_address` FOREIGN KEY (`member_address_id`) REFERENCES `member_addresses` (`id`)
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_smo_courier` FOREIGN KEY (`courier_id`) REFERENCES `couriers` (`courier_id`)

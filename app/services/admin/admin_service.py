@@ -4,7 +4,7 @@ import time
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import and_, case, delete, exists, func, literal, or_, select, true
+from sqlalchemy import and_, case, delete, exists, func, literal, or_, select, true, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, load_only
 
@@ -1129,7 +1129,8 @@ def delete_dish(db: Session, dish_id: int, *, store_id: int) -> None:
     if not row or int(row.store_id) != sid:
         raise HTTPException(status_code=404, detail="菜品不存在")
     did = int(dish_id)
-    # 曾排期的菜品可直接删除：先清理周槽位与按日排期引用，再删菜品库记录
+    dish_name = (row.name or "").strip() or "餐品"
+    # 曾排期或已有单次订餐的菜品可直接删除：先清理排期引用，历史订单保留菜品名快照
     db.execute(
         delete(MenuSchedule).where(
             MenuSchedule.store_id == sid,
@@ -1142,6 +1143,17 @@ def delete_dish(db: Session, dish_id: int, *, store_id: int) -> None:
             WeeklyMenuSlot.dish_id == did,
         )
     )
+    db.execute(
+        update(SingleMealOrder)
+        .where(
+            SingleMealOrder.store_id == sid,
+            SingleMealOrder.dish_id == did,
+        )
+        .values(
+            dish_name=func.coalesce(SingleMealOrder.dish_name, dish_name),
+            dish_id=None,
+        )
+    )
     try:
         db.delete(row)
         db.commit()
@@ -1149,7 +1161,7 @@ def delete_dish(db: Session, dish_id: int, *, store_id: int) -> None:
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail="该菜品仍被单次订餐订单等业务数据引用，暂无法删除",
+            detail="删除菜品失败：仍存在其他业务数据引用，请稍后重试或联系技术支持",
         )
 
 

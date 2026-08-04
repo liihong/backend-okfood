@@ -34,7 +34,7 @@ class SingleMealOrderCreateIn(BaseModel):
 class SingleMealOrderOut(BaseModel):
     id: int
     out_trade_no: str = Field("", description="商户订单号")
-    dish_id: int
+    dish_id: int | None = None
     dish_title: str
     member_address_id: int | None = None
     store_pickup: bool = False

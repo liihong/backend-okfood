@@ -6,11 +6,8 @@ import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import { buildCategoryTree } from '../utils/categoryTree.js'
 
-const storeId = ref(1)
 const categories = ref([])
 const loading = ref(false)
-
-const qs = computed(() => new URLSearchParams({ store_id: String(storeId.value || 1) }).toString())
 
 const categoryTree = computed(() => buildCategoryTree(categories.value))
 
@@ -22,7 +19,7 @@ async function fetchCategories() {
   if (!adminAccessToken.value) return
   loading.value = true
   try {
-    const data = await apiJson(`/api/admin/categories?${qs.value}`, {}, { auth: true })
+    const data = await apiJson('/api/admin/categories', {}, { auth: true })
     categories.value = Array.isArray(data) ? data : []
   } catch (e) {
     if (e?.status === 401) {
@@ -99,10 +96,9 @@ async function saveCategory() {
 
   const name = String(form.value.name || '').trim()
   saving.value = true
-  const sid = encodeURIComponent(String(storeId.value || 1))
   try {
     if (editingId.value) {
-      await apiJson(`/api/admin/category/${editingId.value}?store_id=${sid}`, {
+      await apiJson(`/api/admin/category/${editingId.value}`, {
         method: 'PATCH',
         body: JSON.stringify({
           name,
@@ -113,7 +109,7 @@ async function saveCategory() {
       }, { auth: true })
     } else {
       const code = String(form.value.code || '').trim()
-      await apiJson(`/api/admin/category?store_id=${sid}`, {
+      await apiJson('/api/admin/category', {
         method: 'POST',
         body: JSON.stringify({
           code,
@@ -144,9 +140,8 @@ async function removeCategory(row) {
   } catch {
     return
   }
-  const sid = encodeURIComponent(String(storeId.value || 1))
   try {
-    await apiJson(`/api/admin/category/${row.id}?store_id=${sid}`, { method: 'DELETE' }, { auth: true })
+    await apiJson(`/api/admin/category/${row.id}`, { method: 'DELETE' }, { auth: true })
     showToast('已删除', 'success')
     await fetchCategories()
   } catch (e) {
@@ -159,19 +154,6 @@ onMounted(fetchCategories)
 
 <template>
   <div class="dish-categories-page tab-content animate-up page-content-shell">
-    <el-card shadow="never" class="toolbar-card">
-      <el-form inline label-width="72px" @submit.prevent>
-        <el-form-item label="门店 ID">
-          <el-input-number
-            v-model="storeId"
-            :min="1"
-            controls-position="right"
-            @change="fetchCategories"
-          />
-        </el-form-item>
-      </el-form>
-    </el-card>
-
     <el-alert
       class="page-alert"
       type="info"
@@ -309,9 +291,6 @@ onMounted(fetchCategories)
   display: flex;
   flex-direction: column;
   gap: 1rem;
-}
-.toolbar-card :deep(.el-card__body) {
-  padding-bottom: 2px;
 }
 .page-alert {
   margin: 0;

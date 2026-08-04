@@ -588,6 +588,19 @@ export function useOrdersManage(orderKind = 'single') {
     ])
   }
 
+  async function onBatchPrintSingleMealOrders() {
+    const rows = selectedSingleRows.value
+    if (!rows.length) return
+    const cfg = await resolveScene('store_retail')
+    if (!cfg?.configured) {
+      showToast('请先在系统管理 → 打印设置 → 配送标签 中配置打印机', 'error')
+      return
+    }
+    const storeName = printStoreName()
+    const items = rows.map((row) => singleMealOrderToLabelItem(row, { storeName }))
+    await submitMealFullPrintJob('store_retail', items)
+  }
+
   async function onBatchPrintRetailOrders() {
     const rows = selectedRetailRows.value
     if (!rows.length) return
@@ -1537,6 +1550,7 @@ export function useOrdersManage(orderKind = 'single') {
     onBatchPushSfRetail,
     onBatchPushSfRetailOrders,
     onBatchPrintRetailOrders,
+    onBatchPrintSingleMealOrders,
     onPrintRetailOrder,
     onPrintSingleMealOrder,
     retailPrintLoading,

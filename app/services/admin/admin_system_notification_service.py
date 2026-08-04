@@ -687,7 +687,7 @@ def try_refresh_legacy_single_meal_order_paid_notification(
     title, body = _build_single_meal_order_paid_notification_text(
         order_id=oid,
         delivery_date=order.delivery_date,
-        dish_name=(dish.name if dish else None),
+        dish_name=(dish.name if dish else None) or (getattr(order, "dish_name", None) or None),
         quantity=int(order.quantity or 1),
         store_pickup=bool(getattr(order, "store_pickup", False)),
         member_phone=(member.phone if member else None),

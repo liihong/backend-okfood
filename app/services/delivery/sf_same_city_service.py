@@ -273,12 +273,12 @@ def _load_default_address(
 
 def _single_order_rows(
     db: Session, d: date
-) -> list[tuple[SingleMealOrder, Member, MemberAddress, MenuDish]]:
+) -> list[tuple[SingleMealOrder, Member, MemberAddress, MenuDish | None]]:
     q = (
         select(SingleMealOrder, Member, MemberAddress, MenuDish)
         .join(Member, SingleMealOrder.member_id == Member.id)
         .join(MemberAddress, SingleMealOrder.member_address_id == MemberAddress.id)
-        .join(MenuDish, SingleMealOrder.dish_id == MenuDish.id)
+        .outerjoin(MenuDish, SingleMealOrder.dish_id == MenuDish.id)
         .where(
             and_(
                 SingleMealOrder.delivery_date == d,
@@ -368,7 +368,7 @@ def _build_aggs(
         if sk not in aggs:
             aggs[sk] = _Agg(stop_id=sk, group_area=ra, address_line=line, sub_lines=[])
         qty = max(1, int(o.quantity or 1))
-        label = f"{(dsh.name or '').strip() or '单点'}x{qty}"
+        label = f"{((dsh.name if dsh else (o.dish_name or '')) or '').strip() or '单点'}x{qty}"
         aggs[sk].singles.append(
             {
                 "id": int(o.id),
@@ -2281,8 +2281,9 @@ def _prepare_single_meal_retail_sf_push(
     if not addr:
         raise ValueError("收货地址不存在")
 
-    dish = db.get(MenuDish, int(order.dish_id))
-    dish_name = ((dish.name or "餐品").strip() if dish else None) or "餐品"
+    dish = db.get(MenuDish, int(order.dish_id)) if order.dish_id else None
+    snap = (getattr(order, "dish_name", None) or "").strip()
+    dish_name = snap or ((dish.name or "餐品").strip() if dish else None) or "餐品"
 
     base = get_settings()
     kg_unit = float(getattr(base, "SF_KG_PER_MEAL_UNIT", None) or 0.5)

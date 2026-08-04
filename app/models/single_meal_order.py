@@ -26,7 +26,12 @@ class SingleMealOrder(Base):
     )
     out_trade_no: Mapped[str] = mapped_column(String(32), index=True)
     member_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("members.id", onupdate="CASCADE"), index=True)
-    dish_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("menu_dish.id", onupdate="CASCADE"), index=True)
+    dish_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("menu_dish.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, index=True
+    )
+    dish_name: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, comment="下单时菜品名快照；菜品删除后仍可读"
+    )
     member_address_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("member_addresses.id", ondelete="SET NULL", onupdate="CASCADE"),

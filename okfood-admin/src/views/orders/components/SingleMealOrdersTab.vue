@@ -57,6 +57,7 @@ const {
   singleRowActionLoading,
   onSingleRowMoreCommand,
   onPrintSingleMealOrder,
+  onBatchPrintSingleMealOrders,
   retailPrintLoading,
 } = useOrdersManageInject()
 
@@ -198,6 +199,14 @@ function onSingleMobileSelectChange(row, checked) {
           @click="onBatchCancelOrders"
         >
           批量取消
+        </el-button>
+        <el-button
+          size="small"
+          :loading="retailPrintLoading"
+          :disabled="!selectedSingleRows.length || batchActionBusy"
+          @click="onBatchPrintSingleMealOrders"
+        >
+          批量打印标签
         </el-button>
         <el-button
           size="small"

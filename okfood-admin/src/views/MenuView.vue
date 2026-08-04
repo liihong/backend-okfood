@@ -1,6 +1,7 @@
 <script setup>
 defineOptions({ name: 'MenuView' })
 import { ref, reactive, computed, onMounted } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { Search, Camera, Trash2, X } from 'lucide-vue-next'
 import {
   apiJson,
@@ -329,7 +330,19 @@ async function saveDish() {
 
 async function deleteDish(row) {
   if (!row?.id) return
-  if (!confirm('确定删除「' + row.name + '」？相关周菜单与按日排期引用将一并清除。')) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除「${row.name}」？相关排期引用将清除，历史单次订餐订单仍保留菜品名称。`,
+      '删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
   if (!adminAccessToken.value) {
     showToast('请先登录', 'error')
     return
