@@ -172,6 +172,7 @@ from app.services.admin.member_meal_compensation_service import admin_member_mea
 from app.services.admin.admin_system_notification_service import (
     acknowledge_admin_system_notification,
     admin_system_notification_to_dict,
+    compute_sf_push_notification_counts,
     count_unacknowledged_admin_system_notifications,
     list_admin_system_notifications,
     upsert_sf_push_batch_notification,
@@ -645,9 +646,13 @@ def delivery_sf_push(
         out: SfSameCityPushOut = push_sf_same_city(db, body, store_id=store_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    total = len(out.results)
-    success_count = sum(1 for r in out.results if r.ok)
-    failed = total - success_count
+    total, success_count, failed = compute_sf_push_notification_counts(
+        db,
+        store_id=store_id,
+        delivery_date=body.delivery_date,
+        push_results=out.results,
+        meal_period="lunch",
+    )
     upsert_sf_push_batch_notification(
         db,
         store_id=store_id,
@@ -677,9 +682,13 @@ def delivery_sf_push_instant(
         out: SfSameCityPushOut = push_sf_same_city_instant(db, body, store_id=store_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    total = len(out.results)
-    success_count = sum(1 for r in out.results if r.ok)
-    failed = total - success_count
+    total, success_count, failed = compute_sf_push_notification_counts(
+        db,
+        store_id=store_id,
+        delivery_date=body.delivery_date,
+        push_results=out.results,
+        meal_period="lunch",
+    )
     upsert_sf_push_batch_notification(
         db,
         store_id=store_id,
@@ -726,9 +735,13 @@ def delivery_sf_dinner_push(
         out: SfSameCityPushOut = push_sf_dinner_same_city(db, body, store_id=store_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    total = len(out.results)
-    success_count = sum(1 for r in out.results if r.ok)
-    failed = total - success_count
+    total, success_count, failed = compute_sf_push_notification_counts(
+        db,
+        store_id=store_id,
+        delivery_date=body.delivery_date,
+        push_results=out.results,
+        meal_period="dinner",
+    )
     upsert_sf_push_batch_notification(
         db,
         store_id=store_id,

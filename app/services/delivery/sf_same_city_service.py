@@ -2046,6 +2046,32 @@ def cancel_sf_same_city_push(
     return {"message": "顺丰已受理取消", "sf_response": None}
 
 
+# 推单批次结果中不计入 total/success/failed 的跳过文案（非实际创单尝试）
+_SF_PUSH_RESULT_SKIP_MESSAGES = frozenset(
+    {
+        "已跳过（未勾选）",
+        "已跳过（仅单次卡，将独立推顺丰）",
+    }
+)
+
+
+def summarize_sf_push_batch_results(
+    results: list[SfSameCityPushItemResult],
+) -> tuple[int, int, int]:
+    """
+    统计推单批次结果：total / success / failed。
+
+    不含「未勾选」「仅单次卡跳过」等 ok=True 但未调用顺丰的行，避免手动推单误把跳过计为成功。
+    """
+    attempted = [
+        r for r in results if (r.message or "").strip() not in _SF_PUSH_RESULT_SKIP_MESSAGES
+    ]
+    total = len(attempted)
+    success = sum(1 for r in attempted if r.ok)
+    failed = total - success
+    return total, success, failed
+
+
 @dataclass
 class SfNightlyAutoPushStoreResult:
     """每日 08:50 自动推单单店结果，供系统消息摘要。"""
@@ -2097,9 +2123,15 @@ def auto_push_sf_today_business_day_for_store(
         return SfNightlyAutoPushStoreResult(skip_reason="无待推停靠点")
     body = SfSameCityPushIn(delivery_date=d, rows=pending)
     out = push_sf_same_city(db, body, store_id=int(store_id), ags_hint=ags)
-    total = len(out.results)
-    success = sum(1 for r in out.results if r.ok)
-    failed = total - success
+    from app.services.admin.admin_system_notification_service import compute_sf_push_notification_counts
+
+    total, success, failed = compute_sf_push_notification_counts(
+        db,
+        store_id=int(store_id),
+        delivery_date=d,
+        push_results=out.results,
+        meal_period="lunch",
+    )
     return SfNightlyAutoPushStoreResult(
         total=total, success=success, failed=failed, push_out=out
     )

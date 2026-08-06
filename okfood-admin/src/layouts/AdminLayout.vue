@@ -592,7 +592,7 @@ function onTabClose(tab) {
                   <p class="admin-system-notifications-item__message">{{ item.message }}</p>
                   <div class="admin-system-notifications-item__actions">
                     <el-button
-                      v-if="item.kind === 'sf_nightly_push' && !item.skip_reason"
+                      v-if="(item.kind === 'sf_nightly_push' || item.kind === 'sf_push_batch') && !item.skip_reason"
                       size="small"
                       class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
                       @click="goSfMonitor(item)"

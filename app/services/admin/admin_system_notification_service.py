@@ -19,6 +19,8 @@ from app.models.sf_same_city_push import SfSameCityPush
 _SF_PUSH_KIND_DELIVERY_SHEET = "delivery_sheet"
 
 KIND_SF_NIGHTLY_PUSH = "sf_nightly_push"
+# 管理端手动/补推批次摘要（与 08:50 自动推单分 kind，避免覆盖当日自动推单通知）
+KIND_SF_PUSH_BATCH = "sf_push_batch"
 # 顺丰大表快照已成立后，小程序侧又让会员「当日重新应配送」时需客服人工并入顺丰链路
 KIND_DELIVERY_SHEET_MANUAL_ATTENTION = "delivery_sheet_manual_attention"
 # 小程序自助购卡已缴、待客服确认起送日并同步入账
@@ -65,6 +67,48 @@ def _sf_push_batch_message(*, total: int, success: int, failed: int) -> str:
     return f"本次推送 {int(total)} 单，成功 {int(success)} 单，失败 {int(failed)} 单"
 
 
+def compute_sf_push_notification_counts(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    push_results: list[Any],
+    meal_period: str | None = None,
+) -> tuple[int, int, int]:
+    """
+    顺丰推单系统消息统计：与监控页创单成功/失败口径对齐。
+
+    - 成功：落库 ``error_code=0`` 且未取消（同 ``count_sf_same_city_pushes_for_delivery_date``）
+    - 失败：落库创单失败 + 批次内推前校验失败（未落库）
+    - total：上述合计，保证 total >= success + failed
+    """
+    from app.services.delivery.sf_order_fulfillment_service import count_sf_same_city_pushes_for_delivery_date
+    from app.services.delivery.sf_same_city_service import summarize_sf_push_batch_results
+
+    batch_total, _batch_success, batch_failed = summarize_sf_push_batch_results(push_results)
+    db_stats = count_sf_same_city_pushes_for_delivery_date(
+        db,
+        store_id=int(store_id),
+        delivery_date=delivery_date,
+        meal_period=meal_period,
+    )
+    if meal_period:
+        db_success = int(db_stats["success"])
+        db_failed = int(db_stats["failed"])
+        db_total = int(db_stats["total"])
+    else:
+        sheet = db_stats["delivery_sheet"]
+        db_success = int(sheet["success"])
+        db_failed = int(sheet["failed"])
+        db_total = int(sheet["total"])
+
+    success = db_success
+    unpersisted_failed = max(0, int(batch_failed) - db_failed)
+    failed = db_failed + unpersisted_failed
+    total = max(int(batch_total), db_total, success + failed)
+    return total, success, failed
+
+
 def upsert_sf_push_batch_notification(
     db: Session,
     *,
@@ -75,8 +119,8 @@ def upsert_sf_push_batch_notification(
     failed: int,
     title_prefix: str = "顺丰推单",
 ) -> AdminSystemNotification:
-    """手动/重试推单批次结束后写入或更新当日门店摘要（同店同日 kind 仅一条）。"""
-    kind = KIND_SF_NIGHTLY_PUSH
+    """手动/重试推单批次结束后写入或更新当日门店摘要（同店同日 kind 仅一条，不覆盖 08:50 自动推单）。"""
+    kind = KIND_SF_PUSH_BATCH
     title = f"{title_prefix} · {business_date.isoformat()}"
     message = _sf_push_batch_message(total=total, success=success, failed=failed)
     row = db.scalar(
