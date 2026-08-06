@@ -301,6 +301,18 @@ def _sf_push_monitor_cancelled_clause():
     )
 
 
+def _sf_push_monitor_not_cancelled_clause():
+    """
+    监控统计/筛选「未取消」口径。
+
+    勿对 ``_sf_push_monitor_cancelled_clause`` 直接取反：回调 status 为 NULL 时
+    ``NOT (status IN (2,22))`` 在 SQL 中为 UNKNOWN，会误排除有效推单。
+    """
+    from app.services.delivery.sf_same_city_service import _sf_push_row_active_predicate
+
+    return _sf_push_row_active_predicate()
+
+
 def sf_monitor_create_status_label(
     *,
     error_code: int | None,
@@ -353,7 +365,7 @@ def _sf_push_monitor_where_clauses(
     st = (sf_create_status or "").strip().lower()
     if st in ("ok", "success"):
         clauses.append(SfSameCityPush.error_code == 0)
-        clauses.append(~_sf_push_monitor_cancelled_clause())
+        clauses.append(_sf_push_monitor_not_cancelled_clause())
     elif st in ("fail", "failed"):
         clauses.append(or_(SfSameCityPush.error_code.is_(None), SfSameCityPush.error_code != 0))
     elif st in ("cancelled", "canceled"):
@@ -1573,7 +1585,7 @@ def bulk_admin_resync_subscription_fulfilled_from_sf_monitor_for_delivery_day(
                 SfSameCityPush.delivery_date == delivery_date,
                 SfSameCityPush.error_code == 0,
                 SfSameCityPush.sf_callback_order_status == SF_ORDER_STATUS_DELIVERED_TUOTOU,
-                ~_sf_push_monitor_cancelled_clause(),
+                _sf_push_monitor_not_cancelled_clause(),
                 sheet_clause,
             )
             .order_by(SfSameCityPush.id.asc())
@@ -1752,8 +1764,9 @@ def count_sf_same_city_pushes_for_delivery_date(
 
     flt = and_(*conds)
     cancelled_flt = _sf_push_monitor_cancelled_clause()
+    not_cancelled_flt = _sf_push_monitor_not_cancelled_clause()
     success_case = case(
-        (and_(SfSameCityPush.error_code == 0, ~cancelled_flt), 1),
+        (and_(SfSameCityPush.error_code == 0, not_cancelled_flt), 1),
         else_=0,
     )
     failed_case = case(
