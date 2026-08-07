@@ -1237,6 +1237,61 @@ def _sum_frozen_home_units_for_member_ids(
     return total
 
 
+def _pickup_meal_units_split_for_locked_date(
+    db: Session,
+    *,
+    delivery_date: date,
+    store_id: int,
+    snapshot: dict[int, int] | None,
+    members_by_id: dict[int, Member],
+    delivered_subq,
+) -> tuple[int, int]:
+    """锁单日自提份数：按推单份数快照统计，避免 eligibility 午间变动间接释放零售库存。"""
+    sid = int(store_id)
+    d = delivery_date
+    if not snapshot:
+        pu_base = (
+            *_member_subscription_eligibility_where(d, store_id=sid),
+            Member.store_pickup.is_(True),
+        )
+        return _sum_meal_units_split_by_delivery_status(
+            db, delivery_date=d, store_id=sid, base_filters=pu_base
+        )
+
+    pickup_ids: set[int] = set()
+    for mid in snapshot:
+        m = members_by_id.get(int(mid))
+        if m is None:
+            m = db.get(Member, int(mid))
+            if m is not None:
+                members_by_id[int(m.id)] = m
+        if m is None or m.deleted_at is not None or int(m.store_id) != sid:
+            continue
+        if bool(m.store_pickup):
+            pickup_ids.add(int(mid))
+    if not pickup_ids:
+        return 0, 0
+
+    delivered_pu_ids = {
+        int(x)
+        for x in db.scalars(
+            select(Member.id).where(
+                Member.id.in_(pickup_ids),
+                Member.id.in_(delivered_subq),
+                Member.deleted_at.is_(None),
+            )
+        ).all()
+    }
+    pending_pu_ids = pickup_ids - delivered_pu_ids
+    pu_delivered = _sum_frozen_home_units_for_member_ids(
+        delivered_pu_ids, snapshot=snapshot, members_by_id=members_by_id
+    )
+    pu_pending = _sum_frozen_home_units_for_member_ids(
+        pending_pu_ids, snapshot=snapshot, members_by_id=members_by_id
+    )
+    return pu_delivered, pu_pending
+
+
 def delivery_sheet_metrics_via_sql_for_locked_date(
     db: Session, *, delivery_date: date, store_id: int
 ) -> DeliverySheetDayMetrics:
@@ -1297,12 +1352,13 @@ def delivery_sheet_metrics_via_sql_for_locked_date(
         pending_home_ids, snapshot=snap, members_by_id=members_by_id
     )
 
-    pu_base = (
-        *_member_subscription_eligibility_where(d, store_id=sid),
-        Member.store_pickup.is_(True),
-    )
-    pu_delivered, pu_pending = _sum_meal_units_split_by_delivery_status(
-        db, delivery_date=d, store_id=sid, base_filters=pu_base
+    pu_delivered, pu_pending = _pickup_meal_units_split_for_locked_date(
+        db,
+        delivery_date=d,
+        store_id=sid,
+        snapshot=snap,
+        members_by_id=members_by_id,
+        delivered_subq=delivered_subq,
     )
     # 锁单日到家名单已含推单快照 merged 集合，勿再叠加 extra_home（会与 eligibility 口径重复计 15 份等）
     pu_delivered += _sum_extra_delivered_by_pickup_on_date(

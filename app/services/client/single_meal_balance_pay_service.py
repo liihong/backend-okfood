@@ -138,8 +138,11 @@ def _assert_balance_pay_allowed_for_order(db: Session, member: Member, order: Si
 
 def _apply_single_meal_paid_fulfillment(db: Session, order: SingleMealOrder) -> None:
     """支付成功后写入履约状态（与微信入账一致，不含支付渠道字段）。"""
-    if str(order.fulfillment_status or "").strip().lower() == "cancelled":
-        order.fulfillment_status = "pending"
+    from app.services.order.single_meal_order_service import (
+        try_restore_single_meal_fulfillment_after_timeout_cancel,
+    )
+
+    try_restore_single_meal_fulfillment_after_timeout_cancel(db, order)
     if bool(getattr(order, "store_pickup", False)):
         order.courier_id = None
     else:

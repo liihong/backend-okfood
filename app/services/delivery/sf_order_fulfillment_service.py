@@ -1477,6 +1477,10 @@ def run_sf_push_side_effect_for_callback(db: Session, job: SfCallbackSideEffectJ
         if job.action == "cancel_sync":
             out = _apply_sf_cancel_to_single_meal_orders_for_push(db, pus)
             db.commit()
+            if int(out.get("single_meal_applied") or 0) > 0:
+                from app.services.admin.day_stock_service import invalidate_stock_read_caches
+
+                invalidate_stock_read_caches(int(getattr(pus, "store_id", None) or 1))
             logger.info(
                 "顺丰异步取消同步 push_id=%s applied=%s skipped=%s",
                 job.push_id,

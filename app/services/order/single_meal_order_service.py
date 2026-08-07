@@ -521,6 +521,39 @@ def _unpaid_single_order_expire_cutoff():
     return beijing_now_naive() - timedelta(minutes=UNPAID_SINGLE_MEAL_ORDER_EXPIRE_MINUTES)
 
 
+def try_restore_single_meal_fulfillment_after_timeout_cancel(
+    db: Session, order: SingleMealOrder
+) -> None:
+    """超时自动取消(cancelled)后补入账：有库存则恢复 pending，否则保持 cancelled 避免超卖。"""
+    if str(order.fulfillment_status or "").strip().lower() != "cancelled":
+        return
+    dish_id = order.dish_id
+    if dish_id is None:
+        order.fulfillment_status = "pending"
+        return
+    from app.services.admin.menu_day_stock_service import single_order_stock_for_dish_date
+    from app.services.meal_period.normalize import normalize_meal_period
+
+    info = single_order_stock_for_dish_date(
+        db,
+        int(dish_id),
+        order.delivery_date,
+        store_id=int(order.store_id),
+        meal_period=normalize_meal_period(order.meal_period or "lunch"),
+    )
+    rem = 0 if info.remaining is None else int(info.remaining)
+    qty = max(1, int(order.quantity or 1))
+    if rem >= qty:
+        order.fulfillment_status = "pending"
+    else:
+        logger.warning(
+            "单次零售超时取消后补入账库存不足，保持 cancelled order_id=%s rem=%s qty=%s",
+            order.id,
+            rem,
+            qty,
+        )
+
+
 def expire_stale_unpaid_single_meal_orders(db: Session, *, member_id: int | None = None) -> int:
     """单次零售：创建超过 ``UNPAID_SINGLE_MEAL_ORDER_EXPIRE_MINUTES`` 仍未支付则自动取消（履约 cancelled）。"""
     cutoff = _unpaid_single_order_expire_cutoff()
@@ -534,6 +567,11 @@ def expire_stale_unpaid_single_meal_orders(db: Session, *, member_id: int | None
     stale_ids = list(db.scalars(select(SingleMealOrder.id).where(*filters)).all())
     if not stale_ids:
         return 0
+    store_ids = list(
+        db.scalars(
+            select(SingleMealOrder.store_id).where(SingleMealOrder.id.in_(stale_ids)).distinct()
+        ).all()
+    )
     for oid in stale_ids:
         release_member_coupon_for_order(
             db, order_biz=CouponLockedOrderBiz.SINGLE_MEAL, order_id=int(oid)
@@ -544,6 +582,11 @@ def expire_stale_unpaid_single_meal_orders(db: Session, *, member_id: int | None
         .values(fulfillment_status="cancelled", courier_id=None)
     )
     db.commit()
+    if store_ids:
+        from app.services.admin.day_stock_service import invalidate_stock_read_caches
+
+        for sid in store_ids:
+            invalidate_stock_read_caches(int(sid))
     return len(stale_ids)
 
 
@@ -855,6 +898,8 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
 
     - ``pending_ship``：已支付且履约 pending（含待发货与待自提口径，与列表「订单状态」pending 一致）。
     """
+    from app.services.admin.menu_day_stock_service import SINGLE_RETAIL_INVENTORY_EXCLUDED_FULFILLMENT
+
     need_join = _admin_single_meal_needs_member_join(q)
     # 汇总行展示全天概览，不按发货 Tab / 旧版配送下拉过滤
     base = _admin_store_single_meal_scope_filters_for_delivery_day(
@@ -873,7 +918,7 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
     pending_ship_cond = and_(paid_cond, SingleMealOrder.fulfillment_status == "pending")
     paid_portions_cond = and_(
         paid_cond,
-        SingleMealOrder.fulfillment_status.notin_(("cancelled", "sf_cancelled")),
+        SingleMealOrder.fulfillment_status.notin_(SINGLE_RETAIL_INVENTORY_EXCLUDED_FULFILLMENT),
     )
 
     agg_stmt = (
@@ -899,7 +944,9 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
         agg_stmt = agg_stmt.where(f)
     row = db.execute(agg_stmt).one()
 
-    from app.services.admin.menu_day_stock_service import paid_single_retail_portions_by_dates
+    from app.services.admin.menu_day_stock_service import (
+        paid_single_retail_portions_by_dates,
+    )
 
     retail_inventory = int(
         paid_single_retail_portions_by_dates(db, [delivery_day], store_id=int(store_id)).get(
@@ -1247,9 +1294,8 @@ def finalize_single_meal_order_wechat_pay(db: Session, parsed: WechatPayNotifyPa
     order.pay_channel = "微信"
     tid = (parsed.transaction_id or "").strip()
     order.wx_transaction_id = tid or order.wx_transaction_id
-    # 超时未支付被自动取消后补同步入账：恢复为待履约
-    if str(order.fulfillment_status or "").strip().lower() == "cancelled":
-        order.fulfillment_status = "pending"
+    # 超时未支付被自动取消后补同步入账：有库存才恢复待履约
+    try_restore_single_meal_fulfillment_after_timeout_cancel(db, order)
     if bool(getattr(order, "store_pickup", False)):
         order.courier_id = None
         # 门店自提：支付后仍为 pending，待管理员在后台标记取货完成
@@ -1654,6 +1700,9 @@ def admin_resync_single_meal_from_sf_monitor(
     outcome = _apply_sf_monitor_status_to_retail_order_no_commit(db, o, pus)
     db.commit()
     db.refresh(o)
+    from app.services.admin.day_stock_service import invalidate_stock_read_caches
+
+    invalidate_stock_read_caches(int(store_id))
     after = str(o.fulfillment_status or "").strip().lower()
 
     if sf_push_is_terminal_cancel(pus):
@@ -2282,7 +2331,13 @@ def admin_update_single_meal_order(
     o.routing_area = area
     if store_pickup:
         o.courier_id = None
+    # 顺丰取消后改配送方式（自提/改址重推）：履约回到 pending
+    if str(o.fulfillment_status or "").strip().lower() == "sf_cancelled":
+        o.fulfillment_status = "pending"
     db.add(o)
     db.commit()
     db.refresh(o)
+    from app.services.admin.day_stock_service import invalidate_stock_read_caches
+
+    invalidate_stock_read_caches(int(store_id))
     return _build_admin_single_meal_order_list_out(db, o)

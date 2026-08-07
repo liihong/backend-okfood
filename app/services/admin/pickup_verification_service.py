@@ -12,6 +12,7 @@ from app.core.delivery_calendar import is_subscription_delivery_day
 from app.models.member import Member
 from app.models.menu_dish import MenuDish
 from app.models.single_meal_order import SingleMealOrder
+from app.services.admin.menu_day_stock_service import SINGLE_RETAIL_INVENTORY_EXCLUDED_FULFILLMENT
 from app.schemas.admin import (
     PickupVerificationListOut,
     PickupVerificationRetailRowOut,
@@ -96,7 +97,7 @@ def _retail_pickup_rows(
             SingleMealOrder.delivery_date == delivery_date,
             SingleMealOrder.store_pickup.is_(True),
             SingleMealOrder.pay_status == "已支付",
-            SingleMealOrder.fulfillment_status.notin_(("cancelled", "sf_cancelled")),
+            SingleMealOrder.fulfillment_status.notin_(SINGLE_RETAIL_INVENTORY_EXCLUDED_FULFILLMENT),
         )
     )
     rows: list[PickupVerificationRetailRowOut] = []

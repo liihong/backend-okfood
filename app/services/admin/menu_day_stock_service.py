@@ -205,8 +205,9 @@ def dashboard_meal_totals_by_dates(
     return out
 
 
-# 已取消/顺丰撤单的零售单不再占用库存（会员卡取消后 pay_status 可能仍为已支付）
-_SINGLE_RETAIL_EXCLUDED_FULFILLMENT = ("cancelled", "sf_cancelled")
+# 单次零售库存占用：仅系统取消(cancelled)不计入；顺丰取消(sf_cancelled)仍占用
+SINGLE_RETAIL_INVENTORY_EXCLUDED_FULFILLMENT = ("cancelled",)
+_SINGLE_RETAIL_EXCLUDED_FULFILLMENT = SINGLE_RETAIL_INVENTORY_EXCLUDED_FULFILLMENT
 
 
 def _single_retail_inventory_scope_filters(*, store_id: int) -> list:

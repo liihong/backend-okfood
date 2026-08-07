@@ -192,6 +192,9 @@ def admin_update_store_retail_order_delivery(
     o.routing_area = area
     if store_pickup:
         o.courier_id = None
+    # 顺丰取消后改配送方式（自提/改址重推）：履约回到 pending，与单次零售口径一致
+    if str(o.fulfillment_status or "").strip().lower() == "sf_cancelled":
+        o.fulfillment_status = "pending"
     db.add(o)
     db.commit()
     db.refresh(o)
