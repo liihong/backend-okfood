@@ -6,6 +6,44 @@ import { optimizeImageUrl } from '@/utils/imageUrl.js'
 
 /**
 
+ * @returns {Promise<{
+
+ *   store_id: number,
+
+ *   store_name?: string | null,
+
+ *   store_logo_url?: string | null,
+
+ *   store_logo_thumb_url?: string | null,
+
+ *   store_contact_phone?: string | null,
+
+ *   store_lng?: number | null,
+
+ *   store_lat?: number | null,
+
+ *   store_pickup_address?: string | null,
+
+ *   base_delivery_fee_yuan?: number | null,
+
+ * } | null>}
+
+ */
+
+export async function fetchStoreInfo() {
+
+  const raw = await request('/api/home/store-info', { method: 'GET', retry: 1 })
+
+  if (!raw || typeof raw !== 'object') return null
+
+  return raw
+
+}
+
+
+
+/**
+
  * @typedef {{ id: number, title: string, subtitle?: string | null, cover_image_url?: string | null, price_min_yuan?: string | null, price_max_yuan?: string | null, has_multi_sku?: boolean, stock_limited?: boolean, stock_remaining?: number | null }} RetailSpuPublic
 
  * @typedef {{ id: number, name: string, sort_order: number, products: RetailSpuPublic[] }} RetailCategoryPublic
