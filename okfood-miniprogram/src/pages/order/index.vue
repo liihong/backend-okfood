@@ -75,7 +75,6 @@
       :visible="cartVisible"
       :count="cartCount"
       :subtotal-text="cartSubtotalText"
-      :bottom-offset-px="cartBarBottomPx"
       @open="cartSheetOpen = true"
     />
     <RetailCartSheet
@@ -113,7 +112,7 @@ import { peekWeeklyMenuCache } from '@/utils/weeklyMenuCache.js'
 import { MEAL_PERIOD_DINNER, MEAL_PERIOD_LUNCH } from '@/utils/memberMealPeriod.js'
 import { getTabPageLayoutStyles } from '@/utils/tabPageLayout.js'
 import { getNavbarLayout } from '@/utils/navbar.js'
-import { syncCustomTabBar } from '@/utils/customTabBar.js'
+import { syncCustomTabBar, getCustomTabBarBottomReservePx } from '@/utils/customTabBar.js'
 import { reLaunchIfCourierModePreferred } from '@/utils/api.js'
 import { readMenuFulfillMode, writeMenuFulfillMode } from '@/utils/menuFulfillMode.js'
 import { requestDeliverySubscribeOncePerDay } from '@/utils/subscribeMsg.js'
@@ -121,7 +120,6 @@ import { tryShowMenuPagePoster } from '@/utils/menuPagePoster.js'
 
 const couponHostReady = ref(false)
 const cartSheetOpen = ref(false)
-const cartBarBottomPx = ref(52)
 const { items: cartItems, count: cartCount, subtotalText: cartSubtotalText, visible: cartVisible, refresh: refreshCart } =
   useRetailCart()
 const pageStyle = ref({})
@@ -169,6 +167,9 @@ function clearPendingMenuErrorToast() {
 
 const STORE_HEADER_PX = 68
 
+/** 购物车悬浮条大致高度（px），用于列表底部留白，避免最后一条被遮挡 */
+const RETAIL_CART_BAR_HEIGHT_PX = 56
+
 function syncTabLayout() {
   const { pageStyle: p } = getTabPageLayoutStyles()
   pageStyle.value = p
@@ -176,7 +177,12 @@ function syncTabLayout() {
   const pageH = Number(p.height?.replace('px', '')) || Number(win.windowHeight) || 0
   const { navBarTotal } = getNavbarLayout()
   const bodyH = Math.max(200, pageH - navBarTotal - STORE_HEADER_PX)
-  catalogBodyStyle.value = { height: `${bodyH}px` }
+  const tabReserve = getCustomTabBarBottomReservePx()
+  const cartReserve = cartVisible.value ? RETAIL_CART_BAR_HEIGHT_PX + 12 : 0
+  catalogBodyStyle.value = {
+    height: `${bodyH}px`,
+    paddingBottom: `${tabReserve + cartReserve}px`,
+  }
 }
 
 function formatWeekRangeCn(mondayIso) {
@@ -471,6 +477,10 @@ watch(fulfillMode, (v) => {
   writeMenuFulfillMode(v)
 })
 
+watch(cartVisible, () => {
+  syncTabLayout()
+})
+
 function onFulfillModeChange(mode) {
   fulfillMode.value = mode === 'pickup' ? 'pickup' : 'delivery'
 }
@@ -565,7 +575,7 @@ function goDetail(m) {
   display: flex;
     flex-direction: row;
     overflow: hidden;
-  padding-bottom: 120rpx;
+  box-sizing: border-box;
 }
 
 .catalog-sidebar {

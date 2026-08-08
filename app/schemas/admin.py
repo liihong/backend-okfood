@@ -1729,6 +1729,10 @@ class AdminSystemNotificationOut(BaseModel):
     )
     title: str
     message: str
+    failure_details: list[str] = Field(
+        default_factory=list,
+        description="推单失败会员明细（姓名/手机号/片区/原因），供客服点击通知后处理",
+    )
     total: int = 0
     success: int = 0
     failed: int = 0

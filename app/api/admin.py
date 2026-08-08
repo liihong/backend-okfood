@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import Response as PlainResponse
+from sqlalchemy.orm import Session
 
 from app.core.admin_access import require_member_in_admin_store, require_sf_push_in_admin_tenant
 from app.core.deps import (
@@ -100,6 +101,7 @@ from app.services.delivery.sf_order_fulfillment_service import (
     list_sf_same_city_pushes_for_monitor_export,
 )
 from app.services.delivery.sf_same_city_service import (
+    _build_sf_same_city_preview_bundle,
     cancel_sf_same_city_push,
     preview_sf_dinner_same_city,
     preview_sf_same_city,
@@ -172,6 +174,7 @@ from app.services.admin.member_meal_compensation_service import admin_member_mea
 from app.services.admin.admin_system_notification_service import (
     acknowledge_admin_system_notification,
     admin_system_notification_to_dict,
+    build_sf_push_failure_details,
     compute_sf_push_notification_counts,
     count_unacknowledged_admin_system_notifications,
     list_admin_system_notifications,
@@ -229,6 +232,43 @@ def _normalize_sf_monitor_meal_period(raw: str | None) -> str | None:
     raise HTTPException(
         status_code=400,
         detail="meal_period 仅支持 lunch、dinner 或留空（全部）",
+    )
+
+
+def _upsert_sf_push_batch_with_failure_details(
+    db: Session,
+    *,
+    store_id: int,
+    business_date: date,
+    push_results: list,
+    title_prefix: str,
+    meal_period: str = "lunch",
+    preview_rows: list | None = None,
+    ags: dict | None = None,
+) -> None:
+    """推单批次结束后写入系统消息，并附带失败会员明细供客服处理。"""
+    total, success_count, failed = compute_sf_push_notification_counts(
+        db,
+        store_id=int(store_id),
+        delivery_date=business_date,
+        push_results=push_results,
+        meal_period=meal_period,
+    )
+    failure_details = build_sf_push_failure_details(
+        db,
+        results=push_results,
+        preview_rows=preview_rows,
+        ags=ags,
+    )
+    upsert_sf_push_batch_notification(
+        db,
+        store_id=int(store_id),
+        business_date=business_date,
+        total=total,
+        success=success_count,
+        failed=failed,
+        title_prefix=title_prefix,
+        failure_details=failure_details or None,
     )
 
 
@@ -643,24 +683,22 @@ def delivery_sf_push(
     """
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
-        out: SfSameCityPushOut = push_sf_same_city(db, body, store_id=store_id)
+        _, ags, _, _ = _build_sf_same_city_preview_bundle(
+            db, delivery_date=body.delivery_date, store_id=store_id
+        )
+        out: SfSameCityPushOut = push_sf_same_city(
+            db, body, store_id=store_id, ags_hint=ags
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    total, success_count, failed = compute_sf_push_notification_counts(
-        db,
-        store_id=store_id,
-        delivery_date=body.delivery_date,
-        push_results=out.results,
-        meal_period="lunch",
-    )
-    upsert_sf_push_batch_notification(
+    _upsert_sf_push_batch_with_failure_details(
         db,
         store_id=store_id,
         business_date=body.delivery_date,
-        total=total,
-        success=success_count,
-        failed=failed,
+        push_results=out.results,
         title_prefix="顺丰手动推单",
+        preview_rows=body.rows,
+        ags=ags,
     )
     db.commit()
     return success(data=dump_model(out), msg="处理完成")
@@ -679,24 +717,22 @@ def delivery_sf_push_instant(
     """
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
-        out: SfSameCityPushOut = push_sf_same_city_instant(db, body, store_id=store_id)
+        _, ags, _, _ = _build_sf_same_city_preview_bundle(
+            db, delivery_date=body.delivery_date, store_id=store_id
+        )
+        out: SfSameCityPushOut = push_sf_same_city_instant(
+            db, body, store_id=store_id
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    total, success_count, failed = compute_sf_push_notification_counts(
-        db,
-        store_id=store_id,
-        delivery_date=body.delivery_date,
-        push_results=out.results,
-        meal_period="lunch",
-    )
-    upsert_sf_push_batch_notification(
+    _upsert_sf_push_batch_with_failure_details(
         db,
         store_id=store_id,
         business_date=body.delivery_date,
-        total=total,
-        success=success_count,
-        failed=failed,
+        push_results=out.results,
         title_prefix="顺丰及时单推单",
+        preview_rows=body.rows,
+        ags=ags,
     )
     db.commit()
     return success(data=dump_model(out), msg="处理完成")
@@ -732,24 +768,28 @@ def delivery_sf_dinner_push(
     """晚餐配送大表推顺丰（独立 push_kind，不影响午餐推单记录）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
-        out: SfSameCityPushOut = push_sf_dinner_same_city(db, body, store_id=store_id)
+        from app.models.enums import MealPeriod
+
+        _, ags, _, _ = _build_sf_same_city_preview_bundle(
+            db,
+            delivery_date=body.delivery_date,
+            store_id=store_id,
+            meal_period=MealPeriod.DINNER.value,
+        )
+        out: SfSameCityPushOut = push_sf_dinner_same_city(
+            db, body, store_id=store_id
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    total, success_count, failed = compute_sf_push_notification_counts(
-        db,
-        store_id=store_id,
-        delivery_date=body.delivery_date,
-        push_results=out.results,
-        meal_period="dinner",
-    )
-    upsert_sf_push_batch_notification(
+    _upsert_sf_push_batch_with_failure_details(
         db,
         store_id=store_id,
         business_date=body.delivery_date,
-        total=total,
-        success=success_count,
-        failed=failed,
+        push_results=out.results,
         title_prefix="顺丰晚餐推单",
+        meal_period="dinner",
+        preview_rows=body.rows,
+        ags=ags,
     )
     db.commit()
     return success(data=dump_model(out), msg="处理完成")

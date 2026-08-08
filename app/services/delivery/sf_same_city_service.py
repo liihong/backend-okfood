@@ -1730,6 +1730,18 @@ def push_sf_same_city(
             )
             if skip is not None:
                 out.append(skip)
+                if not skip.ok:
+                    _persist_pre_push_validation_failure(
+                        db,
+                        store_id=sid,
+                        delivery_date=d,
+                        item=item,
+                        agg_cur=ags.get(item.stop_id),
+                        err_msg=skip.message or "推单前校验失败",
+                        push_kind=kind,
+                        gset=gset,
+                        existing_push_id=failed_push_by_stop.get(str(item.stop_id)),
+                    )
                 continue
             if int(item.subscription_pending_units or 0) <= 0:
                 out.append(
@@ -1961,6 +1973,45 @@ def _persist_fail(
     )
 
 
+def _persist_pre_push_validation_failure(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    item: SfSameCityPreviewRow,
+    agg_cur: _Agg | None,
+    err_msg: str,
+    push_kind: str,
+    gset: Any,
+    existing_push_id: int | None = None,
+) -> None:
+    """推前校验失败也落库，便于监控页检索与客服重试（此前仅计入通知失败数）。"""
+    soid = f"OKF{delivery_date:%Y%m%d}{item.stop_id[:12]}{uuid.uuid4().hex[:8]}"
+    if len(soid) > 64:
+        soid = soid[:64]
+    ff_mids, ff_oids, _ = _fulfillment_ids_for_delivery_sheet_push(db, agg_cur)
+    snap_preview: dict[str, Any] = item.model_dump(mode="json")
+    snap_db = _sf_push_request_snapshot(
+        snap_preview,
+        {"validation_failed": True, "reason": (err_msg or "")[:500]},
+        gset=gset,
+        fulfillment_member_ids=ff_mids,
+        fulfillment_single_meal_order_ids=ff_oids,
+    )
+    _persist_fail(
+        db,
+        delivery_date,
+        item.stop_id,
+        soid,
+        snap_db,
+        -1,
+        (err_msg or "推单前校验失败")[:1024],
+        store_id=int(store_id),
+        push_kind=push_kind,
+        existing_push_id=existing_push_id,
+    )
+
+
 def cancel_sf_same_city_push(
     db: Session,
     *,
@@ -2081,6 +2132,7 @@ class SfNightlyAutoPushStoreResult:
     failed: int = 0
     skip_reason: str | None = None
     push_out: SfSameCityPushOut | None = None
+    failure_details: list[str] | None = None
 
 
 def auto_push_sf_today_business_day_for_store(
@@ -2132,8 +2184,20 @@ def auto_push_sf_today_business_day_for_store(
         push_results=out.results,
         meal_period="lunch",
     )
+    from app.services.admin.admin_system_notification_service import build_sf_push_failure_details
+
+    failure_details = build_sf_push_failure_details(
+        db,
+        results=out.results,
+        preview_rows=rows,
+        ags=ags,
+    )
     return SfNightlyAutoPushStoreResult(
-        total=total, success=success, failed=failed, push_out=out
+        total=total,
+        success=success,
+        failed=failed,
+        push_out=out,
+        failure_details=failure_details or None,
     )
 
 
@@ -2158,12 +2222,14 @@ def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
             sid_int = int(sid)
             total = success = failed = 0
             skip_reason: str | None = None
+            failure_details: list[str] | None = None
             try:
                 result = auto_push_sf_today_business_day_for_store(db, store_id=sid_int)
                 total = result.total
                 success = result.success
                 failed = result.failed
                 skip_reason = result.skip_reason
+                failure_details = result.failure_details
             except HTTPException as e:
                 skip_reason = str(e.detail)
                 logger.warning(
@@ -2186,6 +2252,7 @@ def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
                     success=success,
                     failed=failed,
                     skip_reason=skip_reason,
+                    failure_details=failure_details if skip_reason is None else None,
                 )
             except Exception:
                 logger.exception("写入顺丰自动推单系统消息失败 store_id=%s", sid_int)

@@ -1,6 +1,7 @@
 <script setup>
 defineOptions({ name: 'SfOrdersMonitorView' })
 import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { RefreshCw } from 'lucide-vue-next'
 import { apiBlob, apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
@@ -478,7 +479,17 @@ async function onApplyFulfillmentSf(row) {
   }
 }
 
+const route = useRoute()
+
 onMounted(() => {
+  const qDate = String(route.query.delivery_date || '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(qDate)) {
+    deliveryDate.value = qDate
+  }
+  const qCreate = String(route.query.sf_create_status || '').trim().toLowerCase()
+  if (qCreate === 'fail' || qCreate === 'failed') {
+    createStatusFilter.value = 'fail'
+  }
   void refreshMonitor()
 })
 </script>

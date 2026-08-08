@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import date, datetime, time, timedelta
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
@@ -57,6 +58,10 @@ def _system_notification_message_phone_unmasked(message: str | None) -> bool:
     return False
 
 
+# 系统消息正文与失败明细分隔符（客服点击通知时可解析出会员信息）
+SF_PUSH_FAILURE_DETAIL_MARKER = "\n\n失败明细：\n"
+
+
 def _sf_nightly_push_message(*, total: int, success: int, failed: int, skip_reason: str | None) -> str:
     if skip_reason:
         return f"今日自动推单未执行：{skip_reason}"
@@ -65,6 +70,110 @@ def _sf_nightly_push_message(*, total: int, success: int, failed: int, skip_reas
 
 def _sf_push_batch_message(*, total: int, success: int, failed: int) -> str:
     return f"本次推送 {int(total)} 单，成功 {int(success)} 单，失败 {int(failed)} 单"
+
+
+def split_sf_push_notification_message(message: str | None) -> tuple[str, list[str]]:
+    """拆分摘要行与失败明细行（兼容历史仅摘要的消息）。"""
+    raw = str(message or "")
+    if SF_PUSH_FAILURE_DETAIL_MARKER not in raw:
+        return raw.strip(), []
+    head, _, tail = raw.partition(SF_PUSH_FAILURE_DETAIL_MARKER)
+    details = [ln.strip() for ln in tail.splitlines() if ln.strip()]
+    return head.strip(), details
+
+
+def compose_sf_push_notification_message(summary: str, failure_details: list[str] | None) -> str:
+    """摘要 + 可选失败明细（写入库表 message 字段）。"""
+    base = (summary or "").strip()
+    lines = [str(x).strip() for x in (failure_details or []) if str(x).strip()]
+    if not lines:
+        return base
+    return f"{base}{SF_PUSH_FAILURE_DETAIL_MARKER}" + "\n".join(lines)
+
+
+def build_sf_push_failure_details(
+    db: Session,
+    *,
+    results: list[Any],
+    preview_rows: list[Any] | None = None,
+    ags: dict[str, Any] | None = None,
+) -> list[str]:
+    """
+    从推单批次结果生成客服可读的失败明细（含会员姓名/手机号/片区/原因）。
+    推前校验失败未落库时尤其依赖 preview/agg 补全会员信息。
+    """
+    from app.schemas.admin import SfSameCityPushItemResult
+    from app.services.delivery.sf_same_city_service import _SF_PUSH_RESULT_SKIP_MESSAGES
+
+    preview_by_stop: dict[str, Any] = {}
+    for row in preview_rows or []:
+        sid = str(getattr(row, "stop_id", "") or "").strip()
+        if sid:
+            preview_by_stop[sid] = row
+
+    lines: list[str] = []
+    for raw in results or []:
+        if isinstance(raw, SfSameCityPushItemResult):
+            item = raw
+        else:
+            try:
+                item = SfSameCityPushItemResult.model_validate(raw)
+            except Exception:
+                continue
+        msg = (item.message or "").strip()
+        if item.ok or msg in _SF_PUSH_RESULT_SKIP_MESSAGES:
+            continue
+        stop_id = str(item.stop_id or "").strip()
+        prow = preview_by_stop.get(stop_id)
+        agg = (ags or {}).get(stop_id)
+
+        names: list[str] = []
+        phones: list[str] = []
+        area = ""
+        addr = ""
+        if prow is not None:
+            rn = str(getattr(prow, "recv_name", "") or "").strip()
+            rp = str(getattr(prow, "recv_phone", "") or "").strip()
+            if rn and rn not in names:
+                names.append(rn)
+            if rp and rp not in ("", "—") and rp not in phones:
+                phones.append(rp)
+            area = str(getattr(prow, "group_area", "") or "").strip()
+            addr = str(getattr(prow, "recv_address", "") or getattr(prow, "address_line", "") or "").strip()
+        if agg is not None:
+            sub_lines = getattr(agg, "sub_lines", None) or []
+            for x in sub_lines:
+                if not isinstance(x, dict):
+                    continue
+                if x.get("is_delivered"):
+                    continue
+                if int(x.get("units") or 0) <= 0:
+                    continue
+                n = str(x.get("name") or "").strip()
+                p = str(x.get("phone") or "").strip()
+                if n and n not in names:
+                    names.append(n)
+                if p and p not in phones:
+                    phones.append(p)
+            if not area:
+                area = str(getattr(agg, "group_area", "") or "").strip()
+            if not addr:
+                addr = str(getattr(agg, "address_line", "") or "").strip()
+        if addr and len(addr) > 36:
+            addr = addr[:36] + "…"
+
+        name_s = "、".join(names[:3]) if names else "未知会员"
+        phone_s = "、".join(_mask_phone_middle_four(p) for p in phones[:2]) if phones else ""
+        chunks = [f"· {name_s}"]
+        if phone_s:
+            chunks.append(phone_s)
+        if area:
+            chunks.append(area)
+        if addr:
+            chunks.append(addr)
+        chunks.append(f"原因：{msg or '推单失败'}")
+        lines.append(" · ".join(chunks))
+    return lines
 
 
 def compute_sf_push_notification_counts(
@@ -118,11 +227,13 @@ def upsert_sf_push_batch_notification(
     success: int,
     failed: int,
     title_prefix: str = "顺丰推单",
+    failure_details: list[str] | None = None,
 ) -> AdminSystemNotification:
     """手动/重试推单批次结束后写入或更新当日门店摘要（同店同日 kind 仅一条，不覆盖 08:50 自动推单）。"""
     kind = KIND_SF_PUSH_BATCH
     title = f"{title_prefix} · {business_date.isoformat()}"
-    message = _sf_push_batch_message(total=total, success=success, failed=failed)
+    summary = _sf_push_batch_message(total=total, success=success, failed=failed)
+    message = compose_sf_push_notification_message(summary, failure_details)
     row = db.scalar(
         select(AdminSystemNotification).where(
             AdminSystemNotification.store_id == int(store_id),
@@ -163,13 +274,15 @@ def upsert_sf_nightly_push_notification(
     success: int,
     failed: int,
     skip_reason: str | None = None,
+    failure_details: list[str] | None = None,
 ) -> AdminSystemNotification:
     """顺丰 08:50 自动推单结束后写入/更新当日门店摘要（同店同日仅一条）。"""
     kind = KIND_SF_NIGHTLY_PUSH
     title = f"顺丰自动推单 · {business_date.isoformat()}"
-    message = _sf_nightly_push_message(
+    summary = _sf_nightly_push_message(
         total=total, success=success, failed=failed, skip_reason=skip_reason
     )
+    message = compose_sf_push_notification_message(summary, failure_details)
     row = db.scalar(
         select(AdminSystemNotification).where(
             AdminSystemNotification.store_id == int(store_id),
@@ -1175,6 +1288,7 @@ def admin_system_notification_to_dict(row: AdminSystemNotification) -> dict:
     delivery_date = ""
     if row.kind == KIND_SINGLE_MEAL_ORDER_PAID:
         delivery_date = supply_day_from_single_meal_notification_message(row.message)
+    summary, failure_details = split_sf_push_notification_message(row.message)
     return {
         "id": int(row.id),
         "store_id": int(row.store_id),
@@ -1182,7 +1296,8 @@ def admin_system_notification_to_dict(row: AdminSystemNotification) -> dict:
         "business_date": row.business_date.isoformat() if row.business_date else "",
         "delivery_date": delivery_date,
         "title": row.title,
-        "message": row.message,
+        "message": summary,
+        "failure_details": failure_details,
         "total": int(row.total_count),
         "success": int(row.success_count),
         "failed": int(row.failed_count),

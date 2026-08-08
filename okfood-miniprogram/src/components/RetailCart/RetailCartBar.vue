@@ -20,20 +20,29 @@
 
 <script setup>
 import { computed } from 'vue'
+import { getCustomTabBarBottomReservePx } from '@/utils/customTabBar.js'
+
+/** 购物车条与 tabBar 之间的间距（px） */
+const CART_BAR_TAB_GAP_PX = 8
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
   count: { type: Number, default: 0 },
   subtotalText: { type: String, default: '0.00' },
-  /** tabBar 上方留白（px） */
-  bottomOffsetPx: { type: Number, default: 52 },
+  /** 覆盖 tabBar 上方留白（px）；不传则按自定义 tabBar 高度 + 安全区自动计算 */
+  bottomOffsetPx: { type: Number, default: null },
 })
 
 const emit = defineEmits(['open'])
 
-const barStyle = computed(() => ({
-  bottom: `${Math.max(0, Number(props.bottomOffsetPx) || 0)}px`,
-}))
+const barStyle = computed(() => {
+  const custom = props.bottomOffsetPx
+  const base =
+    custom != null && Number.isFinite(Number(custom))
+      ? Number(custom)
+      : getCustomTabBarBottomReservePx() + CART_BAR_TAB_GAP_PX
+  return { bottom: `${Math.max(0, base)}px` }
+})
 </script>
 
 <style lang="scss" scoped>

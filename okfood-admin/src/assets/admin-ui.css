@@ -783,6 +783,26 @@
   white-space: pre-line;
 }
 
+.admin-system-notifications-item__failures {
+  margin: 0 0 0.65rem;
+  padding: 0.5rem 0.55rem 0.5rem 1.25rem;
+  border-radius: 6px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  list-style: disc;
+}
+
+.admin-system-notifications-item__failures li {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #991b1b;
+  margin-bottom: 0.35rem;
+}
+
+.admin-system-notifications-item__failures li:last-child {
+  margin-bottom: 0;
+}
+
 .admin-system-notifications-item__actions {
   display: flex;
   flex-wrap: wrap;

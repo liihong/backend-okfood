@@ -115,7 +115,9 @@ async function onAcknowledgeNotification(item) {
 function goSfMonitor(item) {
   const d = resolveNotificationDeliveryDate(item)
   notificationPopoverVisible.value = false
-  const query = d ? { delivery_date: d } : {}
+  const query = {}
+  if (d) query.delivery_date = d
+  if (Number(item?.failed) > 0) query.sf_create_status = 'fail'
   router.push({ path: '/delivery-sf-orders', query })
 }
 
@@ -590,6 +592,17 @@ function onTabClose(tab) {
                 >
                   <p class="admin-system-notifications-item__title">{{ item.title }}</p>
                   <p class="admin-system-notifications-item__message">{{ item.message }}</p>
+                  <ul
+                    v-if="Array.isArray(item.failure_details) && item.failure_details.length"
+                    class="admin-system-notifications-item__failures"
+                  >
+                    <li
+                      v-for="(line, idx) in item.failure_details"
+                      :key="`${item.id}-fail-${idx}`"
+                    >
+                      {{ line }}
+                    </li>
+                  </ul>
                   <div class="admin-system-notifications-item__actions">
                     <el-button
                       v-if="(item.kind === 'sf_nightly_push' || item.kind === 'sf_push_batch') && !item.skip_reason"
@@ -597,7 +610,7 @@ function onTabClose(tab) {
                       class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
                       @click="goSfMonitor(item)"
                     >
-                      查看详情
+                      {{ Number(item.failed) > 0 ? '查看失败明细' : '查看详情' }}
                     </el-button>
                     <el-button
                       v-if="item.kind === 'single_meal_order_paid'"
