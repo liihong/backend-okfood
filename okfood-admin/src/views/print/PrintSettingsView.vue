@@ -123,14 +123,14 @@ onMounted(() => {
               "
             >
               <div class="ps-preview__store-row">
-                <span>{{ adminStoreBranding?.store_name || 'OK饭' }}</span>
+                <span class="ps-preview__store-name">{{ adminStoreBranding?.store_name || 'OK饭' }}</span>
                 <span class="ps-preview__fulfillment">{{
                   activeScene === 'store_retail' ? '商城订单' : '配送'
                 }}</span>
               </div>
               <table class="ps-preview__sf-table">
                 <tbody>
-                  <tr><td>订单号：{{ activeScene === 'store_retail' ? 'OKF12345' : 'ZX001' }}</td></tr>
+                  <tr><td class="ps-preview__sf-order-no">订单号：{{ activeScene === 'store_retail' ? 'OKF12345' : 'ZX001' }}</td></tr>
                   <tr><td class="ps-preview__sf-region">{{ activeScene === 'store_retail' ? '东区' : '中心医院' }}</td></tr>
                   <tr><td class="ps-preview__sf-member">李女士 · 132****6633</td></tr>
                   <tr><td class="ps-preview__sf-meal">{{
@@ -262,15 +262,22 @@ onMounted(() => {
   max-width: 220px;
 }
 .ps-preview__store-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  position: relative;
   font-size: 0.82rem;
   font-weight: 800;
   margin-bottom: 0.35rem;
 }
+.ps-preview__store-name {
+  display: block;
+  width: 100%;
+  text-align: center;
+}
 .ps-preview__fulfillment {
+  position: absolute;
+  right: 0;
+  top: 0;
   font-weight: 800;
+  white-space: nowrap;
 }
 .ps-preview__barcode {
   display: none;
@@ -301,6 +308,12 @@ onMounted(() => {
 .ps-preview__sf-table td {
   border: 1px solid #111;
   padding: 0.25rem 0.35rem;
+}
+.ps-preview__sf-order-no {
+  font-weight: 800;
+  font-size: 0.88rem;
+  padding: 0.45rem 0.35rem !important;
+  line-height: 1.45;
 }
 .ps-preview__sf-region {
   text-align: center;

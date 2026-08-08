@@ -28,7 +28,9 @@ from app.models.member_meal_period_state import MemberMealPeriodState
 from app.models.single_meal_order import SingleMealOrder
 from app.models.store_retail_category import StoreRetailCategory
 from app.models.store_retail_order import StoreRetailOrder
+from app.models.store_retail_order_item import StoreRetailOrderItem
 from app.models.store_retail_product import StoreRetailProduct
+from app.models.store_retail_spu import StoreRetailSpu
 from app.models.sf_same_city_callback import SfSameCityCallback
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store_kitchen_plan import StoreKitchenPlan
@@ -71,7 +73,9 @@ __all__ = [
     "SingleMealOrder",
     "StoreRetailCategory",
     "StoreRetailOrder",
+    "StoreRetailOrderItem",
     "StoreRetailProduct",
+    "StoreRetailSpu",
     "StoreKitchenPlan",
     "StorePrintProfile",
     "StorePrintSceneSetting",

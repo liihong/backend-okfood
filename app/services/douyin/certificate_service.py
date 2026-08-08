@@ -245,9 +245,12 @@ def _apply_local_grant(
         prod = db.get(StoreRetailProduct, int(mapping.target_id))
         if not prod or int(prod.store_id) != int(member.store_id):
             raise HTTPException(status_code=404, detail="商城商品不存在")
-        if not bool(prod.is_on_shelf):
-            raise HTTPException(status_code=400, detail="商城商品已下架，无法核销")
-        grant_label = grant_type_label(gt.value, display_name=prod.title)
+        from app.services.retail.retail_display import retail_sku_display_title
+        from app.services.retail.retail_order_amount import assert_retail_product_orderable
+
+        spu = assert_retail_product_orderable(db, product=prod, store_id=int(member.store_id))
+        display = retail_sku_display_title(spu_title=spu.title, spec_label=prod.spec_label)
+        grant_label = grant_type_label(gt.value, display_name=display)
         order = create_paid_store_retail_order_for_douyin_redeem(
             db,
             member=member,

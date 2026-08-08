@@ -32,21 +32,31 @@ export function useStorePrint() {
       showToast('没有可打印的数据', 'error')
       return null
     }
+    // silentToast 仅前端使用，不可传入后端
+    const { silentToast, ...jobExtra } = extra
     printing.value = true
     try {
-      const body = { scene, items, ...extra }
+      const body = { scene, items, ...jobExtra }
       const data = await apiJson(
         `/api/admin/store-print/jobs?${storeQuery()}`,
         { method: 'POST', body: JSON.stringify(body) },
         { auth: true },
       )
+      const printedCount =
+        data?.local_payload?.layouts?.length ??
+        data?.printed_count ??
+        items.length
       if (data?.status === 'pending_local' && data?.local_payload) {
         await printLocalPayload(data.local_payload)
-        showToast(`已发送 ${items.length} 项到本地打印机`, 'success')
+        if (!silentToast) {
+          showToast(`已发送 ${printedCount} 张到本地打印机`, 'success')
+        }
       } else if (data?.status === 'success') {
-        showToast(`云打印成功，共 ${data.printed_count || items.length} 张`, 'success')
+        if (!silentToast) {
+          showToast(`云打印成功，共 ${printedCount} 张`, 'success')
+        }
       }
-      return data
+      return { ...data, printed_count: printedCount }
     } catch (e) {
       const msg = e?.message || '打印失败'
       showToast(msg, 'error')

@@ -61,6 +61,7 @@
               :item="m"
               :show-ingredients="true"
               @tap="() => onItemTap(m)"
+              @add="() => onRetailAdd(m)"
             />
           </view>
         </view>
@@ -69,6 +70,19 @@
     <MemberCouponReminderHost v-if="couponHostReady" />
     <EntryPosterHost />
     <MenuPagePosterHost />
+
+    <RetailCartBar
+      :visible="cartVisible"
+      :count="cartCount"
+      :subtotal-text="cartSubtotalText"
+      :bottom-offset-px="cartBarBottomPx"
+      @open="cartSheetOpen = true"
+    />
+    <RetailCartSheet
+      v-model:show="cartSheetOpen"
+      :items="cartItems"
+      @checkout="goRetailCheckout"
+    />
   </view>
 </template>
 
@@ -81,7 +95,11 @@ import MenuDishCard from '@/components/MenuDishCard/MenuDishCard.vue'
 import MemberCouponReminderHost from '@/components/MemberCouponReminderHost/MemberCouponReminderHost.vue'
 import EntryPosterHost from '@/components/EntryPosterHost/EntryPosterHost.vue'
 import MenuPagePosterHost from '@/components/MenuPagePosterHost/MenuPagePosterHost.vue'
-import { fetchStoreInfo, fetchRetailMenu, mapRetailProductItem } from '@/utils/catalogApi.js'
+import RetailCartBar from '@/components/RetailCart/RetailCartBar.vue'
+import RetailCartSheet from '@/components/RetailCart/RetailCartSheet.vue'
+import { addCartItem } from '@/utils/retailCart/retailCartStorage.js'
+import { notifyRetailCartChanged, useRetailCart } from '@/utils/retailCart/useRetailCart.js'
+import { fetchStoreInfo, fetchRetailMenu, mapRetailSpuItem } from '@/utils/catalogApi.js'
 import {
   addDaysIso,
   defaultMenuStockDates,
@@ -102,6 +120,10 @@ import { requestDeliverySubscribeOncePerDay } from '@/utils/subscribeMsg.js'
 import { tryShowMenuPagePoster } from '@/utils/menuPagePoster.js'
 
 const couponHostReady = ref(false)
+const cartSheetOpen = ref(false)
+const cartBarBottomPx = ref(52)
+const { items: cartItems, count: cartCount, subtotalText: cartSubtotalText, visible: cartVisible, refresh: refreshCart } =
+  useRetailCart()
 const pageStyle = ref({})
 const catalogBodyStyle = ref({})
 const storeInfo = ref(null)
@@ -243,11 +265,7 @@ const displayItems = computed(() => {
   const cat = retailCategories.value.find((c) => c.id === meta.categoryId)
   if (!cat || !Array.isArray(cat.products)) return []
   return cat.products.map((p) => {
-    const item = mapRetailProductItem(p)
-    const list = parsePriceYuan(p?.unit_price_yuan)
-    if (list != null) {
-      item.price = list
-    }
+    const item = mapRetailSpuItem(p)
     return item
   })
 })
@@ -439,6 +457,7 @@ onShow(() => {
   syncCustomTabBar()
   syncTabLayout()
   requestDeliverySubscribeOncePerDay()
+  refreshCart()
   loadPageData()
   void tryShowMenuPagePoster()
 })
@@ -458,18 +477,55 @@ function onFulfillModeChange(mode) {
 
 function onItemTap(m) {
   if (m?.isRetail) {
-    const pid = m?.retailProductId != null ? Number(m.retailProductId) : 0
-    if (!Number.isFinite(pid) || pid < 1) {
-      uni.showToast({ title: '商品无效', icon: 'none' })
-      return
-    }
-    clearPendingMenuErrorToast()
-    uni.navigateTo({
-      url: `/packageOrder/pages/retailConfirm/retailConfirm?retail_product_id=${encodeURIComponent(String(pid))}`,
-    })
+    goRetailDetail(m)
     return
   }
   goDetail(m)
+}
+
+function goRetailDetail(m) {
+  const spuId = m?.retailSpuId != null ? Number(m.retailSpuId) : 0
+  if (!Number.isFinite(spuId) || spuId < 1) {
+    uni.showToast({ title: '商品无效', icon: 'none' })
+    return
+  }
+  uni.navigateTo({
+    url: `/packageOrder/pages/retailProductDetail/retailProductDetail?spu_id=${encodeURIComponent(String(spuId))}`,
+  })
+}
+
+/** 商城商品加入本地购物车 */
+function onRetailAdd(m) {
+  const pid = m?.retailProductId != null ? Number(m.retailProductId) : 0
+  if (!Number.isFinite(pid) || pid < 1) {
+    uni.showToast({ title: '商品无效', icon: 'none' })
+    return
+  }
+  if (m.stockLimited && m.stockRemaining != null && Number(m.stockRemaining) <= 0) {
+    uni.showToast({ title: '商品已售罄', icon: 'none' })
+    return
+  }
+  const res = addCartItem({
+    retailProductId: pid,
+    title: m.name,
+    unitPriceYuan: m.price,
+    listPriceYuan: m.listPrice,
+    coverImageUrl: m.imgOriginal || m.img,
+    stockRemaining: m.stockRemaining,
+    stockLimited: m.stockLimited,
+    soldCount: m.soldCount,
+  })
+  if (!res.ok) {
+    uni.showToast({ title: res.msg || '加入失败', icon: 'none' })
+    return
+  }
+  notifyRetailCartChanged()
+  refreshCart()
+  uni.showToast({ title: '已加入购物车', icon: 'none' })
+}
+
+function goRetailCheckout() {
+  uni.navigateTo({ url: '/packageOrder/pages/retailCheckout/retailCheckout' })
 }
 
 function goDetail(m) {
@@ -509,6 +565,7 @@ function goDetail(m) {
   display: flex;
     flex-direction: row;
     overflow: hidden;
+  padding-bottom: 120rpx;
 }
 
 .catalog-sidebar {

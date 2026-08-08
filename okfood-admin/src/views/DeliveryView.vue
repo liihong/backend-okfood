@@ -493,42 +493,85 @@ function exportSheetToExcel() {
   showToast(`已导出 ${out.length} 行`, 'success')
 }
 
-/** 打印标签：当前片区或全部（不含门店自提） */
+/** 打印标签：当前片区或全部（不含门店自提）；全部时按大表片区顺序逐批出纸 */
+const labelPrintBusy = ref(false)
+
 async function printDeliveryLabels(scope) {
+  if (labelPrintBusy.value || printLoading.value) return
   const d = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
   const region = scope === 'region' ? activeRegionTab.value : null
   if (scope === 'region' && region === '门店自提') {
     showToast('门店自提请使用商城零售打印', 'error')
     return
   }
-  const cfg = await resolveScene('delivery_sheet')
-  if (!cfg?.configured) {
-    showToast('请先在系统管理 → 打印设置 → 配送标签 中配置打印机', 'error')
+  if (scope === 'region' && !region) {
+    showToast('请先选择片区', 'error')
     return
   }
-  const storeName =
-    String(adminStoreBranding.value?.store_name || '').trim() || 'OK饭'
-  const regionCodes = sheetToday.value.region_codes || {}
-  const items = buildDeliveryLabelItems(
-    flatStops.value,
-    d,
-    region,
-    addressLineForExcelExport,
-    storeName,
-    regionCodes,
-  )
-  if (!items.length) {
-    showToast('没有可打印的配送记录', 'error')
-    return
-  }
-  const missingCodes = missingRegionCodesForStops(flatStops.value, regionCodes)
-  if (missingCodes.length) {
+  labelPrintBusy.value = true
+  try {
+    const cfg = await resolveScene('delivery_sheet')
+    if (!cfg?.configured) {
+      showToast('请先在系统管理 → 打印设置 → 配送标签 中配置打印机', 'error')
+      return
+    }
+    const storeName =
+      String(adminStoreBranding.value?.store_name || '').trim() || 'OK饭'
+    const regionCodes = sheetToday.value.region_codes || {}
+    const missingCodes = missingRegionCodesForStops(flatStops.value, regionCodes)
+    if (missingCodes.length) {
+      showToast(
+        `以下片区未配置编码，备餐号前缀暂用 X：${missingCodes.join('、')}（请在配送区域维护编码）`,
+        'error',
+      )
+    }
+
+    /** 与左侧片区 Tab 顺序一致（大表 groups 顺序），逐片区发送打印任务 */
+    const targetRegions =
+      scope === 'all'
+        ? (sheetToday.value.groups || [])
+            .map((g) => g.area)
+            .filter((a) => a && a !== '门店自提')
+        : [region]
+
+    let totalSheets = 0
+    let failed = false
+    for (const area of targetRegions) {
+      if (!area || area === '门店自提') continue
+      const items = buildDeliveryLabelItems(
+        flatStops.value,
+        d,
+        area,
+        addressLineForExcelExport,
+        storeName,
+        regionCodes,
+      )
+      if (!items.length) continue
+      const result = await submitPrintJob('delivery_sheet', items, { silentToast: true })
+      if (!result) {
+        failed = true
+        break
+      }
+      totalSheets += Number(result.printed_count) || 0
+    }
+
+    if (!totalSheets) {
+      showToast('没有可打印的配送记录', 'error')
+      return
+    }
+    if (failed) {
+      showToast(`已打印 ${totalSheets} 张后中断，请检查打印机后重试剩余片区`, 'error')
+      return
+    }
     showToast(
-      `以下片区未配置编码，备餐号前缀暂用 X：${missingCodes.join('、')}（请在配送区域维护编码）`,
-      'error',
+      scope === 'all'
+        ? `已按片区顺序发送 ${totalSheets} 张到本地打印机`
+        : `已发送 ${totalSheets} 张到本地打印机`,
+      'success',
     )
+  } finally {
+    labelPrintBusy.value = false
   }
-  await submitPrintJob('delivery_sheet', items)
 }
 
 watch(adminAccessToken, (t) => {
@@ -878,7 +921,7 @@ async function reinstatePhoneToSheet() {
         <button
           type="button"
           class="delivery-btn delivery-btn--outline"
-          :disabled="loading || printLoading || !flatStops.length"
+          :disabled="loading || printLoading || labelPrintBusy || !flatStops.length"
           title="打印当前片区标签（不含自提）"
           @click="printDeliveryLabels('region')"
         >
@@ -888,8 +931,8 @@ async function reinstatePhoneToSheet() {
         <button
           type="button"
           class="delivery-btn delivery-btn--outline"
-          :disabled="loading || printLoading || !flatStops.length"
-          title="打印当日全部到家标签"
+          :disabled="loading || printLoading || labelPrintBusy || !flatStops.length"
+          title="按片区顺序逐批打印当日全部到家标签"
           @click="printDeliveryLabels('all')"
         >
           <Printer :size="16" stroke-width="2" />

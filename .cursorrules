@@ -59,3 +59,11 @@ async def get_users():
 - 要求能复用的代码不要重复写
 - 写代码时要求有注释，注释要清晰，注释要使用中文
 - 修改时不要影响现有功能，保证现有功能代码的健壮性
+
+## 管理端前端（okfood-admin）
+
+修改 `okfood-admin/**` 时须同时遵守 **`okfood-admin/.cursorrules`**，其中强制约定包括：
+
+- 二次确认、删除操作：**`ElMessageBox.confirm`**，**禁止 `window.confirm` / `window.alert`**
+- 列表/表单/弹窗/按钮：Element Plus 组件
+- 轻提示：`showToast`（`composables/useToast.js`）

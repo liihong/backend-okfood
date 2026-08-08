@@ -49,7 +49,7 @@ export function useOrdersManage(orderKind = 'single') {
   const loading = ref(false)
   const singleItems = ref([])
   const singleTotal = ref(0)
-  /** @type {import('vue').Ref<null | { paid: number; unpaid: number; cancelled: number; pending_ship: number }>} */
+  /** @type {import('vue').Ref<null | { paid: number; unpaid: number; cancelled: number; pending_ship: number; pending_pickup: number }>} */
   const singleOrderBucketSummary = ref(null)
   const mallItems = ref([])
   const mallTotal = ref(0)
@@ -1220,6 +1220,7 @@ export function useOrdersManage(orderKind = 'single') {
       const fp = String(singleFulfillmentFilter.value || '').trim()
       if (
         fp === 'pending_ship' ||
+        fp === 'pending_pickup' ||
         fp === 'in_delivery' ||
         fp === 'delivered' ||
         fp === 'after_sale'
@@ -1236,6 +1237,7 @@ export function useOrdersManage(orderKind = 'single') {
           unpaid: Number(sm.unpaid) || 0,
           cancelled: Number(sm.cancelled) || 0,
           pending_ship: Number(sm.pending_ship) || 0,
+          pending_pickup: Number(sm.pending_pickup) || 0,
           retail_inventory_portions: Number(sm.retail_inventory_portions) || 0,
           paid_portions: Number(sm.paid_portions) || 0,
           pending_unpaid_portions: Number(sm.pending_unpaid_portions) || 0,

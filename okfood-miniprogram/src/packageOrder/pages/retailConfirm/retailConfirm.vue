@@ -170,7 +170,7 @@ import {
   FIXED_FOOTER_RESERVE_PX,
 } from '@/utils/navbar.js'
 import { getMemberToken, request } from '@/utils/api.js'
-import { fetchRetailMenu, fetchStoreInfo } from '@/utils/catalogApi.js'
+import { fetchRetailSkuDetail, fetchStoreInfo } from '@/utils/catalogApi.js'
 import { formatMenuPrice } from '@/utils/menuApi.js'
 import {
   normalizeAddressList,
@@ -357,23 +357,19 @@ async function loadPage() {
   loading.value = true
   loadError.value = ''
   try {
-    const [menu, store] = await Promise.all([
-      fetchRetailMenu(),
+    const [skuInfo, store] = await Promise.all([
+      fetchRetailSkuDetail(productId.value),
       fetchStoreInfo().catch(() => null),
     ])
     applyStoreInfo(store)
-    let found = null
-    for (const cat of menu) {
-      for (const p of cat.products || []) {
-        if (Number(p.id) === Number(productId.value)) {
-          found = { ...p, category_id: cat.id }
-          break
-        }
-      }
-      if (found) break
+    if (!skuInfo) throw new Error('商品不存在或已下架')
+    product.value = {
+      title: skuInfo.title || skuInfo.spu_title || '商品',
+      subtitle: skuInfo.subtitle || skuInfo.spec_label || '',
+      unit_price_yuan: skuInfo.unit_price_yuan,
+      list_price_yuan: skuInfo.list_price_yuan,
+      cover_image_url: skuInfo.cover_image_url,
     }
-    if (!found) throw new Error('商品不存在或已下架')
-    product.value = found
     const raw = await request('/api/user/me/addresses', { method: 'GET', retry: 1 })
     applyAddressList(raw)
     selectedIndex.value = 0
@@ -413,9 +409,13 @@ async function handlePay() {
   try {
     await syncWxMiniOpenidFromLogin()
     const payload = {
-      retail_product_id: Number(productId.value),
+      items: [
+        {
+          retail_product_id: Number(productId.value),
+          quantity: Math.max(1, quantity.value),
+        },
+      ],
       store_pickup: false,
-      quantity: Math.max(1, quantity.value),
       member_address_id: Number(addressId),
     }
     if (selectedCouponId.value != null) {

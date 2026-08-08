@@ -72,10 +72,13 @@
           <view v-if="showListStockRemaining" class="menu-dish-card__stock-badge">
             <text class="menu-dish-card__stock-badge-txt">剩 {{ item.singleStockRemaining ?? 0 }} 份</text>
           </view>
-          <view v-if="showListSelectAction" class="menu-dish-card__add-btn">
+          <view v-else-if="showListRetailStockHint" class="menu-dish-card__stock-badge">
+            <text class="menu-dish-card__stock-badge-txt">{{ retailStockHintText }}</text>
+          </view>
+          <view v-if="showListSelectAction" class="menu-dish-card__add-btn" @tap.stop="emit('add', item)">
             <text class="menu-dish-card__add-icon">+</text>
           </view>
-          <text v-else-if="showListSoldOut" class="menu-dish-card__list-soldout">售罄</text>
+          <text v-else-if="showListSoldOut || showListRetailSoldOut" class="menu-dish-card__list-soldout">售罄</text>
         </view>
       </view>
     </view>
@@ -124,9 +127,14 @@ const props = defineProps({
   lazyLoad: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['tap'])
+const emit = defineEmits(['tap', 'add'])
 
-const priceText = computed(() => formatMenuPrice(props.item?.price))
+const priceText = computed(() => {
+  const base = formatMenuPrice(props.item?.price)
+  if (base == null) return null
+  if (props.item?.priceSuffix) return `${base}${props.item.priceSuffix}`
+  return base
+})
 
 const listPriceText = computed(() =>
   formatMenuPrice(props.item?.listPrice ?? props.item?.list_price_yuan),
@@ -172,11 +180,39 @@ const showListSoldOut = computed(
   () => showListStockInfo.value && !listStockAvailable.value,
 )
 
-/** 零售仍展示按钮；排餐项库存为 0 时隐藏选餐 */
+/** 零售商品列表不展示快捷加购，须进详情选规格 */
 const showListSelectAction = computed(() => {
-  if (props.item?.isRetail) return true
+  if (props.item?.isRetail) {
+    return false
+  }
   if (!showListStockInfo.value) return true
   return listStockAvailable.value
+})
+
+/** 商城零售售罄 */
+const showListRetailSoldOut = computed(
+  () =>
+    props.item?.isRetail &&
+    props.item?.stockLimited &&
+    props.item?.stockRemaining != null &&
+    Number(props.item.stockRemaining) <= 0,
+)
+
+const showListRetailStockHint = computed(() => {
+  if (!props.item?.isRetail) return false
+  const sold = Number(props.item?.soldCount) || 0
+  const limited = props.item?.stockLimited
+  return sold > 0 || limited
+})
+
+const retailStockHintText = computed(() => {
+  const sold = Number(props.item?.soldCount) || 0
+  const parts = []
+  if (sold > 0) parts.push(`已售${sold}`)
+  if (props.item?.stockLimited && props.item?.stockRemaining != null) {
+    parts.push(`剩${props.item.stockRemaining}`)
+  }
+  return parts.join(' · ') || ''
 })
 
 const kcalText = computed(() => {

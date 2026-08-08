@@ -5,15 +5,36 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 
-class StoreRetailOrderCreateIn(BaseModel):
+class StoreRetailOrderItemIn(BaseModel):
+    """商城下单单行。"""
+
     retail_product_id: int = Field(..., ge=1)
+    quantity: int = Field(1, ge=1, le=50)
+
+
+class StoreRetailOrderItemOut(BaseModel):
+    id: int
+    retail_product_id: int
+    spu_id: int | None = None
+    product_title: str
+    spu_title: str | None = None
+    spec_label: str | None = None
+    unit_price_yuan: str
+    quantity: int
+    line_amount_yuan: str
+    category_id: int | None = None
+
+
+class StoreRetailOrderCreateIn(BaseModel):
+    """商城购物车结算：多 SKU。"""
+
+    items: list[StoreRetailOrderItemIn] = Field(..., min_length=1, max_length=20)
     member_address_id: int | None = Field(
         default=None,
         ge=1,
         description="配送到家时必填；门店自提勿传",
     )
     store_pickup: bool = Field(False, description="门店自提")
-    quantity: int = Field(1, ge=1, le=50)
     member_coupon_id: int | None = Field(None, ge=1)
 
     @model_validator(mode="after")
@@ -31,6 +52,8 @@ class StoreRetailOrderOut(BaseModel):
     member_address_id: int | None = None
     store_pickup: bool = False
     quantity: int = 1
+    item_count: int = 1
+    items: list[StoreRetailOrderItemOut] = Field(default_factory=list)
     fulfillment_date: date
     routing_area: str
     amount_yuan: str
@@ -105,7 +128,7 @@ class StoreRetailCancelIn(BaseModel):
 
 
 class AdminStoreRetailOrderCreateIn(BaseModel):
-    """管理端：手动创建商城零售订单。"""
+    """管理端：手动创建商城零售订单（支持多 SKU）。"""
 
     phone: str = Field(..., min_length=5, max_length=20, description="会员手机号")
     name: str | None = Field(
@@ -113,8 +136,7 @@ class AdminStoreRetailOrderCreateIn(BaseModel):
         max_length=100,
         description="会员不存在时须填写姓名以创建新会员",
     )
-    retail_product_id: int = Field(..., ge=1, description="商城商品 id")
-    quantity: int = Field(1, ge=1, le=50)
+    items: list[StoreRetailOrderItemIn] = Field(..., min_length=1, max_length=20)
     store_pickup: bool = Field(False, description="门店自提")
     member_address_id: int | None = Field(
         None,

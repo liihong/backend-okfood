@@ -416,6 +416,7 @@ def list_available_member_coupons_for_user(
     membership_template_id: int | None = None,
     dish_id: int | None = None,
     retail_product_id: int | None = None,
+    retail_lines: tuple | None = None,
 ) -> list[UserMemberCouponAvailableOut]:
     """小程序结算页：列出可用券（不含 locked/used）。"""
     checkout_map = {
@@ -437,6 +438,15 @@ def list_available_member_coupons_for_user(
         dish_id=dish_id,
         retail_product_id=retail_product_id,
     )
+    if retail_lines:
+        from app.services.marketing.coupon_checkout_service import CouponCheckoutContext, RetailCheckoutLine
+
+        ctx = CouponCheckoutContext(
+            checkout_biz=checkout_biz,
+            original_amount_yuan=orig or Decimal("0"),
+            retail_product_id=retail_product_id,
+            retail_lines=retail_lines,
+        )
 
     rows = db.scalars(
         select(MemberCoupon)
@@ -455,8 +465,13 @@ def list_available_member_coupons_for_user(
             changed = True
             continue
         if orig is not None:
+            from app.services.marketing.coupon_checkout_service import _retail_coupon_threshold_yuan
+
+            threshold = _retail_coupon_threshold_yuan(db, row, ctx, store_id=int(store_id))
+            if threshold < Decimal("0"):
+                continue
             min_need = Decimal(row.min_order_yuan or 0).quantize(Decimal("0.01"))
-            if orig < min_need:
+            if threshold < min_need:
                 continue
         if not _scope_matches(db, row, ctx, store_id=int(store_id)):
             continue

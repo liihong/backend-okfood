@@ -24,7 +24,13 @@ from app.models.store import Store
 from app.models.store_retail_order import StoreRetailOrder
 from app.schemas.admin import SfSameCityRowBase
 from app.models.store_retail_product import StoreRetailProduct
-from app.schemas.store_retail_order import AdminStoreRetailOrderCreateIn, AdminStoreRetailOrderListOut
+from app.schemas.store_retail_order import (
+    AdminStoreRetailOrderCreateIn,
+    AdminStoreRetailOrderListOut,
+    StoreRetailOrderCreateIn,
+)
+from app.services.retail.retail_order_item_repo import load_order_items_map
+from app.services.retail.retail_order_persist import persist_retail_order_with_items
 from app.services.shared.store_config_service import get_store_config
 from app.services.shared.tenant_integration_service import get_merged_pay_config
 from app.services.client.store_retail_order_service import (
@@ -45,6 +51,7 @@ from app.services.member.member_address_service import delivery_region_name_map,
 from app.utils.sql_like import escape_like_fragment
 
 from app.services.order.single_meal_order_service import (
+    normalize_store_pickup_fulfillment_after_sf_cancel,
     sf_push_create_succeeded,
     sf_push_is_terminal_cancel,
     sf_push_is_terminal_delivered,
@@ -66,14 +73,18 @@ def _admin_member_display_name(member: Member | None, addr: MemberAddress | None
 
 
 def _build_admin_list_out(
-    db: Session, row: StoreRetailOrder, *, order_address: MemberAddress | None = None
+    db: Session,
+    row: StoreRetailOrder,
+    *,
+    order_address: MemberAddress | None = None,
+    items_map: dict[int, list] | None = None,
 ) -> AdminStoreRetailOrderListOut:
     m = db.get(Member, row.member_id)
     aid = int(row.member_address_id) if row.member_address_id is not None else None
     addr = order_address
     if addr is None and aid is not None:
         addr = db.get(MemberAddress, aid)
-    base = _row_to_out(db, row)
+    base = _row_to_out(db, row, items_map=items_map)
     return AdminStoreRetailOrderListOut(
         **base.model_dump(),
         member_id=int(row.member_id),
@@ -279,7 +290,16 @@ def list_admin_store_retail_orders(
     if addr_ids:
         for a in db.scalars(select(MemberAddress).where(MemberAddress.id.in_(addr_ids))).all():
             addr_map[int(a.id)] = a
-    return [_build_admin_list_out(db, r, order_address=addr_map.get(int(r.member_address_id or 0))) for r in rows], total
+    items_map = load_order_items_map(db, [int(r.id) for r in rows])
+    return [
+        _build_admin_list_out(
+            db,
+            r,
+            order_address=addr_map.get(int(r.member_address_id or 0)),
+            items_map=items_map,
+        )
+        for r in rows
+    ], total
 
 
 def _sync_store_retail_wechat_refunded_local(db: Session, o: StoreRetailOrder) -> bool:
@@ -379,8 +399,15 @@ def admin_mark_store_retail_order_delivered(db: Session, *, order_id: int, store
     f = str(o.fulfillment_status or "").strip().lower()
     if f == "delivered":
         return "订单已是已完成"
-    if f in ("cancelled", "sf_cancelled"):
+    if f == "cancelled":
         raise ValueError("已取消订单不可标记完成")
+    # 门店自提：顺丰取消配送后改自提，仍应允许核销（顺丰取消 ≠ 订单取消）
+    if f == "sf_cancelled":
+        if bool(getattr(o, "store_pickup", False)):
+            normalize_store_pickup_fulfillment_after_sf_cancel(o)
+            f = str(o.fulfillment_status or "").strip().lower()
+        else:
+            raise ValueError("顺丰配送已取消，请先改自提/改址重推或重新推顺丰后再标记完成")
     if f not in ("pending", _FULFILLMENT_SF_AWAITING_PICKUP, "accepted"):
         raise ValueError(f"当前状态不可标记完成（{f or '—'}）")
     o.fulfillment_status = "delivered"
@@ -754,7 +781,7 @@ def create_admin_store_retail_order(
     store_id: int,
     operator: str,
 ) -> AdminStoreRetailOrderListOut:
-    """管理端：手动创建商城零售订单（可已支付待接单或未支付）。"""
+    """管理端：手动创建商城零售订单（可已支付待接单或未支付，支持多 SKU）。"""
     _ = operator
     member = _resolve_member_for_admin_retail_order(
         db,
@@ -764,12 +791,6 @@ def create_admin_store_retail_order(
         store_id=int(store_id),
     )
 
-    prod = db.get(StoreRetailProduct, int(body.retail_product_id))
-    if not prod:
-        raise HTTPException(status_code=404, detail="商城商品不存在")
-    _assert_retail_product_orderable(db, product=prod, store_id=int(store_id))
-
-    qty = int(body.quantity)
     if body.store_pickup:
         area = "门店自提"
         addr_id = None
@@ -781,46 +802,36 @@ def create_admin_store_retail_order(
         area = routing_area_label(addr, nm)
         addr_id = int(addr.id)
 
-    if body.amount_yuan is not None:
-        amount = Decimal(body.amount_yuan).quantize(Decimal("0.01"))
-    else:
-        amount = _compute_retail_order_amount(
-            db,
-            unit_price=Decimal(prod.unit_price_yuan),
-            quantity=qty,
-            store_pickup=bool(body.store_pickup),
-            store_id=int(store_id),
-        )
-
     pay_status = str(body.pay_status)
     pay_channel = str(body.pay_channel)
-    if pay_status == "已支付":
-        fulfillment_status = _FULFILLMENT_AWAITING_ACCEPT
-    else:
-        fulfillment_status = "pending"
+    fulfillment_status = _FULFILLMENT_AWAITING_ACCEPT if pay_status == "已支付" else "pending"
 
-    row = StoreRetailOrder(
-        tenant_id=int(tenant_id),
-        store_id=int(store_id),
-        out_trade_no=_new_temp_out_trade_no(),
-        member_id=int(member.id),
-        retail_product_id=int(prod.id),
-        product_title=(prod.title or "").strip() or "商品",
+    create_body = StoreRetailOrderCreateIn(
+        items=body.items,
         member_address_id=addr_id,
         store_pickup=bool(body.store_pickup),
-        quantity=qty,
+        member_coupon_id=None,
+    )
+    row = persist_retail_order_with_items(
+        db,
+        tenant_id=int(tenant_id),
+        store_id=int(store_id),
+        member_id=int(member.id),
+        body=create_body,
+        out_trade_no_temp=_new_temp_out_trade_no(),
         fulfillment_date=today_shanghai(),
         routing_area=area,
-        amount_yuan=amount,
+        member_address_id=addr_id,
         pay_status=pay_status,
         pay_channel=pay_channel if pay_status == "已支付" else None,
         fulfillment_status=fulfillment_status,
-        courier_id=None,
         remark=(body.remark or "管理员手动建单")[:500],
     )
-    db.add(row)
-    db.flush()
     row.out_trade_no = _final_out_trade_no(int(row.id))
+
+    if body.amount_yuan is not None:
+        row.amount_yuan = Decimal(body.amount_yuan).quantize(Decimal("0.01"))
+
     if pay_status == "已支付":
         _notify_store_retail_order_paid(db, row)
     db.commit()

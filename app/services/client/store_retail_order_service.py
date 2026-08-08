@@ -22,21 +22,26 @@ from app.integrations.wechat_pay_v2 import (
 )
 from app.models.enums import CouponLockedOrderBiz
 from app.models.member import Member
-from app.models.member_address import MemberAddress
-from app.models.store_retail_category import StoreRetailCategory
 from app.models.store_retail_order import StoreRetailOrder
+from app.models.store_retail_order_item import StoreRetailOrderItem
 from app.models.store_retail_product import StoreRetailProduct
 from app.schemas.store_retail_order import (
     AdminStoreRetailOrderListOut,
     StoreRetailOrderCreateIn,
     StoreRetailOrderOut,
 )
+from app.services.retail.retail_order_amount import assert_retail_product_orderable, compute_retail_line_amount
+from app.services.retail.retail_order_item_repo import item_row_to_out, load_order_items_map
+from app.services.retail.retail_order_lines import resolve_retail_order_lines
+from app.services.retail.retail_order_persist import persist_retail_order_with_items
+from app.services.retail.retail_stock_service import assert_retail_stock_available
 from app.services.marketing.coupon_checkout_service import (
     CouponCheckoutContext,
     lock_member_coupon_for_order,
     mark_member_coupon_used_for_order,
     release_member_coupon_for_order,
 )
+from app.models.member_address import MemberAddress
 from app.services.member.member_address_service import (
     delivery_region_name_map,
     full_address_line,
@@ -77,25 +82,15 @@ def _unpaid_expire_cutoff():
 
 
 def _assert_retail_product_orderable(db: Session, *, product: StoreRetailProduct, store_id: int) -> None:
-    if int(product.store_id) != int(store_id):
-        raise HTTPException(status_code=404, detail="商品不存在或已下架")
-    if not bool(product.is_on_shelf):
-        raise HTTPException(status_code=400, detail="商品已下架")
-    if product.category_id is not None:
-        cat = db.get(StoreRetailCategory, int(product.category_id))
-        if not cat or not bool(cat.is_active) or int(cat.store_id) != int(store_id):
-            raise HTTPException(status_code=400, detail="商品分类已停用")
+    assert_retail_product_orderable(db, product=product, store_id=store_id)
 
 
 def _compute_retail_order_amount(
     db: Session, *, unit_price: Decimal, quantity: int, store_pickup: bool, store_id: int
 ) -> Decimal:
-    """与单次点餐一致：销售价为配送价；自提时减门店固定配送费。"""
-    unit_dec = Decimal(unit_price).quantize(Decimal("0.01"))
-    if store_pickup:
-        fee = get_store_base_delivery_fee_yuan(db, store_id=int(store_id))
-        unit_dec = max(Decimal("0.01"), (unit_dec - fee).quantize(Decimal("0.01")))
-    return (unit_dec * Decimal(quantity)).quantize(Decimal("0.01"))
+    return compute_retail_line_amount(
+        db, unit_price=unit_price, quantity=quantity, store_pickup=store_pickup, store_id=store_id
+    )
 
 
 def _row_address_summary(db: Session, row: StoreRetailOrder) -> str:
@@ -112,8 +107,19 @@ def _row_address_summary(db: Session, row: StoreRetailOrder) -> str:
     return (row.routing_area or "").strip() or "—"
 
 
-def _row_to_out(db: Session, row: StoreRetailOrder, *, address_summary: str | None = None) -> StoreRetailOrderOut:
+def _row_to_out(
+    db: Session,
+    row: StoreRetailOrder,
+    *,
+    address_summary: str | None = None,
+    items_map: dict[int, list] | None = None,
+) -> StoreRetailOrderOut:
     cfg = get_store_config(db, store_id=int(row.store_id))
+    if items_map is None:
+        items_map = load_order_items_map(db, [int(row.id)])
+    raw_items = items_map.get(int(row.id), [])
+    items_out = [item_row_to_out(r) for r in raw_items]
+    item_count = len(items_out) if items_out else 1
     return StoreRetailOrderOut(
         id=int(row.id),
         out_trade_no=str(row.out_trade_no or ""),
@@ -122,6 +128,8 @@ def _row_to_out(db: Session, row: StoreRetailOrder, *, address_summary: str | No
         member_address_id=int(row.member_address_id) if row.member_address_id is not None else None,
         store_pickup=bool(row.store_pickup),
         quantity=int(row.quantity or 1),
+        item_count=int(item_count),
+        items=items_out,
         fulfillment_date=row.fulfillment_date,
         routing_area=str(row.routing_area or ""),
         amount_yuan=_format_amount_yuan(Decimal(row.amount_yuan)),
@@ -203,20 +211,27 @@ def create_paid_store_retail_order_for_douyin_redeem(
     prod = db.get(StoreRetailProduct, int(retail_product_id))
     if not prod:
         raise HTTPException(status_code=404, detail="商城商品不存在")
-    _assert_retail_product_orderable(db, product=prod, store_id=int(member.store_id))
+    from app.models.store_retail_spu import StoreRetailSpu
+    from app.services.retail.retail_display import retail_sku_display_title
+
+    spu = db.get(StoreRetailSpu, int(prod.spu_id))
+    _assert_retail_product_orderable(db, product=prod, store_id=int(member.store_id), spu=spu)
+
+    assert_retail_stock_available(db, product_id=int(prod.id), need_qty=1)
 
     if amount_yuan is None:
         amount_yuan = Decimal(prod.unit_price_yuan).quantize(Decimal("0.01"))
     else:
         amount_yuan = Decimal(amount_yuan).quantize(Decimal("0.01"))
 
+    title = retail_sku_display_title(spu_title=spu.title if spu else "商品", spec_label=prod.spec_label)
     row = StoreRetailOrder(
         tenant_id=int(member.tenant_id),
         store_id=int(member.store_id),
         out_trade_no=_new_temp_out_trade_no(),
         member_id=int(member.id),
         retail_product_id=int(prod.id),
-        product_title=(prod.title or "").strip() or "商品",
+        product_title=title,
         member_address_id=None,
         store_pickup=True,
         quantity=1,
@@ -232,6 +247,21 @@ def create_paid_store_retail_order_for_douyin_redeem(
     db.add(row)
     db.flush()
     row.out_trade_no = _final_out_trade_no(int(row.id))
+    db.add(
+        StoreRetailOrderItem(
+            order_id=int(row.id),
+            retail_product_id=int(prod.id),
+            spu_id=int(spu.id) if spu else None,
+            category_id=int(spu.category_id) if spu and spu.category_id is not None else None,
+            product_title=title,
+            spu_title=spu.title if spu else None,
+            spec_label=prod.spec_label,
+            unit_price_yuan=amount_yuan,
+            quantity=1,
+            line_amount_yuan=amount_yuan,
+            sort_order=0,
+        )
+    )
     _notify_store_retail_order_paid(db, row)
     return row
 
@@ -242,19 +272,9 @@ def create_store_retail_order(
     expire_stale_unpaid_store_retail_orders(db, member_id=member_id)
     _assert_no_pending_unpaid_retail_order(db, member_id)
 
-    prod = db.get(StoreRetailProduct, int(body.retail_product_id))
-    if not prod:
-        raise HTTPException(status_code=404, detail="商品不存在或已下架")
-
     mem = db.get(Member, member_id)
     if not mem or mem.deleted_at is not None:
         raise HTTPException(status_code=404, detail="用户不存在")
-
-    _assert_retail_product_orderable(db, product=prod, store_id=int(mem.store_id))
-
-    qty = int(body.quantity)
-    if qty < 1 or qty > 50:
-        raise HTTPException(status_code=400, detail="数量须在 1～50 之间")
 
     if body.store_pickup:
         address_summary = "门店自提"
@@ -270,56 +290,18 @@ def create_store_retail_order(
         address_summary = f"{area} {detail_line}".strip()
         addr_id = int(addr.id)
 
-    amt = _compute_retail_order_amount(
+    row = persist_retail_order_with_items(
         db,
-        unit_price=Decimal(prod.unit_price_yuan),
-        quantity=qty,
-        store_pickup=bool(body.store_pickup),
-        store_id=int(mem.store_id),
-    )
-
-    row = StoreRetailOrder(
         tenant_id=int(mem.tenant_id),
         store_id=int(mem.store_id),
-        out_trade_no=_new_temp_out_trade_no(),
-        member_id=member_id,
-        retail_product_id=int(prod.id),
-        product_title=(prod.title or "").strip() or "商品",
-        member_address_id=addr_id,
-        store_pickup=bool(body.store_pickup),
-        quantity=qty,
+        member_id=int(member_id),
+        body=body,
+        out_trade_no_temp=_new_temp_out_trade_no(),
         fulfillment_date=today_shanghai(),
         routing_area=area,
-        amount_yuan=amt,
-        pay_status="未支付",
-        pay_channel=None,
-        fulfillment_status="pending",
-        courier_id=None,
+        member_address_id=addr_id,
     )
-    db.add(row)
-    db.flush()
     row.out_trade_no = _final_out_trade_no(int(row.id))
-
-    if body.member_coupon_id is not None:
-        ctx = CouponCheckoutContext(
-            checkout_biz=CouponLockedOrderBiz.STORE_RETAIL,
-            original_amount_yuan=amt,
-            retail_product_id=int(prod.id),
-            retail_category_id=int(prod.category_id) if prod.category_id is not None else None,
-        )
-        orig, disc, payable = lock_member_coupon_for_order(
-            db,
-            member_coupon_id=int(body.member_coupon_id),
-            member_id=int(member_id),
-            store_id=int(mem.store_id),
-            ctx=ctx,
-            order_id=int(row.id),
-        )
-        row.original_amount_yuan = orig
-        row.coupon_discount_yuan = disc
-        row.amount_yuan = payable
-        row.member_coupon_id = int(body.member_coupon_id)
-
     db.commit()
     db.refresh(row)
     return _row_to_out(db, row, address_summary=address_summary)
@@ -370,14 +352,35 @@ def list_member_store_retail_orders(
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
-    return [_row_to_out(db, r) for r in rows], total
+    items_map = load_order_items_map(db, [int(r.id) for r in rows])
+    return [_row_to_out(db, r, items_map=items_map) for r in rows], total
 
 
 def _revalidate_product_before_pay(db: Session, row: StoreRetailOrder) -> None:
-    prod = db.get(StoreRetailProduct, int(row.retail_product_id))
-    if not prod:
-        raise HTTPException(status_code=400, detail="商品已下架，请重新下单")
-    _assert_retail_product_orderable(db, product=prod, store_id=int(row.store_id))
+    items = load_order_items_map(db, [int(row.id)]).get(int(row.id), [])
+    if not items:
+        prod = db.get(StoreRetailProduct, int(row.retail_product_id))
+        if not prod:
+            raise HTTPException(status_code=400, detail="商品已下架，请重新下单")
+        _assert_retail_product_orderable(db, product=prod, store_id=int(row.store_id))
+        assert_retail_stock_available(
+            db,
+            product_id=int(prod.id),
+            need_qty=int(row.quantity or 1),
+            exclude_order_id=int(row.id),
+        )
+        return
+    for it in items:
+        prod = db.get(StoreRetailProduct, int(it.retail_product_id))
+        if not prod:
+            raise HTTPException(status_code=400, detail=f"「{it.product_title}」已下架，请重新下单")
+        _assert_retail_product_orderable(db, product=prod, store_id=int(row.store_id))
+        assert_retail_stock_available(
+            db,
+            product_id=int(prod.id),
+            need_qty=int(it.quantity),
+            exclude_order_id=int(row.id),
+        )
 
 
 def prepare_wechat_jsapi_for_retail_order(

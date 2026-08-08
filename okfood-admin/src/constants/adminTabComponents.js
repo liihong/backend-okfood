@@ -36,6 +36,8 @@ export const ADMIN_TAB_COMPONENT_NAMES = {
   'tenant-mini-publish': 'TenantMiniPublishPage',
   'system-membership-templates': 'MembershipTemplatesView',
   'menu-retail-catalog': 'RetailCatalogView',
+  'menu-retail-spu-new': 'RetailSpuEditView',
+  'menu-retail-spu-edit': 'RetailSpuEditView',
   'system-dish-categories': 'DishCategoriesView',
   'marketing-home-banners': 'HomeBannersView',
   'marketing-entry-poster': 'EntryPosterView',

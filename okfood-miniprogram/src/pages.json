@@ -147,6 +147,20 @@
           }
         },
         {
+          "path": "pages/retailCheckout/retailCheckout",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
+        },
+        {
+          "path": "pages/retailProductDetail/retailProductDetail",
+          "style": {
+            "navigationStyle": "custom",
+            "backgroundColor": "#f8fafc"
+          }
+        },
+        {
           "path": "pages/retailConfirm/retailConfirm",
           "style": {
             "navigationStyle": "custom",

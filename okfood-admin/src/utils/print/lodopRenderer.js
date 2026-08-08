@@ -83,9 +83,10 @@ function sfWaybillToTableHtml(layout) {
     `<table style="width:${w}mm;border-collapse:collapse;border:none;">` +
     `<tr><td style="padding:${pad}mm ${pad}mm 2mm ${pad}mm;vertical-align:top;` +
     `font-family:${PRINT_FONT};color:#000;font-size:10px;line-height:1.35;">` +
-    `<div style="display:flex;justify-content:space-between;align-items:center;` +
-    `margin:0 0 1.5mm 0;font-size:11px;font-weight:700;line-height:1.3;">` +
-    `<span>${store}</span><span>${mode}</span></div>` +
+    `<div style="position:relative;width:100%;margin:0 0 1.5mm 0;` +
+    `font-size:11px;font-weight:700;line-height:1.3;">` +
+    `<span style="display:block;width:100%;text-align:center;">${store}</span>` +
+    `<span style="position:absolute;right:0;top:0;white-space:nowrap;">${mode}</span></div>` +
     body +
     `</td></tr></table>`
   )
@@ -130,24 +131,24 @@ function layoutToHtml(layout, paperW, paperH) {
   return `<table style="width:${w}mm;height:${h}mm;border-collapse:collapse;border:none;margin:0;padding:0;"><tr><td style="padding:0;margin:0;border:none;height:${h}mm;overflow:hidden;vertical-align:top;"><div style="position:relative;width:${w}mm;height:${h}mm;overflow:hidden;color:#000;">${htmlBlocks}</div></td></tr></table>`
 }
 
-function applyHtmItemStyle(lodop, layout) {
-  if (layout?.layout_style === 'sf_waybill') return
-  lodop.SET_PRINT_STYLEA(0, 'ItemType', 1)
-}
-
-function applyPrintOverflowMode(lodop, layout) {
-  if (layout?.layout_style === 'sf_waybill') {
-    lodop.SET_PRINT_MODE('FULL_HEIGHT_FOR_OVERFLOW', 0)
-    lodop.SET_PRINT_MODE('FULL_WIDTH_FOR_OVERFLOW', 0)
-    // 禁止因内容溢出自动追加空白页
-    lodop.SET_PRINT_MODE('AUTO_CREATE_CUSTOM_PAGE', 0)
-    return
+/** 将最近添加的 N 个打印项标为普通项（ItemType=0）。切勿设为 1（页眉页脚），否则多页任务会在每一页重复输出。 */
+function markRecentItemsNormal(lodop, itemCount) {
+  const n = Math.max(1, Math.floor(Number(itemCount) || 1))
+  for (let i = 0; i < n; i += 1) {
+    lodop.SET_PRINT_STYLEA(i, 'ItemType', 0)
   }
-  lodop.SET_PRINT_MODE('FULL_HEIGHT_FOR_OVERFLOW', 1)
-  lodop.SET_PRINT_MODE('FULL_WIDTH_FOR_OVERFLOW', 1)
 }
 
+/** 标签纸固定页高，禁止溢出自动扩页（否则易与 NEWPAGEA/多标签任务叠加导致重复出纸）。 */
+function applyPrintOverflowMode(lodop) {
+  lodop.SET_PRINT_MODE('FULL_HEIGHT_FOR_OVERFLOW', 0)
+  lodop.SET_PRINT_MODE('FULL_WIDTH_FOR_OVERFLOW', 0)
+  lodop.SET_PRINT_MODE('AUTO_CREATE_CUSTOM_PAGE', 0)
+}
+
+/** @returns {number} 本次新增的条码打印项数量 */
 function addSfWaybillBarcodes(lodop, layout, paperH, pad, barWidth) {
+  let added = 0
   const barcodes = layout.barcodes || []
   for (const bc of barcodes) {
     const code = String(bc.code || '').trim()
@@ -165,14 +166,17 @@ function addSfWaybillBarcodes(lodop, layout, paperH, pad, barWidth) {
       '128Auto',
       code,
     )
+    added += 1
     lodop.SET_PRINT_STYLEA(0, 'ShowBarText', bc.show_text === false ? 0 : 1)
     if (bc.show_text !== false) {
       lodop.SET_PRINT_STYLEA(0, 'FontSize', 8)
       lodop.SET_PRINT_STYLEA(0, 'AlignJustify', 2)
     }
   }
+  return added
 }
 
+/** @returns {number} 本次新增的打印项数量 */
 function addLayoutContent(lodop, layout, paperW, paperH) {
   if (layout.layout_style === 'sf_waybill') {
     const html = sfWaybillToTableHtml(layout)
@@ -184,14 +188,36 @@ function addLayoutContent(lodop, layout, paperW, paperH) {
       : Number(paperH)
     // 表格限定在上部区域，下部留给顺丰条码
     lodop.ADD_PRINT_TABLE('0mm', '0mm', mmStr(paperW), mmStr(tableHmm), html)
+    let added = 1
     if (hasBarcode) {
-      addSfWaybillBarcodes(lodop, layout, paperH, pad, barWidth)
+      added += addSfWaybillBarcodes(lodop, layout, paperH, pad, barWidth)
     }
-    return
+    return added
   }
   const html = layoutToHtml(layout, paperW, paperH)
   lodop.ADD_PRINT_HTM('0mm', '0mm', mmStr(paperW), mmStr(paperH), html)
-  applyHtmItemStyle(lodop, layout)
+  return 1
+}
+
+function applyPrinterIndex(lodop, printerMeta) {
+  if (printerMeta?.index == null || printerMeta.index < 0) return
+  lodop.SET_PRINTER_INDEX(printerMeta.index)
+}
+
+function renderOneLayout(lodop, layout, defaultW, defaultH) {
+  const lw = Number(layout.paper_width_mm || defaultW)
+  const lh = effectiveHeight(layout, defaultH)
+  lodop.SET_PRINT_PAGESIZE(1, pagesizeUnit(lw), pagesizeUnit(lh), '')
+  applyPrintOverflowMode(lodop)
+  const itemCount = addLayoutContent(lodop, layout, lw, lh)
+  markRecentItemsNormal(lodop, itemCount)
+  return { lw, lh }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
 }
 
 /**
@@ -210,53 +236,65 @@ export async function printLocalPayload(localPayload, options = {}) {
     throw new Error('打印数据为空，请检查模板配置')
   }
 
-  let printerMeta = { matched: !hint, fallback: false, name: '' }
+  let printerMeta = { matched: !hint, fallback: false, name: '', index: null }
 
-  const first = layouts[0]
-  const initW = Number(first.paper_width_mm || defaultW)
-  const initH = effectiveHeight(first, defaultH)
-  lodop.PRINT_INITA(0, 0, mmStr(initW), mmStr(initH), 'OK饭标签')
-
-  printerMeta = await applyPrinterHint(lodop, hint, {
-    fallbackDefaultPrinter: options.fallbackDefaultPrinter === true,
-  })
-
-  for (let i = 0; i < layouts.length; i += 1) {
-    const layout = layouts[i]
-    const lw = Number(layout.paper_width_mm || defaultW)
-    const lh = effectiveHeight(layout, defaultH)
-    if (i > 0) {
-      lodop.NEWPAGEA()
+  // 预览：合并为一个多页任务便于翻页检查
+  if (preview) {
+    const first = layouts[0]
+    const initW = Number(first.paper_width_mm || defaultW)
+    const initH = effectiveHeight(first, defaultH)
+    lodop.PRINT_INITA(0, 0, mmStr(initW), mmStr(initH), 'OK饭标签')
+    printerMeta = await applyPrinterHint(lodop, hint, {
+      fallbackDefaultPrinter: options.fallbackDefaultPrinter === true,
+    })
+    for (let i = 0; i < layouts.length; i += 1) {
+      if (i > 0) lodop.NEWPAGEA()
+      renderOneLayout(lodop, layouts[i], defaultW, defaultH)
     }
-    // intOrient=1 固定纸高；勿用 intOrient=3 并把 lh 当 PageHeight（会被当成底边空白导致页面超长）
-    lodop.SET_PRINT_PAGESIZE(1, pagesizeUnit(lw), pagesizeUnit(lh), '')
-    applyPrintOverflowMode(lodop, layout)
-    addLayoutContent(lodop, layout, lw, lh)
+    lodop.PREVIEW()
+    return printerMeta
   }
 
-  if (preview) {
-    lodop.PREVIEW()
-  } else {
+  // 出纸：每张标签独立 PRINT_INIT + PRINT，避免多页任务中打印项互相叠加/重复
+  for (let i = 0; i < layouts.length; i += 1) {
+    const layout = layouts[i]
+    const jobTitle =
+      layouts.length > 1 ? `OK饭标签 ${i + 1}/${layouts.length}` : 'OK饭标签'
+    const lw = Number(layout.paper_width_mm || defaultW)
+    const lh = effectiveHeight(layout, defaultH)
+    lodop.PRINT_INITA(0, 0, mmStr(lw), mmStr(lh), jobTitle)
+    if (i === 0) {
+      printerMeta = await applyPrinterHint(lodop, hint, {
+        fallbackDefaultPrinter: options.fallbackDefaultPrinter === true,
+      })
+    } else {
+      applyPrinterIndex(lodop, printerMeta)
+    }
+    renderOneLayout(lodop, layout, defaultW, defaultH)
     lodop.PRINT()
+    // 标签机驱动队列缓冲：批量出纸时略作间隔，降低丢单/乱序概率
+    if (i < layouts.length - 1) {
+      await sleep(60)
+    }
   }
   return printerMeta
 }
 
 async function applyPrinterHint(lodop, hint, options = {}) {
-  if (!hint) return { matched: false, fallback: false, name: '' }
+  if (!hint) return { matched: false, fallback: false, name: '', index: null }
   const count = Number(lodop.GET_PRINTER_COUNT?.()) || 0
   for (let i = 0; i < count; i += 1) {
     const name = String(lodop.GET_PRINTER_NAME(i) || '')
     if (name === hint || name.includes(hint) || hint.includes(name)) {
       lodop.SET_PRINTER_INDEX(i)
-      return { matched: true, fallback: false, name }
+      return { matched: true, fallback: false, name, index: i }
     }
   }
   if (options.fallbackDefaultPrinter) {
     const physical = pickPhysicalPrinter(lodop)
     if (physical) {
       lodop.SET_PRINTER_INDEX(physical.index)
-      return { matched: false, fallback: true, name: physical.name, hint }
+      return { matched: false, fallback: true, name: physical.name, hint, index: physical.index }
     }
   }
   const names = await listLocalPrinters()

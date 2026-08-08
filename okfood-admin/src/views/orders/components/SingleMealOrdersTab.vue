@@ -123,6 +123,11 @@ function onSingleMobileSelectChange(row, checked) {
         singleOrderBucketSummary.pending_ship
       }}</strong>
       <span class="orders-manage-stats-line__sep">·</span>
+      待自提
+      <strong class="orders-manage-stats-line__num orders-manage-stats-line__num--pending">{{
+        singleOrderBucketSummary.pending_pickup
+      }}</strong>
+      <span class="orders-manage-stats-line__sep">·</span>
       未支付
       <strong class="orders-manage-stats-line__num orders-manage-stats-line__num--unpaid">{{
         singleOrderBucketSummary.unpaid
@@ -139,7 +144,7 @@ function onSingleMobileSelectChange(row, checked) {
       }}</strong>
       份
       <span class="orders-manage-stats-line__hint"
-        >（供餐日全天概览，不受发货 Tab 影响；待发货含门店自提「待自提」；占用库存=已支付未取消
+        >（供餐日全天概览，不受发货 Tab 影响；占用库存=已支付未取消
         {{ singleOrderBucketSummary.paid_portions }} 份 + 待支付
         {{ singleOrderBucketSummary.pending_unpaid_portions }} 份，已取消不计入）</span
       >

@@ -28,6 +28,15 @@ _MIN_PAY = Decimal("0.01")
 
 
 @dataclass(frozen=True)
+class RetailCheckoutLine:
+    """商城结算单行（券 scope 计算用）。"""
+
+    retail_product_id: int
+    retail_category_id: int | None
+    line_amount_yuan: Decimal
+
+
+@dataclass(frozen=True)
 class CouponCheckoutContext:
     """下单前校验上下文。"""
 
@@ -38,6 +47,7 @@ class CouponCheckoutContext:
     dish_id: int | None = None
     retail_product_id: int | None = None
     retail_category_id: int | None = None
+    retail_lines: tuple[RetailCheckoutLine, ...] | None = None
 
 
 def format_amount_yuan(v: Decimal) -> str:
@@ -88,6 +98,21 @@ def _scope_matches(db: Session, coupon: MemberCoupon, ctx: CouponCheckoutContext
         return False
 
     if ctx.checkout_biz == CouponLockedOrderBiz.STORE_RETAIL:
+        lines = ctx.retail_lines or ()
+        if lines:
+            level = (coupon.scope_level or CouponScopeLevel.ALL.value).strip()
+            if level == CouponScopeLevel.ALL.value or (coupon.biz_type or "").strip() == CouponBizType.ALL.value:
+                return True
+            target = coupon.scope_target_id
+            if level == CouponScopeLevel.RETAIL_PRODUCT.value:
+                return target is not None and any(int(ln.retail_product_id) == int(target) for ln in lines)
+            if level == CouponScopeLevel.RETAIL_CATEGORY.value:
+                if target is None:
+                    return False
+                return any(
+                    ln.retail_category_id is not None and int(ln.retail_category_id) == int(target) for ln in lines
+                )
+            return False
         if level == CouponScopeLevel.RETAIL_PRODUCT.value:
             return target is not None and ctx.retail_product_id is not None and int(target) == int(
                 ctx.retail_product_id
@@ -98,7 +123,10 @@ def _scope_matches(db: Session, coupon: MemberCoupon, ctx: CouponCheckoutContext
             prod = db.get(StoreRetailProduct, int(ctx.retail_product_id))
             if not prod or int(prod.store_id) != int(store_id):
                 return False
-            cat_id = prod.category_id
+            from app.models.store_retail_spu import StoreRetailSpu
+
+            spu = db.get(StoreRetailSpu, int(prod.spu_id))
+            cat_id = int(spu.category_id) if spu and spu.category_id is not None else None
             return cat_id is not None and int(target) == int(cat_id)
         return False
 
@@ -109,6 +137,19 @@ def coupon_is_expired(coupon: MemberCoupon, *, now: datetime | None = None) -> b
     ts = now or beijing_now_naive()
     exp = coupon.expires_at
     return exp is not None and ts >= exp
+
+
+def _retail_coupon_threshold_yuan(db: Session, coupon: MemberCoupon, ctx: CouponCheckoutContext, *, store_id: int) -> Decimal:
+    """商城券门槛基数：全店券用整单小计，单品/品类券用适用行小计。"""
+    base = Decimal(ctx.original_amount_yuan).quantize(_TWO)
+    if ctx.checkout_biz != CouponLockedOrderBiz.STORE_RETAIL or not ctx.retail_lines:
+        return base
+    from app.services.retail.retail_coupon_context import retail_coupon_eligible_subtotal
+
+    eligible = retail_coupon_eligible_subtotal(db, coupon, ctx, store_id=int(store_id))
+    if eligible is None:
+        return Decimal("-1")
+    return eligible
 
 
 def assert_coupon_usable_for_checkout(
@@ -135,13 +176,15 @@ def assert_coupon_usable_for_checkout(
     if st != MemberCouponStatus.AVAILABLE.value:
         raise HTTPException(status_code=400, detail="优惠券不可用")
 
-    orig = Decimal(ctx.original_amount_yuan).quantize(_TWO)
-    min_need = Decimal(coupon.min_order_yuan or 0).quantize(_TWO)
-    if orig < min_need:
-        raise HTTPException(status_code=400, detail=f"订单未满 {format_amount_yuan(min_need)} 元，不可使用该券")
-
     if not _scope_matches(db, coupon, ctx, store_id=int(store_id)):
         raise HTTPException(status_code=400, detail="优惠券不适用于当前商品")
+
+    threshold = _retail_coupon_threshold_yuan(db, coupon, ctx, store_id=int(store_id))
+    if threshold < Decimal("0"):
+        raise HTTPException(status_code=400, detail="优惠券不适用于当前商品")
+    min_need = Decimal(coupon.min_order_yuan or 0).quantize(_TWO)
+    if threshold < min_need:
+        raise HTTPException(status_code=400, detail=f"订单未满 {format_amount_yuan(min_need)} 元，不可使用该券")
 
 
 def lock_member_coupon_for_order(
@@ -164,7 +207,13 @@ def lock_member_coupon_for_order(
     assert_coupon_usable_for_checkout(db, coupon, ctx, member_id=member_id, store_id=store_id)
 
     orig = Decimal(ctx.original_amount_yuan).quantize(_TWO)
-    payable, disc = compute_coupon_payable(orig, Decimal(coupon.discount_yuan))
+    threshold = _retail_coupon_threshold_yuan(db, coupon, ctx, store_id=int(store_id))
+    discount_base = threshold if threshold >= Decimal("0") else orig
+    _, disc = compute_coupon_payable(discount_base, Decimal(coupon.discount_yuan))
+    payable = (orig - disc).quantize(_TWO)
+    if payable < _MIN_PAY:
+        payable = _MIN_PAY
+        disc = (orig - payable).quantize(_TWO)
 
     coupon.status = MemberCouponStatus.LOCKED.value
     coupon.locked_order_biz = ctx.checkout_biz.value

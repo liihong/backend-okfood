@@ -250,6 +250,7 @@ import {
   isUserMeNotFoundError,
 } from '@/utils/api.js'
 import { wxMiniMemberLoginAndStore, hasWxPhoneAuthDetail } from '@/utils/wxMemberLogin.js'
+import { mergeGuestCartAfterLogin } from '@/utils/retailCart/retailCartStorage.js'
 import {
   shouldOpenMemberSetup,
   shouldCompleteMemberProfile,
@@ -872,6 +873,7 @@ function mergeMemberApiProfile(data) {
   if (data.id != null) {
     try {
       uni.setStorageSync('memberId', String(data.id))
+      mergeGuestCartAfterLogin(data.id)
     } catch {
       /* ignore */
     }

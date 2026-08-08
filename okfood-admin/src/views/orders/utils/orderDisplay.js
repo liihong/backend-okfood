@@ -20,7 +20,7 @@ export function singleOrderStatusLabelZh(row) {
   if (s == null || s === '') return '—'
   const k = String(s).trim().toLowerCase()
   if (k === 'awaiting_accept') return '待接单'
-  if (k === 'pending' && row.store_pickup) return '待自提'
+  if ((k === 'pending' || k === 'sf_cancelled') && row.store_pickup) return '待自提'
   return SINGLE_ORDER_STATUS_ZH[k] ?? String(s).trim()
 }
 

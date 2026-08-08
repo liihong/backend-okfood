@@ -226,6 +226,20 @@ def single_meal_fulfillment_allows_dispatch(fs: str | None) -> bool:
     return str(fs or "").strip().lower() in ("pending", "sf_cancelled")
 
 
+def normalize_store_pickup_fulfillment_after_sf_cancel(row: SingleMealOrder) -> bool:
+    """
+    门店自提订单若仍停留在 ``sf_cancelled``，归一为 ``pending``。
+
+    顺丰取消配送仅表示配送单取消，不等于订单取消；改自提后应回到待核销。
+    """
+    if not bool(getattr(row, "store_pickup", False)):
+        return False
+    if str(row.fulfillment_status or "").strip().lower() != "sf_cancelled":
+        return False
+    row.fulfillment_status = "pending"
+    return True
+
+
 def sf_push_create_succeeded(pus: SfSameCityPush) -> bool:
     """创单 ``error_code == 0`` 为成功；``0`` 为合法值，不可用 ``or`` 默认值。"""
     ec = getattr(pus, "error_code", None)
@@ -789,10 +803,17 @@ def _single_meal_order_row_to_out(
     )
 
 
+# 管理端单次点餐：发货 Tab 与 fulfillment_phase 参数一一对应
+_ADMIN_SINGLE_FULFILLMENT_PHASES = frozenset(
+    {"pending_ship", "pending_pickup", "in_delivery", "delivered", "after_sale"},
+)
+
+
 def _apply_admin_single_fulfillment_phase_filter(filters: list, fulfillment_phase: str | None) -> None:
     """管理端单次点餐：按发货状态 Tab 过滤（不再按支付状态 Tab）。
 
-    - ``pending_ship``：待发货（已支付且 pending / 顺丰取消可重推）
+    - ``pending_ship``：待发货（已支付、配送到家且 pending / 顺丰取消可重推）
+    - ``pending_pickup``：待自提（已支付、门店自提且 pending / 顺丰取消可重推）
     - ``in_delivery``：配送中（顺丰待取货 / 门店配送中）
     - ``delivered``：已完成
     - ``after_sale``：售后（未支付、已取消、已退款）
@@ -800,6 +821,13 @@ def _apply_admin_single_fulfillment_phase_filter(filters: list, fulfillment_phas
     fp = (fulfillment_phase or "").strip().lower()
     if fp == "pending_ship":
         filters.append(SingleMealOrder.pay_status == "已支付")
+        filters.append(SingleMealOrder.store_pickup.is_(False))
+        filters.append(
+            SingleMealOrder.fulfillment_status.in_(("pending", "sf_cancelled")),
+        )
+    elif fp == "pending_pickup":
+        filters.append(SingleMealOrder.pay_status == "已支付")
+        filters.append(SingleMealOrder.store_pickup.is_(True))
         filters.append(
             SingleMealOrder.fulfillment_status.in_(("pending", "sf_cancelled")),
         )
@@ -896,7 +924,8 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
 ) -> dict[str, int]:
     """订单管理：供餐日全天各状态笔数概览（与供餐日、搜索一致；不受发货 Tab 影响）。
 
-    - ``pending_ship``：已支付且履约 pending（含待发货与待自提口径，与列表「订单状态」pending 一致）。
+    - ``pending_ship``：已支付、配送到家且履约 pending。
+    - ``pending_pickup``：已支付、门店自提且履约 pending。
     """
     from app.services.admin.menu_day_stock_service import SINGLE_RETAIL_INVENTORY_EXCLUDED_FULFILLMENT
 
@@ -915,7 +944,16 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
         SingleMealOrder.fulfillment_status == "pending",
     )
     cancelled_cond = SingleMealOrder.fulfillment_status == "cancelled"
-    pending_ship_cond = and_(paid_cond, SingleMealOrder.fulfillment_status == "pending")
+    pending_ship_cond = and_(
+        paid_cond,
+        SingleMealOrder.fulfillment_status == "pending",
+        SingleMealOrder.store_pickup.is_(False),
+    )
+    pending_pickup_cond = and_(
+        paid_cond,
+        SingleMealOrder.fulfillment_status == "pending",
+        SingleMealOrder.store_pickup.is_(True),
+    )
     paid_portions_cond = and_(
         paid_cond,
         SingleMealOrder.fulfillment_status.notin_(SINGLE_RETAIL_INVENTORY_EXCLUDED_FULFILLMENT),
@@ -927,6 +965,7 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
             func.coalesce(func.sum(case((unpaid_cond, 1), else_=0)), 0).label("unpaid"),
             func.coalesce(func.sum(case((cancelled_cond, 1), else_=0)), 0).label("cancelled"),
             func.coalesce(func.sum(case((pending_ship_cond, 1), else_=0)), 0).label("pending_ship"),
+            func.coalesce(func.sum(case((pending_pickup_cond, 1), else_=0)), 0).label("pending_pickup"),
             func.coalesce(
                 func.sum(case((paid_portions_cond, SingleMealOrder.quantity), else_=0)),
                 0,
@@ -959,6 +998,7 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
         "unpaid": int(row.unpaid or 0),
         "cancelled": int(row.cancelled or 0),
         "pending_ship": int(row.pending_ship or 0),
+        "pending_pickup": int(row.pending_pickup or 0),
         "retail_inventory_portions": retail_inventory,
         "paid_portions": int(row.paid_portions or 0),
         "pending_unpaid_portions": int(row.pending_unpaid_portions or 0),
@@ -979,14 +1019,14 @@ def list_admin_store_single_meal_orders_by_delivery_day(
 ) -> tuple[list[AdminSingleMealOrderListOut], int]:
     """管理端：按供餐日筛选单次点餐订单（``delivery_date``）。
 
-    ``fulfillment_phase``：发货 Tab（``pending_ship`` / ``in_delivery`` / ``delivered`` / ``after_sale``）。
+    ``fulfillment_phase``：发货 Tab（``pending_ship`` / ``pending_pickup`` / ``in_delivery`` / ``delivered`` / ``after_sale``）。
     旧版 ``pay_status`` / ``delivery_phase`` 仍兼容，但 ``fulfillment_phase`` 优先。
     """
     page = max(1, page)
     page_size = min(100, max(1, page_size))
     need_join = _admin_single_meal_needs_member_join(q)
     fp = (fulfillment_phase or "").strip().lower()
-    use_fulfillment_tab = fp in ("pending_ship", "in_delivery", "delivered", "after_sale")
+    use_fulfillment_tab = fp in _ADMIN_SINGLE_FULFILLMENT_PHASES
     filters = list(
         _admin_store_single_meal_scope_filters_for_delivery_day(
             store_id=store_id,
@@ -2253,8 +2293,15 @@ def admin_mark_single_meal_order_delivered(
     f = str(o.fulfillment_status or "").strip().lower()
     if f == "delivered":
         return "订单已是已完成"
-    if f in ("cancelled", "sf_cancelled"):
+    if f == "cancelled":
         raise ValueError("已取消订单不可标记完成")
+    # 门店自提：顺丰取消配送后改自提，仍应允许核销（顺丰取消 ≠ 订单取消）
+    if f == "sf_cancelled":
+        if bool(getattr(o, "store_pickup", False)):
+            normalize_store_pickup_fulfillment_after_sf_cancel(o)
+            f = str(o.fulfillment_status or "").strip().lower()
+        else:
+            raise ValueError("顺丰配送已取消，请先改自提/改址重推或重新推顺丰后再标记完成")
     if f not in ("pending", _FULFILLMENT_SF_AWAITING_PICKUP, "accepted"):
         raise ValueError(f"当前状态不可标记完成（{f or '—'}）")
     o.fulfillment_status = "delivered"

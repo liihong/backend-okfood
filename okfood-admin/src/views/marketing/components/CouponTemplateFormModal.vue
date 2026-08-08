@@ -82,7 +82,7 @@ const scopeTargetOptions = computed(() => {
     return dishes.value.map((d) => ({ id: d.id, label: d.name }))
   }
   if (lv === 'retail_product') {
-    return retailProducts.value.map((p) => ({ id: p.id, label: p.title }))
+    return retailProducts.value.map((p) => ({ id: p.id, label: p.display_title || p.spu_title || p.title || `SKU#${p.id}` }))
   }
   if (lv === 'retail_category') {
     return retailCategories.value.map((c) => ({ id: c.id, label: c.name }))

@@ -67,7 +67,7 @@ const targetOptions = computed(() => {
   if (form.value.grant_type === 'retail_product') {
     return retailProducts.value.map((p) => ({
       id: Number(p.id),
-      label: `${p.title}（¥${p.unit_price_yuan}）`,
+      label: `${p.display_title || p.spu_title || p.title || '商品'}（¥${p.unit_price_yuan}）`,
     }))
   }
   if (form.value.grant_type === 'membership_template') {

@@ -1,6 +1,7 @@
 /** 零售订单（单次点餐）：发货状态 Tab（与接口 fulfillment_phase 对应） */
 export const SINGLE_FULFILLMENT_TABS = [
   { label: '待发货', value: 'pending_ship' },
+  { label: '待自提', value: 'pending_pickup' },
   { label: '配送中', value: 'in_delivery' },
   { label: '已完成', value: 'delivered' },
   { label: '售后', value: 'after_sale' },

@@ -1,6 +1,7 @@
 import { request, getMemberToken, getCourierToken } from '@/utils/api.js'
 import { getMemberCouponReminder } from '@/utils/memberCouponApi.js'
 import { showCouponReminderModal } from '@/utils/memberCouponReminderState.js'
+import { mergeGuestCartAfterLogin } from '@/utils/retailCart/retailCartStorage.js'
 
 const STORAGE_PREFIX = 'okfood_member_coupon_reminder_shown_v1'
 
@@ -42,6 +43,7 @@ async function resolveMemberId() {
   if (id) {
     try {
       uni.setStorageSync('memberId', id)
+      mergeGuestCartAfterLogin(id)
     } catch {
       /* ignore */
     }

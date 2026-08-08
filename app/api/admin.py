@@ -1419,7 +1419,7 @@ def admin_orders_daily_single_meals(
     fulfillment_phase: Annotated[
         str | None,
         Query(
-            description="发货 Tab：pending_ship=待发货；in_delivery=配送中；delivered=已完成；after_sale=售后（含未支付）",
+            description="发货 Tab：pending_ship=待发货；pending_pickup=待自提；in_delivery=配送中；delivered=已完成；after_sale=售后（含未支付）",
         ),
     ] = None,
     page: int = 1,

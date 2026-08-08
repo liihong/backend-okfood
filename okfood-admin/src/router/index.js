@@ -33,6 +33,7 @@ const TenantMiniAuthorizerPage = () => import('../views/tenants/mini-program/Ten
 const TenantMiniPublishPage = () => import('../views/tenants/mini-program/TenantPublishPage.vue')
 const MembershipTemplatesView = () => import('../views/MembershipTemplatesView.vue')
 const RetailCatalogView = () => import('../views/RetailCatalogView.vue')
+const RetailSpuEditView = () => import('../views/retail/RetailSpuEditView.vue')
 const DishCategoriesView = () => import('../views/DishCategoriesView.vue')
 const DeliveryRangeCheckView = () => import('../views/DeliveryRangeCheckView.vue')
 const CouponTemplatesView = () => import('../views/marketing/CouponTemplatesView.vue')
@@ -220,6 +221,18 @@ const router = createRouter({
           name: 'menu-retail-catalog',
           component: RetailCatalogView,
           meta: { title: '普通商品管理', fullAdminOnly: true, hidePageTitle: true },
+        },
+        {
+          path: 'menu/retail-catalog/spu/new',
+          name: 'menu-retail-spu-new',
+          component: RetailSpuEditView,
+          meta: { title: '新建商品', fullAdminOnly: true, hidePageTitle: true },
+        },
+        {
+          path: 'menu/retail-catalog/spu/:spuId/edit',
+          name: 'menu-retail-spu-edit',
+          component: RetailSpuEditView,
+          meta: { title: '编辑商品', fullAdminOnly: true, hidePageTitle: true },
         },
         {
           path: 'marketing/home-banners',

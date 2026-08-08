@@ -11,8 +11,18 @@
         </RetailOrderDetailCard>
 
         <RetailOrderDetailCard>
-          <RetailOrderDetailRow label="商品" :value="order.product_title" />
-          <RetailOrderDetailRow label="数量" :value="`×${order.quantity}`" />
+          <text class="card-label">商品明细</text>
+          <view v-if="order.items && order.items.length" class="items">
+            <view v-for="(it, idx) in order.items" :key="it.id || idx" class="item-row">
+              <text class="item-title">{{ it.product_title }}</text>
+              <text class="item-qty">×{{ it.quantity }}</text>
+              <text class="item-amt">¥ {{ it.line_amount_yuan }}</text>
+            </view>
+          </view>
+          <template v-else>
+            <RetailOrderDetailRow label="商品" :value="order.product_title" />
+            <RetailOrderDetailRow label="数量" :value="`×${order.quantity}`" />
+          </template>
           <RetailOrderDetailRow label="金额" :value="`¥ ${order.amount_yuan}`" value-class="amt" />
         </RetailOrderDetailCard>
 

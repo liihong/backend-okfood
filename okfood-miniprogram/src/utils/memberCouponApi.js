@@ -18,7 +18,9 @@ export function listAvailableMemberCoupons(params) {
   if (params.quantity != null) {
     query.quantity = String(Math.max(1, Math.floor(Number(params.quantity))))
   }
-  if (params.retail_product_id != null) {
+  if (params.retail_items != null && Array.isArray(params.retail_items) && params.retail_items.length) {
+    query.retail_items = JSON.stringify(params.retail_items)
+  } else if (params.retail_product_id != null) {
     query.retail_product_id = String(Math.floor(Number(params.retail_product_id)))
   }
   if (params.store_pickup === true) {

@@ -36,6 +36,7 @@ export function canCancelOrder(row) {
 export function canMarkOrderComplete(row) {
   if (!row || row.pay_status !== '已支付') return false
   const f = String(row.fulfillment_status || '').trim().toLowerCase()
+  if (f === 'sf_cancelled' && row.store_pickup) return true
   return f === 'pending' || f === 'sf_awaiting_pickup' || f === 'accepted'
 }
 

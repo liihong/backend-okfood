@@ -683,6 +683,10 @@ def list_available_member_coupons_me(
     dish_id: Annotated[int | None, Query(ge=1)] = None,
     quantity: Annotated[int | None, Query(ge=1, le=50)] = None,
     retail_product_id: Annotated[int | None, Query(ge=1)] = None,
+    retail_items: Annotated[
+        str | None,
+        Query(description='商城购物车 JSON：[{"retail_product_id":1,"quantity":2}]'),
+    ] = None,
     store_pickup: Annotated[
         bool,
         Query(description="单次点餐：true=门店自提，原价按单点价减门店固定配送费"),
@@ -695,6 +699,7 @@ def list_available_member_coupons_me(
         raise HTTPException(status_code=404, detail="用户不存在")
     store_id = int(mem.store_id)
     original: Decimal | None = None
+    retail_lines = None
     bt = (biz_type or "").strip()
     if bt == "member_card":
         if membership_template_id is not None:
@@ -723,18 +728,78 @@ def list_available_member_coupons_me(
                 fee = get_store_base_delivery_fee_yuan(db, store_id=store_id)
                 unit = max(Decimal("0.01"), (unit - fee).quantize(Decimal("0.01")))
             original = (unit * Decimal(q)).quantize(Decimal("0.01"))
-    elif bt == "store_retail" and retail_product_id is not None:
+    elif bt == "store_retail":
         from app.models.store_retail_product import StoreRetailProduct
-        from app.services.shared.store_config_service import get_store_base_delivery_fee_yuan
+        from app.services.marketing.coupon_checkout_service import RetailCheckoutLine
+        from app.services.retail.retail_order_amount import compute_retail_line_amount
+        from app.services.retail.retail_order_lines import merge_retail_order_items
+        from app.schemas.store_retail_order import StoreRetailOrderItemIn
+        import json
 
-        prod = db.get(StoreRetailProduct, int(retail_product_id))
-        if prod and int(prod.store_id) == store_id:
-            q = max(1, int(quantity or 1))
-            unit = Decimal(prod.unit_price_yuan)
-            if store_pickup:
-                fee = get_store_base_delivery_fee_yuan(db, store_id=store_id)
-                unit = max(Decimal("0.01"), (unit - fee).quantize(Decimal("0.01")))
-            original = (unit * Decimal(q)).quantize(Decimal("0.01"))
+        retail_lines: tuple[RetailCheckoutLine, ...] | None = None
+        parsed_items: list[StoreRetailOrderItemIn] = []
+        if retail_items:
+            try:
+                raw = json.loads(retail_items)
+                if isinstance(raw, list):
+                    for row in raw:
+                        if isinstance(row, dict) and row.get("retail_product_id"):
+                            parsed_items.append(
+                                StoreRetailOrderItemIn(
+                                    retail_product_id=int(row["retail_product_id"]),
+                                    quantity=max(1, int(row.get("quantity") or 1)),
+                                )
+                            )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raise HTTPException(status_code=400, detail="retail_items 格式无效")
+        elif retail_product_id is not None:
+            parsed_items = [
+                StoreRetailOrderItemIn(
+                    retail_product_id=int(retail_product_id),
+                    quantity=max(1, int(quantity or 1)),
+                )
+            ]
+        if parsed_items:
+            merged = merge_retail_order_items(parsed_items)
+            subtotal = Decimal("0")
+            line_ctx: list[RetailCheckoutLine] = []
+            for it in merged:
+                prod = db.get(StoreRetailProduct, int(it.retail_product_id))
+                if not prod or int(prod.store_id) != store_id:
+                    continue
+                from app.models.store_retail_spu import StoreRetailSpu
+
+                spu = db.get(StoreRetailSpu, int(prod.spu_id))
+                q = max(1, int(it.quantity))
+                unit = Decimal(prod.unit_price_yuan)
+                if store_pickup:
+                    from app.services.shared.store_config_service import get_store_base_delivery_fee_yuan
+
+                    fee = get_store_base_delivery_fee_yuan(db, store_id=store_id)
+                    unit = max(Decimal("0.01"), (unit - fee).quantize(Decimal("0.01")))
+                line_amt = compute_retail_line_amount(
+                    db,
+                    unit_price=unit,
+                    quantity=q,
+                    store_pickup=bool(store_pickup),
+                    store_id=store_id,
+                )
+                subtotal += line_amt
+                line_ctx.append(
+                    RetailCheckoutLine(
+                        retail_product_id=int(prod.id),
+                        retail_category_id=int(spu.category_id)
+                        if spu and spu.category_id is not None
+                        else None,
+                        line_amount_yuan=line_amt,
+                    )
+                )
+            if line_ctx:
+                original = subtotal.quantize(Decimal("0.01"))
+                retail_lines = tuple(line_ctx)
+                retail_product_id = int(line_ctx[0].retail_product_id)
+            elif parsed_items:
+                raise HTTPException(status_code=400, detail="购物车商品无效或不属于当前门店")
 
     items = list_available_member_coupons_for_user(
         db,
@@ -746,6 +811,7 @@ def list_available_member_coupons_me(
         membership_template_id=membership_template_id,
         dish_id=dish_id,
         retail_product_id=retail_product_id,
+        retail_lines=retail_lines,
     )
     return success(
         data=[dump_model(UserMemberCouponAvailableOut.model_validate(x)) for x in items],

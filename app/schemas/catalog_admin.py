@@ -89,42 +89,113 @@ class StoreRetailCategoryPatchIn(BaseModel):
     is_active: bool | None = None
 
 
-class StoreRetailProductOut(BaseModel):
+class StoreRetailSpuOut(BaseModel):
     id: int
     store_id: int
     category_id: int | None
-    sku_code: str | None
     title: str
     subtitle: str | None
-    description: str | None
-    unit_price_yuan: str
-    list_price_yuan: str | None
-    cover_image_url: str | None
+    detail_html: str | None
+    gallery_urls: list[str] = Field(default_factory=list)
+    cover_image_url: str | None = None
+    purchase_notice: str | None = None
     sort_order: int
     is_on_shelf: bool
+    sku_count: int = 0
+    price_min_yuan: str | None = None
+    price_max_yuan: str | None = None
+    skus: list["StoreRetailSkuOut"] = Field(default_factory=list)
 
 
-class StoreRetailProductCreateIn(BaseModel):
+class StoreRetailSpuCreateIn(BaseModel):
     category_id: int | None = None
-    sku_code: str | None = Field(None, max_length=64)
     title: str = Field(..., min_length=1, max_length=256)
     subtitle: str | None = Field(None, max_length=512)
-    description: str | None = Field(None, max_length=65535)
-    unit_price_yuan: Decimal = Field(..., ge=Decimal("0"), max_digits=12, decimal_places=2)
-    list_price_yuan: Decimal | None = Field(None, ge=Decimal("0"), max_digits=12, decimal_places=2)
-    cover_image_url: str | None = Field(None, max_length=512)
+    detail_html: str | None = Field(None, max_length=65535)
+    gallery_urls: list[str] | None = Field(None, description="轮播图 URL 列表")
+    purchase_notice: str | None = Field(None, max_length=65535)
     sort_order: int = Field(default=0, ge=0)
     is_on_shelf: bool = False
 
 
-class StoreRetailProductPatchIn(BaseModel):
+class StoreRetailSpuPatchIn(BaseModel):
     category_id: int | None = None
-    sku_code: str | None = Field(None, max_length=64)
     title: str | None = Field(None, min_length=1, max_length=256)
     subtitle: str | None = Field(None, max_length=512)
-    description: str | None = None
-    unit_price_yuan: Decimal | None = Field(None, ge=Decimal("0"), max_digits=12, decimal_places=2)
-    list_price_yuan: Decimal | None = Field(None, ge=Decimal("0"), max_digits=12, decimal_places=2)
-    cover_image_url: str | None = Field(None, max_length=512)
+    detail_html: str | None = None
+    gallery_urls: list[str] | None = None
+    purchase_notice: str | None = None
     sort_order: int | None = Field(None, ge=0)
     is_on_shelf: bool | None = None
+
+
+class StoreRetailSkuOut(BaseModel):
+    id: int
+    store_id: int
+    spu_id: int
+    sku_code: str | None
+    spec_label: str | None
+    unit_price_yuan: str
+    list_price_yuan: str | None
+    sort_order: int
+    is_on_shelf: bool
+    stock_quantity: int | None = Field(None, description="库存上限；空=不限")
+    sold_count: int = Field(0, description="已售件数（已支付）")
+    stock_remaining: int | None = Field(None, description="剩余可售；空=不限")
+    spu_title: str | None = None
+    display_title: str | None = None
+
+
+class StoreRetailSkuCreateIn(BaseModel):
+    spu_id: int = Field(..., ge=1)
+    sku_code: str | None = Field(None, max_length=64)
+    spec_label: str | None = Field(None, max_length=128)
+    unit_price_yuan: Decimal = Field(..., ge=Decimal("0"), max_digits=12, decimal_places=2)
+    list_price_yuan: Decimal | None = Field(None, ge=Decimal("0"), max_digits=12, decimal_places=2)
+    sort_order: int = Field(default=0, ge=0)
+    is_on_shelf: bool = False
+    stock_quantity: int | None = Field(None, ge=0, le=999999, description="库存上限；空=不限")
+
+
+class StoreRetailSkuPatchIn(BaseModel):
+    spu_id: int | None = Field(None, ge=1)
+    sku_code: str | None = Field(None, max_length=64)
+    spec_label: str | None = Field(None, max_length=128)
+    unit_price_yuan: Decimal | None = Field(None, ge=Decimal("0"), max_digits=12, decimal_places=2)
+    list_price_yuan: Decimal | None = Field(None, ge=Decimal("0"), max_digits=12, decimal_places=2)
+    sort_order: int | None = Field(None, ge=0)
+    is_on_shelf: bool | None = None
+    stock_quantity: int | None = Field(None, ge=0, le=999999, description="库存上限；空=不限")
+
+
+class StoreRetailSkuUpsertIn(BaseModel):
+    """保存商品 bundle 时的 SKU 行（新建 id 为空）。"""
+
+    id: int | None = Field(None, ge=1, description="已有 SKU id；新建留空")
+    sku_code: str | None = Field(None, max_length=64)
+    spec_label: str | None = Field(None, max_length=128)
+    unit_price_yuan: Decimal = Field(..., ge=Decimal("0"), max_digits=12, decimal_places=2)
+    list_price_yuan: Decimal | None = Field(None, ge=Decimal("0"), max_digits=12, decimal_places=2)
+    sort_order: int = Field(default=0, ge=0)
+    is_on_shelf: bool = False
+    stock_quantity: int | None = Field(None, ge=0, le=999999)
+
+
+class StoreRetailSpuBundleSaveIn(BaseModel):
+    """原子保存：SPU + 至少一个 SKU。"""
+
+    category_id: int | None = None
+    title: str = Field(..., min_length=1, max_length=256)
+    subtitle: str | None = Field(None, max_length=512)
+    detail_html: str | None = Field(None, max_length=65535)
+    gallery_urls: list[str] | None = None
+    purchase_notice: str | None = Field(None, max_length=65535)
+    sort_order: int = Field(default=0, ge=0)
+    is_on_shelf: bool = False
+    skus: list[StoreRetailSkuUpsertIn] = Field(..., min_length=1, max_length=50)
+
+
+# 兼容旧命名：retail_product = SKU
+StoreRetailProductOut = StoreRetailSkuOut
+StoreRetailProductCreateIn = StoreRetailSkuCreateIn
+StoreRetailProductPatchIn = StoreRetailSkuPatchIn

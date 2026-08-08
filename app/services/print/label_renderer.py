@@ -107,7 +107,11 @@ def _order_no_display(item: LabelItemIn) -> str:
     if kind in ("retail", "mall"):
         no = (item.order_no or "").strip()
         return no or "—"
-    shop = (item.shop_order_id or item.order_no or "").strip()
+    # 订阅配送：面单「订单号」展示大表备餐短号（片区编码+序号），顺丰 shop_order_id 仅用于推单/条码兜底
+    prep = (item.order_no or "").strip()
+    if prep:
+        return prep
+    shop = (item.shop_order_id or "").strip()
     return shop or "—"
 
 
@@ -175,9 +179,13 @@ def _build_sf_waybill_table_html(item: LabelItemIn) -> str:
     order_no = _order_no_display(item)
     border = "0.25mm solid #111"
     cell = f"border:{border};padding:1.2mm 2mm;word-break:break-all;line-height:1.25;"
+    cell_order = (
+        f"border:{border};padding:2.8mm 2mm;word-break:break-all;"
+        f"line-height:1.45;font-size:12px;font-weight:700;"
+    )
     cell_lg = f"border:{border};padding:3.5mm 2mm;word-break:break-all;line-height:1.45;"
     rows: list[str] = [
-        f'<tr><td style="{cell}font-size:9px;">订单号：{escape(order_no)}</td></tr>',
+        f'<tr><td style="{cell_order}">订单号：{escape(order_no)}</td></tr>',
         (
             f'<tr><td style="{cell}text-align:center;font-size:17px;font-weight:700;'
             f'padding:2.5mm 1mm;">{escape(region)}</td></tr>'
@@ -235,10 +243,15 @@ def _build_meal_full_lines(item: LabelItemIn) -> list[_RenderLine]:
             font_pt=12,
             bold=True,
             line_mm=5.5,
-            align="left",
+            align="center",
             right_text=_header_right_label(item),
         ),
-        _RenderLine(f"订单号：{_order_no_display(item)}", font_pt=9, bold=False, line_mm=5),
+        _RenderLine(
+            f"订单号：{_order_no_display(item)}",
+            font_pt=12,
+            bold=True,
+            line_mm=6.5,
+        ),
         _RenderLine(region or "未分配片区", font_pt=18, bold=True, line_mm=9, align="center"),
         _RenderLine(member_line or "—", font_pt=14, bold=True, line_mm=7.5),
         _RenderLine(f"{meal_label}：{meal_val}", font_pt=16, bold=True, line_mm=8),
@@ -310,7 +323,11 @@ def _append_feie_line(
     h_scale = 2 if ln.font_pt >= 15 else 1
 
     if ln.right_text:
-        parts.append(_xml_text(x, y, ln.text, w=1, h=1, font=font))
+        if ln.align == "center":
+            cx = max(x, (w_dot - _estimate_text_dots(ln.text, font=font)) // 2)
+            parts.append(_xml_text(cx, y, ln.text, w=1, h=1, font=font))
+        else:
+            parts.append(_xml_text(x, y, ln.text, w=1, h=1, font=font))
         right_x = max(x, w_dot - _mm_to_dot(margin_left_mm) - _estimate_text_dots(ln.right_text, font=font))
         parts.append(_xml_text(right_x, y, ln.right_text, w=1, h=1, font=font))
     elif ln.align == "center":

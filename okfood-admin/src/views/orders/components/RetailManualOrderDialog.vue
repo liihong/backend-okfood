@@ -47,8 +47,6 @@ const manualSubmitting = ref(false)
 const memberAddresses = ref([])
 const addressesLoading = ref(false)
 const manualForm = ref({
-  retail_product_id: null,
-  quantity: 1,
   store_pickup: false,
   member_address_id: null,
   pay_channel: '线下',
@@ -56,16 +54,28 @@ const manualForm = ref({
   amount_yuan: '',
   remark: '',
 })
+/** @type {import('vue').Ref<Array<{ retail_product_id: number | null, quantity: number }>>} */
+const manualItems = ref([{ retail_product_id: null, quantity: 1 }])
 
-const selectedProduct = computed(() => {
-  const id = manualForm.value.retail_product_id
-  if (id == null) return null
-  return products.value.find((p) => Number(p.id) === Number(id)) || null
-})
+const selectedProduct = computed(() => null)
+
+function addManualItemRow() {
+  if (manualItems.value.length >= 20) {
+    showToast('最多 20 种商品', 'error')
+    return
+  }
+  manualItems.value.push({ retail_product_id: null, quantity: 1 })
+}
+
+function removeManualItemRow(index) {
+  if (manualItems.value.length <= 1) return
+  manualItems.value.splice(index, 1)
+}
 
 const productOptionLabel = (p) => {
   const price = p.unit_price_yuan != null ? String(p.unit_price_yuan) : '—'
-  return `${p.title}（¥${price}）`
+  const title = p.display_title || p.spu_title || p.title || '商品'
+  return `${title}（¥${price}）`
 }
 
 function resetForm() {
@@ -76,8 +86,6 @@ function resetForm() {
   douyinCode.value = ''
   douyinResult.value = null
   manualForm.value = {
-    retail_product_id: null,
-    quantity: 1,
     store_pickup: false,
     member_address_id: null,
     pay_channel: '线下',
@@ -85,6 +93,7 @@ function resetForm() {
     amount_yuan: '',
     remark: '',
   }
+  manualItems.value = [{ retail_product_id: null, quantity: 1 }]
   memberAddresses.value = []
 }
 
@@ -237,9 +246,14 @@ async function submitManualOrder() {
     showToast('会员不存在，请填写姓名以创建新会员', 'error')
     return
   }
-  const productId = manualForm.value.retail_product_id
-  if (productId == null) {
-    showToast('请选择商品', 'error')
+  const items = manualItems.value
+    .filter((row) => row.retail_product_id != null)
+    .map((row) => ({
+      retail_product_id: Number(row.retail_product_id),
+      quantity: Math.max(1, Number(row.quantity) || 1),
+    }))
+  if (!items.length) {
+    showToast('请至少选择一个商品', 'error')
     return
   }
   if (!manualForm.value.store_pickup && !manualForm.value.member_address_id) {
@@ -252,8 +266,7 @@ async function submitManualOrder() {
     const body = {
       phone: ph,
       name: (name.value || '').trim() || null,
-      retail_product_id: Number(productId),
-      quantity: Number(manualForm.value.quantity) || 1,
+      items,
       store_pickup: Boolean(manualForm.value.store_pickup),
       member_address_id: manualForm.value.store_pickup
         ? null
@@ -359,38 +372,34 @@ const isBusy = computed(() => douyinSubmitting.value || manualSubmitting.value)
 
       <!-- 手动建单 -->
       <template v-else>
-        <el-form-item label="商品" required>
-          <el-select
-            v-model="manualForm.retail_product_id"
-            filterable
-            placeholder="选择上架商品"
-            :loading="productsLoading"
-            class="retail-manual-order-select"
-          >
-            <el-option
-              v-for="p in products"
-              :key="p.id"
-              :label="productOptionLabel(p)"
-              :value="Number(p.id)"
-            />
-          </el-select>
+        <el-form-item label="商品明细" required>
+          <div v-for="(row, idx) in manualItems" :key="idx" class="retail-manual-item-row">
+            <el-select
+              v-model="row.retail_product_id"
+              filterable
+              placeholder="选择商品"
+              :loading="productsLoading"
+              class="retail-manual-order-select"
+            >
+              <el-option
+                v-for="p in products"
+                :key="p.id"
+                :label="productOptionLabel(p)"
+                :value="Number(p.id)"
+              />
+            </el-select>
+            <el-input-number v-model="row.quantity" :min="1" :max="50" />
+            <el-button v-if="manualItems.length > 1" link type="danger" @click="removeManualItemRow(idx)">删除</el-button>
+          </div>
+          <el-button link type="primary" @click="addManualItemRow">+ 添加商品</el-button>
         </el-form-item>
 
-        <el-row :gutter="12">
-          <el-col :span="8">
-            <el-form-item label="数量">
-              <el-input-number v-model="manualForm.quantity" :min="1" :max="50" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="16">
-            <el-form-item label="履约方式">
-              <el-radio-group v-model="manualForm.store_pickup">
-                <el-radio :value="false">配送到家</el-radio>
-                <el-radio :value="true">门店自提</el-radio>
-              </el-radio-group>
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="履约方式">
+          <el-radio-group v-model="manualForm.store_pickup">
+            <el-radio :value="false">配送到家</el-radio>
+            <el-radio :value="true">门店自提</el-radio>
+          </el-radio-group>
+        </el-form-item>
 
         <el-form-item v-if="!manualForm.store_pickup" label="配送地址" required>
           <el-select

@@ -157,8 +157,9 @@ def _validate_grant_target(
         prod = db.get(StoreRetailProduct, int(target_id))
         if not prod or int(prod.store_id) != int(store_id):
             raise HTTPException(status_code=400, detail="商城商品不存在或不属于当前门店")
-        if not bool(prod.is_on_shelf):
-            raise HTTPException(status_code=400, detail="商城商品已下架，不可关联")
+        from app.services.retail.retail_order_amount import assert_retail_product_orderable
+
+        assert_retail_product_orderable(db, product=prod, store_id=int(store_id))
         return
     raise HTTPException(status_code=400, detail="未知映射类型")
 

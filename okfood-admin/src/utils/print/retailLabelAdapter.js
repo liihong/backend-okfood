@@ -19,6 +19,19 @@ function maskPhone(phone) {
 export function mallOrderToLabelItem(row, opts = {}) {
   const store = String(opts.storeName || 'OK饭').trim() || 'OK饭'
   const phone = row.member_phone != null ? String(row.member_phone) : ''
+  const items = Array.isArray(row.items) ? row.items : []
+  let productTitle = row.product_title || ''
+  let units = Number(row.quantity) || 1
+  if (items.length) {
+    productTitle = items
+      .map((it) => {
+        const t = String(it.product_title || '').trim() || '商品'
+        const q = Math.max(1, Number(it.quantity) || 1)
+        return q > 1 ? `${t} ×${q}` : t
+      })
+      .join('\n')
+    units = items.reduce((sum, it) => sum + Math.max(1, Number(it.quantity) || 1), 0)
+  }
   return {
     region: row.routing_area || '',
     store_name: store,
@@ -26,11 +39,11 @@ export function mallOrderToLabelItem(row, opts = {}) {
     name: row.recipient_contact_name || row.member_name || '',
     phone_tail: phoneTail(phone),
     phone_masked: maskPhone(phone),
-    units: Number(row.quantity) || 1,
+    units,
     remark: row.remark || row.address_remarks || '',
     delivery_date: row.fulfillment_date || '',
     route_seq: null,
-    product_title: row.product_title || '',
+    product_title: productTitle,
     order_no: String(row.out_trade_no || '').trim() || (row.id != null ? `OKF${row.id}` : ''),
     shop_order_id: '',
     sf_order_id: row.sf_order_id != null ? String(row.sf_order_id) : '',
