@@ -72,7 +72,7 @@
     <MenuPagePosterHost />
 
     <RetailCartBar
-      :visible="cartVisible"
+      :visible="cartVisible && !cartSheetOpen"
       :count="cartCount"
       :subtotal-text="cartSubtotalText"
       @open="cartSheetOpen = true"
@@ -112,7 +112,7 @@ import { peekWeeklyMenuCache } from '@/utils/weeklyMenuCache.js'
 import { MEAL_PERIOD_DINNER, MEAL_PERIOD_LUNCH } from '@/utils/memberMealPeriod.js'
 import { getTabPageLayoutStyles } from '@/utils/tabPageLayout.js'
 import { getNavbarLayout } from '@/utils/navbar.js'
-import { syncCustomTabBar, getCustomTabBarBottomReservePx } from '@/utils/customTabBar.js'
+import { syncCustomTabBar } from '@/utils/customTabBar.js'
 import { reLaunchIfCourierModePreferred } from '@/utils/api.js'
 import { readMenuFulfillMode, writeMenuFulfillMode } from '@/utils/menuFulfillMode.js'
 import { requestDeliverySubscribeOncePerDay } from '@/utils/subscribeMsg.js'
@@ -176,12 +176,13 @@ function syncTabLayout() {
   const win = uni.getWindowInfo ? uni.getWindowInfo() : uni.getSystemInfoSync()
   const pageH = Number(p.height?.replace('px', '')) || Number(win.windowHeight) || 0
   const { navBarTotal } = getNavbarLayout()
+  // Tab 页 windowHeight 已不含自定义 tabBar，无需再扣 tabReserve；
+  // 仅有购物车条时预留下方空间，空车时贴底展示更多菜单
   const bodyH = Math.max(200, pageH - navBarTotal - STORE_HEADER_PX)
-  const tabReserve = getCustomTabBarBottomReservePx()
   const cartReserve = cartVisible.value ? RETAIL_CART_BAR_HEIGHT_PX + 12 : 0
   catalogBodyStyle.value = {
     height: `${bodyH}px`,
-    paddingBottom: `${tabReserve + cartReserve}px`,
+    paddingBottom: cartReserve ? `${cartReserve}px` : '0',
   }
 }
 
@@ -633,7 +634,8 @@ function goDetail(m) {
   }
   
   .catalog-panel__inner {
-    padding: 24rpx 24rpx calc(24rpx + env(safe-area-inset-bottom));
+    /* 底部安全区由 Tab 页高度与购物车条留白处理，此处不再额外垫高 */
+    padding: 24rpx;
 }
 
 .catalog-panel__head {
