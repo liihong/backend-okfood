@@ -99,13 +99,53 @@ def test_awaiting_setup_filter_includes_admin_applied_orders(member_archive_db: 
     assert count == 2
 
 
-def test_awaiting_setup_filter_excludes_paused_members(member_archive_db: Session) -> None:
-    """主动暂停（delivery_deferred）不应出现在待完善筛选列表。"""
+def test_awaiting_setup_filter_includes_deferred_never_delivered(member_archive_db: Session) -> None:
+    """自助购卡入账后 delivery_deferred=true 但从未送达：仍应计入待完善（与 lifecycle 一致）。"""
     m = Member(
         tenant_id=1,
         store_id=1,
         phone="13800006001",
-        name="paused",
+        name="deferred_setup",
+        balance=6,
+        meal_quota_total=6,
+        plan_type=PlanType.WEEK.value,
+        is_active=False,
+        delivery_deferred=True,
+        delivery_start_date=None,
+    )
+    member_archive_db.add(m)
+    member_archive_db.flush()
+    member_archive_db.add(
+        MemberCardOrder(
+            tenant_id=1,
+            store_id=1,
+            member_id=int(m.id),
+            card_kind=PlanType.WEEK.value,
+            pay_channel="微信",
+            pay_status=CardOrderPayStatus.PAID.value,
+            applied_to_member=True,
+            created_by="miniprogram",
+        )
+    )
+    member_archive_db.commit()
+
+    view = resolve_member_lifecycle(member_archive_db, m)
+    assert view.code == "awaiting_setup"
+    count = _member_filter_count(member_archive_db, store_id=1, awaiting_setup_only=True)
+    assert count == 1
+
+
+def test_awaiting_setup_filter_excludes_true_paused_after_delivery(member_archive_db: Session) -> None:
+    """曾确认送达后主动暂停：归已暂停，不应出现在待完善筛选。"""
+    from datetime import date
+
+    from app.models.enums import DeliveryStatus
+
+    m = Member(
+        tenant_id=1,
+        store_id=1,
+        phone="13800006002",
+        name="paused_after_delivery",
         balance=6,
         meal_quota_total=6,
         plan_type=PlanType.WEEK.value,
@@ -127,7 +167,16 @@ def test_awaiting_setup_filter_excludes_paused_members(member_archive_db: Sessio
             created_by="admin_test",
         )
     )
+    member_archive_db.add(
+        DeliveryLog(
+            member_id=int(m.id),
+            delivery_date=date(2026, 1, 10),
+            status=DeliveryStatus.DELIVERED.value,
+        )
+    )
     member_archive_db.commit()
 
+    view = resolve_member_lifecycle(member_archive_db, m)
+    assert view.code == "paused"
     count = _member_filter_count(member_archive_db, store_id=1, awaiting_setup_only=True)
     assert count == 0

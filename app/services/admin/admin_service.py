@@ -281,13 +281,13 @@ def _member_paused_delivery_scope():
 
 def _member_awaiting_setup_scope_clause():
     """
-    待完善履约列表：lifecycle 待完善 + 非主动暂停（delivery_deferred=false）。
-    主动暂停缺信息的会员归「已暂停」Tab，不在此列。
+    待完善履约列表：与 lifecycle 主状态「待完善」一致。
+
+    小程序/抖音自助购卡入账后常为 delivery_deferred=true（暂不派单），
+    但缺起送日/地址且从未送达时仍属待完善，不可再用 delivery_deferred=false 排除。
+    真·主动暂停（曾送达后停送）由 ~has_delivered 自然排除，归「已暂停」Tab。
     """
-    return and_(
-        _member_lifecycle_awaiting_setup_core_scope(),
-        Member.delivery_deferred.is_(False),
-    )
+    return _member_lifecycle_awaiting_setup_core_scope()
 
 
 def _apply_member_list_filters(

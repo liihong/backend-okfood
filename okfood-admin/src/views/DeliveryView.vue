@@ -22,11 +22,9 @@ import {
   validateSfSheetPushRows,
 } from '../composables/delivery/useDeliverySfPush.js'
 import { useAnimatedInteger } from '../composables/useAnimatedInteger.js'
-import { useAdminSystemNotifications } from '../composables/useAdminSystemNotifications.js'
 import { useStorePrint } from '../composables/useStorePrint.js'
 import { buildDeliveryLabelItems, missingRegionCodesForStops } from '../utils/print/deliveryLabelAdapter.js'
 
-const { fetchNotifications } = useAdminSystemNotifications()
 const { submitPrintJob, printing: printLoading, resolveScene } = useStorePrint()
 
 /** 与后端业务日一致：Asia/Shanghai 的日历日期 YYYY-MM-DD */
@@ -752,12 +750,10 @@ async function submitSfPush() {
     })
     sfDialogOpen.value = false
     await fetchSheet()
-    await fetchNotifications({ silent: true })
   } catch (e) {
     toastSfPushError(e instanceof Error ? e.message : '推单失败', showToast)
-    // 后端可能在 HTTP 500 前已落库推单与系统消息（如大批量推单末尾异常），仍刷新大表与通知
+    // 后端可能在 HTTP 500 前已落库推单（如大批量推单末尾异常），仍刷新大表
     await fetchSheet()
-    await fetchNotifications({ silent: true })
   } finally {
     sfPushSubmitting.value = false
   }
