@@ -37,7 +37,7 @@
               <view class="mcard-price-block">
                 <text class="mcard-lab">特惠价格</text>
                 <view class="mcard-price-row">
-                  <text v-if="t.list_price_yuan" class="mcard-list">¥{{ t.list_price_yuan }}</text>
+                  <text v-if="showListPrice(t)" class="mcard-list">¥{{ t.list_price_yuan }}</text>
                   <text class="mcard-sale">¥{{ priceOrDash(t.sale_price_yuan) }}</text>
                 </view>
               </view>
@@ -85,6 +85,15 @@ function panSuffix(id) {
 function priceOrDash(v) {
   if (v == null || v === '') return '—'
   return String(v)
+}
+
+/** 划线原价高于优惠价时展示 */
+function showListPrice(t) {
+  if (!t) return false
+  const list = Number(t.list_price_yuan)
+  const sale = Number(t.sale_price_yuan)
+  if (!Number.isFinite(list) || !Number.isFinite(sale)) return false
+  return list > sale
 }
 
 async function loadList() {

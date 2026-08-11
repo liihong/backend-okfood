@@ -31,7 +31,7 @@ export async function fetchMenuPagePoster() {
 }
 
 /**
- * @returns {Promise<Array<{ id: number, name: string, meals_grant: number, sale_price_yuan?: string | null }>>}
+ * @returns {Promise<Array<{ id: number, name: string, meals_grant: number, sale_price_yuan?: string | null, list_price_yuan?: string | null }>>}
  */
 export async function fetchHomeMembershipCards() {
   const raw = await request('/api/home/membership-card-templates', { method: 'GET', retry: 1 })

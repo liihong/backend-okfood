@@ -24,7 +24,10 @@
         <text class="home-card-strip__name">{{ t.name }}</text>
         <view class="home-card-strip__foot">
           <text class="home-card-strip__meals">{{ t.meals_grant }} 次餐</text>
-          <text class="home-card-strip__price">¥{{ priceOrDash(t.sale_price_yuan) }}</text>
+          <view class="home-card-strip__price-block">
+            <text v-if="showListPrice(t)" class="home-card-strip__list">¥{{ t.list_price_yuan }}</text>
+            <text class="home-card-strip__price">¥{{ priceOrDash(t.sale_price_yuan) }}</text>
+          </view>
         </view>
       </view>
     </view>
@@ -48,7 +51,10 @@
           <text class="home-card-strip__name">{{ t.name }}</text>
           <view class="home-card-strip__foot">
             <text class="home-card-strip__meals">{{ t.meals_grant }} 次餐</text>
-            <text class="home-card-strip__price">¥{{ priceOrDash(t.sale_price_yuan) }}</text>
+            <view class="home-card-strip__price-block">
+              <text v-if="showListPrice(t)" class="home-card-strip__list">¥{{ t.list_price_yuan }}</text>
+              <text class="home-card-strip__price">¥{{ priceOrDash(t.sale_price_yuan) }}</text>
+            </view>
           </view>
         </view>
       </view>
@@ -71,6 +77,15 @@ function paletteClass(i) {
 function priceOrDash(v) {
   if (v == null || v === '') return '—'
   return String(v)
+}
+
+/** 划线原价高于优惠价时展示，体现活动价 */
+function showListPrice(t) {
+  if (!t) return false
+  const list = Number(t.list_price_yuan)
+  const sale = Number(t.sale_price_yuan)
+  if (!Number.isFinite(list) || !Number.isFinite(sale)) return false
+  return list > sale
 }
 
 function goDetail(id) {
@@ -241,11 +256,27 @@ function goList() {
   flex-shrink: 0;
 }
 
+.home-card-strip__price-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4rpx;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.home-card-strip__list {
+  font-size: 20rpx;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1;
+  text-decoration: line-through;
+}
+
 .home-card-strip__price {
   font-size: 34rpx;
   font-weight: 900;
   color: #fef08a;
   line-height: 1;
-  flex-shrink: 0;
 }
 </style>

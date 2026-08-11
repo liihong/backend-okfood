@@ -22,8 +22,18 @@
                 <text class="hero-num">{{ tpl.meals_grant }} 次</text>
               </view>
               <view class="hero-foot-r">
-                <text class="hero-lab">{{ discountDisp ? '券后价' : '优惠价' }}</text>
-                <text v-if="discountDisp" class="hero-orig-mini">¥{{ saleDisp }}</text>
+                <!-- 立省标签：强化活动划算感 -->
+                <view v-if="saveDisp" class="hero-save-pill">
+                  <text class="hero-save-txt">立省 ¥{{ saveDisp }}</text>
+                </view>
+                <view v-if="strikePriceDisp" class="hero-orig-row">
+                  <text class="hero-orig-lab">原价</text>
+                  <view class="hero-orig-wrap">
+                    <text class="hero-orig-num">¥{{ strikePriceDisp }}</text>
+                    <view class="hero-orig-line" />
+                  </view>
+                </view>
+                <text class="hero-lab">{{ priceLabel }}</text>
                 <text class="hero-yuan">¥{{ discountDisp ? payableDisp : saleDisp }}</text>
               </view>
             </view>
@@ -53,14 +63,16 @@
           </view>
 
           <view class="section">
-            <text class="sec-title">方案核心优势</text>
+            <text class="sec-title">为什么现在就办</text>
             <view class="sec-box">
-              <text class="sec-p">{{ introText }}</text>
+              <text v-if="introHook" class="sec-hook">{{ introHook }}</text>
+              <text class="sec-p">{{ introBody }}</text>
+              <text v-if="introExtra" class="sec-p sec-p--em">{{ introExtra }}</text>
             </view>
           </view>
 
           <view class="section">
-            <text class="sec-title">核心特权权益</text>
+            <text class="sec-title">开卡即享</text>
             <view v-for="(line, i) in privilegeLines" :key="i" class="priv-row">
               <text class="priv-ico">✓</text>
               <text class="priv-txt">{{ line }}</text>
@@ -82,9 +94,15 @@
 
     <view v-if="tpl && !loading" class="footer">
       <view class="foot-lab">
-        <text class="foot-cap">TOTAL PRICE</text>
-        <text v-if="discountDisp" class="foot-orig">¥{{ saleDisp }}</text>
-        <text class="foot-price">¥{{ payableDisp }}</text>
+        <text class="foot-cap">{{ strikePriceDisp ? '活动价' : 'TOTAL PRICE' }}</text>
+        <view class="foot-price-row">
+          <view v-if="strikePriceDisp" class="foot-orig-wrap">
+            <text class="foot-orig">¥{{ strikePriceDisp }}</text>
+            <view class="foot-orig-line" />
+          </view>
+          <text class="foot-price">¥{{ payableDisp }}</text>
+        </view>
+        <text v-if="saveDisp" class="foot-save">立省 ¥{{ saveDisp }}</text>
       </view>
       <button
         class="foot-pay"
@@ -135,11 +153,19 @@ import {
 import { listAvailableMemberCoupons, getMemberCouponReminder } from '@/utils/memberCouponApi.js'
 import { filterMemberCardCouponsForTemplate, pickBestMemberCoupon } from '@/utils/memberCouponScope.js'
 
+/** 默认权益：利益点 + 场景感，促下单 */
 const DEFAULT_PRIV = [
-  '全城顺丰免运费',
-  '餐次自由随心停配',
-  '持证营养师餐品搭配',
+  '全城顺丰免运费，不用再纠结配送费，送到家更省心',
+  '餐次自由停配，出差加班随时请假，餐次不浪费',
+  '持证营养师搭配，少油少负担，吃得饱也能管住嘴',
 ]
+
+/** 后台短标签（如「单周体验轻食计划」）映射为更软的权益钩子，避免只剩干巴巴一句话 */
+const SHORT_PRIV_SOFTEN = {
+  全城顺丰免运费: '全城顺丰免运费，不用再纠结配送费，送到家更省心',
+  餐次自由随心停配: '餐次自由停配，出差加班随时请假，餐次不浪费',
+  持证营养师餐品搭配: '持证营养师搭配，少油少负担，吃得饱也能管住嘴',
+}
 
 const scrollStyle = ref({})
 const loading = ref(true)
@@ -191,6 +217,17 @@ const saleDisp = computed(() => {
   return '—'
 })
 
+/** 模板划线原价（高于优惠价时才有活动感） */
+const listPriceDisp = computed(() => {
+  const t = tpl.value
+  if (!t) return null
+  const list = Number(t.list_price_yuan)
+  const sale = Number(t.sale_price_yuan)
+  if (!Number.isFinite(list)) return null
+  if (Number.isFinite(sale) && list <= sale) return null
+  return String(t.list_price_yuan)
+})
+
 const originalPriceNum = computed(() => {
   const n = Number(saleDisp.value)
   return Number.isFinite(n) ? n : null
@@ -209,6 +246,15 @@ const discountDisp = computed(() => {
   return Number.isFinite(n) ? n.toFixed(2) : null
 })
 
+/**
+ * 划线展示价：优先用模板原价；无原价但用了券时划掉标价
+ */
+const strikePriceDisp = computed(() => {
+  if (listPriceDisp.value) return listPriceDisp.value
+  if (discountDisp.value) return saleDisp.value !== '—' ? saleDisp.value : null
+  return null
+})
+
 const payableDisp = computed(() => {
   const orig = originalPriceNum.value
   if (orig == null) return saleDisp.value
@@ -217,13 +263,61 @@ const payableDisp = computed(() => {
   return pay.toFixed(2)
 })
 
-const introText = computed(() => {
+/** 价格主标签：有划线时强调「活动价」 */
+const priceLabel = computed(() => {
+  if (discountDisp.value) return '券后价'
+  if (strikePriceDisp.value) return '活动价'
+  return '优惠价'
+})
+
+/** 相对划线价的立省金额，突出划算感 */
+const saveDisp = computed(() => {
+  const strike = strikePriceDisp.value != null ? Number(strikePriceDisp.value) : NaN
+  const pay = Number(payableDisp.value)
+  if (!Number.isFinite(strike) || !Number.isFinite(pay)) return null
+  const save = strike - pay
+  if (save <= 0) return null
+  // 整数省额不带多余小数，更易读
+  return Number.isInteger(save) ? String(save) : save.toFixed(2)
+})
+
+/** 是否为短标签式简介（非完整软文） */
+function isShortIntroTag(s) {
+  const t = String(s || '').trim()
+  if (!t) return false
+  if (t.length > 28) return false
+  return !/[。！？\n]/.test(t)
+}
+
+const introHook = computed(() => {
   const t = tpl.value
   if (!t) return ''
-  return (
-    (t.intro_short && String(t.intro_short).trim()) ||
-    `含 ${t.meals_grant} 次自律健康餐，购买后餐次将入账至您的账户，稍候请完善配送信息即可开始用餐。`
-  )
+  const raw = t.intro_short && String(t.intro_short).trim()
+  if (raw && isShortIntroTag(raw)) return raw
+  return ''
+})
+
+const introBody = computed(() => {
+  const t = tpl.value
+  if (!t) return ''
+  const raw = t.intro_short && String(t.intro_short).trim()
+  // 后台已写完整软文时原样展示，不强行覆盖
+  if (raw && !isShortIntroTag(raw)) return raw
+  const meals = Number(t.meals_grant)
+  const mealsTxt = Number.isFinite(meals) && meals > 0 ? String(meals) : '多'
+  const name = String(t.name || '自律膳食卡').trim() || '自律膳食卡'
+  return `选择「${name}」，一次备好 ${mealsTxt} 次自律健康餐。想吃好、又怕点餐麻烦时，把选择权交给营养师搭配——开卡后餐次即时到账，完善地址就能开始吃。`
+})
+
+const introExtra = computed(() => {
+  if (!tpl.value) return ''
+  // 已有完整软文时不再追加，避免叠词
+  const raw = tpl.value.intro_short && String(tpl.value.intro_short).trim()
+  if (raw && !isShortIntroTag(raw)) return ''
+  if (saveDisp.value) {
+    return `当前活动价直降 ¥${saveDisp.value}，先体验、再决定是否长期坚持，比临时点外卖更稳也更划算。`
+  }
+  return '没有复杂门槛，先办卡体验起来；吃得规律了，自律也会轻松很多。'
 })
 
 const privilegeLines = computed(() => {
@@ -233,6 +327,7 @@ const privilegeLines = computed(() => {
       .split(/\r?\n/)
       .map((s) => s.trim())
       .filter(Boolean)
+      .map((s) => SHORT_PRIV_SOFTEN[s] || s)
     if (lines.length) return lines
   }
   return DEFAULT_PRIV
@@ -581,20 +676,70 @@ onLoad((opts) => {
 
 .hero-foot-r {
   text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6rpx;
 }
 
-.hero-orig-mini {
-  display: block;
-  font-size: 22rpx;
-  color: rgba(255, 255, 255, 0.55);
-  text-decoration: line-through;
+.hero-save-pill {
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  background: rgba(254, 240, 138, 0.95);
   margin-bottom: 2rpx;
 }
 
-.hero-yuan {
-  font-size: 40rpx;
+.hero-save-txt {
+  font-size: 20rpx;
   font-weight: 800;
+  color: #92400e;
+  line-height: 1.3;
+}
+
+.hero-orig-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8rpx;
+}
+
+.hero-orig-lab {
+  font-size: 20rpx;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1;
+}
+
+.hero-orig-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.hero-orig-num {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.2;
+}
+
+/* 自定义划线：比 text-decoration 在小程序上更清晰 */
+.hero-orig-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 3rpx;
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 2rpx;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.hero-yuan {
+  font-size: 44rpx;
+  font-weight: 900;
   color: #fef08a;
+  line-height: 1.1;
 }
 
 .section {
@@ -615,10 +760,29 @@ onLoad((opts) => {
   padding: 24rpx 24rpx;
 }
 
+.sec-hook {
+  display: block;
+  font-size: 28rpx;
+  font-weight: 800;
+  color: $ok-slate-800;
+  line-height: 1.4;
+  margin-bottom: 12rpx;
+}
+
 .sec-p {
+  display: block;
   font-size: 26rpx;
   color: $ok-slate-600;
-  line-height: 1.55;
+  line-height: 1.65;
+}
+
+.sec-p + .sec-p {
+  margin-top: 12rpx;
+}
+
+.sec-p--em {
+  color: $ok-forest-green;
+  font-weight: 600;
 }
 
 .priv-row {
@@ -689,11 +853,60 @@ onLoad((opts) => {
   line-height: 1.45;
 }
 
+.foot-orig-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 10rpx;
+}
+
 .foot-orig {
-  font-size: 22rpx;
+  font-size: 24rpx;
+  font-weight: 600;
   color: $ok-slate-400;
-  text-decoration: line-through;
-  margin-right: 8rpx;
+  line-height: 1.2;
+}
+
+.foot-orig-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 3rpx;
+  background: $ok-slate-400;
+  border-radius: 2rpx;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.foot-price-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.foot-save {
+  display: block;
+  margin-top: 2rpx;
+  font-size: 20rpx;
+  font-weight: 700;
+  color: $ok-urgent-red;
+  line-height: 1.3;
+}
+
+.foot-cap {
+  display: block;
+  font-size: 20rpx;
+  letter-spacing: 0.08em;
+  color: $ok-slate-400;
+  margin-bottom: 4rpx;
+}
+
+.foot-price {
+  font-size: 40rpx;
+  font-weight: 900;
+  color: $ok-urgent-red;
+  line-height: 1.1;
 }
 
 .coupon-section {
@@ -738,7 +951,7 @@ onLoad((opts) => {
 }
 
 .scroll-pad {
-  height: 180rpx;
+  height: 220rpx;
 }
 
 .footer {
@@ -755,20 +968,6 @@ onLoad((opts) => {
   background: rgba(255, 255, 255, 0.96);
   border-top: 0.5rpx solid $ok-slate-200;
   box-shadow: 0 -8rpx 24rpx rgba(15, 23, 42, 0.06);
-}
-
-.foot-cap {
-  display: block;
-  font-size: 20rpx;
-  letter-spacing: 0.08em;
-  color: $ok-slate-400;
-  margin-bottom: 4rpx;
-}
-
-.foot-price {
-  font-size: 40rpx;
-  font-weight: 900;
-  color: $ok-urgent-red;
 }
 
 .foot-pay {
