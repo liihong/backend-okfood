@@ -83,7 +83,7 @@ const pausedDeliveryCount = computed(
   () => Number(summaryMeta.value?.paused_delivery_count) || 0,
 )
 
-/** 同比上周今日：大表到家+自提去重人数 − 7 天前同日（dashboard-summary） */
+/** 同比上周兜底：后厨出餐差值（dashboard-summary 旧字段，caption 优先） */
 const todayPrepHeadsYoyDelta = computed(() => {
   const v = summaryMeta.value?.today_prep_heads_yoy_week_delta
   if (v == null || v === '') return null
@@ -98,7 +98,7 @@ const tomorrowPrepHeadsYoyDelta = computed(() => {
 })
 
 /**
- * 去掉备餐周同比 caption 前导「较上周」（左侧条已写同比上周，避免重复）
+ * 去掉后厨出餐周同比 caption 前导「较上周」（左侧条已写同比上周，避免重复）
  * @param {unknown} raw
  * @returns {string}
  */
@@ -108,31 +108,31 @@ function stripMealsWowCaptionLeadingPhrase(raw) {
   return t.replace(/^较上周[\s\u3000]*/, '').replace(/份$/u, '').trim()
 }
 
-/** 备餐份数同比上周说明（dashboard-summary）；展示在同比条右侧 */
+/** 后厨出餐总数同比上周说明（dashboard-summary）；展示在同比条右侧 */
 const todayMealsWeekOverWeekCaption = computed(() => {
   const raw = summaryMeta.value?.today_meals_week_over_week_caption
   return stripMealsWowCaptionLeadingPhrase(raw)
 })
-/** 明日备餐份数同比上周说明；展示在同比条右侧 */
+/** 明日后厨出餐总数同比上周说明；展示在同比条右侧 */
 const tomorrowMealsWeekOverWeekCaption = computed(() => {
   const raw = summaryMeta.value?.tomorrow_meals_week_over_week_caption
   return stripMealsWowCaptionLeadingPhrase(raw)
 })
 
-/** 同比文案：正为增加 x 人，负为减少 x 人，零为持平 */
+/** 同比文案：正为增加 x 份，负为减少 x 份，零为持平 */
 function formatYoyWeekHeadsText(delta) {
   if (delta == null) return '—'
   if (delta === 0) return '与上周同期持平'
-  if (delta > 0) return `增加${delta}人`
-  return `减少${Math.abs(delta)}人`
+  if (delta > 0) return `增加${delta}份`
+  return `减少${Math.abs(delta)}份`
 }
 
-/** 同比展示：+x人 / -x人 / 0人（用于边框区块数字） */
+/** 同比展示：+x份 / -x份 / 0份（用于边框区块数字） */
 function formatYoyWeekHeadsSigned(delta) {
   if (delta == null) return '—'
-  if (delta === 0) return '0人'
-  if (delta > 0) return `+${delta}人`
-  return `${delta}人`
+  if (delta === 0) return '0份'
+  if (delta > 0) return `+${delta}份`
+  return `${delta}份`
 }
 
 /** 顶卡右上角剩余可售：图标胶囊的无障碍/悬停文案 */
@@ -2120,7 +2120,7 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
   line-height: 1.35;
 }
 
-/* 备餐份数周同比文案：与左侧「同比上周」行同为 12px */
+/* 后厨出餐周同比文案：与左侧「同比上周」行同为 12px */
 .dro-dash-yoy-chip__val--caption {
   max-width: 52%;
   font-size: 12px;

@@ -62,7 +62,6 @@ from app.services.delivery.delivery_sheet_service import (
     delivery_sheet_metrics_prep_preview_for_dinner_future_date,
     delivery_sheet_metrics_prep_preview_for_future_date,
     delivery_sheet_metrics_via_sql_for_unlocked_date,
-    meal_units_totals_for_delivery_dates,
 )
 from app.services.member.member_address_service import (
     default_address_pick_subquery,
@@ -1659,36 +1658,51 @@ def _dashboard_day_prep_metrics_out(m: DeliverySheetDayMetrics) -> DashboardDayP
     )
 
 
-def _dashboard_meals_week_over_week_caption(*, meals: int, baseline_meals: int) -> str:
-    """备餐份数相对「上周同日」baseline 的差值文案。"""
+def _dashboard_meals_week_over_week_caption(*, meals: int | None, baseline_meals: int | None) -> str:
+    """后厨出餐总数相对「上周同日」的差值文案；任一侧未配置则空串。"""
+    if meals is None or baseline_meals is None:
+        return ""
     delta = int(meals) - int(baseline_meals)
     if delta == 0:
         return "较上周持平"
     return f"较上周{delta:+d}"
 
 
-def _dashboard_snapshot_meal_totals(
+def _dashboard_kitchen_output_by_dates(
     db: Session,
     *,
     store_id: int,
     dates: list[date],
     meal_period: str = "lunch",
-) -> dict[date, int]:
-    """批量读取历史锚日归档中的「当日备餐份数」，避免同比基线重复跑大表；按 meal_period 分档。"""
+) -> dict[date, int | None]:
+    """上周同日后厨出餐：归档 kitchen_output_total 优先，否则读周菜单日总份数。"""
+    from app.services.admin.menu_day_stock_service import weekly_menu_day_total_stock
     from app.services.meal_period.normalize import normalize_meal_period
 
     uniq = list(dict.fromkeys(dates))
     if not uniq:
         return {}
     period = normalize_meal_period(meal_period)
+    sid = int(store_id)
     rows = db.scalars(
         select(AdminDashboardBizDaySnapshot).where(
-            AdminDashboardBizDaySnapshot.store_id == int(store_id),
+            AdminDashboardBizDaySnapshot.store_id == sid,
             AdminDashboardBizDaySnapshot.business_anchor_date.in_(uniq),
             AdminDashboardBizDaySnapshot.meal_period == period,
         )
     ).all()
-    return {row.business_anchor_date: int(row.today_meals_to_prepare) for row in rows}
+    snap = {
+        row.business_anchor_date: int(row.kitchen_output_total)
+        for row in rows
+        if row.kitchen_output_total is not None
+    }
+    out: dict[date, int | None] = {}
+    for d in uniq:
+        if d in snap:
+            out[d] = snap[d]
+            continue
+        out[d] = weekly_menu_day_total_stock(db, d, store_id=sid, meal_period=period)
+    return out
 
 
 def _dashboard_meal_period_stock_fields(
@@ -1872,6 +1886,7 @@ def dashboard_meal_summary(
     """
     今日/明日请假人数与备餐份数。
     备餐份数与 ``build_delivery_sheet``（智能配送大表）各分组合计一致；周日与法定节假日为 0。
+    「同比上周」对比后厨出餐总数（周菜单日总份数），不看配送/备餐份数。
     锚定日早于当前上海日时：优先读 ``admin_dashboard_biz_day_snapshots``，无则按当前库计算并落库（之后不变），
     ``force_recompute=true`` 时管理员可强制按当前库重算并覆盖归档。
     """
@@ -1924,11 +1939,14 @@ def dashboard_meal_summary(
         day_after_tomorrow=day_after_tomorrow,
         metrics_cache=metrics_cache,
     )
-    snapshot_meal_totals = _dashboard_snapshot_meal_totals(
+    # 同比上周：后厨出餐总数（日总份数），不看配送/备餐份数
+    kitchen_wow = _dashboard_kitchen_output_by_dates(
         db,
         store_id=sid,
-        dates=[d for d in (wow_prev_anchor, wow_prev_day_after) if d < cal_today],
+        dates=[wow_prev_anchor, wow_prev_day_after],
     )
+    baseline_kitchen_anchor = kitchen_wow.get(wow_prev_anchor)
+    baseline_kitchen_day_after = kitchen_wow.get(wow_prev_day_after)
 
     if anchor < cal_today and not force_recompute:
         row = db.get(
@@ -1936,25 +1954,19 @@ def dashboard_meal_summary(
             {"store_id": sid, "business_anchor_date": anchor, "meal_period": "lunch"},
         )
         if row is not None:
-            # 快照已含锚日/次日备餐；环比文案仍按需重算两周前两日份数总和
-            wow_only = meal_units_totals_for_delivery_dates(
-                db,
-                dates=[wow_prev_anchor, wow_prev_day_after],
-                store_id=sid,
-                metrics_cache=metrics_cache,
-                snapshot_meal_totals=snapshot_meal_totals,
-                sql_sum_only=True,
-            )
-            baseline_meals_anchor_week = wow_only[wow_prev_anchor]
-            baseline_meals_day_after_week = wow_only[wow_prev_day_after]
             tp_snap = int(row.today_meals_to_prepare)
             np_snap = int(row.tomorrow_meals_to_prepare)
             t_first = count_members_first_scheduled_delivery_day(db, delivery_date=day_after, store_id=sid)
+            today_kitchen = (
+                int(row.kitchen_output_total)
+                if row.kitchen_output_total is not None
+                else today_menu_day_total_stock
+            )
             today_wow_cap = _dashboard_meals_week_over_week_caption(
-                meals=tp_snap, baseline_meals=baseline_meals_anchor_week
+                meals=today_kitchen, baseline_meals=baseline_kitchen_anchor
             )
             tomorrow_wow_cap = _dashboard_meals_week_over_week_caption(
-                meals=np_snap, baseline_meals=baseline_meals_day_after_week
+                meals=tomorrow_menu_day_total_stock, baseline_meals=baseline_kitchen_day_after
             )
             today_metrics = _dashboard_day_prep_metrics_out(
                 _dashboard_cached_sheet_metrics(
@@ -1999,17 +2011,6 @@ def dashboard_meal_summary(
                 _dashboard_anchor_summary_cache[(sid, anchor)] = (time.time(), snap_out)
             return snap_out
 
-    wow_bundle = meal_units_totals_for_delivery_dates(
-        db,
-        dates=[wow_prev_anchor, wow_prev_day_after],
-        store_id=sid,
-        metrics_cache=metrics_cache,
-        snapshot_meal_totals=snapshot_meal_totals,
-        sql_sum_only=True,
-    )
-    baseline_meals_anchor_week = wow_bundle[wow_prev_anchor]
-    baseline_meals_day_after_week = wow_bundle[wow_prev_day_after]
-
     # 锚定日/次日：一次 delivery_sheet_metrics 同时产出 tp/np 与 prep 拆分，避免再跑 6 次 SQL SUM
     today_m = _dashboard_cached_sheet_metrics(
         db, delivery_date=anchor, store_id=sid, metrics_cache=metrics_cache
@@ -2026,8 +2027,12 @@ def dashboard_meal_summary(
     nl = count_leave_members_for_delivery_day(db, day_after, store_id=sid)
     te = count_expire_one_unit_members_for_business_day(db, delivery_date=anchor, store_id=sid)
     t_first = count_members_first_scheduled_delivery_day(db, delivery_date=day_after, store_id=sid)
-    today_wow_cap = _dashboard_meals_week_over_week_caption(meals=tp, baseline_meals=baseline_meals_anchor_week)
-    tomorrow_wow_cap = _dashboard_meals_week_over_week_caption(meals=np, baseline_meals=baseline_meals_day_after_week)
+    today_wow_cap = _dashboard_meals_week_over_week_caption(
+        meals=today_menu_day_total_stock, baseline_meals=baseline_kitchen_anchor
+    )
+    tomorrow_wow_cap = _dashboard_meals_week_over_week_caption(
+        meals=tomorrow_menu_day_total_stock, baseline_meals=baseline_kitchen_day_after
+    )
     single_retail_map = _paid_single_retail_portions_by_dates(
         db, [anchor, day_after], store_id=sid, meal_period=MealPeriod.LUNCH.value
     )

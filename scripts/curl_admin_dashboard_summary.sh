@@ -10,8 +10,9 @@ curl -sS "${BASE}/api/admin/dashboard-summary?store_id=${STORE_ID}" \
   -H "Authorization: Bearer ${TOKEN}" | jq '{
     code,
     msg,
-    paused_delivery_count: .data.paused_delivery_count,
-    tomorrow_leave_members: .data.tomorrow_leave_members,
-    tomorrow_first_meal_new_members: .data.tomorrow_first_meal_new_members,
-    tomorrow_single_retail_total_quantity: .data.tomorrow_single_retail_total_quantity
+    today_menu_day_total_stock: .data.today_menu_day_total_stock,
+    tomorrow_menu_day_total_stock: .data.tomorrow_menu_day_total_stock,
+    today_meals_week_over_week_caption: .data.today_meals_week_over_week_caption,
+    tomorrow_meals_week_over_week_caption: .data.tomorrow_meals_week_over_week_caption,
+    paused_delivery_count: .data.paused_delivery_count
   }'
