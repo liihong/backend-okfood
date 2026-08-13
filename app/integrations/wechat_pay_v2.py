@@ -284,7 +284,7 @@ def unified_order_jsapi(
             if is_partner_pay_config(cfg):
                 err = (
                     f"{err}。请在服务商后台「特约商户 APPID 配置」绑定本店小程序 AppId，"
-                    "并确认 .env 的 WECHAT_PAY_SP_APPID 为服务商 AppId、门店配置的特约商户号正确。"
+                    "并确认 .env 的 WECHAT_PAY_SP_APPID 为服务商 AppId、租户对接中的特约商户号正确。"
                 )
             else:
                 err = (

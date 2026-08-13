@@ -951,7 +951,7 @@ onMounted(async () => {
           <el-form-item label="特约商户号 sub_mch_id">
             <el-input v-model="integrationForm.wechat_pay_mch_id" maxlength="32" placeholder="服务商下发的特约商户号" />
             <p class="integration-field-hint">
-              主租户 OK饭 走直连，勿把服务商号填进全局 WECHAT_PAY_MCH_ID。加盟租户填特约商户号，服务商凭证用 .env 的 WECHAT_PAY_SP_*。
+              仅在本页维护。主租户 OK饭 走直连可留空；加盟租户填特约商户号，服务商凭证用 .env 的 WECHAT_PAY_SP_*。
             </p>
           </el-form-item>
           <el-form-item label="API 密钥（已废弃）">
@@ -975,25 +975,19 @@ onMounted(async () => {
               placeholder="留空则用全局 WECHAT_PAY_NOTIFY_URL"
             />
           </el-form-item>
-          <el-form-item
-            label="退款 API 证书 cert 路径（apiclient_cert.pem）"
-            :title="'租户内各门店未单独配置时的默认路径；门店可在「门店配置」覆盖'"
-          >
+          <el-form-item label="退款 API 证书 cert 路径（apiclient_cert.pem）">
             <el-input
               v-model="integrationForm.wechat_pay_ssl_cert_path"
               maxlength="512"
-              placeholder="例：E:/certs/apiclient_cert.pem；留空则仅用门店或全局 .env"
+              placeholder="服务器可读路径；加盟租户优先用 .env 的 WECHAT_PAY_SP_SSL_*"
               class="mono-input"
             />
           </el-form-item>
-          <el-form-item
-            label="退款 API 证书 key 路径（apiclient_key.pem）"
-            :title="'租户默认 key 路径；优先级：门店 > 租户 > WECHAT_PAY_SSL_KEY_PATH'"
-          >
+          <el-form-item label="退款 API 证书 key 路径（apiclient_key.pem）">
             <el-input
               v-model="integrationForm.wechat_pay_ssl_key_path"
               maxlength="512"
-              placeholder="例：E:/certs/apiclient_key.pem"
+              placeholder="例：/var/www/okcert/apiclient_key.pem"
               class="mono-input"
             />
           </el-form-item>

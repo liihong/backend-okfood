@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 店主「门店配置」本租户微信支付商户号联调
+# 租户对接：本租户特约商户号联调（平台管理）
 set -euo pipefail
 BASE="${BASE_URL:-http://127.0.0.1:8000}"
 TOKEN="${ADMIN_TOKEN:?请 export ADMIN_TOKEN=...}"

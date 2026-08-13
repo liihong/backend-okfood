@@ -16,7 +16,7 @@ from app.core.config import get_settings
 
 # 非主租户对接不全时，引导店主补特约商户号（勿暴露服务商 .env 密钥）
 TENANT_INTEGRATION_INCOMPLETE_HINT = (
-    "租户微信支付未就绪，请在「门店配置」填写本租户特约商户号，"
+    "租户微信支付未就绪，请在「平台管理 → 租户对接」填写本租户特约商户号，"
     "并确认已在服务商后台「特约商户 APPID 配置」绑定本店小程序 AppId"
 )
 
