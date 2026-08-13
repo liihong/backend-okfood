@@ -25,7 +25,7 @@ from app.models.member import Member
 from app.models.enums import PlanType
 from app.core.limiter import limiter
 from app.core.timeutil import today_shanghai
-from app.schemas.member_address import MemberAddressUpdateIn
+from app.schemas.member_address import MemberAddressCreateIn, MemberAddressUpdateIn
 from app.schemas.admin import (
     AdminAddressIn,
     AdminDeliveryMarkIn,
@@ -118,7 +118,7 @@ from app.services.admin.admin_delivery_fulfillment_service import (
     admin_reinstate_member_to_delivery_sheet,
 )
 from app.services.admin.member_delivery_deduction_service import list_member_delivered_dates_admin
-from app.services.member.member_address_service import list_addresses, update_address
+from app.services.member.member_address_service import create_address, list_addresses, update_address
 from app.services.member.member_operation_log_service import (
     list_member_operations,
     operation_log_to_dict,
@@ -1887,6 +1887,31 @@ def admin_member_addresses_list(
     return success(data=[dump_model(i) for i in items], msg="获取成功")
 
 
+@router.post("/users/{member_id}/addresses")
+def admin_member_address_create(
+    request: Request,
+    member_id: int,
+    body: MemberAddressCreateIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """管理端为会员新增配送地址；无地址时首条自动设为默认。"""
+    require_member_in_admin_store(
+        db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
+    )
+    xf = request.headers.get("x-forwarded-for")
+    ip = resolve_request_client_ip(xf, request.client.host if request.client else None)
+    out = create_address(
+        db,
+        member_id,
+        body,
+        ip_address=ip,
+        source="admin",
+    )
+    return success(data=dump_model(out), msg="地址已创建")
+
+
 @router.get("/users/{member_id}/delivered-dates")
 def admin_member_delivered_dates(
     member_id: int,
@@ -1976,7 +2001,7 @@ def admin_member_membership_refund_preview(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """会员档案：退卡退款预览（已消费次数、可退次数、应退金额）。"""
+    """会员档案：退卡退款预览（剩余次数 × 菜单单价 = 应退金额）。"""
     _, _, sid = require_member_in_admin_store(
         db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
     )

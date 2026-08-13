@@ -390,19 +390,6 @@ function applyRenewActivationDefaults() {
   }
 }
 
-/** 续卡：履约方式默认跟随档案（门店自提 / 配送到家） */
-function applyRenewFulfillmentDefaults() {
-  if (createForm.value.open_mode !== 'renew') return
-  const p = renewPreview.value
-  createForm.value.store_pickup = !!(p && p.store_pickup)
-}
-
-/** 续卡：履约方式默认沿用档案（门店自提 / 配送到家） */
-function applyRenewFulfillmentDefaults() {
-  if (createForm.value.open_mode !== 'renew') return
-  createForm.value.store_pickup = !!(renewPreview.value && renewPreview.value.store_pickup)
-}
-
 /** 续卡：履约方式默认沿用档案（门店自提 / 配送到家） */
 function applyRenewFulfillmentDefaults() {
   if (createForm.value.open_mode !== 'renew') return
@@ -509,7 +496,7 @@ async function submitCreate() {
   if (!keepSchedule && !deferStart) {
     startD = (createForm.value.delivery_start_date || '').trim()
     if (!startD) {
-      showToast('请选择开始配送日期', 'error')
+      showToast(createForm.value.store_pickup ? '请选择开始自提日期' : '请选择开始配送日期', 'error')
       return
     }
     const today = todayShanghaiStr()
@@ -555,6 +542,7 @@ async function submitCreate() {
       membership_template_id: Math.floor(Number(tplId)),
       pay_channel: createForm.value.pay_channel,
       pay_status: createForm.value.pay_status,
+      store_pickup: isStorePickup,
     }
     if (openMode === 'new_member') {
       body.name = (createForm.value.name || '').trim()
@@ -1120,6 +1108,7 @@ class="member-pill"
                           · 起送日 {{ String(renewPreview.delivery_start_date).slice(0, 10) }}
                         </template>
                         <template v-if="renewPreview.delivery_deferred"> · 已暂停配送</template>
+                        <template v-else-if="renewPreview.store_pickup"> · 门店自提</template>
                       </p>
                       <p v-if="renewStillDelivering" class="modal-hint modal-hint--accent">
                         仍在履约中，续卡仅叠加次数，不修改起送日与配送安排。
@@ -1242,7 +1231,11 @@ class="member-pill"
                       <el-radio value="date" border class="co-activation-radio-item">
                         <div class="co-open-mode-radio-body">
                           <span class="radio-tile-title">指定起送日</span>
-                          <span class="radio-tile-sub">选择具体业务日起参与配送大表</span>
+                          <span class="radio-tile-sub">{{
+                            createForm.store_pickup
+                              ? '选择具体业务日起参与门店自提'
+                              : '选择具体业务日起参与配送大表'
+                          }}</span>
                         </div>
                       </el-radio>
                       <el-radio value="defer" border class="co-activation-radio-item">
@@ -1262,7 +1255,7 @@ class="member-pill"
                       type="date"
                       value-format="YYYY-MM-DD"
                       format="YYYY-MM-DD"
-                      placeholder="选择开始配送日"
+                      :placeholder="createForm.store_pickup ? '选择开始自提日' : '选择开始配送日'"
                       class="card-order-date-picker"
                       :clearable="false"
                     />
@@ -1280,41 +1273,68 @@ class="member-pill"
             </div>
           </div>
 
-          <!-- 右侧：配送位置 + 提交 -->
+          <!-- 右侧：履约方式（配送 / 自提）+ 提交 -->
           <div class="co-create-split-side">
             <div class="co-create-panel co-create-panel--side">
               <div class="co-create-panel-head-row">
                 <div class="co-create-panel-title co-create-panel-title--plain co-create-panel-title--with-icon">
-                  <MapPin class="co-create-panel-title-icon" :size="18" :stroke-width="2.25" aria-hidden="true" />
-                  配送位置
+                  <Store
+                    v-if="createForm.store_pickup"
+                    class="co-create-panel-title-icon"
+                    :size="18"
+                    :stroke-width="2.25"
+                    aria-hidden="true"
+                  />
+                  <MapPin
+                    v-else
+                    class="co-create-panel-title-icon"
+                    :size="18"
+                    :stroke-width="2.25"
+                    aria-hidden="true"
+                  />
+                  {{ createForm.store_pickup ? '门店自提' : '配送位置' }}
                 </div>
-                <!-- <span class="co-create-optional-pill">OPTIONAL</span> -->
               </div>
-              <!-- <p class="modal-hint card-order-map-hint">
-                与小程序一致：地图搜索或点选后填入详细地址（坐标后台保存）。
-              </p> -->
-              <MemberDeliveryMapPicker
-                class="co-create-map-picker-root"
-                v-model:lng-str="createForm.delivery_lng"
-                v-model:lat-str="createForm.delivery_lat"
-                v-model:map-location-text="createForm.map_location_text"
-                @warn="onDeliveryMapWarn"
+              <div class="form-group">
+                <label>履约方式</label>
+                <el-radio-group v-model="createForm.store_pickup" class="co-fulfillment-radio-group">
+                  <el-radio :value="false" border>配送到家</el-radio>
+                  <el-radio :value="true" border>门店自提</el-radio>
+                </el-radio-group>
+              </div>
+              <el-alert
+                v-if="createForm.store_pickup"
+                type="success"
+                :closable="false"
+                show-icon
+                class="co-pickup-alert"
+                title="门店自提无需填写配送地址"
+                description="入账并指定起送日后，会员将进入配送大表「门店自提」分组，到店取餐即可。"
               />
-              <div class="form-group">
-                <label>地图详细地址（只读）</label>
-                <el-input
-                  v-model="createForm.map_location_text"
-                  type="textarea"
-                  :rows="2"
-                  maxlength="500"
-                  readonly
-                  placeholder="选取地图坐标后自动填充"
+              <template v-else>
+                <MemberDeliveryMapPicker
+                  class="co-create-map-picker-root"
+                  v-model:lng-str="createForm.delivery_lng"
+                  v-model:lat-str="createForm.delivery_lat"
+                  v-model:map-location-text="createForm.map_location_text"
+                  @warn="onDeliveryMapWarn"
                 />
-              </div>
-              <div class="form-group">
-                <label>门牌号 / 单元楼层</label>
-                <el-input v-model="createForm.door_detail" maxlength="500" placeholder="如：3 号楼 1202" clearable />
-              </div>
+                <div class="form-group">
+                  <label>地图详细地址（只读）</label>
+                  <el-input
+                    v-model="createForm.map_location_text"
+                    type="textarea"
+                    :rows="2"
+                    maxlength="500"
+                    readonly
+                    placeholder="选取地图坐标后自动填充"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>门牌号 / 单元楼层</label>
+                  <el-input v-model="createForm.door_detail" maxlength="500" placeholder="如：3 号楼 1202" clearable />
+                </div>
+              </template>
             </div>
             <div class="co-create-side-footer">
               <!-- <p class="modal-hint co-create-submit-hint">
@@ -2199,6 +2219,23 @@ class="member-pill"
   flex-direction: column;
   width: 100%;
   gap: 8px;
+}
+
+.co-fulfillment-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%;
+  gap: 8px;
+}
+
+.co-fulfillment-radio-group :deep(.el-radio) {
+  margin-right: 0;
+  height: auto;
+  padding: 8px 12px;
+}
+
+.co-pickup-alert {
+  margin: 0;
 }
 
 .card-order-edit-actions {

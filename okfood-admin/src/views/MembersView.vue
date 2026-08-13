@@ -900,7 +900,7 @@ async function onMemberMealCompensationSaved() {
   await fetchMemberStats()
 }
 
-/** --- 退卡退款：按消费日菜单单价扣款后退还余款 --- */
+/** --- 退卡退款：按剩余次数 × 菜单单价计算应退（不按开卡实收） --- */
 const showRefundModal = ref(false)
 const refundTarget = ref(null)
 const refundPreview = ref(null)
@@ -968,7 +968,7 @@ async function submitMemberRefund() {
   }
   try {
     await ElMessageBox.confirm(
-      `${u.name || '—'} · ${u.phone || ''}\n\n已消费 ${p.meals_consumed} 次，退剩余 ${p.meals_remaining} 次\n应退 ¥ ${fmtRefundYuan(amt)}`,
+      `${u.name || '—'} · ${u.phone || ''}\n\n已消费 ${p.meals_consumed} 次，退剩余 ${p.meals_remaining} 次 × ¥ ${fmtRefundYuan(p.unit_price_yuan)}\n应退 ¥ ${fmtRefundYuan(amt)}`,
       '确认退卡退款',
       {
         type: 'warning',
@@ -1432,7 +1432,7 @@ onUnmounted(() => {
                     <el-dropdown-item command="refund" :disabled="!canMemberRefund(u)">
                       <span
                         class="members-dropdown-item-inner"
-                        title="按已消费/剩余次数计算应退金额，确认后写入财务扣减"
+                        title="按剩余次数 × 菜单单价计算应退金额，确认后写入财务扣减"
                       >
                         <Banknote :size="14" aria-hidden="true" />
                         退卡退款
@@ -1604,7 +1604,7 @@ onUnmounted(() => {
                     <el-dropdown-item command="refund" :disabled="!canMemberRefund(u)">
                       <span
                         class="members-dropdown-item-inner"
-                        title="按已消费/剩余次数计算应退金额，确认后写入财务扣减"
+                        title="按剩余次数 × 菜单单价计算应退金额，确认后写入财务扣减"
                       >
                         <Banknote :size="14" aria-hidden="true" />
                         退卡退款
@@ -1896,7 +1896,7 @@ onUnmounted(() => {
         <div class="modal-header">
           <div class="header-info">
             <h3>退卡退款</h3>
-            <p>按消费日菜单单价扣款后退还余款</p>
+            <p>按剩余次数 × 菜单单价计算应退，不按开卡实收（避免抖音等渠道已退款重复计算）</p>
           </div>
           <el-button text circle class="close-btn" :disabled="refundSubmitting" @click="showRefundModal = false">
             <X :size="20" />
@@ -1923,18 +1923,23 @@ onUnmounted(() => {
                 <dd>{{ refundPreview.meal_quota_total }} 次</dd>
               </div>
               <div class="members-refund-row">
-                <dt>开卡实收合计</dt>
-                <dd>¥ {{ fmtRefundYuan(refundPreview.paid_total_yuan) }}</dd>
+                <dt>退款单价</dt>
+                <dd>¥ {{ fmtRefundYuan(refundPreview.unit_price_yuan) }}</dd>
               </div>
               <div class="members-refund-row">
-                <dt>已消费扣款</dt>
-                <dd>− ¥ {{ fmtRefundYuan(refundPreview.consumed_value_yuan) }}</dd>
+                <dt>计算</dt>
+                <dd>
+                  {{ refundPreview.meals_remaining }} 次 × ¥ {{ fmtRefundYuan(refundPreview.unit_price_yuan) }}
+                </dd>
               </div>
               <div class="members-refund-row members-refund-row--amount">
                 <dt>应退金额</dt>
                 <dd class="members-refund-amount">¥ {{ fmtRefundYuan(refundPreview.refund_amount_yuan) }}</dd>
               </div>
             </dl>
+            <p v-if="Array.isArray(refundPreview.consumption_items) && refundPreview.consumption_items.length" class="modal-hint members-refund-consumption-label">
+              已消费明细（仅供核对，不从应退中扣减）
+            </p>
             <ul
               v-if="Array.isArray(refundPreview.consumption_items) && refundPreview.consumption_items.length"
               class="members-refund-consumption-list"
@@ -2126,6 +2131,9 @@ onUnmounted(() => {
 .members-refund-tip {
   margin-bottom: 12px;
   line-height: 1.5;
+}
+.members-refund-consumption-label {
+  margin: 0 0 6px;
 }
 .members-refund-consumption-list {
   margin: 0 0 12px;

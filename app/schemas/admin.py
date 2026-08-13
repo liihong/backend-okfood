@@ -928,7 +928,7 @@ class FinanceReceivedBucketOut(BaseModel):
 
 
 class MemberMembershipRefundConsumptionRowOut(BaseModel):
-    """退卡预览：单日消费按菜单单价扣款明细。"""
+    """退卡预览：单日消费按菜单单价列出的核对明细。"""
 
     delivery_date: date = Field(..., description="配送业务日")
     meal_units: int = Field(..., ge=1, description="该日消费份数")
@@ -938,7 +938,7 @@ class MemberMembershipRefundConsumptionRowOut(BaseModel):
 
 
 class MemberMembershipRefundPreviewOut(BaseModel):
-    """会员退卡退款预览：实收 − 各消费日菜单单价扣款。"""
+    """会员退卡退款预览：应退 = 剩余次数 × 菜单单价（不按开卡实收，避免外部渠道已退款重复计算）。"""
 
     member_id: int = Field(..., ge=1)
     member_name: str | None = None
@@ -947,13 +947,20 @@ class MemberMembershipRefundPreviewOut(BaseModel):
     meals_consumed: int = Field(..., ge=0, description="已消费份数（配送扣次）")
     meals_remaining: int = Field(..., ge=0, description="可退剩余次数")
     meal_quota_total: int = Field(..., ge=0, description="累计总次数")
-    paid_total_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="已入账开卡实收合计")
-    consumed_value_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="已消费扣款（按各日菜单单价）")
+    paid_total_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="已入账开卡实收合计（仅供核对，不参与应退计算）")
+    consumed_value_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="已消费按各日菜单单价合计（仅供核对）")
+    unit_price_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="退款单价（午餐菜单单点价）")
     consumption_items: list[MemberMembershipRefundConsumptionRowOut] = Field(
         default_factory=list,
-        description="按消费日列出的菜单扣款明细",
+        description="按消费日列出的菜单单价明细（仅供核对，不从应退中扣减）",
     )
-    refund_amount_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="应退金额 = 实收 − 已消费扣款")
+    refund_amount_yuan: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=14,
+        decimal_places=2,
+        description="应退金额 = 可退剩余次数 × 菜单单价",
+    )
 
 
 class MemberMembershipRefundConfirmIn(BaseModel):

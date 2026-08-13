@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
-import { X } from 'lucide-vue-next'
+import { X, Plus } from 'lucide-vue-next'
 import MemberDeliveryMapPicker from '../../components/MemberDeliveryMapPicker.vue'
 import { apiJson, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
@@ -26,6 +26,34 @@ const addrSelectedId = ref(null)
 const currentAddrRow = computed(() =>
   addrList.value.find((x) => Number(x.id) === Number(addrSelectedId.value)),
 )
+
+/** 右侧表单是否为「新建」（尚无地址 id） */
+const isCreatingAddress = computed(() => Boolean(addrEdit.value) && addrEdit.value.id == null)
+
+const canAddAddress = computed(() => addrList.value.length < 20)
+
+function blankAddrEdit() {
+  const m = props.member
+  return {
+    id: null,
+    contact_name: (m?.name || '').trim(),
+    contact_phone: (m?.phone || '').trim(),
+    map_location_text: '',
+    door_detail: '',
+    remarks: '',
+    lngStr: '',
+    latStr: '',
+  }
+}
+
+function startNewAddress() {
+  if (!canAddAddress.value) {
+    showToast('每位会员最多保存 20 条地址', 'error')
+    return
+  }
+  addrSelectedId.value = null
+  addrEdit.value = blankAddrEdit()
+}
 
 function pickAddrEdit(a) {
   const lng = a.location?.lng
@@ -68,6 +96,7 @@ async function loadAddressesForMember(preferId = null) {
       preferId != null ? addrList.value.find((x) => Number(x.id) === Number(preferId)) : null
     const def = pref || addrList.value.find((x) => x.is_default) || addrList.value[0]
     if (def) pickAddrEdit(def)
+    else startNewAddress()
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -104,22 +133,62 @@ function onAddrMapWarn(msg) {
 async function saveMemberAddress() {
   const m = props.member
   const ed = addrEdit.value
-  if (!m?.id || !ed?.id) return
-  const savedId = Number(ed.id)
+  if (!m?.id || !ed) return
+  const name = (ed.contact_name || '').trim()
+  const phone = (ed.contact_phone || '').trim()
+  const mapT = (ed.map_location_text || '').trim()
+  const doorT = (ed.door_detail || '').trim()
+  if (!name) {
+    showToast('请填写收件人', 'error')
+    return
+  }
+  if (!phone) {
+    showToast('请填写联系电话', 'error')
+    return
+  }
+  const lng = Number(String(ed.lngStr ?? '').trim())
+  const lat = Number(String(ed.latStr ?? '').trim())
+  const hasCoords = Number.isFinite(lng) && Number.isFinite(lat)
+  if (isCreatingAddress.value) {
+    if (!hasCoords) {
+      showToast('请使用地图搜索或点击地图选点', 'error')
+      return
+    }
+    if (!mapT) {
+      showToast('请填写收货位置主文案（地图选点后自动填入）', 'error')
+      return
+    }
+  } else if (!ed.id) {
+    return
+  }
+
   addrSaving.value = true
   try {
     const payload = {
-      contact_name: (ed.contact_name || '').trim(),
-      contact_phone: (ed.contact_phone || '').trim(),
-      map_location_text: (ed.map_location_text || '').trim() || null,
-      door_detail: (ed.door_detail || '').trim() || null,
+      contact_name: name,
+      contact_phone: phone,
+      map_location_text: mapT || null,
+      door_detail: doorT || null,
       remarks: (ed.remarks || '').trim() || null,
     }
-    const lng = Number(String(ed.lngStr ?? '').trim())
-    const lat = Number(String(ed.latStr ?? '').trim())
-    if (Number.isFinite(lng) && Number.isFinite(lat)) {
+    if (hasCoords) {
       payload.location = { lng, lat }
     }
+    if (isCreatingAddress.value) {
+      payload.map_location_text = mapT
+      payload.is_default = addrList.value.length === 0
+      const created = await apiJson(
+        `/api/admin/users/${Number(m.id)}/addresses`,
+        { method: 'POST', body: JSON.stringify(payload) },
+        { auth: true },
+      )
+      showToast('地址已创建', 'success')
+      emit('saved')
+      const newId = created?.id != null ? Number(created.id) : null
+      await loadAddressesForMember(newId)
+      return
+    }
+    const savedId = Number(ed.id)
     await apiJson(
       `/api/admin/users/${Number(m.id)}/addresses/${savedId}`,
       { method: 'PATCH', body: JSON.stringify(payload) },
@@ -135,7 +204,7 @@ async function saveMemberAddress() {
       handleAdminLogout()
       return
     }
-    showToast(e instanceof Error ? e.message : '保存失败', 'error')
+    showToast(e instanceof Error ? e.message : isCreatingAddress.value ? '创建失败' : '保存失败', 'error')
   } finally {
     addrSaving.value = false
   }
@@ -192,14 +261,33 @@ async function makeCurrentAddressDefault() {
         <div v-if="addrLoading">
           <el-skeleton animated :rows="5" />
         </div>
-        <template v-else-if="addrList.length === 0">
-          <el-empty description="该会员暂无配送地址记录。" :image-size="80" />
-        </template>
-        <template v-else>
-          <div class="members-addr-layout">
+        <div v-else class="members-addr-layout">
             <aside class="members-addr-list-pane" aria-label="会员全部地址">
-              <p class="members-addr-list-hint">共 {{ addrList.length }} 条 · 点击条目在右侧编辑</p>
+              <div class="members-addr-list-head">
+                <p class="members-addr-list-hint">
+                  共 {{ addrList.length }} 条 · 点击条目在右侧编辑
+                </p>
+                <el-button
+                  type="primary"
+                  link
+                  :disabled="!canAddAddress || addrSaving || addrDefaultSaving"
+                  @click="startNewAddress"
+                >
+                  <Plus :size="14" :stroke-width="2.5" />
+                  新增地址
+                </el-button>
+              </div>
               <div class="members-addr-list-scroll">
+                <div
+                  v-if="isCreatingAddress"
+                  class="members-addr-list-item members-addr-list-item--active members-addr-list-item--draft"
+                >
+                  <div class="members-addr-list-item-top">
+                    <el-tag size="small" type="warning" effect="plain">新建</el-tag>
+                    <span class="members-addr-list-item-name">未保存</span>
+                  </div>
+                  <div class="members-addr-list-item-addr">在右侧填写后点击「创建地址」</div>
+                </div>
                 <div
                   v-for="a in addrList"
                   :key="a.id"
@@ -207,7 +295,7 @@ async function makeCurrentAddressDefault() {
                   tabindex="0"
                   class="members-addr-list-item"
                   :class="{
-                    'members-addr-list-item--active': addrSelectedId === Number(a.id),
+                    'members-addr-list-item--active': !isCreatingAddress && addrSelectedId === Number(a.id),
                   }"
                   @click="pickAddrEdit(a)"
                   @keydown.enter.prevent="pickAddrEdit(a)"
@@ -222,6 +310,9 @@ async function makeCurrentAddressDefault() {
                   </div>
                   <div class="members-addr-list-item-area">{{ a.area || '—' }}</div>
                 </div>
+                <p v-if="!addrList.length && !isCreatingAddress" class="members-addr-list-empty">
+                  暂无配送地址
+                </p>
               </div>
             </aside>
 
@@ -262,11 +353,11 @@ async function makeCurrentAddressDefault() {
                 <el-form-item label="地图选点（GCJ-02）" class="members-addr-map-form-item">
                   <div class="members-addr-map-wrap">
                     <MemberDeliveryMapPicker
-                      :key="'ma-' + addrEdit.id"
+                      :key="'ma-' + (addrEdit.id != null ? addrEdit.id : 'new')"
                       v-model:lng-str="addrEdit.lngStr"
                       v-model:lat-str="addrEdit.latStr"
                       v-model:map-location-text="addrEdit.map_location_text"
-                      :search-input-id="'members-addr-amap-' + addrEdit.id"
+                      :search-input-id="'members-addr-amap-' + (addrEdit.id != null ? addrEdit.id : 'new')"
                       @warn="onAddrMapWarn"
                     />
                   </div>
@@ -312,8 +403,16 @@ async function makeCurrentAddressDefault() {
                 <el-form-item class="members-addr-actions">
                   <div class="members-addr-actions-inner">
                     <div class="members-addr-actions-left">
+                      <el-tag
+                        v-if="isCreatingAddress && addrList.length === 0"
+                        size="small"
+                        type="success"
+                        effect="plain"
+                      >
+                        保存后将设为默认地址
+                      </el-tag>
                       <el-button
-                        v-if="currentAddrRow && !currentAddrRow.is_default"
+                        v-else-if="currentAddrRow && !currentAddrRow.is_default"
                         type="warning"
                         plain
                         :loading="addrDefaultSaving"
@@ -331,15 +430,14 @@ async function makeCurrentAddressDefault() {
                         当前为默认地址
                       </el-tag>
                     </div>
-                    <el-button type="primary" :loading="addrSaving" :disabled="addrDefaultSaving" native-type="submit"
-                      >保存地址</el-button
-                    >
+                    <el-button type="primary" :loading="addrSaving" :disabled="addrDefaultSaving" native-type="submit">
+                      {{ isCreatingAddress ? '创建地址' : '保存地址' }}
+                    </el-button>
                   </div>
                 </el-form-item>
               </el-form>
             </div>
-          </div>
-        </template>
+        </div>
       </div>
     </div>
   </div>
@@ -374,11 +472,30 @@ async function makeCurrentAddressDefault() {
   top: 0;
 }
 
+.members-addr-list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .members-addr-list-hint {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 12px;
   color: var(--el-text-color-secondary);
   line-height: 1.4;
+}
+
+.members-addr-list-empty {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.members-addr-list-item--draft {
+  cursor: default;
+  border-style: dashed;
 }
 
 .members-addr-list-scroll {

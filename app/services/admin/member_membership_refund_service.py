@@ -1,16 +1,16 @@
-"""会员退卡退款：按各消费日菜单单价扣款后退还余款。"""
+"""会员退卡退款：按剩余次数 × 菜单单价计算应退，不按开卡实收。"""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.timeutil import beijing_now_naive
-from app.models.enums import CardOrderPayStatus, PlanType
+from app.core.timeutil import beijing_now_naive, today_shanghai
+from app.models.enums import CardOrderPayStatus, MealPeriod, PlanType
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
 from app.models.member_membership_refund import MemberMembershipRefund
@@ -26,7 +26,6 @@ from app.services.admin.member_delivery_deduction_service import (
     total_member_delivery_meal_units_consumed,
 )
 from app.services.member.member_operation_log_service import OP_MEMBERSHIP_REFUND, record_member_operation
-from app.models.enums import MealPeriod
 from app.services.admin.menu_day_stock_service import resolve_dishes_for_dates_batch
 
 _TWO_PLACES = Decimal("0.01")
@@ -58,20 +57,19 @@ def _consumption_charge_for_member(
     if not units_by_date:
         return Decimal("0.00"), []
 
-    # 退卡扣款按午餐菜单单价（经典周/月卡默认午餐履约口径）
+    # 已消费明细按午餐菜单单价列出（仅供核对，不参与应退计算）
     dishes_by_date = resolve_dishes_for_dates_batch(
         db, units_by_date.keys(), store_id=int(store_id), meal_period=MealPeriod.LUNCH.value
     )
     items: list[MemberMembershipRefundConsumptionRowOut] = []
-    missing: list[date] = []
     total = Decimal("0")
 
     for delivery_date in sorted(units_by_date.keys()):
         units = max(1, int(units_by_date[delivery_date]))
         dish = dishes_by_date.get(delivery_date)
         raw_price = None if dish is None else dish.single_order_price_yuan
+        # 已消费明细仅供核对；缺单价的日期跳过，不阻断按剩余次数退款
         if raw_price is None:
-            missing.append(delivery_date)
             continue
         unit_price = Decimal(str(raw_price)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
         line_total = (unit_price * Decimal(units)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
@@ -86,15 +84,52 @@ def _consumption_charge_for_member(
             )
         )
 
-    if missing:
-        labels = "、".join(d.isoformat() for d in missing[:5])
-        suffix = "…" if len(missing) > 5 else ""
-        raise HTTPException(
-            status_code=400,
-            detail=f"以下消费日未配置菜单单价，无法计算退卡：{labels}{suffix}",
-        )
-
     return total.quantize(_TWO_PLACES, rounding=ROUND_HALF_UP), items
+
+
+def _menu_unit_price_on_dates(
+    db: Session,
+    *,
+    store_id: int,
+    dates: list[date],
+) -> Decimal | None:
+    """在给定日期中取第一个已配置的午餐菜单单价。"""
+    if not dates:
+        return None
+    dishes_by_date = resolve_dishes_for_dates_batch(
+        db, dates, store_id=int(store_id), meal_period=MealPeriod.LUNCH.value
+    )
+    for d in dates:
+        dish = dishes_by_date.get(d)
+        raw = None if dish is None else dish.single_order_price_yuan
+        if raw is None:
+            continue
+        unit = Decimal(str(raw)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
+        if unit > 0:
+            return unit
+    return None
+
+
+def _resolve_refund_unit_price(
+    db: Session,
+    *,
+    store_id: int,
+    consumption_items: list[MemberMembershipRefundConsumptionRowOut],
+) -> Decimal:
+    """退款单价：优先今日午餐菜单价，其次前后一周，再次已消费日单价。"""
+    today = today_shanghai()
+    ordered: list[date] = [today]
+    for i in range(1, 8):
+        ordered.append(today + timedelta(days=i))
+    for i in range(1, 8):
+        ordered.append(today - timedelta(days=i))
+    found = _menu_unit_price_on_dates(db, store_id=store_id, dates=ordered)
+    if found is not None:
+        return found
+    for row in reversed(consumption_items):
+        if row.unit_price_yuan > 0:
+            return Decimal(str(row.unit_price_yuan)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
+    raise HTTPException(status_code=400, detail="未配置菜单单价，无法按剩余次数计算退款")
 
 
 def _ensure_refundable_member(member: Member) -> None:
@@ -116,14 +151,14 @@ def _compute_refund_preview(db: Session, member: Member) -> MemberMembershipRefu
 
     if meals_remaining <= 0:
         raise HTTPException(status_code=400, detail="该会员剩余次数为 0，无可退次数")
-    if meal_quota_total <= 0:
-        raise HTTPException(status_code=400, detail="该会员无开卡配额记录，无法计算退款")
-    if paid_total <= 0:
-        raise HTTPException(status_code=400, detail="未找到已入账的开卡实收记录，无法计算退款")
 
-    refund_yuan = (paid_total - consumed_value).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
-    if refund_yuan < 0:
-        refund_yuan = Decimal("0.00")
+    # 应退按剩余次数 × 菜单单价；开卡实收可能含抖音等外部已退款，不能作基数
+    unit_price = _resolve_refund_unit_price(
+        db,
+        store_id=int(member.store_id),
+        consumption_items=consumption_items,
+    )
+    refund_yuan = (unit_price * Decimal(meals_remaining)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
 
     return MemberMembershipRefundPreviewOut(
         member_id=int(member.id),
@@ -135,6 +170,7 @@ def _compute_refund_preview(db: Session, member: Member) -> MemberMembershipRefu
         meal_quota_total=meal_quota_total,
         paid_total_yuan=paid_total,
         consumed_value_yuan=consumed_value,
+        unit_price_yuan=unit_price,
         consumption_items=consumption_items,
         refund_amount_yuan=refund_yuan,
     )
@@ -182,8 +218,8 @@ def member_membership_refund_confirm(
 
     remark = (body.remark or "").strip() or None
     log_bits = [
-        f"退卡退款剩余{balance_before}次",
-        f"已消费{preview.meals_consumed}次扣款{preview.consumed_value_yuan}元",
+        f"退卡退款剩余{balance_before}次×单价{preview.unit_price_yuan}元",
+        f"已消费{preview.meals_consumed}次",
         f"应退{preview.refund_amount_yuan}元",
     ]
     if remark:
@@ -210,12 +246,6 @@ def member_membership_refund_confirm(
     m.delivery_deferred = True
     m.membership_refunded_at = beijing_now_naive()
 
-    avg_unit = Decimal("0.00")
-    if preview.meals_consumed > 0:
-        avg_unit = (preview.consumed_value_yuan / Decimal(preview.meals_consumed)).quantize(
-            _TWO_PLACES, rounding=ROUND_HALF_UP
-        )
-
     row = MemberMembershipRefund(
         tenant_id=int(m.tenant_id),
         store_id=int(m.store_id),
@@ -225,7 +255,7 @@ def member_membership_refund_confirm(
         meal_quota_total=int(preview.meal_quota_total),
         paid_total_yuan=preview.paid_total_yuan,
         consumed_value_yuan=preview.consumed_value_yuan,
-        unit_price_yuan=avg_unit,
+        unit_price_yuan=preview.unit_price_yuan,
         refund_amount_yuan=preview.refund_amount_yuan,
         remark=remark,
         operator=operator[:64],
@@ -240,7 +270,7 @@ def member_membership_refund_confirm(
         "delivery_deferred": bool(m.delivery_deferred),
         "refund_id": int(row.id),
         "refund_amount_yuan": str(preview.refund_amount_yuan),
-        "consumed_value_yuan": str(preview.consumed_value_yuan),
+        "unit_price_yuan": str(preview.unit_price_yuan),
     }
     record_member_operation(
         db,
@@ -248,7 +278,7 @@ def member_membership_refund_confirm(
         source="admin",
         operation_type=OP_MEMBERSHIP_REFUND,
         summary=(
-            f"退卡退款：已消费扣款{preview.consumed_value_yuan}元，退剩余{balance_before}次，"
+            f"退卡退款：剩余{balance_before}次×{preview.unit_price_yuan}元，"
             f"应退{preview.refund_amount_yuan}元"
         ),
         before=before_snap,

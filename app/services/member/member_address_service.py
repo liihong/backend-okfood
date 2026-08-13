@@ -479,10 +479,18 @@ def list_addresses(db: Session, member_id: int) -> list[MemberAddressOut]:
     return [_to_out(r, nm) for r in rows]
 
 
-def create_address(db: Session, member_id: int, body: MemberAddressCreateIn, *, ip_address: str | None = None) -> MemberAddressOut:
+def create_address(
+    db: Session,
+    member_id: int,
+    body: MemberAddressCreateIn,
+    *,
+    ip_address: str | None = None,
+    source: str = "miniprogram",
+) -> MemberAddressOut:
     _ensure_member_exists(db, member_id)
     mem = db.get(Member, member_id)
-    if mem:
+    # 管理端代建不受顺丰履约中自助改址限制
+    if mem and source == "miniprogram":
         guard_member_self_service_during_sf_fulfillment(db, mem)
     tid = int(mem.tenant_id) if mem and mem.tenant_id is not None else None
     count = (
