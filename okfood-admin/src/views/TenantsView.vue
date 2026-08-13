@@ -947,11 +947,14 @@ onMounted(async () => {
             <el-checkbox v-model="integrationFlags.clear_wx_mini_secret" size="small">清除租户 Secret（回退全局）</el-checkbox>
           </el-form-item>
 
-          <el-divider content-position="left">微信支付（APIv2）</el-divider>
-          <el-form-item label="商户号 mch_id">
-            <el-input v-model="integrationForm.wechat_pay_mch_id" maxlength="32" placeholder="留空则用全局 WECHAT_PAY_MCH_ID" />
+          <el-divider content-position="left">微信支付（服务商 · 特约商户）</el-divider>
+          <el-form-item label="特约商户号 sub_mch_id">
+            <el-input v-model="integrationForm.wechat_pay_mch_id" maxlength="32" placeholder="服务商下发的特约商户号" />
+            <p class="integration-field-hint">
+              主租户 OK饭 走直连，勿把服务商号填进全局 WECHAT_PAY_MCH_ID。加盟租户填特约商户号，服务商凭证用 .env 的 WECHAT_PAY_SP_*。
+            </p>
           </el-form-item>
-          <el-form-item label="API 密钥">
+          <el-form-item label="API 密钥（已废弃）">
             <div class="secret-row">
               <el-input
                 v-model="integrationForm.wechat_pay_api_key_input"
@@ -959,11 +962,11 @@ onMounted(async () => {
                 show-password
                 maxlength="128"
                 :disabled="integrationFlags.clear_wechat_pay_api_key"
-                placeholder="32 位移；留空不改"
+                placeholder="服务商模式验签使用 .env 服务商密钥，此处无需填写"
               />
-              <el-tag v-if="integrationFlags.wechat_pay_api_key_set" type="info" size="small">已配置</el-tag>
+              <el-tag v-if="integrationFlags.wechat_pay_api_key_set" type="info" size="small">历史已配置</el-tag>
             </div>
-            <el-checkbox v-model="integrationFlags.clear_wechat_pay_api_key" size="small">清除密钥（回退全局）</el-checkbox>
+            <el-checkbox v-model="integrationFlags.clear_wechat_pay_api_key" size="small">清除历史租户密钥</el-checkbox>
           </el-form-item>
           <el-form-item label="支付 notify_url">
             <el-input
@@ -1235,6 +1238,12 @@ onMounted(async () => {
 .integration-meta {
   margin: 0 0 16px;
   font-size: 0.8rem;
+  color: rgba(148, 163, 184, 0.95);
+}
+.integration-field-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
   color: rgba(148, 163, 184, 0.95);
 }
 .integration-drawer-body {

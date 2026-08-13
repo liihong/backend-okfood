@@ -1827,3 +1827,28 @@ class TenantIntegrationSettingsPatchIn(BaseModel):
     sf_pickup_address: str | None = Field(None, max_length=512)
     sf_city_name: str | None = Field(None, max_length=64)
     extra_json: str | None = Field(None, description="JSON 字符串；空字符串清除")
+
+
+class TenantPayConfigOut(BaseModel):
+    """店主可维护的本租户特约商户号（服务商密钥在平台 .env，不在此配置）。"""
+
+    tenant_id: int
+    wechat_pay_mch_id: str | None = Field(None, description="特约商户号 sub_mch_id")
+    wechat_pay_api_key_set: bool = Field(False, description="历史字段；服务商模式验签不再使用租户密钥")
+    wechat_pay_notify_url: str | None = Field(None, description="可选覆盖回调 URL；空则用平台 WECHAT_PAY_NOTIFY_URL")
+
+
+class TenantPayConfigPatchIn(BaseModel):
+    """PATCH 语义：仅提交需要修改的收款字段。"""
+
+    wechat_pay_mch_id: str | None = Field(None, max_length=32, description="特约商户号；传空字符串可清空")
+    wechat_pay_api_key: str | None = Field(
+        None,
+        max_length=128,
+        description="32 位 APIv2 密钥；不传不改，传空字符串清除",
+    )
+    wechat_pay_notify_url: str | None = Field(
+        None,
+        max_length=512,
+        description="支付回调 URL；传空字符串可清空",
+    )

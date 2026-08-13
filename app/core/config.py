@@ -117,16 +117,22 @@ class Settings(BaseSettings):
     # 次卡单次标价（元）：用于小程序线下登记工单等场景的默认金额；管理端开卡可另填实收
     MEMBER_CARD_TIMES_PRICE_YUAN: Decimal = Field(default=Decimal("30.00"), ge=Decimal("0"))
 
-    # 微信支付 v2（小程序 JSAPI）：商户平台 API密钥为32 位
+    # 微信支付 v2：主租户 OK饭 直连凭证（勿改成服务商号）
     WECHAT_PAY_MCH_ID: str = ""
     WECHAT_PAY_API_KEY: str = ""
-    # 异步通知完整 URL，须公网可访问，与商户平台配置一致，如 https://api.example.com/api/pay/wechat/notify
+    # 异步通知完整 URL，主租户与加盟租户可共用
     WECHAT_PAY_NOTIFY_URL: str = ""
     # 微信回调来源 IP 段，逗号分隔 CIDR 或单 IP；留空则不做校验（仅建议开发环境）
     WECHAT_PAY_IP_WHITELIST: str = ""
-    # 退款（secapi）商户 API 证书路径：全局兜底；「门店配置 / 租户对接」可填覆盖路径（优先级：门店 > 租户 > .env）
+    # 主租户直连退款证书
     WECHAT_PAY_SSL_CERT_PATH: str = ""
     WECHAT_PAY_SSL_KEY_PATH: str = ""
+    # 加盟租户服务商模式（与上方直连凭证独立；未配则其它租户无法支付）
+    WECHAT_PAY_SP_APPID: str = ""
+    WECHAT_PAY_SP_MCH_ID: str = ""
+    WECHAT_PAY_SP_API_KEY: str = ""
+    WECHAT_PAY_SP_SSL_CERT_PATH: str = ""
+    WECHAT_PAY_SP_SSL_KEY_PATH: str = ""
     UPLOAD_DIR: str = "data"
     MAX_UPLOAD_BYTES: int = 5 * 1024 * 1024
     # 对外访问根地址（无尾部 /），上传写入库里的 image_url 会拼成绝对地址，如 https://api.example.com/static/uploads/...

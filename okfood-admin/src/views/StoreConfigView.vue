@@ -33,6 +33,8 @@ const form = ref({
   uu_open_app_key_set: false,
   wechat_pay_ssl_cert_path: '',
   wechat_pay_ssl_key_path: '',
+  /** 本租户特约商户号（服务商模式 sub_mch_id，各门店共用） */
+  wechat_pay_mch_id: '',
   douyin_poi_id: '',
   douyin_account_id: '',
   courier_delivery_base_yuan: '',
@@ -43,7 +45,10 @@ async function loadConfig() {
   if (!adminAccessToken.value) return
   loading.value = true
   try {
-    const d = await apiJson('/api/admin/store-config', {}, { auth: true })
+    const [d, pay] = await Promise.all([
+      apiJson('/api/admin/store-config', {}, { auth: true }),
+      apiJson('/api/admin/tenant-pay-config', {}, { auth: true }),
+    ])
     form.value.store_name = d?.store_name != null ? String(d.store_name) : ''
     form.value.store_contact_phone =
       d?.store_contact_phone != null ? String(d.store_contact_phone).trim() : ''
@@ -68,6 +73,8 @@ async function loadConfig() {
       d?.wechat_pay_ssl_cert_path != null ? String(d.wechat_pay_ssl_cert_path).trim() : ''
     form.value.wechat_pay_ssl_key_path =
       d?.wechat_pay_ssl_key_path != null ? String(d.wechat_pay_ssl_key_path).trim() : ''
+    form.value.wechat_pay_mch_id =
+      pay?.wechat_pay_mch_id != null ? String(pay.wechat_pay_mch_id).trim() : ''
     form.value.douyin_poi_id = d?.douyin_poi_id != null ? String(d.douyin_poi_id).trim() : ''
     form.value.douyin_account_id =
       d?.douyin_account_id != null ? String(d.douyin_account_id).trim() : ''
@@ -159,6 +166,11 @@ async function saveConfig() {
   payload.douyin_poi_id = form.value.douyin_poi_id.trim() || null
   payload.douyin_account_id = form.value.douyin_account_id.trim() || null
 
+  const mchId = form.value.wechat_pay_mch_id.trim()
+  const payPayload = {
+    wechat_pay_mch_id: mchId || null,
+  }
+
   saving.value = true
   try {
     await apiJson(
@@ -166,6 +178,14 @@ async function saveConfig() {
       {
         method: 'PUT',
         body: JSON.stringify(payload),
+      },
+      { auth: true },
+    )
+    await apiJson(
+      '/api/admin/tenant-pay-config',
+      {
+        method: 'PUT',
+        body: JSON.stringify(payPayload),
       },
       { auth: true },
     )
@@ -246,7 +266,7 @@ onMounted(() => {
 <template>
   <section class="tab-content animate-up store-config-page">
     <p class="sc-intro">
-      请通过「<strong>地图选点</strong>」在弹窗内用高德<strong>搜索或点选</strong>门店位置（自动为 GCJ-02）。保存后营业概览以门店为中心；骑手端任务按<strong>离该点直线距离</strong>由近到远排序。门店基础与配送相关参数保存在当前门店配置中，保存后立即对骑手结费、顺丰推单与小程序展示生效。
+      门店名称、电话、Logo 与位置均在「门店基础信息」中设置。位置请用「<strong>地图选点</strong>」在弹窗内搜索或点选（GCJ-02）；保存后营业概览以门店为中心，骑手端任务按<strong>离该点直线距离</strong>由近到远排序。配送与支付相关参数保存在当前门店配置中，保存后立即生效。
     </p>
 
     <p v-if="loading" class="sc-muted">加载中…</p>
@@ -274,7 +294,7 @@ onMounted(() => {
           <p class="sc-hint sc-hint--tight">供餐咨询、取消订单等；留空则小程序不展示拨打能力。</p>
         </div>
 
-        <div class="sc-field sc-field--last">
+        <div class="sc-field">
           <span class="sc-label">门店 Logo</span>
           <div class="sc-logo-row">
             <div class="sc-logo-preview-wrap">
@@ -300,21 +320,19 @@ onMounted(() => {
             clearable
           />
         </div>
-      </el-card>
 
-      <el-card class="sc-el-card" shadow="never">
-        <template #header>
-          <span class="sc-card-title">门店位置</span>
-        </template>
-        <p class="sc-hint sc-hint--card">
-          使用高德地图搜索、点击或拖动标记选点（GCJ-02）。弹窗内可微调经纬度；保存设置仍须点击页面底部「保存」。
-        </p>
-        <div class="sc-location-bar">
-          <div class="sc-location-summary">
-            <span v-if="locationSummaryText" class="sc-coord-line">{{ locationSummaryText }}</span>
-            <span v-else class="sc-location-empty">尚未设置坐标</span>
+        <div class="sc-field sc-field--last">
+          <span class="sc-label">门店位置</span>
+          <p class="sc-hint sc-hint--tight">
+            使用高德地图搜索、点击或拖动标记选点（GCJ-02）。弹窗内可微调经纬度；保存设置仍须点击页面底部「保存」。
+          </p>
+          <div class="sc-location-bar">
+            <div class="sc-location-summary">
+              <span v-if="locationSummaryText" class="sc-coord-line">{{ locationSummaryText }}</span>
+              <span v-else class="sc-location-empty">尚未设置坐标</span>
+            </div>
+            <el-button type="primary" @click="locationDialogVisible = true">地图选点</el-button>
           </div>
-          <el-button type="primary" @click="locationDialogVisible = true"> 地图选点 </el-button>
         </div>
       </el-card>
 
@@ -454,6 +472,28 @@ onMounted(() => {
 
       <el-card class="sc-el-card" shadow="never">
         <template #header>
+          <span class="sc-card-title">微信支付 · 本租户特约商户号</span>
+        </template>
+        <p class="sc-hint sc-hint--card">
+          <strong>主小程序 OK饭</strong>仍走原来的直连支付，可留空（使用服务器
+          <code class="sc-code">WECHAT_PAY_MCH_ID</code>）。
+          <strong>加盟租户</strong>须填写服务商下发的特约商户号，购卡/点餐走服务商接口；并在服务商后台「特约商户 APPID 配置」绑定本店小程序 AppId。
+        </p>
+        <div class="sc-field sc-field--last">
+          <label class="sc-label" for="sc-wx-mch">特约商户号 sub_mch_id</label>
+          <el-input
+            id="sc-wx-mch"
+            v-model="form.wechat_pay_mch_id"
+            class="sc-input-el sc-input-el--mono"
+            maxlength="32"
+            clearable
+            placeholder="服务商下发的特约商户号，如 1116333132"
+          />
+        </div>
+      </el-card>
+
+      <el-card class="sc-el-card" shadow="never">
+        <template #header>
           <span class="sc-card-title">微信支付 · 退款证书（本门店）</span>
         </template>
         <p class="sc-hint sc-hint--card">
@@ -461,7 +501,8 @@ onMounted(() => {
           <strong>secapi 退款</strong> 接口，须商户平台下发的 <code class="sc-code">apiclient_cert.pem</code> 与
           <code class="sc-code">apiclient_key.pem</code>。请填写<strong>服务器可读的本地路径</strong>（绝对路径或相对进程工作目录）。
           <strong>优先级</strong>：本门店填写 &gt; 租户「对接配置」中的默认路径 &gt; 服务器环境变量
-          <code class="sc-code">WECHAT_PAY_SSL_*</code>。同一租户下多门店若共用同一商户号，也可仅在租户对接中配置一次。
+          <code class="sc-code">WECHAT_PAY_SSL_*</code>。服务商模式下退款优先使用平台服务商证书，本门店路径仅作未配
+          <code class="sc-code">.env</code> 时的兜底。特约商户号请在上方单独配置。
         </p>
         <div class="sc-field">
           <label class="sc-label" for="sc-wx-cert">apiclient_cert.pem 路径</label>
@@ -615,6 +656,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  margin-top: 0.55rem;
 }
 .sc-location-summary {
   flex: 1;
@@ -674,6 +716,13 @@ onMounted(() => {
 }
 .sc-hint--tight {
   margin: 0.25rem 0 0;
+}
+.sc-pay-key-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.45rem;
 }
 .sc-input {
   width: 100%;

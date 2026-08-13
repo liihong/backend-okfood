@@ -12,12 +12,12 @@ import {
   apiForm,
   apiJson,
   adminAccessToken,
+  adminStoreId,
   dishImageDisplayUrl,
   handleAdminLogout,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
-const storeId = ref(1)
 const list = ref([])
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -127,7 +127,7 @@ async function onCardPhotoUploadChange(uploadFile) {
 }
 
 const qs = computed(() => {
-  const p = new URLSearchParams({ store_id: String(storeId.value || 1) })
+  const p = new URLSearchParams({ store_id: String(adminStoreId.value || 1) })
   return p.toString()
 })
 
@@ -224,7 +224,7 @@ async function saveForm() {
   }
   saving.value = true
   try {
-    const sid = encodeURIComponent(String(storeId.value || 1))
+    const sid = encodeURIComponent(String(adminStoreId.value || 1))
     const common = {
       kind_label: kind,
       name,
@@ -266,7 +266,7 @@ async function removeRow(row) {
   const ok = window.confirm(`确定删除「${row.name}」？`)
   if (!ok) return
   try {
-    const sid = encodeURIComponent(String(storeId.value || 1))
+    const sid = encodeURIComponent(String(adminStoreId.value || 1))
     await apiJson(`/api/admin/catalog/membership-templates/${row.id}?store_id=${sid}`, { method: 'DELETE' }, { auth: true })
     showToast('已删除')
     await fetchList()
@@ -282,17 +282,6 @@ onMounted(fetchList)
   <div class="mcard-page tab-content animate-up page-content-shell">
     <div class="page-content-title-row page-content-title-row--actions-only">
       <div class="page-content-title-actions">
-        <div class="mcard-store-selector">
-          <label for="mcard-store-id">门店 ID</label>
-          <el-input-number
-            id="mcard-store-id"
-            v-model="storeId"
-            :min="1"
-            controls-position="right"
-            class="mcard-store-input"
-            @change="fetchList"
-          />
-        </div>
         <button type="button" class="mcard-btn-add" @click="openCreate">
           <Plus :size="16" stroke-width="3" aria-hidden="true" />
           新增会员卡模板
@@ -627,33 +616,6 @@ onMounted(fetchList)
   display: flex;
   flex-direction: column;
   gap: 24px;
-}
-
-.mcard-store-selector {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: #f1f5f9;
-  padding: 6px 14px;
-  border-radius: 14px;
-  border: 1px solid var(--mcard-border);
-}
-
-.mcard-store-selector label {
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--mcard-muted);
-  white-space: nowrap;
-}
-
-.mcard-store-input {
-  width: 120px;
-}
-
-.mcard-store-input :deep(.el-input__wrapper) {
-  background: transparent;
-  box-shadow: none;
-  padding: 0;
 }
 
 .mcard-btn-add {

@@ -42,6 +42,7 @@ from app.schemas.admin import (
     RechargeIn,
     SettingsIn,
     StoreConfigUpdateIn,
+    TenantPayConfigPatchIn,
     SingleMealAssignCourierIn,
     SingleMealOrderIdsIn,
     SingleMealBatchAssignCourierIn,
@@ -111,6 +112,10 @@ from app.services.delivery.sf_same_city_service import (
     retry_sf_same_city_push_by_id,
 )
 from app.services.shared.store_config_service import get_store_config, update_store_config
+from app.services.shared.tenant_integration_service import (
+    get_tenant_pay_config_out,
+    patch_tenant_pay_config,
+)
 from app.services.delivery.delivery_sheet_service import build_delivery_sheet
 from app.services.admin.pickup_verification_service import list_pickup_verification_panel
 from app.services.admin.admin_delivery_fulfillment_service import (
@@ -1753,7 +1758,7 @@ def admin_single_meal_refund_wechat(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """单次点餐：微信支付订单全额原路退款。证书路径优先级：门店配置 > 租户对接 > 环境变量 WECHAT_PAY_SSL_*。"""
+    """单次点餐：微信支付订单全额原路退款（服务商接口；证书优先平台 WECHAT_PAY_SSL_*）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
         payload = admin_wechat_refund_single_meal_order(db, order_id=int(order_id), store_id=store_id)
@@ -2264,6 +2269,29 @@ def admin_store_config_put(
     """更新门店配置；未传的字段保持不变（PATCH 语义）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     cfg = update_store_config(db, store_id=store_id, body=body)
+    return success(data=dump_model(cfg), msg="已保存")
+
+
+@router.get("/tenant-pay-config")
+def admin_tenant_pay_config_get(
+    db: SessionDep,
+    admin_username: str = Depends(admin_full_subject),
+):
+    """本租户特约商户号（服务商密钥在平台 .env）。"""
+    tid = require_admin_tenant_id(db, admin_username=admin_username)
+    cfg = get_tenant_pay_config_out(db, tid)
+    return success(data=dump_model(cfg), msg="获取成功")
+
+
+@router.put("/tenant-pay-config")
+def admin_tenant_pay_config_put(
+    body: TenantPayConfigPatchIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_full_subject),
+):
+    """更新本租户特约商户号；未传字段保持不变。"""
+    tid = require_admin_tenant_id(db, admin_username=admin_username)
+    cfg = patch_tenant_pay_config(db, tid, body)
     return success(data=dump_model(cfg), msg="已保存")
 
 

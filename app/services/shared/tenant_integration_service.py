@@ -28,7 +28,12 @@ from app.models.member_card_order import MemberCardOrder
 from app.models.single_meal_order import SingleMealOrder
 from app.models.tenant import Tenant
 from app.models.tenant_integration_settings import TenantIntegrationSettings
-from app.schemas.admin import TenantIntegrationSettingsOut, TenantIntegrationSettingsPatchIn
+from app.schemas.admin import (
+    TenantIntegrationSettingsOut,
+    TenantIntegrationSettingsPatchIn,
+    TenantPayConfigOut,
+    TenantPayConfigPatchIn,
+)
 from app.services.delivery.sf_open_notify_payload import extract_shop_and_sf_order_ids
 
 
@@ -56,81 +61,126 @@ def get_merged_wx_credentials(db: Session, tenant_id: int) -> tuple[str, str]:
 
 @dataclass(frozen=True)
 class MergedPayConfig:
+    """支付配置。主租户直连时 ``wechat_pay_sp_mch_id`` 为空；加盟租户服务商模式则填写服务商号。"""
+
     wx_mini_appid: str
     wechat_pay_mch_id: str
     wechat_pay_api_key: str
     wechat_pay_notify_url: str
+    wechat_pay_sp_appid: str = ""
+    wechat_pay_sp_mch_id: str = ""
     wechat_pay_ssl_cert_path: str = ""
     wechat_pay_ssl_key_path: str = ""
 
 
+def is_partner_pay_config(cfg: MergedPayConfig) -> bool:
+    """有服务商商户号即走服务商接口；主租户 OK饭 该字段为空，走直连。"""
+    return bool(_s(getattr(cfg, "wechat_pay_sp_mch_id", None)))
+
+
+def _store_ssl_paths(db: Session, store_id: int | None) -> tuple[str, str]:
+    if store_id is None:
+        return "", ""
+    from app.models.store import Store as StoreModel
+
+    st_row = db.get(StoreModel, int(store_id))
+    if st_row is None:
+        return "", ""
+    return (
+        _s(getattr(st_row, "wechat_pay_ssl_cert_path", None)),
+        _s(getattr(st_row, "wechat_pay_ssl_key_path", None)),
+    )
+
+
 def get_merged_pay_config(db: Session, tenant_id: int, store_id: int | None = None) -> MergedPayConfig:
-    """支付配置合并：非主租户须独立配置商户号与 API 密钥，禁止串用主租户 .env。"""
+    """主租户：直连，回退 .env 的 WECHAT_PAY_*。其它租户：服务商接口，特约商户号须自填。"""
     base = get_settings()
     row = get_tenant_integration_row(db, tenant_id)
     tid = int(tenant_id)
     appid = merge_tenant_field_or_global(
         row.wx_mini_appid if row else None, base.WX_MINI_APPID, tenant_id=tid
     )
-    mch = merge_tenant_field_or_global(
-        row.wechat_pay_mch_id if row else None, base.WECHAT_PAY_MCH_ID, tenant_id=tid
-    )
-    key = merge_tenant_field_or_global(
-        row.wechat_pay_api_key if row else None, base.WECHAT_PAY_API_KEY, tenant_id=tid
-    )
-    notify = merge_tenant_field_or_global(
-        row.wechat_pay_notify_url if row else None, base.WECHAT_PAY_NOTIFY_URL, tenant_id=tid
-    )
+    notify_t = _s(row.wechat_pay_notify_url) if row else ""
+    notify = notify_t or _s(base.WECHAT_PAY_NOTIFY_URL)
+    cert_s, keyp_s = _store_ssl_paths(db, store_id)
     cert_t = _s(row.wechat_pay_ssl_cert_path) if row else ""
     keyp_t = _s(row.wechat_pay_ssl_key_path) if row else ""
-    cert_s, keyp_s = "", ""
-    if store_id is not None:
-        from app.models.store import Store as StoreModel
 
-        st_row = db.get(StoreModel, int(store_id))
-        if st_row is not None:
-            cert_s = _s(getattr(st_row, "wechat_pay_ssl_cert_path", None))
-            keyp_s = _s(getattr(st_row, "wechat_pay_ssl_key_path", None))
-    cert_merged = cert_s or cert_t
-    keyp_merged = keyp_s or keyp_t
+    if allows_global_env_fallback(tid):
+        mch = merge_tenant_field_or_global(
+            row.wechat_pay_mch_id if row else None, base.WECHAT_PAY_MCH_ID, tenant_id=tid
+        )
+        key = merge_tenant_field_or_global(
+            row.wechat_pay_api_key if row else None, base.WECHAT_PAY_API_KEY, tenant_id=tid
+        )
+        return MergedPayConfig(
+            wx_mini_appid=appid,
+            wechat_pay_mch_id=mch,
+            wechat_pay_api_key=key,
+            wechat_pay_notify_url=notify,
+            wechat_pay_ssl_cert_path=cert_s or cert_t or _s(base.WECHAT_PAY_SSL_CERT_PATH),
+            wechat_pay_ssl_key_path=keyp_s or keyp_t or _s(base.WECHAT_PAY_SSL_KEY_PATH),
+        )
+
+    # 加盟租户：禁止回退 OK饭 直连商户号/密钥
     return MergedPayConfig(
         wx_mini_appid=appid,
-        wechat_pay_mch_id=mch,
-        wechat_pay_api_key=key,
+        wechat_pay_mch_id=_s(row.wechat_pay_mch_id) if row else "",
+        wechat_pay_api_key=_s(base.WECHAT_PAY_SP_API_KEY),
         wechat_pay_notify_url=notify,
-        wechat_pay_ssl_cert_path=cert_merged,
-        wechat_pay_ssl_key_path=keyp_merged,
+        wechat_pay_sp_appid=_s(base.WECHAT_PAY_SP_APPID),
+        wechat_pay_sp_mch_id=_s(base.WECHAT_PAY_SP_MCH_ID),
+        wechat_pay_ssl_cert_path=_s(base.WECHAT_PAY_SP_SSL_CERT_PATH) or cert_s or cert_t,
+        wechat_pay_ssl_key_path=_s(base.WECHAT_PAY_SP_SSL_KEY_PATH) or keyp_s or keyp_t,
     )
 
 
 def wechat_pay_misconfiguration_detail_merged(
     cfg: MergedPayConfig, *, tenant_id: int | None = None
 ) -> str | None:
-    """支付配置完整性检查；非主租户缺项时附带对接设置引导文案。"""
+    """主租户按直连校验；加盟租户按服务商 + 特约商户号校验。"""
     hint_suffix = ""
     if tenant_id is not None and not allows_global_env_fallback(int(tenant_id)):
         hint_suffix = f"；{TENANT_INTEGRATION_INCOMPLETE_HINT}"
 
+    if is_partner_pay_config(cfg):
+        if not cfg.wechat_pay_sp_appid:
+            return "未配置服务商 AppId WECHAT_PAY_SP_APPID（服务器 .env）"
+        if not cfg.wechat_pay_api_key:
+            return "未配置服务商 APIv2 密钥 WECHAT_PAY_SP_API_KEY（服务器 .env）"
+        if len(cfg.wechat_pay_api_key) != 32:
+            return (
+                f"WECHAT_PAY_SP_API_KEY 必须为 32 位，当前 {len(cfg.wechat_pay_api_key)} 位。"
+                "请到服务商商户平台核对后写入服务器 .env"
+            )
+        if not cfg.wechat_pay_notify_url:
+            return "未配置支付回调 notify_url（WECHAT_PAY_NOTIFY_URL）"
+        if not cfg.wechat_pay_mch_id:
+            return f"未配置本租户特约商户号{hint_suffix}"
+        if not cfg.wx_mini_appid:
+            return f"未配置小程序 AppId{hint_suffix}"
+        return None
+
     if not cfg.wechat_pay_mch_id:
-        return f"未配置微信支付商户号{hint_suffix}"
+        return "未配置微信支付商户号 WECHAT_PAY_MCH_ID"
     if not cfg.wechat_pay_api_key:
-        return f"未配置微信 APIv2 密钥{hint_suffix}"
+        return "未配置微信 APIv2 密钥 WECHAT_PAY_API_KEY"
     if len(cfg.wechat_pay_api_key) != 32:
         return (
             f"WECHAT_PAY_API_KEY 必须为 32 位，当前 {len(cfg.wechat_pay_api_key)} 位。"
-            f"请到 pay.weixin.qq.com 核对后填入租户对接配置{hint_suffix}"
+            "请到 pay.weixin.qq.com 核对后写入服务器 .env"
         )
     if not cfg.wechat_pay_notify_url:
-        return f"未配置支付回调 notify_url{hint_suffix}"
+        return "未配置支付回调 notify_url（WECHAT_PAY_NOTIFY_URL）"
     if not cfg.wx_mini_appid:
-        return f"未配置小程序 AppId{hint_suffix}"
+        return "未配置小程序 AppId WX_MINI_APPID"
     return None
 
 
 def assert_tenant_pay_config_ready(
     db: Session, tenant_id: int, store_id: int | None = None
 ) -> MergedPayConfig:
-    """下单/退款前校验：配置不全时 503，非主租户不会落到主租户支付密钥。"""
+    """下单/退款前校验：主租户直连缺项或加盟租户服务商/特约商户号不全时 503。"""
     cfg = get_merged_pay_config(db, int(tenant_id), store_id=store_id)
     detail = wechat_pay_misconfiguration_detail_merged(cfg, tenant_id=int(tenant_id))
     if detail:
@@ -163,13 +213,11 @@ def resolve_tenant_id_for_wechat_out_trade_no(
 
 
 def list_tenant_ids_by_wechat_mch_id(db: Session, mch_id: str) -> list[int]:
-    """回调报文中的 ``mch_id`` → 配置了该商户号的租户 id 列表（去重保序）。"""
+    """按商户号匹配租户：加盟租户特约商户号，或主租户直连 WECHAT_PAY_MCH_ID。"""
     mid = _s(mch_id)
     if not mid:
         return []
     out: list[int] = []
-    base = get_settings()
-    global_mch = _s(base.WECHAT_PAY_MCH_ID)
 
     def add(tid: int) -> None:
         t = int(tid)
@@ -181,7 +229,9 @@ def list_tenant_ids_by_wechat_mch_id(db: Session, mch_id: str) -> list[int]:
         m = _s(row.wechat_pay_mch_id)
         if m and m == mid:
             add(int(row.tenant_id))
-    if global_mch and global_mch == mid:
+    base = get_settings()
+    # 直连回调 mch_id 等于 OK饭 商户号时归主租户；服务商号不归主租户
+    if _s(base.WECHAT_PAY_MCH_ID) and _s(base.WECHAT_PAY_MCH_ID) == mid:
         add(legacy_default_tenant_id())
     return out
 
@@ -192,11 +242,7 @@ def resolve_wechat_pay_notify_api_key_candidates(
     """
     微信异步通知验签密钥候选（去重保序）。
 
-    优先级：
-    1. 商户单号命中订单 → 该租户密钥；
-    2. 报文 ``mch_id`` 命中租户对接配置；
-    3. 各租户已配置的 API 密钥（覆盖「订单尚未入库」的竞态回调）；
-    4. 主租户全局 .env 密钥（仅主租户兼容）。
+    直连回调验 OK饭 ``WECHAT_PAY_API_KEY``；服务商回调验 ``WECHAT_PAY_SP_API_KEY``。
     """
     out: list[str] = []
 
@@ -205,22 +251,19 @@ def resolve_wechat_pay_notify_api_key_candidates(
         if kk and kk not in out:
             out.append(kk)
 
-    otn = _s(data.get("out_trade_no"))
-    mch_id = _s(data.get("mch_id"))
+    base = get_settings()
+    add(base.WECHAT_PAY_API_KEY)
+    add(base.WECHAT_PAY_SP_API_KEY)
 
+    otn = _s(data.get("out_trade_no"))
     tid = resolve_tenant_id_for_wechat_out_trade_no(db, otn, allow_legacy_default_fallback=False)
     if tid is not None:
         add(get_merged_pay_config(db, tid).wechat_pay_api_key)
 
-    for t in list_tenant_ids_by_wechat_mch_id(db, mch_id):
+    sub_mch = _s(data.get("sub_mch_id"))
+    mch_id = _s(data.get("mch_id"))
+    for t in list_tenant_ids_by_wechat_mch_id(db, sub_mch or mch_id):
         add(get_merged_pay_config(db, t).wechat_pay_api_key)
-
-    for row in db.scalars(select(TenantIntegrationSettings)).all():
-        add(row.wechat_pay_api_key)
-
-    base = get_settings()
-    if allows_global_env_fallback(legacy_default_tenant_id()):
-        add(base.WECHAT_PAY_API_KEY)
 
     return out
 
@@ -459,3 +502,29 @@ def patch_tenant_integration_admin(
     db.commit()
     db.refresh(row)
     return get_tenant_integration_admin_out(db, tenant_id)
+
+
+def get_tenant_pay_config_out(db: Session, tenant_id: int) -> TenantPayConfigOut:
+    """店主侧：只读本租户收款商户号/密钥状态，不回显密钥明文。"""
+    full = get_tenant_integration_admin_out(db, tenant_id)
+    return TenantPayConfigOut(
+        tenant_id=int(full.tenant_id),
+        wechat_pay_mch_id=full.wechat_pay_mch_id,
+        wechat_pay_api_key_set=bool(full.wechat_pay_api_key_set),
+        wechat_pay_notify_url=full.wechat_pay_notify_url,
+    )
+
+
+def patch_tenant_pay_config(
+    db: Session, tenant_id: int, body: TenantPayConfigPatchIn
+) -> TenantPayConfigOut:
+    """店主侧：仅更新租户收款字段，复用平台对接写入逻辑。"""
+    patch = body.model_dump(exclude_unset=True)
+    if "wechat_pay_api_key" in patch:
+        raw_key = patch.get("wechat_pay_api_key")
+        key = "" if raw_key is None else str(raw_key).strip()
+        if key and len(key) != 32:
+            raise HTTPException(status_code=400, detail="微信支付 APIv2 密钥须为 32 位")
+    inner = TenantIntegrationSettingsPatchIn.model_validate(patch)
+    patch_tenant_integration_admin(db, tenant_id, inner)
+    return get_tenant_pay_config_out(db, tenant_id)

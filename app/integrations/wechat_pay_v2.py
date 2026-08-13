@@ -27,7 +27,7 @@ REFUND_URL = "https://api.mch.weixin.qq.com/secapi/pay/refund"
 
 
 def wechat_pay_misconfiguration_detail() -> str | None:
-    """若微信支付环境未就绪，返回可读原因；就绪则返回 None。"""
+    """主租户 OK饭 直连凭证是否就绪。"""
     mch = (settings.WECHAT_PAY_MCH_ID or "").strip()
     key = (settings.WECHAT_PAY_API_KEY or "").strip()
     notify = (settings.WECHAT_PAY_NOTIFY_URL or "").strip()
@@ -50,6 +50,48 @@ def wechat_pay_misconfiguration_detail() -> str | None:
 
 def wechat_pay_configured() -> bool:
     return wechat_pay_misconfiguration_detail() is None
+
+
+def _global_direct_pay_config() -> Any:
+    """无租户上下文时回落主租户直连 .env。"""
+    from app.services.shared.tenant_integration_service import MergedPayConfig
+
+    return MergedPayConfig(
+        wx_mini_appid=(settings.WX_MINI_APPID or "").strip(),
+        wechat_pay_mch_id=(settings.WECHAT_PAY_MCH_ID or "").strip(),
+        wechat_pay_api_key=(settings.WECHAT_PAY_API_KEY or "").strip(),
+        wechat_pay_notify_url=(settings.WECHAT_PAY_NOTIFY_URL or "").strip(),
+        wechat_pay_ssl_cert_path=(settings.WECHAT_PAY_SSL_CERT_PATH or "").strip(),
+        wechat_pay_ssl_key_path=(settings.WECHAT_PAY_SSL_KEY_PATH or "").strip(),
+    )
+
+
+def partner_base_params(cfg: Any) -> dict[str, str]:
+    """服务商接口公共字段：appid/mch_id 为服务商，sub_* 为特约商户。"""
+    return {
+        "appid": (getattr(cfg, "wechat_pay_sp_appid", None) or "").strip(),
+        "mch_id": (getattr(cfg, "wechat_pay_sp_mch_id", None) or "").strip(),
+        "sub_mch_id": (getattr(cfg, "wechat_pay_mch_id", None) or "").strip(),
+        "sub_appid": (getattr(cfg, "wx_mini_appid", None) or "").strip(),
+    }
+
+
+def pay_trade_base_params(cfg: Any, *, openid: str | None = None) -> dict[str, str]:
+    """按配置选择直连或服务商下单字段。"""
+    from app.services.shared.tenant_integration_service import is_partner_pay_config
+
+    if is_partner_pay_config(cfg):
+        out = partner_base_params(cfg)
+        if openid is not None:
+            out["sub_openid"] = openid.strip()
+        return out
+    out = {
+        "appid": (getattr(cfg, "wx_mini_appid", None) or "").strip(),
+        "mch_id": (getattr(cfg, "wechat_pay_mch_id", None) or "").strip(),
+    }
+    if openid is not None:
+        out["openid"] = openid.strip()
+    return out
 
 
 def _api_key() -> str:
@@ -187,28 +229,21 @@ def unified_order_jsapi(
     spbill_create_ip: str,
     pay: Any | None = None,
 ) -> str:
-    """统一下单 JSAPI，返回 prepay_id。``pay`` 为空时使用全局 .env（兼容旧行为）。"""
-    from app.services.shared.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
+    """统一下单 JSAPI：主租户直连，加盟租户服务商。``pay`` 为空时回落 OK饭 .env。"""
+    from app.services.shared.tenant_integration_service import (
+        is_partner_pay_config,
+        wechat_pay_misconfiguration_detail_merged,
+    )
 
-    cfg = pay
-    if cfg is None:
-        cfg = MergedPayConfig(
-            wx_mini_appid=(settings.WX_MINI_APPID or "").strip(),
-            wechat_pay_mch_id=(settings.WECHAT_PAY_MCH_ID or "").strip(),
-            wechat_pay_api_key=(settings.WECHAT_PAY_API_KEY or "").strip(),
-            wechat_pay_notify_url=(settings.WECHAT_PAY_NOTIFY_URL or "").strip(),
-        )
+    cfg = pay if pay is not None else _global_direct_pay_config()
     perr = wechat_pay_misconfiguration_detail_merged(cfg)
     if perr:
         raise WeChatPayV2Error(503, perr)
-    appid = cfg.wx_mini_appid
-    mch_id = cfg.wechat_pay_mch_id
     notify_url = cfg.wechat_pay_notify_url
     api_key = cfg.wechat_pay_api_key
 
     params: dict[str, Any] = {
-        "appid": appid,
-        "mch_id": mch_id,
+        **pay_trade_base_params(cfg, openid=openid),
         "nonce_str": random_nonce_str(),
         "body": body[:127] if body else "单次点餐",
         "out_trade_no": out_trade_no,
@@ -216,7 +251,6 @@ def unified_order_jsapi(
         "spbill_create_ip": (spbill_create_ip or "127.0.0.1").strip()[:45],
         "notify_url": notify_url,
         "trade_type": "JSAPI",
-        "openid": openid.strip(),
     }
     params["sign"] = sign_params_md5(params, api_key=api_key)
 
@@ -247,10 +281,16 @@ def unified_order_jsapi(
         logger.warning("微信统一下单业务失败: %s", data)
         err_code = (data.get("err_code") or "").strip().upper()
         if err_code == "APPID_MCHID_NOT_MATCH" or "appid和mch_id不匹配" in str(err):
-            err = (
-                f"{err}。请在微信支付商户平台确认：发起支付的小程序 AppId（须与 .env 的 WX_MINI_APPID 一致）"
-                "已关联当前商户号（.env 的 WECHAT_PAY_MCH_ID），勿混用其它小程序或公众号 AppId。"
-            )
+            if is_partner_pay_config(cfg):
+                err = (
+                    f"{err}。请在服务商后台「特约商户 APPID 配置」绑定本店小程序 AppId，"
+                    "并确认 .env 的 WECHAT_PAY_SP_APPID 为服务商 AppId、门店配置的特约商户号正确。"
+                )
+            else:
+                err = (
+                    f"{err}。请在微信支付商户平台确认：发起支付的小程序 AppId（须与 .env 的 WX_MINI_APPID 一致）"
+                    "已关联当前商户号（.env 的 WECHAT_PAY_MCH_ID），勿混用其它小程序或公众号 AppId。"
+                )
         raise WeChatPayV2Error(400, err)
 
     prepay_id = (data.get("prepay_id") or "").strip()
@@ -265,28 +305,18 @@ def query_order_by_out_trade_no(out_trade_no: str, *, pay: Any | None = None) ->
 
     用于异步通知未达服务端时，由小程序主动拉单完成入账（与 /pay/wechat/notify 等效验签后字段）。
     """
-    from app.services.shared.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
+    from app.services.shared.tenant_integration_service import wechat_pay_misconfiguration_detail_merged
 
-    cfg = pay
-    if cfg is None:
-        cfg = MergedPayConfig(
-            wx_mini_appid=(settings.WX_MINI_APPID or "").strip(),
-            wechat_pay_mch_id=(settings.WECHAT_PAY_MCH_ID or "").strip(),
-            wechat_pay_api_key=(settings.WECHAT_PAY_API_KEY or "").strip(),
-            wechat_pay_notify_url=(settings.WECHAT_PAY_NOTIFY_URL or "").strip(),
-        )
+    cfg = pay if pay is not None else _global_direct_pay_config()
     perr = wechat_pay_misconfiguration_detail_merged(cfg)
     if perr:
         raise WeChatPayV2Error(503, perr)
     otn = (out_trade_no or "").strip()[:32]
     if not otn:
         raise WeChatPayV2Error(400, "缺少商户单号")
-    appid = cfg.wx_mini_appid
-    mch_id = cfg.wechat_pay_mch_id
     api_key = cfg.wechat_pay_api_key
     params: dict[str, Any] = {
-        "appid": appid,
-        "mch_id": mch_id,
+        **pay_trade_base_params(cfg),
         "out_trade_no": otn,
         "nonce_str": random_nonce_str(),
     }
@@ -319,28 +349,18 @@ def close_order_by_out_trade_no(out_trade_no: str, *, pay: Any | None = None) ->
 
     若订单不存在或已关闭，视为成功（幂等）。
     """
-    from app.services.shared.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
+    from app.services.shared.tenant_integration_service import wechat_pay_misconfiguration_detail_merged
 
-    cfg = pay
-    if cfg is None:
-        cfg = MergedPayConfig(
-            wx_mini_appid=(settings.WX_MINI_APPID or "").strip(),
-            wechat_pay_mch_id=(settings.WECHAT_PAY_MCH_ID or "").strip(),
-            wechat_pay_api_key=(settings.WECHAT_PAY_API_KEY or "").strip(),
-            wechat_pay_notify_url=(settings.WECHAT_PAY_NOTIFY_URL or "").strip(),
-        )
+    cfg = pay if pay is not None else _global_direct_pay_config()
     perr = wechat_pay_misconfiguration_detail_merged(cfg)
     if perr:
         raise WeChatPayV2Error(503, perr)
     otn = (out_trade_no or "").strip()[:32]
     if not otn:
         raise WeChatPayV2Error(400, "缺少商户单号")
-    appid = cfg.wx_mini_appid
-    mch_id = cfg.wechat_pay_mch_id
     api_key = cfg.wechat_pay_api_key
     params: dict[str, Any] = {
-        "appid": appid,
-        "mch_id": mch_id,
+        **pay_trade_base_params(cfg),
         "out_trade_no": otn,
         "nonce_str": random_nonce_str(),
     }
@@ -375,7 +395,7 @@ def close_order_by_out_trade_no(out_trade_no: str, *, pay: Any | None = None) ->
 
 
 def _secapi_ssl_cert_paths(*, pay: Any | None = None) -> tuple[str, str]:
-    """退款等资金接口使用的商户 API 证书（pem）。优先 MergedPayConfig 中门店/租户合并路径，否则 .env。"""
+    """退款证书：优先 MergedPayConfig（主租户直连 / 加盟服务商已按模式合并），否则 OK饭 .env。"""
     c = ""
     k = ""
     if pay is not None:
@@ -388,9 +408,8 @@ def _secapi_ssl_cert_paths(*, pay: Any | None = None) -> tuple[str, str]:
     if not c or not k:
         raise WeChatPayV2Error(
             503,
-            "未配置微信退款 API 证书路径：请在「门店配置」或租户「对接配置」中填写 apiclient_cert.pem / "
-            "apiclient_key.pem 路径，或在服务器环境配置 WECHAT_PAY_SSL_CERT_PATH / "
-            "WECHAT_PAY_SSL_KEY_PATH（生效优先级：门店 > 租户 > 全局）",
+            "未配置微信退款 API 证书路径：主租户请配置 WECHAT_PAY_SSL_*，"
+            "加盟租户请配置 WECHAT_PAY_SP_SSL_CERT_PATH / WECHAT_PAY_SP_SSL_KEY_PATH（服务商证书）",
         )
     cp = Path(c)
     kp = Path(k)
@@ -413,16 +432,12 @@ def refund_order_v2(
 
     ``out_trade_no`` 与 ``transaction_id`` 至少其一必填（此处一般以商户单号为主）。
     """
-    from app.services.shared.tenant_integration_service import MergedPayConfig, wechat_pay_misconfiguration_detail_merged
+    from app.services.shared.tenant_integration_service import (
+        is_partner_pay_config,
+        wechat_pay_misconfiguration_detail_merged,
+    )
 
-    cfg = pay
-    if cfg is None:
-        cfg = MergedPayConfig(
-            wx_mini_appid=(settings.WX_MINI_APPID or "").strip(),
-            wechat_pay_mch_id=(settings.WECHAT_PAY_MCH_ID or "").strip(),
-            wechat_pay_api_key=(settings.WECHAT_PAY_API_KEY or "").strip(),
-            wechat_pay_notify_url=(settings.WECHAT_PAY_NOTIFY_URL or "").strip(),
-        )
+    cfg = pay if pay is not None else _global_direct_pay_config()
     perr = wechat_pay_misconfiguration_detail_merged(cfg)
     if perr:
         raise WeChatPayV2Error(503, perr)
@@ -439,17 +454,19 @@ def refund_order_v2(
         raise WeChatPayV2Error(400, "退款金额不合法")
 
     cert_pair = _secapi_ssl_cert_paths(pay=cfg)
-    appid = cfg.wx_mini_appid
-    mch_id = cfg.wechat_pay_mch_id
     api_key = cfg.wechat_pay_api_key
+    op_mch = (
+        (getattr(cfg, "wechat_pay_sp_mch_id", None) or "").strip()
+        if is_partner_pay_config(cfg)
+        else (getattr(cfg, "wechat_pay_mch_id", None) or "").strip()
+    )
     params: dict[str, Any] = {
-        "appid": appid,
-        "mch_id": mch_id,
+        **pay_trade_base_params(cfg),
         "nonce_str": random_nonce_str(),
         "out_refund_no": orn,
         "total_fee": str(tf),
         "refund_fee": str(rf),
-        "op_user_id": mch_id,
+        "op_user_id": op_mch,
     }
     if otn:
         params["out_trade_no"] = otn
