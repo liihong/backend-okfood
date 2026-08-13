@@ -78,6 +78,11 @@ const tomorrowFirstMealNewCount = computed(
   () => Number(summaryMeta.value?.tomorrow_first_meal_new_members) || 0,
 )
 
+/** 暂停配送：与档案库「已暂停」筛选同源（dashboard-summary.paused_delivery_count） */
+const pausedDeliveryCount = computed(
+  () => Number(summaryMeta.value?.paused_delivery_count) || 0,
+)
+
 /** 同比上周今日：大表到家+自提去重人数 − 7 天前同日（dashboard-summary） */
 const todayPrepHeadsYoyDelta = computed(() => {
   const v = summaryMeta.value?.today_prep_heads_yoy_week_delta
@@ -546,11 +551,10 @@ const expireMealPortionsAnimated = useAnimatedInteger(() => expireMealPortions.v
 const todaySingleRetailTotalAnimated = useAnimatedInteger(() => todaySingleRetailTotalCount.value, {
   duration: 620,
 })
-const tomorrowSingleRetailTotalAnimated = useAnimatedInteger(
-  () => tomorrowSingleRetailTotalCount.value,
-  { duration: 620 },
-)
 const tomorrowFirstMealNewAnimated = useAnimatedInteger(() => tomorrowFirstMealNewCount.value, {
+  duration: 620,
+})
+const pausedDeliveryAnimated = useAnimatedInteger(() => pausedDeliveryCount.value, {
   duration: 620,
 })
 
@@ -915,12 +919,14 @@ onMounted(() => {
             <span class="dro-dash-chip__v">{{ tomorrowFirstMealNewAnimated }} <small></small></span>
           </div>
           <div
-            class="dro-dash-chip dro-dash-chip--blue"
+            class="dro-dash-chip dro-dash-chip--slate"
+            :class="{ 'dro-dash-chip--faded': pausedDeliveryCount === 0 }"
             role="status"
-            :aria-label="`单次零售 ${tomorrowSingleRetailTotalCount} `"
+            :aria-label="`暂停配送 ${pausedDeliveryCount} `"
+            title="与档案库「已暂停」筛选口径一致"
           >
-            <span class="dro-dash-chip__k">单次零售</span>
-            <span class="dro-dash-chip__v">{{ tomorrowSingleRetailTotalAnimated }} <small></small></span>
+            <span class="dro-dash-chip__k">暂停配送</span>
+            <span class="dro-dash-chip__v">{{ pausedDeliveryAnimated }} <small></small></span>
           </div>
           <div
             class="dro-dash-yoy-chip dro-dash-yoy-chip--tomorrow"
@@ -2417,7 +2423,7 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
   align-items: stretch;
 }
 
-/** 今日/明日：首行双 chip，次行单次零售 + 同比上周并排 */
+/** 今日/明日：首行双 chip，次行单次零售或暂停配送 + 同比上周并排 */
 .dro-dash-kpi__stat-row--chips-then-yoy {
   grid-template-columns: 1fr 1fr;
   align-items: stretch;

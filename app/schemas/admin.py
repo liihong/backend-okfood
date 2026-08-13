@@ -797,6 +797,11 @@ class DashboardMealSummaryOut(BaseModel):
         ge=0,
         description="明日首餐新客人数：起送业务日恰为锚定日之次日，且次日应履约（到家+自提，与大表一致）",
     )
+    paused_delivery_count: int = Field(
+        0,
+        ge=0,
+        description="暂停配送会员数：与档案库「已暂停」筛选一致（主动暂停且仍有余次，排除待完善/请假/退款/次数用尽）",
+    )
     today_meals_week_over_week_caption: str = Field(
         ...,
         description="「今日」(锚定日) 备餐份数周同比文案，如「较上周+12」「较上周持平」",

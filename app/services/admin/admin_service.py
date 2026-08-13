@@ -1833,7 +1833,12 @@ def _dashboard_membership_kw(db: Session, *, store_id: int) -> dict[str, int]:
         ts, payload = cached
         if time.time() - ts < _DASHBOARD_MEMBERSHIP_KW_TTL_SEC:
             return payload
-    payload = {**_store_membership_counts(db, store_id=sid), **_store_card_reorder_stats(db, store_id=sid)}
+    payload = {
+        **_store_membership_counts(db, store_id=sid),
+        **_store_card_reorder_stats(db, store_id=sid),
+        # 与档案库「已暂停」Tab 同源，供明日预测底栏「暂停配送」chip
+        "paused_delivery_count": _member_filter_count(db, store_id=sid, delivery_deferred_only=True),
+    }
     _dashboard_membership_kw_cache[sid] = (time.time(), payload)
     return payload
 
@@ -2100,6 +2105,7 @@ def dashboard_meal_summary(
             monthly_card_reorder_members=out.monthly_card_reorder_members,
             monthly_card_reorder_base_members=out.monthly_card_reorder_base_members,
             tomorrow_first_meal_new_members=out.tomorrow_first_meal_new_members,
+            paused_delivery_count=out.paused_delivery_count,
             today_meals_week_over_week_caption=out.today_meals_week_over_week_caption,
             tomorrow_meals_week_over_week_caption=out.tomorrow_meals_week_over_week_caption,
             today_menu_day_total_stock=today_menu_day_total_stock,
