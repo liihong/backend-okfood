@@ -1,8 +1,12 @@
 /** 餐别文案：优先使用会员开卡种类名称 */
 
+export const STORE_PICKUP_GROUP_AREA = '门店自提'
+/** 门店自提备餐短号前缀；配送区域未单独配置「门店自提」编码时使用 */
+export const STORE_PICKUP_REGION_CODE = 'ZT'
+
 /**
  * 配送大表备餐短号：{片区编码}{3位序号}，如 ZX001。
- * 未配置片区编码时用 X 占位。
+ * 未配置片区编码时用 X 占位；门店自提默认 ZT。
  * @param {string} regionName
  * @param {number|null|undefined} stopIndex 片区内停靠点序号（从 1 起）
  * @param {Record<string, string>|null|undefined} regionCodeByName
@@ -11,7 +15,7 @@ export function formatDeliveryPrepOrderNo(regionName, stopIndex, regionCodeByNam
   const name = String(regionName || '').trim()
   const map = regionCodeByName && typeof regionCodeByName === 'object' ? regionCodeByName : {}
   let code = String(map[name] || '').trim().toUpperCase()
-  if (!code) code = 'X'
+  if (!code) code = name === STORE_PICKUP_GROUP_AREA ? STORE_PICKUP_REGION_CODE : 'X'
   const seq = Math.max(1, Math.floor(Number(stopIndex) || 1))
   return `${code}${String(seq).padStart(3, '0')}`
 }
@@ -52,12 +56,14 @@ export function buildDeliveryLabelItems(
 ) {
   const out = []
   const store = String(storeName || 'OK饭').trim() || 'OK饭'
+  let pickupMemberSeq = 0
   for (const st of flatStops || []) {
-    if (st.groupArea === '门店自提') continue
     if (filterRegion && st.groupArea !== filterRegion) continue
+    const isPickup = st.groupArea === STORE_PICKUP_GROUP_AREA
     const region = st.groupArea ?? st.area ?? ''
-    const prepOrderNo = formatDeliveryPrepOrderNo(region, st.stopIndex, regionCodeByName)
     for (const m of st.members || []) {
+      const seq = isPickup ? ++pickupMemberSeq : st.stopIndex
+      const prepOrderNo = formatDeliveryPrepOrderNo(region, seq, regionCodeByName)
       const phone = m.phone != null ? String(m.phone) : ''
       const remark = m.remarks != null ? String(m.remarks) : ''
       out.push({
@@ -72,12 +78,12 @@ export function buildDeliveryLabelItems(
         units: Number(m.daily_meal_units) || 1,
         remark,
         delivery_date: deliveryDate,
-        route_seq: st.stopIndex ?? null,
-        shop_order_id: st.shop_order_id != null ? String(st.shop_order_id) : '',
-        sf_order_id: st.sf_order_id != null ? String(st.sf_order_id) : '',
+        route_seq: isPickup ? pickupMemberSeq : (st.stopIndex ?? null),
+        shop_order_id: isPickup ? '' : (st.shop_order_id != null ? String(st.shop_order_id) : ''),
+        sf_order_id: isPickup ? '' : (st.sf_order_id != null ? String(st.sf_order_id) : ''),
         product_title: '',
         order_no: prepOrderNo,
-        store_pickup: st.groupArea === '门店自提' || m.store_pickup === true,
+        store_pickup: isPickup || m.store_pickup === true,
         order_kind: 'delivery',
       })
     }
@@ -85,12 +91,13 @@ export function buildDeliveryLabelItems(
   return out
 }
 
-/** 返回未配置编码的片区名（去重） */
-export function missingRegionCodesForStops(flatStops, regionCodeByName = {}) {
+/** 返回未配置编码的片区名（去重）；门店自提使用默认 ZT，不计入缺失。 */
+export function missingRegionCodesForStops(flatStops, regionCodeByName = {}, filterRegion = null) {
   const map = regionCodeByName && typeof regionCodeByName === 'object' ? regionCodeByName : {}
   const missing = new Set()
   for (const st of flatStops || []) {
-    if (st.groupArea === '门店自提') continue
+    if (st.groupArea === STORE_PICKUP_GROUP_AREA) continue
+    if (filterRegion && st.groupArea !== filterRegion) continue
     const name = String(st.groupArea ?? st.area ?? '').trim()
     if (!name) continue
     if (!String(map[name] || '').trim()) missing.add(name)

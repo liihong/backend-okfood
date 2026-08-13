@@ -1246,31 +1246,48 @@ def _pickup_meal_units_split_for_locked_date(
     members_by_id: dict[int, Member],
     delivered_subq,
 ) -> tuple[int, int]:
-    """锁单日自提份数：按推单份数快照统计，避免 eligibility 午间变动间接释放零售库存。"""
+    """锁单日自提份数。
+
+    顺丰推单快照只含到家停靠点，纯自提会员不会进快照。
+    因此不能只扫快照：须并入当前应自提名单（与核销舱 / eligible_members_for_store_pickup 同源），
+    再并入快照里已改自提的会员（锁单后改自提、到家侧已剔除）。
+    """
     sid = int(store_id)
     d = delivery_date
-    if not snapshot:
-        pu_base = (
-            *_member_subscription_eligibility_where(d, store_id=sid),
-            Member.store_pickup.is_(True),
-        )
-        return _sum_meal_units_split_by_delivery_status(
-            db, delivery_date=d, store_id=sid, base_filters=pu_base
-        )
+    pickup_ids: set[int] = {
+        int(x)
+        for x in db.scalars(
+            select(Member.id).where(
+                *_member_subscription_eligibility_where(d, store_id=sid),
+                Member.store_pickup.is_(True),
+            )
+        ).all()
+    }
 
-    pickup_ids: set[int] = set()
-    for mid in snapshot:
-        m = members_by_id.get(int(mid))
-        if m is None:
-            m = db.get(Member, int(mid))
-            if m is not None:
-                members_by_id[int(m.id)] = m
-        if m is None or m.deleted_at is not None or int(m.store_id) != sid:
-            continue
-        if bool(m.store_pickup):
-            pickup_ids.add(int(mid))
+    if snapshot:
+        for mid in snapshot:
+            m = members_by_id.get(int(mid))
+            if m is None:
+                m = db.get(Member, int(mid))
+                if m is not None:
+                    members_by_id[int(m.id)] = m
+            if m is None or m.deleted_at is not None or int(m.store_id) != sid:
+                continue
+            if bool(m.store_pickup):
+                pickup_ids.add(int(mid))
+
     if not pickup_ids:
         return 0, 0
+
+    missing_ids = [mid for mid in pickup_ids if mid not in members_by_id]
+    if missing_ids:
+        for m in db.scalars(
+            select(Member).where(
+                Member.id.in_(missing_ids),
+                Member.deleted_at.is_(None),
+            )
+        ).all():
+            members_by_id[int(m.id)] = m
 
     delivered_pu_ids = {
         int(x)

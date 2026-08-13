@@ -1316,9 +1316,15 @@ class CardOrderCreateIn(BaseModel):
         None,
         description="可选；有值时创建工单后 upsert 会员默认配送地址（含经纬度、门牌、划区）",
     )
+    store_pickup: bool = Field(
+        False,
+        description="门店自提：无需配送地址，写入会员档案 store_pickup；与 delivery_address 互斥",
+    )
 
     @model_validator(mode="after")
     def _validate_card_selection(self) -> Self:
+        if self.store_pickup and self.delivery_address is not None:
+            raise ValueError("门店自提无需填写配送地址")
         if self.membership_template_id is not None:
             if self.card_kind is not None:
                 raise ValueError("请勿同时提交 membership_template_id 与 card_kind")

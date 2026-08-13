@@ -3,7 +3,7 @@ defineOptions({ name: 'CardOrdersView' })
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { CreditCard, MapPin, Plus, Search, UserRound, X, Zap } from 'lucide-vue-next'
+import { CreditCard, MapPin, Plus, Search, Store, UserRound, X, Zap } from 'lucide-vue-next'
 import {
   apiJson,
   adminAccessToken,
@@ -258,6 +258,7 @@ const createForm = ref({
   delivery_lat: '',
   map_location_text: '',
   door_detail: '',
+  store_pickup: false,
 })
 
 /** 续卡：按手机号预查会员档案 */
@@ -389,6 +390,26 @@ function applyRenewActivationDefaults() {
   }
 }
 
+/** 续卡：履约方式默认跟随档案（门店自提 / 配送到家） */
+function applyRenewFulfillmentDefaults() {
+  if (createForm.value.open_mode !== 'renew') return
+  const p = renewPreview.value
+  createForm.value.store_pickup = !!(p && p.store_pickup)
+}
+
+/** 续卡：履约方式默认沿用档案（门店自提 / 配送到家） */
+function applyRenewFulfillmentDefaults() {
+  if (createForm.value.open_mode !== 'renew') return
+  createForm.value.store_pickup = !!(renewPreview.value && renewPreview.value.store_pickup)
+}
+
+/** 续卡：履约方式默认沿用档案（门店自提 / 配送到家） */
+function applyRenewFulfillmentDefaults() {
+  if (createForm.value.open_mode !== 'renew') return
+  const p = renewPreview.value
+  createForm.value.store_pickup = !!(p && p.store_pickup)
+}
+
 /** 续卡同步入账后：剩余、总次数均 +本次卡次数 */
 const renewSyncPreview = computed(() => {
   const p = renewPreview.value
@@ -423,12 +444,14 @@ watch(
     } else {
       createForm.value.delivery_start_mode = 'date'
       createForm.value.delivery_start_date = todayShanghaiStr()
+      createForm.value.store_pickup = false
     }
   },
 )
 
 watch(renewPreview, () => {
   applyRenewActivationDefaults()
+  applyRenewFulfillmentDefaults()
 })
 
 function onDeliveryMapWarn(msg) {
@@ -453,6 +476,7 @@ function openCreateModal() {
     delivery_lat: '',
     map_location_text: '',
     door_detail: '',
+    store_pickup: false,
   }
   showCreateModal.value = true
   void loadMembershipTemplates()
@@ -495,6 +519,7 @@ async function submitCreate() {
     }
   }
 
+  const isStorePickup = createForm.value.store_pickup === true
   const lngS = (createForm.value.delivery_lng || '').trim()
   const latS = (createForm.value.delivery_lat || '').trim()
   const mapT = (createForm.value.map_location_text || '').trim()
@@ -502,7 +527,7 @@ async function submitCreate() {
   const lngN = Number(lngS)
   const latN = Number(latS)
   const hasCoords = lngS !== '' && latS !== '' && Number.isFinite(lngN) && Number.isFinite(latN)
-  const wantsDelivery = hasCoords || mapT !== '' || doorT !== ''
+  const wantsDelivery = !isStorePickup && (hasCoords || mapT !== '' || doorT !== '')
   if (wantsDelivery) {
     if (!hasCoords) {
       showToast('录入配送地址时请使用地图搜索或点击地图选点', 'error')

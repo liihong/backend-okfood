@@ -491,17 +491,13 @@ function exportSheetToExcel() {
   showToast(`已导出 ${out.length} 行`, 'success')
 }
 
-/** 打印标签：当前片区或全部（不含门店自提）；全部时按大表片区顺序逐批出纸 */
+/** 打印标签：当前片区（含周卡/月卡门店自提）或全部到家；全部时按大表片区顺序逐批出纸 */
 const labelPrintBusy = ref(false)
 
 async function printDeliveryLabels(scope) {
   if (labelPrintBusy.value || printLoading.value) return
   const d = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
   const region = scope === 'region' ? activeRegionTab.value : null
-  if (scope === 'region' && region === '门店自提') {
-    showToast('门店自提请使用商城零售打印', 'error')
-    return
-  }
   if (scope === 'region' && !region) {
     showToast('请先选择片区', 'error')
     return
@@ -516,7 +512,11 @@ async function printDeliveryLabels(scope) {
     const storeName =
       String(adminStoreBranding.value?.store_name || '').trim() || 'OK饭'
     const regionCodes = sheetToday.value.region_codes || {}
-    const missingCodes = missingRegionCodesForStops(flatStops.value, regionCodes)
+    const missingCodes = missingRegionCodesForStops(
+      flatStops.value,
+      regionCodes,
+      scope === 'region' ? region : null,
+    )
     if (missingCodes.length) {
       showToast(
         `以下片区未配置编码，备餐号前缀暂用 X：${missingCodes.join('、')}（请在配送区域维护编码）`,
@@ -535,7 +535,7 @@ async function printDeliveryLabels(scope) {
     let totalSheets = 0
     let failed = false
     for (const area of targetRegions) {
-      if (!area || area === '门店自提') continue
+      if (!area) continue
       const items = buildDeliveryLabelItems(
         flatStops.value,
         d,
@@ -918,7 +918,11 @@ async function reinstatePhoneToSheet() {
           type="button"
           class="delivery-btn delivery-btn--outline"
           :disabled="loading || printLoading || labelPrintBusy || !flatStops.length"
-          title="打印当前片区标签（不含自提）"
+          :title="
+            activeRegionTab === '门店自提'
+              ? '打印周卡/月卡门店自提备餐标签'
+              : '打印当前片区标签'
+          "
           @click="printDeliveryLabels('region')"
         >
           <Printer :size="16" stroke-width="2" />

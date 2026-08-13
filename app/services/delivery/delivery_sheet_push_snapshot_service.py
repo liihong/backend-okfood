@@ -386,6 +386,27 @@ def _collect_member_meal_units_for_sf_push_sheet(
     return out
 
 
+def _collect_pickup_member_meal_units_for_snapshot(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    meal_period: str = DEFAULT_MEAL_PERIOD,
+) -> dict[str, int]:
+    """首次推单时刻：把门店自提应备餐会员写入份数快照（自提不进顺丰停靠点）。"""
+    from app.services.delivery.courier_service import eligible_members_for_store_pickup
+    from app.services.meal_period.units import effective_daily_meal_units_for_period
+
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    pu_members, _ = eligible_members_for_store_pickup(
+        db, delivery_date=delivery_date, store_id=int(store_id)
+    )
+    out: dict[str, int] = {}
+    for m in pu_members:
+        out[str(int(m.id))] = effective_daily_meal_units_for_period(db, m, period)
+    return out
+
+
 def capture_delivery_sheet_units_on_first_push(
     db: Session,
     *,
@@ -411,7 +432,14 @@ def capture_delivery_sheet_units_on_first_push(
     units = _collect_member_meal_units_for_sf_push_sheet(
         db, store_id=sid, delivery_date=d, meal_period=meal_period
     )
+    # frozen 仅到家停靠点；自提另写入份数映射，避免锁单日后顶卡自提被算成 0
+    pickup_units = _collect_pickup_member_meal_units_for_snapshot(
+        db, store_id=sid, delivery_date=d, meal_period=meal_period
+    )
     units_payload: dict[str, object] = dict(units)
+    for k, v in pickup_units.items():
+        if k not in units_payload:
+            units_payload[k] = v
     units_payload[FROZEN_MEMBER_IDS_SNAPSHOT_KEY] = sorted(int(k) for k in units.keys())
     try:
         db.add(

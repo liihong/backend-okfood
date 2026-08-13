@@ -971,7 +971,10 @@ def create_card_order(
                 status_code=400,
                 detail="起送日期须不早于当日（上海业务日）",
             )
-    if body.delivery_address is not None:
+    # 须在入账前写入：自提会员无地址也可判定履约齐备并进入大表「门店自提」
+    m.store_pickup = bool(body.store_pickup)
+    db.add(m)
+    if not body.store_pickup and body.delivery_address is not None:
         da = body.delivery_address
         cphone = (da.contact_phone or "").strip() or phone
         upsert_default_address_from_admin_map_pick(

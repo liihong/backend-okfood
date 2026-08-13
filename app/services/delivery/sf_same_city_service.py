@@ -1730,18 +1730,26 @@ def push_sf_same_city(
             )
             if skip is not None:
                 out.append(skip)
+                # 推前校验失败必须落库，否则监控「创单失败」查不到、也不知道是哪个会员
                 if not skip.ok:
-                    _persist_pre_push_validation_failure(
-                        db,
-                        store_id=sid,
-                        delivery_date=d,
-                        item=item,
-                        agg_cur=ags.get(item.stop_id),
-                        err_msg=skip.message or "推单前校验失败",
-                        push_kind=kind,
-                        gset=gset,
-                        existing_push_id=failed_push_by_stop.get(str(item.stop_id)),
-                    )
+                    try:
+                        _persist_pre_push_validation_failure(
+                            db,
+                            store_id=sid,
+                            delivery_date=d,
+                            item=item,
+                            agg_cur=ags.get(item.stop_id),
+                            err_msg=skip.message or "推单前校验失败",
+                            push_kind=kind,
+                            gset=gset,
+                            existing_push_id=failed_push_by_stop.get(str(item.stop_id)),
+                        )
+                    except Exception:
+                        logger.exception(
+                            "推前校验失败落库异常 store_id=%s stop_id=%s",
+                            sid,
+                            item.stop_id,
+                        )
                 continue
             if int(item.subscription_pending_units or 0) <= 0:
                 out.append(
@@ -1842,17 +1850,25 @@ def push_sf_same_city(
                     if is_sf_balance_insufficient(error_code=err_code, message=_raw):
                         balance_halt = True
                         batch_hint = MSG_BALANCE_INSUFFICIENT
-                    _persist_fail(
-                        db,
-                        d,
-                        prep.stop_id,
-                        prep.soid,
-                        prep.snap_db,
-                        err_code,
-                        user_msg,
-                        store_id=sid,
-                        existing_push_id=prep.existing_push_id,
-                    )
+                    try:
+                        _persist_fail(
+                            db,
+                            d,
+                            prep.stop_id,
+                            prep.soid,
+                            prep.snap_db,
+                            err_code,
+                            user_msg,
+                            store_id=sid,
+                            push_kind=kind,
+                            existing_push_id=prep.existing_push_id,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "顺丰创单失败落库异常 store_id=%s stop_id=%s",
+                            sid,
+                            prep.stop_id,
+                        )
                     out.append(
                         SfSameCityPushItemResult(
                             stop_id=prep.stop_id,
@@ -1882,17 +1898,36 @@ def push_sf_same_city(
                 except Exception as e:
                     db.rollback()
                     user_msg = sf_push_user_message(error_code=-2, message=str(e))
-                    _persist_fail(
-                        db,
-                        d,
-                        prep.stop_id,
-                        prep.soid,
-                        prep.snap_db,
-                        -2,
-                        user_msg,
-                        store_id=sid,
-                        existing_push_id=prep.existing_push_id,
-                    )
+                    # 成功行可能已 commit：按 shop_order_id 找回并覆盖为失败，避免「通知失败但监控无记录」
+                    fail_existing_id = prep.existing_push_id
+                    if fail_existing_id is None:
+                        try:
+                            fail_existing_id = db.scalar(
+                                select(SfSameCityPush.id).where(
+                                    SfSameCityPush.shop_order_id == prep.soid
+                                )
+                            )
+                        except Exception:
+                            fail_existing_id = None
+                    try:
+                        _persist_fail(
+                            db,
+                            d,
+                            prep.stop_id,
+                            prep.soid,
+                            prep.snap_db,
+                            -2,
+                            user_msg,
+                            store_id=sid,
+                            push_kind=kind,
+                            existing_push_id=fail_existing_id,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "顺丰推单后处理失败落库异常 store_id=%s stop_id=%s",
+                            sid,
+                            prep.stop_id,
+                        )
                     out.append(
                         SfSameCityPushItemResult(
                             stop_id=prep.stop_id,
@@ -1903,7 +1938,27 @@ def push_sf_same_city(
                     )
 
             if balance_halt:
+                # 余额不足后未发起的剩余单也必须落库失败记录，便于监控检索与充值后重试
                 for prep in queue:
+                    try:
+                        _persist_fail(
+                            db,
+                            d,
+                            prep.stop_id,
+                            prep.soid,
+                            prep.snap_db,
+                            -1,
+                            MSG_SKIPPED_AFTER_BALANCE,
+                            store_id=sid,
+                            push_kind=kind,
+                            existing_push_id=prep.existing_push_id,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "余额不足跳过单落库异常 store_id=%s stop_id=%s",
+                            sid,
+                            prep.stop_id,
+                        )
                     out.append(
                         SfSameCityPushItemResult(
                             stop_id=prep.stop_id,

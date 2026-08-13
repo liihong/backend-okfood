@@ -83,12 +83,25 @@ def split_sf_push_notification_message(message: str | None) -> tuple[str, list[s
 
 
 def compose_sf_push_notification_message(summary: str, failure_details: list[str] | None) -> str:
-    """摘要 + 可选失败明细（写入库表 message 字段）。"""
+    """摘要 + 可选失败明细（写入库表 message 字段，最长 500，优先保留失败明细行）。"""
     base = (summary or "").strip()
     lines = [str(x).strip() for x in (failure_details or []) if str(x).strip()]
     if not lines:
-        return base
-    return f"{base}{SF_PUSH_FAILURE_DETAIL_MARKER}" + "\n".join(lines)
+        return base[:500]
+    # 逐行拼明细，超出 500 时截断并加省略号，避免整段写入失败或明细被整段丢掉
+    out = f"{base}{SF_PUSH_FAILURE_DETAIL_MARKER}"
+    for ln in lines:
+        piece = ln if out.endswith(SF_PUSH_FAILURE_DETAIL_MARKER) else f"\n{ln}"
+        if len(out) + len(piece) <= 499:
+            out += piece
+            continue
+        remain = 499 - len(out)
+        if remain > 1:
+            out += piece[:remain] + "…"
+        elif len(out) < 500:
+            out += "…"
+        break
+    return out[:500]
 
 
 def build_sf_push_failure_details(
@@ -188,7 +201,7 @@ def compute_sf_push_notification_counts(
     顺丰推单系统消息统计：与监控页创单成功/失败口径对齐。
 
     - 成功：落库 ``error_code=0`` 且未取消（同 ``count_sf_same_city_pushes_for_delivery_date``）
-    - 失败：落库创单失败 + 批次内推前校验失败（未落库）
+    - 失败：落库创单失败 + 批次内仍未落库的失败（兜底；正常路径失败应已写入 ``sf_same_city_pushes``）
     - total：上述合计，保证 total >= success + failed
     """
     from app.services.delivery.sf_order_fulfillment_service import count_sf_same_city_pushes_for_delivery_date

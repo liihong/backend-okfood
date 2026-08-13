@@ -46,6 +46,22 @@ def test_summarize_excludes_unselected_skip_rows() -> None:
     assert failed == 1
 
 
+def test_summarize_counts_balance_skipped_as_failed() -> None:
+    """余额不足后未发起的剩余单计入失败（且业务侧应落库，监控可查）。"""
+    from app.services.sf_open.user_messages import MSG_SKIPPED_AFTER_BALANCE
+
+    results = [
+        SfSameCityPushItemResult(stop_id="ok", ok=True, message="已提交顺丰", sf_order_id="SF1"),
+        SfSameCityPushItemResult(
+            stop_id="skip", ok=False, message=MSG_SKIPPED_AFTER_BALANCE, sf_order_id=None
+        ),
+    ]
+    total, success, failed = summarize_sf_push_batch_results(results)
+    assert total == 2
+    assert success == 1
+    assert failed == 1
+
+
 def test_compute_aligns_success_with_monitor_db(sf_notify_db: Session) -> None:
     d = date(2026, 8, 6)
     sf_notify_db.add_all(
