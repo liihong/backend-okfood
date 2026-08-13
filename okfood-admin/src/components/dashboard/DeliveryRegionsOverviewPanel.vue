@@ -548,9 +548,6 @@ const tomorrowDinnerDistributionMainTotal = computed(() => {
 const todayLeaveAnimated = useAnimatedInteger(() => summarySlice.value.todayLeave, { duration: 620 })
 const tomorrowLeaveAnimated = useAnimatedInteger(() => summarySlice.value.tomorrowLeave, { duration: 620 })
 const expireMealPortionsAnimated = useAnimatedInteger(() => expireMealPortions.value, { duration: 620 })
-const todaySingleRetailTotalAnimated = useAnimatedInteger(() => todaySingleRetailTotalCount.value, {
-  duration: 620,
-})
 const tomorrowFirstMealNewAnimated = useAnimatedInteger(() => tomorrowFirstMealNewCount.value, {
   duration: 620,
 })
@@ -742,12 +739,14 @@ onMounted(() => {
             <span class="dro-dash-chip__v">{{ expireMealPortionsAnimated }} <small></small></span>
           </div>
           <div
-            class="dro-dash-chip dro-dash-chip--blue"
+            class="dro-dash-chip dro-dash-chip--slate"
+            :class="{ 'dro-dash-chip--faded': pausedDeliveryCount === 0 }"
             role="status"
-            :aria-label="`单次零售 ${todaySingleRetailTotalCount} `"
+            :aria-label="`暂停配送 ${pausedDeliveryCount} `"
+            title="与档案库「已暂停」筛选口径一致"
           >
-            <span class="dro-dash-chip__k">单次零售</span>
-            <span class="dro-dash-chip__v">{{ todaySingleRetailTotalAnimated }} <small></small></span>
+            <span class="dro-dash-chip__k">暂停配送</span>
+            <span class="dro-dash-chip__v">{{ pausedDeliveryAnimated }} <small></small></span>
           </div>
           <div
             class="dro-dash-yoy-chip dro-dash-yoy-chip--today"
