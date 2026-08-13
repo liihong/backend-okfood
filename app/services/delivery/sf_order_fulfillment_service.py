@@ -331,6 +331,8 @@ def sf_monitor_create_status_label(
         return "创单成功"
     if error_code is None:
         return "—"
+    if error_code < 0:
+        return "创单失败"
     return f"失败 ({error_code})"
 
 

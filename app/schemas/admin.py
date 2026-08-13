@@ -1090,6 +1090,10 @@ class DeliverySheetMemberOut(BaseModel):
     )
     remarks: str | None = None
     area_issue: bool = Field(False, description="会员主档或默认地址片区为空、未分配或与启用区域表不一致")
+    missing_coords: bool = Field(
+        False,
+        description="默认配送地址缺少有效经纬度，自动推顺丰会失败",
+    )
     is_delivered: bool = Field(
         False,
         description="该业务日 delivery_logs 为已送达（骑手或管理员手标；门店自提同口径）",
@@ -1170,6 +1174,14 @@ class DeliverySheetStopOut(BaseModel):
         False,
         description="本配送点存在区域未维护/未分配或与启用 delivery_regions 不匹配",
     )
+    sf_push_failed: bool = Field(
+        False,
+        description="当日该停靠点大表推顺丰已落库且创单失败（含缺坐标等推前校验失败）",
+    )
+    sf_push_error_msg: str | None = Field(
+        None,
+        description="创单失败原因，供大表客服处理",
+    )
 
 
 class DeliverySheetGroupOut(BaseModel):
@@ -1188,6 +1200,10 @@ class DeliverySheetGroupOut(BaseModel):
         description="本片区分组已确认送达/已自提份数合计",
     )
     has_area_issue: bool = Field(False, description="本片区分组存在区域待处理记录")
+    has_sf_push_issue: bool = Field(
+        False,
+        description="本片区存在缺坐标或顺丰创单失败停靠点，须客服处理",
+    )
 
 
 class DeliverySheetOut(BaseModel):

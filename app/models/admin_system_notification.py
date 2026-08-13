@@ -23,7 +23,8 @@ class AdminSystemNotification(Base):
     kind: Mapped[str] = mapped_column(String(50), index=True)
     business_date: Mapped[date] = mapped_column(Date)
     title: Mapped[str] = mapped_column(String(200))
-    message: Mapped[str] = mapped_column(String(500))
+    # 须容纳推单失败明细（姓名/手机号/片区/原因）；过短会导致客服看不到是谁失败
+    message: Mapped[str] = mapped_column(String(2000))
     total_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     success_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     failed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

@@ -32,11 +32,13 @@ def test_compose_and_split_failure_details() -> None:
     assert parsed == details
 
 
-def test_compose_failure_details_clips_to_500() -> None:
+def test_compose_failure_details_clips_to_max_len() -> None:
+    from app.services.admin.admin_system_notification_service import SF_PUSH_NOTIFICATION_MESSAGE_MAX_LEN
+
     summary = "今日共推送 164 单，成功 163 单，失败 1 单"
-    long_line = "· " + ("很长地址" * 40) + " · 原因：顺丰账户余额不足，本条未向顺丰发起推单"
+    long_line = "· " + ("很长地址" * 80) + " · 原因：顺丰账户余额不足，本条未向顺丰发起推单"
     full = compose_sf_push_notification_message(summary, [long_line])
-    assert len(full) <= 500
+    assert len(full) <= SF_PUSH_NOTIFICATION_MESSAGE_MAX_LEN
     assert SF_PUSH_FAILURE_DETAIL_MARKER in full
     assert full.startswith(summary)
 
@@ -86,5 +88,6 @@ def test_build_sf_push_failure_details_from_preview_and_agg() -> None:
     )
     assert len(lines) == 1
     assert "TPQ" in lines[0]
-    assert "5210" in lines[0]
+    assert "15675175210" in lines[0]
+    assert "****" not in lines[0]
     assert "配送地址缺少有效坐标" in lines[0]

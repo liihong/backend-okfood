@@ -60,6 +60,8 @@ def _system_notification_message_phone_unmasked(message: str | None) -> bool:
 
 # 系统消息正文与失败明细分隔符（客服点击通知时可解析出会员信息）
 SF_PUSH_FAILURE_DETAIL_MARKER = "\n\n失败明细：\n"
+# 与 admin_system_notifications.message 列长一致；过短会丢掉「谁失败」
+SF_PUSH_NOTIFICATION_MESSAGE_MAX_LEN = 2000
 
 
 def _sf_nightly_push_message(*, total: int, success: int, failed: int, skip_reason: str | None) -> str:
@@ -83,25 +85,26 @@ def split_sf_push_notification_message(message: str | None) -> tuple[str, list[s
 
 
 def compose_sf_push_notification_message(summary: str, failure_details: list[str] | None) -> str:
-    """摘要 + 可选失败明细（写入库表 message 字段，最长 500，优先保留失败明细行）。"""
+    """摘要 + 可选失败明细（写入库表 message 字段，优先保留失败明细行）。"""
+    max_len = SF_PUSH_NOTIFICATION_MESSAGE_MAX_LEN
     base = (summary or "").strip()
     lines = [str(x).strip() for x in (failure_details or []) if str(x).strip()]
     if not lines:
-        return base[:500]
-    # 逐行拼明细，超出 500 时截断并加省略号，避免整段写入失败或明细被整段丢掉
+        return base[:max_len]
+    # 逐行拼明细，超出上限时截断并加省略号，避免整段写入失败或明细被整段丢掉
     out = f"{base}{SF_PUSH_FAILURE_DETAIL_MARKER}"
     for ln in lines:
         piece = ln if out.endswith(SF_PUSH_FAILURE_DETAIL_MARKER) else f"\n{ln}"
-        if len(out) + len(piece) <= 499:
+        if len(out) + len(piece) <= max_len - 1:
             out += piece
             continue
-        remain = 499 - len(out)
+        remain = max_len - 1 - len(out)
         if remain > 1:
             out += piece[:remain] + "…"
-        elif len(out) < 500:
+        elif len(out) < max_len:
             out += "…"
         break
-    return out[:500]
+    return out[:max_len]
 
 
 def build_sf_push_failure_details(
@@ -176,7 +179,8 @@ def build_sf_push_failure_details(
             addr = addr[:36] + "…"
 
         name_s = "、".join(names[:3]) if names else "未知会员"
-        phone_s = "、".join(_mask_phone_middle_four(p) for p in phones[:2]) if phones else ""
+        # 推单失败须给客服完整手机号，便于立刻打电话处理；其它系统消息仍走脱敏
+        phone_s = "、".join((p or "").strip() for p in phones[:2] if (p or "").strip()) if phones else ""
         chunks = [f"· {name_s}"]
         if phone_s:
             chunks.append(phone_s)

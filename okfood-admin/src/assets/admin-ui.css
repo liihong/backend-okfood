@@ -2026,11 +2026,15 @@
   background: #fffbeb;
   border-bottom-color: #fde68a;
 }
-.admin-table--delivery.el-table tr.delivery-row--done:not(.delivery-row--area-warn) > td.el-table__cell {
+.admin-table--delivery.el-table tr.delivery-row--sf-fail > td.el-table__cell {
+  background: #fef2f2;
+  border-bottom-color: #fecaca;
+}
+.admin-table--delivery.el-table tr.delivery-row--done:not(.delivery-row--area-warn):not(.delivery-row--sf-fail) > td.el-table__cell {
   background: #f7fdf9;
   border-bottom-color: #ecfdf5;
 }
-.admin-table--delivery.el-table tr.delivery-row--partial:not(.delivery-row--area-warn) > td.el-table__cell {
+.admin-table--delivery.el-table tr.delivery-row--partial:not(.delivery-row--area-warn):not(.delivery-row--sf-fail) > td.el-table__cell {
   background: #fafafa;
   border-bottom-color: #f1f5f9;
 }

@@ -38,7 +38,7 @@ def main() -> None:
       `kind` VARCHAR(50) NOT NULL,
       `business_date` DATE NOT NULL,
       `title` VARCHAR(200) NOT NULL,
-      `message` VARCHAR(500) NOT NULL,
+      `message` VARCHAR(2000) NOT NULL,
       `total_count` INT NOT NULL DEFAULT 0,
       `success_count` INT NOT NULL DEFAULT 0,
       `failed_count` INT NOT NULL DEFAULT 0,

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections import defaultdict
 from collections.abc import Iterable
@@ -14,7 +15,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from fastapi import HTTPException
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.constants import UNASSIGNED_DELIVERY_AREA
@@ -245,14 +246,25 @@ def _normalize_address_key(s: str) -> str:
     return " ".join(s.strip().split()).casefold()
 
 
-def _sf_push_map_for_sheet(db: Session, *, store_id: int, delivery_date: date) -> dict[str, SfSameCityPush]:
+def _sheet_sf_push_kind(meal_period: str) -> str:
+    """大表停靠点对应的顺丰 push_kind；晚餐与午餐隔离。"""
+    if (meal_period or "").strip().lower() == MealPeriod.DINNER.value:
+        return "dinner_delivery_sheet"
+    return "delivery_sheet"
+
+
+def _sf_push_map_for_sheet(
+    db: Session, *, store_id: int, delivery_date: date, meal_period: str = "lunch"
+) -> dict[str, SfSameCityPush]:
     """业务日已成功创单的停靠点 → 最新推单记录（供面单打印条码/订单号）。"""
+    kind = _sheet_sf_push_kind(meal_period)
     rows = db.scalars(
         select(SfSameCityPush)
         .where(
             and_(
                 SfSameCityPush.store_id == int(store_id),
                 SfSameCityPush.delivery_date == delivery_date,
+                SfSameCityPush.push_kind == kind,
                 SfSameCityPush.error_code == 0,
             )
         )
@@ -264,6 +276,43 @@ def _sf_push_map_for_sheet(db: Session, *, store_id: int, delivery_date: date) -
         if key and key not in out:
             out[key] = row
     return out
+
+
+def _sf_fail_push_map_for_sheet(
+    db: Session, *, store_id: int, delivery_date: date, meal_period: str = "lunch"
+) -> dict[str, SfSameCityPush]:
+    """业务日创单失败（含缺坐标等推前校验失败）停靠点 → 最新失败记录。"""
+    kind = _sheet_sf_push_kind(meal_period)
+    rows = db.scalars(
+        select(SfSameCityPush)
+        .where(
+            and_(
+                SfSameCityPush.store_id == int(store_id),
+                SfSameCityPush.delivery_date == delivery_date,
+                SfSameCityPush.push_kind == kind,
+                or_(SfSameCityPush.error_code.is_(None), SfSameCityPush.error_code != 0),
+            )
+        )
+        .order_by(SfSameCityPush.id.desc())
+    ).all()
+    out: dict[str, SfSameCityPush] = {}
+    for row in rows:
+        key = str(row.stop_id or "")
+        if key and key not in out:
+            out[key] = row
+    return out
+
+
+def _address_has_valid_coords(addr: MemberAddress | None) -> bool:
+    """默认地址是否具备可推顺丰的有效经纬度。"""
+    if addr is None or addr.lng is None or addr.lat is None:
+        return False
+    try:
+        lg = float(addr.lng)
+        lt = float(addr.lat)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(lg) and math.isfinite(lt)
 
 
 @dataclass(frozen=True)
@@ -1627,7 +1676,12 @@ def build_delivery_sheet(
         members = _filter_members_by_phone_hint(members, ph)
         pu_members = _filter_members_by_phone_hint(pu_members, ph)
     units_ctx = DeliverySheetMealUnitsContext.from_day_snapshots(day_snap, db=db)
-    sf_push_map = _sf_push_map_for_sheet(db, store_id=sid, delivery_date=d)
+    sf_push_map = _sf_push_map_for_sheet(
+        db, store_id=sid, delivery_date=d, meal_period=meal_period
+    )
+    sf_fail_map = _sf_fail_push_map_for_sheet(
+        db, store_id=sid, delivery_date=d, meal_period=meal_period
+    )
     all_member_ids = {int(m.id) for m in members} | {int(m.id) for m in pu_members}
     delivered_set = day_delivered_ids & all_member_ids
     dinner_state_map: dict[int, object] = {}
@@ -1682,6 +1736,7 @@ def build_delivery_sheet(
                     state_row=dinner_state_map.get(int(mem.id)),
                 )
                 mem_units = units_ctx.units_for(mem)
+                missing_coords = not _address_has_valid_coords(addr)
                 lines.append(
                     DeliverySheetMemberOut(
                         member_id=int(mem.id),
@@ -1694,6 +1749,7 @@ def build_delivery_sheet(
                         meal_quota_total=quota,
                         remarks=rmk,
                         area_issue=_member_area_issue(addr, known_ids),
+                        missing_coords=missing_coords,
                         is_delivered=mem.id in delivered_set,
                     )
                 )
@@ -1715,6 +1771,8 @@ def build_delivery_sheet(
             stop_pending = stop_meals - stop_delivered
             stop_id = compute_delivery_stop_id(d, area_name, resolved.address_line)
             sf_push = sf_push_map.get(stop_id)
+            sf_fail = None if sf_push is not None else sf_fail_map.get(stop_id)
+            fail_msg = (str(sf_fail.error_msg).strip() if sf_fail and sf_fail.error_msg else "") or None
             stops.append(
                 DeliverySheetStopOut(
                     meal_count=stop_meals,
@@ -1728,6 +1786,8 @@ def build_delivery_sheet(
                     members=lines,
                     remarks_combined="；".join(uniq_combined) if uniq_combined else None,
                     has_area_issue=stop_area_issue,
+                    sf_push_failed=sf_fail is not None,
+                    sf_push_error_msg=fail_msg[:200] if fail_msg else None,
                 )
             )
         # 配送点：仍有待送份数的点在上、已全部送达的在下；同档仍按地址稳定排序
@@ -1742,6 +1802,9 @@ def build_delivery_sheet(
         group_pending = sum(s.pending_meal_count for s in stops)
         group_delivered = sum(s.delivered_meal_count for s in stops)
         group_issue = any(s.has_area_issue for s in stops) or _area_needs_attention(area_name, known_names)
+        group_sf_issue = any(
+            bool(s.sf_push_failed) or any(bool(m.missing_coords) for m in s.members) for s in stops
+        )
         groups_out.append(
             DeliverySheetGroupOut(
                 area=area_name,
@@ -1751,6 +1814,7 @@ def build_delivery_sheet(
                 pending_meal_total=group_pending,
                 delivered_meal_total=group_delivered,
                 has_area_issue=group_issue,
+                has_sf_push_issue=group_sf_issue,
             )
         )
 

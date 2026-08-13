@@ -348,6 +348,9 @@ function deliveryMemberStatusClass(group, m) {
 function deliveryStopRowClassName({ row }) {
   const classes = []
   if (row.has_area_issue) classes.push('delivery-row--area-warn')
+  if (row.sf_push_failed || (row.members || []).some((m) => m.missing_coords)) {
+    classes.push('delivery-row--sf-fail')
+  }
   const g = selectedGroup.value
   if (g?.area === '门店自提') return classes.join(' ')
   const pending = row.pending_meal_count
@@ -463,6 +466,8 @@ function exportSheetToExcel() {
         备注: m.remarks != null && String(m.remarks).length ? String(m.remarks) : '',
         送达状态: status,
         片区待核实: m.area_issue || st.has_area_issue ? '是' : '否',
+        无坐标: m.missing_coords ? '是' : '否',
+        顺丰推单失败: st.sf_push_failed ? (st.sf_push_error_msg || '是') : '否',
       })
     }
   }
@@ -670,6 +675,11 @@ function applySfSelectAll(val) {
       r.selected = val
     }
   }
+}
+
+function sfPreviewRowClassName({ row }) {
+  if (row.recv_lng == null || row.recv_lat == null) return 'sf-row--no-coords'
+  return ''
 }
 
 async function loadSfPreviewData() {
@@ -1042,7 +1052,7 @@ async function reinstatePhoneToSheet() {
               class="delivery-region-tab"
               :class="{
                 'delivery-region-tab--active': activeRegionTab === group.area,
-                'delivery-region-tab--warn': group.has_area_issue,
+                'delivery-region-tab--warn': group.has_area_issue || group.has_sf_push_issue,
               }"
               :aria-selected="activeRegionTab === group.area"
               @click="activeRegionTab = group.area"
@@ -1122,6 +1132,7 @@ async function reinstatePhoneToSheet() {
             stripe
             class="sf-table"
             max-height="420"
+            :row-class-name="sfPreviewRowClassName"
           >
             <el-table-column width="48" label="选" align="center" fixed>
               <template #default="{ row }">
@@ -1222,6 +1233,12 @@ async function reinstatePhoneToSheet() {
                   class="sf-num"
                   controls-position="right"
                 />
+              </template>
+            </el-table-column>
+            <el-table-column width="88" label="坐标" align="center">
+              <template #default="{ row }">
+                <span v-if="row.recv_lng == null || row.recv_lat == null" class="sf-bad">缺</span>
+                <span v-else>有</span>
               </template>
             </el-table-column>
             <el-table-column width="72" label="已推" align="center">
@@ -1406,6 +1423,15 @@ async function reinstatePhoneToSheet() {
                         <div class="delivery-addr-cell__sub">
                           {{ selectedGroup?.area }}<template v-if="st.area"> · {{ st.area }}</template>
                         </div>
+                        <div v-if="st.sf_push_failed" class="delivery-sf-fail-hint">
+                          顺丰未推成：{{ st.sf_push_error_msg || '创单失败' }}
+                        </div>
+                        <div
+                          v-else-if="(st.members || []).some((m) => m.missing_coords)"
+                          class="delivery-sf-fail-hint"
+                        >
+                          地址无坐标，无法推顺丰
+                        </div>
                       </div>
                     </template>
                   </el-table-column>
@@ -1423,6 +1449,8 @@ async function reinstatePhoneToSheet() {
                             {{ deliveryMemberStatusLabel(selectedGroup, m) }}
                           </span>
                           <span v-if="m.area_issue" class="member-area-tag">未分配片区</span>
+                          <span v-if="m.missing_coords" class="member-sf-fail-tag">无坐标未推顺丰</span>
+                          <span v-else-if="st.sf_push_failed" class="member-sf-fail-tag">顺丰推单失败</span>
                         </div>
                         <span class="t-sub">{{ m.phone }}</span>
                       </div>
@@ -2232,6 +2260,9 @@ async function reinstatePhoneToSheet() {
   color: #dc2626;
   font-weight: 700;
 }
+:deep(.sf-table .sf-row--no-coords > td.el-table__cell) {
+  background: #fef2f2;
+}
 .sf-empty {
   margin: 0;
   padding: 1rem;
@@ -2298,6 +2329,26 @@ async function reinstatePhoneToSheet() {
   background: #ffedd5;
   color: #c2410c;
   vertical-align: middle;
+}
+
+.member-sf-fail-tag {
+  display: inline-block;
+  margin: 0;
+  font-size: 9px;
+  font-weight: 900;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #fee2e2;
+  color: #b91c1c;
+  vertical-align: middle;
+}
+
+.delivery-sf-fail-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #b91c1c;
+  line-height: 1.35;
 }
 
 .delivery-status-tag {
