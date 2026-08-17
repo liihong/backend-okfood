@@ -1396,13 +1396,16 @@ def _validate_sf_push_row(
                     message=err,
                     sf_order_id=None,
                 )
-            if item.recv_lng is None or item.recv_lat is None:
-                return SfSameCityPushItemResult(
-                    stop_id=item.stop_id,
-                    ok=False,
-                    message="配送地址缺少有效坐标，不可推顺丰",
-                    sf_order_id=None,
-                )
+    # 无坐标必须按失败拦截（即使停靠点聚合缺失），禁止用默认坐标悄悄创单
+    if int(item.subscription_pending_units or 0) > 0 and (
+        item.recv_lng is None or item.recv_lat is None
+    ):
+        return SfSameCityPushItemResult(
+            stop_id=item.stop_id,
+            ok=False,
+            message="配送地址缺少有效坐标，不可推顺丰",
+            sf_order_id=None,
+        )
     if item.is_insured and item.goods_value_yuan is None:
         return SfSameCityPushItemResult(
             stop_id=item.stop_id,
@@ -1732,24 +1735,22 @@ def push_sf_same_city(
                 out.append(skip)
                 # 推前校验失败必须落库，否则监控「创单失败」查不到、也不知道是哪个会员
                 if not skip.ok:
-                    try:
-                        _persist_pre_push_validation_failure(
-                            db,
-                            store_id=sid,
-                            delivery_date=d,
-                            item=item,
-                            agg_cur=ags.get(item.stop_id),
-                            err_msg=skip.message or "推单前校验失败",
-                            push_kind=kind,
-                            gset=gset,
-                            existing_push_id=failed_push_by_stop.get(str(item.stop_id)),
-                        )
-                    except Exception:
-                        logger.exception(
-                            "推前校验失败落库异常 store_id=%s stop_id=%s",
-                            sid,
-                            item.stop_id,
-                        )
+                    retry_existing = (
+                        int(retry_push_id)
+                        if retry_push_id is not None
+                        else failed_push_by_stop.get(str(item.stop_id))
+                    )
+                    _persist_pre_push_validation_failure_best_effort(
+                        db,
+                        store_id=sid,
+                        delivery_date=d,
+                        item=item,
+                        agg_cur=ags.get(item.stop_id),
+                        err_msg=skip.message or "推单前校验失败",
+                        push_kind=kind,
+                        gset=gset,
+                        existing_push_id=retry_existing,
+                    )
                 continue
             if int(item.subscription_pending_units or 0) <= 0:
                 out.append(
@@ -1972,6 +1973,17 @@ def push_sf_same_city(
 
         order_index = {row.stop_id: idx for idx, row in enumerate(body.rows)}
         out.sort(key=lambda r: order_index.get(r.stop_id, len(body.rows)))
+        # 批次结束再核对：任何 ok=False 都必须有监控失败行（落库异常时补写）
+        _ensure_failed_push_rows(
+            db,
+            store_id=sid,
+            delivery_date=d,
+            results=out,
+            items_by_stop={str(r.stop_id): r for r in body.rows},
+            ags=ags,
+            push_kind=kind,
+            gset=gset,
+        )
 
     if batch_hint is None and any(
         not r.ok and is_sf_balance_insufficient(error_code=None, message=r.message) for r in out
@@ -2026,6 +2038,153 @@ def _persist_fail(
         response_json=None,
         push_kind=push_kind,
     )
+
+
+def _rollback_sf_push_session_quietly(db: Session) -> None:
+    """落库失败后回滚，避免脏会话挡住后续成功单。"""
+    try:
+        db.rollback()
+    except Exception:
+        logger.exception("顺丰推单会话回滚失败")
+
+
+def _persist_pre_push_validation_failure_minimal(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    item: SfSameCityPreviewRow,
+    agg_cur: _Agg | None,
+    err_msg: str,
+    push_kind: str,
+    existing_push_id: int | None = None,
+) -> None:
+    """完整快照写失败时的最小失败行：至少能在监控里看到停靠点、手机号、原因。"""
+    soid = f"OKF{delivery_date:%Y%m%d}{item.stop_id[:12]}{uuid.uuid4().hex[:8]}"
+    if len(soid) > 64:
+        soid = soid[:64]
+    mids: list[int] = []
+    if agg_cur is not None:
+        for sl in agg_cur.sub_lines or []:
+            try:
+                mids.append(int(sl["member_id"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+    snap: dict[str, Any] = {
+        "preview_row": item.model_dump(mode="json"),
+        "sf_create_order": {"validation_failed": True, "reason": (err_msg or "")[:500]},
+        "fulfillment_member_ids": mids,
+        "fulfillment_single_meal_order_ids": [],
+    }
+    _persist_fail(
+        db,
+        delivery_date,
+        item.stop_id,
+        soid,
+        snap,
+        -1,
+        (err_msg or "推单前校验失败")[:1024],
+        store_id=int(store_id),
+        push_kind=push_kind,
+        existing_push_id=existing_push_id,
+    )
+
+
+def _persist_pre_push_validation_failure_best_effort(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    item: SfSameCityPreviewRow,
+    agg_cur: _Agg | None,
+    err_msg: str,
+    push_kind: str,
+    gset: Any,
+    existing_push_id: int | None = None,
+) -> None:
+    """
+    推前校验失败必须落库。完整快照失败时回滚再写最小行，避免监控空白。
+    """
+    try:
+        _persist_pre_push_validation_failure(
+            db,
+            store_id=store_id,
+            delivery_date=delivery_date,
+            item=item,
+            agg_cur=agg_cur,
+            err_msg=err_msg,
+            push_kind=push_kind,
+            gset=gset,
+            existing_push_id=existing_push_id,
+        )
+        return
+    except Exception:
+        logger.exception(
+            "推前校验失败落库异常 store_id=%s stop_id=%s",
+            store_id,
+            item.stop_id,
+        )
+        _rollback_sf_push_session_quietly(db)
+    try:
+        _persist_pre_push_validation_failure_minimal(
+            db,
+            store_id=store_id,
+            delivery_date=delivery_date,
+            item=item,
+            agg_cur=agg_cur,
+            err_msg=err_msg,
+            push_kind=push_kind,
+            existing_push_id=existing_push_id,
+        )
+    except Exception:
+        logger.exception(
+            "推前校验失败最小行落库仍失败 store_id=%s stop_id=%s",
+            store_id,
+            item.stop_id,
+        )
+        _rollback_sf_push_session_quietly(db)
+
+
+def _ensure_failed_push_rows(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    results: list[SfSameCityPushItemResult],
+    items_by_stop: dict[str, SfSameCityPreviewRow],
+    ags: dict[str, _Agg],
+    push_kind: str,
+    gset: Any,
+) -> None:
+    """批次结果里 ok=False 的停靠点，若尚未有失败行则补写。"""
+    failed = [r for r in results if not r.ok]
+    if not failed:
+        return
+    have = _failed_push_id_by_stop(
+        db,
+        store_id=int(store_id),
+        d=delivery_date,
+        stop_ids={str(r.stop_id) for r in failed},
+        push_kind=push_kind,
+    )
+    for r in failed:
+        key = str(r.stop_id)
+        if key in have:
+            continue
+        item = items_by_stop.get(key)
+        if item is None:
+            continue
+        _persist_pre_push_validation_failure_best_effort(
+            db,
+            store_id=int(store_id),
+            delivery_date=delivery_date,
+            item=item,
+            agg_cur=ags.get(key),
+            err_msg=r.message or "推单失败",
+            push_kind=push_kind,
+            gset=gset,
+            existing_push_id=None,
+        )
 
 
 def _persist_pre_push_validation_failure(
@@ -2334,9 +2493,16 @@ def retry_sf_same_city_push_by_id(db: Session, *, push_id: int) -> SfSameCityPus
     d = row.delivery_date
     if d is None:
         raise HTTPException(status_code=400, detail="记录缺少业务日")
-    preview = preview_sf_same_city(db, delivery_date=d, store_id=sid)
+    from app.services.delivery.sf_order_fulfillment_service import _meal_period_from_push_kind
+
+    kind = (getattr(row, "push_kind", None) or "").strip() or "delivery_sheet"
+    period = _meal_period_from_push_kind(kind)
+    # 不用 preview_sf_same_city：其全局「有一单缺坐标则整批报错」会拦住监控重试
+    rows, ags, _, _ = _build_sf_same_city_preview_bundle(
+        db, delivery_date=d, store_id=sid, meal_period=period
+    )
     prow: SfSameCityPreviewRow | None = None
-    for r in preview.rows:
+    for r in rows:
         if r.stop_id == row.stop_id:
             prow = r
             break
@@ -2351,7 +2517,15 @@ def retry_sf_same_city_push_by_id(db: Session, *, push_id: int) -> SfSameCityPus
             detail="该停靠点本日不可再推（本停靠点已成功创单，或同配送日内同一会员已在其他停靠点成功推单）。",
         )
     body = SfSameCityPushIn(delivery_date=d, rows=[prow])
-    out = push_sf_same_city(db, body, store_id=sid, retry_push_id=int(push_id))
+    out = push_sf_same_city(
+        db,
+        body,
+        store_id=sid,
+        retry_push_id=int(push_id),
+        push_kind=kind,
+        meal_period=period,
+        ags_hint=ags,
+    )
     if not out.results:
         raise HTTPException(status_code=500, detail="重试无返回结果")
     return out.results[0]

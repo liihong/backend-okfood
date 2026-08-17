@@ -13,10 +13,13 @@ from app.db.base import Base
 from app.models.sf_same_city_push import SfSameCityPush
 from app.models.store import Store
 from app.models.tenant import Tenant
-from app.schemas.admin import SfSameCityPreviewRow
+from app.schemas.admin import SfSameCityPreviewRow, SfSameCityPushIn
 from app.services.delivery.sf_same_city_service import (
+    _ensure_failed_push_rows,
     _persist_pre_push_validation_failure,
+    _persist_pre_push_validation_failure_best_effort,
     _validate_sf_push_row,
+    push_sf_same_city,
 )
 
 
@@ -134,3 +137,127 @@ def test_persist_pre_push_validation_failure_is_monitor_fail(persist_db: Session
         )
     ).all()
     assert len(fails) == 1
+
+
+def test_missing_coords_validate_without_agg_is_failure() -> None:
+    """停靠点聚合缺失时，预览行无坐标仍须判失败，避免默认坐标悄悄创单。"""
+    item = _preview_row(recv_lng=None, recv_lat=None)
+    skip = _validate_sf_push_row(
+        None,
+        item,
+        d=date(2026, 8, 13),
+        success_stop_ids=set(),
+        success_member_map={},
+        ags={},
+    )
+    assert skip is not None
+    assert skip.ok is False
+    assert "缺少有效坐标" in (skip.message or "")
+
+
+def _gset() -> SimpleNamespace:
+    return SimpleNamespace(
+        SF_OPEN_SHOP_ID="shop1",
+        SF_OPEN_DEV_ID=1,
+        SF_OPEN_SECRET="secret",
+        SF_PICKUP_PHONE="13800000000",
+        SF_PICKUP_ADDRESS="取件地址",
+        SF_DEFAULT_PRODUCT_TYPE=1,
+        SF_VEHICLE_TYPE_CODE=1,
+    )
+
+
+def test_push_same_city_missing_coords_writes_monitor_fail(persist_db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    """批量推单遇到缺坐标：不调顺丰，写入创单失败行。"""
+    from contextlib import nullcontext
+
+    import app.services.delivery.sf_same_city_service as svc
+
+    monkeypatch.setattr(svc, "_sf_push_serial_lock", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(svc, "merged_sf_integration_namespace", lambda *a, **k: _gset())
+    monkeypatch.setattr(
+        svc,
+        "get_store_config",
+        lambda *a, **k: SimpleNamespace(store_name="测试门店", store_lng=113.8, store_lat=35.2),
+    )
+
+    called = {"http": 0}
+
+    def _forbid_http(*a, **k):
+        called["http"] += 1
+        raise AssertionError("缺坐标不得请求顺丰 createorder")
+
+    monkeypatch.setattr(svc, "_sf_http_create_order", _forbid_http)
+
+    item = _preview_row(recv_lng=None, recv_lat=None)
+    agg = _FakeAgg()
+    agg.sub_lines = []
+    out = push_sf_same_city(
+        persist_db,
+        SfSameCityPushIn(delivery_date=date(2026, 8, 13), rows=[item]),
+        store_id=1,
+        ags_hint={item.stop_id: agg},
+    )
+    assert called["http"] == 0
+    assert len(out.results) == 1
+    assert out.results[0].ok is False
+    assert "缺少有效坐标" in (out.results[0].message or "")
+    row = persist_db.scalars(select(SfSameCityPush)).one()
+    assert row.error_code == -1
+    assert "缺少有效坐标" in (row.error_msg or "")
+    preview = (row.request_snapshot or {}).get("preview_row") or {}
+    assert preview.get("recv_phone") == "18568538855"
+
+
+def test_best_effort_persist_writes_minimal_row_when_snapshot_fails(
+    persist_db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """完整快照失败时仍须落下最小失败行。"""
+    import app.services.delivery.sf_same_city_service as svc
+
+    def _boom(*a, **k):
+        raise RuntimeError("snapshot boom")
+
+    monkeypatch.setattr(svc, "_persist_pre_push_validation_failure", _boom)
+    item = _preview_row(recv_lng=None, recv_lat=None)
+    _persist_pre_push_validation_failure_best_effort(
+        persist_db,
+        store_id=1,
+        delivery_date=date(2026, 8, 13),
+        item=item,
+        agg_cur=_FakeAgg(),
+        err_msg="会员18568538855默认配送地址缺少有效坐标，不可推顺丰",
+        push_kind="delivery_sheet",
+        gset=_gset(),
+        existing_push_id=None,
+    )
+    row = persist_db.scalars(select(SfSameCityPush)).one()
+    assert row.error_code == -1
+    assert 3579 in ((row.request_snapshot or {}).get("fulfillment_member_ids") or [])
+
+
+def test_ensure_failed_push_rows_backfills_missing(persist_db: Session) -> None:
+    """批次结果失败但尚未落库时补写。"""
+    from app.schemas.admin import SfSameCityPushItemResult
+
+    item = _preview_row(recv_lng=None, recv_lat=None)
+    _ensure_failed_push_rows(
+        persist_db,
+        store_id=1,
+        delivery_date=date(2026, 8, 13),
+        results=[
+            SfSameCityPushItemResult(
+                stop_id=item.stop_id,
+                ok=False,
+                message="配送地址缺少有效坐标，不可推顺丰",
+                sf_order_id=None,
+            )
+        ],
+        items_by_stop={item.stop_id: item},
+        ags={item.stop_id: _FakeAgg()},
+        push_kind="delivery_sheet",
+        gset=_gset(),
+    )
+    row = persist_db.scalars(select(SfSameCityPush)).one()
+    assert row.error_code == -1
+    assert row.stop_id == item.stop_id
