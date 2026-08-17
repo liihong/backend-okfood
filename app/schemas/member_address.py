@@ -39,7 +39,7 @@ class MemberAddressCreateIn(BaseModel):
     is_default: bool = False
     location: Location | None = Field(
         None,
-        description="地图选点坐标；若提供则保存该经纬度并据此自动划区，不再对拼接地址做地理编码",
+        description="地图选点坐标；小程序新增必须提供。若提供则保存该经纬度并据此自动划区",
     )
 
 
@@ -66,5 +66,5 @@ class MemberAddressUpdateIn(BaseModel):
     is_default: bool | None = None
     location: Location | None = Field(
         None,
-        description="更新地图选点；提交则刷新经纬度并按坐标重算片区",
+        description="更新地图选点；提交则刷新经纬度并按坐标重算片区。改门牌时不提交则保留原坐标",
     )

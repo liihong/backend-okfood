@@ -148,12 +148,12 @@ async function saveMemberAddress() {
   }
   const lng = Number(String(ed.lngStr ?? '').trim())
   const lat = Number(String(ed.latStr ?? '').trim())
-  const hasCoords = Number.isFinite(lng) && Number.isFinite(lat)
+  const hasCoords = Number.isFinite(lng) && Number.isFinite(lat) && !(lng === 0 && lat === 0)
+  if (!hasCoords) {
+    showToast('请使用地图搜索或点击地图选点', 'error')
+    return
+  }
   if (isCreatingAddress.value) {
-    if (!hasCoords) {
-      showToast('请使用地图搜索或点击地图选点', 'error')
-      return
-    }
     if (!mapT) {
       showToast('请填写收货位置主文案（地图选点后自动填入）', 'error')
       return

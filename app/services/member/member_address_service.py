@@ -1,3 +1,5 @@
+import math
+
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -20,6 +22,11 @@ from app.services.member.member_operation_log_service import (
 from app.services.shared.region_assignment import assign_region_for_coords
 
 _MAX_ADDRESSES_PER_MEMBER = 20
+# 小程序/管理端保存地址时若仍无有效坐标，拒绝落库，避免顺丰推单缺经纬度
+_MISSING_COORDS_DETAIL = "无法确定收货坐标，请使用地图选点后再保存"
+# 中国大陆及港澳台常见 GCJ-02 范围；用于拦截 0,0 等选点失败脏数据
+_LNG_MIN, _LNG_MAX = 73.0, 136.0
+_LAT_MIN, _LAT_MAX = 3.0, 54.0
 
 
 def full_address_line(map_location_text: str | None, door_detail: str | None) -> str:
@@ -125,6 +132,25 @@ def _row_coords(row: MemberAddress) -> tuple[float, float] | None:
     except (TypeError, ValueError):
         return None
     return lng_f, lat_f
+
+
+def _validate_map_coords(lng: float, lat: float) -> tuple[float, float]:
+    """校验地图选点坐标：须为有限值且落在国内常见范围内。"""
+    try:
+        lng_f, lat_f = float(lng), float(lat)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=_MISSING_COORDS_DETAIL) from exc
+    if not math.isfinite(lng_f) or not math.isfinite(lat_f):
+        raise HTTPException(status_code=400, detail=_MISSING_COORDS_DETAIL)
+    if not (_LNG_MIN <= lng_f <= _LNG_MAX and _LAT_MIN <= lat_f <= _LAT_MAX):
+        raise HTTPException(status_code=400, detail="经纬度超出有效范围，请重新地图选点")
+    return lng_f, lat_f
+
+
+def _require_row_coords(row: MemberAddress) -> None:
+    """地址文案或选点变更后必须仍有有效坐标，禁止静默写成空经纬度。"""
+    if _row_coords(row) is None:
+        raise HTTPException(status_code=400, detail=_MISSING_COORDS_DETAIL)
 
 
 def default_address_pick_subquery():
@@ -504,8 +530,12 @@ def create_address(
     map_raw = _opt_str(body.map_location_text)
     door_eff = _opt_str(body.door_detail)
 
+    # 小程序建档必须以地图选点坐标入库；无坐标时禁止走「纯文案地理编码失败仍保存」
+    if body.location is None and source == "miniprogram":
+        raise HTTPException(status_code=400, detail=_MISSING_COORDS_DETAIL)
+
     if body.location is not None:
-        lng_f, lat_f = float(body.location.lng), float(body.location.lat)
+        lng_f, lat_f = _validate_map_coords(body.location.lng, body.location.lat)
         lng, lat = lng_f, lat_f
         r = assign_region_for_coords(db, lng_f, lat_f, tenant_id=tid)
         rid = int(r.id) if r else None
@@ -522,6 +552,9 @@ def create_address(
         line = full_address_line(map_raw, door_eff)
         lng, lat, rid = _geocode_bundle(db, line, tenant_id=tid)
         map_eff = map_raw
+        if lng is None or lat is None:
+            raise HTTPException(status_code=400, detail=_MISSING_COORDS_DETAIL)
+        lng, lat = _validate_map_coords(lng, lat)
 
     if effective_default:
         _clear_defaults(db, member_id, except_id=None)
@@ -614,20 +647,25 @@ def update_address(
         row.door_detail = _opt_str(row.door_detail)
 
     if location_patch is not None:
-        lng_f = float(location_patch["lng"])
-        lat_f = float(location_patch["lat"])
+        lng_f, lat_f = _validate_map_coords(location_patch["lng"], location_patch["lat"])
         row.lng, row.lat = lng_f, lat_f
         r = assign_region_for_coords(db, lng_f, lat_f, tenant_id=tid)
         row.delivery_region_id = int(r.id) if r else None
     elif "map_location_text" in patch or "door_detail" in patch:
-        line = full_address_line(row.map_location_text, row.door_detail)
-        lng, lat, rid = _geocode_bundle(db, line, tenant_id=tid)
-        row.lng, row.lat, row.delivery_region_id = lng, lat, rid
+        # 改门牌/主文案不得覆盖已有坐标。地理编码失败曾把 lng/lat 写成 NULL。
+        if _row_coords(row) is None:
+            line = full_address_line(row.map_location_text, row.door_detail)
+            lng, lat, rid = _geocode_bundle(db, line, tenant_id=tid)
+            if lng is not None and lat is not None:
+                lng, lat = _validate_map_coords(lng, lat)
+                row.lng, row.lat, row.delivery_region_id = lng, lat, rid
 
     lnglat = _row_coords(row)
     addr_touched = (
         location_patch is not None or "map_location_text" in patch or "door_detail" in patch
     )
+    if addr_touched:
+        _require_row_coords(row)
 
     snap = amap.fetch_regeo_snapshot(lnglat[0], lnglat[1]) if lnglat else None
 

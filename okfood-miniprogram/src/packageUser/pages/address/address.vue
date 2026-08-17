@@ -57,6 +57,7 @@
               <view class="map-pick-actions">
                 <button class="btn-map-pick" hover-class="none" @tap="chooseMapLocation">地图选点</button>
                 <text v-if="coords" class="coords-bound-hint">已绑定地图坐标</text>
+                <text v-else-if="addressId" class="coords-missing-hint">当前地址无坐标，请重新地图选点后再保存</text>
               </view>
             </view>
           </view>
@@ -192,6 +193,38 @@ function strAddrPart(v) {
   return String(v).trim()
 }
 
+/** 解析接口里的经纬度；兼容 location.{lat,lng} / latitude,longitude / 顶层字段；排除 0,0 脏数据 */
+function parseItemCoords(item) {
+  if (!item || typeof item !== 'object') return null
+  const loc = item.location
+  let latRaw
+  let lngRaw
+  if (loc && typeof loc === 'object') {
+    latRaw = loc.lat ?? loc.latitude
+    lngRaw = loc.lng ?? loc.longitude
+  } else {
+    latRaw = item.lat ?? item.latitude
+    lngRaw = item.lng ?? item.longitude
+  }
+  const lat = latRaw != null && latRaw !== '' ? Number(latRaw) : NaN
+  const lng = lngRaw != null && lngRaw !== '' ? Number(lngRaw) : NaN
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  if (lat === 0 && lng === 0) return null
+  return { lat, lng }
+}
+
+function isUsableMapCoords(lat, lng) {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    !(lat === 0 && lng === 0) &&
+    lng >= 73 &&
+    lng <= 136 &&
+    lat >= 3 &&
+    lat <= 54
+  )
+}
+
 /** 接口条目 → 表单：仅存 map_location_text、door_detail 与联系人 */
 function applyAddressItem(item) {
   if (!item || typeof item !== 'object') return
@@ -206,12 +239,7 @@ function applyAddressItem(item) {
     item.map_location_text ?? item.mapLocationText,
   )
   form.doorDetail = strAddrPart(item.door_detail ?? item.doorDetail)
-
-  const loc = item.location
-  const latRaw = loc && typeof loc === 'object' && loc.lat != null ? Number(loc.lat) : NaN
-  const lngRaw = loc && typeof loc === 'object' && loc.lng != null ? Number(loc.lng) : NaN
-  const hasLoc = Number.isFinite(latRaw) && Number.isFinite(lngRaw)
-  coords.value = hasLoc ? { lat: latRaw, lng: lngRaw } : null
+  coords.value = parseItemCoords(item)
 }
 
 function clearForm() {
@@ -225,7 +253,7 @@ function clearForm() {
 }
 
 function applyCoordsAndPoiMeta(la, lo, meta) {
-  if (!Number.isFinite(la) || !Number.isFinite(lo)) {
+  if (!isUsableMapCoords(la, lo)) {
     uni.showToast({
       title: '未获取到位置坐标，请重选',
       icon: 'none',
@@ -271,9 +299,11 @@ function openChooseLocationCentered(lat, lng) {
     ...opts,
     async success(res) {
       const name = String(res.name ?? '').trim()
+      const address = String(res.address ?? '').trim()
+      const poiLabel = name || address || '地图选点位置'
       const la = res.latitude != null ? Number(res.latitude) : NaN
       const lo = res.longitude != null ? Number(res.longitude) : NaN
-      if (!Number.isFinite(la) || !Number.isFinite(lo)) {
+      if (!isUsableMapCoords(la, lo)) {
         uni.showToast({ title: '未获取到位置坐标，请重选', icon: 'none' })
         return
       }
@@ -289,7 +319,7 @@ function openChooseLocationCentered(lat, lng) {
         })
         return
       }
-      applyCoordsAndPoiMeta(la, lo, { name })
+      applyCoordsAndPoiMeta(la, lo, { name: poiLabel })
     },
     fail(err) {
       const msg = err?.errMsg != null ? String(err.errMsg) : ''
@@ -448,13 +478,21 @@ async function save() {
   }
   if (!form.mapLocationText.trim()) {
     uni.showToast({
-      title: '请填写收货位置主文案，或使用地图选点',
+      title: '请先使用地图选点选择收货位置',
       icon: 'none',
     })
     return
   }
-  const hasCoords = coords.value != null
-  if (hasCoords && !addressId.value && !form.doorDetail.trim()) {
+  const hasCoords =
+    coords.value != null && isUsableMapCoords(coords.value.lat, coords.value.lng)
+  if (!hasCoords) {
+    uni.showToast({
+      title: '收货位置缺少地图坐标，请重新地图选点',
+      icon: 'none',
+    })
+    return
+  }
+  if (!addressId.value && !form.doorDetail.trim()) {
     uni.showToast({ title: '请填写门牌号/单元楼层', icon: 'none' })
     return
   }
@@ -679,6 +717,13 @@ async function save() {
   font-size: 24rpx;
   font-weight: 700;
   color: $ok-forest-green;
+  line-height: 1.35;
+}
+
+.coords-missing-hint {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #b45309;
   line-height: 1.35;
 }
 

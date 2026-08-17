@@ -424,7 +424,7 @@ def check_delivery_region_me(
 
 def add_address_me(request: Request, body: MemberAddressCreateIn, db: SessionDep, member_id: MemberIdScoped):
 
-    """新增配送地址：高德地理编码（失败则坐标为空，区域保留客户端或「未分配」）；首条地址自动设为默认。"""
+    """新增配送地址：须带地图选点坐标（或管理端文案地理编码成功）；首条地址自动设为默认。"""
 
     ip = resolve_request_client_ip(
         request.headers.get("x-forwarded-for"),
