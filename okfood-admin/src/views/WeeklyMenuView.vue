@@ -10,36 +10,6 @@ const previewDinner = ref(null)
 
 const DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
-/** 上海日历日 YYYY-MM-DD（与配送/财务业务日一致） */
-function ymdInShanghai(date) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date)
-  const map = Object.fromEntries(parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]))
-  return `${map.year}-${map.month}-${map.day}`
-}
-
-function todayShanghaiYmd() {
-  return ymdInShanghai(new Date())
-}
-
-/** week_start 当周周一 + (slot-1) 天 → 该槽位日历日 */
-function slotCalendarYmd(row) {
-  const raw = String(row.weekStart || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (!raw) return todayShanghaiYmd()
-  const base = new Date(`${raw[1]}-${raw[2]}-${raw[3]}T12:00:00+08:00`)
-  const ms = base.getTime() + (Number(row.slot) - 1) * 86400000
-  return ymdInShanghai(new Date(ms))
-}
-
-/** 早于今日（上海）的行不可改菜品、日总份（仍可查看） */
-function isSlotRowPast(row) {
-  return slotCalendarYmd(row) < todayShanghaiYmd()
-}
-
 const loading = ref(false)
 const savingSlot = ref(null)
 const dishes = ref([])
@@ -247,10 +217,6 @@ async function loadPreview() {
  * @param {{ silent?: boolean }} [opts]
  */
 async function onDishChange(row, dishId, mealPeriod, opts = {}) {
-  if (isSlotRowPast(row)) {
-    if (!opts.silent) showToast('历史日期不可修改菜品', 'info')
-    return
-  }
   const key = `${mealPeriod}-${row.weekStart}-${row.slot}`
   savingSlot.value = key
   try {
@@ -310,7 +276,6 @@ function buildTotalStockBody(row, mealPeriod, opts = {}) {
  * @param {{ silent?: boolean, stockOverride?: string | null }} [opts]
  */
 async function onTotalStockCommit(row, mealPeriod, opts = {}) {
-  if (isSlotRowPast(row)) return
   if (!row.dish_id) {
     if (!opts.silent) showToast('请先选择菜品', 'error')
     return
@@ -399,19 +364,9 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                 </tr>
               </thead>
               <tbody>
-                <tr
-                  v-for="row in card.rows"
-                  :key="`${card.key}-${row.slot}`"
-                  :class="{ 'wmenu-row--past': isSlotRowPast(row) }"
-                >
+                <tr v-for="row in card.rows" :key="`${card.key}-${row.slot}`">
                   <td>
-                    <span
-                      class="wmenu-day-label"
-                      :class="[
-                        `wmenu-day-tone--${row.slot}`,
-                        { 'wmenu-day-label--past': isSlotRowPast(row) },
-                      ]"
-                    >
+                    <span class="wmenu-day-label" :class="`wmenu-day-tone--${row.slot}`">
                       {{ row.weekday }}
                     </span>
                   </td>
@@ -435,7 +390,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                       class="wmenu-total-input"
                       placeholder="留空=不限"
                       :value="totalStockFieldValue(row, card.mealPeriod)"
-                      :disabled="isRowBusy(row, card.mealPeriod) || isSlotRowPast(row)"
+                      :disabled="isRowBusy(row, card.mealPeriod)"
                       @input="(e) => setTotalStockDraft(row, (e.target).value, card.mealPeriod)"
                       @blur="() => onTotalStockCommit(row, card.mealPeriod)"
                     />
@@ -463,7 +418,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                       placeholder="选择菜品"
                       class="wmenu-dish-select"
                       :loading="savingSlot === `${card.mealPeriod}-${row.weekStart}-${row.slot}`"
-                      :disabled="isRowBusy(row, card.mealPeriod) || isSlotRowPast(row)"
+                      :disabled="isRowBusy(row, card.mealPeriod)"
                       @update:model-value="(v) => onDishChange(row, v, card.mealPeriod)"
                     >
                       <el-option
