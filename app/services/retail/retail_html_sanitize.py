@@ -34,7 +34,8 @@ _ALLOWED_ATTRIBUTES = {
     "img": ["src", "alt", "width", "height"],
 }
 
-_ALLOWED_PROTOCOLS = ["http", "https"]
+# 空串：允许相对路径（本地上传 /static/uploads/...），否则 bleach 会剥掉 img src
+_ALLOWED_PROTOCOLS = ["http", "https", ""]
 
 
 def sanitize_retail_detail_html(raw: str | None) -> str | None:

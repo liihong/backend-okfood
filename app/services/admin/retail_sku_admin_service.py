@@ -77,6 +77,8 @@ def _upsert_sku_row(
                         detail=f"库存不能低于已售与未支付占用合计（至少 {min_stock} 件）",
                     )
         row.stock_quantity = int(body.stock_quantity) if body.stock_quantity is not None else None
+        # 同请求里后续新建 SKU 做规格唯一校验时，需看到本次改名后的值
+        db.flush()
         return row
 
     _assert_spec_label_unique(db, spu_id=int(spu_id), spec_label=spec)

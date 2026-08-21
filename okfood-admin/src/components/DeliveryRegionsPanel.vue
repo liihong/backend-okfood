@@ -2,8 +2,11 @@
 import { ref, onMounted, onUnmounted, onActivated, nextTick, watch } from 'vue'
 import { MapPin, Trash2, Plus, Save, X } from 'lucide-vue-next'
 
-/** 新乡市城区中心（GCJ-02，与高德一致）；定位失败时使用 */
+/** 新乡市城区中心（GCJ-02）；门店未配置经纬度时兜底 */
 const XINXIANG_CENTER = [113.9268, 35.303]
+/** 有门店坐标时略放大，便于围绕门店划配送范围 */
+const STORE_MAP_ZOOM = 14
+const FALLBACK_MAP_ZOOM = 13
 
 const props = defineProps({
   /** (path, init?) => Promise data */
@@ -28,6 +31,10 @@ let mouseTool = null
 let mapPolygon = null
 /** 多边形折点拖拽编辑（高德 AMap.PolygonEditor） */
 let polygonEditor = null
+/** @type {{ lng: number, lat: number, name: string } | null} 门店配置坐标（GCJ-02）；未配置则为 null */
+let storeAnchor = null
+/** 门店锚点标记（不参与多边形编辑） */
+let storeMarker = null
 /** 地图容器尺寸变化时调用 resize，避免区域拉高后画布仍偏小 */
 let mapResizeObserver = null
 
@@ -73,6 +80,70 @@ async function refreshList() {
   } finally {
     loading.value = false
   }
+}
+
+/** 从门店配置解析 GCJ-02 坐标；未配置或非法则返回 null */
+function parseStoreAnchor(cfg) {
+  const lng = cfg?.store_lng != null ? Number(cfg.store_lng) : NaN
+  const lat = cfg?.store_lat != null ? Number(cfg.store_lat) : NaN
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null
+  const nm = typeof cfg?.store_name === 'string' ? cfg.store_name.trim() : ''
+  return { lng, lat, name: nm || '门店' }
+}
+
+function defaultMapCenter() {
+  return storeAnchor ? [storeAnchor.lng, storeAnchor.lat] : [...XINXIANG_CENTER]
+}
+
+function defaultMapZoom() {
+  return storeAnchor ? STORE_MAP_ZOOM : FALLBACK_MAP_ZOOM
+}
+
+async function loadStoreAnchor() {
+  try {
+    const cfg = await props.apiRequest('/api/admin/store-config')
+    storeAnchor = parseStoreAnchor(cfg)
+  } catch {
+    storeAnchor = null
+  }
+}
+
+/** 门店图钉（与配送范围核验页一致），便于围绕门店划片 */
+function storePinIconDataUrl() {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="27" height="32" viewBox="0 0 38 46">' +
+    '<path fill="#059669" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" ' +
+    'd="M19 3C11.8 3 6 8.5 6 15.2c0 7.2 11.2 23.5 13 25.8 1.8-2.3 13-18.6 13-25.8C32 8.5 26.2 3 19 3z"/>' +
+    '<text x="19" y="19" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="700" ' +
+    "font-family=\"system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif\">店</text></svg>"
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+}
+
+function upsertStoreMarker() {
+  if (!map || !window.AMap || !storeAnchor) return
+  const AMap = window.AMap
+  const pos = [storeAnchor.lng, storeAnchor.lat]
+  if (storeMarker) {
+    try {
+      storeMarker.setPosition(pos)
+      storeMarker.setTitle(storeAnchor.name)
+    } catch {
+      /* ignore */
+    }
+    return
+  }
+  storeMarker = new AMap.Marker({
+    position: pos,
+    icon: new AMap.Icon({
+      size: new AMap.Size(27, 32),
+      image: storePinIconDataUrl(),
+      imageSize: new AMap.Size(27, 32),
+    }),
+    title: storeAnchor.name,
+    zIndex: 200,
+    anchor: 'bottom-center',
+  })
+  map.add(storeMarker)
 }
 
 /** 解析 polygon_json 为高德 path：支持 [[lng,lat], …]、GeoJSON Polygon、Feature(Polygon)，与后端 extract_outer_ring 可对齐 */
@@ -142,7 +213,7 @@ function loadAmapScript() {
       window.AMapLoader.load({
         key: amapKey,
         version: '2.0',
-        plugins: ['AMap.MouseTool', 'AMap.Geolocation', 'AMap.PolygonEditor'],
+        plugins: ['AMap.MouseTool', 'AMap.PolygonEditor'],
       })
         .then((AMap) => {
           window.AMap = AMap
@@ -184,14 +255,15 @@ async function initMap() {
       }
       map.destroy()
       map = null
+      storeMarker = null
     }
     map = new window.AMap.Map(mapEl.value, {
-      zoom: 13,
-      center: [...XINXIANG_CENTER],
+      zoom: defaultMapZoom(),
+      center: defaultMapCenter(),
       viewMode: '2D',
       mapStyle: 'amap://styles/normal',
     })
-    centerMapToUserOrXinxiang()
+    upsertStoreMarker()
 
     await nextTick()
     requestAnimationFrame(() => {
@@ -219,34 +291,10 @@ async function initMap() {
   }
 }
 
-function centerMapToUserOrXinxiang() {
-  if (!map || !window.AMap) return
-  const AMap = window.AMap
-  const fallback = () => {
-    map.setCenter([...XINXIANG_CENTER])
-    map.setZoom(13)
-  }
-  AMap.plugin('AMap.Geolocation', () => {
-    const geolocation = new AMap.Geolocation({
-      enableHighAccuracy: true,
-      timeout: 12000,
-      maximumAge: 60000,
-      convert: true,
-      showButton: false,
-      showMarker: false,
-      showCircle: false,
-      panToLocation: false,
-      zoomToAccuracy: true,
-    })
-    geolocation.getCurrentPosition((status, result) => {
-      if (status === 'complete' && result?.position) {
-        map.setCenter(result.position)
-        map.setZoom(Math.max(map.getZoom(), 14))
-      } else {
-        fallback()
-      }
-    })
-  })
+function centerMapToStoreOrFallback() {
+  if (!map) return
+  map.setCenter(defaultMapCenter())
+  map.setZoom(defaultMapZoom())
 }
 
 function closePolygonEditor() {
@@ -427,7 +475,7 @@ function resumeNewRegionDrawer() {
 function openNewRegion() {
   closeFormDrawer()
   resetForm()
-  centerMapToUserOrXinxiang()
+  centerMapToStoreOrFallback()
   showToast('请在地图上绘制配送范围（沿边界点击，双击结束闭合）', 'success')
   nextTick(() => startDrawPolygon())
 }
@@ -558,7 +606,9 @@ watch(formDrawerOpen, (open) => {
 
 onMounted(async () => {
   await nextTick()
-  await Promise.all([refreshList(), initMap()])
+  // 先拉门店坐标再初始化地图，避免默认落到新乡后再跳转
+  await Promise.all([refreshList(), loadStoreAnchor()])
+  await initMap()
 })
 
 /** keep-alive 切回标签页：地图画布高度可能需重算后才能正常响应点击 */
@@ -588,6 +638,7 @@ onUnmounted(() => {
     map = null
   }
   mapPolygon = null
+  storeMarker = null
 })
 </script>
 

@@ -201,6 +201,8 @@ function parsePrice(raw) {
 }
 
 function goBack() {
+  // 离开编辑页时清掉 KeepAlive 缓存，避免下次点「新建」带出上一份 SKU
+  resetForm()
   router.push({
     name: 'menu-retail-catalog',
     query: { store_id: String(storeId.value) },
@@ -223,7 +225,7 @@ async function handleSave() {
   const gallery = (spuForm.value.gallery_urls || []).map((u) => String(u || '').trim()).filter(Boolean)
 
   const skuRows = []
-  for (const row of skus.value) {
+  for (const [idx, row] of skus.value.entries()) {
     const price = parsePrice(row.unit_price_yuan)
     if (price == null || Number.isNaN(Number(price))) {
       showToast('请填写有效的销售价', 'error')
@@ -246,7 +248,7 @@ async function handleSave() {
       sku_code: String(row.sku_code || '').trim() || null,
       unit_price_yuan: price,
       list_price_yuan: list_py,
-      sort_order: Number(row.sort_order) || 0,
+      sort_order: idx,
       is_on_shelf: Boolean(row.is_on_shelf),
     }
     if (row.id) skuPayload.id = row.id
@@ -337,13 +339,13 @@ onMounted(async () => {
   }
 })
 
-/** KeepAlive 缓存页：切换商品 id 时必须重载，否则会用上一个商品的 SKU id 保存 */
+/** KeepAlive：商品 id 变了才重载，避免切走再回来把刚加的 SKU 清掉 */
 watch(spuId, () => {
   void loadSpuDetail()
 })
 
 onActivated(() => {
-  void loadSpuDetail()
+  void fetchCategories()
 })
 </script>
 

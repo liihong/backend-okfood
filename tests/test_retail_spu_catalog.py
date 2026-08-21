@@ -140,3 +140,12 @@ def test_save_retail_spu_bundle_create_does_not_flush_empty_title():
     apply_at = src.index("_apply_spu_fields")
     first_flush_at = src.index("db.flush()")
     assert apply_at < first_flush_at
+
+
+def test_sanitize_keeps_relative_upload_img_src():
+    """本地上传相对路径不得被 bleach 剥掉，否则详情图保存后丢失。"""
+    from app.services.retail.retail_html_sanitize import sanitize_retail_detail_html
+
+    html = sanitize_retail_detail_html('<p><img src="/static/uploads/a.jpg" alt="x"></p>')
+    assert html is not None
+    assert "/static/uploads/a.jpg" in html
