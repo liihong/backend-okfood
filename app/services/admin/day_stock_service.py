@@ -177,6 +177,23 @@ def display_single_stock_remaining(
     return max(0, int(breakdown.remaining))
 
 
+def resolve_single_stock_remaining_display(
+    breakdown: DayStockBreakdown,
+    *,
+    business_date: date,
+    total_stock: int | None,
+    subscription_floor: date | None = None,
+) -> int:
+    """全系统「单次可售剩余」展示唯一出口：周菜单、详情、顶卡、下单校验展示均须调用，禁止各端手写 max(0, …)。"""
+    if total_stock is None:
+        return 0
+    return display_single_stock_remaining(
+        breakdown,
+        business_date=business_date,
+        subscription_floor=subscription_floor,
+    )
+
+
 def get_day_stock_breakdown(
     db: Session,
     *,

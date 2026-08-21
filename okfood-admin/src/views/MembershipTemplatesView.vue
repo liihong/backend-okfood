@@ -12,8 +12,10 @@ import {
   apiForm,
   apiJson,
   adminAccessToken,
-  adminStoreId,
+  adminStoreBranding,
+  DEFAULT_SIDEBAR_STORE_NAME,
   dishImageDisplayUrl,
+  fetchAdminStoreBranding,
   handleAdminLogout,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
@@ -126,16 +128,17 @@ async function onCardPhotoUploadChange(uploadFile) {
   }
 }
 
-const qs = computed(() => {
-  const p = new URLSearchParams({ store_id: String(adminStoreId.value || 1) })
-  return p.toString()
+/** 样式图预览左上角：优先门店/租户品牌名，勿写死 OK饭 */
+const cardPreviewBrandName = computed(() => {
+  const name = String(adminStoreBranding.value?.store_name || '').trim()
+  return name || DEFAULT_SIDEBAR_STORE_NAME
 })
 
 async function fetchList() {
   if (!adminAccessToken.value) return
   loading.value = true
   try {
-    const data = await apiJson(`/api/admin/catalog/membership-templates?${qs.value}`, {}, { auth: true })
+    const data = await apiJson('/api/admin/catalog/membership-templates', {}, { auth: true })
     list.value = Array.isArray(data) ? data : []
   } catch (e) {
     if (e?.status === 401) {
@@ -224,7 +227,6 @@ async function saveForm() {
   }
   saving.value = true
   try {
-    const sid = encodeURIComponent(String(adminStoreId.value || 1))
     const common = {
       kind_label: kind,
       name,
@@ -241,13 +243,13 @@ async function saveForm() {
       is_active: Boolean(form.value.is_active),
     }
     if (editingId.value) {
-      await apiJson(`/api/admin/catalog/membership-templates/${editingId.value}?store_id=${sid}`, {
+      await apiJson(`/api/admin/catalog/membership-templates/${editingId.value}`, {
         method: 'PATCH',
         body: JSON.stringify(common),
       }, { auth: true })
       showToast('已保存')
     } else {
-      await apiJson(`/api/admin/catalog/membership-templates?store_id=${sid}`, {
+      await apiJson('/api/admin/catalog/membership-templates', {
         method: 'POST',
         body: JSON.stringify(common),
       }, { auth: true })
@@ -266,8 +268,7 @@ async function removeRow(row) {
   const ok = window.confirm(`确定删除「${row.name}」？`)
   if (!ok) return
   try {
-    const sid = encodeURIComponent(String(adminStoreId.value || 1))
-    await apiJson(`/api/admin/catalog/membership-templates/${row.id}?store_id=${sid}`, { method: 'DELETE' }, { auth: true })
+    await apiJson(`/api/admin/catalog/membership-templates/${row.id}`, { method: 'DELETE' }, { auth: true })
     showToast('已删除')
     await fetchList()
   } catch (e) {
@@ -275,7 +276,10 @@ async function removeRow(row) {
   }
 }
 
-onMounted(fetchList)
+onMounted(() => {
+  void fetchAdminStoreBranding()
+  void fetchList()
+})
 </script>
 
 <template>
@@ -334,7 +338,7 @@ onMounted(fetchList)
                   />
                 </div>
                 <div v-else :class="cardPreviewClass(row)">
-                  <span class="mcard-mini-brand">OK 饭</span>
+                  <span class="mcard-mini-brand">{{ cardPreviewBrandName }}</span>
                   <span class="mcard-mini-name">{{ row.name || '—' }}</span>
                   <span class="mcard-mini-meals">{{ row.meals_grant }}餐</span>
                 </div>
@@ -792,6 +796,10 @@ onMounted(fetchList)
   opacity: 0.9;
   position: relative;
   z-index: 1;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mcard-mini-name {

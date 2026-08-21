@@ -286,11 +286,15 @@ def admin_store_branding(
     admin_username: str = Depends(admin_or_delivery_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """当前门店侧栏品牌：名称与 Logo（未配置时字段为 null，前端回落默认 OK饭）。"""
-    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    """当前门店侧栏品牌：名称与 Logo（未配置时回落租户名称，前端再回落默认 OK饭）。"""
+    tid, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     cfg = get_store_config(db, store_id=store_id)
+    store_name = (cfg.store_name or "").strip()
+    if not store_name:
+        tenant = db.get(Tenant, tid)
+        store_name = (tenant.name or "").strip() if tenant else ""
     payload = AdminStoreBrandingOut(
-        store_name=(cfg.store_name or "").strip() or None,
+        store_name=store_name or None,
         store_logo_url=(cfg.store_logo_url or "").strip() or None,
     )
     return success(data=dump_model(payload), msg="获取成功")

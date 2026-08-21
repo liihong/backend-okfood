@@ -163,7 +163,6 @@ def membership_template_dump(row: MembershipCardTemplate) -> dict:
         kl = _fallback_kind_from_period(row.period_kind)
     return {
         "id": int(row.id),
-        "store_id": int(row.store_id),
         "tenant_id": int(row.tenant_id),
         "kind_label": kl[:64],
         "period_kind": row.period_kind,

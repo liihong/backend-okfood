@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 class MembershipCardTemplateOut(BaseModel):
     id: int
-    store_id: int
     tenant_id: int
     kind_label: str = Field(..., description="种类：手填，如 周卡/季卡/午晚餐卡")
     period_kind: str | None = Field(None, description="可选占位 weekly|monthly，后续自动化可用")

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, Iterable
@@ -40,40 +39,9 @@ if TYPE_CHECKING:
     from app.services.admin.day_stock_service import DayStockBreakdown
 
 
-# 小程序读库存：短 TTL 跨请求复用订阅份数/零售占用，午晚餐切换时减少重复扫表
-_STOCK_SUB_TOTALS_CACHE: dict[tuple[int, tuple[date, ...], str], tuple[float, dict[date, int]]] = {}
-_STOCK_PAID_SINGLE_CACHE: dict[tuple[int, tuple[date, ...], str], tuple[float, dict[date, int]]] = {}
-_STOCK_READ_CACHE_TTL_SEC = 60.0
-_process_metrics_cache: dict = {}
-_process_metrics_cache_at: float = 0.0
-
-
-def _process_metrics_cache_ref() -> dict:
-    """delivery_sheet_metrics 进程内短 TTL 缓存（键为 (date, period)）。"""
-    global _process_metrics_cache, _process_metrics_cache_at
-    now = time.time()
-    if now - _process_metrics_cache_at > _STOCK_READ_CACHE_TTL_SEC:
-        _process_metrics_cache = {}
-        _process_metrics_cache_at = now
-    return _process_metrics_cache
-
-
 def invalidate_menu_day_stock_read_caches(store_id: int | None = None) -> None:
-    """失效小程序/周菜单读路径的进程内短 TTL 缓存（订阅份数、单次零售占用、metrics）。"""
-    global _process_metrics_cache, _process_metrics_cache_at
-    _process_metrics_cache = {}
-    _process_metrics_cache_at = 0.0
-    if store_id is None:
-        _STOCK_SUB_TOTALS_CACHE.clear()
-        _STOCK_PAID_SINGLE_CACHE.clear()
-        return
-    sid = int(store_id)
-    for key in list(_STOCK_SUB_TOTALS_CACHE):
-        if key[0] == sid:
-            _STOCK_SUB_TOTALS_CACHE.pop(key, None)
-    for key in list(_STOCK_PAID_SINGLE_CACHE):
-        if key[0] == sid:
-            _STOCK_PAID_SINGLE_CACHE.pop(key, None)
+    """库存写操作后占位失效（跨请求进程内缓存已移除，保留接口供调用方统一触发仪表盘缓存清理）。"""
+    _ = store_id
 
 
 def _week_start(d: date) -> date:
@@ -180,15 +148,7 @@ def dashboard_meal_totals_by_dates(
     if not uniq:
         return {}
 
-    use_process_cache = metrics_cache is None
-    if use_process_cache:
-        cache_key = (sid, tuple(uniq), period)
-        now = time.time()
-        hit = _STOCK_SUB_TOTALS_CACHE.get(cache_key)
-        if hit and now - hit[0] < _STOCK_READ_CACHE_TTL_SEC:
-            return dict(hit[1])
-
-    cache = metrics_cache if metrics_cache is not None else _process_metrics_cache_ref()
+    cache = metrics_cache if metrics_cache is not None else {}
     out: dict[date, int] = {}
     for d in uniq:
         m = delivery_sheet_metrics_for_period(
@@ -199,9 +159,6 @@ def dashboard_meal_totals_by_dates(
             metrics_cache=cache,
         )
         out[d] = int(m.meal_total)
-
-    if use_process_cache:
-        _STOCK_SUB_TOTALS_CACHE[cache_key] = (time.time(), dict(out))
     return out
 
 
@@ -239,12 +196,6 @@ def paid_single_retail_portions_by_dates(
     sid = int(store_id)
     period = normalize_meal_period(meal_period)
 
-    cache_key = (sid, tuple(uniq), period)
-    now = time.time()
-    hit = _STOCK_PAID_SINGLE_CACHE.get(cache_key)
-    if hit and now - hit[0] < _STOCK_READ_CACHE_TTL_SEC:
-        return dict(hit[1])
-
     rows = db.execute(
         select(
             SingleMealOrder.delivery_date,
@@ -261,7 +212,6 @@ def paid_single_retail_portions_by_dates(
     for d, qty in rows:
         if d is not None:
             out[d] = int(qty or 0)
-    _STOCK_PAID_SINGLE_CACHE[cache_key] = (time.time(), dict(out))
     return out
 
 
@@ -417,26 +367,19 @@ def _single_order_stock_info_from_breakdown(
     subscription_floor: date | None = None,
 ) -> SingleOrderStockInfo:
     """由 ``get_day_stock_breakdown`` 构造单次可售信息，禁止在此处重复写剩余公式。"""
-    from app.services.admin.day_stock_service import display_single_stock_remaining
+    from app.services.admin.day_stock_service import resolve_single_stock_remaining_display
 
     sub = int(breakdown.delivery_total) + int(breakdown.pickup_total)
     paid = int(breakdown.single_retail_total)
-    if total_stock is None:
-        return SingleOrderStockInfo(
-            limited=True,
-            total_stock=None,
-            subscription_meals=sub,
-            paid_single_portions=paid,
-            remaining=0,
-        )
-    rem = display_single_stock_remaining(
+    rem = resolve_single_stock_remaining_display(
         breakdown,
         business_date=business_date,
+        total_stock=total_stock,
         subscription_floor=subscription_floor,
     )
     return SingleOrderStockInfo(
         limited=True,
-        total_stock=int(total_stock),
+        total_stock=None if total_stock is None else int(total_stock),
         subscription_meals=sub,
         paid_single_portions=paid,
         remaining=rem,
@@ -672,9 +615,9 @@ def weekly_slot_stock_extras(
     paid_by_date: dict[date, int] | None = None,
     skip_subscription_stats: bool = False,
 ) -> list[dict[str, Any]]:
-    """为每槽位附加 subscription_meals_for_day、single_retail_paid_portions、single_stock_remaining；total_stock 由调用方自 payload 已带明。
+    """为每槽位附加 subscription_meals_for_day、single_retail_paid_portions、single_stock_remaining；total_stock 由调用方自 payload 已带。
 
-    管理端本周菜单应传入 ``sub_by_date`` / ``paid_by_date``（与营业概览同源）；未传时回退旧聚合逻辑。
+    剩余份数统一由 ``resolve_single_stock_remaining_display`` 计算（与小程序 ``single_stock_remaining`` 同源）。
 
     ``skip_subscription_stats=True`` 时不查会员履约/已付单次（下周预告维护用，显著减库压）。
     """
@@ -686,7 +629,7 @@ def weekly_slot_stock_extras(
     if skip_subscription_stats:
         breakdown_by_date: dict[date, Any] = {}
     else:
-        from app.services.admin.day_stock_service import get_day_stock_breakdown_by_dates
+        from app.services.admin.day_stock_service import get_day_stock_breakdown_by_dates, resolve_single_stock_remaining_display
 
         # 与营业概览 / 小程序 / 下单校验同源：一次批量拉拆解，禁止在循环内逐槽位重算
         breakdown_by_date = get_day_stock_breakdown_by_dates(
@@ -729,7 +672,11 @@ def weekly_slot_stock_extras(
             base["waste_total"] = int(bd.waste_total)
         else:
             base["total_stock"] = int(cap_raw)
-            base["single_stock_remaining"] = 0 if bd.remaining is None else max(0, int(bd.remaining))
+            base["single_stock_remaining"] = resolve_single_stock_remaining_display(
+                bd,
+                business_date=menu_date,
+                total_stock=int(cap_raw),
+            )
             base["waste_total"] = int(bd.waste_total)
         out.append(base)
     return out

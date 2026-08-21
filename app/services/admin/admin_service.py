@@ -1716,11 +1716,12 @@ def _dashboard_meal_period_stock_fields(
 ) -> dict:
     """顶卡午/晚餐库存扩展字段（损耗、剩余、晚餐 metrics）；午餐/晚餐 total_stock 分字段读取，互不覆盖。"""
     from app.models.enums import MealPeriod
-    from app.services.admin.day_stock_service import get_day_stock_breakdown
+    from app.services.admin.day_stock_service import get_day_stock_breakdown, resolve_single_stock_remaining_display
     from app.services.delivery.delivery_sheet_service import delivery_sheet_metrics_for_period
     from app.services.admin.menu_day_stock_service import (
         paid_single_retail_portions_by_dates,
         weekly_menu_dinner_day_total_stock,
+        weekly_menu_lunch_day_total_stock,
     )
 
     sid = int(store_id)
@@ -1738,6 +1739,8 @@ def _dashboard_meal_period_stock_fields(
         meal_period=MealPeriod.DINNER.value,
         metrics_cache=metrics_cache,
     )
+    lunch_cap = weekly_menu_lunch_day_total_stock(db, anchor, store_id=sid)
+    dinner_cap = weekly_menu_dinner_day_total_stock(db, anchor, store_id=sid)
     today_dinner_m = delivery_sheet_metrics_for_period(
         db,
         delivery_date=anchor,
@@ -1765,7 +1768,11 @@ def _dashboard_meal_period_stock_fields(
     )
     return {
         "today_lunch_waste_total": lunch_bd.waste_total,
-        "today_lunch_remaining": lunch_bd.remaining,
+        "today_lunch_remaining": resolve_single_stock_remaining_display(
+            lunch_bd,
+            business_date=anchor,
+            total_stock=lunch_cap,
+        ),
         # 晚餐顶卡「后厨产出量」：today_dinner_menu_day_total_stock（勿与午餐 today_menu_day_total_stock 混读）
         "today_dinner_menu_day_total_stock": weekly_menu_dinner_day_total_stock(
             db, anchor, store_id=sid
@@ -1779,7 +1786,11 @@ def _dashboard_meal_period_stock_fields(
         "today_dinner_single_retail_total_quantity": dinner_bd.single_retail_total,
         "tomorrow_dinner_single_retail_total_quantity": int(tomorrow_dinner_retail.get(day_after, 0)),
         "today_dinner_waste_total": dinner_bd.waste_total,
-        "today_dinner_remaining": dinner_bd.remaining,
+        "today_dinner_remaining": resolve_single_stock_remaining_display(
+            dinner_bd,
+            business_date=anchor,
+            total_stock=dinner_cap,
+        ),
         "today_dinner_prep_metrics": _dashboard_day_prep_metrics_out(today_dinner_m),
         "tomorrow_dinner_prep_metrics": _dashboard_day_prep_metrics_out(tomorrow_dinner_m),
     }
@@ -1859,7 +1870,7 @@ def _dashboard_membership_kw(db: Session, *, store_id: int) -> dict[str, int]:
 
 # 按门店 + 锚定日缓存概览结果（进程内，单 worker 有效）
 _dashboard_anchor_summary_cache: dict[tuple[int, date], tuple[float, DashboardMealSummaryOut]] = {}
-_DASHBOARD_ANCHOR_SUMMARY_TTL_TODAY_SEC = 90.0
+_DASHBOARD_ANCHOR_SUMMARY_TTL_TODAY_SEC = 0.0
 _DASHBOARD_ANCHOR_SUMMARY_TTL_OTHER_SEC = 300.0
 
 
