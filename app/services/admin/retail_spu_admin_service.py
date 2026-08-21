@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.store import Store
@@ -76,9 +77,9 @@ def save_retail_spu_bundle(db: Session, *, store_id: int, body: StoreRetailSpuBu
 
     try:
         if spu_id is None:
+            # title 在库中 NOT NULL 且无默认值，必须先填字段再 flush，否则 MySQL 报 1048
             row = StoreRetailSpu(store_id=int(store_id))
             db.add(row)
-            db.flush()
         else:
             row = db.get(StoreRetailSpu, int(spu_id))
             if not row or int(row.store_id) != int(store_id):
@@ -114,6 +115,12 @@ def save_retail_spu_bundle(db: Session, *, store_id: int, body: StoreRetailSpuBu
     except HTTPException:
         db.rollback()
         raise
+    except IntegrityError as e:
+        db.rollback()
+        s = str(e).lower()
+        if "duplicate" in s or "1062" in s or "uk_srp_spu_spec" in s:
+            raise HTTPException(status_code=400, detail="该商品下已有相同规格名") from None
+        raise HTTPException(status_code=400, detail="商品保存失败，请检查填写内容后重试") from None
     except Exception:
         db.rollback()
         raise

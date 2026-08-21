@@ -125,3 +125,18 @@ def test_get_retail_sku_public(catalog_db: Session):
     assert sku is not None
     assert sku["retail_product_id"] == 10
     assert "1日体验" in sku["title"]
+
+
+def test_save_retail_spu_bundle_create_does_not_flush_empty_title():
+    """新建时不得在 title 仍为空时 flush；MySQL 下会 1048 Column 'title' cannot be null。"""
+    import inspect
+
+    from app.services.admin.retail_spu_admin_service import save_retail_spu_bundle
+
+    src = inspect.getsource(save_retail_spu_bundle)
+    create_block = src.split("if spu_id is None:", 1)[1].split("else:", 1)[0]
+    assert "db.flush()" not in create_block
+    assert "_apply_spu_fields" in src
+    apply_at = src.index("_apply_spu_fields")
+    first_flush_at = src.index("db.flush()")
+    assert apply_at < first_flush_at
