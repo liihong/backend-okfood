@@ -531,6 +531,38 @@ def build_miniprogram_pay_params(
     return {k: str(v) for k, v in pay_params.items()}
 
 
+# 微信支付官方「回调通知注意事项」出口网段；与 .env 白名单取并集，避免漏配深圳/香港等段导致已扣款不入账。
+WECHAT_PAY_OFFICIAL_NOTIFY_NETWORKS: tuple[str, ...] = (
+    "101.226.103.0/25",
+    "140.207.54.0/25",
+    "121.51.58.128/25",
+    "183.3.234.0/25",
+    "58.251.80.0/25",
+    "121.51.30.128/25",
+    "203.205.219.128/25",
+    "81.71.199.64/32",
+    "81.71.198.25/32",
+    "81.71.199.59/32",
+    "182.254.48.0/24",
+)
+
+
+def _ip_in_allow_parts(addr: ipaddress.IPv4Address | ipaddress.IPv6Address, parts: list[str]) -> bool:
+    ip_s = str(addr)
+    for p in parts:
+        if not p:
+            continue
+        try:
+            if "/" in p:
+                if addr in ipaddress.ip_network(p, strict=False):
+                    return True
+            elif ip_s == p:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def notify_client_ip_allowed(remote_ip: str) -> bool:
     raw = (settings.WECHAT_PAY_IP_WHITELIST or "").strip()
     if not raw:
@@ -543,18 +575,10 @@ def notify_client_ip_allowed(remote_ip: str) -> bool:
         addr = ipaddress.ip_address(ip)
     except ValueError:
         return False
-    for part in raw.split(","):
-        p = part.strip()
-        if not p:
-            continue
-        try:
-            if "/" in p:
-                if addr in ipaddress.ip_network(p, strict=False):
-                    return True
-            elif ip == p:
-                return True
-        except ValueError:
-            continue
+    env_parts = [p.strip() for p in raw.split(",") if p.strip()]
+    official_parts = list(WECHAT_PAY_OFFICIAL_NOTIFY_NETWORKS)
+    if _ip_in_allow_parts(addr, official_parts) or _ip_in_allow_parts(addr, env_parts):
+        return True
     logger.warning("微信支付回调 IP 不在白名单: %s", ip)
     return False
 

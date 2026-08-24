@@ -273,12 +273,8 @@ async function loadDetail() {
     if (isMemberCardSingleMealOrder(order.value)) {
       payIntent.value = 'balance'
     }
-    // 仅微信支付意向：微信已扣款但异步通知未达时静默拉单
-    if (
-      order.value.pay_status === '未支付' &&
-      order.value.fulfillment_status === 'pending' &&
-      payIntent.value !== 'balance'
-    ) {
+    // 仅微信支付意向：微信已扣款但异步通知未达时静默拉单（含超时取消后的未支付单）
+    if (order.value.pay_status === '未支付' && payIntent.value !== 'balance') {
       try {
         const synced = await syncSingleMealWechatPayResult(orderId.value)
         if (synced && typeof synced === 'object' && synced.pay_status === '已支付') {

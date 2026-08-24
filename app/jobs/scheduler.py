@@ -158,12 +158,12 @@ def job_low_balance_notify() -> None:
 
 
 def job_expire_unpaid_single_meal_orders() -> None:
-    """每 2 分钟：单次零售未支付超过 30 分钟的订单自动取消。"""
+    """每 2 分钟：单次零售未支付超过 30 分钟的订单自动取消（取消前向微信查单，已扣款则入账）。"""
     from app.services.order.single_meal_order_service import expire_stale_unpaid_single_meal_orders
 
     db = SessionLocal()
     try:
-        n = expire_stale_unpaid_single_meal_orders(db)
+        n = expire_stale_unpaid_single_meal_orders(db, reconcile_wechat=True)
         if n:
             logger.info("单次零售超时未支付自动取消: count=%s", n)
     except Exception:

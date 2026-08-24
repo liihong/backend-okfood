@@ -568,8 +568,25 @@ def try_restore_single_meal_fulfillment_after_timeout_cancel(
         )
 
 
-def expire_stale_unpaid_single_meal_orders(db: Session, *, member_id: int | None = None) -> int:
-    """单次零售：创建超过 ``UNPAID_SINGLE_MEAL_ORDER_EXPIRE_MINUTES`` 仍未支付则自动取消（履约 cancelled）。"""
+def _wechat_query_reason_means_definitely_unpaid(reason: str) -> bool:
+    """超时取消前查单：仅在微信明确未支付/无单时才关单，查单失败或支付中则跳过以免误杀。"""
+    r = (reason or "").strip()
+    if r in ("not_paid", "wechat_order_not_found", "missing_out_trade_no"):
+        return True
+    if r == "PAY_USERPAYING":
+        return False
+    if r.startswith("trade_state_"):
+        return True
+    return False
+
+
+def expire_stale_unpaid_single_meal_orders(
+    db: Session, *, member_id: int | None = None, reconcile_wechat: bool = True
+) -> int:
+    """单次零售：创建超过 ``UNPAID_SINGLE_MEAL_ORDER_EXPIRE_MINUTES`` 仍未支付则自动取消（履约 cancelled）。
+
+    ``reconcile_wechat=True`` 时先向微信查单：已支付则走入账（含超时取消后补恢复），避免「微信已扣款、本地当未支付关掉」。
+    """
     cutoff = _unpaid_single_order_expire_cutoff()
     filters = [
         SingleMealOrder.pay_status == "未支付",
@@ -578,21 +595,53 @@ def expire_stale_unpaid_single_meal_orders(db: Session, *, member_id: int | None
     ]
     if member_id is not None:
         filters.append(SingleMealOrder.member_id == int(member_id))
-    stale_ids = list(db.scalars(select(SingleMealOrder.id).where(*filters)).all())
+    stale_ids = [int(x) for x in db.scalars(select(SingleMealOrder.id).where(*filters)).all()]
     if not stale_ids:
+        return 0
+
+    cancel_ids: list[int] = []
+    if reconcile_wechat:
+        for oid in stale_ids:
+            row = db.get(SingleMealOrder, oid)
+            if row is None or (row.pay_status or "").strip() != "未支付":
+                continue
+            if str(row.fulfillment_status or "").strip().lower() != "pending":
+                continue
+            try:
+                ok, reason = sync_single_meal_order_from_wechat_query(db, int(row.member_id), oid)
+            except Exception:
+                logger.exception("超时取消前微信查单异常，本轮跳过取消 order_id=%s", oid)
+                continue
+            if ok:
+                logger.info("超时取消前微信查单已入账 order_id=%s reason=%s", oid, reason)
+                continue
+            if _wechat_query_reason_means_definitely_unpaid(reason):
+                cancel_ids.append(oid)
+            else:
+                logger.warning(
+                    "超时取消前微信查单未决，本轮不取消 order_id=%s reason=%s", oid, reason
+                )
+    else:
+        cancel_ids = list(stale_ids)
+
+    if not cancel_ids:
         return 0
     store_ids = list(
         db.scalars(
-            select(SingleMealOrder.store_id).where(SingleMealOrder.id.in_(stale_ids)).distinct()
+            select(SingleMealOrder.store_id).where(SingleMealOrder.id.in_(cancel_ids)).distinct()
         ).all()
     )
-    for oid in stale_ids:
+    for oid in cancel_ids:
         release_member_coupon_for_order(
             db, order_biz=CouponLockedOrderBiz.SINGLE_MEAL, order_id=int(oid)
         )
     db.execute(
         update(SingleMealOrder)
-        .where(SingleMealOrder.id.in_(stale_ids))
+        .where(
+            SingleMealOrder.id.in_(cancel_ids),
+            SingleMealOrder.pay_status == "未支付",
+            SingleMealOrder.fulfillment_status == "pending",
+        )
         .values(fulfillment_status="cancelled", courier_id=None)
     )
     db.commit()
@@ -601,7 +650,7 @@ def expire_stale_unpaid_single_meal_orders(db: Session, *, member_id: int | None
 
         for sid in store_ids:
             invalidate_stock_read_caches(int(sid))
-    return len(stale_ids)
+    return len(cancel_ids)
 
 
 def _assert_no_pending_unpaid_single_order(db: Session, member_id: int) -> None:
@@ -1132,6 +1181,20 @@ def get_member_single_meal_order(db: Session, member_id: int, order_id: int) -> 
     row = db.get(SingleMealOrder, order_id)
     if not row or int(row.member_id) != int(member_id):
         raise HTTPException(status_code=404, detail="订单不存在")
+    # 超时任务可能已把「微信已扣款、本地仍未支付」标成 cancelled；详情页再查一次微信补入账
+    if (row.pay_status or "").strip() == "未支付" and str(row.fulfillment_status or "").strip().lower() == "cancelled":
+        try:
+            ok, reason = sync_single_meal_order_from_wechat_query(db, int(member_id), int(order_id))
+            if ok:
+                row = db.get(SingleMealOrder, order_id) or row
+            else:
+                logger.info(
+                    "会员端单次订单详情微信查单未入账 order_id=%s reason=%s",
+                    order_id,
+                    reason,
+                )
+        except Exception:
+            logger.exception("会员端单次订单详情补同步微信支付失败 order_id=%s", order_id)
     out = _single_meal_order_row_to_out(db, row)
     from app.services.shared.store_config_service import get_store_config
 
