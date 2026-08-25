@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ from app.models.tenant_integration_settings import TenantIntegrationSettings
 from app.schemas.store_print import (
     CLOUD_PRINT_BRANDS,
     DEFAULT_SCENE_TEMPLATE,
+    DELIVERY_ENJOY_MEAL_KEY,
+    ENJOY_MEAL_QR_FALLBACK,
     PRINT_BRANDS,
     PRINT_SCENES,
     PRINT_TEMPLATES,
@@ -368,6 +371,11 @@ def create_print_job(
     if body.template_key:
         template_key = body.template_key
     expanded = _expand_items(body.items, copies_mode)
+    if template_key == DELIVERY_ENJOY_MEAL_KEY:
+        qr_url = _enjoy_meal_qr_url(db, tenant_id)
+        for item in expanded:
+            if not (item.qr_content or "").strip():
+                item.qr_content = qr_url
     job = StorePrintJob(
         store_id=int(store_id),
         tenant_id=int(tenant_id),
@@ -462,7 +470,36 @@ def test_print_profile(db: Session, *, tenant_id: int, store_id: int, profile_id
     return StorePrintJobOut(job_id=0, driver=prof.brand, status="success", printed_count=1)
 
 
-def list_print_templates(scene: str | None = None) -> list[dict[str, Any]]:
-    if scene:
-        return [t for t in PRINT_TEMPLATES if t["scene"] == scene]
-    return list(PRINT_TEMPLATES)
+def _enjoy_meal_qr_url(db: Session, tenant_id: int) -> str:
+    """袋贴加好友二维码：优先 extra_json.print.friend_qr_url。"""
+    row = db.get(TenantIntegrationSettings, int(tenant_id))
+    extra = _s(row.extra_json) if row is not None else ""
+    if extra:
+        try:
+            obj = json.loads(extra)
+            if isinstance(obj, dict):
+                print_cfg = obj.get("print") if isinstance(obj.get("print"), dict) else {}
+                raw_url = print_cfg.get("friend_qr_url") if print_cfg else None
+                url = _s(raw_url) if isinstance(raw_url, str) else ""
+                if url:
+                    return url
+        except (json.JSONDecodeError, TypeError):
+            pass
+    appid = _s(row.wx_mini_appid) if row is not None else ""
+    if appid:
+        return appid
+    return ENJOY_MEAL_QR_FALLBACK
+
+
+def list_print_templates(scene: str | None = None, tenant_id: int | None = None) -> list[dict[str, Any]]:
+    items = [t for t in PRINT_TEMPLATES if scene is None or t["scene"] == scene]
+    if tenant_id is None:
+        return list(items)
+    tid = int(tenant_id)
+    out: list[dict[str, Any]] = []
+    for t in items:
+        allowed = t.get("tenant_ids")
+        if allowed and tid not in allowed:
+            continue
+        out.append(t)
+    return out

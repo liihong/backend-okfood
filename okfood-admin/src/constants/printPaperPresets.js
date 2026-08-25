@@ -1,6 +1,7 @@
 /** 标签纸预设（宽×高 mm） */
 export const PAPER_PRESETS = [
   { value: '76x130', label: '76×130mm（顺丰面单）', width: 76, height: 130 },
+  { value: '60x90', label: '60×90mm（袋贴）', width: 60, height: 90 },
   { value: '40x30', label: '40×30mm', width: 40, height: 30 },
   { value: '80x50', label: '80×50mm', width: 80, height: 50 },
   { value: '80x60', label: '80×60mm', width: 80, height: 60 },

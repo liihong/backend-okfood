@@ -45,6 +45,13 @@ watch(
   },
 )
 
+watch(
+  () => editForm.value.store_pickup,
+  (v) => {
+    if (v) editForm.value.use_auto_area = false
+  },
+)
+
 /** 默认配送地址只读展示（与档案同步，不在此弹窗编辑） */
 const addressDisplayText = computed(() => (editForm.value.address || '').trim())
 
@@ -184,7 +191,10 @@ async function forceReinstateToDeliverySheet() {
 async function submitEditMember() {
   if (!editForm.value.phone) return
   if (profileLoading.value) return
-  if (!(editForm.value.address || '').trim()) {
+  const isStorePickup = editForm.value.store_pickup === true
+  const addressText = (editForm.value.address || '').trim()
+  // 配送到家才要求默认地址；门店自提到店取餐，无需维护配送地址
+  if (!isStorePickup && !addressText) {
     showToast('默认配送地址为空，请先在会员列表「地址」中维护后再保存', 'error')
     return
   }
@@ -195,12 +205,12 @@ async function submitEditMember() {
       phone: editForm.value.phone,
       name: editForm.value.name.trim(),
       remarks: editForm.value.remarks.trim() || null,
-      address: editForm.value.address.trim() || null,
+      address: addressText || null,
       daily_meal_units: Math.max(1, Math.min(50, Number(editForm.value.daily_meal_units) || 1)),
       delivery_start_date: String(editForm.value.delivery_start_date ?? '').trim()
         ? String(editForm.value.delivery_start_date).trim().slice(0, 10)
         : null,
-      store_pickup: editForm.value.store_pickup === true,
+      store_pickup: isStorePickup,
       skip_subscription_saturday: editForm.value.skip_subscription_saturday === true,
       delivery_deferred: editForm.value.delivery_deferred === true,
     }
@@ -208,11 +218,14 @@ async function submitEditMember() {
     if (balanceVal !== editInitialBalance.value) {
       payload.balance = balanceVal
     }
-    if (editForm.value.use_auto_area) {
-      payload.use_auto_area = true
-    } else {
-      const dr = editForm.value.delivery_region_id
-      payload.delivery_region_id = dr === '' || dr == null ? null : Number(dr)
+    // 自提且无地址时不提交划区，避免后端因无默认地址拒绝保存
+    if (!(isStorePickup && !addressText)) {
+      if (editForm.value.use_auto_area) {
+        payload.use_auto_area = true
+      } else {
+        const dr = editForm.value.delivery_region_id
+        payload.delivery_region_id = dr === '' || dr == null ? null : Number(dr)
+      }
     }
     const pt = String(editForm.value.plan_type || '次卡').trim() || '次卡'
     if (pt !== editInitialPlanType.value) {
@@ -301,12 +314,15 @@ async function submitEditMember() {
                   <h2 class="mem-addr-title">默认配送地址</h2>
                 </div>
                 <p class="mem-addr-foot">
-                  注：如需修改地址，请前往地址库或通过工单重新绑定。
+                  注：门店自提无需配送地址；如需修改地址，请前往地址库或通过工单重新绑定。
                 </p>
               </div>
               <div class="mem-addr-box">
                 <p class="mem-addr-text">
-                  {{ addressDisplayText || '未设置配送地址' }}
+                  {{
+                    addressDisplayText ||
+                    (editForm.store_pickup ? '门店自提无需配送地址' : '未设置配送地址')
+                  }}
                 </p>
               </div>
             </section>
@@ -414,10 +430,16 @@ async function submitEditMember() {
               </div>
 
               <label class="mem-auto-chk mem-auto-chk--el">
-                <el-checkbox v-model="editForm.use_auto_area">保存时按当前地址重新自动划区</el-checkbox>
+                <el-checkbox v-model="editForm.use_auto_area" :disabled="editForm.store_pickup">
+                  保存时按当前地址重新自动划区
+                </el-checkbox>
               </label>
               <p class="mem-hint-soft">
-                未勾选时：保存会先按地址地理编码划区，再以您所选片区覆盖。勾选后忽略手动片区。
+                {{
+                  editForm.store_pickup
+                    ? '门店自提不参与配送划区，无需默认配送地址即可保存。'
+                    : '未勾选时：保存会先按地址地理编码划区，再以您所选片区覆盖。勾选后忽略手动片区。'
+                }}
               </p>
 
               <div class="mem-chk-band">

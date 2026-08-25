@@ -24,6 +24,7 @@ CLOUD_PRINT_BRANDS: frozenset[str] = frozenset({"xprinter_cloud_label", "feie_la
 
 PAPER_PRESETS: dict[str, tuple[int, int]] = {
     "76x130": (76, 130),
+    "60x90": (60, 90),
     "80x60": (80, 60),
     "80x50": (80, 50),
     "100x80": (100, 80),
@@ -31,6 +32,10 @@ PAPER_PRESETS: dict[str, tuple[int, int]] = {
     "100x180": (100, 180),
     "40x30": (40, 30),
 }
+
+# Hello轻厨（租户 3）袋贴模板仅对该租户展示
+ENJOY_MEAL_TENANT_ID = 3
+DELIVERY_ENJOY_MEAL_KEY = "delivery_enjoy_meal"
 
 PRINT_TEMPLATES: list[dict[str, Any]] = [
     {
@@ -56,6 +61,13 @@ PRINT_TEMPLATES: list[dict[str, Any]] = [
         "scene": "delivery_sheet",
         "name": "大字片区",
         "description": "片区突出，便于分拣",
+    },
+    {
+        "key": DELIVERY_ENJOY_MEAL_KEY,
+        "scene": "delivery_sheet",
+        "name": "用餐愉快袋贴",
+        "description": "竖版袋贴：姓名/餐别大字、食用提示、日期、扫码加好友（建议 60×90mm）",
+        "tenant_ids": [ENJOY_MEAL_TENANT_ID],
     },
     {
         "key": "delivery_meal_full",
@@ -92,6 +104,13 @@ DEFAULT_SCENE_TEMPLATE: dict[str, str] = {
 # 备餐面单模板底部固定提示
 DELIVERY_MEAL_FULL_TIPS = "1.若暂不吃，优先建议冷藏保存！"
 
+# Hello轻厨袋贴固定文案
+ENJOY_MEAL_GREETING = "用餐愉快哦！"
+ENJOY_MEAL_TIP_1 = "1.酱汁根据个人口味酌量添加"
+ENJOY_MEAL_TIP_2 = "2.若暂时不吃，优先建议冷藏保鲜！"
+ENJOY_MEAL_QR_HINT = "扫码添加好友"
+ENJOY_MEAL_QR_FALLBACK = "Hello轻厨"
+
 
 class LabelItemIn(BaseModel):
     """单张标签业务字段（前后端共用结构）。"""
@@ -113,6 +132,7 @@ class LabelItemIn(BaseModel):
     shop_order_id: str = Field("", description="顺丰商家订单号（推单 shop_order_id）")
     sf_order_id: str = Field("", description="顺丰运单号（条码内容）")
     store_pickup: bool = Field(False, description="是否自提")
+    qr_content: str = Field("", description="袋贴底部二维码内容（加好友链接等）")
     order_kind: LabelOrderKind = Field(
         "",
         description="订单类别：delivery=订阅配送；retail=零售单次；mall=商城零售；空=按订阅配送处理",

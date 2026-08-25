@@ -296,6 +296,7 @@ def admin_store_branding(
     payload = AdminStoreBrandingOut(
         store_name=store_name or None,
         store_logo_url=(cfg.store_logo_url or "").strip() or None,
+        tenant_id=int(tid),
     )
     return success(data=dump_model(payload), msg="获取成功")
 

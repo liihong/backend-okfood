@@ -207,13 +207,16 @@ export function syncAdminStoreBrandingFromPayload(data) {
   }
   const nameRaw = raw.store_name != null ? String(raw.store_name).trim() : ''
   const logoRaw = raw.store_logo_url != null ? String(raw.store_logo_url).trim() : ''
-  if (!nameRaw && !logoRaw) {
+  const tidNum = Number(raw.tenant_id)
+  const tenantId = Number.isFinite(tidNum) && tidNum > 0 ? tidNum : null
+  if (!nameRaw && !logoRaw && tenantId == null) {
     adminStoreBranding.value = null
     return
   }
   adminStoreBranding.value = {
     store_name: nameRaw || null,
     store_logo_url: logoRaw || null,
+    tenant_id: tenantId,
   }
 }
 

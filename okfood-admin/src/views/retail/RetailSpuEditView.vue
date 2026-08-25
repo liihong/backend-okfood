@@ -35,6 +35,10 @@ const loading = ref(false)
 const saving = ref(false)
 const coverUploading = ref(false)
 const coverUploadKey = ref(0)
+/** 正在上传的轮播下标（extraGallery 的 index），null 表示空闲 */
+const galleryUploadingIndex = ref(null)
+/** 用于上传后重置 el-upload，以便可重复选择同一文件 */
+const galleryUploadKeys = ref({})
 const categories = ref([])
 
 const spuForm = ref({
@@ -130,15 +134,20 @@ async function loadSpuDetail() {
   }
 }
 
+/** 上传图片到 OSS，成功返回 url */
+async function uploadImageFile(file) {
+  const fd = new FormData()
+  fd.append('file', file)
+  const data = await apiForm('/api/admin/upload', fd, { auth: true })
+  return data && typeof data.url === 'string' ? data.url.trim() : ''
+}
+
 async function onCoverUploadChange(uploadFile) {
   const file = uploadFile?.raw
   if (!file || !file.type.startsWith('image/')) return
   coverUploading.value = true
   try {
-    const fd = new FormData()
-    fd.append('file', file)
-    const data = await apiForm('/api/admin/upload', fd, { auth: true })
-    const url = data && typeof data.url === 'string' ? data.url.trim() : ''
+    const url = await uploadImageFile(file)
     if (url) {
       const rest = (spuForm.value.gallery_urls || []).slice(1)
       spuForm.value.gallery_urls = [url, ...rest]
@@ -149,6 +158,27 @@ async function onCoverUploadChange(uploadFile) {
   } finally {
     coverUploading.value = false
     coverUploadKey.value += 1
+  }
+}
+
+async function onGalleryUploadChange(index, uploadFile) {
+  const file = uploadFile?.raw
+  if (!file || !file.type.startsWith('image/')) return
+  galleryUploadingIndex.value = index
+  try {
+    const url = await uploadImageFile(file)
+    if (url) {
+      updateExtraGallery(index, url)
+      showToast('轮播图已上传', 'success')
+    }
+  } catch (e) {
+    showToast(e instanceof Error ? e.message : '上传失败', 'error')
+  } finally {
+    galleryUploadingIndex.value = null
+    galleryUploadKeys.value = {
+      ...galleryUploadKeys.value,
+      [index]: (galleryUploadKeys.value[index] || 0) + 1,
+    }
   }
 }
 
@@ -424,16 +454,37 @@ onActivated(() => {
         </div>
 
         <div v-if="extraGallery.length" class="retail-spu-edit__gallery-list">
-          <div v-for="(url, gi) in extraGallery" :key="gi" class="retail-spu-edit__gallery-row">
-            <span class="retail-spu-edit__gallery-label">轮播{{ gi + 2 }}</span>
-            <el-input
-              :model-value="url"
-              placeholder="https://"
-              clearable
-              size="small"
-              @update:model-value="(v) => updateExtraGallery(gi, v)"
-            />
-            <el-button type="danger" link size="small" @click="removeGalleryUrl(gi)">删</el-button>
+          <div v-for="(url, gi) in extraGallery" :key="gi" class="retail-spu-edit__gallery-item">
+            <el-upload
+              :key="`g-${gi}-${galleryUploadKeys[gi] || 0}`"
+              class="retail-spu-edit__gallery-upload"
+              :show-file-list="false"
+              :auto-upload="false"
+              :disabled="galleryUploadingIndex === gi"
+              accept="image/*"
+              @change="(f) => onGalleryUploadChange(gi, f)"
+            >
+              <div
+                class="retail-spu-edit__gallery-box"
+                :class="{ 'retail-spu-edit__gallery-box--empty': !url }"
+              >
+                <img
+                  v-if="url"
+                  :src="dishImageDisplayUrl(url)"
+                  alt=""
+                  class="retail-spu-edit__gallery-img"
+                />
+                <div v-else class="retail-spu-edit__gallery-placeholder">
+                  <Camera :size="18" stroke-width="1.5" />
+                  <span>{{ galleryUploadingIndex === gi ? '上传中' : '上传' }}</span>
+                </div>
+                <div v-if="url" class="retail-spu-edit__cover-mask">更换</div>
+              </div>
+            </el-upload>
+            <div class="retail-spu-edit__gallery-item-meta">
+              <span class="retail-spu-edit__gallery-label">轮播{{ gi + 2 }}</span>
+              <el-button type="danger" link size="small" @click="removeGalleryUrl(gi)">删</el-button>
+            </div>
           </div>
         </div>
       </section>
@@ -684,19 +735,73 @@ onActivated(() => {
   padding-top: 10px;
   border-top: 1px solid #f1f5f9;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
-.retail-spu-edit__gallery-row {
+.retail-spu-edit__gallery-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.retail-spu-edit__gallery-upload {
+  width: 80px;
+}
+
+.retail-spu-edit__gallery-upload :deep(.el-upload) {
+  width: 80px;
+  display: block;
+}
+
+.retail-spu-edit__gallery-box {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px dashed #cbd5e1;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.retail-spu-edit__gallery-box:hover {
+  border-color: var(--retail-primary);
+}
+
+.retail-spu-edit__gallery-box--empty {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+}
+
+.retail-spu-edit__gallery-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.retail-spu-edit__gallery-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: center;
+}
+
+.retail-spu-edit__gallery-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .retail-spu-edit__gallery-label {
   flex-shrink: 0;
-  width: 48px;
   font-size: 12px;
   color: #64748b;
 }

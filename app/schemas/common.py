@@ -26,6 +26,7 @@ class AdminStoreBrandingOut(BaseModel):
 
     store_name: str | None = None
     store_logo_url: str | None = None
+    tenant_id: int | None = None
 
 
 class AdminLoginTokenOut(TokenResponse):

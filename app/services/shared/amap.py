@@ -36,20 +36,25 @@ def _sanitize_amap_payload(data: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in data.items() if k not in drop}
 
 
-def geocode_address(address: str) -> tuple[float, float] | None:
+def geocode_address(address: str, *, city: str | None = None) -> tuple[float, float] | None:
     """
     高德地理编码：返回 (lng, lat)，GCJ-02。
+    ``city`` 可限定搜索城市（如「禹州市」），减少同名路段命中外市。
     失败返回 None，由上层决定片区与坐标策略。
     """
     key = settings.AMAP_KEY.strip()
     if not key:
         logger.warning("AMAP_KEY 未配置，跳过地理编码")
         return None
+    params: dict[str, Any] = {"address": address, "key": key}
+    city_q = (city or "").strip()
+    if city_q:
+        params["city"] = city_q
     try:
         with httpx.Client(timeout=10.0) as client:
             r = client.get(
                 "https://restapi.amap.com/v3/geocode/geo",
-                params={"address": address, "key": key},
+                params=params,
             )
             r.raise_for_status()
             data: dict[str, Any] = r.json()

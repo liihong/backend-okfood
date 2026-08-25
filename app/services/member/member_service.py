@@ -1789,27 +1789,50 @@ def admin_patch_member_profile(
         # 新建默认地址时尚未 flush，后续 get_default_address（自动/手动划区）可能查不到 pending 行
         db.flush()
 
+    # 先写入自提标记：划区与恢复配送按最新履约方式判断（自提不要求地址）
+    if set_store_pickup:
+
+        if store_pickup is None:
+
+            raise HTTPException(status_code=400, detail="门店自提标记不能为空")
+
+        m.store_pickup = bool(store_pickup)
+
     if use_auto_area:
 
         addr = get_default_address(db, mid)
 
         if not addr:
 
-            raise HTTPException(status_code=400, detail="该会员暂无默认配送地址，无法自动划区")
+            if not bool(m.store_pickup):
 
-        apply_auto_area_from_coords_or_geocode(db, addr)
+                raise HTTPException(status_code=400, detail="该会员暂无默认配送地址，无法自动划区")
+
+        else:
+
+            apply_auto_area_from_coords_or_geocode(db, addr)
 
     elif set_delivery_region_id:
 
-        admin_apply_manual_delivery_region(
+        addr = get_default_address(db, mid)
 
-            db,
+        if not addr:
 
-            member_id=mid,
+            if not bool(m.store_pickup):
 
-            delivery_region_id=delivery_region_id,
+                raise HTTPException(status_code=400, detail="该会员暂无默认配送地址，无法分配片区")
 
-        )
+        else:
+
+            admin_apply_manual_delivery_region(
+
+                db,
+
+                member_id=mid,
+
+                delivery_region_id=delivery_region_id,
+
+            )
 
     if set_balance:
 
@@ -1874,14 +1897,6 @@ def admin_patch_member_profile(
         else:
 
             m.delivery_start_date = None
-
-    if set_store_pickup:
-
-        if store_pickup is None:
-
-            raise HTTPException(status_code=400, detail="门店自提标记不能为空")
-
-        m.store_pickup = bool(store_pickup)
 
     if set_skip_subscription_saturday:
 

@@ -46,9 +46,9 @@
         </view>
       </view>
 
-      <view v-if="detail.detail_html" class="detail-card">
+      <view v-if="detailHtml" class="detail-card">
         <text class="detail-card__title">商品详情</text>
-        <rich-text class="detail-card__html" :nodes="detail.detail_html" />
+        <rich-text class="detail-card__html" :nodes="detailHtml" />
       </view>
 
       <view v-if="detail.purchase_notice" class="detail-card">
@@ -75,6 +75,7 @@ import { addCartItem } from '@/utils/retailCart/retailCartStorage.js'
 import { notifyRetailCartChanged, useRetailCart } from '@/utils/retailCart/useRetailCart.js'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { optimizeImageUrl } from '@/utils/imageUrl.js'
+import { fitRichTextHtml } from '@/utils/richTextHtml.js'
 
 const loading = ref(true)
 const detail = ref(null)
@@ -93,6 +94,9 @@ const gallery = computed(() => {
   if (!Array.isArray(urls)) return []
   return urls.map((u) => optimizeImageUrl(String(u || ''), null, 'detail')).filter(Boolean)
 })
+
+/** rich-text 不吃页面 CSS，需在 HTML 上写死 max-width 才能横向等比缩放 */
+const detailHtml = computed(() => fitRichTextHtml(detail.value?.detail_html))
 
 const priceText = computed(() => {
   const s = selectedSku.value
@@ -292,6 +296,9 @@ onMounted(() => {
   background: #fff;
   border-radius: 12px;
 }
+.detail-card {
+  overflow: hidden;
+}
 .spec-card__label,
 .qty-card__label,
 .detail-card__title {
@@ -342,9 +349,12 @@ onMounted(() => {
   font-size: 16px;
 }
 .detail-card__html {
+  width: 100%;
+  overflow: hidden;
   font-size: 14px;
   line-height: 1.6;
   color: #475569;
+  word-break: break-word;
 }
 .detail-card__notice {
   font-size: 13px;

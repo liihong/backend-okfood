@@ -103,9 +103,13 @@ def test_print_profile(
 
 @router.get("/store-print/templates")
 def list_print_templates(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
     scene: Annotated[str | None, Query(description="delivery_sheet / store_retail")] = None,
+    store_id: Annotated[int, Query(description="门店 id")] = 1,
 ):
-    items = svc.list_print_templates(scene)
+    tid, _ = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    items = svc.list_print_templates(scene, tenant_id=tid)
     return success(data=items, msg="获取成功")
 
 

@@ -68,6 +68,23 @@ export function buildTestLabelItems(scene, templateKey, storeName) {
     ]
   }
 
+  if (templateKey === 'delivery_enjoy_meal') {
+    return [
+      {
+        region: '东区',
+        store_name: store,
+        name: '曹女士',
+        meal_category: '午餐+果蔬汁卡',
+        units: 1,
+        delivery_date: deliveryDate,
+        product_title: '',
+        order_no: '',
+        store_pickup: false,
+        order_kind: 'delivery',
+      },
+    ]
+  }
+
   return [
     {
       region: '东区',

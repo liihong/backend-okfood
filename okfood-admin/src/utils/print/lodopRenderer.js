@@ -57,8 +57,8 @@ function mmStr(v) {
 }
 
 function effectiveHeight(layout, fallback) {
-  // 顺丰面单：始终用打印机配置的完整纸高（如 130mm），保证条码在同一页
-  if (layout?.layout_style === 'sf_waybill') {
+  // 顺丰面单 / 袋贴：始终用打印机配置的完整纸高，保证条码/二维码在同一页
+  if (layout?.layout_style === 'sf_waybill' || layout?.layout_style === 'enjoy_meal') {
     return Number(layout.paper_height_mm) || fallback
   }
   const content = Number(layout.content_height_mm)
@@ -87,6 +87,19 @@ function sfWaybillToTableHtml(layout) {
     `font-size:11px;font-weight:700;line-height:1.3;">` +
     `<span style="display:block;width:100%;text-align:center;">${store}</span>` +
     `<span style="position:absolute;right:0;top:0;white-space:nowrap;">${mode}</span></div>` +
+    body +
+    `</td></tr></table>`
+  )
+}
+
+function enjoyMealToTableHtml(layout) {
+  const w = Number(layout.paper_width_mm) || 60
+  const pad = Math.max(2, Number(layout.margin_left_mm) || 2)
+  const body = layout.table_html || ''
+  return (
+    `<table style="width:${w}mm;border-collapse:collapse;border:none;">` +
+    `<tr><td style="padding:${pad}mm ${pad}mm 1.5mm ${pad}mm;vertical-align:top;` +
+    `font-family:${PRINT_FONT};color:#000;line-height:1.35;">` +
     body +
     `</td></tr></table>`
   )
@@ -176,6 +189,27 @@ function addSfWaybillBarcodes(lodop, layout, paperH, pad, barWidth) {
   return added
 }
 
+/** 按 layout.barcodes 的绝对坐标叠加条码/二维码 */
+function addPositionedBarcodes(lodop, layout) {
+  let added = 0
+  for (const bc of layout.barcodes || []) {
+    const code = String(bc.code || '').trim()
+    if (!code) continue
+    const type = String(bc.code_type || '128Auto')
+    lodop.ADD_PRINT_BARCODE(
+      mmStr(Number(bc.y_mm) || 0),
+      mmStr(Number(bc.x_mm) || 0),
+      mmStr(Number(bc.width_mm) || 20),
+      mmStr(Number(bc.height_mm) || 20),
+      type,
+      code,
+    )
+    added += 1
+    lodop.SET_PRINT_STYLEA(0, 'ShowBarText', bc.show_text === false || type === 'QRCode' ? 0 : 1)
+  }
+  return added
+}
+
 /** @returns {number} 本次新增的打印项数量 */
 function addLayoutContent(lodop, layout, paperW, paperH) {
   if (layout.layout_style === 'sf_waybill') {
@@ -192,6 +226,13 @@ function addLayoutContent(lodop, layout, paperW, paperH) {
     if (hasBarcode) {
       added += addSfWaybillBarcodes(lodop, layout, paperH, pad, barWidth)
     }
+    return added
+  }
+  if (layout.layout_style === 'enjoy_meal') {
+    const html = enjoyMealToTableHtml(layout)
+    lodop.ADD_PRINT_HTM('0mm', '0mm', mmStr(paperW), mmStr(paperH), html)
+    let added = 1
+    added += addPositionedBarcodes(lodop, layout)
     return added
   }
   const html = layoutToHtml(layout, paperW, paperH)
