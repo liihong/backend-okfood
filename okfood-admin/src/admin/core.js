@@ -667,7 +667,7 @@ export function resolveMemberStatusFromLifecycle(raw, balance = null) {
   if (memberCardExpired(raw, bal) || (active && bal === 0)) return '已过期'
   if (!active) return '未开卡'
   if (bal <= 2) return '待续费'
-  return '配送中'
+  return '正常配送中'
 }
 
 /** GET /api/admin/users 单条映射为表格行 */

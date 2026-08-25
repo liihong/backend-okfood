@@ -278,6 +278,29 @@ def _member_paused_delivery_scope():
     )
 
 
+def _member_delivering_scope(*, threshold: int):
+    """
+    正常配送中：与 lifecycle DELIVERING 主状态且无「请假中」叠层一致。
+
+    排除待完善、暂停、未开卡、待续费、请假、退款与次数用尽。
+    待续费只看午餐余次 1..threshold；午餐=0 但晚餐有余次仍属配送中。
+    """
+    t = int(threshold)
+    return and_(
+        Member.delivery_deferred.is_(False),
+        Member.membership_refunded_at.is_(None),
+        _member_has_any_period_balance_scope(),
+        _member_exclude_on_leave_scope(),
+        ~_member_lifecycle_awaiting_setup_core_scope(),
+        or_(Member.is_active.is_(True), _member_has_applied_card_order_scope()),
+        or_(
+            Member.is_active.is_(False),
+            Member.balance <= 0,
+            Member.balance > t,
+        ),
+    )
+
+
 def _member_awaiting_setup_scope_clause():
     """
     待完善履约列表：与 lifecycle 主状态「待完善」一致。
@@ -302,6 +325,7 @@ def _apply_member_list_filters(
     plan_type: str | None = None,
     on_leave_only: bool = False,
     renew_pending_only: bool = False,
+    delivering_only: bool = False,
     store_id: int | None = None,
 ):
     stmt = stmt.where(Member.deleted_at.is_(None)).where(_member_archive_scope())
@@ -394,6 +418,11 @@ def _apply_member_list_filters(
 
         threshold = int(get_settings().LOW_BALANCE_THRESHOLD)
         stmt = stmt.where(_member_renew_pending_scope(threshold=threshold))
+    if delivering_only:
+        from app.core.config import get_settings
+
+        threshold = int(get_settings().LOW_BALANCE_THRESHOLD)
+        stmt = stmt.where(_member_delivering_scope(threshold=threshold))
     return stmt
 
 
@@ -487,6 +516,7 @@ def _member_filter_count(
     unassigned_region: bool = False,
     store_pickup_active: bool = False,
     renew_pending_only: bool = False,
+    delivering_only: bool = False,
 ) -> int:
     """会员档案库筛选计数：与列表页各 Tab/筛选项口径一致。"""
     stmt = _apply_member_list_filters(
@@ -500,6 +530,7 @@ def _member_filter_count(
         unassigned_region=unassigned_region,
         store_id=int(store_id),
         renew_pending_only=renew_pending_only,
+        delivering_only=delivering_only,
     )
     if store_pickup_active:
         stmt = stmt.where(Member.store_pickup.is_(True), Member.balance > 0)
@@ -663,6 +694,7 @@ def list_members_paged(
     plan_type: str | None = None,
     on_leave_only: bool = False,
     renew_pending_only: bool = False,
+    delivering_only: bool = False,
     store_id: int | None = None,
 ) -> tuple[list[MemberAdminOut], int]:
     # 单次往返：总计数 + 分页 id；默认地址与 lifecycle 在 Python 层批量加载，避免全表地址子查询
@@ -679,6 +711,7 @@ def list_members_paged(
         on_leave_only=on_leave_only,
         store_id=store_id,
         renew_pending_only=renew_pending_only,
+        delivering_only=delivering_only,
     ).subquery("cnt")
     page_sq = _apply_member_list_filters(
         select(Member.id.label("pid")).select_from(Member),
@@ -693,6 +726,7 @@ def list_members_paged(
         on_leave_only=on_leave_only,
         store_id=store_id,
         renew_pending_only=renew_pending_only,
+        delivering_only=delivering_only,
     )
     page_sq = (
         # 用户操作时间：members.updated_at（小程序/管理端档案变更时刷新，微信仅同步 openid 不刷新）

@@ -30,7 +30,7 @@ _LIFECYCLE_LABELS: dict[str, str] = {
     MemberLifecycleCode.BALANCE_EXHAUSTED.value: "已过期",
     MemberLifecycleCode.NEVER_OPENED.value: "未开卡",
     MemberLifecycleCode.RENEW_PENDING.value: "待续费",
-    MemberLifecycleCode.DELIVERING.value: "配送中",
+    MemberLifecycleCode.DELIVERING.value: "正常配送中",
 }
 
 

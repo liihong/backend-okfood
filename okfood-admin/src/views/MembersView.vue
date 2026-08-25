@@ -86,7 +86,7 @@ const membersValidityFilter = ref('')
 const membersPlanFilter = ref('')
 /** 片区：'' | 'unassigned' | 区域 id 字符串 */
 const membersRegionFilter = ref('')
-/** 会员卡状态：'' 全部 | inactive 未开卡 | awaiting_setup 待完善履约 | paused 暂停配送 | leave 请假中 */
+/** 会员卡状态：'' 全部 | delivering 正常配送中 | inactive 未开卡 | awaiting_setup 待完善履约 | paused 暂停配送 | leave 请假中 | renew_pending 待续费 */
 const membersStatusSegment = ref('')
 const regionFilterOptions = ref([])
 
@@ -99,6 +99,8 @@ const isRenewPendingFilter = computed(() => membersStatusSegment.value === 'rene
 const isAwaitingSetupFilter = computed(() => membersStatusSegment.value === 'awaiting_setup')
 /** 当前是否为暂停配送筛选 */
 const isPausedFilter = computed(() => membersStatusSegment.value === 'paused')
+/** 当前是否为正常配送中筛选 */
+const isDeliveringFilter = computed(() => membersStatusSegment.value === 'delivering')
 
 /** 从路由 query 恢复筛选（会员统计页跳转带参） */
 function applyMembersRouteQueryFilters() {
@@ -108,7 +110,7 @@ function applyMembersRouteQueryFilters() {
     membersValidityFilter.value = validity
   }
   const segment = String(q.segment ?? '').trim()
-  if (['inactive', 'awaiting_setup', 'paused', 'leave', 'renew_pending'].includes(segment)) {
+  if (['delivering', 'inactive', 'awaiting_setup', 'paused', 'leave', 'renew_pending'].includes(segment)) {
     membersStatusSegment.value = segment
   }
   const region = String(q.region ?? '').trim()
@@ -302,7 +304,8 @@ function buildMembersListParams(page, pageSize, { exportMode = false } = {}) {
   if (pq) params.set('plan_type', pq)
   const q = searchQuery.value.trim()
   if (q) params.set('q', q)
-  if (membersStatusSegment.value === 'inactive') params.set('inactive_only', '1')
+  if (membersStatusSegment.value === 'delivering') params.set('delivering_only', '1')
+  else if (membersStatusSegment.value === 'inactive') params.set('inactive_only', '1')
   else if (membersStatusSegment.value === 'awaiting_setup') params.set('awaiting_setup_only', '1')
   else if (membersStatusSegment.value === 'paused') params.set('delivery_deferred_only', '1')
   else if (membersStatusSegment.value === 'leave') params.set('on_leave_only', '1')
@@ -407,7 +410,11 @@ async function exportMembersExcel() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '会员档案')
     const stamp = shanghaiTodayYmd()
-    const exportTag = isRenewPendingFilter.value ? '待续费' : '剩余次数大于0'
+    const exportTag = isRenewPendingFilter.value
+      ? '待续费'
+      : isDeliveringFilter.value
+        ? '正常配送中'
+        : '剩余次数大于0'
     XLSX.writeFile(wb, `会员档案_${exportTag}_${stamp}.xlsx`)
     showToast(`已导出 ${out.length} 条`, 'success')
   } catch (e) {
@@ -1146,8 +1153,9 @@ onUnmounted(() => {
                     @change="onCardStatusFilterChange"
                   >
                     <el-option label="全部" value="" />
+                    <el-option label="正常配送中" value="delivering" />
                     <el-option label="未开卡" value="inactive" />
-                   <el-option label="待完善" value="awaiting_setup" />
+                    <el-option label="待完善" value="awaiting_setup" />
                     <el-option label="已暂停" value="paused" />
                     <el-option label="请假中" value="leave" />
                     <el-option label="待续费" value="renew_pending" />
@@ -1219,6 +1227,12 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
+      </div>
+      <div v-if="isDeliveringFilter" class="members-awaiting-banner" role="status">
+        <p class="members-awaiting-banner__text">
+          当前展示<strong>正常配送中</strong>会员（生效履约中，非待完善/暂停/请假/待续费/未开卡/退款/已过期）。
+          状态列应与筛选一致，均显示「正常配送中」。
+        </p>
       </div>
       <div v-if="isRenewPendingFilter" class="members-renew-banner" role="status">
         <p class="members-renew-banner__text">

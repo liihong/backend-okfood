@@ -1199,6 +1199,12 @@ def users(
         bool,
         Query(description="true=仅待续费：生效中且剩余次数<=低余额阈值，非暂停/退款/请假"),
     ] = False,
+    delivering_only: Annotated[
+        bool,
+        Query(
+            description="true=仅正常配送中：lifecycle 主状态为配送中，排除待完善/暂停/未开卡/待续费/请假/退款/次数用尽"
+        ),
+    ] = False,
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     response.headers["Cache-Control"] = "no-store"
@@ -1227,6 +1233,17 @@ def users(
             status_code=400,
             detail="renew_pending_only 与 inactive/delivery_deferred/awaiting_setup/on_leave 筛选互斥",
         )
+    if delivering_only and (
+        inactive_only
+        or delivery_deferred_only
+        or on_leave_only
+        or awaiting_setup_only
+        or renew_pending_only
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="delivering_only 与 inactive/delivery_deferred/awaiting_setup/on_leave/renew_pending 筛选互斥",
+        )
     items, total = list_members_paged(
         db,
         q_phone=q,
@@ -1242,6 +1259,7 @@ def users(
         on_leave_only=on_leave_only,
         store_id=store_id,
         renew_pending_only=renew_pending_only,
+        delivering_only=delivering_only,
     )
     serialized = [dump_model(i) for i in items]
     return page_response(items=serialized, total=total, page=page, page_size=page_size, msg="获取成功")
