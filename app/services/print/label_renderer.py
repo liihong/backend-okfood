@@ -10,8 +10,8 @@ from app.schemas.store_print import (
     DELIVERY_ENJOY_MEAL_KEY,
     DELIVERY_MEAL_FULL_TIPS,
     ENJOY_MEAL_GREETING,
-    ENJOY_MEAL_QR_FALLBACK,
-    ENJOY_MEAL_QR_HINT,
+    ENJOY_MEAL_PAPER_HEIGHT_MM,
+    ENJOY_MEAL_PAPER_WIDTH_MM,
     ENJOY_MEAL_TIP_1,
     ENJOY_MEAL_TIP_2,
     LabelItemIn,
@@ -338,10 +338,6 @@ def _format_meal_category_enjoy(raw: str) -> str:
     return s or "—"
 
 
-def _enjoy_meal_qr_value(item: LabelItemIn) -> str:
-    return (item.qr_content or "").strip() or (item.store_name or "").strip() or ENJOY_MEAL_QR_FALLBACK
-
-
 def _enjoy_meal_name_value(item: LabelItemIn) -> str:
     return (item.name or "").strip() or "—"
 
@@ -355,53 +351,17 @@ def _enjoy_meal_meal_value(item: LabelItemIn) -> str:
 
 
 def _build_enjoy_meal_lines(item: LabelItemIn) -> list[_RenderLine]:
-    """云打印纯文本顺序。"""
+    """75×50 单张：左上角起排，不含加好友二维码。"""
     meal_label = _meal_row_label(item)
     date_s = _format_date_slash(item.delivery_date)
     return [
-        _RenderLine(f"{ENJOY_MEAL_GREETING}  :)", font_pt=12, bold=True, line_mm=7, align="center"),
-        _RenderLine(f"姓名：{_enjoy_meal_name_value(item)}", font_pt=18, bold=True, line_mm=10),
-        _RenderLine(f"{meal_label}：{_enjoy_meal_meal_value(item)}", font_pt=18, bold=True, line_mm=10),
-        _RenderLine(ENJOY_MEAL_TIP_1, font_pt=9, bold=False, line_mm=5.5),
-        _RenderLine(ENJOY_MEAL_TIP_2, font_pt=9, bold=False, line_mm=6),
-        _RenderLine(f"日期：{date_s}" if date_s else "日期：—", font_pt=11, bold=True, line_mm=7),
-        _RenderLine(ENJOY_MEAL_QR_HINT, font_pt=10, bold=False, line_mm=6),
+        _RenderLine(f"{ENJOY_MEAL_GREETING} :)", font_pt=11, bold=True, line_mm=6.5),
+        _RenderLine(f"姓名：{_enjoy_meal_name_value(item)}", font_pt=15, bold=True, line_mm=8),
+        _RenderLine(f"{meal_label}：{_enjoy_meal_meal_value(item)}", font_pt=15, bold=True, line_mm=8),
+        _RenderLine(ENJOY_MEAL_TIP_1, font_pt=8, bold=False, line_mm=5),
+        _RenderLine(ENJOY_MEAL_TIP_2, font_pt=8, bold=False, line_mm=5.5),
+        _RenderLine(f"日期：{date_s}" if date_s else "日期：—", font_pt=10, bold=True, line_mm=5.5),
     ]
-
-
-def _build_enjoy_meal_table_html(item: LabelItemIn, *, qr_size_mm: float) -> str:
-    """竖版袋贴 HTML：顶栏问候 + 大字姓名/餐别 + 提示 + 日期 + 加好友。"""
-    meal_label = _meal_row_label(item)
-    name = escape(_enjoy_meal_name_value(item))
-    meal = escape(_enjoy_meal_meal_value(item))
-    date_s = escape(_format_date_slash(item.delivery_date) or "—")
-    qr_h = max(16.0, float(qr_size_mm))
-    return (
-        '<div style="font-family:\'Microsoft YaHei\',\'微软雅黑\',sans-serif;color:#000;">'
-        '<table style="width:100%;border-collapse:collapse;margin:0 0 2.5mm 0;">'
-        "<tr>"
-        '<td style="width:8mm;font-size:13px;line-height:1.2;vertical-align:middle;">🛵</td>'
-        '<td style="text-align:center;font-size:13px;font-weight:700;letter-spacing:0.4mm;'
-        'vertical-align:middle;">'
-        f"{escape(ENJOY_MEAL_GREETING)}</td>"
-        '<td style="width:8mm;text-align:right;font-size:13px;font-weight:700;'
-        'vertical-align:middle;">:)</td>'
-        "</tr></table>"
-        f'<div style="font-size:18px;font-weight:800;line-height:1.35;margin:1.5mm 0 1mm 0;">'
-        f"姓名：{name}</div>"
-        f'<div style="font-size:18px;font-weight:800;line-height:1.35;margin:0 0 3mm 0;">'
-        f"{escape(meal_label)}：{meal}</div>"
-        f'<div style="font-size:10px;line-height:1.55;margin:0 0 1.2mm 0;">'
-        f"{escape(ENJOY_MEAL_TIP_1)}</div>"
-        f'<div style="font-size:10px;line-height:1.55;margin:0 0 3mm 0;">'
-        f"{escape(ENJOY_MEAL_TIP_2)}</div>"
-        f'<div style="font-size:12px;font-weight:700;margin:0 0 2mm 0;">日期：{date_s}</div>'
-        '<table style="width:100%;border-collapse:collapse;">'
-        "<tr>"
-        f'<td style="font-size:11px;font-weight:600;vertical-align:middle;">{escape(ENJOY_MEAL_QR_HINT)}</td>'
-        f'<td style="width:{qr_h:.1f}mm;height:{qr_h:.1f}mm;"></td>'
-        "</tr></table></div>"
-    )
 
 
 def _to_lodop_layout_enjoy_meal(
@@ -412,38 +372,41 @@ def _to_lodop_layout_enjoy_meal(
     margin_top_mm: int,
     margin_left_mm: int,
 ) -> LodopLayout:
-    """竖版袋贴：问候栏 + 大字字段 + 页底右侧二维码。"""
-    margin_l = max(margin_left_mm, 2)
-    content_w = max(20.0, float(paper_width_mm) - float(margin_l) * 2)
-    qr_size = min(22.0, content_w * 0.38, max(16.0, float(paper_height_mm) * 0.24))
-    qr_x = float(paper_width_mm) - float(margin_l) - qr_size
-    qr_y = max(float(margin_top_mm) + 40.0, float(paper_height_mm) - qr_size - 4.0)
-    qr_val = _enjoy_meal_qr_value(item)
-    barcodes: list[LodopBarcodeBlock] = []
-    if qr_val:
-        barcodes.append(
-            LodopBarcodeBlock(
-                x_mm=qr_x,
-                y_mm=qr_y,
-                width_mm=qr_size,
-                height_mm=qr_size,
-                code=qr_val,
-                show_text=False,
-                code_type="QRCode",
+    """75×50 袋贴：绝对坐标从左上角起，高度锁定 50mm，避免连打多张。"""
+    width_mm = ENJOY_MEAL_PAPER_WIDTH_MM
+    height_mm = ENJOY_MEAL_PAPER_HEIGHT_MM
+    x = 1.5
+    y = 1.5
+    content_w = max(20.0, float(width_mm) - x * 2)
+    blocks: list[LodopTextBlock] = []
+    for ln in _build_enjoy_meal_lines(item):
+        blocks.append(
+            LodopTextBlock(
+                x_mm=x,
+                y_mm=y,
+                text=ln.text,
+                font_size_pt=ln.font_pt,
+                bold=ln.bold,
+                width_mm=content_w,
+                height_mm=ln.line_mm,
+                align="left",
             )
         )
+        y += ln.line_mm
+        if y > height_mm - 1.5:
+            break
     layout = LodopLayout(
-        paper_width_mm=paper_width_mm,
-        paper_height_mm=paper_height_mm,
-        margin_top_mm=margin_top_mm,
-        margin_left_mm=int(margin_l),
-        blocks=[],
+        paper_width_mm=width_mm,
+        paper_height_mm=height_mm,
+        margin_top_mm=1,
+        margin_left_mm=1,
+        blocks=blocks,
         layout_style="enjoy_meal",
         header_text=ENJOY_MEAL_GREETING,
-        table_html=_build_enjoy_meal_table_html(item, qr_size_mm=qr_size),
-        barcodes=barcodes,
+        table_html="",
+        barcodes=[],
     )
-    layout.content_height_mm = float(paper_height_mm)
+    layout.content_height_mm = float(height_mm)
     return layout
 
 
@@ -729,14 +692,6 @@ def _to_feie_xp_xml(
             )
             if y > h_dot - _mm_to_dot(4):
                 break
-        qr_val = _enjoy_meal_qr_value(item)
-        qr_mm = min(22.0, max(16.0, paper_width_mm * 0.32))
-        qr_dot = _mm_to_dot(qr_mm)
-        if qr_val and y <= h_dot - qr_dot:
-            qr_x = max(x, w_dot - _mm_to_dot(margin_left_mm) - qr_dot)
-            parts.append(
-                f'<QR x="{qr_x}" y="{y}" e="L" w="6">{escape(qr_val, quote=False)}</QR>'
-            )
         return "".join(parts)
 
     line_h = _mm_to_dot(5)
@@ -772,9 +727,6 @@ def _to_yilian_content(item: LabelItemIn, template_key: str) -> str:
                 parts.append(f"<FS>{ln.text}</FS><BR>")
             else:
                 parts.append(f"{ln.text}<BR>")
-        qr_val = _enjoy_meal_qr_value(item)
-        if qr_val:
-            parts.append(f"<QRCODE s=6 e=L>{qr_val}</QRCODE>")
         return "".join(parts)
 
     parts = []
@@ -857,6 +809,12 @@ def render_label_payload(
     margin_top_mm: int = 2,
     margin_left_mm: int = 2,
 ) -> RenderedPrintPayload:
+    # 袋贴实物为 75×50：锁定页高，避免沿用面单 130mm 导致一卷打出多张
+    if _uses_enjoy_meal_layout(template_key):
+        paper_width_mm = ENJOY_MEAL_PAPER_WIDTH_MM
+        paper_height_mm = ENJOY_MEAL_PAPER_HEIGHT_MM
+        margin_top_mm = 1
+        margin_left_mm = 1
     return RenderedPrintPayload(
         feie_xp_content=_to_feie_xp_xml(
             item,

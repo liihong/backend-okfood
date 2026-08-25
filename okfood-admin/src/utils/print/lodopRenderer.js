@@ -57,8 +57,12 @@ function mmStr(v) {
 }
 
 function effectiveHeight(layout, fallback) {
-  // 顺丰面单 / 袋贴：始终用打印机配置的完整纸高，保证条码/二维码在同一页
-  if (layout?.layout_style === 'sf_waybill' || layout?.layout_style === 'enjoy_meal') {
+  // 袋贴锁定 75×50，必须用 layout 纸高，不能回退到打印机里的面单高度
+  if (layout?.layout_style === 'enjoy_meal') {
+    return Number(layout.paper_height_mm) || 50
+  }
+  // 顺丰面单：始终用打印机配置的完整纸高（如 130mm），保证条码在同一页
+  if (layout?.layout_style === 'sf_waybill') {
     return Number(layout.paper_height_mm) || fallback
   }
   const content = Number(layout.content_height_mm)
@@ -92,30 +96,18 @@ function sfWaybillToTableHtml(layout) {
   )
 }
 
-function enjoyMealToTableHtml(layout) {
-  const w = Number(layout.paper_width_mm) || 60
-  const pad = Math.max(2, Number(layout.margin_left_mm) || 2)
-  const body = layout.table_html || ''
-  return (
-    `<table style="width:${w}mm;border-collapse:collapse;border:none;">` +
-    `<tr><td style="padding:${pad}mm ${pad}mm 1.5mm ${pad}mm;vertical-align:top;` +
-    `font-family:${PRINT_FONT};color:#000;line-height:1.35;">` +
-    body +
-    `</td></tr></table>`
-  )
-}
-
 function layoutToHtml(layout, paperW, paperH) {
   const w = Number(paperW) || 100
   const h = Number(paperH) || 150
-  const fallbackMargin = Math.max(6, Number(layout.margin_left_mm) || 6)
+  const compact = layout.layout_style === 'enjoy_meal'
+  const fallbackMargin = compact ? 1.5 : Math.max(6, Number(layout.margin_left_mm) || 6)
   const blocks = layout.blocks || []
-  const scale = fitScale(blocks, h)
+  const scale = compact ? 1 : fitScale(blocks, h)
 
   const htmlBlocks = blocks
     .map((b) => {
       const fs = Math.round(ptToPx(b.font_size_pt) * scale)
-      const weight = b.bold ? '600' : 'normal'
+      const weight = b.bold ? (compact ? '800' : '600') : 'normal'
       const align = b.align || 'left'
       const y = (Number(b.y_mm) || 0) * scale
       const bh = (Number(b.height_mm) || 5) * scale
@@ -125,8 +117,12 @@ function layoutToHtml(layout, paperW, paperH) {
       const isDivider = isDividerText(b.text)
       const isTipsLine = String(b.text || '').trim() === 'tips:' || /^tips:/.test(String(b.text || ''))
       const isLeftBody = align === 'left' && !isRemark
-      let extra = `padding:0.4mm 1.5mm 0.4mm 2mm;height:${bh}mm;overflow:hidden;`
-      if (isRemark) {
+      let extra = compact
+        ? `padding:0;margin:0;height:${bh}mm;overflow:hidden;line-height:1.15;white-space:nowrap;`
+        : `padding:0.4mm 1.5mm 0.4mm 2mm;height:${bh}mm;overflow:hidden;`
+      if (compact) {
+        extra += 'word-break:keep-all;'
+      } else if (isRemark) {
         extra += 'white-space:normal;word-break:break-all;line-height:1.25;background:#fef3c7;border:0.25mm solid #92400e;border-radius:0.5mm;'
       } else if (isDivider) {
         extra += 'color:#555;letter-spacing:0.2mm;line-height:1;white-space:nowrap;'
@@ -226,13 +222,6 @@ function addLayoutContent(lodop, layout, paperW, paperH) {
     if (hasBarcode) {
       added += addSfWaybillBarcodes(lodop, layout, paperH, pad, barWidth)
     }
-    return added
-  }
-  if (layout.layout_style === 'enjoy_meal') {
-    const html = enjoyMealToTableHtml(layout)
-    lodop.ADD_PRINT_HTM('0mm', '0mm', mmStr(paperW), mmStr(paperH), html)
-    let added = 1
-    added += addPositionedBarcodes(lodop, layout)
     return added
   }
   const html = layoutToHtml(layout, paperW, paperH)

@@ -1009,6 +1009,9 @@ onMounted(async () => {
           </el-form-item>
 
           <el-divider content-position="left">顺丰开放平台（同城等）</el-divider>
+          <p class="integration-drawer-tip">
+            开发者 ID、密钥未填时各租户共用服务器全局 <code>.env</code>（同一开放平台账号）。店铺编号、取件电话/地址须填本店；非主租户不会借用主店店铺。
+          </p>
           <el-form-item label="dev_id">
             <el-input-number
               v-model="integrationForm.sf_open_dev_id"
@@ -1033,22 +1036,26 @@ onMounted(async () => {
             <el-checkbox v-model="integrationFlags.clear_sf_open_secret" size="small">清除 secret（回退全局）</el-checkbox>
           </el-form-item>
           <el-form-item label="shop_id（门店）">
-            <el-input v-model="integrationForm.sf_open_shop_id" maxlength="64" placeholder="留空则用全局 SF_OPEN_SHOP_ID" />
+            <el-input
+              v-model="integrationForm.sf_open_shop_id"
+              maxlength="64"
+              placeholder="本租户顺丰店铺编号；主租户留空则用全局 SF_OPEN_SHOP_ID"
+            />
           </el-form-item>
           <el-form-item label="shop_type">
-            <el-select v-model="integrationForm.sf_open_shop_type" clearable placeholder="留空则用全局" style="width: 100%">
+            <el-select v-model="integrationForm.sf_open_shop_type" clearable placeholder="主租户留空用全局；其它租户建议填写" style="width: 100%">
               <el-option label="1" :value="1" />
               <el-option label="2" :value="2" />
             </el-select>
           </el-form-item>
           <el-form-item label="取件电话">
-            <el-input v-model="integrationForm.sf_pickup_phone" maxlength="32" placeholder="留空则用全局" />
+            <el-input v-model="integrationForm.sf_pickup_phone" maxlength="32" placeholder="本店取件电话；主租户留空用全局" />
           </el-form-item>
           <el-form-item label="取件地址">
-            <el-input v-model="integrationForm.sf_pickup_address" maxlength="512" type="textarea" :rows="2" placeholder="留空则用全局" />
+            <el-input v-model="integrationForm.sf_pickup_address" maxlength="512" type="textarea" :rows="2" placeholder="本店取件地址；主租户留空用全局" />
           </el-form-item>
           <el-form-item label="城市名（如开单城市）">
-            <el-input v-model="integrationForm.sf_city_name" maxlength="64" placeholder="留空则用全局 SF_CITY_NAME" />
+            <el-input v-model="integrationForm.sf_city_name" maxlength="64" placeholder="本店城市；主租户留空用全局 SF_CITY_NAME" />
           </el-form-item>
 
           <el-divider content-position="left">扩展</el-divider>

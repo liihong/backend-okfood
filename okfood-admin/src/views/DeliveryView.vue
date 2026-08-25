@@ -967,10 +967,10 @@ async function reinstatePhoneToSheet() {
         <button
           type="button"
           class="delivery-btn delivery-btn--sf-instant"
-          :disabled="loading || !sfPushEnabledForView || sheetView === SHEET_VIEW_DINNER"
+          :disabled="loading || !sfPushEnabledForView"
           :title="
-            sheetView === SHEET_VIEW_DINNER
-              ? '晚餐推单暂不支持及时单模式'
+            !sfPushEnabledForView
+              ? '午晚餐视图仅运维双餐段会员；推顺丰请切换午餐或晚餐 Tab'
               : '勾选部分停靠点，推送到及时单账号（立即创单）；需先在门店设置配置「零售推顺丰店铺ID」'
           "
           @click="openSfDialog(SF_PUSH_MODE_INSTANT)"

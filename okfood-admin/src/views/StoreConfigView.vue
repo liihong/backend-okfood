@@ -352,7 +352,7 @@ onMounted(() => {
           <span class="sc-card-title">单次点餐 / 零售 · 顺丰与 UU</span>
         </template>
         <p class="sc-hint sc-hint--card">
-          <strong>零售推顺丰店铺ID</strong>仅用于订单管理里「推送到顺丰」；开发者 ID、密钥、取件电话/地址仍使用<strong>租户对接</strong>或 .env（与智能配送大表手动/夜间推单使用的「租户顺丰店铺编号」可填不同值，例如
+          <strong>零售推顺丰店铺ID</strong>用于订单管理「推送到顺丰」以及配送大表「推送及时单」；开发者 ID、密钥、取件电话/地址仍使用<strong>租户对接</strong>或 .env（与智能配送大表预约/夜间推单使用的「租户顺丰店铺编号」可填不同值，例如
           <code class="sc-code">6284388701377</code>）。
         </p>
         <div class="sc-coord-grid">

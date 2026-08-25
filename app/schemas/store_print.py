@@ -24,6 +24,7 @@ CLOUD_PRINT_BRANDS: frozenset[str] = frozenset({"xprinter_cloud_label", "feie_la
 
 PAPER_PRESETS: dict[str, tuple[int, int]] = {
     "76x130": (76, 130),
+    "75x50": (75, 50),
     "60x90": (60, 90),
     "80x60": (80, 60),
     "80x50": (80, 50),
@@ -33,9 +34,11 @@ PAPER_PRESETS: dict[str, tuple[int, int]] = {
     "40x30": (40, 30),
 }
 
-# Hello轻厨（租户 3）袋贴模板仅对该租户展示
+# Hello轻厨（租户 3）袋贴：固定 75×50mm，避免按面单纸高连打多张
 ENJOY_MEAL_TENANT_ID = 3
 DELIVERY_ENJOY_MEAL_KEY = "delivery_enjoy_meal"
+ENJOY_MEAL_PAPER_WIDTH_MM = 75
+ENJOY_MEAL_PAPER_HEIGHT_MM = 50
 
 PRINT_TEMPLATES: list[dict[str, Any]] = [
     {
@@ -66,7 +69,7 @@ PRINT_TEMPLATES: list[dict[str, Any]] = [
         "key": DELIVERY_ENJOY_MEAL_KEY,
         "scene": "delivery_sheet",
         "name": "用餐愉快袋贴",
-        "description": "竖版袋贴：姓名/餐别大字、食用提示、日期、扫码加好友（建议 60×90mm）",
+        "description": "75×50mm 单张：问候、姓名、餐别、食用提示、日期",
         "tenant_ids": [ENJOY_MEAL_TENANT_ID],
     },
     {
@@ -108,8 +111,6 @@ DELIVERY_MEAL_FULL_TIPS = "1.若暂不吃，优先建议冷藏保存！"
 ENJOY_MEAL_GREETING = "用餐愉快哦！"
 ENJOY_MEAL_TIP_1 = "1.酱汁根据个人口味酌量添加"
 ENJOY_MEAL_TIP_2 = "2.若暂时不吃，优先建议冷藏保鲜！"
-ENJOY_MEAL_QR_HINT = "扫码添加好友"
-ENJOY_MEAL_QR_FALLBACK = "Hello轻厨"
 
 
 class LabelItemIn(BaseModel):

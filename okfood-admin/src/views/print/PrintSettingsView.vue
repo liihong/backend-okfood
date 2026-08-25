@@ -109,7 +109,7 @@ onMounted(() => {
           <p class="ps-preview__title">预览说明</p>
           <p class="ps-preview__hint">
             <template v-if="currentSetting.template_key === 'delivery_enjoy_meal'">
-              用餐愉快袋贴建议使用 60×90mm 竖版标签纸，须与「打印机管理」中纸张规格一致。姓名、餐别取配送会员资料；底部为扫码加好友二维码。
+              本模板按 75×50mm 单张输出（不沿用面单纸高度）。请在「打印机管理」中把纸张规格改为 75×50mm，避免走纸不准。已去掉加好友二维码。
             </template>
             <template v-else>
               推荐使用 76×130mm 顺丰面单纸，须与「打印机管理」中纸张规格一致；推单成功后条码为顺丰运单号，可扫码。配送标签订单号为片区编码+序号（如 ZX001）；零售/商城与配送同款面单，右上角分别为「零售订单」「商城订单」，餐品行显示商品详情。若未单独配置「商城零售标签」，将自动使用配送标签的打印机。
@@ -155,20 +155,12 @@ onMounted(() => {
               </div>
             </template>
             <template v-else-if="currentSetting.template_key === 'delivery_enjoy_meal'">
-              <div class="ps-preview__enjoy-head">
-                <span class="ps-preview__enjoy-ico" aria-hidden="true">🛵</span>
-                <span class="ps-preview__enjoy-hi">用餐愉快哦！</span>
-                <span class="ps-preview__enjoy-ico" aria-hidden="true">:)</span>
-              </div>
+              <div class="ps-preview__enjoy-hi">用餐愉快哦！ :)</div>
               <div class="ps-preview__enjoy-name">姓名：曹女士</div>
               <div class="ps-preview__enjoy-meal">餐别：午+果</div>
               <div class="ps-preview__enjoy-tip">1.酱汁根据个人口味酌量添加</div>
               <div class="ps-preview__enjoy-tip">2.若暂时不吃，优先建议冷藏保鲜！</div>
               <div class="ps-preview__enjoy-date">日期：2026/07/24</div>
-              <div class="ps-preview__enjoy-foot">
-                <span>扫码添加好友</span>
-                <span class="ps-preview__enjoy-qr" aria-hidden="true" />
-              </div>
             </template>
             <template v-else-if="activeScene === 'delivery_sheet'">
               <div class="ps-preview__region">东区</div>
@@ -286,67 +278,35 @@ onMounted(() => {
   max-width: 220px;
 }
 .ps-preview__box--enjoy {
-  max-width: 200px;
+  max-width: 240px;
+  min-height: 0;
+  aspect-ratio: 75 / 50;
   font-size: 0.78rem;
-}
-.ps-preview__enjoy-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.25rem;
-  margin-bottom: 0.55rem;
+  text-align: left;
 }
 .ps-preview__enjoy-hi {
-  flex: 1;
-  text-align: center;
   font-weight: 800;
   font-size: 0.82rem;
-  letter-spacing: 0.04em;
-}
-.ps-preview__enjoy-ico {
-  font-size: 0.78rem;
-  font-weight: 700;
-  width: 1.2rem;
-  text-align: center;
+  margin-bottom: 0.25rem;
 }
 .ps-preview__enjoy-name,
 .ps-preview__enjoy-meal {
-  font-size: 1.05rem;
+  font-size: 1.02rem;
   font-weight: 800;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 .ps-preview__enjoy-meal {
-  margin-bottom: 0.55rem;
+  margin-bottom: 0.35rem;
 }
 .ps-preview__enjoy-tip {
   font-size: 0.72rem;
   color: #111;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 .ps-preview__enjoy-date {
-  margin: 0.55rem 0 0.4rem;
+  margin-top: 0.35rem;
   font-weight: 700;
   font-size: 0.82rem;
-}
-.ps-preview__enjoy-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-.ps-preview__enjoy-qr {
-  width: 2.4rem;
-  height: 2.4rem;
-  flex-shrink: 0;
-  background:
-    linear-gradient(#111 0 0) 0 0 / 33% 33%,
-    linear-gradient(#111 0 0) 100% 0 / 33% 33%,
-    linear-gradient(#111 0 0) 0 100% / 33% 33%,
-    repeating-linear-gradient(90deg, #111 0 2px, #fff 2px 4px);
-  background-repeat: no-repeat;
-  border: 1px solid #111;
 }
 .ps-preview__store-row {
   position: relative;

@@ -65,6 +65,27 @@ def merge_tenant_int_or_global(
     return 0
 
 
+def merge_shared_sf_developer_int(
+    tenant_value: int | None,
+    global_value: int | None,
+) -> int:
+    """顺丰开放平台开发者 ID：各租户未填时共用全局 ``.env``（店铺编号仍按租户）。"""
+    if tenant_value is not None:
+        return int(tenant_value)
+    return int(global_value or 0)
+
+
+def merge_shared_sf_developer_secret(
+    tenant_value: str | None,
+    global_value: str | None,
+) -> str:
+    """顺丰开放平台密钥：各租户未填时共用全局 ``.env``。"""
+    tv = (tenant_value or "").strip()
+    if tv:
+        return tv
+    return (global_value or "").strip()
+
+
 def require_store_id_for_service(store_id: int | None, *, operation: str) -> int:
     """服务层入口：必须显式传入 ``store_id``，禁止回落主租户默认门店。"""
     if store_id is None:

@@ -553,20 +553,30 @@ def _successful_push_stop_ids_set(db: Session, *, store_id: int, d: date) -> set
     return {str(x) for x in rows}
 
 
-def _active_success_push_stop_ids_set(db: Session, *, store_id: int, d: date) -> set[str]:
+def _push_kind_filter_clause(push_kind: str | None) -> Any | None:
+    """按 push_kind 过滤；None/空表示不过滤；delivery_sheet 兼容历史空值。"""
+    k = (push_kind or "").strip()
+    if not k:
+        return None
+    if k == "delivery_sheet":
+        return _delivery_sheet_push_kind_predicate()
+    return SfSameCityPush.push_kind == k
+
+
+def _active_success_push_stop_ids_set(
+    db: Session, *, store_id: int, d: date, push_kind: str | None = None
+) -> set[str]:
     """本门店·业务日已成功创单且未取消的停靠点（占用运力；已取消的不算 already_pushed）。"""
-    rows = db.scalars(
-        select(SfSameCityPush.stop_id)
-        .where(
-            and_(
-                SfSameCityPush.store_id == int(store_id),
-                SfSameCityPush.delivery_date == d,
-                SfSameCityPush.error_code == 0,
-                _sf_push_row_active_predicate(),
-            )
-        )
-        .distinct()
-    ).all()
+    clauses: list[Any] = [
+        SfSameCityPush.store_id == int(store_id),
+        SfSameCityPush.delivery_date == d,
+        SfSameCityPush.error_code == 0,
+        _sf_push_row_active_predicate(),
+    ]
+    pk = _push_kind_filter_clause(push_kind)
+    if pk is not None:
+        clauses.append(pk)
+    rows = db.scalars(select(SfSameCityPush.stop_id).where(and_(*clauses)).distinct()).all()
     return {str(x) for x in rows}
 
 
@@ -602,10 +612,9 @@ def _cancelled_success_push_id_by_stop(
         SfSameCityPush.error_code == 0,
         _sf_push_row_cancelled_predicate(),
     ]
-    if push_kind == "delivery_sheet":
-        clauses.append(_delivery_sheet_push_kind_predicate())
-    elif push_kind:
-        clauses.append(SfSameCityPush.push_kind == push_kind)
+    pk = _push_kind_filter_clause(push_kind)
+    if pk is not None:
+        clauses.append(pk)
     if stop_ids:
         clauses.append(SfSameCityPush.stop_id.in_(list(stop_ids)))
     rows = db.execute(
@@ -648,10 +657,9 @@ def _failed_push_id_by_stop(
         SfSameCityPush.delivery_date == d,
         or_(SfSameCityPush.error_code.is_(None), SfSameCityPush.error_code != 0),
     ]
-    if push_kind == "delivery_sheet":
-        clauses.append(_delivery_sheet_push_kind_predicate())
-    elif push_kind:
-        clauses.append(SfSameCityPush.push_kind == push_kind)
+    pk = _push_kind_filter_clause(push_kind)
+    if pk is not None:
+        clauses.append(pk)
     if stop_ids:
         clauses.append(SfSameCityPush.stop_id.in_(list(stop_ids)))
     rows = db.execute(
@@ -714,28 +722,33 @@ def _member_ids_receiving_on_agg(db: Session, agg: _Agg) -> set[int]:
     return out
 
 
-def _successful_sf_stop_ids(db: Session, *, store_id: int, d: date) -> list[str]:
-    rows = db.scalars(
-        select(SfSameCityPush.stop_id)
-        .where(
-            and_(
-                SfSameCityPush.store_id == int(store_id),
-                SfSameCityPush.delivery_date == d,
-                SfSameCityPush.error_code == 0,
-                _sf_push_row_active_predicate(),
-            )
-        )
-        .distinct()
-    ).all()
+def _successful_sf_stop_ids(
+    db: Session, *, store_id: int, d: date, push_kind: str | None = None
+) -> list[str]:
+    clauses: list[Any] = [
+        SfSameCityPush.store_id == int(store_id),
+        SfSameCityPush.delivery_date == d,
+        SfSameCityPush.error_code == 0,
+        _sf_push_row_active_predicate(),
+    ]
+    pk = _push_kind_filter_clause(push_kind)
+    if pk is not None:
+        clauses.append(pk)
+    rows = db.scalars(select(SfSameCityPush.stop_id).where(and_(*clauses)).distinct()).all()
     return [str(x) for x in rows]
 
 
 def _success_stop_member_map(
-    db: Session, *, store_id: int, d: date, ags_hint: dict[str, _Agg]
+    db: Session,
+    *,
+    store_id: int,
+    d: date,
+    ags_hint: dict[str, _Agg],
+    push_kind: str | None = None,
 ) -> dict[str, set[int]]:
     """已成功创单的每个 stop_id → 当时停靠点上收件会员 id 集合（用于跨停靠点去重）。"""
     m: dict[str, set[int]] = {}
-    for sid_stop in _successful_sf_stop_ids(db, store_id=store_id, d=d):
+    for sid_stop in _successful_sf_stop_ids(db, store_id=store_id, d=d, push_kind=push_kind):
         agg = ags_hint.get(sid_stop)
         if agg is None:
             continue
@@ -852,7 +865,7 @@ def aggs_for_delivery_date(
         members, default_by_id = eligible_members_for_lunch_delivery(
             db, delivery_date=d, delivery_region_id=None, store_id=sid
         )
-        mlist = list(members)
+    mlist = list(members)
     return _build_aggs(db, d, None, None, mlist, default_by_id, store_id=sid, meal_period=period)
 
 
@@ -939,24 +952,31 @@ def _build_sf_same_city_preview_bundle(
     period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
     if period == MealPeriod.DINNER.value:
         from app.services.dinner.eligibility import eligible_members_for_dinner_delivery
+        from app.services.delivery.sf_order_fulfillment_service import SF_PUSH_KIND_DINNER_DELIVERY_SHEET
 
         members, default_by_id = eligible_members_for_dinner_delivery(
             db, delivery_date=d, delivery_region_id=reg_id, store_id=int(store_id)
         )
+        sheet_push_kind = SF_PUSH_KIND_DINNER_DELIVERY_SHEET
     else:
+        from app.services.delivery.sf_order_fulfillment_service import SF_PUSH_KIND_DELIVERY_SHEET
+
         members, default_by_id = eligible_members_for_lunch_delivery(
             db, delivery_date=d, delivery_region_id=reg_id, store_id=int(store_id)
         )
-        mlist = list(members)
+        sheet_push_kind = SF_PUSH_KIND_DELIVERY_SHEET
+    mlist = list(members)
     if pkey:
         mlist = _filter_members_by_phone_hint(mlist, pkey)
     m_by_id = {int(m.id): m for m in mlist}
 
     ags = _build_aggs(db, d, akey, pkey, mlist, default_by_id, store_id=int(store_id), meal_period=period)
     success_member_map = _success_stop_member_map(
-        db, store_id=int(store_id), d=d, ags_hint=ags
+        db, store_id=int(store_id), d=d, ags_hint=ags, push_kind=sheet_push_kind
     )
-    success_stop_ids = _active_success_push_stop_ids_set(db, store_id=int(store_id), d=d)
+    success_stop_ids = _active_success_push_stop_ids_set(
+        db, store_id=int(store_id), d=d, push_kind=sheet_push_kind
+    )
     gset = merged_sf_integration_namespace(db, tid)
     rows: list[SfSameCityPreviewRow] = [
         _agg_to_row(
@@ -1711,14 +1731,18 @@ def push_sf_same_city(
         ags = ags_hint if ags_hint is not None else aggs_for_delivery_date(
             db, d, store_id=sid, meal_period=period
         )
-        success_stop_ids = _active_success_push_stop_ids_set(db, store_id=sid, d=d)
-        success_member_map = _success_stop_member_map(db, store_id=sid, d=d, ags_hint=ags)
+        success_stop_ids = _active_success_push_stop_ids_set(
+            db, store_id=sid, d=d, push_kind=kind
+        )
+        success_member_map = _success_stop_member_map(
+            db, store_id=sid, d=d, ags_hint=ags, push_kind=kind
+        )
         retry_stop_ids = {str(r.stop_id) for r in body.rows if r.selected}
         failed_push_by_stop = _failed_push_id_by_stop(
-            db, store_id=sid, d=d, stop_ids=retry_stop_ids or None
+            db, store_id=sid, d=d, stop_ids=retry_stop_ids or None, push_kind=kind
         )
         cancelled_push_by_stop = _cancelled_success_push_id_by_stop(
-            db, store_id=sid, d=d, stop_ids=retry_stop_ids or None
+            db, store_id=sid, d=d, stop_ids=retry_stop_ids or None, push_kind=kind
         )
 
         pending: list[_PreparedSfPush] = []
@@ -2007,6 +2031,30 @@ def push_sf_dinner_same_city(
         db,
         body,
         store_id=store_id,
+        push_kind=SF_PUSH_KIND_DINNER_DELIVERY_SHEET,
+        meal_period=MealPeriod.DINNER.value,
+    )
+
+
+def push_sf_dinner_same_city_instant(
+    db: Session,
+    body: SfSameCityPushIn,
+    *,
+    store_id: int | None = None,
+) -> SfSameCityPushOut:
+    """晚餐配送大表：推送到及时单账号（门店零售 shop，全部立即推单）。"""
+    from app.services.delivery.sf_order_fulfillment_service import SF_PUSH_KIND_DINNER_DELIVERY_SHEET
+    from app.models.enums import MealPeriod
+
+    forced_rows = [
+        r.model_copy(update={"push_immediately": True, "expect_delivery_at": None}) for r in body.rows
+    ]
+    forced_body = SfSameCityPushIn(delivery_date=body.delivery_date, rows=forced_rows)
+    return push_sf_same_city(
+        db,
+        forced_body,
+        store_id=store_id,
+        use_instant_shop=True,
         push_kind=SF_PUSH_KIND_DINNER_DELIVERY_SHEET,
         meal_period=MealPeriod.DINNER.value,
     )

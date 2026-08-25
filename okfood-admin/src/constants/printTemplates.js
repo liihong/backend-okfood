@@ -28,7 +28,7 @@ export const PRINT_TEMPLATES = [
     key: 'delivery_enjoy_meal',
     scene: 'delivery_sheet',
     name: '用餐愉快袋贴',
-    description: '竖版袋贴：姓名/餐别大字、食用提示、日期、扫码加好友（建议 60×90mm）',
+    description: '75×50mm 单张：问候、姓名、餐别、食用提示、日期',
     tenant_ids: [3],
   },
   {

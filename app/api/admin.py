@@ -106,6 +106,7 @@ from app.services.delivery.sf_same_city_service import (
     preview_sf_dinner_same_city,
     preview_sf_same_city,
     push_sf_dinner_same_city,
+    push_sf_dinner_same_city_instant,
     push_sf_same_city,
     push_sf_same_city_instant,
     push_single_meal_retail_to_sf,
@@ -719,6 +720,27 @@ def delivery_sf_dinner_push(
     try:
         # 结果由管理端页面 toast 展示，不再写系统消息
         out: SfSameCityPushOut = push_sf_dinner_same_city(
+            db, body, store_id=store_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=dump_model(out), msg="处理完成")
+
+
+@router.post("/delivery-sf/dinner/push-instant", response_model=None)
+def delivery_sf_dinner_push_instant(
+    body: SfSameCityPushIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """
+    晚餐配送大表：勾选停靠点推送到「及时单账号」（门店零售推顺丰店铺ID），全部按立即推单创单。
+    与午餐及时单互不影响；创单失败/已取消的记录可覆盖重推。
+    """
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        out: SfSameCityPushOut = push_sf_dinner_same_city_instant(
             db, body, store_id=store_id
         )
     except ValueError as e:

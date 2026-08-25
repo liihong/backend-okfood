@@ -21,6 +21,8 @@ from app.core.tenant_scope import (
     TENANT_INTEGRATION_INCOMPLETE_HINT,
     allows_global_env_fallback,
     legacy_default_tenant_id,
+    merge_shared_sf_developer_int,
+    merge_shared_sf_developer_secret,
     merge_tenant_field_or_global,
     merge_tenant_int_or_global,
 )
@@ -269,19 +271,23 @@ def resolve_wechat_pay_notify_api_key_candidates(
 
 
 def merged_sf_integration_namespace(db: Session, tenant_id: int) -> SimpleNamespace:
-    """顺丰预览/推单参数：非主租户缺省不回退全局，避免串用主租户顺丰账号。"""
+    """
+    顺丰预览/推单参数。
+
+    开发者 ID / 密钥：各租户未填时共用全局 ``.env``（同一开放平台账号）。
+    店铺编号、取件电话/地址：仍按租户填写；非主租户缺省不借用主店店铺，避免串店。
+    """
     base = get_settings()
     row = get_tenant_integration_row(db, tenant_id)
     tid = int(tenant_id)
     ns = SimpleNamespace()
 
-    ns.SF_OPEN_DEV_ID = merge_tenant_int_or_global(
+    ns.SF_OPEN_DEV_ID = merge_shared_sf_developer_int(
         row.sf_open_dev_id if row else None,
         int(base.SF_OPEN_DEV_ID or 0),
-        tenant_id=tid,
     )
-    ns.SF_OPEN_SECRET = merge_tenant_field_or_global(
-        row.sf_open_secret if row else None, base.SF_OPEN_SECRET, tenant_id=tid
+    ns.SF_OPEN_SECRET = merge_shared_sf_developer_secret(
+        row.sf_open_secret if row else None, base.SF_OPEN_SECRET
     )
     ns.SF_OPEN_SHOP_ID = merge_tenant_field_or_global(
         row.sf_open_shop_id if row else None, base.SF_OPEN_SHOP_ID, tenant_id=tid
@@ -327,8 +333,8 @@ def resolve_sf_notify_app_key_candidates(db: Session, payload: dict[str, Any] | 
     """
     顺丰回调验签密钥候选。
 
-    - 能定位推单/门店：仅用该租户密钥；主租户可追加全局兜底。
-    - 无法定位：遍历各租户已配置密钥 + 主租户全局（不用主租户密钥替非主租户验签）。
+    - 能定位推单/门店：该租户密钥优先，未填则用全局开发者密钥（与推单共用同一开放平台账号）。
+    - 无法定位：遍历各租户已配置密钥 + 全局密钥。
     """
     from app.services.delivery.sf_open_notify_payload import normalize_sf_callback_payload
 
@@ -380,8 +386,8 @@ def resolve_sf_notify_app_key_candidates(db: Session, payload: dict[str, Any] | 
                 row = get_tenant_integration_row(db, int(st.tenant_id))
                 if row and _s(row.sf_open_secret):
                     add(_s(row.sf_open_secret))
-                if allows_global_env_fallback(int(st.tenant_id)):
-                    add(base.SF_OPEN_SECRET)
+                # 开发者密钥：租户未填时与推单一样回退全局 .env
+                add(base.SF_OPEN_SECRET)
         return out
 
     for row in db.scalars(select(TenantIntegrationSettings)).all():

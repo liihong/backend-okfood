@@ -25,7 +25,11 @@ export function getSfPushPreviewApiPath(sheetView, mode) {
 
 /** @param {'lunch'|'dinner'|'lunch_dinner'} sheetView @param {'sheet'|'instant'} mode */
 export function getSfPushApiPath(mode, sheetView = SHEET_VIEW_LUNCH) {
-  if (sheetView === SHEET_VIEW_DINNER) return '/api/admin/delivery-sf/dinner/push'
+  if (sheetView === SHEET_VIEW_DINNER) {
+    return mode === SF_PUSH_MODE_INSTANT
+      ? '/api/admin/delivery-sf/dinner/push-instant'
+      : '/api/admin/delivery-sf/dinner/push'
+  }
   return mode === SF_PUSH_MODE_INSTANT
     ? '/api/admin/delivery-sf/push-instant'
     : '/api/admin/delivery-sf/push'

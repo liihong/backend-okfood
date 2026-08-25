@@ -226,7 +226,7 @@ class StoreConfigOut(BaseModel):
     sf_retail_push_shop_id: str | None = Field(
         None,
         max_length=64,
-        description="单次点餐/零售单推顺丰：顺丰店铺编号，与租户对接中的 shop（大表推单）独立",
+        description="单次点餐/零售单及配送大表及时单推顺丰：顺丰店铺编号，与租户对接中的 shop（大表预约推单）独立",
     )
     sf_retail_push_shop_type: int | None = Field(
         None,
