@@ -335,7 +335,7 @@ onMounted(async () => {
     await fetchCategories()
     await loadSpuDetail()
   } finally {
-    if (!spuId.value) loading.value = false
+    loading.value = false
   }
 })
 
@@ -486,10 +486,10 @@ onActivated(() => {
         </el-table>
       </section>
 
-      <!-- 详情介绍（置底） -->
+      <!-- 详情介绍（置底）；等数据加载完再挂载，避免遮罩下初始化导致无法输入 -->
       <section class="retail-spu-edit__card">
         <h3 class="retail-spu-edit__card-title">详情介绍</h3>
-        <RetailRichTextEditor v-model="spuForm.detail_html" />
+        <RetailRichTextEditor v-if="!loading" v-model="spuForm.detail_html" />
       </section>
     </div>
 
