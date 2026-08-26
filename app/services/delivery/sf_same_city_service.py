@@ -1174,6 +1174,13 @@ def _sf_product_display_name(row: SfSameCityRowBase, *, n_meals: int, gset: Any)
     return f"{cat[:80]} {n_meals}份"[:200]
 
 
+def _sf_order_source(store: Any, gset: Any) -> str:
+    """顺丰骑士端「来源」(createorder.order_source)：优先租户门店名，未配置再回退全局 SF_ORDER_SOURCE。"""
+    name = (getattr(store, "store_name", None) or "").strip()
+    fallback = str(getattr(gset, "SF_ORDER_SOURCE", None) or "").strip()
+    return (name or fallback or "OKFOOD")[:12]
+
+
 def _create_order_payload(
     row: SfSameCityRowBase,
     *,
@@ -1224,7 +1231,7 @@ def _create_order_payload(
         "shop_id": str(gset.SF_OPEN_SHOP_ID or "").strip(),
         "shop_type": int(gset.SF_OPEN_SHOP_TYPE or 1),
         "shop_order_id": str(shop_order_id)[:64],
-        "order_source": str((gset.SF_ORDER_SOURCE or "OKFOOD")[:12]),
+        "order_source": _sf_order_source(store, gset),
         "order_time": int(now_ts),
         "is_appoint": is_appoint,
         "is_insured": is_insu,

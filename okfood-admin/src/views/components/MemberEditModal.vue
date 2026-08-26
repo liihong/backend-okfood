@@ -1,8 +1,67 @@
 <script setup>
 import { ref, watch, computed, onActivated } from 'vue'
 import { X, UserPen, CircleHelp, Info, Save, MapPin, Truck } from 'lucide-vue-next'
-import { apiJson, handleAdminLogout, mapAdminUserToRow } from '../../admin/core.js'
+import {
+  apiJson,
+  handleAdminLogout,
+  mapAdminUserToRow,
+  mealScopeLabelFromPeriods,
+} from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
+
+/** 档案套餐无法匹配已开启卡包时的占位值，避免下拉空白 */
+const CURRENT_PLAN_VALUE = '__current__'
+
+/**
+ * 与后端 `_plan_for_membership_template` 对齐：种类文案 / 餐次 → 周卡/月卡/次卡
+ * @param {Record<string, unknown> | null | undefined} tpl
+ */
+function planTypeFromTemplate(tpl) {
+  const kl = String(tpl?.kind_label || '').trim()
+  const pk = String(tpl?.period_kind || '').trim().toLowerCase()
+  if (kl.includes('月') || pk === 'monthly') return '月卡'
+  if (kl.includes('周') || pk === 'weekly') return '周卡'
+  const mg = Number(tpl?.meals_grant) || 0
+  if (mg >= 18) return '月卡'
+  if (mg >= 6) return '周卡'
+  return '次卡'
+}
+
+/**
+ * 套餐下拉展示：优先种类 + 餐段，与列表「月卡 · 全餐」口径一致
+ * @param {Record<string, unknown> | null | undefined} tpl
+ */
+function templatePlanLabel(tpl) {
+  const kind = String(tpl?.kind_label || '').trim() || String(tpl?.name || '').trim() || '会员卡'
+  if (kind.includes('·') || kind.includes('午餐') || kind.includes('晚餐') || kind.includes('全餐')) {
+    return kind
+  }
+  return `${kind} · ${mealScopeLabelFromPeriods(tpl?.meal_periods)}`
+}
+
+/**
+ * 将档案当前套餐匹配到本店卡包（种类 + 餐段优先）
+ * @param {Array<Record<string, unknown>>} templates
+ * @param {Record<string, unknown> | null | undefined} member
+ */
+function matchMemberTemplate(templates, member) {
+  const list = Array.isArray(templates) ? templates : []
+  if (!list.length || !member) return null
+  const planBase = String(member.planBase || member.plan_type || '').trim()
+  const display = String(member.plan || '').trim()
+  const scope = mealScopeLabelFromPeriods(member.entitled_meal_periods)
+  // 仅精确匹配，避免把「月卡 · 全餐」错配成租户另一张「月卡 · 午餐」
+  const byDisplay = display
+    ? list.find((t) => templatePlanLabel(t) === display)
+    : null
+  if (byDisplay?.id != null) return Number(byDisplay.id)
+  const exact = list.find((t) => {
+    const kl = String(t.kind_label || '').trim()
+    return kl === planBase && mealScopeLabelFromPeriods(t.meal_periods) === scope
+  })
+  if (exact?.id != null) return Number(exact.id)
+  return null
+}
 
 const open = defineModel('open', { type: Boolean, default: false })
 
@@ -22,6 +81,9 @@ const editInitialPlanType = ref('次卡')
 /** 打开/刷新表单时的剩余次数，仅用户主动修改时才提交 balance，避免 keep-alive 快照误覆盖 */
 const editInitialBalance = ref(0)
 const profileLoading = ref(false)
+/** 当前租户已开启的会员卡模版（套餐类型下拉） */
+const membershipTemplates = ref([])
+const membershipTemplatesLoading = ref(false)
 const editForm = ref({
   phone: '',
   name: '',
@@ -29,6 +91,7 @@ const editForm = ref({
   remarks: '',
   daily_meal_units: 1,
   plan_type: '次卡',
+  membership_template_id: CURRENT_PLAN_VALUE,
   use_auto_area: false,
   balance: 0,
   delivery_start_date: '',
@@ -74,9 +137,80 @@ function normalizeBalance(v) {
   return Math.max(0, Math.min(999999, Math.floor(Number(v) || 0)))
 }
 
+/** 当前租户已开启卡包 → 套餐下拉选项（按展示文案去重） */
+const planOptions = computed(() => {
+  const seen = new Set()
+  const opts = []
+  for (const t of membershipTemplates.value) {
+    const id = Number(t?.id)
+    if (!Number.isFinite(id) || id <= 0) continue
+    const label = templatePlanLabel(t)
+    if (seen.has(label)) continue
+    seen.add(label)
+    opts.push({ id, label, planType: planTypeFromTemplate(t) })
+  }
+  const selected = editForm.value.membership_template_id
+  if (selected === CURRENT_PLAN_VALUE) {
+    const currentLabel =
+      (props.member?.plan && String(props.member.plan).trim()) ||
+      String(editForm.value.plan_type || '次卡').trim() ||
+      '次卡'
+    if (!opts.some((o) => o.label === currentLabel)) {
+      opts.unshift({
+        id: CURRENT_PLAN_VALUE,
+        label: currentLabel,
+        planType: editInitialPlanType.value || '次卡',
+      })
+    }
+  }
+  return opts
+})
+
+watch(planOptions, (opts) => {
+  if (editForm.value.membership_template_id !== CURRENT_PLAN_VALUE) return
+  const currentLabel =
+    (props.member?.plan && String(props.member.plan).trim()) ||
+    String(editForm.value.plan_type || '').trim()
+  const hit = opts.find((o) => o.id !== CURRENT_PLAN_VALUE && o.label === currentLabel)
+  if (hit) editForm.value.membership_template_id = hit.id
+})
+
+async function loadMembershipTemplates() {
+  membershipTemplatesLoading.value = true
+  try {
+    const data = await apiJson(
+      '/api/admin/catalog/membership-templates?active_only=true',
+      {},
+      { auth: true },
+    )
+    membershipTemplates.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    membershipTemplates.value = []
+    const status = e && typeof e.status === 'number' ? e.status : 0
+    if (status === 401) throw e
+    showToast(e instanceof Error ? e.message : '加载本店会员卡失败', 'error')
+  } finally {
+    membershipTemplatesLoading.value = false
+  }
+}
+
+function resolveSelectedPlanType() {
+  const id = editForm.value.membership_template_id
+  if (id == null || id === CURRENT_PLAN_VALUE) {
+    return String(editForm.value.plan_type || '次卡').trim() || '次卡'
+  }
+  const hit = planOptions.value.find((o) => String(o.id) === String(id))
+  if (hit?.planType) return hit.planType
+  const tpl = membershipTemplates.value.find((t) => Number(t.id) === Number(id))
+  if (tpl) return planTypeFromTemplate(tpl)
+  return String(editForm.value.plan_type || '次卡').trim() || '次卡'
+}
+
 function fillFormFromMember(u) {
-  const p0 = u.plan && u.plan !== '—' ? u.plan : '次卡'
+  // 提交口径用 planBase（周卡/月卡/次卡），勿用列表展示文案「月卡 · 全餐」
+  const p0 = u.planBase && u.planBase !== '—' ? String(u.planBase).trim() : '次卡'
   editInitialPlanType.value = p0
+  const matchedId = matchMemberTemplate(membershipTemplates.value, u)
   const dr =
     u.delivery_region_id != null && u.delivery_region_id !== '' ? String(u.delivery_region_id) : ''
   const balance = normalizeBalance(u.balance)
@@ -88,6 +222,7 @@ function fillFormFromMember(u) {
     remarks: u.remarks || '',
     daily_meal_units: Math.max(1, Math.min(50, Number(u.daily_meal_units) || 1)),
     plan_type: p0,
+    membership_template_id: matchedId != null ? matchedId : CURRENT_PLAN_VALUE,
     use_auto_area: false,
     balance,
     delivery_start_date:
@@ -101,18 +236,31 @@ function fillFormFromMember(u) {
   }
 }
 
-/** 打开弹窗时拉取最新档案，避免列表 keep-alive 缓存与送达扣次不同步 */
+/** 打开弹窗时拉取最新档案与本店卡包，避免列表 keep-alive 缓存与送达扣次不同步 */
 async function refreshMemberFormFromServer(u) {
   if (!u || typeof u !== 'object') return
   const phone = String(u.phone || '').trim()
   if (!phone) {
+    try {
+      await loadMembershipTemplates()
+    } catch (e) {
+      const status = e && typeof e.status === 'number' ? e.status : 0
+      if (status === 401) {
+        alert('登录已过期，请重新登录')
+        handleAdminLogout()
+        return
+      }
+    }
     fillFormFromMember(u)
     return
   }
   profileLoading.value = true
   try {
     const params = new URLSearchParams({ q: phone, page: '1', page_size: '1' })
-    const data = await apiJson(`/api/admin/users?${params}`, {}, { auth: true })
+    const [data] = await Promise.all([
+      apiJson(`/api/admin/users?${params}`, {}, { auth: true }),
+      loadMembershipTemplates(),
+    ])
     const rawItems = Array.isArray(data?.items) ? data.items : []
     const fresh = rawItems.length ? mapAdminUserToRow(rawItems[0], 0) : u
     fillFormFromMember(fresh)
@@ -227,7 +375,7 @@ async function submitEditMember() {
         payload.delivery_region_id = dr === '' || dr == null ? null : Number(dr)
       }
     }
-    const pt = String(editForm.value.plan_type || '次卡').trim() || '次卡'
+    const pt = resolveSelectedPlanType()
     if (pt !== editInitialPlanType.value) {
       payload.plan_type = pt
     }
@@ -374,11 +522,31 @@ async function submitEditMember() {
                 </div>
                 <div class="mem-field">
                   <label class="mem-lab">套餐类型</label>
-                  <el-select v-model="editForm.plan_type" class="mem-input-el mem-select-el">
-                    <el-option label="周卡" value="周卡" />
-                    <el-option label="月卡" value="月卡" />
-                    <el-option label="次卡" value="次卡" />
+                  <el-select
+                    v-model="editForm.membership_template_id"
+                    class="mem-input-el mem-select-el"
+                    :loading="membershipTemplatesLoading"
+                    :placeholder="
+                      membershipTemplatesLoading
+                        ? '加载本店会员卡…'
+                        : planOptions.length
+                          ? '请选择本店会员卡'
+                          : '暂无已开启的会员卡'
+                    "
+                  >
+                    <el-option
+                      v-for="opt in planOptions"
+                      :key="String(opt.id)"
+                      :label="opt.label"
+                      :value="opt.id"
+                    />
                   </el-select>
+                  <p
+                    v-if="!membershipTemplatesLoading && !membershipTemplates.length"
+                    class="mem-hint-soft"
+                  >
+                    暂无已开启的卡包，请先在「会员卡管理」中创建并开启。
+                  </p>
                 </div>
               </div>
             </section>

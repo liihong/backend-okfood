@@ -167,7 +167,7 @@ class Settings(BaseSettings):
     SF_API_BASE: str = "https://openic.sf-express.com"
     """生产环境 API 根地址；沙箱可改为 commit-openic 等以控制台为准。"""
     SF_ORDER_SOURCE: str = "OKFOOD"
-    """order_source，文档允许其它填中文字符串或短码，勿含敏感信息。"""
+    """createorder.order_source 回退值（骑士端「来源」优先用租户门店名）；文档允许中文或短码，勿含敏感信息。"""
     SF_API_VERSION: int = 17
     """API 主版本，如文档 1.7 则填 17。"""
     SF_PICKUP_PHONE: str = ""
