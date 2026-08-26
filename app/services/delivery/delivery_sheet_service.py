@@ -52,6 +52,12 @@ from app.services.meal_period.card_eligibility import filter_member_groups_for_s
 from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
 
 
+def _tenant_id_for_store(db: Session, store_id: int) -> int | None:
+    """门店所属租户；门店缺失时返回 None，避免名单查询在无租户上下文时扫到租户 1。"""
+    st = db.get(Store, int(store_id))
+    return int(st.tenant_id) if st is not None else None
+
+
 def _merged_home_member_ids_when_sheet_frozen(
     db: Session,
     *,
@@ -101,6 +107,7 @@ def _merged_home_member_ids_when_sheet_frozen(
         delivery_date=delivery_date,
         delivery_region_id=delivery_region_id,
         store_id=sid,
+        tenant_id=_tenant_id_for_store(db, sid),
         meal_period=period,
     )
     for mid in whitelist:
@@ -125,6 +132,7 @@ def _load_home_members_with_default_addresses(
     if not member_ids:
         return [], {}
     sid = int(store_id)
+    tid = _tenant_id_for_store(db, sid)
     daf = default_address_pick_subquery()
     q = (
         select(Member, MemberAddress)
@@ -137,6 +145,8 @@ def _load_home_members_with_default_addresses(
             Member.store_id == sid,
         )
     )
+    if tid is not None:
+        q = q.where(Member.tenant_id == int(tid))
     if delivery_region_id is not None:
         q = q.where(MemberAddress.delivery_region_id == int(delivery_region_id))
     members: list[Member] = []
@@ -188,6 +198,7 @@ def _home_members_for_delivery_sheet(
         delivery_date=delivery_date,
         delivery_region_id=delivery_region_id,
         store_id=sid,
+        tenant_id=_tenant_id_for_store(db, sid),
     )
 
 
@@ -232,6 +243,7 @@ def _home_members_for_dinner_delivery_sheet(
         delivery_date=delivery_date,
         delivery_region_id=delivery_region_id,
         store_id=sid,
+        tenant_id=_tenant_id_for_store(db, sid),
     )
 
 
@@ -425,15 +437,15 @@ def home_delivery_stops_for_aggs(
     """
     sid = int(store_id)
     d = delivery_date
+    tid = _tenant_id_for_store(db, sid)
+    if tid is None:
+        return []
     region_filter_id: int | None = None
     if area and (a := area.strip()):
-        st = db.get(Store, sid)
-        if st is None:
-            return []
         rid = db.scalar(
             select(DeliveryRegion.id).where(
                 DeliveryRegion.name == a,
-                DeliveryRegion.tenant_id == int(st.tenant_id),
+                DeliveryRegion.tenant_id == tid,
             )
         )
         if rid is None:
@@ -446,7 +458,9 @@ def home_delivery_stops_for_aggs(
     day_delivered_ids = _store_delivered_member_ids_on_date(
         db, store_id=sid, delivery_date=d, meal_period=period
     )
-    pu_members, _pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d, store_id=sid)
+    pu_members, _pu_defaults = eligible_members_for_store_pickup(
+        db, delivery_date=d, store_id=sid, tenant_id=tid
+    )
     ex_h, ex_dh, _ex_pu, _ex_pud = extra_delivered_ineligible_subscribers(
         db,
         delivery_date=d,
@@ -454,6 +468,7 @@ def home_delivery_stops_for_aggs(
         already_pickup={int(m.id) for m in pu_members},
         delivery_region_id=region_filter_id,
         store_id=sid,
+        tenant_id=tid,
         day_delivered_member_ids=day_delivered_ids,
     )
     for m in ex_h:
@@ -474,7 +489,7 @@ def home_delivery_stops_for_aggs(
         addr = sheet_defaults.get(m.id)
         if addr and addr.delivery_region_id is not None:
             region_ids.add(int(addr.delivery_region_id))
-    id_to_name = delivery_region_name_map(db, region_ids)
+    id_to_name = delivery_region_name_map(db, region_ids, tenant_id=tid)
 
     buckets: dict[str, dict[tuple[str, str], list[Member]]] = defaultdict(lambda: defaultdict(list))
     for m in sheet_members:
@@ -535,7 +550,8 @@ def _count_home_delivery_stops(
         addr = sheet_defaults.get(int(m.id))
         if addr and addr.delivery_region_id is not None:
             region_ids.add(int(addr.delivery_region_id))
-    id_to_name = delivery_region_name_map(db, region_ids)
+    tid = int(sheet_members[0].tenant_id) if sheet_members else None
+    id_to_name = delivery_region_name_map(db, region_ids, tenant_id=tid)
     buckets: dict[str, set[tuple[str, str]]] = defaultdict(set)
     for m in sheet_members:
         addr = sheet_defaults.get(int(m.id))
@@ -570,7 +586,9 @@ def delivery_sheet_metrics_for_date(
         db, delivery_date=d, delivery_region_id=None, store_id=sid, day_snap=day_snap
     )
     mlist = list(members)
-    pu_members, _pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d, store_id=sid)
+    pu_members, _pu_defaults = eligible_members_for_store_pickup(
+        db, delivery_date=d, store_id=sid, tenant_id=_tenant_id_for_store(db, sid)
+    )
     ex_h, ex_dh, ex_pu, _ex_pud = extra_delivered_ineligible_subscribers(
         db,
         delivery_date=d,
@@ -578,6 +596,7 @@ def delivery_sheet_metrics_for_date(
         already_pickup={int(m.id) for m in pu_members},
         delivery_region_id=None,
         store_id=sid,
+        tenant_id=_tenant_id_for_store(db, sid),
         day_delivered_member_ids=day_delivered_ids,
     )
     sheet_members = mlist + list(ex_h)
@@ -690,7 +709,11 @@ def delivery_sheet_metrics_pending_sql_for_dinner_future_date(
     if not is_subscription_delivery_day(delivery_date):
         return empty
     members, _ = eligible_members_for_dinner_delivery(
-        db, delivery_date=delivery_date, delivery_region_id=None, store_id=int(store_id)
+        db,
+        delivery_date=delivery_date,
+        delivery_region_id=None,
+        store_id=int(store_id),
+        tenant_id=_tenant_id_for_store(db, int(store_id)),
     )
     total = sum(
         effective_daily_meal_units_for_period(db, m, MealPeriod.DINNER.value) for m in members
@@ -1210,7 +1233,11 @@ def delivery_sheet_metrics_prep_preview_for_dinner_future_date(
     if not is_subscription_delivery_day(delivery_date):
         return empty
     members, _ = eligible_members_for_dinner_delivery(
-        db, delivery_date=delivery_date, delivery_region_id=None, store_id=int(store_id)
+        db,
+        delivery_date=delivery_date,
+        delivery_region_id=None,
+        store_id=int(store_id),
+        tenant_id=_tenant_id_for_store(db, int(store_id)),
     )
     state_map = load_dinner_meal_period_states_map(db, [int(m.id) for m in members])
     total = 0
@@ -1647,7 +1674,9 @@ def build_delivery_sheet(
     if view == DeliverySheetView.DINNER.value:
         pu_members, pu_defaults = [], {}
     else:
-        pu_members, pu_defaults = eligible_members_for_store_pickup(db, delivery_date=d, store_id=sid)
+        pu_members, pu_defaults = eligible_members_for_store_pickup(
+            db, delivery_date=d, store_id=sid, tenant_id=tid
+        )
         if view == DeliverySheetView.LUNCH.value:
             members, pu_members = filter_member_groups_for_sheet_view(
                 db, DeliverySheetView.LUNCH.value, members, pu_members
@@ -1663,6 +1692,7 @@ def build_delivery_sheet(
         already_pickup={int(m.id) for m in pu_members},
         delivery_region_id=region_filter_id,
         store_id=sid,
+        tenant_id=tid,
         day_delivered_member_ids=day_delivered_ids,
     )
     for m in ex_h:
@@ -1703,7 +1733,7 @@ def build_delivery_sheet(
         addr = default_by_id.get(m.id)
         if addr and addr.delivery_region_id is not None:
             region_ids.add(int(addr.delivery_region_id))
-    id_to_name = delivery_region_name_map(db, region_ids)
+    id_to_name = delivery_region_name_map(db, region_ids, tenant_id=tid)
 
     buckets: dict[str, dict[tuple[str, str], list[Member]]] = defaultdict(lambda: defaultdict(list))
     for m in members:

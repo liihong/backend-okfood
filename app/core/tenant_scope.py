@@ -98,15 +98,18 @@ def require_store_id_for_service(store_id: int | None, *, operation: str) -> int
 
 def sql_member_scope_clause(*, tenant_id: int | None, store_id: int | None):
     """
-    会员名单 SQL 范围子句：优先按门店；否则按租户。
+    会员名单 SQL 范围子句：门店与租户同时传入时两者必须同时命中；否则优先按门店，再按租户。
 
     **禁止** ``tenant_id`` 与 ``store_id`` 同时为空时回落主租户，避免多租户环境下误扫租户 1 数据。
     调用方须从已校验的门店/租户上下文传入至少其一。
     """
-    from sqlalchemy import false
+    from sqlalchemy import and_, false
 
     from app.models.member import Member
 
+    if store_id is not None and tenant_id is not None:
+        # 严格隔离：避免门店 id 误配时把 OK饭租户 1 会员扫进其它租户名单
+        return and_(Member.store_id == int(store_id), Member.tenant_id == int(tenant_id))
     if store_id is not None:
         return Member.store_id == int(store_id)
     if tenant_id is not None:

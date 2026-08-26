@@ -198,10 +198,16 @@ def load_default_address_map(db: Session, member_ids: list[int]) -> dict[int, Me
     return {mid: by_mid.get(mid) for mid in uniq}
 
 
-def delivery_region_name_map(db: Session, ids: set[int]) -> dict[int, str]:
+def delivery_region_name_map(
+    db: Session, ids: set[int], *, tenant_id: int | None = None
+) -> dict[int, str]:
+    """片区 id→名称；传入 ``tenant_id`` 时只映射本租户片区，避免跨租户片区名泄漏。"""
     if not ids:
         return {}
-    rows = db.execute(select(DeliveryRegion.id, DeliveryRegion.name).where(DeliveryRegion.id.in_(ids))).all()
+    stmt = select(DeliveryRegion.id, DeliveryRegion.name).where(DeliveryRegion.id.in_(ids))
+    if tenant_id is not None:
+        stmt = stmt.where(DeliveryRegion.tenant_id == int(tenant_id))
+    rows = db.execute(stmt).all()
     out: dict[int, str] = {}
     for rid, name in rows:
         n = (name or "").strip()

@@ -271,9 +271,30 @@ def _load_default_address(
     )
 
 
+def _single_meal_period_match(meal_period: str | None):
+    """单次点餐餐段条件：晚餐仅 dinner；午餐兼容历史空值。"""
+    from app.models.enums import MealPeriod
+    from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
+
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    if period == MealPeriod.DINNER.value:
+        return SingleMealOrder.meal_period == MealPeriod.DINNER.value
+    return or_(
+        SingleMealOrder.meal_period == MealPeriod.LUNCH.value,
+        SingleMealOrder.meal_period.is_(None),
+        SingleMealOrder.meal_period == "",
+    )
+
+
 def _single_order_rows(
-    db: Session, d: date
+    db: Session,
+    d: date,
+    *,
+    store_id: int,
+    tenant_id: int,
+    meal_period: str | None = None,
 ) -> list[tuple[SingleMealOrder, Member, MemberAddress, MenuDish | None]]:
+    """仅本租户本店、对应餐段的待履约到家单次单；禁止「全部片区」时扫入其它租户（含 OK饭租户 1）。"""
     q = (
         select(SingleMealOrder, Member, MemberAddress, MenuDish)
         .join(Member, SingleMealOrder.member_id == Member.id)
@@ -282,9 +303,14 @@ def _single_order_rows(
         .where(
             and_(
                 SingleMealOrder.delivery_date == d,
+                SingleMealOrder.store_id == int(store_id),
+                SingleMealOrder.tenant_id == int(tenant_id),
+                Member.store_id == int(store_id),
+                Member.tenant_id == int(tenant_id),
                 SingleMealOrder.pay_status == "已支付",
                 SingleMealOrder.fulfillment_status == "pending",
                 SingleMealOrder.store_pickup.is_(False),
+                _single_meal_period_match(meal_period),
             )
         )
     )
@@ -314,6 +340,11 @@ def _build_aggs(
 ) -> dict[str, _Agg]:
     """大表所有到家停靠点 + 单次餐合并。"""
     from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
+
+    st_row = db.get(Store, int(store_id))
+    if st_row is None:
+        return {}
+    tid = int(st_row.tenant_id)
 
     aggs: dict[str, _Agg] = {}
     m_by_id = {int(m.id): m for m in members}
@@ -352,9 +383,13 @@ def _build_aggs(
             )
         aggs[sk] = a
 
-    for o, mem, aaddr, dsh in _single_order_rows(db, d):
+    for o, mem, aaddr, dsh in _single_order_rows(
+        db, d, store_id=int(store_id), tenant_id=tid, meal_period=period
+    ):
         nm = delivery_region_name_map(
-            db, {int(aaddr.delivery_region_id)} if aaddr.delivery_region_id else set()
+            db,
+            {int(aaddr.delivery_region_id)} if aaddr.delivery_region_id else set(),
+            tenant_id=tid,
         )
         ra = (o.routing_area or "").strip() or routing_area_label(aaddr, nm)
         if area_key and (ra or "").strip() != area_key.strip():
@@ -854,16 +889,18 @@ def aggs_for_delivery_date(
     from app.models.enums import DeliverySheetView, MealPeriod
 
     sid = int(store_id) if store_id is not None else int(get_settings().DEFAULT_STORE_ID)
+    st_row = db.get(Store, sid)
+    tid = int(st_row.tenant_id) if st_row is not None else None
     period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
     if period == MealPeriod.DINNER.value:
         from app.services.dinner.eligibility import eligible_members_for_dinner_delivery
 
         members, default_by_id = eligible_members_for_dinner_delivery(
-            db, delivery_date=d, delivery_region_id=None, store_id=sid
+            db, delivery_date=d, delivery_region_id=None, store_id=sid, tenant_id=tid
         )
     else:
         members, default_by_id = eligible_members_for_lunch_delivery(
-            db, delivery_date=d, delivery_region_id=None, store_id=sid
+            db, delivery_date=d, delivery_region_id=None, store_id=sid, tenant_id=tid
         )
     mlist = list(members)
     return _build_aggs(db, d, None, None, mlist, default_by_id, store_id=sid, meal_period=period)
@@ -955,14 +992,22 @@ def _build_sf_same_city_preview_bundle(
         from app.services.delivery.sf_order_fulfillment_service import SF_PUSH_KIND_DINNER_DELIVERY_SHEET
 
         members, default_by_id = eligible_members_for_dinner_delivery(
-            db, delivery_date=d, delivery_region_id=reg_id, store_id=int(store_id)
+            db,
+            delivery_date=d,
+            delivery_region_id=reg_id,
+            store_id=int(store_id),
+            tenant_id=tid,
         )
         sheet_push_kind = SF_PUSH_KIND_DINNER_DELIVERY_SHEET
     else:
         from app.services.delivery.sf_order_fulfillment_service import SF_PUSH_KIND_DELIVERY_SHEET
 
         members, default_by_id = eligible_members_for_lunch_delivery(
-            db, delivery_date=d, delivery_region_id=reg_id, store_id=int(store_id)
+            db,
+            delivery_date=d,
+            delivery_region_id=reg_id,
+            store_id=int(store_id),
+            tenant_id=tid,
         )
         sheet_push_kind = SF_PUSH_KIND_DELIVERY_SHEET
     mlist = list(members)
