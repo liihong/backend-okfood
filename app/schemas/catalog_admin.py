@@ -16,6 +16,10 @@ class MembershipCardTemplateOut(BaseModel):
         default_factory=lambda: ["lunch"],
         description='覆盖餐段：["lunch"] / ["dinner"] / ["lunch","dinner"]',
     )
+    deliver_dinner_with_lunch: bool = Field(
+        False,
+        description="午+晚卡是否与午餐一起配送（午餐送达时同时扣晚餐）；只勾单餐段时忽略",
+    )
     name: str
     meals_grant: int
     list_price_yuan: str | None = Field(None, description="原价（划线价），可为空")
@@ -50,6 +54,10 @@ class MembershipCardTemplateCreateIn(BaseModel):
         default_factory=lambda: ["lunch"],
         description='覆盖餐段：["lunch"] / ["dinner"] / ["lunch","dinner"]',
     )
+    deliver_dinner_with_lunch: bool = Field(
+        False,
+        description="午+晚卡是否与午餐一起配送；默认否（分开配送、各扣各的）",
+    )
 
 
 class MembershipCardTemplatePatchIn(BaseModel):
@@ -66,6 +74,9 @@ class MembershipCardTemplatePatchIn(BaseModel):
     sort_order: int | None = Field(None, ge=0)
     is_active: bool | None = None
     meal_periods: list[str] | None = Field(None, description="覆盖餐段")
+    deliver_dinner_with_lunch: bool | None = Field(
+        None, description="午+晚是否与午餐一起配送；只勾单餐段时服务端强制 false"
+    )
 
 
 class StoreRetailCategoryOut(BaseModel):

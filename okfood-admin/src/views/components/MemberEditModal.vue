@@ -118,6 +118,13 @@ watch(
 /** 默认配送地址只读展示（与档案同步，不在此弹窗编辑） */
 const addressDisplayText = computed(() => (editForm.value.address || '').trim())
 
+/** 自动划区勾选说明：自提时不参与划区 */
+const autoAreaHintText = computed(() =>
+  editForm.value.store_pickup
+    ? '门店自提不参与配送划区，无需默认配送地址即可保存。'
+    : '未勾选时：保存会先按地址地理编码划区，再以您所选片区覆盖。勾选后忽略手动片区。',
+)
+
 /** 不含所属片区：map_location_text + door_detail；否则从列表 address 去掉片区前缀 */
 function memberAddressDetailWithoutArea(u) {
   const mapT = typeof u.map_location_text === 'string' ? u.map_location_text.trim() : ''
@@ -426,7 +433,7 @@ async function submitEditMember() {
         <!-- 主区：单列居中 max-w-3xl，可滚动 -->
         <div class="mem-main">
           <div class="mem-main-inner">
-            <!-- 1. 会员基础档案 -->
+            <!-- 1. 会员基础档案 + 默认地址 -->
             <section class="mem-sec">
               <div class="mem-sec-head">
                 <span class="mem-bar" aria-hidden="true"></span>
@@ -452,26 +459,29 @@ async function submitEditMember() {
                   />
                 </div>
               </div>
-            </section>
-
-            <!-- 默认配送地址（只读，位于档案与权益之间） -->
-            <section class="mem-sec mem-sec--addr">
-              <div class="mem-addr-head">
-                <div class="mem-addr-head-main">
+              <div class="mem-field mem-field--addr">
+                <label class="mem-lab mem-lab-inline">
+                  默认配送地址
+                  <el-tooltip placement="top">
+                    <template #content>
+                      <div class="mem-tip-body">
+                        门店自提无需配送地址；如需修改地址，请前往地址库或通过工单重新绑定。
+                      </div>
+                    </template>
+                    <span class="mem-tip-wrap">
+                      <Info class="mem-tip" :size="13" />
+                    </span>
+                  </el-tooltip>
+                </label>
+                <div class="mem-addr-line">
                   <MapPin :size="14" class="mem-addr-head-ico" aria-hidden="true" />
-                  <h2 class="mem-addr-title">默认配送地址</h2>
+                  <p class="mem-addr-text">
+                    {{
+                      addressDisplayText ||
+                      (editForm.store_pickup ? '门店自提无需配送地址' : '未设置配送地址')
+                    }}
+                  </p>
                 </div>
-                <p class="mem-addr-foot">
-                  注：门店自提无需配送地址；如需修改地址，请前往地址库或通过工单重新绑定。
-                </p>
-              </div>
-              <div class="mem-addr-box">
-                <p class="mem-addr-text">
-                  {{
-                    addressDisplayText ||
-                    (editForm.store_pickup ? '门店自提无需配送地址' : '未设置配送地址')
-                  }}
-                </p>
               </div>
             </section>
 
@@ -485,11 +495,14 @@ async function submitEditMember() {
                 <div class="mem-field">
                   <label class="mem-lab mem-lab-inline">
                     剩余次数
-                    <CircleHelp
-                      class="mem-tip"
-                      :size="14"
-                      title="直接修改将产生余额流水（管理端调整）；常规续卡请走开卡工单入账"
-                    />
+                    <el-tooltip
+                      content="直接修改将产生余额流水（管理端调整）；常规续卡请走开卡工单入账"
+                      placement="top"
+                    >
+                      <span class="mem-tip-wrap">
+                        <CircleHelp class="mem-tip" :size="13" />
+                      </span>
+                    </el-tooltip>
                   </label>
                   <div class="mem-affix mem-affix--el-row">
                     <el-input-number
@@ -504,7 +517,19 @@ async function submitEditMember() {
                   </div>
                 </div>
                 <div class="mem-field">
-                  <label class="mem-lab">每配送日份数</label>
+                  <label class="mem-lab mem-lab-inline">
+                    每配送日份数
+                    <el-tooltip placement="top">
+                      <template #content>
+                        <div class="mem-tip-body">
+                          修改后次日配送日起生效，当日备餐/顺丰推单份数不变；若须调整当日配送请协调顺丰或厨房。
+                        </div>
+                      </template>
+                      <span class="mem-tip-wrap">
+                        <CircleHelp class="mem-tip" :size="13" />
+                      </span>
+                    </el-tooltip>
+                  </label>
                   <div class="mem-affix mem-affix--el-row">
                     <el-input-number
                       v-model="editForm.daily_meal_units"
@@ -516,9 +541,6 @@ async function submitEditMember() {
                     />
                     <span class="mem-affix-suf-el">份</span>
                   </div>
-                  <p class="mem-hint-soft">
-                    修改后<strong>次日配送日</strong>起生效，当日备餐/顺丰推单份数不变；若须调整当日配送请协调顺丰或厨房。
-                  </p>
                 </div>
                 <div class="mem-field">
                   <label class="mem-lab">套餐类型</label>
@@ -562,27 +584,40 @@ async function submitEditMember() {
                 <div class="mem-field">
                   <label class="mem-lab mem-lab-inline">
                     配送片区
-                    <Info
-                      class="mem-tip"
-                      :size="14"
-                      title="勾选自动划区后保存将忽略此处手动所选；否则先地理编码再以所选片区覆盖"
-                    />
+                    <el-tooltip placement="top">
+                      <template #content>
+                        <div class="mem-tip-body">{{ autoAreaHintText }}</div>
+                      </template>
+                      <span class="mem-tip-wrap">
+                        <Info class="mem-tip" :size="13" />
+                      </span>
+                    </el-tooltip>
                   </label>
-                  <el-select
-                    v-model="editForm.delivery_region_id"
-                    class="mem-input-el mem-select-el"
-                    :disabled="editForm.use_auto_area"
-                    clearable
-                    placeholder="未分配"
-                  >
-                    <el-option label="未分配" value="" />
-                    <el-option
-                      v-for="r in regionOptions"
-                      :key="r.id"
-                      :label="r.name || '—'"
-                      :value="String(r.id)"
-                    />
-                  </el-select>
+                  <div class="mem-region-row">
+                    <el-select
+                      v-model="editForm.delivery_region_id"
+                      class="mem-input-el mem-select-el"
+                      :disabled="editForm.use_auto_area"
+                      clearable
+                      placeholder="未分配"
+                    >
+                      <el-option label="未分配" value="" />
+                      <el-option
+                        v-for="r in regionOptions"
+                        :key="r.id"
+                        :label="r.name || '—'"
+                        :value="String(r.id)"
+                      />
+                    </el-select>
+                    <el-checkbox
+                      v-model="editForm.use_auto_area"
+                      :disabled="editForm.store_pickup"
+                      class="mem-auto-inline"
+                      title="保存时按当前地址重新自动划区"
+                    >
+                      自动划区
+                    </el-checkbox>
+                  </div>
                 </div>
                 <div class="mem-field">
                   <label class="mem-lab">业务起送日期</label>
@@ -597,46 +632,45 @@ async function submitEditMember() {
                 </div>
               </div>
 
-              <label class="mem-auto-chk mem-auto-chk--el">
-                <el-checkbox v-model="editForm.use_auto_area" :disabled="editForm.store_pickup">
-                  保存时按当前地址重新自动划区
-                </el-checkbox>
-              </label>
-              <p class="mem-hint-soft">
-                {{
-                  editForm.store_pickup
-                    ? '门店自提不参与配送划区，无需默认配送地址即可保存。'
-                    : '未勾选时：保存会先按地址地理编码划区，再以您所选片区覆盖。勾选后忽略手动片区。'
-                }}
-              </p>
-
               <div class="mem-chk-band">
                 <el-checkbox v-model="editForm.delivery_deferred" class="mem-chk-el mem-chk-el--red">
                   暂停配送
                 </el-checkbox>
-                <el-checkbox v-model="editForm.store_pickup" :disabled="editForm.delivery_deferred" class="mem-chk-el mem-chk-el--blue">
+                <el-checkbox
+                  v-model="editForm.store_pickup"
+                  :disabled="editForm.delivery_deferred"
+                  class="mem-chk-el mem-chk-el--blue"
+                >
                   门店自提
                 </el-checkbox>
-                <el-checkbox v-model="editForm.skip_subscription_saturday" class="mem-chk-el mem-chk-el--amber">
+                <el-checkbox
+                  v-model="editForm.skip_subscription_saturday"
+                  class="mem-chk-el mem-chk-el--amber"
+                >
                   周六不参与
                 </el-checkbox>
-                <button
-                  type="button"
-                  class="mem-reinstate-btn"
-                  :disabled="reinstateBusy || editSaving"
-                  title="推单后取消请假默认不加回；仅此操作可强制写入当日配送大表"
-                  @click="forceReinstateToDeliverySheet"
-                >
-                  <Truck :size="14" aria-hidden="true" />
-                  {{ reinstateBusy ? '加入中…' : '强制加入当天配送大表' }}
-                </button>
+                <el-tooltip placement="top">
+                  <template #content>
+                    <div class="mem-tip-body">
+                      若会员今日已推单冻结且早上取消请假需补送，可点此强制写入当日配送大表；须先取消请假且会员符合配送条件。
+                    </div>
+                  </template>
+                  <span class="mem-reinstate-wrap">
+                    <button
+                      type="button"
+                      class="mem-reinstate-btn"
+                      :disabled="reinstateBusy || editSaving"
+                      @click="forceReinstateToDeliverySheet"
+                    >
+                      <Truck :size="14" aria-hidden="true" />
+                      {{ reinstateBusy ? '加入中…' : '强制加入当天配送大表' }}
+                    </button>
+                  </span>
+                </el-tooltip>
               </div>
-              <p class="mem-hint-soft">
-                若会员今日已推单冻结且早上取消请假需补送，可点「强制加入当天配送大表」；须先取消请假且会员符合配送条件。
-              </p>
             </section>
 
-            <!-- 4. 备注 -->
+            <!-- 4. 备注：空时两行，有内容时最多三行 -->
             <section class="mem-sec">
               <div class="mem-sec-head">
                 <span class="mem-bar" aria-hidden="true"></span>
@@ -645,7 +679,7 @@ async function submitEditMember() {
               <el-input
                 v-model="editForm.remarks"
                 type="textarea"
-                :rows="4"
+                :autosize="{ minRows: 2, maxRows: 3 }"
                 maxlength="500"
                 show-word-limit
                 class="mem-input-el mem-ta-el"
@@ -698,7 +732,7 @@ async function submitEditMember() {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.72rem 1.35rem;
+  padding: 0.5rem 1.15rem;
   background: #064e3b;
   color: #fff;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
@@ -714,12 +748,12 @@ async function submitEditMember() {
 
 .mem-top-ico {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.1);
 }
 
@@ -732,7 +766,7 @@ async function submitEditMember() {
 }
 
 .mem-top-sub {
-  margin: 3px 0 0;
+  margin: 1px 0 0;
   font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
@@ -772,37 +806,25 @@ async function submitEditMember() {
   box-sizing: border-box;
   max-width: 48rem;
   margin: 0 auto;
-  padding: 1rem 1.25rem;
-  padding-bottom: 2rem;
+  padding: 0.7rem 1.15rem 0.75rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-}
-
-@media (min-width: 768px) {
-  .mem-main-inner {
-    padding: 1.35rem 1.5rem 2rem;
-  }
+  gap: 0.6rem;
 }
 
 .mem-sec {
   flex-shrink: 0;
   background: #fff;
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid #e2e8f0;
-  padding: 1.15rem 1.2rem;
-}
-
-.mem-sec--addr {
-  background: rgba(236, 253, 245, 0.45);
-  border-color: rgba(167, 243, 208, 0.8);
+  padding: 0.7rem 0.9rem;
 }
 
 .mem-sec-head {
   display: flex;
   align-items: center;
-  gap: 0.46rem;
-  margin-bottom: 0.92rem;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
 }
 
 .mem-bar {
@@ -819,62 +841,35 @@ async function submitEditMember() {
   color: #1e293b;
 }
 
-.mem-addr-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.55rem 0.85rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.72rem;
+.mem-field--addr {
+  margin-top: 0.55rem;
 }
 
-.mem-addr-head-main {
+.mem-addr-line {
   display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-width: 0;
-  flex-shrink: 0;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.4rem 0.65rem;
+  background: #f0fdf4;
+  border: 1px solid #d1fae5;
+  border-radius: 8px;
 }
 
 .mem-addr-head-ico {
+  flex-shrink: 0;
+  margin-top: 0.12rem;
   color: #059669;
-}
-
-.mem-addr-title {
-  margin: 0;
-  font-size: 0.688rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: rgba(6, 78, 59, 0.9);
-}
-
-.mem-addr-box {
-  padding: 0.75rem 0.85rem;
-  background: #fff;
-  border-radius: 10px;
-  border: 1px solid rgba(167, 243, 208, 0.55);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .mem-addr-text {
   margin: 0;
-  font-size: 0.875rem;
-  font-weight: 600;
-  line-height: 1.58;
-  color: #334155;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.mem-addr-foot {
-  margin: 0;
-  flex: 1 1 12rem;
+  flex: 1;
   min-width: 0;
-  font-size: 10px;
-  line-height: 1.42;
-  color: #94a3b8;
-  text-align: right;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.45;
+  color: #334155;
+  word-break: break-word;
 }
 
 .mem-field {
@@ -884,7 +879,7 @@ async function submitEditMember() {
 .mem-lab {
   display: flex;
   align-items: center;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.25rem;
   font-size: 0.7rem;
   font-weight: 700;
   color: #475569;
@@ -896,14 +891,26 @@ async function submitEditMember() {
   gap: 0.2rem;
 }
 
+.mem-tip-wrap {
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  line-height: 1;
+}
+
 .mem-tip {
   flex-shrink: 0;
   color: #94a3b8;
-  cursor: help;
 }
 
-.mem-tip:hover {
+.mem-tip-wrap:hover .mem-tip {
   color: #059669;
+}
+
+.mem-tip-body {
+  max-width: 280px;
+  line-height: 1.5;
+  font-size: 12px;
 }
 
 .mem-input {
@@ -953,13 +960,30 @@ select.mem-input {
 .mem-grid-2 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
+  gap: 0.55rem 0.85rem;
 }
 
 .mem-grid-3 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
+  gap: 0.55rem 0.85rem;
+}
+
+.mem-region-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mem-region-row .mem-select-el {
+  flex: 1;
+  min-width: 0;
+}
+
+.mem-auto-inline {
+  flex-shrink: 0;
+  margin-right: 0 !important;
+  white-space: nowrap;
 }
 
 .mem-affix {
@@ -1012,38 +1036,20 @@ select.mem-input {
   width: 100%;
 }
 
-.mem-auto-chk {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin-top: 0.75rem;
-  cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #64748b;
-  user-select: none;
-}
-
-.mem-auto-chk input {
-  width: 15px;
-  height: 15px;
-  accent-color: #059669;
-}
-
 .mem-hint-soft {
-  margin: 0.35rem 0 0;
+  margin: 0.28rem 0 0;
   font-size: 10px;
-  line-height: 1.45;
+  line-height: 1.4;
   color: #94a3b8;
 }
 
 .mem-chk-band {
-  margin-top: 1rem;
-  padding-top: 0.72rem;
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
   border-top: 1px solid #f1f5f9;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem 1rem;
+  gap: 0.45rem 0.85rem;
   align-items: center;
 }
 
@@ -1079,11 +1085,15 @@ select.mem-input {
   accent-color: #d97706;
 }
 
+.mem-reinstate-wrap {
+  display: inline-flex;
+}
+
 .mem-reinstate-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.38rem 0.72rem;
+  padding: 0.28rem 0.62rem;
   border: 1px solid rgba(16, 185, 129, 0.45);
   border-radius: 8px;
   background: rgba(236, 253, 245, 0.85);
@@ -1118,12 +1128,11 @@ select.mem-input {
 
 .mem-ft {
   flex-shrink: 0;
-  height: 80px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 1rem;
+  padding: 0.5rem 1rem;
   background: #fff;
   border-top: 1px solid #e2e8f0;
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.05);
@@ -1141,10 +1150,10 @@ select.mem-input {
 }
 
 .mem-btn {
-  height: 3rem;
-  border-radius: 12px;
+  height: 2.35rem;
+  border-radius: 10px;
   font-weight: 800;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1194,14 +1203,13 @@ select.mem-input {
     grid-template-columns: 1fr;
   }
 
-  .mem-addr-foot {
-    flex-basis: 100%;
-    text-align: left;
+  .mem-region-row {
+    flex-wrap: wrap;
   }
 
   .mem-main-inner {
-    padding-left: 0.95rem;
-    padding-right: 0.95rem;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
   }
 
   .mem-ft-inner {

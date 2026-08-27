@@ -971,6 +971,12 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
             detail=None,
         )
     )
+    # 全餐「与午餐一起配送」：独立副作用，失败不回滚午餐扣次
+    from app.services.meal_period.combo_with_lunch import try_apply_dinner_deduction_with_lunch
+
+    try_apply_dinner_deduction_with_lunch(
+        db, member, delivery_date=d, operator=f"courier:{courier_id}"
+    )
     fee_yuan = courier_delivery_fee_yuan_for_meal_units(db, deduct, store_id=int(member.store_id))
     courier_row = db.execute(select(Courier).where(Courier.courier_id == courier_id).with_for_update()).scalar_one_or_none()
     if not courier_row:

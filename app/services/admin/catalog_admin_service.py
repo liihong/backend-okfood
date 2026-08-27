@@ -35,13 +35,18 @@ def create_membership_template(
     kl = (body.kind_label or "").strip()
     if not kl:
         raise HTTPException(status_code=400, detail="请填写会员卡种类（如：周卡、季卡）")
+    from app.services.meal_period.combo_with_lunch import coerce_deliver_dinner_with_lunch
     from app.services.meal_period.template_periods import normalize_meal_periods_list
 
+    periods = normalize_meal_periods_list(body.meal_periods)
     row = MembershipCardTemplate(
         tenant_id=int(tenant_id),
         store_id=int(store_id),
         period_kind=None,
-        meal_periods=normalize_meal_periods_list(body.meal_periods),
+        meal_periods=periods,
+        deliver_dinner_with_lunch=coerce_deliver_dinner_with_lunch(
+            periods, bool(body.deliver_dinner_with_lunch)
+        ),
         kind_label=kl[:64],
         name=body.name.strip(),
         meals_grant=int(body.meals_grant),
@@ -109,10 +114,19 @@ def patch_membership_template(
         row.intro_short = (body.intro_short.strip() or None) if body.intro_short else None
     if "purchase_notice" in fs:
         row.purchase_notice = (body.purchase_notice.strip() or None) if body.purchase_notice else None
-    if body.meal_periods is not None:
-        from app.services.meal_period.template_periods import normalize_meal_periods_list
+    from app.services.meal_period.combo_with_lunch import coerce_deliver_dinner_with_lunch
+    from app.services.meal_period.template_periods import normalize_meal_periods_list
 
+    if body.meal_periods is not None:
         row.meal_periods = normalize_meal_periods_list(body.meal_periods)
+    periods_now = normalize_meal_periods_list(getattr(row, "meal_periods", None))
+    flag_in = (
+        bool(body.deliver_dinner_with_lunch)
+        if body.deliver_dinner_with_lunch is not None
+        else bool(getattr(row, "deliver_dinner_with_lunch", False))
+    )
+    # 改成只勾单餐段时强制关掉，避免脏配置跟到新开卡
+    row.deliver_dinner_with_lunch = coerce_deliver_dinner_with_lunch(periods_now, flag_in)
     db.commit()
     db.refresh(row)
     return row
@@ -167,6 +181,7 @@ def membership_template_dump(row: MembershipCardTemplate) -> dict:
         "kind_label": kl[:64],
         "period_kind": row.period_kind,
         "meal_periods": normalize_meal_periods_list(getattr(row, "meal_periods", None)),
+        "deliver_dinner_with_lunch": bool(getattr(row, "deliver_dinner_with_lunch", False)),
         "name": row.name,
         "meals_grant": int(row.meals_grant),
         "list_price_yuan": decimal_to_str_money(getattr(row, "list_price_yuan", None)),

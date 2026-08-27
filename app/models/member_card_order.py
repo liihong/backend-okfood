@@ -38,6 +38,10 @@ class MemberCardOrder(Base):
     )
     #: 入账时从模版复制的餐段；经典卡为 ["lunch"]
     meal_periods_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    #: 入账时从模版复制；true=午餐履约后连带扣晚餐。扣次只读本快照，不读模版当前值
+    deliver_dinner_with_lunch_snapshot: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
     card_kind: Mapped[str] = mapped_column(String(10))
     pay_channel: Mapped[str] = mapped_column(String(10))
     pay_status: Mapped[str] = mapped_column(String(10), default="未缴")

@@ -541,11 +541,18 @@ def _apply_paid_card_order_to_member_balance(
         kind_label = order.card_kind
         from app.services.meal_period.template_periods import resolve_meal_periods_for_card_order_credit
 
+        tpl = None
         order.meal_periods_snapshot = resolve_meal_periods_for_card_order_credit(
             order_meal_periods_snapshot=order.meal_periods_snapshot,
             template=None,
             use_classic_lunch_only=True,
         )
+    from app.services.meal_period.combo_with_lunch import snapshot_deliver_dinner_with_lunch_from_template
+
+    # 跟卡快照：入账时固化，之后改模版不影响已入账会员
+    order.deliver_dinner_with_lunch_snapshot = snapshot_deliver_dinner_with_lunch_from_template(
+        tpl, order.meal_periods_snapshot
+    )
     parts = [
         f"开卡工单#{order.id}",
         f"{kind_label}",

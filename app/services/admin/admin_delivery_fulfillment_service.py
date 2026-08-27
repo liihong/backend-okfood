@@ -173,6 +173,12 @@ def _subscription_fulfilled_apply(
                 detail=None,
             )
         )
+        # 全餐「与午餐一起配送」：独立副作用，失败不回滚上面的午餐扣次
+        from app.services.meal_period.combo_with_lunch import try_apply_dinner_deduction_with_lunch
+
+        try_apply_dinner_deduction_with_lunch(
+            db, member, delivery_date=d, operator=op_tag
+        )
     return member, balance_before
 
 

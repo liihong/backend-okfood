@@ -607,8 +607,10 @@ def create_miniprogram_member_card_order(
             f"卡包模版#{tpl.id}·{tpl.name.strip()}",
             is_renewal=is_renewal,
         )
+        from app.services.meal_period.combo_with_lunch import snapshot_deliver_dinner_with_lunch_from_template
         from app.services.meal_period.template_periods import meal_periods_from_template
 
+        _periods = meal_periods_from_template(tpl)
         row = MemberCardOrder(
             member_id=member_id,
             tenant_id=int(m.tenant_id),
@@ -621,7 +623,10 @@ def create_miniprogram_member_card_order(
             remark=rmk,
             delivery_start_date=d0,
             applied_to_member=False,
-            meal_periods_snapshot=meal_periods_from_template(tpl),
+            meal_periods_snapshot=_periods,
+            deliver_dinner_with_lunch_snapshot=snapshot_deliver_dinner_with_lunch_from_template(
+                tpl, _periods
+            ),
             out_trade_no=_new_temp_out_trade_no(),
             wx_transaction_id=None,
             created_by="miniprogram",

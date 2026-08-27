@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
-import { X, Plus } from 'lucide-vue-next'
+import { X, Plus, ChevronLeft } from 'lucide-vue-next'
 import MemberDeliveryMapPicker from '../../components/MemberDeliveryMapPicker.vue'
 import { apiJson, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
@@ -22,6 +22,8 @@ const addrDefaultSaving = ref(false)
 const addrEdit = ref(null)
 /** 当前选中的地址 id（列表高亮与表单联动） */
 const addrSelectedId = ref(null)
+/** 手机端分步：列表 / 编辑（桌面端双栏始终同时显示） */
+const mobilePane = ref('list')
 
 const currentAddrRow = computed(() =>
   addrList.value.find((x) => Number(x.id) === Number(addrSelectedId.value)),
@@ -53,6 +55,22 @@ function startNewAddress() {
   }
   addrSelectedId.value = null
   addrEdit.value = blankAddrEdit()
+}
+
+/** 点击「新增」：准备空白表单，手机端切到编辑页 */
+function onClickNewAddress() {
+  startNewAddress()
+  mobilePane.value = 'edit'
+}
+
+/** 点击列表条目：填入表单，手机端切到编辑页 */
+function onSelectAddr(a) {
+  pickAddrEdit(a)
+  mobilePane.value = 'edit'
+}
+
+function backToAddrList() {
+  mobilePane.value = 'list'
 }
 
 function pickAddrEdit(a) {
@@ -116,6 +134,7 @@ watch([open, () => props.member?.id], ([isOpen, mid]) => {
     addrList.value = []
     addrEdit.value = null
     addrSelectedId.value = null
+    mobilePane.value = 'list'
     return
   }
   if (mid != null) void loadAddressesForMember(null)
@@ -243,50 +262,61 @@ async function makeCurrentAddressDefault() {
 <template>
   <div
     v-if="open"
-    class="modal-overlay"
+    class="modal-overlay members-addr-overlay"
     v-esc-close="close"
     @click.self="close()"
   >
     <div class="modal-card modal-card--member-edit members-addr-modal-card">
-      <div class="modal-header">
+      <div class="modal-header members-addr-header">
         <div class="header-info">
           <h3>地址管理</h3>
           <p>MEMBER ADDRESSES</p>
         </div>
-        <button type="button" class="close-btn" @click="close()">
-          <X :size="20" />
+        <button type="button" class="close-btn members-addr-close" @click="close()">
+          <X :size="18" />
         </button>
       </div>
       <div class="modal-form members-addr-modal-body">
         <div v-if="addrLoading">
-          <el-skeleton animated :rows="5" />
+          <el-skeleton animated :rows="4" />
         </div>
-        <div v-else class="members-addr-layout">
+        <div
+          v-else
+          class="members-addr-layout"
+          :class="{ 'is-mobile-edit': mobilePane === 'edit' }"
+        >
             <aside class="members-addr-list-pane" aria-label="会员全部地址">
               <div class="members-addr-list-head">
                 <p class="members-addr-list-hint">
-                  共 {{ addrList.length }} 条 · 点击条目在右侧编辑
+                  共 {{ addrList.length }} 条
+                  <span class="members-addr-list-hint-desk"> · 点击条目在右侧编辑</span>
+                  <span class="members-addr-list-hint-mobi"> · 点击条目编辑</span>
                 </p>
                 <el-button
                   type="primary"
                   link
+                  size="small"
                   :disabled="!canAddAddress || addrSaving || addrDefaultSaving"
-                  @click="startNewAddress"
+                  @click="onClickNewAddress"
                 >
                   <Plus :size="14" :stroke-width="2.5" />
-                  新增地址
+                  新增
                 </el-button>
               </div>
               <div class="members-addr-list-scroll">
                 <div
                   v-if="isCreatingAddress"
                   class="members-addr-list-item members-addr-list-item--active members-addr-list-item--draft"
+                  role="button"
+                  tabindex="0"
+                  @click="mobilePane = 'edit'"
+                  @keydown.enter.prevent="mobilePane = 'edit'"
                 >
                   <div class="members-addr-list-item-top">
                     <el-tag size="small" type="warning" effect="plain">新建</el-tag>
                     <span class="members-addr-list-item-name">未保存</span>
                   </div>
-                  <div class="members-addr-list-item-addr">在右侧填写后点击「创建地址」</div>
+                  <div class="members-addr-list-item-addr">填写后点击「创建地址」</div>
                 </div>
                 <div
                   v-for="a in addrList"
@@ -297,18 +327,18 @@ async function makeCurrentAddressDefault() {
                   :class="{
                     'members-addr-list-item--active': !isCreatingAddress && addrSelectedId === Number(a.id),
                   }"
-                  @click="pickAddrEdit(a)"
-                  @keydown.enter.prevent="pickAddrEdit(a)"
+                  @click="onSelectAddr(a)"
+                  @keydown.enter.prevent="onSelectAddr(a)"
                 >
                   <div class="members-addr-list-item-top">
                     <el-tag v-if="a.is_default" size="small" type="success" effect="plain">默认</el-tag>
                     <span class="members-addr-list-item-name">{{ a.contact_name || '—' }}</span>
+                    <span class="members-addr-list-item-phone">{{ a.contact_phone || '—' }}</span>
                   </div>
-                  <div class="members-addr-list-item-phone">{{ a.contact_phone || '—' }}</div>
                   <div class="members-addr-list-item-addr" :title="a.full_address || ''">
                     {{ a.full_address || '—' }}
                   </div>
-                  <div class="members-addr-list-item-area">{{ a.area || '—' }}</div>
+                  <div v-if="a.area" class="members-addr-list-item-area">{{ a.area }}</div>
                 </div>
                 <p v-if="!addrList.length && !isCreatingAddress" class="members-addr-list-empty">
                   暂无配送地址
@@ -317,8 +347,14 @@ async function makeCurrentAddressDefault() {
             </aside>
 
             <div class="members-addr-edit-pane">
+              <div class="members-addr-edit-toolbar">
+                <el-button text size="small" class="members-addr-back-btn" @click="backToAddrList">
+                  <ChevronLeft :size="16" :stroke-width="2.25" />
+                  返回列表
+                </el-button>
+              </div>
               <div v-if="member && addrEdit" class="members-addr-first-row">
-                <el-space wrap :size="8" alignment="center">
+                <el-space wrap :size="6" alignment="center">
                   <span class="members-addr-k">会员</span>
                   <el-text truncated class="members-addr-name">{{ member.name || '—' }}</el-text>
                   <el-text type="info" truncated>{{ member.phone || '' }}</el-text>
@@ -337,7 +373,7 @@ async function makeCurrentAddressDefault() {
                 class="members-addr-el-form"
                 @submit.prevent="saveMemberAddress"
               >
-                <el-row :gutter="12">
+                <el-row :gutter="8">
                   <el-col :xs="24" :sm="12">
                     <el-form-item label="收件人">
                       <el-input v-model="addrEdit.contact_name" maxlength="100" clearable placeholder="收件人姓名" />
@@ -350,7 +386,7 @@ async function makeCurrentAddressDefault() {
                   </el-col>
                 </el-row>
 
-                <el-form-item label="地图选点（GCJ-02）" class="members-addr-map-form-item">
+                <el-form-item label="地图选点" class="members-addr-map-form-item">
                   <div class="members-addr-map-wrap">
                     <MemberDeliveryMapPicker
                       :key="'ma-' + (addrEdit.id != null ? addrEdit.id : 'new')"
@@ -363,26 +399,25 @@ async function makeCurrentAddressDefault() {
                   </div>
                 </el-form-item>
 
-                <el-row :gutter="12">
+                <el-row :gutter="8">
                   <el-col :xs="24" :sm="14">
-                    <el-form-item label="收货位置主文案（map_location_text）">
+                    <el-form-item label="收货位置">
                       <el-input
                         v-model="addrEdit.map_location_text"
                         type="textarea"
                         readonly
-                        :autosize="{ minRows: 2, maxRows: 4 }"
+                        :autosize="{ minRows: 1, maxRows: 3 }"
                         maxlength="500"
-                        show-word-limit
-                        placeholder="地图选点自动填入；可与门牌拼接为完整收货地址"
+                        placeholder="地图选点后自动填入"
                       />
                     </el-form-item>
                   </el-col>
                   <el-col :xs="24" :sm="10">
-                    <el-form-item label="门牌（楼栋 / 单元 / 室号）">
+                    <el-form-item label="门牌号">
                       <el-input
                         v-model="addrEdit.door_detail"
                         type="textarea"
-                        :autosize="{ minRows: 2, maxRows: 3 }"
+                        :autosize="{ minRows: 1, maxRows: 2 }"
                         maxlength="500"
                         placeholder="例如：3 号楼 1202"
                       />
@@ -394,7 +429,7 @@ async function makeCurrentAddressDefault() {
                   <el-input
                     v-model="addrEdit.remarks"
                     type="textarea"
-                    :autosize="{ minRows: 1, maxRows: 3 }"
+                    :autosize="{ minRows: 1, maxRows: 2 }"
                     maxlength="500"
                     placeholder="忌口等，可留空"
                   />
@@ -415,11 +450,12 @@ async function makeCurrentAddressDefault() {
                         v-else-if="currentAddrRow && !currentAddrRow.is_default"
                         type="warning"
                         plain
+                        size="small"
                         :loading="addrDefaultSaving"
                         :disabled="addrSaving"
                         @click.prevent="makeCurrentAddressDefault"
                       >
-                        设为默认配送地址
+                        设为默认
                       </el-button>
                       <el-tag
                         v-else-if="currentAddrRow && currentAddrRow.is_default"
@@ -430,7 +466,14 @@ async function makeCurrentAddressDefault() {
                         当前为默认地址
                       </el-tag>
                     </div>
-                    <el-button type="primary" :loading="addrSaving" :disabled="addrDefaultSaving" native-type="submit">
+                    <el-button
+                      type="primary"
+                      size="small"
+                      class="members-addr-save-btn"
+                      :loading="addrSaving"
+                      :disabled="addrDefaultSaving"
+                      native-type="submit"
+                    >
                       {{ isCreatingAddress ? '创建地址' : '保存地址' }}
                     </el-button>
                   </div>
@@ -444,27 +487,47 @@ async function makeCurrentAddressDefault() {
 </template>
 
 <style scoped>
-.members-addr-modal-card {
-  max-width: min(920px, 98vw);
+.members-addr-overlay {
+  padding: max(0.5rem, env(safe-area-inset-top, 0px)) 0.75rem
+    max(0.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+.modal-card.modal-card--member-edit.members-addr-modal-card {
+  max-width: min(760px, 100%);
+  border-radius: 12px;
 }
 
 .members-addr-modal-body {
-  padding: 1rem 1.25rem 1.35rem;
-  max-height: min(82vh, 720px);
+  padding: 0.7rem 0.85rem 0.85rem;
+  max-height: min(78vh, 620px);
   overflow: auto;
+  gap: 0;
+}
+
+.members-addr-header {
+  padding: 0.4rem 0.9rem 0.4rem 1rem;
+}
+
+.members-addr-header .header-info h3 {
+  font-size: 1.1rem;
+}
+
+.members-addr-header .header-info p {
+  margin-top: 1px;
+  letter-spacing: 1.5px;
+  font-size: 10px;
+}
+
+.members-addr-close {
+  width: 2rem;
+  height: 2rem;
 }
 
 .members-addr-layout {
   display: grid;
-  grid-template-columns: minmax(200px, 268px) 1fr;
-  gap: 14px;
+  grid-template-columns: minmax(168px, 210px) 1fr;
+  gap: 10px;
   align-items: start;
-}
-
-@media (max-width: 720px) {
-  .members-addr-layout {
-    grid-template-columns: 1fr;
-  }
 }
 
 .members-addr-list-pane {
@@ -474,35 +537,38 @@ async function makeCurrentAddressDefault() {
 
 .members-addr-list-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
 .members-addr-list-hint {
   margin: 0;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--el-text-color-secondary);
-  line-height: 1.4;
+  line-height: 1.35;
+}
+
+.members-addr-list-hint-mobi {
+  display: none;
 }
 
 .members-addr-list-empty {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 
 .members-addr-list-item--draft {
-  cursor: default;
   border-style: dashed;
 }
 
 .members-addr-list-scroll {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: min(56vh, 520px);
+  gap: 6px;
+  max-height: min(52vh, 460px);
   overflow: auto;
   padding-right: 2px;
 }
@@ -510,8 +576,8 @@ async function makeCurrentAddressDefault() {
 .members-addr-list-item {
   text-align: left;
   border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  padding: 10px 10px 8px;
+  border-radius: 6px;
+  padding: 6px 8px;
   cursor: pointer;
   background: var(--el-fill-color-blank);
   transition:
@@ -531,108 +597,122 @@ async function makeCurrentAddressDefault() {
 .members-addr-list-item-top {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-wrap: wrap;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .members-addr-list-item-name {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.3;
 }
 
 .members-addr-list-item-phone {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--el-text-color-secondary);
-  margin-bottom: 4px;
 }
 
 .members-addr-list-item-addr {
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.4;
   color: var(--el-text-color-regular);
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
 .members-addr-list-item-area {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--el-text-color-secondary);
-  margin-top: 6px;
+  margin-top: 3px;
 }
 
 .members-addr-edit-pane {
   min-width: 0;
 }
 
+.members-addr-edit-toolbar {
+  display: none;
+}
+
 .members-addr-first-row {
-  margin-bottom: 12px;
-  padding-bottom: 10px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .members-addr-k {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--el-text-color-secondary);
   flex-shrink: 0;
 }
 
 .members-addr-name {
-  max-width: 7rem;
+  max-width: 6.5rem;
 }
 
 .members-addr-divider {
   margin: 0 2px !important;
-  height: 14px !important;
+  height: 12px !important;
 }
 
 .members-addr-coord-tag {
-  max-width: 220px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.members-addr-pca-line {
-  max-width: min(200px, 36vw);
-  vertical-align: middle;
-}
-
 .members-addr-el-form {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .members-addr-el-form :deep(.el-form-item) {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
+}
+
+.members-addr-el-form :deep(.el-form-item__label) {
+  margin-bottom: 2px !important;
+  font-size: 12px;
+  line-height: 1.3;
 }
 
 .members-addr-map-form-item :deep(.el-form-item__content) {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.members-addr-tip {
-  padding: 6px 10px;
-}
-
-.members-addr-tip :deep(.el-alert__title) {
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.members-addr-tip-text {
-  font-size: 12px;
+  gap: 6px;
 }
 
 .members-addr-map-wrap {
   width: 100%;
 }
 
+.members-addr-map-wrap :deep(.mdmp) {
+  margin-bottom: 0;
+}
+
+.members-addr-map-wrap :deep(.mdmp-search) {
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.members-addr-map-wrap :deep(.mdmp-search-input) {
+  min-width: 0;
+  flex: 1;
+}
+
+.members-addr-map-wrap :deep(.mdmp-search-btn) {
+  padding: 0.4rem 0.75rem;
+  font-size: 12px;
+}
+
 .members-addr-map-wrap :deep(.mdmp-map) {
-  height: min(188px, 30vh);
-  min-height: 150px;
+  height: min(148px, 24vh);
+  min-height: 120px;
+  border-radius: 8px;
 }
 
 .members-addr-actions {
@@ -644,7 +724,7 @@ async function makeCurrentAddressDefault() {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
 }
 
@@ -653,10 +733,103 @@ async function makeCurrentAddressDefault() {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  min-height: 32px;
+  min-height: 28px;
 }
 
 .members-addr-actions :deep(.el-form-item__content) {
   display: block;
+}
+
+@media (max-width: 720px) {
+  .members-addr-overlay {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .modal-card.modal-card--member-edit.members-addr-modal-card {
+    max-width: 100%;
+    max-height: 100dvh;
+    height: 100%;
+    border-radius: 0;
+    width: 100%;
+  }
+
+  .members-addr-header {
+    padding: 0.45rem 0.7rem 0.45rem 0.85rem;
+    padding-top: max(0.45rem, env(safe-area-inset-top, 0px));
+  }
+
+  .members-addr-modal-body {
+    padding: 0.65rem 0.75rem max(0.85rem, env(safe-area-inset-bottom, 0px));
+    max-height: none;
+    flex: 1 1 auto;
+  }
+
+  .members-addr-layout {
+    display: block;
+  }
+
+  .members-addr-list-pane {
+    position: static;
+  }
+
+  .members-addr-list-scroll {
+    max-height: none;
+  }
+
+  .members-addr-list-item {
+    padding: 8px 10px;
+  }
+
+  .members-addr-list-hint-desk {
+    display: none;
+  }
+
+  .members-addr-list-hint-mobi {
+    display: inline;
+  }
+
+  /* 手机：列表与编辑分步，避免双栏挤在一起 */
+  .members-addr-layout:not(.is-mobile-edit) .members-addr-edit-pane {
+    display: none;
+  }
+
+  .members-addr-layout.is-mobile-edit .members-addr-list-pane {
+    display: none;
+  }
+
+  .members-addr-edit-toolbar {
+    display: flex;
+    align-items: center;
+    margin: -2px 0 8px;
+  }
+
+  .members-addr-back-btn {
+    padding-left: 0;
+    margin-left: -4px;
+  }
+
+  .members-addr-map-wrap :deep(.mdmp-map) {
+    height: min(160px, 28vh);
+    min-height: 132px;
+  }
+
+  .members-addr-actions-inner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .members-addr-save-btn {
+    width: 100%;
+  }
+
+  .members-addr-coord-tag {
+    max-width: 100%;
+  }
+
+  .members-addr-name {
+    max-width: 8rem;
+  }
 }
 </style>

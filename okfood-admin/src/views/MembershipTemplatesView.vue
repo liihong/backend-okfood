@@ -34,6 +34,7 @@ const form = ref({
   name: '',
   meals_grant: 6,
   meal_periods: ['lunch'],
+  deliver_dinner_with_lunch: false,
   list_price_yuan: '',
   sale_price_yuan: '',
   card_style_image_url: '',
@@ -43,6 +44,12 @@ const form = ref({
   remark: '',
   sort_order: 0,
   is_active: true,
+})
+
+/** 仅午+晚同时勾选时才询问是否与午餐一起配送 */
+const showDeliverDinnerWithLunch = computed(() => {
+  const ps = Array.isArray(form.value.meal_periods) ? form.value.meal_periods : []
+  return ps.includes('lunch') && ps.includes('dinner')
 })
 
 function parseOptionalMoney(raw) {
@@ -159,6 +166,7 @@ function openCreate() {
     name: '',
     meals_grant: 6,
     meal_periods: ['lunch'],
+    deliver_dinner_with_lunch: false,
     list_price_yuan: '',
     sale_price_yuan: '',
     card_style_image_url: '',
@@ -179,6 +187,7 @@ function openEdit(row) {
     name: row.name || '',
     meals_grant: row.meals_grant,
     meal_periods: Array.isArray(row.meal_periods) && row.meal_periods.length ? [...row.meal_periods] : ['lunch'],
+    deliver_dinner_with_lunch: row.deliver_dinner_with_lunch === true,
     list_price_yuan: row.list_price_yuan != null ? String(row.list_price_yuan).trim() : '',
     sale_price_yuan: row.sale_price_yuan != null ? String(row.sale_price_yuan).trim() : '',
     card_style_image_url: row.card_style_image_url || '',
@@ -232,6 +241,9 @@ async function saveForm() {
       name,
       meals_grant: Number(form.value.meals_grant),
       meal_periods: periods,
+      deliver_dinner_with_lunch: Boolean(
+        periods.includes('lunch') && periods.includes('dinner') && form.value.deliver_dinner_with_lunch,
+      ),
       list_price_yuan: listPx,
       sale_price_yuan: salePx,
       card_style_image_url: String(form.value.card_style_image_url || '').trim() || null,
@@ -413,7 +425,7 @@ onMounted(() => {
     <el-dialog
       v-model="dialogVisible"
       class="mcard-template-dialog"
-      width="680px"
+      width="860px"
       align-center
       destroy-on-close
       :show-close="false"
@@ -428,162 +440,178 @@ onMounted(() => {
       </template>
 
       <div class="mcard-modal-body">
-        <div class="mcard-form-row mcard-form-row--center">
-          <label class="mcard-form-label">种类</label>
-          <el-input
-            v-model="form.kind_label"
-            maxlength="64"
-            class="mcard-form-control"
-            placeholder="如：周卡、月卡、次卡、季卡、午晚餐餐卡"
-          />
-        </div>
-
-        <div class="mcard-form-row mcard-form-row--center">
-          <label class="mcard-form-label">名称</label>
-          <el-input
-            v-model="form.name"
-            maxlength="128"
-            class="mcard-form-control"
-            placeholder="如：标准六餐 — 可作具体套餐名"
-          />
-        </div>
-
-        <div class="mcard-form-row mcard-form-row--center">
-          <label class="mcard-form-label">覆盖餐段</label>
-          <el-checkbox-group v-model="form.meal_periods" class="mcard-form-control">
-            <el-checkbox label="lunch">午餐</el-checkbox>
-            <el-checkbox label="dinner">晚餐</el-checkbox>
-          </el-checkbox-group>
-        </div>
-
-        <div class="mcard-form-row mcard-form-row--center">
-          <label class="mcard-form-label">单笔入账餐次</label>
-          <el-input-number
-            v-model="form.meals_grant"
-            :min="1"
-            :max="366"
-            controls-position="right"
-            class="mcard-form-control mcard-form-control--number"
-          />
-        </div>
-
-        <div class="mcard-form-row mcard-form-row--center">
-          <label class="mcard-form-label">原价(元)</label>
-          <el-input
-            v-model="form.list_price_yuan"
-            class="mcard-form-control"
-            placeholder="划线价，留空不在小程序展示"
-          />
-        </div>
-
-        <div class="mcard-form-row mcard-form-row--center">
-          <label class="mcard-form-label">优惠价(元)</label>
-          <el-input
-            v-model="form.sale_price_yuan"
-            class="mcard-form-control"
-            placeholder="主推价，留空不在小程序展示"
-          />
-        </div>
-
-        <div class="mcard-form-row mcard-form-row--center">
-          <label class="mcard-form-label">有效天数</label>
-          <el-input-number
-            v-model="form.validity_days"
-            :min="0"
-            :max="3660"
-            :precision="0"
-            controls-position="right"
-            class="mcard-form-control mcard-form-control--number"
-            placeholder="展示用"
-          />
-        </div>
-
-        <div class="mcard-form-row">
-          <label class="mcard-form-label">卡片样式图</label>
-          <div class="mcard-upload-col">
-            <el-upload
-              :key="cardPhotoUploadKey"
-              class="mcard-style-upload"
-              :show-file-list="false"
-              :auto-upload="false"
-              accept="image/*"
-              @change="onCardPhotoUploadChange"
-            >
-              <button type="button" class="mcard-btn-upload" :disabled="cardPhotoUploading">
-                <Camera :size="16" stroke-width="2.5" aria-hidden="true" />
-                {{ cardPhotoUploading ? '上传中…' : '上传图片' }}
-              </button>
-            </el-upload>
+        <div class="mcard-form-grid">
+          <div class="mcard-field">
+            <label class="mcard-form-label">种类</label>
             <el-input
-              v-model="form.card_style_image_url"
+              v-model="form.kind_label"
+              maxlength="64"
               class="mcard-form-control"
-              placeholder="/static/uploads/... 或上传"
-            />
-            <img
-              v-if="form.card_style_image_url"
-              :src="dishImageDisplayUrl(form.card_style_image_url)"
-              alt=""
-              class="mcard-upload-preview"
+              placeholder="如：周卡、月卡、次卡、季卡、午晚餐餐卡"
             />
           </div>
-        </div>
 
-        <div class="mcard-form-row">
-          <label class="mcard-form-label">商品简介</label>
-          <div class="mcard-textarea-wrap">
+          <div class="mcard-field">
+            <label class="mcard-form-label">名称</label>
             <el-input
-              v-model="form.intro_short"
-              type="textarea"
-              :rows="3"
-              maxlength="512"
-              :show-word-limit="false"
-              class="mcard-textarea-control"
-              placeholder="一句话卖点，对应小程序「商品简介」"
+              v-model="form.name"
+              maxlength="128"
+              class="mcard-form-control"
+              placeholder="如：标准六餐 — 可作具体套餐名"
             />
-            <span class="mcard-char-counter">{{ textareaCount(form.intro_short, 512) }}</span>
           </div>
-        </div>
 
-        <div class="mcard-form-row">
-          <label class="mcard-form-label">购买须知</label>
-          <div class="mcard-textarea-wrap">
+          <div class="mcard-field">
+            <label class="mcard-form-label">覆盖餐段</label>
+            <el-checkbox-group v-model="form.meal_periods" class="mcard-form-control mcard-form-control--periods">
+              <el-checkbox label="lunch">午餐</el-checkbox>
+              <el-checkbox label="dinner">晚餐</el-checkbox>
+            </el-checkbox-group>
+          </div>
+
+          <div v-if="showDeliverDinnerWithLunch" class="mcard-field mcard-field--span2">
+            <label class="mcard-form-label">与午餐一起配送</label>
+            <div class="mcard-form-control">
+              <el-radio-group v-model="form.deliver_dinner_with_lunch">
+                <el-radio :value="false">分开配送（午、晚各扣各的）</el-radio>
+                <el-radio :value="true">一起配送（午餐送达时同时扣晚餐）</el-radio>
+              </el-radio-group>
+              <p class="mcard-form-hint">
+                改此项只影响之后新开的卡；已入账会员仍按开卡时的选择扣次。
+              </p>
+            </div>
+          </div>
+
+          <div class="mcard-field">
+            <label class="mcard-form-label">单笔入账餐次</label>
+            <el-input-number
+              v-model="form.meals_grant"
+              :min="1"
+              :max="366"
+              controls-position="right"
+              class="mcard-form-control mcard-form-control--number"
+            />
+          </div>
+
+          <div class="mcard-field">
+            <label class="mcard-form-label">原价(元)</label>
             <el-input
-              v-model="form.purchase_notice"
-              type="textarea"
-              :rows="4"
-              maxlength="6000"
-              :show-word-limit="false"
-              class="mcard-textarea-control"
-              placeholder="有效期说明、使用限制、适用门店等"
+              v-model="form.list_price_yuan"
+              class="mcard-form-control"
+              placeholder="划线价，留空不在小程序展示"
             />
-            <span class="mcard-char-counter">{{ textareaCount(form.purchase_notice, 6000) }}</span>
           </div>
-        </div>
 
-        <div class="mcard-form-row mcard-form-row--center">
-          <label class="mcard-form-label">排序</label>
-          <el-input-number
-            v-model="form.sort_order"
-            :min="0"
-            controls-position="right"
-            class="mcard-form-control mcard-form-control--number"
-          />
-        </div>
+          <div class="mcard-field">
+            <label class="mcard-form-label">优惠价(元)</label>
+            <el-input
+              v-model="form.sale_price_yuan"
+              class="mcard-form-control"
+              placeholder="主推价，留空不在小程序展示"
+            />
+          </div>
 
-        <div class="mcard-form-row mcard-form-row--center">
-          <label class="mcard-form-label">启用</label>
-          <el-switch v-model="form.is_active" class="mcard-form-switch" />
-        </div>
+          <div class="mcard-field">
+            <label class="mcard-form-label">有效天数</label>
+            <el-input-number
+              v-model="form.validity_days"
+              :min="0"
+              :max="3660"
+              :precision="0"
+              controls-position="right"
+              class="mcard-form-control mcard-form-control--number"
+              placeholder="展示用"
+            />
+          </div>
 
-        <div class="mcard-form-row">
-          <label class="mcard-form-label">备注</label>
-          <el-input
-            v-model="form.remark"
-            type="textarea"
-            :rows="2"
-            class="mcard-textarea-control mcard-textarea-control--plain"
-            placeholder="备注信息"
-          />
+          <div class="mcard-field mcard-field--split">
+            <div class="mcard-field">
+              <label class="mcard-form-label">排序</label>
+              <el-input-number
+                v-model="form.sort_order"
+                :min="0"
+                controls-position="right"
+                class="mcard-form-control mcard-form-control--number"
+              />
+            </div>
+            <div class="mcard-field mcard-field--switch">
+              <label class="mcard-form-label">启用</label>
+              <el-switch v-model="form.is_active" class="mcard-form-switch" />
+            </div>
+          </div>
+
+          <div class="mcard-field mcard-field--span2">
+            <label class="mcard-form-label">卡片样式图</label>
+            <div class="mcard-upload-row">
+              <el-upload
+                :key="cardPhotoUploadKey"
+                class="mcard-style-upload"
+                :show-file-list="false"
+                :auto-upload="false"
+                accept="image/*"
+                @change="onCardPhotoUploadChange"
+              >
+                <button type="button" class="mcard-btn-upload" :disabled="cardPhotoUploading">
+                  <Camera :size="16" stroke-width="2.5" aria-hidden="true" />
+                  {{ cardPhotoUploading ? '上传中…' : '上传图片' }}
+                </button>
+              </el-upload>
+              <el-input
+                v-model="form.card_style_image_url"
+                class="mcard-form-control"
+                placeholder="/static/uploads/... 或上传"
+              />
+              <img
+                v-if="form.card_style_image_url"
+                :src="dishImageDisplayUrl(form.card_style_image_url)"
+                alt=""
+                class="mcard-upload-preview"
+              />
+            </div>
+          </div>
+
+          <div class="mcard-field mcard-field--span2">
+            <label class="mcard-form-label">商品简介</label>
+            <div class="mcard-textarea-wrap">
+              <el-input
+                v-model="form.intro_short"
+                type="textarea"
+                :rows="2"
+                maxlength="512"
+                :show-word-limit="false"
+                class="mcard-textarea-control"
+                placeholder="一句话卖点，对应小程序「商品简介」"
+              />
+              <span class="mcard-char-counter">{{ textareaCount(form.intro_short, 512) }}</span>
+            </div>
+          </div>
+
+          <div class="mcard-field mcard-field--span2">
+            <label class="mcard-form-label">购买须知</label>
+            <div class="mcard-textarea-wrap">
+              <el-input
+                v-model="form.purchase_notice"
+                type="textarea"
+                :rows="3"
+                maxlength="6000"
+                :show-word-limit="false"
+                class="mcard-textarea-control"
+                placeholder="有效期说明、使用限制、适用门店等"
+              />
+              <span class="mcard-char-counter">{{ textareaCount(form.purchase_notice, 6000) }}</span>
+            </div>
+          </div>
+
+          <div class="mcard-field mcard-field--span2">
+            <label class="mcard-form-label">备注</label>
+            <el-input
+              v-model="form.remark"
+              type="textarea"
+              :rows="2"
+              class="mcard-textarea-control mcard-textarea-control--plain"
+              placeholder="备注信息"
+            />
+          </div>
         </div>
       </div>
 
@@ -1021,6 +1049,7 @@ onMounted(() => {
   overflow: hidden;
   border: 1px solid var(--mcard-border);
   box-shadow: 0 20px 50px rgba(15, 23, 42, 0.15);
+  max-width: calc(100vw - 32px);
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -1083,35 +1112,45 @@ onMounted(() => {
 .mcard-modal-body {
   flex: 1;
   overflow-y: auto;
-  padding: 18px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  padding: 16px 20px;
   max-height: calc(90vh - 120px);
 }
 
-.mcard-form-row {
+.mcard-form-grid {
   display: grid;
-  grid-template-columns: 108px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 20px;
   align-items: start;
 }
 
-.mcard-form-row--center {
-  align-items: center;
+.mcard-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mcard-field--span2 {
+  grid-column: 1 / -1;
+}
+
+.mcard-field--split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 16px;
+  align-items: start;
+}
+
+.mcard-field--switch {
+  min-width: 52px;
 }
 
 .mcard-form-label {
-  text-align: right;
+  text-align: left;
   font-size: 13px;
   font-weight: 800;
   color: #0f172a;
-  padding-top: 8px;
   line-height: 1.35;
-}
-
-.mcard-form-row--center .mcard-form-label {
-  padding-top: 0;
 }
 
 .mcard-form-control {
@@ -1139,18 +1178,48 @@ onMounted(() => {
 
 .mcard-form-control--number {
   width: 100%;
+  --el-input-number-width: 100%;
 }
 
 .mcard-form-control--number :deep(.el-input__wrapper) {
   padding: 8px 12px;
 }
 
-.mcard-upload-col {
+.mcard-form-control--periods {
+  min-height: 40px;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+}
+
+.mcard-form-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+}
+
+.mcard-field--switch .mcard-form-switch {
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.mcard-upload-row {
+  display: flex;
+  align-items: center;
   gap: 8px;
   width: 100%;
   min-width: 0;
+}
+
+.mcard-upload-row .mcard-form-control {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.mcard-style-upload {
+  flex-shrink: 0;
 }
 
 .mcard-style-upload :deep(.el-upload) {
@@ -1194,6 +1263,7 @@ onMounted(() => {
   object-fit: cover;
   border-radius: 8px;
   border: 1px solid var(--mcard-border);
+  flex-shrink: 0;
 }
 
 .mcard-textarea-wrap {
@@ -1202,14 +1272,14 @@ onMounted(() => {
 }
 
 .mcard-textarea-control :deep(.el-textarea__inner) {
-  padding: 12px 16px 30px;
+  padding: 10px 16px 26px;
   border-radius: 10px;
   border: 1px solid var(--mcard-border);
   font-size: 13px;
   font-weight: 700;
   color: #0f172a;
   box-shadow: none;
-  min-height: 80px;
+  min-height: 64px;
 }
 
 .mcard-textarea-control :deep(.el-textarea__inner:focus) {
@@ -1218,8 +1288,8 @@ onMounted(() => {
 }
 
 .mcard-textarea-control--plain :deep(.el-textarea__inner) {
-  padding-bottom: 12px;
-  min-height: 60px;
+  padding-bottom: 10px;
+  min-height: 52px;
 }
 
 .mcard-char-counter {
@@ -1293,6 +1363,16 @@ onMounted(() => {
 .mcard-btn-modal--submit:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .mcard-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mcard-field--split {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
 }
 
 </style>

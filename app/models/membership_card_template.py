@@ -26,6 +26,8 @@ class MembershipCardTemplate(Base):
     period_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
     #: 覆盖餐段 JSON：["lunch"] / ["dinner"] / ["lunch","dinner"]，默认午餐
     meal_periods: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    #: 午+晚卡是否与午餐一起配送并在午餐履约时连带扣晚餐；默认否（分送）
+    deliver_dinner_with_lunch: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     kind_label: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     meals_grant: Mapped[int] = mapped_column(Integer, nullable=False)
