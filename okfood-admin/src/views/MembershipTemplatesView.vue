@@ -425,7 +425,7 @@ onMounted(() => {
     <el-dialog
       v-model="dialogVisible"
       class="mcard-template-dialog"
-      width="860px"
+      width="680px"
       align-center
       destroy-on-close
       :show-close="false"
@@ -434,7 +434,7 @@ onMounted(() => {
         <div class="mcard-modal-header">
           <h3 class="mcard-modal-title">{{ editingId ? '编辑模版' : '新建模版' }}</h3>
           <button type="button" class="mcard-modal-close" aria-label="关闭" @click="dialogVisible = false">
-            <X :size="18" stroke-width="2.5" />
+            <X :size="14" stroke-width="2.5" />
           </button>
         </div>
       </template>
@@ -446,6 +446,7 @@ onMounted(() => {
             <el-input
               v-model="form.kind_label"
               maxlength="64"
+              size="small"
               class="mcard-form-control"
               placeholder="如：周卡、月卡、次卡、季卡、午晚餐餐卡"
             />
@@ -456,6 +457,7 @@ onMounted(() => {
             <el-input
               v-model="form.name"
               maxlength="128"
+              size="small"
               class="mcard-form-control"
               placeholder="如：标准六餐 — 可作具体套餐名"
             />
@@ -463,7 +465,7 @@ onMounted(() => {
 
           <div class="mcard-field">
             <label class="mcard-form-label">覆盖餐段</label>
-            <el-checkbox-group v-model="form.meal_periods" class="mcard-form-control mcard-form-control--periods">
+            <el-checkbox-group v-model="form.meal_periods" size="small" class="mcard-form-control mcard-form-control--periods">
               <el-checkbox label="lunch">午餐</el-checkbox>
               <el-checkbox label="dinner">晚餐</el-checkbox>
             </el-checkbox-group>
@@ -472,7 +474,7 @@ onMounted(() => {
           <div v-if="showDeliverDinnerWithLunch" class="mcard-field mcard-field--span2">
             <label class="mcard-form-label">与午餐一起配送</label>
             <div class="mcard-form-control">
-              <el-radio-group v-model="form.deliver_dinner_with_lunch">
+              <el-radio-group v-model="form.deliver_dinner_with_lunch" size="small">
                 <el-radio :value="false">分开配送（午、晚各扣各的）</el-radio>
                 <el-radio :value="true">一起配送（午餐送达时同时扣晚餐）</el-radio>
               </el-radio-group>
@@ -488,6 +490,7 @@ onMounted(() => {
               v-model="form.meals_grant"
               :min="1"
               :max="366"
+              size="small"
               controls-position="right"
               class="mcard-form-control mcard-form-control--number"
             />
@@ -497,6 +500,7 @@ onMounted(() => {
             <label class="mcard-form-label">原价(元)</label>
             <el-input
               v-model="form.list_price_yuan"
+              size="small"
               class="mcard-form-control"
               placeholder="划线价，留空不在小程序展示"
             />
@@ -506,6 +510,7 @@ onMounted(() => {
             <label class="mcard-form-label">优惠价(元)</label>
             <el-input
               v-model="form.sale_price_yuan"
+              size="small"
               class="mcard-form-control"
               placeholder="主推价，留空不在小程序展示"
             />
@@ -518,6 +523,7 @@ onMounted(() => {
               :min="0"
               :max="3660"
               :precision="0"
+              size="small"
               controls-position="right"
               class="mcard-form-control mcard-form-control--number"
               placeholder="展示用"
@@ -530,13 +536,14 @@ onMounted(() => {
               <el-input-number
                 v-model="form.sort_order"
                 :min="0"
+                size="small"
                 controls-position="right"
                 class="mcard-form-control mcard-form-control--number"
               />
             </div>
             <div class="mcard-field mcard-field--switch">
               <label class="mcard-form-label">启用</label>
-              <el-switch v-model="form.is_active" class="mcard-form-switch" />
+              <el-switch v-model="form.is_active" size="small" class="mcard-form-switch" />
             </div>
           </div>
 
@@ -552,12 +559,13 @@ onMounted(() => {
                 @change="onCardPhotoUploadChange"
               >
                 <button type="button" class="mcard-btn-upload" :disabled="cardPhotoUploading">
-                  <Camera :size="16" stroke-width="2.5" aria-hidden="true" />
+                  <Camera :size="14" stroke-width="2.5" aria-hidden="true" />
                   {{ cardPhotoUploading ? '上传中…' : '上传图片' }}
                 </button>
               </el-upload>
               <el-input
                 v-model="form.card_style_image_url"
+                size="small"
                 class="mcard-form-control"
                 placeholder="/static/uploads/... 或上传"
               />
@@ -579,6 +587,7 @@ onMounted(() => {
                 :rows="2"
                 maxlength="512"
                 :show-word-limit="false"
+                size="small"
                 class="mcard-textarea-control"
                 placeholder="一句话卖点，对应小程序「商品简介」"
               />
@@ -592,9 +601,10 @@ onMounted(() => {
               <el-input
                 v-model="form.purchase_notice"
                 type="textarea"
-                :rows="3"
+                :rows="2"
                 maxlength="6000"
                 :show-word-limit="false"
+                size="small"
                 class="mcard-textarea-control"
                 placeholder="有效期说明、使用限制、适用门店等"
               />
@@ -607,7 +617,8 @@ onMounted(() => {
             <el-input
               v-model="form.remark"
               type="textarea"
-              :rows="2"
+              :rows="1"
+              size="small"
               class="mcard-textarea-control mcard-textarea-control--plain"
               placeholder="备注信息"
             />
@@ -1043,14 +1054,14 @@ onMounted(() => {
   background: #fecaca;
 }
 
-/* ── 新建/编辑模版弹窗（对齐参考稿 modal） ── */
+/* ── 新建/编辑模版弹窗：紧凑尺寸 ── */
 .mcard-template-dialog :deep(.el-dialog) {
-  border-radius: 24px;
+  border-radius: 16px;
   overflow: hidden;
   border: 1px solid var(--mcard-border);
   box-shadow: 0 20px 50px rgba(15, 23, 42, 0.15);
   max-width: calc(100vw - 32px);
-  max-height: 90vh;
+  max-height: 86vh;
   display: flex;
   flex-direction: column;
   margin: 0;
@@ -1076,21 +1087,21 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--mcard-border);
 }
 
 .mcard-modal-title {
   margin: 0;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 800;
   color: #0f172a;
   line-height: 1.25;
 }
 
 .mcard-modal-close {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border: none;
   border-radius: 50%;
   background: #f1f5f9;
@@ -1112,21 +1123,21 @@ onMounted(() => {
 .mcard-modal-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
-  max-height: calc(90vh - 120px);
+  padding: 12px 16px;
+  max-height: calc(86vh - 96px);
 }
 
 .mcard-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px 20px;
+  gap: 8px 14px;
   align-items: start;
 }
 
 .mcard-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -1137,20 +1148,20 @@ onMounted(() => {
 .mcard-field--split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px 16px;
+  gap: 8px 12px;
   align-items: start;
 }
 
 .mcard-field--switch {
-  min-width: 52px;
+  min-width: 48px;
 }
 
 .mcard-form-label {
   text-align: left;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
   color: #0f172a;
-  line-height: 1.35;
+  line-height: 1.3;
 }
 
 .mcard-form-control {
@@ -1158,8 +1169,8 @@ onMounted(() => {
 }
 
 .mcard-form-control :deep(.el-input__wrapper) {
-  padding: 12px 16px;
-  border-radius: 10px;
+  padding: 1px 10px;
+  border-radius: 8px;
   box-shadow: 0 0 0 1px var(--mcard-border) inset;
   background: #fff;
 }
@@ -1167,13 +1178,25 @@ onMounted(() => {
 .mcard-form-control :deep(.el-input__wrapper.is-focus) {
   box-shadow:
     0 0 0 1px var(--mcard-primary) inset,
-    0 0 0 3px rgba(13, 92, 70, 0.08);
+    0 0 0 2px rgba(13, 92, 70, 0.08);
 }
 
 .mcard-form-control :deep(.el-input__inner) {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   color: #0f172a;
+}
+
+.mcard-form-control :deep(.el-radio-group) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+.mcard-form-control :deep(.el-radio),
+.mcard-form-control :deep(.el-checkbox) {
+  height: auto;
+  margin-right: 0;
 }
 
 .mcard-form-control--number {
@@ -1182,24 +1205,24 @@ onMounted(() => {
 }
 
 .mcard-form-control--number :deep(.el-input__wrapper) {
-  padding: 8px 12px;
+  padding: 1px 8px;
 }
 
 .mcard-form-control--periods {
-  min-height: 40px;
+  min-height: 28px;
   display: flex;
   align-items: center;
 }
 
 .mcard-form-hint {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 1.5;
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
   color: var(--el-text-color-secondary);
 }
 
 .mcard-field--switch .mcard-form-switch {
-  height: 40px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
 }
@@ -1230,12 +1253,12 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   border: 1px solid var(--mcard-border);
   background: #fff;
   color: var(--mcard-muted);
-  padding: 8px 16px;
-  border-radius: 10px;
+  padding: 5px 10px;
+  border-radius: 8px;
   font-size: 12px;
   font-weight: 800;
   cursor: pointer;
@@ -1258,10 +1281,10 @@ onMounted(() => {
 }
 
 .mcard-upload-preview {
-  width: 84px;
-  height: 52px;
+  width: 56px;
+  height: 36px;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--mcard-border);
   flex-shrink: 0;
 }
@@ -1272,45 +1295,46 @@ onMounted(() => {
 }
 
 .mcard-textarea-control :deep(.el-textarea__inner) {
-  padding: 10px 16px 26px;
-  border-radius: 10px;
+  padding: 6px 10px 20px;
+  border-radius: 8px;
   border: 1px solid var(--mcard-border);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   color: #0f172a;
   box-shadow: none;
-  min-height: 64px;
+  min-height: 44px;
+  line-height: 1.45;
 }
 
 .mcard-textarea-control :deep(.el-textarea__inner:focus) {
   border-color: var(--mcard-primary);
-  box-shadow: 0 0 0 3px rgba(13, 92, 70, 0.08);
+  box-shadow: 0 0 0 2px rgba(13, 92, 70, 0.08);
 }
 
 .mcard-textarea-control--plain :deep(.el-textarea__inner) {
-  padding-bottom: 10px;
-  min-height: 52px;
+  padding: 6px 10px;
+  min-height: 32px;
 }
 
 .mcard-char-counter {
   position: absolute;
-  right: 12px;
-  bottom: 8px;
-  font-size: 11px;
+  right: 8px;
+  bottom: 4px;
+  font-size: 10px;
   font-weight: 700;
   color: var(--mcard-muted);
   pointer-events: none;
 }
 
 .mcard-form-switch :deep(.el-switch__core) {
-  width: 44px;
-  height: 24px;
+  width: 36px;
+  height: 20px;
   border-radius: 34px;
 }
 
 .mcard-form-switch :deep(.el-switch__core .el-switch__action) {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
 }
 
 .mcard-form-switch.is-checked :deep(.el-switch__core) {
@@ -1321,18 +1345,18 @@ onMounted(() => {
 .mcard-modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
-  padding: 14px 20px;
+  gap: 8px;
+  padding: 10px 16px;
   border-top: 1px solid var(--mcard-border);
   background: #f8fafc;
-  border-bottom-left-radius: 24px;
-  border-bottom-right-radius: 24px;
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
 }
 
 .mcard-btn-modal {
-  padding: 12px 24px;
-  border-radius: 12px;
-  font-size: 13px;
+  padding: 7px 16px;
+  border-radius: 8px;
+  font-size: 12px;
   font-weight: 800;
   cursor: pointer;
   border: none;

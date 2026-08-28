@@ -1863,6 +1863,7 @@ def member_profile_patch(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
+    """修改会员档案。不改写配送地址（小区名 / 门牌）；地址请走地址管理接口。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     xf = request.headers.get("x-forwarded-for")
     ip = resolve_request_client_ip(xf, request.client.host if request.client else None)

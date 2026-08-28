@@ -641,7 +641,12 @@ class AdminMemberPatchIn(BaseModel):
     remarks: str | None = Field(
         None, max_length=500, description="显式传 null 或空串表示清空；不传本字段则不改备注"
     )
-    address: str | None = Field(None, max_length=500, description="默认配送地址详细行，提交则重算坐标与自动划区")
+    address: str | None = Field(
+        None,
+        max_length=500,
+        deprecated=True,
+        description="已废弃且忽略：档案修改不得改写会员地址（小区名/门牌拆分字段）；请走地址管理接口",
+    )
     use_auto_area: bool = Field(
         False,
         description="按当前详细地址与坐标重新自动划区；若无坐标则先尝试高德地理编码再划区；为 true 时不采用手动指定的 delivery_region_id",

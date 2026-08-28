@@ -1693,8 +1693,6 @@ def admin_patch_member_profile(
 
         and not set_remarks
 
-        and address is None
-
         and daily_meal_units is None
 
         and plan_type is None
@@ -1764,30 +1762,9 @@ def admin_patch_member_profile(
 
         m.remarks = (remarks or "").strip() or None
 
-    if address is not None:
-
-        t = address.strip()
-
-        if not t:
-
-            raise HTTPException(status_code=400, detail="地址不能为空")
-
-        admin_set_default_address_plain_line(
-
-            db,
-
-            member_id=mid,
-
-            detail_line=t,
-
-            contact_name=m.name,
-
-            contact_phone=m.phone,
-
-        )
-
-        # 新建默认地址时尚未 flush，后续 get_default_address（自动/手动划区）可能查不到 pending 行
-        db.flush()
+    # 兼容旧管理端仍提交 address：曾把小区名+门牌拼成一条写入 map_location_text 并清空 door_detail。
+    # 档案修改不得改写会员地址，地址仅允许在地址管理中维护。
+    _ = address
 
     # 先写入自提标记：划区与恢复配送按最新履约方式判断（自提不要求地址）
     if set_store_pickup:
@@ -1991,13 +1968,6 @@ def admin_patch_member_profile(
             f"修改备注",
             before={"remarks": prev_snapshot["remarks"]},
             after={"remarks": new_snapshot["remarks"]},
-        )
-    if address is not None and prev_snapshot["address"] != new_snapshot["address"]:
-        _admin_log(
-            OP_ADMIN_UPDATE_ADDRESS,
-            f"修改默认配送地址",
-            before={"address": prev_snapshot["address"]},
-            after={"address": new_snapshot["address"]},
         )
     if (
         (use_auto_area or set_delivery_region_id)

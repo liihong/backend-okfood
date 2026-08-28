@@ -18,6 +18,7 @@ from app.models.tenant import Tenant
 from app.schemas.member_address import MemberAddressCreateIn, MemberAddressUpdateIn
 from app.schemas.user import Location
 from app.services.member.member_address_service import create_address, update_address
+from app.services.member.member_service import admin_patch_member_profile
 
 
 @pytest.fixture()
@@ -245,3 +246,67 @@ def test_patch_set_default_allows_missing_coords(
     )
     assert out.is_default is True
     assert out.location is None
+
+
+def test_admin_patch_profile_does_not_merge_map_and_door(
+    addr_db: Session, member: Member, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """档案修改即使提交拼接后的 address，也不得把小区名与门牌写入同一字段。"""
+    _patch_address_deps(monkeypatch, geocode=(113.883, 35.303))
+    monkeypatch.setattr(
+        "app.services.member.member_service._to_member_out",
+        lambda *a, **k: None,
+    )
+    row = MemberAddress(
+        member_id=int(member.id),
+        contact_name="张三",
+        contact_phone="13800001111",
+        map_location_text="绿都城",
+        door_detail="1号楼2单元301",
+        lng=113.883,
+        lat=35.303,
+        is_default=True,
+    )
+    addr_db.add(row)
+    addr_db.commit()
+    addr_db.refresh(row)
+
+    admin_patch_member_profile(
+        addr_db,
+        phone=member.phone,
+        name="李四",
+        remarks=None,
+        address="绿都城 1号楼2单元301",
+        use_auto_area=False,
+        operator="tester",
+        store_id=int(member.store_id),
+    )
+
+    fresh = addr_db.get(MemberAddress, row.id)
+    assert fresh is not None
+    assert (fresh.map_location_text or "") == "绿都城"
+    assert (fresh.door_detail or "") == "1号楼2单元301"
+    assert float(fresh.lng) == pytest.approx(113.883)
+    assert float(fresh.lat) == pytest.approx(35.303)
+    updated = addr_db.get(Member, member.id)
+    assert updated is not None
+    assert updated.name == "李四"
+
+
+def test_admin_patch_profile_address_only_is_rejected(
+    addr_db: Session, member: Member
+) -> None:
+    """仅提交 address 不算有效档案修改，避免旧客户端靠该字段改地址。"""
+    with pytest.raises(HTTPException) as ei:
+        admin_patch_member_profile(
+            addr_db,
+            phone=member.phone,
+            name=None,
+            remarks=None,
+            address="绿都城 1号楼2单元301",
+            use_auto_area=False,
+            operator="tester",
+            store_id=int(member.store_id),
+        )
+    assert ei.value.status_code == 400
+    assert "至少修改一项" in str(ei.value.detail)

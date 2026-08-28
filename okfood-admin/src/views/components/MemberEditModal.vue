@@ -348,9 +348,10 @@ async function submitEditMember() {
   if (profileLoading.value) return
   const isStorePickup = editForm.value.store_pickup === true
   const addressText = (editForm.value.address || '').trim()
-  // 配送到家才要求默认地址；门店自提到店取餐，无需维护配送地址
+  // 配送到家才要求已有默认地址；门店自提到店取餐，无需维护配送地址。
+  // 有地址也只做展示校验，保存时不提交 address，避免把门牌并入小区名字段。
   if (!isStorePickup && !addressText) {
-    showToast('默认配送地址为空，请先在会员列表「地址」中维护后再保存', 'error')
+    showToast('默认配送地址为空，请先在会员列表「地址管理」中维护后再保存', 'error')
     return
   }
   editSaving.value = true
@@ -360,7 +361,6 @@ async function submitEditMember() {
       phone: editForm.value.phone,
       name: editForm.value.name.trim(),
       remarks: editForm.value.remarks.trim() || null,
-      address: addressText || null,
       daily_meal_units: Math.max(1, Math.min(50, Number(editForm.value.daily_meal_units) || 1)),
       delivery_start_date: String(editForm.value.delivery_start_date ?? '').trim()
         ? String(editForm.value.delivery_start_date).trim().slice(0, 10)
@@ -465,7 +465,7 @@ async function submitEditMember() {
                   <el-tooltip placement="top">
                     <template #content>
                       <div class="mem-tip-body">
-                        门店自提无需配送地址；如需修改地址，请前往地址库或通过工单重新绑定。
+                        此处仅展示默认地址，保存档案不会改写小区名或门牌。修改地址请使用会员列表「地址管理」。门店自提无需配送地址。
                       </div>
                     </template>
                     <span class="mem-tip-wrap">
@@ -482,6 +482,7 @@ async function submitEditMember() {
                     }}
                   </p>
                 </div>
+                <p class="mem-hint-soft">保存档案不会改写小区名或门牌，修改请用「地址管理」。</p>
               </div>
             </section>
 
