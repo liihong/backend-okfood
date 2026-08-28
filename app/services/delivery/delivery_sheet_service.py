@@ -1588,6 +1588,53 @@ def _empty_sheet_member_stats() -> dict[str, int]:
     }
 
 
+def _merge_extra_delivered_for_sheet_view(
+    db: Session,
+    *,
+    view: str,
+    members: list[Member],
+    pu_members: list[Member],
+    default_by_id: dict[int, MemberAddress | None],
+    pu_defaults: dict[int, MemberAddress | None],
+    delivery_date: date,
+    region_filter_id: int | None,
+    store_id: int,
+    tenant_id: int,
+    day_delivered_member_ids: set[int],
+) -> tuple[list[Member], list[Member]]:
+    """
+    把「当日已送达、但已不在应送 SQL」的会员补回大表。
+
+    午餐视图补回后不再按餐段过滤：无工单快照、扣次后余额为 0 的纯午餐会员
+    仍须留在当日午餐大表，否则已送达记录会从统计里消失。
+
+    午晚餐视图补回后必须再滤一次双餐段：纯午餐会员今日午餐已送达时，
+    extra_delivered 会把他们当成「名单外已送达」重新塞进 already_home 之外，
+    从而污染午晚餐 Tab。
+    """
+    ex_h, ex_dh, ex_pu, ex_pud = extra_delivered_ineligible_subscribers(
+        db,
+        delivery_date=delivery_date,
+        already_home={int(m.id) for m in members},
+        already_pickup={int(m.id) for m in pu_members},
+        delivery_region_id=region_filter_id,
+        store_id=store_id,
+        tenant_id=tenant_id,
+        day_delivered_member_ids=day_delivered_member_ids,
+    )
+    for m in ex_h:
+        members.append(m)
+        default_by_id[m.id] = ex_dh.get(int(m.id))
+    for m in ex_pu:
+        pu_members.append(m)
+        pu_defaults[m.id] = ex_pud.get(int(m.id))
+    if (view or "").strip().lower() == DeliverySheetView.LUNCH_DINNER.value:
+        members, pu_members = filter_member_groups_for_sheet_view(
+            db, DeliverySheetView.LUNCH_DINNER.value, members, pu_members
+        )
+    return members, pu_members
+
+
 def _sheet_member_stats(db: Session, *, store_id: int, include: bool) -> dict[str, int]:
     if not include:
         return _empty_sheet_member_stats()
@@ -1685,22 +1732,19 @@ def build_delivery_sheet(
             members, pu_members = filter_member_groups_for_sheet_view(
                 db, DeliverySheetView.LUNCH_DINNER.value, members, pu_members
             )
-    ex_h, ex_dh, ex_pu, ex_pud = extra_delivered_ineligible_subscribers(
+    members, pu_members = _merge_extra_delivered_for_sheet_view(
         db,
+        view=view,
+        members=members,
+        pu_members=pu_members,
+        default_by_id=default_by_id,
+        pu_defaults=pu_defaults,
         delivery_date=d,
-        already_home={int(m.id) for m in members},
-        already_pickup={int(m.id) for m in pu_members},
-        delivery_region_id=region_filter_id,
+        region_filter_id=region_filter_id,
         store_id=sid,
         tenant_id=tid,
         day_delivered_member_ids=day_delivered_ids,
     )
-    for m in ex_h:
-        members.append(m)
-        default_by_id[m.id] = ex_dh.get(int(m.id))
-    for m in ex_pu:
-        pu_members.append(m)
-        pu_defaults[m.id] = ex_pud.get(int(m.id))
     ph = (phone or "").strip()
     if ph:
         members = _filter_members_by_phone_hint(members, ph)
