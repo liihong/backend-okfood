@@ -621,6 +621,13 @@ def _apply_paid_card_order_to_member_balance(
     from app.services.meal_period.plan_type_sync import sync_member_plan_type_from_latest_card_order
 
     sync_member_plan_type_from_latest_card_order(db, m)
+    # 礼品券自动补发：弱依赖。失败不得回滚或阻断本次开卡入账。
+    try:
+        from app.services.gift_coupon.hooks import try_auto_grant_after_card_credit
+
+        try_auto_grant_after_card_credit(db, order)
+    except Exception:
+        pass
 
 
 def _meals_grant_units_for_card_order(db: Session, order: MemberCardOrder) -> tuple[int, bool]:

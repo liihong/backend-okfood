@@ -205,6 +205,7 @@ const TAB_ROUTE_ICONS = {
   'marketing-menu-poster': Megaphone,
   'marketing-coupon-templates': Megaphone,
   'marketing-member-coupons': Megaphone,
+  'marketing-gift-coupons': Megaphone,
   'marketing-douyin-products': Megaphone,
   'marketing-douyin-redemptions': Megaphone,
 }
@@ -487,6 +488,7 @@ function onTabClose(tab) {
           <el-menu-item index="/marketing/menu-poster">菜单页弹窗海报</el-menu-item>
           <el-menu-item index="/marketing/coupon-templates">优惠券管理</el-menu-item>
           <el-menu-item index="/marketing/member-coupons">优惠券发放</el-menu-item>
+          <el-menu-item index="/marketing/gift-coupons">礼品券管理</el-menu-item>
           <el-menu-item index="/marketing/douyin-products">抖音商品设置</el-menu-item>
           <el-menu-item index="/marketing/douyin-redemptions">核销记录查询</el-menu-item>
         </el-sub-menu>

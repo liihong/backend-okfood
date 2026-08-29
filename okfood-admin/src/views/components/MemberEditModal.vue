@@ -6,6 +6,7 @@ import {
   handleAdminLogout,
   mapAdminUserToRow,
   mealScopeLabelFromPeriods,
+  membershipTemplatePlanLabel,
 } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 
@@ -28,18 +29,6 @@ function planTypeFromTemplate(tpl) {
 }
 
 /**
- * 套餐下拉展示：优先种类 + 餐段，与列表「月卡 · 全餐」口径一致
- * @param {Record<string, unknown> | null | undefined} tpl
- */
-function templatePlanLabel(tpl) {
-  const kind = String(tpl?.kind_label || '').trim() || String(tpl?.name || '').trim() || '会员卡'
-  if (kind.includes('·') || kind.includes('午餐') || kind.includes('晚餐') || kind.includes('全餐')) {
-    return kind
-  }
-  return `${kind} · ${mealScopeLabelFromPeriods(tpl?.meal_periods)}`
-}
-
-/**
  * 将档案当前套餐匹配到本店卡包（种类 + 餐段优先）
  * @param {Array<Record<string, unknown>>} templates
  * @param {Record<string, unknown> | null | undefined} member
@@ -52,7 +41,7 @@ function matchMemberTemplate(templates, member) {
   const scope = mealScopeLabelFromPeriods(member.entitled_meal_periods)
   // 仅精确匹配，避免把「月卡 · 全餐」错配成租户另一张「月卡 · 午餐」
   const byDisplay = display
-    ? list.find((t) => templatePlanLabel(t) === display)
+    ? list.find((t) => membershipTemplatePlanLabel(t) === display)
     : null
   if (byDisplay?.id != null) return Number(byDisplay.id)
   const exact = list.find((t) => {
@@ -151,7 +140,7 @@ const planOptions = computed(() => {
   for (const t of membershipTemplates.value) {
     const id = Number(t?.id)
     if (!Number.isFinite(id) || id <= 0) continue
-    const label = templatePlanLabel(t)
+    const label = membershipTemplatePlanLabel(t)
     if (seen.has(label)) continue
     seen.add(label)
     opts.push({ id, label, planType: planTypeFromTemplate(t) })

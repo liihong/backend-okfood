@@ -1,7 +1,7 @@
 <script setup>
 defineOptions({ name: 'DeliveryView' })
 import { ref, computed, watch, onMounted } from 'vue'
-import { RefreshCw, MapPin, Truck, Zap, FileDown, Search, Loader2, Printer } from 'lucide-vue-next'
+import { RefreshCw, MapPin, Truck, Zap, FileDown, Search, Loader2, Printer, Gift } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import { apiJson, adminAccessToken, adminStoreBranding, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
@@ -24,6 +24,7 @@ import {
 import { useAnimatedInteger } from '../composables/useAnimatedInteger.js'
 import { useStorePrint } from '../composables/useStorePrint.js'
 import { buildDeliveryLabelItems, missingRegionCodesForStops } from '../utils/print/deliveryLabelAdapter.js'
+import GiftCouponTodayDialog from './delivery/GiftCouponTodayDialog.vue'
 
 const { submitPrintJob, printing: printLoading, resolveScene } = useStorePrint()
 
@@ -178,6 +179,8 @@ const batchMarking = ref(false)
 /** 配送大表 el-table 多选 */
 const deliveryTableRef = ref(null)
 const selectedDeliveryStops = ref([])
+/** 今日礼品券打印/核销弹窗（独立模块，不改配送名单） */
+const giftCouponDialogVisible = ref(false)
 
 /** 顺丰同城：预览弹窗 */
 const sfDialogOpen = ref(false)
@@ -950,6 +953,16 @@ async function reinstatePhoneToSheet() {
         </button>
         <button
           type="button"
+          class="delivery-btn delivery-btn--outline"
+          :disabled="loading"
+          title="打印当天大表上持有未核销礼品券的会员标签，勾选后自动核销"
+          @click="giftCouponDialogVisible = true"
+        >
+          <Gift :size="16" stroke-width="2" />
+          今日礼品券
+        </button>
+        <button
+          type="button"
           class="delivery-btn delivery-btn--sf"
           :disabled="loading || !sfPushEnabledForView"
           :title="
@@ -1497,6 +1510,11 @@ async function reinstatePhoneToSheet() {
       </div>
     </template>
 
+    <GiftCouponTodayDialog
+      v-model:visible="giftCouponDialogVisible"
+      :delivery-date="(sheetToday.delivery_date || deliveryDateQuery || '').trim()"
+      :sheet-view="sheetView"
+    />
   </section>
 </template>
 

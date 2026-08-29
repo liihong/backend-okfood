@@ -40,6 +40,8 @@ from app.models.store_print_job import StorePrintJob
 from app.models.douyin import DouyinCertificateRedemption, DouyinProductMapping
 from app.models.home_banner import HomeBanner
 from app.models.home_entry_poster import HomeEntryPoster
+from app.models.gift_coupon_campaign import GiftCouponCampaign
+from app.models.gift_coupon_entitlement import GiftCouponEntitlement
 
 __all__ = [
     "DayStockAdjustmentLog",
@@ -84,6 +86,8 @@ __all__ = [
     "DouyinProductMapping",
     "HomeBanner",
     "HomeEntryPoster",
+    "GiftCouponCampaign",
+    "GiftCouponEntitlement",
     "SfSameCityCallback",
     "SfSameCityPush",
 ]

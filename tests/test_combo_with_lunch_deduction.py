@@ -245,6 +245,28 @@ def test_template_edit_does_not_change_applied_snapshot(combo_db: Session) -> No
     assert member_has_combo_delivered_with_lunch(combo_db, int(m.id)) is True
 
 
+def test_legacy_snapshot_false_follows_template_together(combo_db: Session) -> None:
+    """历史全餐卡快照默认 false：模版勾选一起配送时午餐送达仍连带扣晚餐。"""
+    m = _member(combo_db)
+    _paid_order(combo_db, m, periods=["lunch", "dinner"], with_lunch=False, template_flag=True)
+    assert member_has_combo_delivered_with_lunch(combo_db, int(m.id)) is True
+    assert try_apply_dinner_deduction_with_lunch(
+        combo_db, m, delivery_date=DELIVERY_DAY, operator="test"
+    ) is True
+    dinner = combo_db.get(
+        MemberMealPeriodState,
+        {"member_id": int(m.id), "meal_period": MealPeriod.DINNER.value},
+    )
+    assert int(dinner.balance) == 9
+    assert m.balance == 10
+    # 已送达则幂等，晚餐不会扣第二次
+    assert try_apply_dinner_deduction_with_lunch(
+        combo_db, m, delivery_date=DELIVERY_DAY, operator="test"
+    ) is False
+    combo_db.refresh(dinner)
+    assert int(dinner.balance) == 9
+
+
 def test_separate_lunch_and_dinner_cards_not_combo(combo_db: Session) -> None:
     m = _member(combo_db)
     _paid_order(combo_db, m, periods=["lunch"], with_lunch=False)
@@ -323,3 +345,45 @@ def test_lunch_fulfillment_with_flag_deducts_both(combo_db: Session, monkeypatch
     )
     assert lunch_log is not None and lunch_log.status == DeliveryStatus.DELIVERED.value
     assert dinner_log is not None and dinner_log.status == DeliveryStatus.DELIVERED.value
+
+
+def test_legacy_member_lunch_fulfillment_deducts_both_and_dinner_sheet_is_idempotent(
+    combo_db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """老会员快照 false、模版勾选一起配送：午餐扣午+晚；再标晚餐送达不重复扣。"""
+    from app.services.admin import admin_delivery_fulfillment_service as svc
+
+    monkeypatch.setattr(svc, "is_subscription_delivery_day", lambda _d: True)
+    m = _member(combo_db)
+    _paid_order(combo_db, m, periods=["lunch", "dinner"], with_lunch=False, template_flag=True)
+    out = svc._subscription_fulfilled_apply(
+        combo_db,
+        member_id=int(m.id),
+        delivery_date=DELIVERY_DAY,
+        operator_tag="admin:test",
+        kind="home",
+        ok_ids={int(m.id)},
+        meal_period="lunch",
+    )
+    assert out is not None
+    combo_db.flush()
+    combo_db.refresh(m)
+    assert m.balance == 9
+    dinner = combo_db.get(
+        MemberMealPeriodState,
+        {"member_id": int(m.id), "meal_period": MealPeriod.DINNER.value},
+    )
+    assert int(dinner.balance) == 9
+    dinner_again = svc._subscription_fulfilled_apply(
+        combo_db,
+        member_id=int(m.id),
+        delivery_date=DELIVERY_DAY,
+        operator_tag="admin:test",
+        kind="home",
+        ok_ids={int(m.id)},
+        meal_period="dinner",
+    )
+    assert dinner_again is None
+    combo_db.refresh(dinner)
+    assert int(dinner.balance) == 9
+    assert m.balance == 9

@@ -551,6 +551,18 @@ export function formatPlanTypeDisplay(planType, periods) {
   return `${pt} · ${mealScopeLabelFromPeriods(periods)}`
 }
 
+/**
+ * 租户卡包套餐展示：优先种类 + 餐段（与会员编辑下拉、档案库套餐筛选一致）
+ * @param {Record<string, unknown> | null | undefined} tpl
+ */
+export function membershipTemplatePlanLabel(tpl) {
+  const kind = String(tpl?.kind_label || '').trim() || String(tpl?.name || '').trim() || '会员卡'
+  if (kind.includes('·') || kind.includes('午餐') || kind.includes('晚餐') || kind.includes('全餐')) {
+    return kind
+  }
+  return `${kind} · ${mealScopeLabelFromPeriods(tpl?.meal_periods)}`
+}
+
 /** API 日期字段规范为 YYYY-MM-DD */
 function adminUserYmd(v) {
   if (v == null || v === '') return ''

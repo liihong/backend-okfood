@@ -41,6 +41,7 @@ const HomeBannersView = () => import('../views/marketing/HomeBannersView.vue')
 const EntryPosterView = () => import('../views/marketing/EntryPosterView.vue')
 const MenuPagePosterView = () => import('../views/marketing/MenuPagePosterView.vue')
 const MemberCouponGrantsView = () => import('../views/marketing/MemberCouponGrantsView.vue')
+const GiftCouponsView = () => import('../views/marketing/GiftCouponsView.vue')
 const DouyinProductMappingsView = () => import('../views/marketing/douyin/DouyinProductMappingsView.vue')
 const DouyinRedemptionsView = () => import('../views/marketing/douyin/DouyinRedemptionsView.vue')
 
@@ -281,6 +282,16 @@ const router = createRouter({
           meta: {
             title: '优惠券发放',
             pageSubtitle: '向会员发放优惠券并管理记录',
+            supportMarketing: true,
+          },
+        },
+        {
+          path: 'marketing/gift-coupons',
+          name: 'marketing-gift-coupons',
+          component: GiftCouponsView,
+          meta: {
+            title: '礼品券管理',
+            pageSubtitle: '按开卡入账日圈月卡/季卡发放跟餐礼品券',
             supportMarketing: true,
           },
         },

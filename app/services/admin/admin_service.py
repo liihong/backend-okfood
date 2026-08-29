@@ -312,6 +312,65 @@ def _member_awaiting_setup_scope_clause():
     return _member_lifecycle_awaiting_setup_core_scope()
 
 
+def _member_membership_template_filter_scope(
+    template_ids: list[int],
+    *,
+    fallback_plan_type: str | None = None,
+):
+    """
+    最近一笔已缴已入账开卡工单命中指定卡包；
+    无此类工单时，可选按 members.plan_type 兜底（导入档案、经典周/月卡）。
+    """
+    ids = sorted({int(x) for x in template_ids if x is not None and int(x) > 0})
+    if not ids:
+        return literal(False)
+    latest_sq = (
+        select(
+            MemberCardOrder.member_id.label("mid"),
+            func.max(MemberCardOrder.id).label("max_id"),
+        )
+        .where(
+            MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+            MemberCardOrder.applied_to_member.is_(True),
+        )
+        .group_by(MemberCardOrder.member_id)
+    ).subquery("latest_paid_card_for_plan")
+    latest_match = [MemberCardOrder.membership_template_id.in_(ids)]
+    fb = (fallback_plan_type or "").strip()
+    if fb:
+        latest_match.append(
+            and_(
+                MemberCardOrder.membership_template_id.is_(None),
+                or_(MemberCardOrder.card_kind == fb, Member.plan_type == fb),
+            )
+        )
+    via_latest = exists(
+        select(1)
+        .select_from(MemberCardOrder)
+        .join(
+            latest_sq,
+            and_(
+                MemberCardOrder.member_id == latest_sq.c.mid,
+                MemberCardOrder.id == latest_sq.c.max_id,
+            ),
+        )
+        .where(MemberCardOrder.member_id == Member.id)
+        .where(or_(*latest_match))
+    )
+    if not fb:
+        return via_latest
+    has_applied_paid = exists(
+        select(1)
+        .select_from(MemberCardOrder)
+        .where(
+            MemberCardOrder.member_id == Member.id,
+            MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+            MemberCardOrder.applied_to_member.is_(True),
+        )
+    )
+    return or_(via_latest, and_(~has_applied_paid, Member.plan_type == fb))
+
+
 def _apply_member_list_filters(
     stmt,
     *,
@@ -323,6 +382,8 @@ def _apply_member_list_filters(
     delivery_region_id: int | None = None,
     unassigned_region: bool = False,
     plan_type: str | None = None,
+    membership_template_ids: list[int] | None = None,
+    membership_template_fallback_plan_type: str | None = None,
     on_leave_only: bool = False,
     renew_pending_only: bool = False,
     delivering_only: bool = False,
@@ -364,7 +425,14 @@ def _apply_member_list_filters(
         stmt = stmt.where(_member_card_expired_scope())
     elif validity == "refunded":
         stmt = stmt.where(_member_refunded_scope())
-    if plan_type:
+    if membership_template_ids:
+        stmt = stmt.where(
+            _member_membership_template_filter_scope(
+                membership_template_ids,
+                fallback_plan_type=membership_template_fallback_plan_type,
+            )
+        )
+    elif plan_type:
         stmt = stmt.where(Member.plan_type == plan_type)
     if inactive_only:
         # 与 lifecycle「未开卡」一致：从未入账工单且有余次，排除已过期/暂停/退款
@@ -692,6 +760,8 @@ def list_members_paged(
     delivery_region_id: int | None = None,
     unassigned_region: bool = False,
     plan_type: str | None = None,
+    membership_template_ids: list[int] | None = None,
+    membership_template_fallback_plan_type: str | None = None,
     on_leave_only: bool = False,
     renew_pending_only: bool = False,
     delivering_only: bool = False,
@@ -708,6 +778,8 @@ def list_members_paged(
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=plan_type,
+        membership_template_ids=membership_template_ids,
+        membership_template_fallback_plan_type=membership_template_fallback_plan_type,
         on_leave_only=on_leave_only,
         store_id=store_id,
         renew_pending_only=renew_pending_only,
@@ -723,6 +795,8 @@ def list_members_paged(
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=plan_type,
+        membership_template_ids=membership_template_ids,
+        membership_template_fallback_plan_type=membership_template_fallback_plan_type,
         on_leave_only=on_leave_only,
         store_id=store_id,
         renew_pending_only=renew_pending_only,

@@ -44,6 +44,7 @@ export const ADMIN_TAB_COMPONENT_NAMES = {
   'marketing-menu-poster': 'MenuPagePosterView',
   'marketing-coupon-templates': 'CouponTemplatesView',
   'marketing-member-coupons': 'MemberCouponGrantsView',
+  'marketing-gift-coupons': 'GiftCouponsView',
   'marketing-douyin-products': 'DouyinProductMappingsView',
   'marketing-douyin-redemptions': 'DouyinRedemptionsView',
 }

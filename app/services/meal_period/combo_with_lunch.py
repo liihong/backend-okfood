@@ -1,7 +1,8 @@
 """全餐卡「与午餐一起配送」：独立于现网午餐扣次。
 
-仅当开卡工单快照同时覆盖午+晚且 deliver_dinner_with_lunch_snapshot=true 时，
-在午餐履约成功之后追加扣晚餐。默认 false，不改变纯午餐 / 分送全餐 / 纯晚餐。
+午餐履约成功后追加扣晚餐，当且仅当会员有已缴已入账的午+晚工单，且：
+开卡快照 deliver_dinner_with_lunch_snapshot=true，或快照未置位但关联模版当前已勾选。
+默认 false，不改变纯午餐 / 分送全餐 / 纯晚餐。晚餐流水已送达则幂等跳过，不会扣两次。
 
 本模块不得向午餐主路径抛业务异常，以免晚餐失败回滚午餐扣次。
 """
@@ -54,26 +55,40 @@ def snapshot_deliver_dinner_with_lunch_from_template(
 
 
 def member_has_combo_delivered_with_lunch(db: Session, member_id: int) -> bool:
-    """是否存在已缴已入账、且快照为「午+晚一起配送」的工单。不读模版当前值。"""
+    """是否应按「午餐送达同时扣晚餐」履约。
+
+    已缴已入账且覆盖午+晚的工单：快照为 true 即命中（改模版为分开配送也不取消）；
+    历史老会员快照默认 false 时，再看关联模版当前是否勾选一起配送。
+    """
     mid = int(member_id)
     rows = db.execute(
         select(
             MemberCardOrder.meal_periods_snapshot,
             MemberCardOrder.deliver_dinner_with_lunch_snapshot,
+            MemberCardOrder.membership_template_id,
         ).where(
             MemberCardOrder.member_id == mid,
             MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
             MemberCardOrder.applied_to_member.is_(True),
-            MemberCardOrder.deliver_dinner_with_lunch_snapshot.is_(True),
         )
     ).all()
-    for snap, flag in rows:
-        if not flag:
-            continue
+    template_ids: list[int] = []
+    for snap, flag, tpl_id in rows:
         periods = meal_periods_from_snapshot_value(snap)
-        if MealPeriod.LUNCH.value in periods and MealPeriod.DINNER.value in periods:
+        if MealPeriod.LUNCH.value not in periods or MealPeriod.DINNER.value not in periods:
+            continue
+        if flag:
             return True
-    return False
+        if tpl_id is not None:
+            template_ids.append(int(tpl_id))
+    if not template_ids:
+        return False
+    flags = db.scalars(
+        select(MembershipCardTemplate.deliver_dinner_with_lunch).where(
+            MembershipCardTemplate.id.in_(template_ids)
+        )
+    ).all()
+    return any(bool(f) for f in flags)
 
 
 def try_apply_dinner_deduction_with_lunch(

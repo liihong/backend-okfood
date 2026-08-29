@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.timeutil import today_shanghai
 from app.models.balance_log import BalanceLog
 from app.models.delivery_log import DeliveryLog
-from app.models.enums import BalanceReason, DeliveryStatus
+from app.models.enums import BalanceReason, DeliveryStatus, MealPeriod
 from app.models.member_card_order import MemberCardOrder
 from app.models.single_meal_order import SingleMealOrder
 from app.schemas.user import DeliveryDeductionOut
@@ -32,33 +32,64 @@ def _balance_log_business_date(created_at: datetime | None) -> date:
     return created_at.date()
 
 
-def _delivery_meal_units_by_date(db: Session, member_id: int) -> dict[date, int]:
-    """按确认送达时间序，将 delivery_logs 与 balance_logs（配送扣次）一一配对得每日份数。"""
+def _normalize_record_meal_period(raw: object) -> str:
+    """消费记录餐段：仅 lunch / dinner，缺省按午餐（与历史 delivery_logs 默认一致）。"""
+    p = str(raw or MealPeriod.LUNCH.value).strip().lower()
+    return MealPeriod.DINNER.value if p == MealPeriod.DINNER.value else MealPeriod.LUNCH.value
+
+
+def _delivery_logs_with_units(db: Session, member_id: int) -> list[tuple[DeliveryLog, int]]:
+    """已送达流水按餐段与配送扣次流水配对，得到每条记录的份数。"""
     mid = int(member_id)
-    dl_rows = db.scalars(
-        select(DeliveryLog)
-        .where(
-            DeliveryLog.member_id == mid,
-            DeliveryLog.status == DeliveryStatus.DELIVERED.value,
-        )
-        .order_by(DeliveryLog.updated_at.asc(), DeliveryLog.id.asc())
-    ).all()
-    bl_rows = db.scalars(
-        select(BalanceLog)
-        .where(
-            BalanceLog.member_id == mid,
-            BalanceLog.reason == BalanceReason.DELIVERY.value,
-            BalanceLog.change < 0,
-        )
-        .order_by(BalanceLog.created_at.asc(), BalanceLog.id.asc())
-    ).all()
-    out: dict[date, int] = {}
-    for i, dl in enumerate(dl_rows):
-        if i < len(bl_rows):
-            units = abs(int(bl_rows[i].change))
+    dl_rows = list(
+        db.scalars(
+            select(DeliveryLog)
+            .where(
+                DeliveryLog.member_id == mid,
+                DeliveryLog.status == DeliveryStatus.DELIVERED.value,
+            )
+            .order_by(DeliveryLog.updated_at.asc(), DeliveryLog.id.asc())
+        ).all()
+    )
+    bl_rows = list(
+        db.scalars(
+            select(BalanceLog)
+            .where(
+                BalanceLog.member_id == mid,
+                BalanceLog.reason == BalanceReason.DELIVERY.value,
+                BalanceLog.change < 0,
+            )
+            .order_by(BalanceLog.created_at.asc(), BalanceLog.id.asc())
+        ).all()
+    )
+    bl_by_period: dict[str, list[BalanceLog]] = {
+        MealPeriod.LUNCH.value: [],
+        MealPeriod.DINNER.value: [],
+    }
+    for bl in bl_rows:
+        period = _normalize_record_meal_period(getattr(bl, "meal_period", None))
+        bl_by_period[period].append(bl)
+    bl_idx = {MealPeriod.LUNCH.value: 0, MealPeriod.DINNER.value: 0}
+    out: list[tuple[DeliveryLog, int]] = []
+    for dl in dl_rows:
+        period = _normalize_record_meal_period(getattr(dl, "meal_period", None))
+        i = bl_idx[period]
+        pool = bl_by_period[period]
+        if i < len(pool):
+            units = abs(int(pool[i].change))
+            bl_idx[period] = i + 1
         else:
             units = 1
-        out[dl.delivery_date] = max(1, units)
+        out.append((dl, max(1, units)))
+    return out
+
+
+def _delivery_meal_units_by_date(db: Session, member_id: int) -> dict[date, int]:
+    """各配送业务日已消费份数：同日午+晚分别计入后求和（退卡按日核对用）。"""
+    out: dict[date, int] = {}
+    for dl, units in _delivery_logs_with_units(db, member_id):
+        d = dl.delivery_date
+        out[d] = int(out.get(d, 0)) + int(units)
     return out
 
 
@@ -119,6 +150,9 @@ def _single_meal_deduction_items(db: Session, member_id: int) -> list[DeliveryDe
                 delivery_date=order.delivery_date,
                 meal_units=max(1, abs(int(bl.change))),
                 deduction_kind=_DEDUCTION_KIND_SINGLE_MEAL,
+                meal_period=_normalize_record_meal_period(
+                    getattr(order, "meal_period", None) or getattr(bl, "meal_period", None)
+                ),
             )
         )
     return items
@@ -163,6 +197,7 @@ def _card_recharge_items(db: Session, member_id: int) -> list[DeliveryDeductionO
                 delivery_date=_balance_log_business_date(bl.created_at),
                 meal_units=max(1, int(bl.change)),
                 deduction_kind=_DEDUCTION_KIND_CARD_RECHARGE,
+                meal_period=_normalize_record_meal_period(getattr(bl, "meal_period", None)),
             )
         )
     return items
@@ -185,27 +220,33 @@ def _meal_compensation_items(db: Session, member_id: int) -> list[DeliveryDeduct
             delivery_date=_balance_log_business_date(bl.created_at),
             meal_units=max(1, int(bl.change)),
             deduction_kind=_DEDUCTION_KIND_MEAL_COMPENSATION,
+            meal_period=_normalize_record_meal_period(getattr(bl, "meal_period", None)),
         )
         for bl in bl_rows
     ]
 
 
 def _subscription_deduction_items(db: Session, member_id: int) -> list[DeliveryDeductionOut]:
-    """订阅套餐：已确认送达的配送业务日（去重，一日一条）。"""
+    """订阅套餐：每条已确认送达流水一条（同日午餐、晚餐分开，标明餐段）。"""
     mid = int(member_id)
-    filt = (DeliveryLog.member_id == mid) & (DeliveryLog.status == DeliveryStatus.DELIVERED.value)
-    dates = db.scalars(
-        select(DeliveryLog.delivery_date).where(filt).distinct().order_by(DeliveryLog.delivery_date.desc())
-    ).all()
-    units_map = _delivery_meal_units_by_date(db, mid)
-    return [
-        DeliveryDeductionOut(
-            delivery_date=d,
-            meal_units=units_map.get(d, 1),
-            deduction_kind=_DEDUCTION_KIND_SUBSCRIPTION,
+    items: list[DeliveryDeductionOut] = []
+    for dl, units in _delivery_logs_with_units(db, mid):
+        items.append(
+            DeliveryDeductionOut(
+                delivery_date=dl.delivery_date,
+                meal_units=units,
+                deduction_kind=_DEDUCTION_KIND_SUBSCRIPTION,
+                meal_period=_normalize_record_meal_period(getattr(dl, "meal_period", None)),
+            )
         )
-        for d in dates
-    ]
+    return items
+
+
+def _consumption_sort_key(item: DeliveryDeductionOut) -> tuple[date, int]:
+    """新到旧：同日晚餐排在午餐前（更接近送达时刻）。"""
+    period = _normalize_record_meal_period(getattr(item, "meal_period", None))
+    period_rank = 1 if period == MealPeriod.DINNER.value else 0
+    return (item.delivery_date, period_rank)
 
 
 def _merged_consumption_items(db: Session, member_id: int) -> list[DeliveryDeductionOut]:
@@ -215,7 +256,7 @@ def _merged_consumption_items(db: Session, member_id: int) -> list[DeliveryDeduc
         + _meal_compensation_items(db, member_id)
         + _card_recharge_items(db, member_id)
     )
-    return sorted(items, key=lambda x: x.delivery_date, reverse=True)
+    return sorted(items, key=_consumption_sort_key, reverse=True)
 
 
 def total_member_consumption_meal_units(db: Session, member_id: int) -> int:

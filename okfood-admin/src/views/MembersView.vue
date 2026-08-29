@@ -27,6 +27,7 @@ import {
   memberList,
   mapAdminUserToRow,
   handleAdminLogout,
+  membershipTemplatePlanLabel,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import { parseApiDateTimeBeijing } from '../utils/beijingDateTime.js'
@@ -82,13 +83,15 @@ const membersLoading = ref(false)
 const searchQuery = ref('')
 /** 状态：'' 全部 | active 生效中 | expired 已过期 | refunded 已退款（默认全部） */
 const membersValidityFilter = ref('')
-/** 套餐：'' | 周卡 | 月卡 */
+/** 套餐：'' 全部 | 租户卡包模版 id | 无卡包时兜底「周卡」「月卡」 */
 const membersPlanFilter = ref('')
 /** 片区：'' | 'unassigned' | 区域 id 字符串 */
 const membersRegionFilter = ref('')
 /** 会员卡状态：'' 全部 | delivering 正常配送中 | inactive 未开卡 | awaiting_setup 待完善履约 | paused 暂停配送 | leave 请假中 | renew_pending 待续费 */
 const membersStatusSegment = ref('')
 const regionFilterOptions = ref([])
+/** 本店会员卡套餐筛选项（按种类+餐段去重） */
+const membershipPlanFilterOptions = ref([])
 
 const route = useRoute()
 const router = useRouter()
@@ -155,6 +158,33 @@ async function loadRegionFilterOptions() {
       .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
   } catch {
     regionFilterOptions.value = []
+  }
+}
+
+/** 套餐下拉：本店会员卡模版（含已下架，便于筛历史套餐）；无模版时仍可用周卡/月卡 */
+async function loadMembershipPlanFilterOptions() {
+  try {
+    const data = await apiJson('/api/admin/catalog/membership-templates', {}, { auth: true })
+    const list = Array.isArray(data) ? data : []
+    const seen = new Set()
+    const opts = []
+    for (const t of list) {
+      const id = Number(t?.id)
+      if (!Number.isFinite(id) || id <= 0) continue
+      const label = membershipTemplatePlanLabel(t)
+      if (seen.has(label)) continue
+      seen.add(label)
+      opts.push({ id, label })
+    }
+    membershipPlanFilterOptions.value = opts
+    const cur = String(membersPlanFilter.value ?? '').trim()
+    if (!cur) return
+    const known = opts.some((o) => String(o.id) === cur)
+    if (!known && cur !== '周卡' && cur !== '月卡') {
+      membersPlanFilter.value = ''
+    }
+  } catch {
+    membershipPlanFilterOptions.value = []
   }
 }
 
@@ -301,7 +331,13 @@ function buildMembersListParams(page, pageSize, { exportMode = false } = {}) {
     if (vq) params.set('validity', vq)
   }
   const pq = String(membersPlanFilter.value ?? '').trim()
-  if (pq) params.set('plan_type', pq)
+  if (pq) {
+    if (pq === '周卡' || pq === '月卡') {
+      params.set('plan_type', pq)
+    } else {
+      params.set('membership_template_id', pq)
+    }
+  }
   const q = searchQuery.value.trim()
   if (q) params.set('q', q)
   if (membersStatusSegment.value === 'delivering') params.set('delivering_only', '1')
@@ -722,6 +758,14 @@ function formatSignedMealUnits(kind, units) {
   return `${isConsumptionAdditionKind(kind) ? '+' : '-'}${n} 份`
 }
 
+function normalizeConsumptionMealPeriod(periodRaw) {
+  return String(periodRaw || '').trim().toLowerCase() === 'dinner' ? 'dinner' : 'lunch'
+}
+
+function consumptionMealPeriodLabel(periodRaw) {
+  return normalizeConsumptionMealPeriod(periodRaw) === 'dinner' ? '晚餐' : '午餐'
+}
+
 function normalizeConsumptionRecordKind(kindRaw) {
   if (kindRaw === 'single_meal') return 'single_meal'
   if (kindRaw === 'meal_compensation') return 'meal_compensation'
@@ -748,7 +792,8 @@ async function openMemberDeliveryRecords(u) {
         if (!ymd) return null
         const mealUnits = Math.max(1, Number(row.meal_units) || 1)
         const kind = normalizeConsumptionRecordKind(row.deduction_kind)
-        return { delivery_date: ymd, meal_units: mealUnits, deduction_kind: kind }
+        const mealPeriod = normalizeConsumptionMealPeriod(row.meal_period)
+        return { delivery_date: ymd, meal_units: mealUnits, deduction_kind: kind, meal_period: mealPeriod }
       })
       .filter(Boolean)
     deliveryRecordTotal.value = Number(data?.total) || deliveryRecordDates.value.length
@@ -1050,7 +1095,7 @@ async function onMemberAddressesSaved() {
 
 onMounted(async () => {
   applyMembersRouteQueryFilters()
-  await loadRegionFilterOptions()
+  await Promise.all([loadRegionFilterOptions(), loadMembershipPlanFilterOptions()])
   await fetchMemberStats()
   await fetchMembers()
   if (typeof window !== 'undefined') {
@@ -1069,7 +1114,8 @@ onMounted(async () => {
 })
 
 /** keep-alive 切回标签页时刷新列表，避免配送扣次后仍展示旧剩余次数 */
-onActivated(() => {
+onActivated(async () => {
+  await loadMembershipPlanFilterOptions()
   void fetchMembers()
 })
 
@@ -1122,8 +1168,18 @@ onUnmounted(() => {
                     @change="onPlanFilterChange"
                   >
                     <el-option label="全部" value="" />
-                    <el-option label="周卡" value="周卡" />
-                    <el-option label="月卡" value="月卡" />
+                    <template v-if="membershipPlanFilterOptions.length">
+                      <el-option
+                        v-for="opt in membershipPlanFilterOptions"
+                        :key="opt.id"
+                        :label="opt.label"
+                        :value="String(opt.id)"
+                      />
+                    </template>
+                    <template v-else>
+                      <el-option label="周卡" value="周卡" />
+                      <el-option label="月卡" value="月卡" />
+                    </template>
                   </el-select>
                   <label class="members-filter-label" for="members-region-filter">片区</label>
                   <el-select
@@ -1771,7 +1827,7 @@ onUnmounted(() => {
             {{ deliveryRecordTarget.name || '—' }} · {{ deliveryRecordTarget.phone || '' }}
           </p>
           <p class="modal-hint delivery-records-caption">
-            下列包含订阅套餐确认送达扣次、单次购买使用会员卡扣次的供餐日，以及补餐赔付与开卡入账记录；入账显示 +，扣次显示 -，按新到旧排列。
+            下列包含订阅套餐确认送达扣次、单次购买使用会员卡扣次的供餐日，以及补餐赔付与开卡入账记录；入账显示 +，扣次显示 -，会标明午餐或晚餐，按新到旧排列。
           </p>
           <div v-if="deliveryRecordLoading" class="delivery-records-loading">加载中…</div>
           <template v-else>
@@ -1782,11 +1838,17 @@ onUnmounted(() => {
             <ul v-if="deliveryRecordDates.length" class="delivery-records-list">
               <li
                 v-for="(row, idx) in deliveryRecordDates"
-                :key="`${row.delivery_date}-${row.deduction_kind}-${idx}`"
+                :key="`${row.delivery_date}-${row.deduction_kind}-${row.meal_period}-${idx}`"
               >
                 <span class="delivery-records-idx">{{ idx + 1 }}</span>
                 <span class="delivery-records-line">
                   {{ row.delivery_date }}
+                  <span
+                    class="delivery-records-kind-badge"
+                    :class="row.meal_period === 'dinner'
+                      ? 'delivery-records-kind-badge--dinner'
+                      : 'delivery-records-kind-badge--lunch'"
+                  >{{ consumptionMealPeriodLabel(row.meal_period) }}</span>
                   <span
                     v-if="row.deduction_kind === 'single_meal'"
                     class="delivery-records-kind-badge"

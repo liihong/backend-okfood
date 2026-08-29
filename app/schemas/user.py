@@ -121,6 +121,10 @@ class DeliveryDeductionOut(BaseModel):
         description="subscription=套餐确认送达扣次；single_meal=单次购买会员卡扣次；"
         "meal_compensation=补餐赔付；card_recharge=开卡入账",
     )
+    meal_period: str = Field(
+        default="lunch",
+        description="lunch=午餐 / dinner=晚餐；套餐送达按履约餐段，入账/补餐按次数池",
+    )
 
 
 class RegisterIn(BaseModel):

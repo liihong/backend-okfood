@@ -1167,7 +1167,11 @@ def users(
     ] = None,
     plan_type: Annotated[
         str | None,
-        Query(description="套餐筛选：周卡 | 月卡；不传或空=不限"),
+        Query(description="套餐筛选：周卡 | 月卡；不传或空=不限。与 membership_template_id 同时传时以模版为准"),
+    ] = None,
+    membership_template_id: Annotated[
+        int | None,
+        Query(ge=1, description="按本店会员卡模版筛选（同类种类+餐段一并命中）；不传或空=不限"),
     ] = None,
     inactive_only: Annotated[
         bool,
@@ -1208,13 +1212,26 @@ def users(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     response.headers["Cache-Control"] = "no-store"
-    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    tenant_id, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     v = (validity or "").strip().lower()
     if v not in ("", "active", "expired", "refunded"):
         v = ""
-    pt = (plan_type or "").strip()
-    if pt not in ("", PlanType.WEEK.value, PlanType.MONTH.value):
-        raise HTTPException(status_code=400, detail="plan_type 仅支持 周卡 或 月卡")
+    tpl_ids: list[int] | None = None
+    tpl_fallback_plan: str | None = None
+    if membership_template_id is not None:
+        from app.services.admin.catalog_admin_service import resolve_membership_template_member_filter
+
+        tpl_ids, tpl_fallback_plan = resolve_membership_template_member_filter(
+            db,
+            template_id=int(membership_template_id),
+            tenant_id=int(tenant_id),
+            store_id=int(store_id),
+        )
+        pt = ""
+    else:
+        pt = (plan_type or "").strip()
+        if pt not in ("", PlanType.WEEK.value, PlanType.MONTH.value):
+            raise HTTPException(status_code=400, detail="plan_type 仅支持 周卡 或 月卡")
     page = max(1, page)
     page_size = min(max(1, page_size), 100)
     if delivery_region_id is not None and unassigned_region:
@@ -1256,6 +1273,8 @@ def users(
         delivery_region_id=delivery_region_id,
         unassigned_region=unassigned_region,
         plan_type=pt or None,
+        membership_template_ids=tpl_ids,
+        membership_template_fallback_plan_type=tpl_fallback_plan,
         on_leave_only=on_leave_only,
         store_id=store_id,
         renew_pending_only=renew_pending_only,

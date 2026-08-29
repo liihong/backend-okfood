@@ -169,6 +169,38 @@ def membership_template_public_dump(row: MembershipCardTemplate) -> dict:
     }
 
 
+def resolve_membership_template_member_filter(
+    db: Session, *, template_id: int, tenant_id: int, store_id: int
+) -> tuple[list[int], str | None]:
+    """
+    会员档案库按租户卡包筛选：返回同店「种类 + 餐段」相同的模版 id，
+    以及无卡包工单时可用的 plan_type 兜底（仅种类为周卡/月卡且未覆盖晚餐）。
+    """
+    from app.models.enums import PlanType
+    from app.services.meal_period.template_periods import normalize_meal_periods_list
+
+    row = get_membership_template_row(
+        db, template_id=int(template_id), tenant_id=int(tenant_id), store_id=int(store_id)
+    )
+    want_kind = (row.kind_label or "").strip()
+    want_periods = tuple(normalize_meal_periods_list(getattr(row, "meal_periods", None)))
+    ids: list[int] = []
+    for t in list_membership_templates(
+        db, tenant_id=int(row.tenant_id), store_id=int(row.store_id), active_only=False
+    ):
+        if (t.kind_label or "").strip() != want_kind:
+            continue
+        if tuple(normalize_meal_periods_list(getattr(t, "meal_periods", None))) != want_periods:
+            continue
+        ids.append(int(t.id))
+    if int(row.id) not in ids:
+        ids.append(int(row.id))
+    fallback: str | None = None
+    if want_kind in (PlanType.WEEK.value, PlanType.MONTH.value) and "dinner" not in set(want_periods):
+        fallback = want_kind
+    return ids, fallback
+
+
 def membership_template_dump(row: MembershipCardTemplate) -> dict:
     from app.services.meal_period.template_periods import normalize_meal_periods_list
 

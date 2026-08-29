@@ -24,7 +24,7 @@
           </view>
           <view
             v-for="(row, idx) in items"
-            :key="row.delivery_date + '-' + (row.deduction_kind || 'subscription') + '-' + idx"
+            :key="row.delivery_date + '-' + (row.deduction_kind || 'subscription') + '-' + (row.meal_period || 'lunch') + '-' + idx"
             class="record-row"
           >
             <view class="record-main">
@@ -32,6 +32,10 @@
                 <text class="record-label">
                   {{ row.deduction_kind === 'single_meal' ? '供餐日' : '配送日' }}
                 </text>
+                <text
+                  class="record-kind-tag"
+                  :class="row.meal_period === 'dinner' ? 'record-kind-tag--dinner' : 'record-kind-tag--lunch'"
+                >{{ mealPeriodLabel(row.meal_period) }}</text>
                 <text v-if="row.deduction_kind === 'single_meal'" class="record-kind-tag">单次购买</text>
                 <text
                   v-else-if="row.deduction_kind === 'meal_compensation'"
@@ -96,6 +100,10 @@ function isConsumptionAdditionKind(kind) {
 function formatSignedMealUnits(kind, units) {
   const n = Math.max(1, Number(units) || 1)
   return `${isConsumptionAdditionKind(kind) ? '+' : '-'}${n} 份`
+}
+
+function mealPeriodLabel(period) {
+  return String(period || '').trim().toLowerCase() === 'dinner' ? '晚餐' : '午餐'
 }
 
 async function fetchPage(reset) {
@@ -273,6 +281,16 @@ onShow(() => {
 .record-kind-tag--recharge {
   color: #0e5a44;
   background: rgba(14, 90, 68, 0.1);
+}
+
+.record-kind-tag--lunch {
+  color: #0e5a44;
+  background: rgba(14, 90, 68, 0.1);
+}
+
+.record-kind-tag--dinner {
+  color: #4338ca;
+  background: rgba(67, 56, 202, 0.12);
 }
 
 .record-date {
