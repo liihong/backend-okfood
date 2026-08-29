@@ -1158,7 +1158,10 @@ def users(
     response: Response,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
-    q: str | None = None,
+    q: Annotated[
+        str | None,
+        Query(description="姓名、微信昵称、地址或手机号模糊；手机可输后四位或完整号码"),
+    ] = None,
     page: int = 1,
     page_size: int = 20,
     validity: Annotated[

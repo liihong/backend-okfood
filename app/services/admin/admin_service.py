@@ -396,7 +396,7 @@ def _apply_member_list_filters(
         q = q_phone.strip()
         if q:
             esc = escape_like_fragment(q)
-            # 与列表页搜索框「姓名、电话、片区地址」提示一致：默认地址详细行
+            # 与列表页搜索框「姓名、手机后四位或地址」提示一致：手机含前后模糊（可输后四位/完整号）
             dap = default_address_pick_subquery()
             ma = aliased(MemberAddress)
             addr_match = exists(
@@ -413,7 +413,7 @@ def _apply_member_list_filters(
             )
             stmt = stmt.where(
                 or_(
-                    Member.phone.like(f"{esc}%", escape="\\"),
+                    Member.phone.like(f"%{esc}%", escape="\\"),
                     Member.name.like(f"%{esc}%", escape="\\"),
                     Member.wechat_name.like(f"%{esc}%", escape="\\"),
                     addr_match,

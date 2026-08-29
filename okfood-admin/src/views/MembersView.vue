@@ -1138,7 +1138,7 @@ onUnmounted(() => {
               <el-input
                 v-model="searchQuery"
                 clearable
-                placeholder="输入姓名、手机或地址检索…"
+                placeholder="输入姓名、手机后四位或地址检索…"
                 class="members-search-el-input"
               />
             </div>
