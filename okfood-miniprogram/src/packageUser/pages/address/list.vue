@@ -1,9 +1,9 @@
 <template>
   <view class="page">
-    <OkNavbar show-back title="我的配送地址 👌" />
+    <OkNavbar show-back :title="pageTitle" />
     <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="list-inner">
-        <view v-if="profileLoaded" class="notice notice--info">
+        <view v-if="profileLoaded && !isRetailUsage" class="notice notice--info">
           <text class="notice-txt">{{ sfEffectiveNotice }}</text>
         </view>
         <view v-if="loading" class="state-text">加载中…</view>
@@ -65,6 +65,10 @@ import {
   addressListRow,
   sortAddressesDefaultFirst,
   isAddressItemDefault,
+  addressesApiPath,
+  addressEditPageUrl,
+  isRetailAddressUsage,
+  parseAddressUsage,
 } from '@/utils/addressApi.js'
 
 const scrollStyle = ref({})
@@ -72,6 +76,12 @@ const list = ref([])
 const loading = ref(true)
 const memberProfile = ref(null)
 const profileLoaded = ref(false)
+const addressUsage = ref('meal')
+
+const isRetailUsage = computed(() => isRetailAddressUsage(addressUsage.value))
+const pageTitle = computed(() =>
+  isRetailUsage.value ? '商城收货地址 👌' : '我的配送地址 👌',
+)
 
 const sfEffectiveNotice = computed(() => sfPushEffectiveEditNotice(memberProfile.value))
 
@@ -107,7 +117,7 @@ async function fetchList() {
   }
   loading.value = true
   try {
-    const data = await request('/api/user/me/addresses', { method: 'GET' })
+    const data = await request(addressesApiPath(addressUsage.value), { method: 'GET' })
     if (seq !== fetchListSeq) return
     list.value = sortAddressesDefaultFirst(normalizeAddressList(data))
   } catch {
@@ -120,9 +130,21 @@ async function fetchList() {
 
 onShow(() => {
   applyScrollLayout()
+  readUsageFromPage()
   void loadMemberProfile()
   fetchList()
 })
+
+function readUsageFromPage() {
+  try {
+    const pages = getCurrentPages()
+    const cur = pages[pages.length - 1]
+    const q = cur && cur.options ? cur.options : {}
+    addressUsage.value = parseAddressUsage(q.usage)
+  } catch {
+    addressUsage.value = 'meal'
+  }
+}
 
 function goEdit(item, index) {
   const id = addressListRow(item, index).id
@@ -131,7 +153,7 @@ function goEdit(item, index) {
     return
   }
   uni.navigateTo({
-    url: `/packageUser/pages/address/address?id=${encodeURIComponent(id)}`,
+    url: addressEditPageUrl(addressUsage.value, id),
   })
 }
 
@@ -156,6 +178,11 @@ async function setAsDefault(item, index) {
       `/api/user/me/addresses/${encodeURIComponent(row.id)}`,
       { method: 'PATCH', data: { is_default: true } },
     )
+    if (isRetailUsage.value) {
+      uni.showToast({ title: '已设为默认商城收货地址', icon: 'success' })
+      await fetchList()
+      return
+    }
     const alertPayload = sfPushEffectiveSaveAlert(memberProfile.value, {
       titleScheduled: '已设为默认',
       titleImmediate: '已设为默认',
@@ -180,7 +207,7 @@ async function setAsDefault(item, index) {
 }
 
 function goAdd() {
-  uni.navigateTo({ url: '/packageUser/pages/address/address' })
+  uni.navigateTo({ url: addressEditPageUrl(addressUsage.value) })
 }
 
 /** 先弹窗确认，再请求 DELETE /api/user/me/addresses/{address_id} */
@@ -220,7 +247,7 @@ async function deleteAddress(addressId) {
     uni.showToast({
       title: typeof tip === 'string' && tip.trim() ? tip.trim() : '已删除',
     })
-    markMinePageNeedsRefresh()
+    if (!isRetailUsage.value) markMinePageNeedsRefresh()
     await fetchList()
   } catch (e) {
     uni.showToast({

@@ -257,7 +257,11 @@ def _load_default_address(
     a = db.scalar(
         select(MemberAddress)
         .where(
-            and_(MemberAddress.member_id == member_id, MemberAddress.is_default.is_(True)),
+            and_(
+                MemberAddress.member_id == member_id,
+                MemberAddress.is_default.is_(True),
+                MemberAddress.address_usage == "meal",
+            ),
         )
         .limit(1)
     )
@@ -265,7 +269,10 @@ def _load_default_address(
         return a
     return db.scalar(
         select(MemberAddress)
-        .where(MemberAddress.member_id == member_id)
+        .where(
+            MemberAddress.member_id == member_id,
+            MemberAddress.address_usage == "meal",
+        )
         .order_by(MemberAddress.id.asc())
         .limit(1)
     )

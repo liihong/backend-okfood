@@ -3,7 +3,7 @@
     <OkNavbar show-back :title="navbarTitle" />
     <scroll-view scroll-y class="scroll" :style="scrollStyle" :show-scrollbar="false">
       <view class="page-address">
-        <view v-if="profileLoaded" class="notice notice--info">
+        <view v-if="profileLoaded && !isRetailUsage" class="notice notice--info">
           <text class="notice-txt">{{ sfEffectiveNotice }}</text>
         </view>
         <view class="form-box">
@@ -42,7 +42,7 @@
           </view>
           <view class="form-field">
             <view class="field-label-row">
-              <text class="field-title">收餐地址</text>
+              <text class="field-title">{{ isRetailUsage ? '收货地址' : '收餐地址' }}</text>
               <text class="field-required">*</text>
             </view>
             <view
@@ -106,7 +106,13 @@ import { getPageScrollStyle, FIXED_FOOTER_RESERVE_PX } from '@/utils/navbar.js'
 import { showOkAlert } from '@/utils/okAlert.js'
 import { request, getMemberToken } from '@/utils/api.js'
 import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
-import { normalizeAddressList, addressLineFromStructured } from '@/utils/addressApi.js'
+import {
+  normalizeAddressList,
+  addressLineFromStructured,
+  addressesApiPath,
+  isRetailAddressUsage,
+  parseAddressUsage,
+} from '@/utils/addressApi.js'
 
 const scrollStyle = ref({})
 
@@ -117,6 +123,8 @@ import { hasWxPhoneAuthDetail, wxMiniMemberLoginAndStore } from '@/utils/wxMembe
 
 /** 导航标题；购卡成功后跳转时可传 title=完善配送信息 */
 const navbarTitle = ref('地址管理 👌')
+const addressUsage = ref('meal')
+const isRetailUsage = computed(() => isRetailAddressUsage(addressUsage.value))
 
 const form = reactive({
   name: '',
@@ -381,7 +389,7 @@ async function loadAddressById(id) {
   const token = getMemberToken()
   if (!token) return
   try {
-    const data = await request('/api/user/me/addresses', {
+    const data = await request(addressesApiPath(addressUsage.value), {
       method: 'GET',
     })
     const list = normalizeAddressList(data)
@@ -444,6 +452,10 @@ onShow(() => {
 
 onLoad((options) => {
   applyScrollLayout()
+  addressUsage.value = parseAddressUsage(options && options.usage)
+  if (isRetailUsage.value && !(options && options.title)) {
+    navbarTitle.value = '商城收货地址 👌'
+  }
   const tRaw = options && options.title != null ? String(options.title).trim() : ''
   if (tRaw && tRaw !== 'undefined') {
     try {
@@ -502,6 +514,8 @@ async function save() {
     return
   }
   const body = buildAddressBody()
+  if (isRetailUsage.value) body.usage = 'retail'
+  else body.usage = 'meal'
   const isNewAddress = !addressId.value
   try {
     /** 服务端 `code === 200` 时 request 会 resolve；列表页 onShow 会重新拉取 */
@@ -525,13 +539,24 @@ async function save() {
       map_location_text: bodySaved.map_location_text ?? '',
       door_detail: bodySaved.door_detail ?? '',
     })
-    uni.setStorageSync('deliveryAddress', {
-      name: form.name,
-      phone: form.phone,
-      address: addrLine,
-      remarks: form.remarks,
-      location: hasCoords ? { lat: coords.value.lat, lng: coords.value.lng } : null,
-    })
+    if (!isRetailUsage.value) {
+      uni.setStorageSync('deliveryAddress', {
+        name: form.name,
+        phone: form.phone,
+        address: addrLine,
+        remarks: form.remarks,
+        location: hasCoords ? { lat: coords.value.lat, lng: coords.value.lng } : null,
+      })
+    }
+    if (isRetailUsage.value) {
+      if (!isNewAddress) {
+        uni.showToast({ title: '已保存', icon: 'success' })
+      } else {
+        uni.showToast({ title: '地址已保存', icon: 'success' })
+      }
+      uni.navigateBack()
+      return
+    }
     const alertPayload = sfPushEffectiveSaveAlert(memberProfile.value, {
       titleScheduled: isNewAddress ? '地址已保存' : '已保存',
       titleImmediate: isNewAddress ? '地址已保存' : '已保存',

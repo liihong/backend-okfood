@@ -75,6 +75,7 @@
     <MemberAddressSelectSheet
       :visible="addressSheetVisible"
       :selected-address-id="selectedAddressId"
+      usage="retail"
       title="选择配送地址"
       confirm-text="确认选择"
       @close="addressSheetVisible = false"
@@ -101,6 +102,8 @@ import {
   sortAddressesDefaultFirst,
   getAddressRecordId,
   addressListRow,
+  addressesApiPath,
+  addressListPageUrl,
 } from '@/utils/addressApi.js'
 import { createRetailOrder } from '@/utils/retailOrder/retailOrderApi.js'
 import { payRetailOrderWechat } from '@/utils/retailOrder/retailOrderPay.js'
@@ -221,7 +224,7 @@ async function loadPage() {
     if (!items.length) throw new Error('购物车为空，请返回加点商品')
     cartItems.value = items
     await fetchStoreInfo().catch(() => null)
-    applyAddressList(await request('/api/user/me/addresses', { method: 'GET', retry: 1 }), null)
+    applyAddressList(await request(addressesApiPath('retail'), { method: 'GET', retry: 1 }), null)
     selectedIndex.value = 0
     await loadCoupons()
   } catch (e) {
@@ -233,7 +236,7 @@ async function loadPage() {
 }
 
 function goAddressList() {
-  uni.navigateTo({ url: '/packageUser/pages/address/list' })
+  uni.navigateTo({ url: addressListPageUrl('retail') })
 }
 
 function openAddressSheet() {
@@ -254,7 +257,7 @@ async function onAddressConfirm(payload) {
       return
     }
     try {
-      const raw = await request('/api/user/me/addresses', { method: 'GET', retry: 1 })
+      const raw = await request(addressesApiPath('retail'), { method: 'GET', retry: 1 })
       applyAddressList(raw, memberAddressId)
     } catch {
       const idx = rawAddresses.value.findIndex(
@@ -350,7 +353,7 @@ onLoad(() => {
 onShow(() => {
   applyScrollLayout()
   if (!getMemberToken()) return
-  void request('/api/user/me/addresses', { method: 'GET', retry: 1 })
+  void request(addressesApiPath('retail'), { method: 'GET', retry: 1 })
     .then((raw) => applyAddressList(raw))
     .catch(() => {})
 })

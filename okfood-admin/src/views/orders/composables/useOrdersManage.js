@@ -222,13 +222,28 @@ export function useOrdersManage(orderKind = 'single') {
     }
   }
 
-  async function loadMemberAddressesForEdit(memberId) {
+  async function loadMemberAddressesForEdit(memberId, kind = 'single') {
     editMemberAddresses.value = []
     if (!memberId) return
     editAddrLoading.value = true
     try {
-      const list = await apiJson(`/api/admin/users/${Number(memberId)}/addresses`, {}, { auth: true })
-      editMemberAddresses.value = Array.isArray(list) ? list : []
+      const usage = kind === 'retail' ? 'retail' : 'meal'
+      let list = await apiJson(
+        `/api/admin/users/${Number(memberId)}/addresses?usage=${usage}`,
+        {},
+        { auth: true },
+      )
+      list = Array.isArray(list) ? list : []
+      // 商城订单尚无独立地址时，展示会员送餐地址供复制，保存时不会改写送餐地址
+      if (kind === 'retail' && !list.length) {
+        const mealList = await apiJson(
+          `/api/admin/users/${Number(memberId)}/addresses?usage=meal`,
+          {},
+          { auth: true },
+        )
+        list = Array.isArray(mealList) ? mealList : []
+      }
+      editMemberAddresses.value = list
     } catch (e) {
       const status = e && typeof e.status === 'number' ? e.status : 0
       if (status === 401) {
@@ -268,15 +283,48 @@ export function useOrdersManage(orderKind = 'single') {
     const id = editForm.value.member_address_id
     const list = editMemberAddresses.value
     if (!id || !Array.isArray(list) || !list.length) {
+      // 商城订单正在「登记新地址」时不要把空白草稿清掉
+      if (editKind.value === 'retail' && editAddrDraft.value && editAddrDraft.value.id == null) {
+        return
+      }
       editAddrDraft.value = null
       return
     }
     const a = list.find((x) => Number(x.id) === Number(id))
     if (!a) {
+      if (editKind.value === 'retail' && editAddrDraft.value && editAddrDraft.value.id == null) {
+        return
+      }
       editAddrDraft.value = null
       return
     }
     pickEditAddressDraft(a)
+  }
+
+  function startNewRetailAddress() {
+    const row = editOrder.value
+    const nameHint = String(row?.member_name || row?.recipient_contact_name || '').trim()
+    const phoneHint = String(row?.member_phone || '').trim()
+    editAddrAlsoDefault.value = true
+    editAddrDraft.value = {
+      id: null,
+      contact_name: nameHint,
+      contact_phone: phoneHint,
+      map_location_text: '',
+      door_detail: '',
+      remarks: '',
+      lngStr: '',
+      latStr: '',
+    }
+    editForm.value.member_address_id = null
+  }
+
+  /** 改址弹窗：从「登记新地址」回到选用已有地址 */
+  function useExistingRetailAddress() {
+    const list = editMemberAddresses.value
+    if (!Array.isArray(list) || !list.length) return
+    const def = list.find((x) => x.is_default)
+    editForm.value.member_address_id = Number((def || list[0]).id)
   }
 
   function onEditAddrMapWarn(msg) {
@@ -319,8 +367,11 @@ export function useOrdersManage(orderKind = 'single') {
       member_address_id: row.member_address_id ? Number(row.member_address_id) : null,
     }
     editOpen.value = true
-    void loadMemberAddressesForEdit(row.member_id).then(() => {
+    void loadMemberAddressesForEdit(row.member_id, kind).then(() => {
       syncEditAddrDraftFromSelection()
+      if (kind === 'retail' && !editForm.value.store_pickup && !editAddrDraft.value) {
+        startNewRetailAddress()
+      }
     })
   }
 
@@ -329,14 +380,16 @@ export function useOrdersManage(orderKind = 'single') {
     if (!row) return
     const pickup = !!editForm.value.store_pickup
     const addrId = editForm.value.member_address_id
-    if (!pickup && (!addrId || Number(addrId) <= 0)) {
+    const creatingRetailAddr =
+      !pickup && editKind.value === 'retail' && editAddrDraft.value && editAddrDraft.value.id == null
+    if (!pickup && !creatingRetailAddr && (!addrId || Number(addrId) <= 0)) {
       showToast('配送到家须选择收货地址', 'error')
       return
     }
     const mid = Number(row.member_id)
     if (!pickup) {
       const ed = editAddrDraft.value
-      if (!ed || Number(ed.id) !== Number(addrId)) {
+      if (!ed || (!creatingRetailAddr && Number(ed.id) !== Number(addrId))) {
         showToast('地址明细未加载或与所选地址不一致，请稍候或重新打开', 'error')
         return
       }
@@ -354,6 +407,14 @@ export function useOrdersManage(orderKind = 'single') {
       if (!mt) {
         showToast('请通过地图搜索/选点填写收货位置主文案，或直接在主文案里填写', 'error')
         return
+      }
+      if (creatingRetailAddr) {
+        const lng = Number(String(ed.lngStr ?? '').trim())
+        const lat = Number(String(ed.latStr ?? '').trim())
+        if (!Number.isFinite(lng) || !Number.isFinite(lat) || (lng === 0 && lat === 0)) {
+          showToast('请使用地图选点后再保存', 'error')
+          return
+        }
       }
     }
 
@@ -376,14 +437,35 @@ export function useOrdersManage(orderKind = 'single') {
         if (Number.isFinite(lng) && Number.isFinite(lat)) {
           patchBody.location = { lng, lat }
         }
-        await apiJson(`/api/admin/users/${mid}/addresses/${Number(addrId)}`, {
-          method: 'PATCH',
-          body: JSON.stringify(patchBody),
-        }, { auth: true })
+        const selected = (editMemberAddresses.value || []).find(
+          (x) => Number(x.id) === Number(addrId),
+        )
+        const selectedUsage = String(selected?.usage || '').trim().toLowerCase()
+        const isRetailEdit = editKind.value === 'retail'
+        // 当场登记、或从送餐地址复制：一律新建 retail 地址，不改写会员送餐档案
+        if (creatingRetailAddr || (isRetailEdit && selectedUsage !== 'retail')) {
+          patchBody.usage = 'retail'
+          const created = await apiJson(
+            `/api/admin/users/${mid}/addresses`,
+            { method: 'POST', body: JSON.stringify(patchBody) },
+            { auth: true },
+          )
+          const newId = Number(created?.id)
+          if (!Number.isFinite(newId) || newId <= 0) {
+            showToast('创建商城收货地址失败', 'error')
+            return
+          }
+          editForm.value.member_address_id = newId
+        } else {
+          await apiJson(`/api/admin/users/${mid}/addresses/${Number(addrId)}`, {
+            method: 'PATCH',
+            body: JSON.stringify(patchBody),
+          }, { auth: true })
+        }
       }
 
       const body = { store_pickup: pickup }
-      if (!pickup) body.member_address_id = Number(addrId)
+      if (!pickup) body.member_address_id = Number(editForm.value.member_address_id || addrId)
       const patchPath =
         editKind.value === 'retail'
           ? `/api/admin/orders/retail-orders/${row.id}`
@@ -1562,6 +1644,8 @@ export function useOrdersManage(orderKind = 'single') {
     submitRefundWechat,
     submitAssignCourier,
     submitEditOrder,
+    startNewRetailAddress,
+    useExistingRetailAddress,
     onEditAddrMapWarn,
     onEditDialogClosed,
     onAssignDialogClosed,

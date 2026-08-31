@@ -101,7 +101,10 @@ def _admin_single_meal_member_display_name(
     if fallback_addr is None and member is not None:
         fallback_addr = db.scalar(
             select(MemberAddress)
-            .where(MemberAddress.member_id == int(member.id))
+            .where(
+                MemberAddress.member_id == int(member.id),
+                MemberAddress.address_usage == "meal",
+            )
             .order_by(MemberAddress.is_default.desc(), MemberAddress.id.desc())
             .limit(1)
         )

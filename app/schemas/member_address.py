@@ -19,6 +19,10 @@ class MemberAddressOut(BaseModel):
     remarks: str | None
     location: Location | None
     is_default: bool
+    usage: str = Field(
+        "meal",
+        description="meal=会员送餐地址；retail=果蔬汁/月饼等商城收货地址",
+    )
     created_at: str
     updated_at: str
 
@@ -37,6 +41,10 @@ class MemberAddressCreateIn(BaseModel):
     door_detail: str | None = Field(None, max_length=500)
     remarks: str | None = Field(None, max_length=500)
     is_default: bool = False
+    usage: str = Field(
+        "meal",
+        description="meal=会员送餐地址（默认）；retail=果蔬汁/月饼等商城收货地址",
+    )
     location: Location | None = Field(
         None,
         description="地图选点坐标；小程序新增必须提供。若提供则保存该经纬度并据此自动划区",

@@ -177,6 +177,8 @@ import {
   sortAddressesDefaultFirst,
   getAddressRecordId,
   addressListRow,
+  addressesApiPath,
+  addressListPageUrl,
 } from '@/utils/addressApi.js'
 import { createRetailOrder } from '@/utils/retailOrder/retailOrderApi.js'
 import { payRetailOrderWechat } from '@/utils/retailOrder/retailOrderPay.js'
@@ -370,7 +372,7 @@ async function loadPage() {
       list_price_yuan: skuInfo.list_price_yuan,
       cover_image_url: skuInfo.cover_image_url,
     }
-    const raw = await request('/api/user/me/addresses', { method: 'GET', retry: 1 })
+    const raw = await request(addressesApiPath('retail'), { method: 'GET', retry: 1 })
     applyAddressList(raw)
     selectedIndex.value = 0
     await loadCoupons()
@@ -383,7 +385,7 @@ async function loadPage() {
 }
 
 function goAddressList() {
-  uni.navigateTo({ url: '/packageUser/pages/address/list' })
+  uni.navigateTo({ url: addressListPageUrl('retail') })
 }
 
 function onPayButtonTap() {
@@ -486,7 +488,7 @@ onLoad((options) => {
 onShow(() => {
   applyScrollLayout()
   if (!productId.value || !getMemberToken()) return
-  void request('/api/user/me/addresses', { method: 'GET', retry: 1 })
+  void request(addressesApiPath('retail'), { method: 'GET', retry: 1 })
     .then(applyAddressList)
     .catch(() => {})
   void loadCoupons()

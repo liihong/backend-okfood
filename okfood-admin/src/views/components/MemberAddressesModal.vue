@@ -108,7 +108,7 @@ async function loadAddressesForMember(preferId = null) {
   addrSelectedId.value = null
   addrLoading.value = true
   try {
-    const list = await apiJson(`/api/admin/users/${Number(m.id)}/addresses`, {}, { auth: true })
+    const list = await apiJson(`/api/admin/users/${Number(m.id)}/addresses?usage=meal`, {}, { auth: true })
     addrList.value = Array.isArray(list) ? list : []
     const pref =
       preferId != null ? addrList.value.find((x) => Number(x.id) === Number(preferId)) : null
@@ -196,6 +196,7 @@ async function saveMemberAddress() {
     if (isCreatingAddress.value) {
       payload.map_location_text = mapT
       payload.is_default = addrList.value.length === 0
+      payload.usage = 'meal'
       const created = await apiJson(
         `/api/admin/users/${Number(m.id)}/addresses`,
         { method: 'POST', body: JSON.stringify(payload) },
@@ -269,8 +270,8 @@ async function makeCurrentAddressDefault() {
     <div class="modal-card modal-card--member-edit members-addr-modal-card">
       <div class="modal-header members-addr-header">
         <div class="header-info">
-          <h3>地址管理</h3>
-          <p>MEMBER ADDRESSES</p>
+          <h3>会员送餐地址</h3>
+          <p>与果蔬汁/月饼商城收货地址分开管理，互不同步</p>
         </div>
         <button type="button" class="close-btn members-addr-close" @click="close()">
           <X :size="18" />
@@ -341,7 +342,7 @@ async function makeCurrentAddressDefault() {
                   <div v-if="a.area" class="members-addr-list-item-area">{{ a.area }}</div>
                 </div>
                 <p v-if="!addrList.length && !isCreatingAddress" class="members-addr-list-empty">
-                  暂无配送地址
+                  暂无会员送餐地址
                 </p>
               </div>
             </aside>

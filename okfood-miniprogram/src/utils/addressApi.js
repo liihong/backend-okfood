@@ -64,6 +64,36 @@ export function isAddressItemDefault(item) {
   )
 }
 
+export const ADDRESS_USAGE_MEAL = 'meal'
+export const ADDRESS_USAGE_RETAIL = 'retail'
+
+/** meal=会员送餐；retail=果蔬汁/月饼商城收货 */
+export function parseAddressUsage(raw) {
+  return String(raw || '').trim().toLowerCase() === ADDRESS_USAGE_RETAIL
+    ? ADDRESS_USAGE_RETAIL
+    : ADDRESS_USAGE_MEAL
+}
+
+export function isRetailAddressUsage(raw) {
+  return parseAddressUsage(raw) === ADDRESS_USAGE_RETAIL
+}
+
+export function addressesApiPath(usage) {
+  return `/api/user/me/addresses?usage=${encodeURIComponent(parseAddressUsage(usage))}`
+}
+
+export function addressListPageUrl(usage) {
+  return `/packageUser/pages/address/list?usage=${encodeURIComponent(parseAddressUsage(usage))}`
+}
+
+export function addressEditPageUrl(usage, id) {
+  const u = parseAddressUsage(usage)
+  if (id) {
+    return `/packageUser/pages/address/address?usage=${encodeURIComponent(u)}&id=${encodeURIComponent(id)}`
+  }
+  return `/packageUser/pages/address/address?usage=${encodeURIComponent(u)}`
+}
+
 /** 默认地址排在最前，其余保持原有顺序 */
 export function sortAddressesDefaultFirst(items) {
   if (!Array.isArray(items)) return []

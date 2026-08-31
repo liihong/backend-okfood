@@ -127,6 +127,18 @@ class StoreRetailCancelIn(BaseModel):
     cancel_sf: bool = Field(True, description="若已推顺丰则同步请求取消")
 
 
+class AdminRetailDeliveryAddressIn(BaseModel):
+    """管理端手动建单：当场登记商城收货地址（写入 retail 用途，不改会员送餐地址）。"""
+
+    contact_name: str | None = Field(None, max_length=100, description="收件人；空则用会员姓名")
+    contact_phone: str | None = Field(None, max_length=20, description="收货电话；空则用会员手机号")
+    lng: float = Field(..., ge=-180, le=180, description="GCJ-02 经度（高德）")
+    lat: float = Field(..., ge=-90, le=90, description="GCJ-02 纬度（高德）")
+    map_location_text: str = Field(..., min_length=1, max_length=500)
+    door_detail: str | None = Field(None, max_length=500)
+    remarks: str | None = Field(None, max_length=500)
+
+
 class AdminStoreRetailOrderCreateIn(BaseModel):
     """管理端：手动创建商城零售订单（支持多 SKU）。"""
 
@@ -141,7 +153,11 @@ class AdminStoreRetailOrderCreateIn(BaseModel):
     member_address_id: int | None = Field(
         None,
         ge=1,
-        description="配送到家时必填：会员已保存的配送地址 id",
+        description="配送到家：选用已有地址；与 delivery_address 二选一",
+    )
+    delivery_address: AdminRetailDeliveryAddressIn | None = Field(
+        None,
+        description="配送到家：当场登记商城收货地址；与 member_address_id 二选一",
     )
     pay_channel: Literal["微信", "线下", "抖音"] = Field(..., description="支付渠道")
     pay_status: Literal["已支付", "未支付"] = Field("已支付", description="支付状态")
@@ -156,6 +172,8 @@ class AdminStoreRetailOrderCreateIn(BaseModel):
 
     @model_validator(mode="after")
     def _address_when_delivery(self) -> "AdminStoreRetailOrderCreateIn":
-        if not self.store_pickup and self.member_address_id is None:
-            raise ValueError("配送到家须选择配送地址")
+        if self.store_pickup:
+            return self
+        if self.member_address_id is None and self.delivery_address is None:
+            raise ValueError("配送到家须选择已有地址或登记新的收货地址")
         return self

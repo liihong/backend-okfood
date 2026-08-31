@@ -442,6 +442,16 @@
   max-width: 140px;
   font-weight: 600;
 }
+.orders-edit-addr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.orders-edit-addr-toolbar .orders-edit-select {
+  flex: 1;
+  min-width: 0;
+}
 .orders-edit-map-wrap {
   width: 100%;
   min-height: 244px;

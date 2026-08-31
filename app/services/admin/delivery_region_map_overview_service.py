@@ -41,7 +41,10 @@ def delivery_region_map_overview(db: Session, *, store_id: int) -> DeliveryRegio
             MemberAddress.member_id.label("mid"),
             func.max(MemberAddress.id).label("addr_id"),
         )
-        .where(MemberAddress.is_default.is_(True))
+        .where(
+            MemberAddress.is_default.is_(True),
+            MemberAddress.address_usage == "meal",
+        )
         .group_by(MemberAddress.member_id)
     ).subquery("def_addr_ov")
 

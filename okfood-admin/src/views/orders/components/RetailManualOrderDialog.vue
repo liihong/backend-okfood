@@ -7,6 +7,7 @@ import { computed, ref, watch } from 'vue'
 import { apiJson, adminAccessToken } from '../../../admin/core.js'
 import { showToast } from '../../../composables/useToast.js'
 import { formatMemberAddressOption } from '../utils/orderFormatters.js'
+import MemberDeliveryMapPicker from '../../../components/MemberDeliveryMapPicker.vue'
 
 defineOptions({ name: 'RetailManualOrderDialog' })
 
@@ -57,7 +58,59 @@ const manualForm = ref({
 /** @type {import('vue').Ref<Array<{ retail_product_id: number | null, quantity: number }>>} */
 const manualItems = ref([{ retail_product_id: null, quantity: 1 }])
 
-const selectedProduct = computed(() => null)
+/** 空白商城收货地址草稿（地图选点） */
+function blankAddrDraft() {
+  return {
+    contact_name: '',
+    contact_phone: '',
+    map_location_text: '',
+    door_detail: '',
+    remarks: '',
+    lngStr: '',
+    latStr: '',
+  }
+}
+
+/** 配送到家时当场登记新商城收货地址（不走会员送餐地址） */
+const addrRegistering = ref(true)
+const addrDraft = ref(blankAddrDraft())
+
+function prefillAddrDraftFromMember() {
+  const d = addrDraft.value
+  if (!d.contact_name) {
+    d.contact_name = (name.value || memberPreview.value?.name || '').trim()
+  }
+  if (!d.contact_phone) {
+    d.contact_phone = (phone.value || memberPreview.value?.phone || '').trim()
+  }
+}
+
+const addrCoordDisplay = computed(() => {
+  const a = String(addrDraft.value.lngStr ?? '').trim()
+  const b = String(addrDraft.value.latStr ?? '').trim()
+  if (a && b) return `${a}, ${b}`
+  return '未选点'
+})
+
+function startRegisterAddress() {
+  addrRegistering.value = true
+  manualForm.value.member_address_id = null
+  prefillAddrDraftFromMember()
+}
+
+function useExistingAddress() {
+  addrRegistering.value = false
+  const list = memberAddresses.value
+  if (list.length) {
+    const def = list.find((x) => x.is_default)
+    manualForm.value.member_address_id = Number((def || list[0]).id)
+  }
+}
+
+function onAddrMapWarn(msg) {
+  const s = typeof msg === 'string' && msg.trim() ? msg.trim() : '地图提示'
+  showToast(s, 'error')
+}
 
 function addManualItemRow() {
   if (manualItems.value.length >= 20) {
@@ -78,6 +131,12 @@ const productOptionLabel = (p) => {
   return `${title}（¥${price}）`
 }
 
+const selectedProduct = computed(() => {
+  const id = manualItems.value[0]?.retail_product_id
+  if (id == null) return null
+  return products.value.find((p) => Number(p.id) === Number(id)) || null
+})
+
 function resetForm() {
   mode.value = 'douyin'
   phone.value = ''
@@ -95,6 +154,8 @@ function resetForm() {
   }
   manualItems.value = [{ retail_product_id: null, quantity: 1 }]
   memberAddresses.value = []
+  addrRegistering.value = true
+  addrDraft.value = blankAddrDraft()
 }
 
 function onDialogClosed() {
@@ -141,8 +202,8 @@ async function loadProducts() {
       { auth: true },
     )
     products.value = Array.isArray(data) ? data : []
-    if (products.value.length > 0 && manualForm.value.retail_product_id == null) {
-      manualForm.value.retail_product_id = Number(products.value[0].id)
+    if (products.value.length > 0 && manualItems.value[0] && manualItems.value[0].retail_product_id == null) {
+      manualItems.value[0].retail_product_id = Number(products.value[0].id)
     }
   } catch (e) {
     products.value = []
@@ -159,9 +220,23 @@ async function loadMemberAddresses(memberId) {
   }
   addressesLoading.value = true
   try {
-    const list = await apiJson(`/api/admin/users/${memberId}/addresses`, {}, { auth: true })
-    memberAddresses.value = Array.isArray(list) ? list : []
+    let list = await apiJson(
+      `/api/admin/users/${memberId}/addresses?usage=retail`,
+      {},
+      { auth: true },
+    )
+    list = Array.isArray(list) ? list : []
+    if (!list.length) {
+      const mealList = await apiJson(
+        `/api/admin/users/${memberId}/addresses?usage=meal`,
+        {},
+        { auth: true },
+      )
+      list = Array.isArray(mealList) ? mealList : []
+    }
+    memberAddresses.value = list
     if (memberAddresses.value.length > 0) {
+      addrRegistering.value = false
       const cur = manualForm.value.member_address_id
       const hit =
         cur != null && memberAddresses.value.some((a) => Number(a.id) === Number(cur))
@@ -171,10 +246,14 @@ async function loadMemberAddresses(memberId) {
       }
     } else {
       manualForm.value.member_address_id = null
+      addrRegistering.value = true
+      prefillAddrDraftFromMember()
     }
   } catch {
     memberAddresses.value = []
     manualForm.value.member_address_id = null
+    addrRegistering.value = true
+    prefillAddrDraftFromMember()
   } finally {
     addressesLoading.value = false
   }
@@ -197,8 +276,10 @@ watch(mode, (m) => {
 })
 
 watch(
-  () => phone.value,
-  () => scheduleMemberPreview(),
+  () => [phone.value, name.value, memberPreview.value],
+  () => {
+    if (addrRegistering.value) prefillAddrDraftFromMember()
+  },
 )
 
 async function submitDouyinRedeem() {
@@ -256,9 +337,34 @@ async function submitManualOrder() {
     showToast('请至少选择一个商品', 'error')
     return
   }
-  if (!manualForm.value.store_pickup && !manualForm.value.member_address_id) {
-    showToast('配送到家须选择配送地址', 'error')
-    return
+  if (!manualForm.value.store_pickup) {
+    if (addrRegistering.value) {
+      const ed = addrDraft.value
+      const cn = String(ed.contact_name ?? '').trim()
+      const cp = String(ed.contact_phone ?? '').trim()
+      const mt = String(ed.map_location_text ?? '').trim()
+      const lng = Number(String(ed.lngStr ?? '').trim())
+      const lat = Number(String(ed.latStr ?? '').trim())
+      if (!cn) {
+        showToast('请填写收件人', 'error')
+        return
+      }
+      if (cp.length < 5) {
+        showToast('请填写有效收货电话', 'error')
+        return
+      }
+      if (!mt) {
+        showToast('请使用地图搜索或点击地图选点', 'error')
+        return
+      }
+      if (!Number.isFinite(lng) || !Number.isFinite(lat) || (lng === 0 && lat === 0)) {
+        showToast('请使用地图选点后再保存', 'error')
+        return
+      }
+    } else if (!manualForm.value.member_address_id) {
+      showToast('配送到家须选择或登记收货地址', 'error')
+      return
+    }
   }
 
   manualSubmitting.value = true
@@ -268,13 +374,26 @@ async function submitManualOrder() {
       name: (name.value || '').trim() || null,
       items,
       store_pickup: Boolean(manualForm.value.store_pickup),
-      member_address_id: manualForm.value.store_pickup
-        ? null
-        : Number(manualForm.value.member_address_id),
       pay_channel: manualForm.value.pay_channel,
       pay_status: manualForm.value.pay_status,
       amount_yuan: (manualForm.value.amount_yuan || '').trim() || null,
       remark: (manualForm.value.remark || '').trim() || null,
+    }
+    if (!manualForm.value.store_pickup) {
+      if (addrRegistering.value) {
+        const ed = addrDraft.value
+        body.delivery_address = {
+          contact_name: String(ed.contact_name ?? '').trim(),
+          contact_phone: String(ed.contact_phone ?? '').trim(),
+          lng: Number(String(ed.lngStr ?? '').trim()),
+          lat: Number(String(ed.latStr ?? '').trim()),
+          map_location_text: String(ed.map_location_text ?? '').trim(),
+          door_detail: String(ed.door_detail ?? '').trim() || null,
+          remarks: String(ed.remarks ?? '').trim() || null,
+        }
+      } else {
+        body.member_address_id = Number(manualForm.value.member_address_id)
+      }
     }
     const data = await apiJson(
       `/api/admin/orders/retail-orders?store_id=${props.storeId}`,
@@ -298,7 +417,7 @@ const isBusy = computed(() => douyinSubmitting.value || manualSubmitting.value)
   <el-dialog
     v-model="visible"
     title="手动建单"
-    width="640px"
+    :width="mode === 'manual' && !manualForm.store_pickup ? '920px' : '640px'"
     class="retail-manual-order-dialog"
     destroy-on-close
     align-center
@@ -401,28 +520,92 @@ const isBusy = computed(() => douyinSubmitting.value || manualSubmitting.value)
           </el-radio-group>
         </el-form-item>
 
-        <el-form-item v-if="!manualForm.store_pickup" label="配送地址" required>
-          <el-select
-            v-model="manualForm.member_address_id"
-            filterable
-            placeholder="选择会员配送地址"
-            :loading="addressesLoading"
-            :disabled="!memberPreview"
-            class="retail-manual-order-select"
-          >
-            <el-option
-              v-for="a in memberAddresses"
-              :key="a.id"
-              :label="formatMemberAddressOption(a)"
-              :value="Number(a.id)"
-            />
-          </el-select>
-          <p v-if="memberPreview && !addressesLoading && !memberAddresses.length" class="retail-manual-order-tip">
-            该会员暂无配送地址，请先在会员档案中添加。
+        <el-form-item v-if="!manualForm.store_pickup" label="商城收货地址" required>
+          <div class="retail-manual-addr-toolbar">
+            <el-select
+              v-if="!addrRegistering && memberAddresses.length"
+              v-model="manualForm.member_address_id"
+              filterable
+              placeholder="选择已有商城收货地址"
+              :loading="addressesLoading"
+              class="retail-manual-order-select"
+            >
+              <el-option
+                v-for="a in memberAddresses"
+                :key="a.id"
+                :label="formatMemberAddressOption(a)"
+                :value="Number(a.id)"
+              />
+            </el-select>
+            <el-button
+              v-if="!addrRegistering"
+              type="primary"
+              link
+              @click="startRegisterAddress"
+            >
+              登记新地址
+            </el-button>
+            <el-button
+              v-else-if="memberAddresses.length"
+              link
+              @click="useExistingAddress"
+            >
+              选用已有地址
+            </el-button>
+          </div>
+          <p v-if="!addrRegistering && memberAddresses.length" class="retail-manual-order-tip">
+            选用已有地址不会改写会员送餐地址。也可点「登记新地址」当场录入。
           </p>
-          <p v-else-if="!memberPreview && phone.trim().length >= 5" class="retail-manual-order-tip">
-            请先确认会员手机号匹配成功后再选地址。
-          </p>
+          <template v-if="addrRegistering">
+            <p class="retail-manual-order-tip">
+              当场登记商城收货地址（果蔬汁/月饼），与会员送餐地址分开保存。
+            </p>
+            <el-row :gutter="12">
+              <el-col :span="12">
+                <el-form-item label="收件人" required>
+                  <el-input v-model="addrDraft.contact_name" maxlength="100" clearable placeholder="收件人姓名" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="联系电话" required>
+                  <el-input v-model="addrDraft.contact_phone" maxlength="20" clearable placeholder="手机号" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <p class="retail-manual-order-coord">经纬度 GCJ-02：{{ addrCoordDisplay }}</p>
+            <div class="retail-manual-map-wrap">
+              <MemberDeliveryMapPicker
+                :key="'retail-manual-amap'"
+                v-model:lng-str="addrDraft.lngStr"
+                v-model:lat-str="addrDraft.latStr"
+                v-model:map-location-text="addrDraft.map_location_text"
+                search-input-id="retail-manual-amap-search"
+                @warn="onAddrMapWarn"
+              />
+            </div>
+            <el-form-item label="收货位置主文案">
+              <el-input
+                v-model="addrDraft.map_location_text"
+                type="textarea"
+                readonly
+                :autosize="{ minRows: 2, maxRows: 4 }"
+                maxlength="500"
+                show-word-limit
+                placeholder="地图选点后自动填入"
+              />
+            </el-form-item>
+            <el-form-item label="门牌（楼栋 / 单元 / 室号）">
+              <el-input
+                v-model="addrDraft.door_detail"
+                maxlength="500"
+                clearable
+                placeholder="例如：3 号楼 1202"
+              />
+            </el-form-item>
+            <el-form-item label="地址备注">
+              <el-input v-model="addrDraft.remarks" maxlength="500" clearable placeholder="可留空" />
+            </el-form-item>
+          </template>
         </el-form-item>
 
         <el-row :gutter="12">
@@ -508,8 +691,49 @@ const isBusy = computed(() => douyinSubmitting.value || manualSubmitting.value)
   margin-top: 4px;
 }
 
+.retail-manual-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .retail-manual-order-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.retail-manual-addr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
   width: 100%;
+}
+
+.retail-manual-addr-toolbar .retail-manual-order-select {
+  flex: 1;
+}
+
+:deep(.el-dialog__body) {
+  max-height: min(78vh, 720px);
+  overflow-y: auto;
+}
+
+.retail-manual-map-wrap {
+  width: 100%;
+  min-height: 244px;
+  margin: 8px 0 12px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.retail-manual-order-coord {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .retail-manual-order-member-tip {

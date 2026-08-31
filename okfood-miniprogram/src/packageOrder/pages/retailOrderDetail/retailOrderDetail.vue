@@ -92,6 +92,7 @@
     <MemberAddressSelectSheet
       :visible="addressSheetVisible"
       :selected-address-id="order?.member_address_id"
+      usage="retail"
       title="修改配送地址"
       confirm-text="确认修改"
       @close="addressSheetVisible = false"

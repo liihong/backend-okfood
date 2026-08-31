@@ -1951,12 +1951,15 @@ def admin_member_addresses_list(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    usage: Annotated[
+        str, Query(description="meal=会员送餐地址；retail=果蔬汁/月饼商城收货")
+    ] = "meal",
 ):
-    """会员档案：列出该会员全部配送地址（含地图文案、门牌、经纬度与省市区）。"""
+    """会员档案：列出该会员指定用途的配送地址（含地图文案、门牌、经纬度与省市区）。"""
     require_member_in_admin_store(
         db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
     )
-    items = list_addresses(db, member_id)
+    items = list_addresses(db, member_id, usage=usage)
     return success(data=[dump_model(i) for i in items], msg="获取成功")
 
 

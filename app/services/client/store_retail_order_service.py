@@ -44,6 +44,7 @@ from app.services.marketing.coupon_checkout_service import (
 from app.models.member_address import MemberAddress
 from app.services.member.member_address_service import (
     delivery_region_name_map,
+    ensure_retail_address,
     full_address_line,
     routing_area_label,
 )
@@ -284,6 +285,7 @@ def create_store_retail_order(
         addr = db.get(MemberAddress, body.member_address_id)
         if not addr or int(addr.member_id) != int(member_id):
             raise HTTPException(status_code=404, detail="配送地址不存在")
+        addr = ensure_retail_address(db, addr)
         nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
         area = routing_area_label(addr, nm)
         detail_line = full_address_line(addr.map_location_text, addr.door_detail)
@@ -617,6 +619,7 @@ def member_update_store_retail_order_address(
     addr = db.get(MemberAddress, int(member_address_id))
     if not addr or int(addr.member_id) != int(member_id):
         raise HTTPException(status_code=400, detail="配送地址不存在或不属于当前会员")
+    addr = ensure_retail_address(db, addr)
 
     nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
     area = routing_area_label(addr, nm)

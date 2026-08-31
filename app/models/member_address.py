@@ -32,6 +32,8 @@ class MemberAddress(Base):
     lng: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
     lat: Mapped[float | None] = mapped_column(Numeric(11, 8), nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    # meal=会员餐次送餐地址；retail=果蔬汁/月饼等商城收货地址；两套默认地址互不影响
+    address_usage: Mapped[str] = mapped_column(String(16), default="meal", nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive, onupdate=beijing_now_naive)
 

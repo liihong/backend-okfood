@@ -612,6 +612,7 @@ def list_today_redeemed(
                 select(MemberAddress).where(
                     MemberAddress.member_id == int(ent.member_id),
                     MemberAddress.is_default.is_(True),
+                    MemberAddress.address_usage == "meal",
                 )
             )
             from app.services.member.member_address_service import full_address_line

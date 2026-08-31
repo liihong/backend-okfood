@@ -59,6 +59,8 @@ import { ref, watch } from 'vue'
 import { getMemberToken, request } from '@/utils/api.js'
 import {
   addressListRow,
+  addressListPageUrl,
+  addressesApiPath,
   getAddressRecordId,
   normalizeAddressList,
   sortAddressesDefaultFirst,
@@ -81,6 +83,11 @@ const props = defineProps({
   confirmText: {
     type: String,
     default: '确认修改',
+  },
+  /** meal=会员送餐；retail=果蔬汁/月饼商城收货 */
+  usage: {
+    type: String,
+    default: 'meal',
   },
 })
 
@@ -122,7 +129,7 @@ async function loadAddresses() {
   loading.value = true
   loadError.value = ''
   try {
-    const raw = await request('/api/user/me/addresses', { method: 'GET', retry: 1 })
+    const raw = await request(addressesApiPath(props.usage), { method: 'GET', retry: 1 })
     const list = sortAddressesDefaultFirst(normalizeAddressList(raw))
     rawAddresses.value = list
     addressRows.value = list.map((item, i) => addressListRow(item, i))
@@ -137,7 +144,7 @@ async function loadAddresses() {
 }
 
 function goAddressList() {
-  uni.navigateTo({ url: '/packageUser/pages/address/list' })
+  uni.navigateTo({ url: addressListPageUrl(props.usage) })
 }
 
 function onConfirm() {

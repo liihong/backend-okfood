@@ -383,13 +383,13 @@ def read_membership_card_templates_catalog(
 
 
 @router.get("/me/addresses")
-
-def read_addresses_me(db: SessionDep, member_id: MemberIdScoped):
-
-    """会员配送地址列表（多地址）；默认地址优先。"""
-
-    items = list_addresses(db, member_id)
-
+def read_addresses_me(
+    db: SessionDep,
+    member_id: MemberIdScoped,
+    usage: Annotated[str, Query(description="meal=会员送餐地址；retail=果蔬汁/月饼商城收货")] = "meal",
+):
+    """按用途列出地址；默认仅会员送餐，不含商城收货。"""
+    items = list_addresses(db, member_id, usage=usage)
     return success(data=[dump_model(x) for x in items], msg="获取成功")
 
 
@@ -424,7 +424,8 @@ def check_delivery_region_me(
 
 def add_address_me(request: Request, body: MemberAddressCreateIn, db: SessionDep, member_id: MemberIdScoped):
 
-    """新增配送地址：须带地图选点坐标（或管理端文案地理编码成功）；首条地址自动设为默认。"""
+    """新增配送地址：须带地图选点坐标（或管理端文案地理编码成功）；首条地址自动设为默认。
+    body.usage=retail 时写入商城收货地址，不改写会员送餐默认地址。"""
 
     ip = resolve_request_client_ip(
         request.headers.get("x-forwarded-for"),

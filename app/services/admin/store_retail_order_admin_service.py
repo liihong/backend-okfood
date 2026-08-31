@@ -46,8 +46,15 @@ from app.services.client.store_retail_order_service import (
     store_retail_fulfillment_allows_dispatch,
 )
 from app.core.timeutil import today_shanghai
+from app.schemas.member_address import MemberAddressCreateIn
+from app.schemas.user import Location
 from app.services.member.member_address_service import full_address_line
-from app.services.member.member_address_service import delivery_region_name_map, routing_area_label
+from app.services.member.member_address_service import (
+    create_address,
+    delivery_region_name_map,
+    ensure_retail_address,
+    routing_area_label,
+)
 from app.utils.sql_like import escape_like_fragment
 
 from app.services.order.single_meal_order_service import (
@@ -194,6 +201,7 @@ def admin_update_store_retail_order_delivery(
         addr = db.get(MemberAddress, int(member_address_id or 0))
         if not addr or int(addr.member_id) != int(o.member_id):
             raise ValueError("配送地址不存在或不属于该会员")
+        addr = ensure_retail_address(db, addr)
         nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
         area = routing_area_label(addr, nm)
         addr_id = int(addr.id)
@@ -794,10 +802,32 @@ def create_admin_store_retail_order(
     if body.store_pickup:
         area = "门店自提"
         addr_id = None
+    elif body.delivery_address is not None:
+        da = body.delivery_address
+        cn = (da.contact_name or member.name or "").strip() or str(member.name or "收件人")
+        cp = (da.contact_phone or member.phone or "").strip() or str(member.phone or "")
+        created = create_address(
+            db,
+            int(member.id),
+            MemberAddressCreateIn(
+                contact_name=cn[:100],
+                contact_phone=cp[:20],
+                map_location_text=da.map_location_text,
+                door_detail=da.door_detail,
+                remarks=da.remarks,
+                is_default=True,
+                usage="retail",
+                location=Location(lng=float(da.lng), lat=float(da.lat)),
+            ),
+            source="admin",
+        )
+        addr_id = int(created.id)
+        area = (created.area or "").strip() or "未分配"
     else:
         addr = db.get(MemberAddress, int(body.member_address_id or 0))
         if not addr or int(addr.member_id) != int(member.id):
             raise HTTPException(status_code=404, detail="配送地址不存在或不属于该会员")
+        addr = ensure_retail_address(db, addr)
         nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
         area = routing_area_label(addr, nm)
         addr_id = int(addr.id)

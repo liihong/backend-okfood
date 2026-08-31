@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.constants import UNASSIGNED_DELIVERY_AREA
+from app.constants import ADDRESS_USAGE_MEAL, ADDRESS_USAGE_RETAIL, UNASSIGNED_DELIVERY_AREA
 from app.models.delivery_region import DeliveryRegion
 from app.models.member import Member
 from app.models.member_address import MemberAddress
@@ -153,29 +153,44 @@ def _require_row_coords(row: MemberAddress) -> None:
         raise HTTPException(status_code=400, detail=_MISSING_COORDS_DETAIL)
 
 
+def parse_address_usage(raw: str | None) -> str:
+    """地址用途：仅 meal / retail；其它值回落为会员送餐。"""
+    s = (raw or "").strip().lower()
+    if s == ADDRESS_USAGE_RETAIL:
+        return ADDRESS_USAGE_RETAIL
+    return ADDRESS_USAGE_MEAL
+
+
 def default_address_pick_subquery():
-    """每人一条默认地址：若存在多条 is_default，取 id 最大者（与管理端会员列表一致）。"""
+    """每人一条会员送餐默认地址：不含果蔬汁/月饼商城地址；多条 is_default 取 id 最大者。"""
     return (
         select(
             MemberAddress.member_id.label("mid"),
             func.max(MemberAddress.id).label("addr_id"),
         )
-        .where(MemberAddress.is_default.is_(True))
+        .where(
+            MemberAddress.is_default.is_(True),
+            MemberAddress.address_usage == ADDRESS_USAGE_MEAL,
+        )
         .group_by(MemberAddress.member_id)
     ).subquery("daf")
 
 
-def get_default_address(db: Session, member_id: int) -> MemberAddress | None:
+def get_default_address(
+    db: Session, member_id: int, *, usage: str = ADDRESS_USAGE_MEAL
+) -> MemberAddress | None:
+    u = parse_address_usage(usage)
     return db.scalars(
         select(MemberAddress).where(
             MemberAddress.member_id == member_id,
             MemberAddress.is_default.is_(True),
+            MemberAddress.address_usage == u,
         )
     ).first()
 
 
 def load_default_address_map(db: Session, member_ids: list[int]) -> dict[int, MemberAddress | None]:
-    """按会员 id 批量取默认配送地址；无默认地址时值为 None。"""
+    """按会员 id 批量取会员送餐默认地址；无默认地址时值为 None。"""
     if not member_ids:
         return {}
     uniq = list(dict.fromkeys(member_ids))
@@ -188,6 +203,7 @@ def load_default_address_map(db: Session, member_ids: list[int]) -> dict[int, Me
         .where(
             MemberAddress.member_id.in_(uniq),
             MemberAddress.is_default.is_(True),
+            MemberAddress.address_usage == ADDRESS_USAGE_MEAL,
         )
         .group_by(MemberAddress.member_id)
     ).subquery("daf_page")
@@ -247,7 +263,7 @@ def upsert_default_address_after_register(
         row.lng = lng
         row.lat = lat
         return
-    _clear_defaults(db, member_id, except_id=None)
+    _clear_defaults(db, member_id, except_id=None, usage=ADDRESS_USAGE_MEAL)
     db.add(
         MemberAddress(
             member_id=member_id,
@@ -260,6 +276,7 @@ def upsert_default_address_after_register(
             lng=lng,
             lat=lat,
             is_default=True,
+            address_usage=ADDRESS_USAGE_MEAL,
         )
     )
 
@@ -318,7 +335,7 @@ def upsert_default_address_from_admin_map_pick(
         row.lat = lat_f
         row.delivery_region_id = rid
         return
-    _clear_defaults(db, member_id, except_id=None)
+    _clear_defaults(db, member_id, except_id=None, usage=ADDRESS_USAGE_MEAL)
     db.add(
         MemberAddress(
             member_id=member_id,
@@ -331,6 +348,7 @@ def upsert_default_address_from_admin_map_pick(
             lng=lng_f,
             lat=lat_f,
             is_default=True,
+            address_usage=ADDRESS_USAGE_MEAL,
         )
     )
 
@@ -373,7 +391,7 @@ def admin_set_default_address_plain_line(
         row.lng, row.lat = lng, lat
         row.delivery_region_id = rid
         return
-    _clear_defaults(db, member_id, except_id=None)
+    _clear_defaults(db, member_id, except_id=None, usage=ADDRESS_USAGE_MEAL)
     db.add(
         MemberAddress(
             member_id=member_id,
@@ -386,6 +404,7 @@ def admin_set_default_address_plain_line(
             lng=lng,
             lat=lat,
             is_default=True,
+            address_usage=ADDRESS_USAGE_MEAL,
         )
     )
 
@@ -451,6 +470,7 @@ def _to_out(row: MemberAddress, id_to_name: dict[int, str]) -> MemberAddressOut:
         remarks=row.remarks,
         location=loc,
         is_default=bool(row.is_default),
+        usage=parse_address_usage(getattr(row, "address_usage", None)),
         created_at=row.created_at.isoformat() if row.created_at else "",
         updated_at=row.updated_at.isoformat() if row.updated_at else "",
     )
@@ -462,25 +482,37 @@ def _ensure_member_exists(db: Session, member_id: int) -> None:
         raise HTTPException(status_code=404, detail="用户不存在")
 
 
-def _clear_defaults(db: Session, member_id: int, except_id: int | None = None) -> None:
-    stmt = select(MemberAddress).where(MemberAddress.member_id == member_id, MemberAddress.is_default.is_(True))
+def _clear_defaults(
+    db: Session, member_id: int, except_id: int | None = None, *, usage: str = ADDRESS_USAGE_MEAL
+) -> None:
+    u = parse_address_usage(usage)
+    stmt = select(MemberAddress).where(
+        MemberAddress.member_id == member_id,
+        MemberAddress.is_default.is_(True),
+        MemberAddress.address_usage == u,
+    )
     if except_id is not None:
         stmt = stmt.where(MemberAddress.id != except_id)
     for row in db.scalars(stmt).all():
         row.is_default = False
 
 
-def _assign_default_if_none(db: Session, member_id: int) -> None:
+def _assign_default_if_none(
+    db: Session, member_id: int, *, usage: str = ADDRESS_USAGE_MEAL
+) -> None:
+    u = parse_address_usage(usage)
     has_default = db.scalar(
         select(func.count()).select_from(MemberAddress).where(
-            MemberAddress.member_id == member_id, MemberAddress.is_default.is_(True)
+            MemberAddress.member_id == member_id,
+            MemberAddress.is_default.is_(True),
+            MemberAddress.address_usage == u,
         )
     )
     if has_default:
         return
     last = db.scalars(
         select(MemberAddress)
-        .where(MemberAddress.member_id == member_id)
+        .where(MemberAddress.member_id == member_id, MemberAddress.address_usage == u)
         .order_by(MemberAddress.id.desc())
         .limit(1)
     ).first()
@@ -499,13 +531,14 @@ def check_coords_in_delivery_region(
     return True, int(r.id), name
 
 
-def list_addresses(db: Session, member_id: int) -> list[MemberAddressOut]:
+def list_addresses(
+    db: Session, member_id: int, *, usage: str | None = ADDRESS_USAGE_MEAL
+) -> list[MemberAddressOut]:
     _ensure_member_exists(db, member_id)
-    rows = db.scalars(
-        select(MemberAddress)
-        .where(MemberAddress.member_id == member_id)
-        .order_by(MemberAddress.is_default.desc(), MemberAddress.id.desc())
-    ).all()
+    stmt = select(MemberAddress).where(MemberAddress.member_id == member_id)
+    if usage is not None:
+        stmt = stmt.where(MemberAddress.address_usage == parse_address_usage(usage))
+    rows = db.scalars(stmt.order_by(MemberAddress.is_default.desc(), MemberAddress.id.desc())).all()
     ids = {int(r.delivery_region_id) for r in rows if r.delivery_region_id is not None}
     nm = delivery_region_name_map(db, ids)
     return [_to_out(r, nm) for r in rows]
@@ -521,12 +554,18 @@ def create_address(
 ) -> MemberAddressOut:
     _ensure_member_exists(db, member_id)
     mem = db.get(Member, member_id)
-    # 管理端代建不受顺丰履约中自助改址限制
-    if mem and source == "miniprogram":
+    usage = parse_address_usage(getattr(body, "usage", None))
+    # 管理端代建不受顺丰履约中自助改址限制；商城地址与会员送餐履约无关
+    if mem and source == "miniprogram" and usage == ADDRESS_USAGE_MEAL:
         guard_member_self_service_during_sf_fulfillment(db, mem)
     tid = int(mem.tenant_id) if mem and mem.tenant_id is not None else None
     count = (
-        db.scalar(select(func.count()).select_from(MemberAddress).where(MemberAddress.member_id == member_id)) or 0
+        db.scalar(
+            select(func.count())
+            .select_from(MemberAddress)
+            .where(MemberAddress.member_id == member_id, MemberAddress.address_usage == usage)
+        )
+        or 0
     )
     if count >= _MAX_ADDRESSES_PER_MEMBER:
         raise HTTPException(status_code=400, detail=f"每位会员最多保存 {_MAX_ADDRESSES_PER_MEMBER} 条地址")
@@ -563,7 +602,7 @@ def create_address(
         lng, lat = _validate_map_coords(lng, lat)
 
     if effective_default:
-        _clear_defaults(db, member_id, except_id=None)
+        _clear_defaults(db, member_id, except_id=None, usage=usage)
 
     row = MemberAddress(
         member_id=member_id,
@@ -576,6 +615,7 @@ def create_address(
         lng=lng,
         lat=lat,
         is_default=effective_default,
+        address_usage=usage,
     )
     db.add(row)
     db.flush()
@@ -593,6 +633,7 @@ def create_address(
             "map_location_text": map_eff,
             "door_detail": door_eff,
             "is_default": bool(effective_default),
+            "usage": usage,
         },
         ip_address=ip_address,
     )
@@ -616,7 +657,8 @@ def update_address(
     if not row or row.member_id != member_id:
         raise HTTPException(status_code=404, detail="地址不存在")
     mem = db.get(Member, member_id)
-    if mem and source == "miniprogram":
+    row_usage = parse_address_usage(getattr(row, "address_usage", None))
+    if mem and source == "miniprogram" and row_usage == ADDRESS_USAGE_MEAL:
         guard_member_self_service_during_sf_fulfillment(db, mem)
     tid = int(mem.tenant_id) if mem and mem.tenant_id is not None else None
 
@@ -686,11 +728,11 @@ def update_address(
         )
 
     if is_default_new is True:
-        _clear_defaults(db, member_id, except_id=row.id)
+        _clear_defaults(db, member_id, except_id=row.id, usage=row_usage)
         row.is_default = True
     elif is_default_new is False:
         row.is_default = False
-        _assign_default_if_none(db, member_id)
+        _assign_default_if_none(db, member_id, usage=row_usage)
 
     db.flush()
     after = {
@@ -737,7 +779,8 @@ def delete_address(db: Session, member_id: int, address_id: int, *, ip_address: 
     if not row or row.member_id != member_id:
         raise HTTPException(status_code=404, detail="地址不存在")
     mem = db.get(Member, member_id)
-    if mem:
+    row_usage = parse_address_usage(getattr(row, "address_usage", None))
+    if mem and row_usage == ADDRESS_USAGE_MEAL:
         guard_member_self_service_during_sf_fulfillment(db, mem)
     was_default = bool(row.is_default)
     before = {
@@ -752,7 +795,7 @@ def delete_address(db: Session, member_id: int, address_id: int, *, ip_address: 
     db.delete(row)
     db.flush()
     if was_default:
-        _assign_default_if_none(db, member_id)
+        _assign_default_if_none(db, member_id, usage=row_usage)
     record_member_operation(
         db,
         member_id=member_id,
@@ -762,4 +805,154 @@ def delete_address(db: Session, member_id: int, address_id: int, *, ip_address: 
         after=None,
         ip_address=ip_address,
     )
+    db.commit()
+
+
+def _norm_addr_text(v: str | None) -> str:
+    return (v or "").strip()
+
+
+def _find_matching_retail_address(db: Session, src: MemberAddress) -> MemberAddress | None:
+    """按联系人+电话+主文案+门牌匹配已有商城地址，避免回填重复复制。"""
+    rows = db.scalars(
+        select(MemberAddress).where(
+            MemberAddress.member_id == int(src.member_id),
+            MemberAddress.address_usage == ADDRESS_USAGE_RETAIL,
+        )
+    ).all()
+    for r in rows:
+        if (
+            _norm_addr_text(r.contact_name) == _norm_addr_text(src.contact_name)
+            and _norm_addr_text(r.contact_phone) == _norm_addr_text(src.contact_phone)
+            and _norm_addr_text(r.map_location_text) == _norm_addr_text(src.map_location_text)
+            and _norm_addr_text(r.door_detail) == _norm_addr_text(src.door_detail)
+        ):
+            return r
+    return None
+
+
+def _clone_as_retail_address(db: Session, src: MemberAddress) -> MemberAddress:
+    """将会员送餐地址复制为商城地址，不改写源记录。"""
+    retail_count = (
+        db.scalar(
+            select(func.count())
+            .select_from(MemberAddress)
+            .where(
+                MemberAddress.member_id == int(src.member_id),
+                MemberAddress.address_usage == ADDRESS_USAGE_RETAIL,
+            )
+        )
+        or 0
+    )
+    is_default = retail_count == 0
+    if is_default:
+        _clear_defaults(db, int(src.member_id), except_id=None, usage=ADDRESS_USAGE_RETAIL)
+    clone = MemberAddress(
+        member_id=int(src.member_id),
+        contact_name=src.contact_name,
+        contact_phone=src.contact_phone,
+        delivery_region_id=src.delivery_region_id,
+        map_location_text=src.map_location_text,
+        door_detail=src.door_detail,
+        remarks=src.remarks,
+        lng=src.lng,
+        lat=src.lat,
+        is_default=is_default,
+        address_usage=ADDRESS_USAGE_RETAIL,
+    )
+    db.add(clone)
+    db.flush()
+    return clone
+
+
+def ensure_retail_address(db: Session, addr: MemberAddress) -> MemberAddress:
+    """
+    商城订单只绑定零售地址。
+    若传入的是会员送餐地址，则复制一条零售地址（已有相同内容则复用），源地址保持不变。
+    """
+    if parse_address_usage(getattr(addr, "address_usage", None)) == ADDRESS_USAGE_RETAIL:
+        return addr
+    existing = _find_matching_retail_address(db, addr)
+    if existing is not None:
+        return existing
+    return _clone_as_retail_address(db, addr)
+
+
+def backfill_retail_address_separation(db: Session) -> None:
+    """
+    存量数据：
+    1) 从未开卡且无餐次余额的用户，地址改为零售用途；
+    2) 商城订单若仍绑着餐次地址，复制后改绑，避免改送餐地址带动果蔬汁/月饼单。
+    """
+    from sqlalchemy import exists, or_, update
+
+    from app.models.enums import MealPeriod
+    from app.models.member_card_order import MemberCardOrder
+    from app.models.member_meal_period_state import MemberMealPeriodState
+    from app.models.store_retail_order import StoreRetailOrder
+
+    has_applied_card = exists(
+        select(1)
+        .select_from(MemberCardOrder)
+        .where(
+            MemberCardOrder.member_id == Member.id,
+            MemberCardOrder.applied_to_member.is_(True),
+        )
+    )
+    has_dinner_quota = exists(
+        select(1)
+        .select_from(MemberMealPeriodState)
+        .where(
+            MemberMealPeriodState.member_id == Member.id,
+            MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+            or_(
+                MemberMealPeriodState.balance > 0,
+                func.coalesce(MemberMealPeriodState.meal_quota_total, 0) > 0,
+            ),
+        )
+    )
+    juice_only = select(Member.id).where(
+        ~has_applied_card,
+        func.coalesce(Member.balance, 0) == 0,
+        func.coalesce(Member.meal_quota_total, 0) == 0,
+        ~has_dinner_quota,
+    )
+    db.execute(
+        update(MemberAddress)
+        .where(
+            MemberAddress.address_usage == ADDRESS_USAGE_MEAL,
+            MemberAddress.member_id.in_(juice_only),
+        )
+        .values(address_usage=ADDRESS_USAGE_RETAIL)
+    )
+
+    order_addr_ids = [
+        int(x)
+        for x in db.scalars(
+            select(StoreRetailOrder.member_address_id)
+            .join(MemberAddress, MemberAddress.id == StoreRetailOrder.member_address_id)
+            .where(
+                StoreRetailOrder.member_address_id.isnot(None),
+                MemberAddress.address_usage == ADDRESS_USAGE_MEAL,
+            )
+            .distinct()
+        ).all()
+        if x is not None
+    ]
+    seen: set[int] = set()
+    for aid in order_addr_ids:
+        if aid in seen:
+            continue
+        seen.add(aid)
+        src = db.get(MemberAddress, aid)
+        if src is None:
+            continue
+        retail = ensure_retail_address(db, src)
+        if int(retail.id) == aid:
+            continue
+        db.execute(
+            update(StoreRetailOrder)
+            .where(StoreRetailOrder.member_address_id == aid)
+            .values(member_address_id=int(retail.id))
+        )
     db.commit()

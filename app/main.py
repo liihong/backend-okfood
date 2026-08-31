@@ -12,6 +12,8 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.api import admin, admin_catalog, admin_couriers, admin_douyin, admin_gift_coupon, admin_marketing, admin_member_import, admin_print, admin_regions, admin_retail_orders, admin_system, admin_uploads, catalog, courier, douyin_spi_notify, douyin_webhook_notify, home, menu, sf_open_notify, tenant, user, user_douyin, user_retail_orders, wechat_pay, wx_open_notify
 from app.core.config import settings
 from app.core.limiter import limiter
+from app.db.session import SessionLocal, engine
+from app.db.schema_patches import apply_address_usage_data_backfill, ensure_member_address_usage_schema
 from app.jobs.scheduler import setup_scheduler, shutdown_scheduler
 from app.services.shared.upload_service import ensure_upload_root
 from app.utils.response import success
@@ -80,6 +82,15 @@ def _prewarm() -> None:
 async def lifespan(app: FastAPI):
     _ = app
     ensure_upload_root()
+    try:
+        ensure_member_address_usage_schema(engine)
+        patch_db = SessionLocal()
+        try:
+            apply_address_usage_data_backfill(patch_db)
+        finally:
+            patch_db.close()
+    except Exception:
+        logger.warning("地址用途列补丁失败（不影响启动）", exc_info=True)
     setup_scheduler()
     _prewarm()
     yield

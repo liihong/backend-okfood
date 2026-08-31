@@ -5,6 +5,7 @@ import { useOrdersManageInject } from '../composables/useOrdersManageInject.js'
 
 const {
   editOpen,
+  editKind,
   editOrder,
   editSaving,
   editAddrLoading,
@@ -15,6 +16,8 @@ const {
   editDialogMemberDisplayName,
   editHeadCoordDisplay,
   submitEditOrder,
+  startNewRetailAddress,
+  useExistingRetailAddress,
   onEditAddrMapWarn,
   onEditDialogClosed,
 } = useOrdersManageInject()
@@ -48,30 +51,70 @@ const {
       </div>
       <div v-if="!editForm.store_pickup" class="orders-edit-field">
         <span class="orders-edit-label">收货地址</span>
-        <el-select
-          v-model="editForm.member_address_id"
-          filterable
-          placeholder="选择会员配送地址（可切换该会员名下其它地址）"
-          class="orders-edit-select"
-          :loading="editAddrLoading"
-        >
-          <el-option
-            v-for="a in editMemberAddresses"
-            :key="a.id"
-            :label="formatMemberAddressOption(a)"
-            :value="Number(a.id)"
-          />
-        </el-select>
-        <p v-if="!editAddrLoading && !editMemberAddresses.length" class="orders-edit-tip">
-          该会员暂无配送地址，请先在会员档案「地址」中新建后再来绑定订单。
+        <div class="orders-edit-addr-toolbar">
+          <el-select
+            v-if="editMemberAddresses.length && !(editKind === 'retail' && editAddrDraft && editAddrDraft.id == null)"
+            v-model="editForm.member_address_id"
+            filterable
+            :placeholder="
+              editKind === 'retail'
+                ? '选择已有商城收货地址'
+                : '选择会员配送地址（可切换该会员名下其它地址）'
+            "
+            class="orders-edit-select"
+            :loading="editAddrLoading"
+          >
+            <el-option
+              v-for="a in editMemberAddresses"
+              :key="a.id"
+              :label="formatMemberAddressOption(a)"
+              :value="Number(a.id)"
+            />
+          </el-select>
+          <el-button
+            v-if="editKind === 'retail' && !(editAddrDraft && editAddrDraft.id == null)"
+            type="primary"
+            link
+            @click="startNewRetailAddress"
+          >
+            登记新地址
+          </el-button>
+          <el-button
+            v-else-if="editKind === 'retail' && editMemberAddresses.length"
+            link
+            @click="useExistingRetailAddress"
+          >
+            选用已有地址
+          </el-button>
+        </div>
+        <p v-if="editKind === 'retail' && editAddrDraft && editAddrDraft.id == null" class="orders-edit-tip">
+          正在登记新的商城收货地址：下方地图选点即可，保存后只用于果蔬汁/月饼，不会改写会员送餐地址。
+        </p>
+        <p v-else-if="!editAddrLoading && !editMemberAddresses.length" class="orders-edit-tip">
+          {{
+            editKind === 'retail'
+              ? '请在下方用地图选点登记收货地址。'
+              : '该会员暂无配送地址，请先在会员档案「地址」中新建后再来绑定订单。'
+          }}
         </p>
       </div>
 
       <template v-if="!editForm.store_pickup && editAddrDraft">
         <div class="orders-edit-addr-sep" />
         <p class="orders-edit-subhint">
-          以下与「会员档案 · 地址管理」一致：可修正收件人、电话、地图选点与门牌；
-          <strong>保存时先写入会员地址</strong>（全店订单凡引用本条地址一并更新），再更新本订单绑定与配送摘要。
+          <template v-if="editKind === 'retail'">
+            果蔬汁/月饼收货地址与会员送餐地址分开管理。
+            <template v-if="editAddrDraft && editAddrDraft.id == null">
+              下方为新建商城地址，保存后只绑定本单。
+            </template>
+            <template v-else>
+              若下列仍是送餐地址，保存时会<strong>复制为商城地址</strong>，不会改写会员默认送餐地址。
+            </template>
+          </template>
+          <template v-else>
+            以下与「会员档案 · 地址管理」一致：可修正收件人、电话、地图选点与门牌；
+            <strong>保存时先写入会员地址</strong>（全店订单凡引用本条地址一并更新），再更新本订单绑定与配送摘要。
+          </template>
         </p>
         <div class="orders-edit-first-row">
           <el-space wrap :size="8" alignment="center">
@@ -104,11 +147,11 @@ const {
           <el-form-item label="地图选点（GCJ-02）">
             <div class="orders-edit-map-wrap">
               <MemberDeliveryMapPicker
-                :key="'orders-edit-ma-' + editAddrDraft.id"
+                :key="'orders-edit-ma-' + (editAddrDraft.id != null ? editAddrDraft.id : 'new')"
                 v-model:lng-str="editAddrDraft.lngStr"
                 v-model:lat-str="editAddrDraft.latStr"
                 v-model:map-location-text="editAddrDraft.map_location_text"
-                :search-input-id="'orders-edit-amap-' + editAddrDraft.id"
+                :search-input-id="'orders-edit-amap-' + (editAddrDraft.id != null ? editAddrDraft.id : 'new')"
                 @warn="onEditAddrMapWarn"
               />
             </div>
@@ -149,7 +192,11 @@ const {
             />
           </el-form-item>
           <el-form-item>
-            <el-checkbox v-model="editAddrAlsoDefault">同时将本条设为该会员默认配送地址</el-checkbox>
+            <el-checkbox v-model="editAddrAlsoDefault">{{
+              editKind === 'retail'
+                ? '同时设为该用户默认商城收货地址（不影响会员送餐地址）'
+                : '同时将本条设为该会员默认配送地址'
+            }}</el-checkbox>
           </el-form-item>
         </el-form>
       </template>

@@ -27,7 +27,7 @@
 --  23) members.store_pickup 门店自提（见 migrations/20260424_members_store_pickup.sql）
 --  24) members.skip_subscription_saturday 固定周六不履约（见 migrations/20260506_members_skip_subscription_saturday.sql）
 --  25) balance_logs.reason 增加 single_meal 单点扣次（见 migration_036_balance_logs_single_meal_reason.sql）
---  26) balance_logs.reason 增加 meal_compensation 补餐赔付（见 migration_042_balance_logs_meal_compensation_reason.sql）
+--  27) member_addresses.address_usage 餐次送餐与商城收货分用途（见 sql/migration_member_addresses_usage.sql）
 
 SET NAMES utf8mb4;
 
@@ -79,18 +79,20 @@ CREATE TABLE IF NOT EXISTS `member_addresses` (
   `remarks` VARCHAR(500) NULL COMMENT '忌口/备注',
   `lng` DECIMAL(11,8) NULL COMMENT '高德经度 GCJ-02',
   `lat` DECIMAL(11,8) NULL COMMENT '高德纬度 GCJ-02',
-  `is_default` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否默认配送地址',
+  `is_default` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否默认配送地址（按 address_usage 各自一条）',
+  `address_usage` VARCHAR(16) NOT NULL DEFAULT 'meal' COMMENT 'meal=会员送餐地址；retail=果蔬汁/月饼等商城收货地址',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_member_addresses_member` (`member_id`),
   KEY `idx_member_addresses_member_default` (`member_id`, `is_default`),
+  KEY `idx_member_addresses_member_usage_default` (`member_id`, `address_usage`, `is_default`),
   KEY `idx_member_addresses_delivery_region` (`delivery_region_id`),
   CONSTRAINT `fk_member_addresses_member` FOREIGN KEY (`member_id`) REFERENCES `members` (`id`)
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_member_addresses_delivery_region` FOREIGN KEY (`delivery_region_id`) REFERENCES `delivery_regions` (`id`)
     ON DELETE SET NULL ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员配送地址（多地址）';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员地址：餐次送餐(meal)与商城收货(retail)分用途管理';
 
 CREATE TABLE IF NOT EXISTS `couriers` (
   `courier_id` VARCHAR(50) NOT NULL COMMENT '工号/配送员ID',
