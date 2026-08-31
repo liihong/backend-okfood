@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, computed, onActivated } from 'vue'
-import { X, UserPen, CircleHelp, Info, Save, MapPin, Truck } from 'lucide-vue-next'
+import { X, UserPen, CircleHelp, Info, Save, Truck } from 'lucide-vue-next'
 import {
   apiJson,
   handleAdminLogout,
@@ -69,6 +69,8 @@ const reinstateBusy = ref(false)
 const editInitialPlanType = ref('次卡')
 /** 打开/刷新表单时的剩余次数，仅用户主动修改时才提交 balance，避免 keep-alive 快照误覆盖 */
 const editInitialBalance = ref(0)
+/** 打开时的片区，仅用户改片区或勾选自动划区时才提交，避免备注保存误写地址行 */
+const editInitialDeliveryRegionId = ref('')
 const profileLoading = ref(false)
 /** 当前租户已开启的会员卡模版（套餐类型下拉） */
 const membershipTemplates = ref([])
@@ -76,7 +78,6 @@ const membershipTemplatesLoading = ref(false)
 const editForm = ref({
   phone: '',
   name: '',
-  address: '',
   remarks: '',
   daily_meal_units: 1,
   plan_type: '次卡',
@@ -104,30 +105,12 @@ watch(
   },
 )
 
-/** 默认配送地址只读展示（与档案同步，不在此弹窗编辑） */
-const addressDisplayText = computed(() => (editForm.value.address || '').trim())
-
 /** 自动划区勾选说明：自提时不参与划区 */
 const autoAreaHintText = computed(() =>
   editForm.value.store_pickup
-    ? '门店自提不参与配送划区，无需默认配送地址即可保存。'
-    : '未勾选时：保存会先按地址地理编码划区，再以您所选片区覆盖。勾选后忽略手动片区。',
+    ? '门店自提不参与配送划区。'
+    : '仅勾选后保存才会按已有坐标重算片区；不改片区则不提交，避免动到地址。',
 )
-
-/** 不含所属片区：map_location_text + door_detail；否则从列表 address 去掉片区前缀 */
-function memberAddressDetailWithoutArea(u) {
-  const mapT = typeof u.map_location_text === 'string' ? u.map_location_text.trim() : ''
-  const door = typeof u.door_detail === 'string' ? u.door_detail.trim() : ''
-  const detail = [mapT, door].filter(Boolean).join(' ').trim()
-  if (detail) return detail
-  const rawAddr = String(u.address || '').trim()
-  if (!rawAddr || rawAddr.startsWith('（未设置')) return ''
-  const areaTag = String(u.area || '').trim()
-  if (areaTag && areaTag !== '—' && rawAddr.startsWith(areaTag)) {
-    return rawAddr.slice(areaTag.length).trim()
-  }
-  return rawAddr
-}
 
 function normalizeBalance(v) {
   return Math.max(0, Math.min(999999, Math.floor(Number(v) || 0)))
@@ -211,10 +194,10 @@ function fillFormFromMember(u) {
     u.delivery_region_id != null && u.delivery_region_id !== '' ? String(u.delivery_region_id) : ''
   const balance = normalizeBalance(u.balance)
   editInitialBalance.value = balance
+  editInitialDeliveryRegionId.value = dr
   editForm.value = {
     phone: u.phone,
     name: u.name || '',
-    address: memberAddressDetailWithoutArea(u),
     remarks: u.remarks || '',
     daily_meal_units: Math.max(1, Math.min(50, Number(u.daily_meal_units) || 1)),
     plan_type: p0,
@@ -336,13 +319,6 @@ async function submitEditMember() {
   if (!editForm.value.phone) return
   if (profileLoading.value) return
   const isStorePickup = editForm.value.store_pickup === true
-  const addressText = (editForm.value.address || '').trim()
-  // 配送到家才要求已有默认地址；门店自提到店取餐，无需维护配送地址。
-  // 有地址也只做展示校验，保存时不提交 address，避免把门牌并入小区名字段。
-  if (!isStorePickup && !addressText) {
-    showToast('默认配送地址为空，请先在会员列表「地址管理」中维护后再保存', 'error')
-    return
-  }
   editSaving.value = true
   try {
     const balanceVal = normalizeBalance(editForm.value.balance)
@@ -362,13 +338,14 @@ async function submitEditMember() {
     if (balanceVal !== editInitialBalance.value) {
       payload.balance = balanceVal
     }
-    // 自提且无地址时不提交划区，避免后端因无默认地址拒绝保存
-    if (!(isStorePickup && !addressText)) {
-      if (editForm.value.use_auto_area) {
-        payload.use_auto_area = true
-      } else {
-        const dr = editForm.value.delivery_region_id
-        payload.delivery_region_id = dr === '' || dr == null ? null : Number(dr)
+    // 不提交 address。片区仅在勾选自动划区或手动改了下拉时才提交，避免备注保存写地址行。
+    if (editForm.value.use_auto_area) {
+      payload.use_auto_area = true
+    } else {
+      const dr = editForm.value.delivery_region_id
+      const next = dr === '' || dr == null ? '' : String(dr)
+      if (next !== String(editInitialDeliveryRegionId.value || '')) {
+        payload.delivery_region_id = next === '' ? null : Number(dr)
       }
     }
     const pt = resolveSelectedPlanType()
@@ -422,7 +399,7 @@ async function submitEditMember() {
         <!-- 主区：单列居中 max-w-3xl，可滚动 -->
         <div class="mem-main">
           <div class="mem-main-inner">
-            <!-- 1. 会员基础档案 + 默认地址 -->
+            <!-- 1. 会员基础档案（地址不在此编辑，请走地址管理） -->
             <section class="mem-sec">
               <div class="mem-sec-head">
                 <span class="mem-bar" aria-hidden="true"></span>
@@ -447,31 +424,6 @@ async function submitEditMember() {
                     class="mem-input-el"
                   />
                 </div>
-              </div>
-              <div class="mem-field mem-field--addr">
-                <label class="mem-lab mem-lab-inline">
-                  默认配送地址
-                  <el-tooltip placement="top">
-                    <template #content>
-                      <div class="mem-tip-body">
-                        此处仅展示默认地址，保存档案不会改写小区名或门牌。修改地址请使用会员列表「地址管理」。门店自提无需配送地址。
-                      </div>
-                    </template>
-                    <span class="mem-tip-wrap">
-                      <Info class="mem-tip" :size="13" />
-                    </span>
-                  </el-tooltip>
-                </label>
-                <div class="mem-addr-line">
-                  <MapPin :size="14" class="mem-addr-head-ico" aria-hidden="true" />
-                  <p class="mem-addr-text">
-                    {{
-                      addressDisplayText ||
-                      (editForm.store_pickup ? '门店自提无需配送地址' : '未设置配送地址')
-                    }}
-                  </p>
-                </div>
-                <p class="mem-hint-soft">保存档案不会改写小区名或门牌，修改请用「地址管理」。</p>
               </div>
             </section>
 
@@ -603,7 +555,7 @@ async function submitEditMember() {
                       v-model="editForm.use_auto_area"
                       :disabled="editForm.store_pickup"
                       class="mem-auto-inline"
-                      title="保存时按当前地址重新自动划区"
+                      title="仅勾选后保存才按已有坐标重算片区，不会改小区名或门牌"
                     >
                       自动划区
                     </el-checkbox>
@@ -829,37 +781,6 @@ async function submitEditMember() {
   font-size: 0.875rem;
   font-weight: 800;
   color: #1e293b;
-}
-
-.mem-field--addr {
-  margin-top: 0.55rem;
-}
-
-.mem-addr-line {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.4rem;
-  padding: 0.4rem 0.65rem;
-  background: #f0fdf4;
-  border: 1px solid #d1fae5;
-  border-radius: 8px;
-}
-
-.mem-addr-head-ico {
-  flex-shrink: 0;
-  margin-top: 0.12rem;
-  color: #059669;
-}
-
-.mem-addr-text {
-  margin: 0;
-  flex: 1;
-  min-width: 0;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  line-height: 1.45;
-  color: #334155;
-  word-break: break-word;
 }
 
 .mem-field {

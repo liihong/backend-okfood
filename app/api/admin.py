@@ -1895,7 +1895,7 @@ def member_profile_patch(
         phone=body.phone,
         name=body.name,
         remarks=body.remarks,
-        address=body.address,
+        address=None,
         use_auto_area=body.use_auto_area,
         operator=admin_username,
         store_id=store_id,

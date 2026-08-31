@@ -1801,15 +1801,22 @@ def admin_patch_member_profile(
 
         else:
 
-            admin_apply_manual_delivery_region(
-
-                db,
-
-                member_id=mid,
-
-                delivery_region_id=delivery_region_id,
-
+            current_rid = (
+                int(addr.delivery_region_id)
+                if addr.delivery_region_id is not None
+                else None
             )
+            next_rid = int(delivery_region_id) if delivery_region_id is not None else None
+            if current_rid != next_rid:
+                admin_apply_manual_delivery_region(
+
+                    db,
+
+                    member_id=mid,
+
+                    delivery_region_id=delivery_region_id,
+
+                )
 
     if set_balance:
 
