@@ -1655,6 +1655,8 @@ def admin_patch_member_profile(
 
     plan_type: PlanType | None = None,
 
+    membership_template_id: int | None = None,
+
     set_balance: bool = False,
 
     balance: int | None = None,
@@ -1696,6 +1698,8 @@ def admin_patch_member_profile(
         and daily_meal_units is None
 
         and plan_type is None
+
+        and membership_template_id is None
 
         and not use_auto_area
 
@@ -1921,8 +1925,34 @@ def admin_patch_member_profile(
 
         admin_units_change_mode = set_member_daily_meal_units_change(db, m, daily_meal_units)
 
-    if plan_type is not None:
-        m.plan_type = plan_type.value
+    # 套餐：模版优先（写 plan_type + 最近已入账工单餐段）；仅传 plan_type 时只改档案标签
+    plan_tpl_apply: dict[str, object] | None = None
+    prev_plan_label = ""
+    if plan_type is not None or membership_template_id is not None:
+        from app.models.membership_card_template import MembershipCardTemplate
+        from app.services.meal_period.card_eligibility import member_entitled_meal_periods
+        from app.services.meal_period.plan_type_sync import (
+            apply_admin_membership_template,
+            format_plan_type_display,
+        )
+
+        prev_plan_label = format_plan_type_display(
+            m.plan_type, member_entitled_meal_periods(db, mid)
+        )
+        if membership_template_id is not None:
+            tpl = db.get(MembershipCardTemplate, int(membership_template_id))
+            if (
+                tpl is None
+                or int(tpl.store_id) != int(store_id)
+                or int(tpl.tenant_id) != int(m.tenant_id)
+            ):
+                raise HTTPException(status_code=404, detail="会员卡模版不存在")
+            if not tpl.is_active:
+                raise HTTPException(status_code=400, detail="该卡包模版未开启或已下架")
+            plan_tpl_apply = apply_admin_membership_template(db, m, tpl, operator=admin_op)
+            db.flush()
+        elif plan_type is not None:
+            m.plan_type = plan_type.value
 
     addr_after = get_default_address(db, mid)
     new_snapshot = {
@@ -1995,13 +2025,39 @@ def admin_patch_member_profile(
             before={"balance": prev_snapshot["balance"]},
             after={"balance": new_snapshot["balance"]},
         )
-    if plan_type is not None and prev_snapshot["plan_type"] != new_snapshot["plan_type"]:
-        _admin_log(
-            OP_ADMIN_UPDATE_PLAN_TYPE,
-            f"修改套餐类型 {prev_snapshot['plan_type'] or '-'}→{new_snapshot['plan_type'] or '-'}",
-            before={"plan_type": prev_snapshot["plan_type"]},
-            after={"plan_type": new_snapshot["plan_type"]},
-        )
+    if plan_type is not None or membership_template_id is not None:
+        from app.services.meal_period.card_eligibility import member_entitled_meal_periods
+        from app.services.meal_period.plan_type_sync import format_plan_type_display
+
+        if plan_tpl_apply and plan_tpl_apply.get("new_label"):
+            new_plan_label = str(plan_tpl_apply["new_label"])
+        else:
+            new_plan_label = format_plan_type_display(
+                m.plan_type, member_entitled_meal_periods(db, mid)
+            )
+        order_changed = bool(plan_tpl_apply and plan_tpl_apply.get("order_changed"))
+        if (
+            prev_snapshot["plan_type"] != new_snapshot["plan_type"]
+            or prev_plan_label != new_plan_label
+            or order_changed
+        ):
+            after_tpl = plan_tpl_apply.get("new_template_id") if plan_tpl_apply else None
+            _admin_log(
+                OP_ADMIN_UPDATE_PLAN_TYPE,
+                (
+                    f"修改套餐类型 {prev_plan_label or prev_snapshot['plan_type'] or '-'}"
+                    f"→{new_plan_label or new_snapshot['plan_type'] or '-'}"
+                ),
+                before={
+                    "plan_type": prev_snapshot["plan_type"],
+                    "plan_type_display": prev_plan_label or None,
+                },
+                after={
+                    "plan_type": new_snapshot["plan_type"],
+                    "plan_type_display": new_plan_label or None,
+                    "membership_template_id": int(after_tpl) if after_tpl is not None else None,
+                },
+            )
     if daily_meal_units is not None and admin_units_change_mode != "unchanged" and (
         prev_snapshot["daily_meal_units_pending"] != new_snapshot["daily_meal_units_pending"]
         or prev_snapshot["daily_meal_units"] != new_snapshot["daily_meal_units"]

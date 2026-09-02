@@ -13,6 +13,13 @@ import { showToast } from '../../composables/useToast.js'
 /** 档案套餐无法匹配已开启卡包时的占位值，避免下拉空白 */
 const CURRENT_PLAN_VALUE = '__current__'
 
+/** 统一「月卡 · 全餐」与「月卡·全餐」，避免下拉对不上已选模版 */
+function normalizePlanLabel(s) {
+  return String(s || '')
+    .replace(/\s*·\s*/g, '·')
+    .trim()
+}
+
 /**
  * 与后端 `_plan_for_membership_template` 对齐：种类文案 / 餐次 → 周卡/月卡/次卡
  * @param {Record<string, unknown> | null | undefined} tpl
@@ -37,11 +44,11 @@ function matchMemberTemplate(templates, member) {
   const list = Array.isArray(templates) ? templates : []
   if (!list.length || !member) return null
   const planBase = String(member.planBase || member.plan_type || '').trim()
-  const display = String(member.plan || '').trim()
+  const display = normalizePlanLabel(member.plan)
   const scope = mealScopeLabelFromPeriods(member.entitled_meal_periods)
   // 仅精确匹配，避免把「月卡 · 全餐」错配成租户另一张「月卡 · 午餐」
   const byDisplay = display
-    ? list.find((t) => membershipTemplatePlanLabel(t) === display)
+    ? list.find((t) => normalizePlanLabel(membershipTemplatePlanLabel(t)) === display)
     : null
   if (byDisplay?.id != null) return Number(byDisplay.id)
   const exact = list.find((t) => {
@@ -67,6 +74,8 @@ const editSaving = ref(false)
 const reinstateBusy = ref(false)
 /** 打开编辑弹窗时的套餐类型，用于判断是否与档案一致、是否提交 plan_type */
 const editInitialPlanType = ref('次卡')
+/** 打开时选中的卡包模版 id；换模版即使仍是月卡也要提交，否则不落库、不写操作记录 */
+const editInitialTemplateId = ref(CURRENT_PLAN_VALUE)
 /** 打开/刷新表单时的剩余次数，仅用户主动修改时才提交 balance，避免 keep-alive 快照误覆盖 */
 const editInitialBalance = ref(0)
 /** 打开时的片区，仅用户改片区或勾选自动划区时才提交，避免备注保存误写地址行 */
@@ -124,8 +133,9 @@ const planOptions = computed(() => {
     const id = Number(t?.id)
     if (!Number.isFinite(id) || id <= 0) continue
     const label = membershipTemplatePlanLabel(t)
-    if (seen.has(label)) continue
-    seen.add(label)
+    const labelKey = normalizePlanLabel(label)
+    if (seen.has(labelKey)) continue
+    seen.add(labelKey)
     opts.push({ id, label, planType: planTypeFromTemplate(t) })
   }
   const selected = editForm.value.membership_template_id
@@ -134,7 +144,8 @@ const planOptions = computed(() => {
       (props.member?.plan && String(props.member.plan).trim()) ||
       String(editForm.value.plan_type || '次卡').trim() ||
       '次卡'
-    if (!opts.some((o) => o.label === currentLabel)) {
+    const currentNorm = normalizePlanLabel(currentLabel)
+    if (!opts.some((o) => normalizePlanLabel(o.label) === currentNorm)) {
       opts.unshift({
         id: CURRENT_PLAN_VALUE,
         label: currentLabel,
@@ -150,8 +161,17 @@ watch(planOptions, (opts) => {
   const currentLabel =
     (props.member?.plan && String(props.member.plan).trim()) ||
     String(editForm.value.plan_type || '').trim()
-  const hit = opts.find((o) => o.id !== CURRENT_PLAN_VALUE && o.label === currentLabel)
-  if (hit) editForm.value.membership_template_id = hit.id
+  const currentNorm = normalizePlanLabel(currentLabel)
+  const hit = opts.find(
+    (o) => o.id !== CURRENT_PLAN_VALUE && normalizePlanLabel(o.label) === currentNorm,
+  )
+  if (hit) {
+    editForm.value.membership_template_id = hit.id
+    // 打开时自动对上卡包，初始值一并对齐，避免未改下拉却误提交
+    if (editInitialTemplateId.value === CURRENT_PLAN_VALUE) {
+      editInitialTemplateId.value = hit.id
+    }
+  }
 })
 
 async function loadMembershipTemplates() {
@@ -190,6 +210,7 @@ function fillFormFromMember(u) {
   const p0 = u.planBase && u.planBase !== '—' ? String(u.planBase).trim() : '次卡'
   editInitialPlanType.value = p0
   const matchedId = matchMemberTemplate(membershipTemplates.value, u)
+  editInitialTemplateId.value = matchedId != null ? matchedId : CURRENT_PLAN_VALUE
   const dr =
     u.delivery_region_id != null && u.delivery_region_id !== '' ? String(u.delivery_region_id) : ''
   const balance = normalizeBalance(u.balance)
@@ -349,8 +370,18 @@ async function submitEditMember() {
       }
     }
     const pt = resolveSelectedPlanType()
-    if (pt !== editInitialPlanType.value) {
+    const selectedTplId = editForm.value.membership_template_id
+    const hasRealTpl =
+      selectedTplId != null && selectedTplId !== CURRENT_PLAN_VALUE && Number(selectedTplId) > 0
+    const templateChanged =
+      hasRealTpl && String(selectedTplId) !== String(editInitialTemplateId.value)
+    const planTypeChanged = pt !== editInitialPlanType.value
+    // 换卡包（含同为月卡但餐段不同）或周/月/次变化都要提交，否则后端不改套餐、不写操作记录
+    if (templateChanged || planTypeChanged) {
       payload.plan_type = pt
+      if (hasRealTpl) {
+        payload.membership_template_id = Number(selectedTplId)
+      }
     }
     await apiJson(
       '/api/admin/member/profile',

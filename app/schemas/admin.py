@@ -666,6 +666,11 @@ class AdminMemberPatchIn(BaseModel):
         None,
         description="仅更新档案套餐标签（周卡/月卡/次卡），不改动余额；与开卡工单入账互补",
     )
+    membership_template_id: int | None = Field(
+        None,
+        ge=1,
+        description="本店会员卡模版 id；提交则按模版写入套餐标签，并同步最近已入账工单的模版与餐段快照",
+    )
     balance: int | None = Field(
         None,
         ge=0,
@@ -1160,7 +1165,7 @@ class PickupVerificationListOut(BaseModel):
 
 
 class DeliverySheetStopOut(BaseModel):
-    """同一收件地址聚合为一配送点；meal_count 为当日该址份数。"""
+    """到家一名会员一个配送点（同址不合并）；meal_count 为当日该点份数。"""
 
     meal_count: int = Field(..., ge=1)
     pending_meal_count: int = Field(
@@ -1175,11 +1180,11 @@ class DeliverySheetStopOut(BaseModel):
     )
     address_line: str = Field(..., description="收件地址单行展示")
     area: str = Field(..., description="该配送点展示用片区（来自默认地址或会员主档）")
-    stop_id: str | None = Field(None, description="停靠点 id（与顺丰推单 stop_id 一致）")
+    stop_id: str | None = Field(None, description="停靠点 id（与顺丰推单 stop_id 一致；含会员 id，同址不合并）")
     shop_order_id: str | None = Field(None, description="顺丰商家订单号")
     sf_order_id: str | None = Field(None, description="顺丰运单号")
     members: list[DeliverySheetMemberOut]
-    remarks_combined: str | None = Field(None, description="多名会员备注去重合并")
+    remarks_combined: str | None = Field(None, description="该配送点备注（到家按会员拆分后通常为单人备注）")
     has_area_issue: bool = Field(
         False,
         description="本配送点存在区域未维护/未分配或与启用 delivery_regions 不匹配",
@@ -1554,7 +1559,7 @@ class SfSameCityPushMonitorRow(BaseModel):
     sf_create_status_label: str = Field(..., description="监控列表「创单状态」展示文案")
     members: list[SfSameCityPushMonitorMemberRow] = Field(
         default_factory=list,
-        description="该顺丰单停靠点在当前系统聚合中的会员明细（可多人物流合并）",
+        description="该顺丰单停靠点在当前系统聚合中的会员明细（新单按会员拆分；历史同址合并单仍可能多人）",
     )
 
 

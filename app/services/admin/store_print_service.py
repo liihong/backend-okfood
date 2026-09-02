@@ -392,6 +392,7 @@ def create_print_job(
             paper_height_mm=int(prof.paper_height_mm),
             margin_top_mm=int(prof.margin_top_mm),
             margin_left_mm=int(prof.margin_left_mm),
+            copies_mode=copies_mode,
         )
         if prof.brand == "local_label":
             if payload.lodop_layout:

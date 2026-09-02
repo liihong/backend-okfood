@@ -350,18 +350,53 @@ def _enjoy_meal_meal_value(item: LabelItemIn) -> str:
     return _format_meal_category_enjoy(item.meal_category or "午餐卡")
 
 
-def _build_enjoy_meal_lines(item: LabelItemIn) -> list[_RenderLine]:
+def _enjoy_show_units(copies_mode: str) -> bool:
+    """按单打印时袋贴在餐别下展示「份数：X份」。"""
+    return (copies_mode or "").strip() == "per_order"
+
+
+def _build_enjoy_meal_lines(item: LabelItemIn, *, copies_mode: str = "per_unit") -> list[_RenderLine]:
     """75×50 单张：左上角起排，不含加好友二维码。"""
     meal_label = _meal_row_label(item)
     date_s = _format_date_slash(item.delivery_date)
-    return [
-        _RenderLine(f"{ENJOY_MEAL_GREETING} :)", font_pt=11, bold=True, line_mm=6.5),
-        _RenderLine(f"姓名：{_enjoy_meal_name_value(item)}", font_pt=15, bold=True, line_mm=8),
-        _RenderLine(f"{meal_label}：{_enjoy_meal_meal_value(item)}", font_pt=15, bold=True, line_mm=8),
-        _RenderLine(ENJOY_MEAL_TIP_1, font_pt=8, bold=False, line_mm=5),
-        _RenderLine(ENJOY_MEAL_TIP_2, font_pt=8, bold=False, line_mm=5.5),
-        _RenderLine(f"日期：{date_s}" if date_s else "日期：—", font_pt=10, bold=True, line_mm=5.5),
+    show_units = _enjoy_show_units(copies_mode)
+    # 按单打印多一行「份数」，略压缩行高，保证整张仍落在 50mm 内
+    if show_units:
+        hi_mm, name_mm, meal_mm, copies_mm, tip1_mm, tip2_mm, date_mm = (
+            5.5,
+            7.0,
+            7.0,
+            7.0,
+            4.5,
+            4.8,
+            5.0,
+        )
+    else:
+        hi_mm, name_mm, meal_mm, copies_mm, tip1_mm, tip2_mm, date_mm = (
+            6.5,
+            8.0,
+            8.0,
+            0.0,
+            5.0,
+            5.5,
+            5.5,
+        )
+    lines: list[_RenderLine] = [
+        _RenderLine(f"{ENJOY_MEAL_GREETING} :)", font_pt=11, bold=True, line_mm=hi_mm),
+        _RenderLine(f"姓名：{_enjoy_meal_name_value(item)}", font_pt=15, bold=True, line_mm=name_mm),
+        _RenderLine(f"{meal_label}：{_enjoy_meal_meal_value(item)}", font_pt=15, bold=True, line_mm=meal_mm),
     ]
+    if show_units:
+        units_n = max(1, int(item.units or 1))
+        lines.append(_RenderLine(f"份数：{units_n}份", font_pt=15, bold=True, line_mm=copies_mm))
+    lines.extend(
+        [
+            _RenderLine(ENJOY_MEAL_TIP_1, font_pt=8, bold=False, line_mm=tip1_mm),
+            _RenderLine(ENJOY_MEAL_TIP_2, font_pt=8, bold=False, line_mm=tip2_mm),
+            _RenderLine(f"日期：{date_s}" if date_s else "日期：—", font_pt=10, bold=True, line_mm=date_mm),
+        ]
+    )
+    return lines
 
 
 def _to_lodop_layout_enjoy_meal(
@@ -371,30 +406,38 @@ def _to_lodop_layout_enjoy_meal(
     paper_height_mm: int,
     margin_top_mm: int,
     margin_left_mm: int,
+    copies_mode: str = "per_unit",
 ) -> LodopLayout:
     """75×50 袋贴：绝对坐标从左上角起，高度锁定 50mm，避免连打多张。"""
     width_mm = ENJOY_MEAL_PAPER_WIDTH_MM
     height_mm = ENJOY_MEAL_PAPER_HEIGHT_MM
     x = 1.5
-    y = 1.5
+    y0 = 1.5
+    bottom_pad = 1.5
     content_w = max(20.0, float(width_mm) - x * 2)
+    lines = _build_enjoy_meal_lines(item, copies_mode=copies_mode)
+    total_mm = sum(ln.line_mm for ln in lines)
+    usable = max(8.0, float(height_mm) - y0 - bottom_pad)
+    # 内容偏高时整体压缩行高与字号，避免溢出切到第二张
+    scale = min(1.0, usable / total_mm) if total_mm > 0 else 1.0
     blocks: list[LodopTextBlock] = []
-    for ln in _build_enjoy_meal_lines(item):
+    y = y0
+    for ln in lines:
+        h = ln.line_mm * scale
+        fs = ln.font_pt if scale >= 0.999 else max(7, int(round(ln.font_pt * scale)))
         blocks.append(
             LodopTextBlock(
                 x_mm=x,
                 y_mm=y,
                 text=ln.text,
-                font_size_pt=ln.font_pt,
+                font_size_pt=fs,
                 bold=ln.bold,
                 width_mm=content_w,
-                height_mm=ln.line_mm,
+                height_mm=h,
                 align="left",
             )
         )
-        y += ln.line_mm
-        if y > height_mm - 1.5:
-            break
+        y += h
     layout = LodopLayout(
         paper_width_mm=width_mm,
         paper_height_mm=height_mm,
@@ -558,11 +601,16 @@ def _plan_type_label(plan_type: str) -> str:
     return s
 
 
-def _build_lines(item: LabelItemIn, template_key: str) -> list[tuple[str, int, bool]]:
+def _build_lines(
+    item: LabelItemIn, template_key: str, *, copies_mode: str = "per_unit"
+) -> list[tuple[str, int, bool]]:
     if _uses_sf_waybill_layout(item, template_key):
         return [(ln.text, 2 if ln.bold and ln.font_pt >= 12 else 1, ln.bold) for ln in _build_meal_full_lines(item)]
     if _uses_enjoy_meal_layout(template_key):
-        return [(ln.text, 2 if ln.bold and ln.font_pt >= 12 else 1, ln.bold) for ln in _build_enjoy_meal_lines(item)]
+        return [
+            (ln.text, 2 if ln.bold and ln.font_pt >= 12 else 1, ln.bold)
+            for ln in _build_enjoy_meal_lines(item, copies_mode=copies_mode)
+        ]
 
     lines: list[tuple[str, int, bool]] = []
     region = (item.region or "").strip()
@@ -650,6 +698,7 @@ def _to_feie_xp_xml(
     paper_height_mm: int,
     margin_top_mm: int,
     margin_left_mm: int,
+    copies_mode: str = "per_unit",
 ) -> str:
     w_dot = _mm_to_dot(paper_width_mm)
     h_dot = _mm_to_dot(paper_height_mm)
@@ -681,7 +730,7 @@ def _to_feie_xp_xml(
         return "".join(parts)
 
     if _uses_enjoy_meal_layout(template_key):
-        for ln in _build_enjoy_meal_lines(item):
+        for ln in _build_enjoy_meal_lines(item, copies_mode=copies_mode):
             y = _append_feie_line(
                 parts,
                 ln=ln,
@@ -695,7 +744,7 @@ def _to_feie_xp_xml(
         return "".join(parts)
 
     line_h = _mm_to_dot(5)
-    for text, scale, _bold in _build_lines(item, template_key):
+    for text, scale, _bold in _build_lines(item, template_key, copies_mode=copies_mode):
         font = 12 if scale >= 2 else 9
         parts.append(_xml_text(x, y, text, w=min(scale, 2), h=min(scale, 2), font=font))
         y += line_h * max(1, scale // 2 + 1)
@@ -704,7 +753,7 @@ def _to_feie_xp_xml(
     return "".join(parts)
 
 
-def _to_yilian_content(item: LabelItemIn, template_key: str) -> str:
+def _to_yilian_content(item: LabelItemIn, template_key: str, *, copies_mode: str = "per_unit") -> str:
     if _uses_sf_waybill_layout(item, template_key):
         parts: list[str] = []
         for ln in _build_meal_full_lines(item):
@@ -720,7 +769,7 @@ def _to_yilian_content(item: LabelItemIn, template_key: str) -> str:
 
     if _uses_enjoy_meal_layout(template_key):
         parts: list[str] = []
-        for ln in _build_enjoy_meal_lines(item):
+        for ln in _build_enjoy_meal_lines(item, copies_mode=copies_mode):
             if ln.bold or ln.font_pt >= 16:
                 parts.append(f"<FS2><BOLD>{ln.text}</BOLD></FS2><BR>")
             elif ln.bold or ln.font_pt >= 12:
@@ -730,7 +779,7 @@ def _to_yilian_content(item: LabelItemIn, template_key: str) -> str:
         return "".join(parts)
 
     parts = []
-    for text, scale, bold in _build_lines(item, template_key):
+    for text, scale, bold in _build_lines(item, template_key, copies_mode=copies_mode):
         if scale >= 2 or bold:
             parts.append(f"<FS>{text}</FS><BR>")
         else:
@@ -746,6 +795,7 @@ def _to_lodop_layout(
     paper_height_mm: int,
     margin_top_mm: int,
     margin_left_mm: int,
+    copies_mode: str = "per_unit",
 ) -> LodopLayout:
     blocks: list[LodopTextBlock] = []
     y = float(margin_top_mm)
@@ -768,10 +818,11 @@ def _to_lodop_layout(
             paper_height_mm=paper_height_mm,
             margin_top_mm=margin_top_mm,
             margin_left_mm=margin_left_mm,
+            copies_mode=copies_mode,
         )
 
     line_h = 5.0
-    for text, scale, bold in _build_lines(item, template_key):
+    for text, scale, bold in _build_lines(item, template_key, copies_mode=copies_mode):
         fs = 14 if scale >= 2 else 10
         row_h = line_h * (1.5 if scale >= 2 else 1.0)
         blocks.append(
@@ -808,6 +859,7 @@ def render_label_payload(
     paper_height_mm: int,
     margin_top_mm: int = 2,
     margin_left_mm: int = 2,
+    copies_mode: str = "per_unit",
 ) -> RenderedPrintPayload:
     # 袋贴实物为 75×50：锁定页高，避免沿用面单 130mm 导致一卷打出多张
     if _uses_enjoy_meal_layout(template_key):
@@ -823,8 +875,9 @@ def render_label_payload(
             paper_height_mm=paper_height_mm,
             margin_top_mm=margin_top_mm,
             margin_left_mm=margin_left_mm,
+            copies_mode=copies_mode,
         ),
-        yilian_content=_to_yilian_content(item, template_key),
+        yilian_content=_to_yilian_content(item, template_key, copies_mode=copies_mode),
         lodop_layout=_to_lodop_layout(
             item,
             template_key,
@@ -832,6 +885,7 @@ def render_label_payload(
             paper_height_mm=paper_height_mm,
             margin_top_mm=margin_top_mm,
             margin_left_mm=margin_left_mm,
+            copies_mode=copies_mode,
         ),
     )
 

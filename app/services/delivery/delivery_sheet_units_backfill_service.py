@@ -26,7 +26,7 @@ from app.services.delivery.delivery_sheet_push_snapshot_service import (
 )
 from app.services.member.member_service import effective_daily_meal_units
 from app.services.delivery.sf_order_fulfillment_service import _ids_from_push_snapshot
-from app.services.delivery.sf_same_city_service import load_agg_for_stop_id
+from app.services.delivery.sf_same_city_service import aggs_for_delivery_date, load_agg_for_stop_id
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ def _member_units_from_agg_stop(
     pus: SfSameCityPush,
     member_id: int,
 ) -> int | None:
-    """同址多会员停靠点：用当前聚合子行份数兜底（仅无扣次记录时）。"""
+    """历史同址合并单：用当前聚合子行份数兜底（仅无扣次记录时）。"""
     sid = int(pus.store_id) if pus.store_id is not None else None
     if sid is None:
         return None
@@ -103,6 +103,19 @@ def _member_units_from_agg_stop(
         str(pus.stop_id or ""),
         store_id=sid,
     )
+    if agg is None:
+        # 旧 stop_id 为同址合并口径，与现「按会员拆分」对不上时按会员扫当日聚合
+        ags = aggs_for_delivery_date(db, pus.delivery_date, store_id=sid)
+        for a in ags.values():
+            for sl in getattr(a, "sub_lines", None) or []:
+                try:
+                    if int(sl["member_id"]) == int(member_id):
+                        agg = a
+                        break
+                except (KeyError, TypeError, ValueError):
+                    continue
+            if agg is not None:
+                break
     if agg is None:
         return None
     for sl in getattr(agg, "sub_lines", None) or []:
@@ -141,8 +154,8 @@ def build_member_meal_units_from_sf_pushes(
 
     口径优先级（同一会员仅记录首次命中）：
     1. 独占停靠点：preview_row.subscription_pending_units
-    2. 同址多会员：当日已送达则用 balance_logs 扣次份数
-    3. 同址多会员未送达：停靠点聚合子行 units 兜底
+    2. 历史同址多会员：当日已送达则用 balance_logs 扣次份数
+    3. 历史同址多会员未送达：停靠点聚合子行 units 兜底
     """
     pushes = db.scalars(
         select(SfSameCityPush)

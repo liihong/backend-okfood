@@ -300,7 +300,7 @@ function sfCallbackKindLabel(kind) {
   return zh ? `${zh}（${k}）` : k
 }
 
-/** 监控列表：系统会员姓名 / 手机（同一停靠点可能多人合并一单） */
+/** 监控列表：系统会员姓名 / 手机（到家已按会员拆单；历史同址合并单仍可能一人以上） */
 function formatMemberNames(row) {
   const list = row?.members
   if (!Array.isArray(list) || !list.length) return '—'

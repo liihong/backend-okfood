@@ -1,4 +1,4 @@
-"""管理端配送大表：按请假规则筛选会员，默认收件地址聚合为配送点。
+"""管理端配送大表：按请假规则筛选会员，到家按会员拆为配送点（同址不合并）。
 
 送达状态：配送到家会员与 ``delivery_logs``（DELIVERED、业务日）对齐，与骑手端任务列表一致；
 门店自提仅备餐归组，份数不计入「到家已/未送达」汇总。
@@ -39,7 +39,11 @@ from app.services.delivery.courier_service import (
     post_push_first_day_whitelist_member_ids,
 )
 from app.services.member.member_address_service import delivery_region_name_map, full_address_line, load_default_address_map, routing_area_label
-from app.services.delivery.delivery_stop_id import compute_delivery_stop_id
+from app.services.delivery.delivery_stop_id import (
+    compute_delivery_stop_id,
+    compute_legacy_address_stop_id,
+    member_ids_from_sf_push_snapshot,
+)
 from app.services.delivery.delivery_sheet_meal_units_service import DeliverySheetMealUnitsContext
 from app.services.delivery.delivery_sheet_push_snapshot_service import DeliverySheetDaySnapshots
 from app.services.member.member_service import (
@@ -254,10 +258,6 @@ def _member_balance_quota(mem: Member) -> tuple[int, int]:
     return balance_quota_for_sheet_period(mem, meal_period=MealPeriod.LUNCH.value)
 
 
-def _normalize_address_key(s: str) -> str:
-    return " ".join(s.strip().split()).casefold()
-
-
 def _sheet_sf_push_kind(meal_period: str) -> str:
     """大表停靠点对应的顺丰 push_kind；晚餐与午餐隔离。"""
     if (meal_period or "").strip().lower() == MealPeriod.DINNER.value:
@@ -265,10 +265,26 @@ def _sheet_sf_push_kind(meal_period: str) -> str:
     return "delivery_sheet"
 
 
+def _index_sf_pushes_for_sheet(
+    rows: list[SfSameCityPush],
+) -> tuple[dict[str, SfSameCityPush], dict[int, SfSameCityPush]]:
+    """stop_id → 最新推单；会员 id → 最新推单（含历史同址合并单快照）。"""
+    by_stop: dict[str, SfSameCityPush] = {}
+    by_member: dict[int, SfSameCityPush] = {}
+    for row in rows:
+        key = str(row.stop_id or "")
+        if key and key not in by_stop:
+            by_stop[key] = row
+        for mid in member_ids_from_sf_push_snapshot(row.request_snapshot):
+            if mid not in by_member:
+                by_member[mid] = row
+    return by_stop, by_member
+
+
 def _sf_push_map_for_sheet(
     db: Session, *, store_id: int, delivery_date: date, meal_period: str = "lunch"
-) -> dict[str, SfSameCityPush]:
-    """业务日已成功创单的停靠点 → 最新推单记录（供面单打印条码/订单号）。"""
+) -> tuple[dict[str, SfSameCityPush], dict[int, SfSameCityPush]]:
+    """业务日已成功创单的停靠点 / 会员 → 最新推单记录（供面单打印条码/订单号）。"""
     kind = _sheet_sf_push_kind(meal_period)
     rows = db.scalars(
         select(SfSameCityPush)
@@ -282,18 +298,13 @@ def _sf_push_map_for_sheet(
         )
         .order_by(SfSameCityPush.id.desc())
     ).all()
-    out: dict[str, SfSameCityPush] = {}
-    for row in rows:
-        key = str(row.stop_id or "")
-        if key and key not in out:
-            out[key] = row
-    return out
+    return _index_sf_pushes_for_sheet(list(rows))
 
 
 def _sf_fail_push_map_for_sheet(
     db: Session, *, store_id: int, delivery_date: date, meal_period: str = "lunch"
-) -> dict[str, SfSameCityPush]:
-    """业务日创单失败（含缺坐标等推前校验失败）停靠点 → 最新失败记录。"""
+) -> tuple[dict[str, SfSameCityPush], dict[int, SfSameCityPush]]:
+    """业务日创单失败（含缺坐标等推前校验失败）停靠点 / 会员 → 最新失败记录。"""
     kind = _sheet_sf_push_kind(meal_period)
     rows = db.scalars(
         select(SfSameCityPush)
@@ -307,12 +318,25 @@ def _sf_fail_push_map_for_sheet(
         )
         .order_by(SfSameCityPush.id.desc())
     ).all()
-    out: dict[str, SfSameCityPush] = {}
-    for row in rows:
-        key = str(row.stop_id or "")
-        if key and key not in out:
-            out[key] = row
-    return out
+    return _index_sf_pushes_for_sheet(list(rows))
+
+
+def _resolve_sheet_sf_push(
+    *,
+    stop_id: str,
+    member_id: int,
+    address_line: str,
+    area_name: str,
+    delivery_date: date,
+    by_stop: dict[str, SfSameCityPush],
+    by_member: dict[int, SfSameCityPush],
+) -> SfSameCityPush | None:
+    """优先新口径 stop_id，其次快照会员，再回退历史同址合并 stop_id。"""
+    hit = by_stop.get(stop_id) or by_member.get(int(member_id))
+    if hit is not None:
+        return hit
+    legacy = compute_legacy_address_stop_id(delivery_date, area_name, address_line)
+    return by_stop.get(legacy)
 
 
 def _address_has_valid_coords(addr: MemberAddress | None) -> bool:
@@ -413,7 +437,7 @@ def _filter_members_by_phone_hint(members: list[Member], phone_hint: str) -> lis
 
 @dataclass(frozen=True)
 class HomeDeliveryStopForAgg:
-    """顺丰停靠点聚合用：与 ``build_delivery_sheet`` 到家分组同源，不含完整 Pydantic 树。"""
+    """顺丰停靠点聚合用：与 ``build_delivery_sheet`` 到家分组同源（一名会员一个点）。"""
 
     area: str
     address_line: str
@@ -491,27 +515,21 @@ def home_delivery_stops_for_aggs(
             region_ids.add(int(addr.delivery_region_id))
     id_to_name = delivery_region_name_map(db, region_ids, tenant_id=tid)
 
-    buckets: dict[str, dict[tuple[str, str], list[Member]]] = defaultdict(lambda: defaultdict(list))
-    for m in sheet_members:
-        addr = sheet_defaults.get(m.id)
-        routing_area = routing_area_label(addr, id_to_name)
-        resolved = _resolve_delivery_line(addr, id_to_name)
-        key = (_normalize_address_key(resolved.area), _normalize_address_key(resolved.detail))
-        buckets[routing_area][key].append(m)
+    buckets = _members_by_routing_area(sheet_members, sheet_defaults, id_to_name)
 
     out: list[HomeDeliveryStopForAgg] = []
     for area_name in sorted(buckets.keys()):
-        stop_map = buckets[area_name]
-        for ms in stop_map.values():
-            ms_sorted = sorted(ms, key=lambda x: (x.id in delivered_set, (x.phone or "")))
-            first = ms_sorted[0]
-            resolved = _resolve_delivery_line(sheet_defaults.get(first.id), id_to_name)
-            member_pairs = tuple((mem, mem.id in delivered_set) for mem in ms_sorted)
+        ms_sorted = sorted(
+            buckets[area_name],
+            key=lambda x: (x.id in delivered_set, (x.phone or ""), int(x.id)),
+        )
+        for mem in ms_sorted:
+            resolved = _resolve_delivery_line(sheet_defaults.get(mem.id), id_to_name)
             out.append(
                 HomeDeliveryStopForAgg(
                     area=area_name,
                     address_line=resolved.address_line,
-                    members=member_pairs,
+                    members=((mem, mem.id in delivered_set),),
                 )
             )
     return out
@@ -537,29 +555,21 @@ class DeliverySheetDayMetrics:
         )
 
 
-def _count_home_delivery_stops(
-    sheet_members: list[Member],
-    sheet_defaults: dict[int, MemberAddress | None],
-    db: Session,
-) -> int:
-    """到家停靠点数：按片区+地址去重计数，供 dashboard metrics 使用（不构建完整停靠点结构）。"""
-    if not sheet_members:
-        return 0
-    region_ids: set[int] = set()
-    for m in sheet_members:
-        addr = sheet_defaults.get(int(m.id))
-        if addr and addr.delivery_region_id is not None:
-            region_ids.add(int(addr.delivery_region_id))
-    tid = int(sheet_members[0].tenant_id) if sheet_members else None
-    id_to_name = delivery_region_name_map(db, region_ids, tenant_id=tid)
-    buckets: dict[str, set[tuple[str, str]]] = defaultdict(set)
-    for m in sheet_members:
-        addr = sheet_defaults.get(int(m.id))
-        routing_area = routing_area_label(addr, id_to_name)
-        resolved = _resolve_delivery_line(addr, id_to_name)
-        addr_key = (_normalize_address_key(resolved.area), _normalize_address_key(resolved.detail))
-        buckets[routing_area].add(addr_key)
-    return sum(len(stop_map) for stop_map in buckets.values())
+def _members_by_routing_area(
+    members: list[Member],
+    defaults: dict[int, MemberAddress | None],
+    id_to_name: dict[int, str],
+) -> dict[str, list[Member]]:
+    """按配送片区分桶；同一片区内每名会员独立成点。"""
+    buckets: dict[str, list[Member]] = defaultdict(list)
+    for m in members:
+        buckets[routing_area_label(defaults.get(m.id), id_to_name)].append(m)
+    return buckets
+
+
+def _count_home_delivery_stops(sheet_members: list[Member]) -> int:
+    """到家停靠点数：一名会员一个点（同址不合并）。"""
+    return len({int(m.id) for m in sheet_members})
 
 
 def delivery_sheet_metrics_for_date(
@@ -615,7 +625,7 @@ def delivery_sheet_metrics_for_date(
             home_delivered += u
         else:
             home_pending += u
-    home_stop_count = _count_home_delivery_stops(sheet_members, sheet_defaults, db)
+    home_stop_count = _count_home_delivery_stops(sheet_members)
 
     all_pu = list(pu_members) + list(ex_pu)
     pu_mids = {int(m.id) for m in all_pu}
@@ -683,7 +693,7 @@ def delivery_sheet_metrics_for_dinner_date(
             home_delivered += u
         else:
             home_pending += u
-    home_stop_count = _count_home_delivery_stops(sheet_members, default_by_id, db)
+    home_stop_count = _count_home_delivery_stops(sheet_members)
 
     result = DeliverySheetDayMetrics(
         home_pending_meal_total=home_pending,
@@ -1750,10 +1760,10 @@ def build_delivery_sheet(
         members = _filter_members_by_phone_hint(members, ph)
         pu_members = _filter_members_by_phone_hint(pu_members, ph)
     units_ctx = DeliverySheetMealUnitsContext.from_day_snapshots(day_snap, db=db)
-    sf_push_map = _sf_push_map_for_sheet(
+    sf_push_map, sf_push_by_member = _sf_push_map_for_sheet(
         db, store_id=sid, delivery_date=d, meal_period=meal_period
     )
-    sf_fail_map = _sf_fail_push_map_for_sheet(
+    sf_fail_map, sf_fail_by_member = _sf_fail_push_map_for_sheet(
         db, store_id=sid, delivery_date=d, meal_period=meal_period
     )
     all_member_ids = {int(m.id) for m in members} | {int(m.id) for m in pu_members}
@@ -1779,73 +1789,71 @@ def build_delivery_sheet(
             region_ids.add(int(addr.delivery_region_id))
     id_to_name = delivery_region_name_map(db, region_ids, tenant_id=tid)
 
-    buckets: dict[str, dict[tuple[str, str], list[Member]]] = defaultdict(lambda: defaultdict(list))
-    for m in members:
-        addr = default_by_id.get(m.id)
-        routing_area = routing_area_label(addr, id_to_name)
-        resolved = _resolve_delivery_line(addr, id_to_name)
-        key = (_normalize_address_key(resolved.area), _normalize_address_key(resolved.detail))
-        buckets[routing_area][key].append(m)
+    buckets = _members_by_routing_area(members, default_by_id, id_to_name)
 
     groups_out: list[DeliverySheetGroupOut] = []
     for area_name in sorted(buckets.keys()):
-        stop_map = buckets[area_name]
         stops: list[DeliverySheetStopOut] = []
-        for (_ka, _kd), ms in stop_map.items():
-            # 同址多会员：未送达在上、已送达在下；同状态按手机号
-            ms_sorted = sorted(
-                ms,
-                key=lambda x: (x.id in delivered_set, (x.phone or "")),
+        ms_sorted = sorted(
+            buckets[area_name],
+            key=lambda x: (x.id in delivered_set, (x.phone or ""), int(x.id)),
+        )
+        for mem in ms_sorted:
+            resolved = _resolve_delivery_line(default_by_id.get(mem.id), id_to_name)
+            addr = default_by_id.get(mem.id)
+            rmk = _member_line_remarks(mem, addr)
+            bal, quota = balance_quota_for_sheet_period(
+                mem,
+                meal_period=meal_period,
+                state_row=dinner_state_map.get(int(mem.id)),
             )
-            first = ms_sorted[0]
-            resolved = _resolve_delivery_line(default_by_id.get(first.id), id_to_name)
-            lines: list[DeliverySheetMemberOut] = []
-            combined_parts: list[str] = []
-            for mem in ms_sorted:
-                addr = default_by_id.get(mem.id)
-                rmk = _member_line_remarks(mem, addr)
-                bal, quota = balance_quota_for_sheet_period(
-                    mem,
-                    meal_period=meal_period,
-                    state_row=dinner_state_map.get(int(mem.id)),
-                )
-                mem_units = units_ctx.units_for(mem)
-                missing_coords = not _address_has_valid_coords(addr)
-                lines.append(
-                    DeliverySheetMemberOut(
-                        member_id=int(mem.id),
-                        phone=mem.phone,
-                        name=mem.name,
-                        plan_type=(mem.plan_type or "").strip() or None,
-                        card_kind_label=card_kind_map.get(int(mem.id)) or None,
-                        daily_meal_units=mem_units,
-                        balance=bal,
-                        meal_quota_total=quota,
-                        remarks=rmk,
-                        area_issue=_member_area_issue(addr, known_ids),
-                        missing_coords=missing_coords,
-                        is_delivered=mem.id in delivered_set,
-                    )
-                )
-                if rmk:
-                    combined_parts.append(rmk)
-            seen: set[str] = set()
-            uniq_combined: list[str] = []
-            for p in combined_parts:
-                if p not in seen:
-                    seen.add(p)
-                    uniq_combined.append(p)
+            mem_units = units_ctx.units_for(mem)
+            missing_coords = not _address_has_valid_coords(addr)
+            line = DeliverySheetMemberOut(
+                member_id=int(mem.id),
+                phone=mem.phone,
+                name=mem.name,
+                plan_type=(mem.plan_type or "").strip() or None,
+                card_kind_label=card_kind_map.get(int(mem.id)) or None,
+                daily_meal_units=mem_units,
+                balance=bal,
+                meal_quota_total=quota,
+                remarks=rmk,
+                area_issue=_member_area_issue(addr, known_ids),
+                missing_coords=missing_coords,
+                is_delivered=mem.id in delivered_set,
+            )
             stop_area_issue = (
-                any(ln.area_issue for ln in lines)
+                bool(line.area_issue)
                 or _area_needs_attention(resolved.area, known_names)
                 or _area_needs_attention(area_name, known_names)
             )
-            stop_meals = sum(ln.daily_meal_units for ln in lines)
-            stop_delivered = sum(ln.daily_meal_units for ln in lines if ln.is_delivered)
+            stop_meals = int(line.daily_meal_units)
+            stop_delivered = stop_meals if line.is_delivered else 0
             stop_pending = stop_meals - stop_delivered
-            stop_id = compute_delivery_stop_id(d, area_name, resolved.address_line)
-            sf_push = sf_push_map.get(stop_id)
-            sf_fail = None if sf_push is not None else sf_fail_map.get(stop_id)
+            stop_id = compute_delivery_stop_id(
+                d, area_name, resolved.address_line, member_id=int(mem.id)
+            )
+            sf_push = _resolve_sheet_sf_push(
+                stop_id=stop_id,
+                member_id=int(mem.id),
+                address_line=resolved.address_line,
+                area_name=area_name,
+                delivery_date=d,
+                by_stop=sf_push_map,
+                by_member=sf_push_by_member,
+            )
+            sf_fail = None
+            if sf_push is None:
+                sf_fail = _resolve_sheet_sf_push(
+                    stop_id=stop_id,
+                    member_id=int(mem.id),
+                    address_line=resolved.address_line,
+                    area_name=area_name,
+                    delivery_date=d,
+                    by_stop=sf_fail_map,
+                    by_member=sf_fail_by_member,
+                )
             fail_msg = (str(sf_fail.error_msg).strip() if sf_fail and sf_fail.error_msg else "") or None
             stops.append(
                 DeliverySheetStopOut(
@@ -1857,18 +1865,19 @@ def build_delivery_sheet(
                     stop_id=stop_id,
                     shop_order_id=str(sf_push.shop_order_id) if sf_push else None,
                     sf_order_id=(str(sf_push.sf_order_id).strip() if sf_push and sf_push.sf_order_id else None),
-                    members=lines,
-                    remarks_combined="；".join(uniq_combined) if uniq_combined else None,
+                    members=[line],
+                    remarks_combined=rmk or None,
                     has_area_issue=stop_area_issue,
                     sf_push_failed=sf_fail is not None,
                     sf_push_error_msg=fail_msg[:200] if fail_msg else None,
                 )
             )
-        # 配送点：仍有待送份数的点在上、已全部送达的在下；同档仍按地址稳定排序
+        # 配送点：仍有待送份数的点在上、已全部送达的在下；同档按地址、手机号稳定排序
         stops.sort(
             key=lambda s: (
                 0 if (s.pending_meal_count or 0) > 0 else 1,
                 s.address_line.casefold(),
+                (s.members[0].phone or "") if s.members else "",
                 s.area.casefold(),
             )
         )

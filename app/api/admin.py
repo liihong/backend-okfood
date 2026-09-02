@@ -627,7 +627,7 @@ def delivery_sf_preview(
     phone: Annotated[str | None, Query(description="同 delivery-sheet 手机筛选")] = None,
 ):
     """
-    顺丰同城创单前预览：按停靠点合并大表+单点餐，返回 Excel 同结构字段的默认值。
+    顺丰同城创单前预览：按会员停靠点（同址不合并）组大表+该会员单点餐，返回 Excel 同结构字段的默认值。
     需配置：``SF_OPEN_*``、``SF_PICKUP_PHONE``、``SF_PICKUP_ADDRESS``。
     """
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
@@ -1901,6 +1901,7 @@ def member_profile_patch(
         store_id=store_id,
         daily_meal_units=body.daily_meal_units,
         plan_type=body.plan_type,
+        membership_template_id=body.membership_template_id,
         set_balance="balance" in fs,
         balance=body.balance,
         set_delivery_start_date="delivery_start_date" in fs,

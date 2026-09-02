@@ -592,10 +592,12 @@ function markBusy(memberId) {
   return batchMarking.value || (markingMemberId.value != null && Number(markingMemberId.value) === Number(memberId))
 }
 
-/** el-table row-key：同一片区内按地址区分（与后端停靠点聚合一致） */
+/** el-table row-key：到家按停靠点 id（同址多会员拆开后地址不再唯一） */
 function deliveryStopRowKey(row) {
   const g = activeRegionTab.value || ''
-  return `${g}\u0001${row.address_line || ''}`
+  if (row.stop_id) return `${g}\u0001${row.stop_id}`
+  const mid = row.members && row.members[0] ? row.members[0].member_id : ''
+  return `${g}\u0001${row.address_line || ''}\u0001${mid}`
 }
 
 function selectableDeliveryStop(row) {

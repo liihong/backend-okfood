@@ -122,6 +122,9 @@ onMounted(() => {
                 (activeScene === 'delivery_sheet' || activeScene === 'store_retail')
                 && currentSetting.template_key === 'delivery_meal_full',
               'ps-preview__box--enjoy': currentSetting.template_key === 'delivery_enjoy_meal',
+              'ps-preview__box--enjoy-units':
+                currentSetting.template_key === 'delivery_enjoy_meal'
+                && currentSetting.copies_mode === 'per_order',
             }"
           >
             <template
@@ -158,6 +161,12 @@ onMounted(() => {
               <div class="ps-preview__enjoy-hi">用餐愉快哦！ :)</div>
               <div class="ps-preview__enjoy-name">姓名：曹女士</div>
               <div class="ps-preview__enjoy-meal">餐别：午+果</div>
+              <div
+                v-if="currentSetting.copies_mode === 'per_order'"
+                class="ps-preview__enjoy-units"
+              >
+                份数：2份
+              </div>
               <div class="ps-preview__enjoy-tip">1.酱汁根据个人口味酌量添加</div>
               <div class="ps-preview__enjoy-tip">2.若暂时不吃，优先建议冷藏保鲜！</div>
               <div class="ps-preview__enjoy-date">日期：2026/07/24</div>
@@ -283,6 +292,7 @@ onMounted(() => {
   aspect-ratio: 75 / 50;
   font-size: 0.78rem;
   text-align: left;
+  overflow: hidden;
 }
 .ps-preview__enjoy-hi {
   font-weight: 800;
@@ -290,13 +300,41 @@ onMounted(() => {
   margin-bottom: 0.25rem;
 }
 .ps-preview__enjoy-name,
-.ps-preview__enjoy-meal {
+.ps-preview__enjoy-meal,
+.ps-preview__enjoy-units {
   font-size: 1.02rem;
   font-weight: 800;
   line-height: 1.35;
 }
 .ps-preview__enjoy-meal {
   margin-bottom: 0.35rem;
+}
+.ps-preview__enjoy-units {
+  margin-bottom: 0.25rem;
+}
+.ps-preview__box--enjoy-units {
+  font-size: 0.7rem;
+}
+.ps-preview__box--enjoy-units .ps-preview__enjoy-hi {
+  font-size: 0.76rem;
+  margin-bottom: 0.12rem;
+}
+.ps-preview__box--enjoy-units .ps-preview__enjoy-name,
+.ps-preview__box--enjoy-units .ps-preview__enjoy-meal,
+.ps-preview__box--enjoy-units .ps-preview__enjoy-units {
+  font-size: 0.9rem;
+  line-height: 1.25;
+}
+.ps-preview__box--enjoy-units .ps-preview__enjoy-meal {
+  margin-bottom: 0;
+}
+.ps-preview__box--enjoy-units .ps-preview__enjoy-tip {
+  font-size: 0.64rem;
+  line-height: 1.28;
+}
+.ps-preview__box--enjoy-units .ps-preview__enjoy-date {
+  margin-top: 0.18rem;
+  font-size: 0.74rem;
 }
 .ps-preview__enjoy-tip {
   font-size: 0.72rem;

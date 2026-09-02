@@ -27,6 +27,14 @@ _DINNER_ONLY_LABEL_MARKERS = (
     "纯晚餐",
 )
 
+# 纯午餐卡：避免「月午餐卡」被默认午餐规则以外的全餐快照盖住
+_LUNCH_ONLY_LABEL_MARKERS = (
+    "午餐卡",
+    "午饭卡",
+    "仅午餐",
+    "纯午餐",
+)
+
 
 def _coerce_meal_periods_raw(raw: object) -> list[object]:
     """JSON 列偶发以字符串读出时先解析，避免晚餐 snapshot 被误判为午餐。"""
@@ -69,6 +77,8 @@ def _infer_meal_periods_from_template_labels(name: str, kind_label: str) -> list
         return [MealPeriod.LUNCH.value, MealPeriod.DINNER.value]
     if any(marker in text for marker in _DINNER_ONLY_LABEL_MARKERS):
         return [MealPeriod.DINNER.value]
+    if any(marker in text for marker in _LUNCH_ONLY_LABEL_MARKERS):
+        return [MealPeriod.LUNCH.value]
     return None
 
 

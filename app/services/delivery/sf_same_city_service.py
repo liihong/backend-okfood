@@ -1,5 +1,5 @@
 """
-顺丰同城推单：与配送大表、单点餐同合并为停靠点，预览 14+ 列模板，提交 `createorder`。
+顺丰同城推单：与配送大表、单点餐按会员合并为停靠点（同址不同会员不合并），预览 14+ 列模板，提交 `createorder`。
 
 签名为 ``json + && + dev_id + && + appKey`` 再 MD5→Hex→Base64（与常见 openic Java 样例一致）。
 """
@@ -35,7 +35,10 @@ from app.models.sf_same_city_push import SfSameCityPush
 from app.models.single_meal_order import SingleMealOrder
 from app.models.store import Store
 from app.services.meal_period.lunch_delivery import eligible_members_for_lunch_delivery
-from app.services.delivery.delivery_stop_id import _stop_key, compute_delivery_stop_id
+from app.services.delivery.delivery_stop_id import (
+    _stop_key,
+    member_ids_from_sf_push_snapshot,
+)
 from app.services.delivery.delivery_sheet_service import (
     _filter_members_by_phone_hint,
     _member_line_remarks,
@@ -345,7 +348,7 @@ def _build_aggs(
     store_id: int,
     meal_period: str | None = None,
 ) -> dict[str, _Agg]:
-    """大表所有到家停靠点 + 单次餐合并。"""
+    """到家按会员拆停靠点；同一会员的订阅与单次餐仍合并，不同会员同址不合并。"""
     from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
 
     st_row = db.get(Store, int(store_id))
@@ -370,8 +373,11 @@ def _build_aggs(
         line_full = (st.address_line or "").strip()
         if not line_full:
             continue
+        if not st.members:
+            continue
+        stop_member_id = int(st.members[0][0].id)
         line = _address_line_without_sheet_area(st.area, line_full)
-        sk = _stop_key(d, st.area, line_full)
+        sk = _stop_key(d, st.area, line_full, member_id=stop_member_id)
         a = _Agg(stop_id=sk, group_area=st.area, address_line=line, sub_lines=[])
         for mem, is_del in st.members:
             u = 0
@@ -406,7 +412,7 @@ def _build_aggs(
         if not line_full:
             continue
         line = (rline.detail or "").strip() or _address_line_without_sheet_area(ra, line_full)
-        sk = _stop_key(d, ra, line_full)
+        sk = _stop_key(d, ra, line_full, member_id=int(mem.id))
         if sk not in aggs:
             aggs[sk] = _Agg(stop_id=sk, group_area=ra, address_line=line, sub_lines=[])
         qty = max(1, int(o.quantity or 1))
@@ -788,13 +794,32 @@ def _success_stop_member_map(
     ags_hint: dict[str, _Agg],
     push_kind: str | None = None,
 ) -> dict[str, set[int]]:
-    """已成功创单的每个 stop_id → 当时停靠点上收件会员 id 集合（用于跨停靠点去重）。"""
+    """已成功创单的每个 stop_id → 收件会员 id 集合（用于跨停靠点去重）。
+
+    优先创单快照 ``fulfillment_member_ids``，以便历史同址合并单在按会员拆分后仍能拦住重复推单。
+    """
     m: dict[str, set[int]] = {}
-    for sid_stop in _successful_sf_stop_ids(db, store_id=store_id, d=d, push_kind=push_kind):
-        agg = ags_hint.get(sid_stop)
-        if agg is None:
+    clauses: list[Any] = [
+        SfSameCityPush.store_id == int(store_id),
+        SfSameCityPush.delivery_date == d,
+        SfSameCityPush.error_code == 0,
+        _sf_push_row_active_predicate(),
+    ]
+    pk = _push_kind_filter_clause(push_kind)
+    if pk is not None:
+        clauses.append(pk)
+    rows = db.scalars(select(SfSameCityPush).where(and_(*clauses))).all()
+    for row in rows:
+        sid_stop = str(row.stop_id or "")
+        if not sid_stop:
             continue
-        m[sid_stop] = _member_ids_receiving_on_agg(db, agg)
+        snap_mids = member_ids_from_sf_push_snapshot(row.request_snapshot)
+        if snap_mids:
+            m[sid_stop] = set(snap_mids)
+            continue
+        agg = ags_hint.get(sid_stop)
+        if agg is not None:
+            m[sid_stop] = _member_ids_receiving_on_agg(db, agg)
     return m
 
 
@@ -2614,10 +2639,33 @@ def retry_sf_same_city_push_by_id(db: Session, *, push_id: int) -> SfSameCityPus
             prow = r
             break
     if prow is None:
-        raise HTTPException(
-            status_code=400,
-            detail="当前业务日已无此停靠点待配送数据，请在配送大表核对或改用手动推单",
-        )
+        snap_mids = set(member_ids_from_sf_push_snapshot(row.request_snapshot))
+        overlap_rows: list[SfSameCityPreviewRow] = []
+        if snap_mids:
+            for r in rows:
+                agg = ags.get(r.stop_id)
+                if agg is None:
+                    continue
+                mids = set()
+                for sl in agg.sub_lines:
+                    try:
+                        mids.add(int(sl["member_id"]))
+                    except (KeyError, TypeError, ValueError):
+                        pass
+                if mids & snap_mids:
+                    overlap_rows.append(r)
+        if len(overlap_rows) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="该记录为同址多会员合并单，现已改为按会员拆开推单。请到配送大表分别勾选推送。",
+            )
+        if len(overlap_rows) == 1:
+            prow = overlap_rows[0]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="当前业务日已无此停靠点待配送数据，请在配送大表核对或改用手动推单",
+            )
     if prow.already_pushed:
         raise HTTPException(
             status_code=400,

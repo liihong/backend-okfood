@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from app.models.enums import CardOrderPayStatus, PlanType
+from app.models.enums import CardOrderPayStatus, CardPayChannel, PlanType
 from app.models.member import Member
 from app.models.member_card_order import MemberCardOrder
 from app.models.membership_card_template import MembershipCardTemplate
@@ -87,6 +89,65 @@ def load_member_card_kind_label_map(
     return out
 
 
+def load_member_plan_type_display_map(
+    db: Session,
+    member_ids: list[int],
+    *,
+    plan_type_by_member: dict[int, str | None] | None = None,
+    periods_by_member: dict[int, frozenset[str]] | None = None,
+) -> dict[int, str]:
+    """
+    档案库套餐列：优先最近已入账工单的卡包文案（与编辑下拉一致，如「月午餐卡」），
+    无模版时再回退「月卡 · 全餐」。
+    """
+    ids = sorted({int(x) for x in member_ids if x is not None})
+    pt_map = plan_type_by_member or {}
+    periods_map = periods_by_member or {}
+    out: dict[int, str] = {}
+    if not ids:
+        return out
+    latest_sq = (
+        select(
+            MemberCardOrder.member_id.label("mid"),
+            func.max(MemberCardOrder.id).label("max_id"),
+        )
+        .where(
+            MemberCardOrder.member_id.in_(ids),
+            MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+            MemberCardOrder.applied_to_member.is_(True),
+        )
+        .group_by(MemberCardOrder.member_id)
+    ).subquery("latest_plan_display")
+    rows = db.execute(
+        select(MemberCardOrder.member_id, MembershipCardTemplate)
+        .select_from(MemberCardOrder)
+        .join(
+            latest_sq,
+            and_(
+                MemberCardOrder.member_id == latest_sq.c.mid,
+                MemberCardOrder.id == latest_sq.c.max_id,
+            ),
+        )
+        .outerjoin(
+            MembershipCardTemplate,
+            MemberCardOrder.membership_template_id == MembershipCardTemplate.id,
+        )
+    ).all()
+    tpl_label_by_mid: dict[int, str] = {}
+    for mid, tpl in rows:
+        if tpl is not None:
+            tpl_label_by_mid[int(mid)] = membership_template_plan_label(tpl)
+    for mid in ids:
+        label = tpl_label_by_mid.get(mid, "").strip()
+        if label:
+            out[mid] = label
+        else:
+            out[mid] = format_plan_type_display(
+                pt_map.get(mid), periods_map.get(mid, frozenset())
+            )
+    return out
+
+
 def format_plan_type_display(plan_type: str | None, periods: frozenset[str] | set[str]) -> str:
     """管理端方案 A：「周卡 · 全餐」；plan_type 仍为计费周期，餐段来自 entitled_meal_periods。"""
     pt = (plan_type or PlanType.TIMES.value).strip() or PlanType.TIMES.value
@@ -116,6 +177,114 @@ def plan_type_from_card_order(db: Session, order: MemberCardOrder) -> PlanType:
         if tpl is not None:
             return _plan_for_membership_template(tpl)
     return _quota_for_card_kind(order.card_kind)[0]
+
+
+def membership_template_plan_label(template: MembershipCardTemplate) -> str:
+    """与管理端下拉 ``membershipTemplatePlanLabel`` 对齐：种类 + 餐段。"""
+    from app.services.meal_period.template_periods import meal_periods_from_template
+
+    kind = (template.kind_label or "").strip() or (template.name or "").strip() or "会员卡"
+    if "·" in kind or "午餐" in kind or "晚餐" in kind or "全餐" in kind:
+        return kind
+    periods = meal_periods_from_template(template)
+    return f"{kind} · {meal_scope_label_from_periods(set(periods))}"
+
+
+def apply_admin_membership_template(
+    db: Session,
+    member: Member,
+    template: MembershipCardTemplate,
+    *,
+    operator: str | None = None,
+) -> dict[str, object]:
+    """
+    后台改套餐：写入 members.plan_type，并把最近一笔已入账工单对齐到该模版
+    （模版 id / card_kind / 餐段快照）。不改余额、不重写历史工单金额。
+    其余已入账工单只对齐餐段快照，避免并集资格仍停留在旧的「全餐」。
+    台账导入等无已入账工单的会员：补一条 0 元已缴工单只绑定卡包与餐段，不入账次数。
+    返回是否改动了工单及展示文案，供操作记录使用。
+    """
+    from app.services.member.member_card_order_service import (
+        _plan_for_membership_template,
+        enum_card_kind_for_template,
+    )
+    from app.services.meal_period.combo_with_lunch import snapshot_deliver_dinner_with_lunch_from_template
+    from app.services.meal_period.template_periods import meal_periods_from_template
+
+    plan = _plan_for_membership_template(template)
+    member.plan_type = plan.value
+    db.add(member)
+
+    periods = meal_periods_from_template(template)
+    combo = snapshot_deliver_dinner_with_lunch_from_template(template, periods)
+    card_kind = enum_card_kind_for_template(template)
+    new_label = membership_template_plan_label(template)
+    latest = _latest_applied_paid_card_order(db, int(member.id))
+    if latest is None:
+        created_by = (operator or "admin").strip()[:64] or "admin"
+        db.add(
+            MemberCardOrder(
+                member_id=int(member.id),
+                tenant_id=int(member.tenant_id),
+                store_id=int(member.store_id),
+                membership_template_id=int(template.id),
+                meal_periods_snapshot=periods,
+                deliver_dinner_with_lunch_snapshot=combo,
+                card_kind=card_kind,
+                pay_channel=CardPayChannel.OFFLINE.value,
+                pay_status=CardOrderPayStatus.PAID.value,
+                amount_yuan=Decimal("0.00"),
+                remark="档案修改套餐类型（不入账次数）",
+                applied_to_member=True,
+                created_by=created_by,
+            )
+        )
+        return {
+            "order_changed": True,
+            "prev_template_id": None,
+            "new_template_id": int(template.id),
+            "new_label": new_label,
+        }
+
+    prev_tid = (
+        int(latest.membership_template_id) if latest.membership_template_id is not None else None
+    )
+    card_kind = enum_card_kind_for_template(template)
+    order_changed = (
+        prev_tid != int(template.id)
+        or (latest.card_kind or "") != card_kind
+        or list(latest.meal_periods_snapshot or []) != list(periods)
+        or bool(latest.deliver_dinner_with_lunch_snapshot) != bool(combo)
+    )
+    latest.membership_template_id = int(template.id)
+    latest.card_kind = card_kind
+    latest.meal_periods_snapshot = periods
+    latest.deliver_dinner_with_lunch_snapshot = combo
+    db.add(latest)
+
+    older_orders = db.scalars(
+        select(MemberCardOrder).where(
+            MemberCardOrder.member_id == int(member.id),
+            MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+            MemberCardOrder.applied_to_member.is_(True),
+            MemberCardOrder.id != int(latest.id),
+        )
+    ).all()
+    for row in older_orders:
+        if list(row.meal_periods_snapshot or []) != list(periods) or bool(
+            row.deliver_dinner_with_lunch_snapshot
+        ) != bool(combo):
+            row.meal_periods_snapshot = periods
+            row.deliver_dinner_with_lunch_snapshot = combo
+            db.add(row)
+            order_changed = True
+
+    return {
+        "order_changed": order_changed,
+        "prev_template_id": prev_tid,
+        "new_template_id": int(template.id),
+        "new_label": new_label,
+    }
 
 
 def sync_member_plan_type_from_latest_card_order(db: Session, member: Member) -> None:

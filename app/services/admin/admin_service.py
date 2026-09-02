@@ -841,12 +841,22 @@ def list_members_paged(
             region_ids.add(int(addr.delivery_region_id))
     id_to_name = delivery_region_name_map(db, region_ids)
     from app.services.meal_period.card_eligibility import members_entitled_meal_periods_map
-    from app.services.meal_period.plan_type_sync import format_plan_type_display, meal_scope_label_from_periods
+    from app.services.meal_period.plan_type_sync import (
+        format_plan_type_display,
+        load_member_plan_type_display_map,
+        meal_scope_label_from_periods,
+    )
     from app.services.meal_period.units import load_dinner_meal_period_states_map
     from app.services.member.member_lifecycle_service import resolve_members_lifecycle_map
 
     members_by_id = {int(m.id): m for m in members}
     entitled_map = members_entitled_meal_periods_map(db, member_ids, members_by_id=members_by_id)
+    plan_display_map = load_member_plan_type_display_map(
+        db,
+        member_ids,
+        plan_type_by_member={int(m.id): m.plan_type for m in members},
+        periods_by_member=entitled_map,
+    )
     dinner_state_map = load_dinner_meal_period_states_map(db, member_ids)
     on_leave_by_id = {int(m.id): _member_on_leave_today(m, biz_today) for m in members}
     lifecycle_map = resolve_members_lifecycle_map(
@@ -892,7 +902,8 @@ def list_members_paged(
                 plan_type=m.plan_type,
                 entitled_meal_periods=sorted(periods),
                 meal_scope_label=meal_scope_label_from_periods(periods),
-                plan_type_display=format_plan_type_display(m.plan_type, periods),
+                plan_type_display=plan_display_map.get(int(m.id))
+                or format_plan_type_display(m.plan_type, periods),
                 dinner_balance=int(dinner_row.balance or 0) if dinner_row else 0,
                 dinner_meal_quota_total=int(dinner_row.meal_quota_total or 0) if dinner_row else 0,
                 dinner_is_leaved_tomorrow=bool(dinner_row.is_leaved_tomorrow) if dinner_row else False,
