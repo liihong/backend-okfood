@@ -89,20 +89,64 @@ def load_member_card_kind_label_map(
     return out
 
 
+def _normalized_period_set(periods: frozenset[str] | set[str] | list[str] | None) -> frozenset[str]:
+    """空餐段视为经典午餐，与工单快照缺省口径一致。"""
+    normalized = {(x or "").strip().lower() for x in (periods or []) if x}
+    return normalized if normalized else frozenset({"lunch"})
+
+
+def catalog_template_plan_label_for_member(
+    plan_type: str | None,
+    periods: frozenset[str] | set[str] | list[str] | None,
+    templates: list[MembershipCardTemplate] | list[object],
+) -> str | None:
+    """
+    无工单卡包时，按计费周期 + 餐段匹配本店卡包展示名。
+    只读展示，不写会员/工单。
+    """
+    if not templates:
+        return None
+    from app.services.meal_period.template_periods import catalog_periods_from_template
+    from app.services.member.member_card_order_service import _plan_for_membership_template
+
+    want_plan = (plan_type or "").strip()
+    want_periods = _normalized_period_set(periods)
+    hits: list[object] = []
+    for tpl in templates:
+        if _plan_for_membership_template(tpl).value != want_plan:
+            continue
+        tpl_periods = _normalized_period_set(catalog_periods_from_template(tpl))
+        if tpl_periods == want_periods:
+            hits.append(tpl)
+    if not hits:
+        return None
+
+    def _rank(t: object) -> tuple[int, int, int]:
+        active = 0 if bool(getattr(t, "is_active", True)) else 1
+        order = int(getattr(t, "sort_order", 0) or 0)
+        tid = int(getattr(t, "id", 0) or 0)
+        return (active, order, tid)
+
+    hits.sort(key=_rank)
+    return membership_template_plan_label(hits[0])
+
+
 def load_member_plan_type_display_map(
     db: Session,
     member_ids: list[int],
     *,
     plan_type_by_member: dict[int, str | None] | None = None,
     periods_by_member: dict[int, frozenset[str]] | None = None,
+    catalog_templates: list[MembershipCardTemplate] | list[object] | None = None,
 ) -> dict[int, str]:
     """
-    档案库套餐列：优先最近已入账工单的卡包文案（与编辑下拉一致，如「月午餐卡」），
-    无模版时再回退「月卡 · 全餐」。
+    档案库套餐列：优先最近已入账工单的卡包文案（与筛选下拉一致）；
+    无模版时按周期+餐段匹配本店卡包名，再回退「月卡 · 全餐」。不写库。
     """
     ids = sorted({int(x) for x in member_ids if x is not None})
     pt_map = plan_type_by_member or {}
     periods_map = periods_by_member or {}
+    templates = list(catalog_templates or [])
     out: dict[int, str] = {}
     if not ids:
         return out
@@ -141,6 +185,12 @@ def load_member_plan_type_display_map(
         label = tpl_label_by_mid.get(mid, "").strip()
         if label:
             out[mid] = label
+            continue
+        catalog_label = catalog_template_plan_label_for_member(
+            pt_map.get(mid), periods_map.get(mid, frozenset()), templates
+        )
+        if catalog_label:
+            out[mid] = catalog_label
         else:
             out[mid] = format_plan_type_display(
                 pt_map.get(mid), periods_map.get(mid, frozenset())

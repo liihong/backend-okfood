@@ -545,6 +545,37 @@ export function mealScopeLabelFromPeriods(periods) {
   return '午餐'
 }
 
+/**
+ * 卡包入账次数按餐段拆开：meals_grant 会原样写入每个勾选餐段，不是午晚合计。
+ * 例：午餐+24次、晚餐+24次、午餐+48次 晚餐+48次
+ * @param {{ meals_grant?: unknown, meal_periods?: unknown } | null | undefined} tpl
+ * @returns {{ period: 'lunch' | 'dinner', label: string, text: string }[]}
+ */
+export function mealsGrantCreditParts(tpl) {
+  const n = Number(tpl?.meals_grant)
+  const txt = Number.isFinite(n) && n > 0 ? String(Math.trunc(n)) : '—'
+  const ps = Array.isArray(tpl?.meal_periods) ? tpl.meal_periods : []
+  const hasLunch = ps.includes('lunch')
+  const hasDinner = ps.includes('dinner')
+  /** @type {{ period: 'lunch' | 'dinner', label: string, text: string }[]} */
+  const parts = []
+  if (hasLunch) parts.push({ period: 'lunch', label: '午餐', text: `午餐+${txt}次` })
+  if (hasDinner) parts.push({ period: 'dinner', label: '晚餐', text: `晚餐+${txt}次` })
+  if (!parts.length) parts.push({ period: 'lunch', label: '午餐', text: `午餐+${txt}次` })
+  return parts
+}
+
+/**
+ * 入账次数展示文案（与开卡入账逻辑一致：每个勾选餐段各加 meals_grant）
+ * @param {{ meals_grant?: unknown, meal_periods?: unknown } | null | undefined} tpl
+ * @param {string} [joiner]
+ */
+export function mealsGrantCreditLabel(tpl, joiner = '  ') {
+  return mealsGrantCreditParts(tpl)
+    .map((p) => p.text)
+    .join(joiner)
+}
+
 /** 管理端方案 A：「周卡 · 全餐」 */
 export function formatPlanTypeDisplay(planType, periods) {
   const pt = String(planType || '次卡').trim() || '次卡'

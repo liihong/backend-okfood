@@ -56,6 +56,10 @@ function matchMemberTemplate(templates, member) {
     return kl === planBase && mealScopeLabelFromPeriods(t.meal_periods) === scope
   })
   if (exact?.id != null) return Number(exact.id)
+  const byPlanAndScope = list.find((t) => {
+    return planTypeFromTemplate(t) === planBase && mealScopeLabelFromPeriods(t.meal_periods) === scope
+  })
+  if (byPlanAndScope?.id != null) return Number(byPlanAndScope.id)
   return null
 }
 

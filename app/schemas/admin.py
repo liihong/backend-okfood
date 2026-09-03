@@ -445,7 +445,7 @@ class MemberAdminOut(BaseModel):
         description="开卡工单合并后的餐段资格：lunch / dinner",
     )
     meal_scope_label: str = Field("", description="午餐 / 晚餐 / 全餐")
-    plan_type_display: str = Field("", description="管理端展示：周卡 · 全餐（方案 A）")
+    plan_type_display: str = Field("", description="管理端展示：本店卡包名称；无卡包工单时按周期+餐段匹配")
     dinner_balance: int = Field(0, ge=0, description="晚餐剩余次数")
     dinner_meal_quota_total: int = Field(
         0,

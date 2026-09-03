@@ -17,6 +17,8 @@ import {
   dishImageDisplayUrl,
   fetchAdminStoreBranding,
   handleAdminLogout,
+  mealsGrantCreditLabel,
+  mealsGrantCreditParts,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
@@ -94,13 +96,15 @@ function fmtPriceYuan(v) {
   return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-/** 名称列副标题：优先商品简介 */
+/** 名称列副标题：优先商品简介；否则按餐段写清入账次数（非午晚合计） */
 function cardSubtitle(row) {
   const t = String(row.intro_short || '').trim()
   if (t) return t
-  const meals = row.meals_grant ?? '—'
-  return `入账 ${meals} 次 · 小程序展示模板`
+  return `${mealsGrantCreditLabel(row)} · 小程序展示模板`
 }
+
+/** 编辑弹窗：按当前勾选餐段预览将写入的次数 */
+const formCreditPreview = computed(() => mealsGrantCreditLabel(form.value))
 
 async function onCardPhotoUploadChange(uploadFile) {
   const file = uploadFile?.raw
@@ -352,7 +356,13 @@ onMounted(() => {
                 <div v-else :class="cardPreviewClass(row)">
                   <span class="mcard-mini-brand">{{ cardPreviewBrandName }}</span>
                   <span class="mcard-mini-name">{{ row.name || '—' }}</span>
-                  <span class="mcard-mini-meals">{{ row.meals_grant }}餐</span>
+                  <span class="mcard-mini-meals">
+                    <span
+                      v-for="part in mealsGrantCreditParts(row)"
+                      :key="part.period"
+                      class="mcard-mini-meals-line"
+                    >{{ part.text }}</span>
+                  </span>
                 </div>
               </td>
               <td>
@@ -367,7 +377,13 @@ onMounted(() => {
               </td>
               <td>
                 <div class="mcard-cell-center">
-                  <span class="mcard-meals-badge">{{ row.meals_grant ?? '—' }}</span>
+                  <span class="mcard-meals-badge">
+                    <span
+                      v-for="part in mealsGrantCreditParts(row)"
+                      :key="part.period"
+                      class="mcard-meals-badge-line"
+                    >{{ part.text }}</span>
+                  </span>
                 </div>
               </td>
               <td>
@@ -484,8 +500,8 @@ onMounted(() => {
             </div>
           </div>
 
-          <div class="mcard-field">
-            <label class="mcard-form-label">单笔入账餐次</label>
+          <div class="mcard-field mcard-field--span2">
+            <label class="mcard-form-label">每个餐段入账次数</label>
             <el-input-number
               v-model="form.meals_grant"
               :min="1"
@@ -494,6 +510,9 @@ onMounted(() => {
               controls-position="right"
               class="mcard-form-control mcard-form-control--number"
             />
+            <p class="mcard-form-hint">
+              勾选几个餐段就分别写入几次，不是午晚加总。当前将入账：<strong>{{ formCreditPreview }}</strong>
+            </p>
           </div>
 
           <div class="mcard-field">
@@ -853,12 +872,20 @@ onMounted(() => {
 }
 
 .mcard-mini-meals {
-  font-size: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  font-size: 8px;
   font-weight: 900;
   text-align: right;
-  font-family: var(--okfood-font-number);
+  line-height: 1.15;
   position: relative;
   z-index: 1;
+}
+
+.mcard-mini-meals-line {
+  white-space: nowrap;
 }
 
 .mcard-thumb-wrap {
@@ -926,15 +953,23 @@ onMounted(() => {
   background: #ecfdf5;
   color: var(--mcard-primary);
   border: 1px solid rgba(16, 185, 129, 0.15);
-  width: 32px;
-  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 6px 10px;
   border-radius: 10px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   justify-content: center;
-  font-size: 13px;
-  font-weight: 900;
-  font-family: var(--okfood-font-number);
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.mcard-meals-badge-line {
+  display: block;
 }
 
 .mcard-price-stack {

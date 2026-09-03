@@ -8,6 +8,7 @@ import {
   apiJson,
   adminAccessToken,
   handleAdminLogout,
+  mealsGrantCreditLabel,
   planDefaultTotal,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
@@ -122,10 +123,10 @@ function mealPeriodBadgeClass(periods) {
   return 'co-meal-period--lunch'
 }
 
-/** 卡包模版下拉文案：名称 + 种类 + 餐段 + 入账次数 */
+/** 卡包模版下拉文案：名称 + 种类 + 餐段 + 分餐段入账次数 */
 function templateOptionLabel(t) {
   const periods = Array.isArray(t.meal_periods) ? t.meal_periods : ['lunch']
-  return `${t.name}（${t.kind_label || '卡包'} · ${mealPeriodsLabel(periods)} · +${t.meals_grant} 次）`
+  return `${t.name}（${t.kind_label || '卡包'} · ${mealPeriodsLabel(periods)} · ${mealsGrantCreditLabel(t, ' ')}）`
 }
 
 /** 列表格内备注（列宽加大后以换行展示全文；空为 —） */
@@ -1418,7 +1419,7 @@ class="member-pill"
             </p>
             <p v-else-if="selectedEditTemplate" class="modal-hint">
               所选餐段：<strong>{{ mealPeriodsLabel(selectedEditTemplate.meal_periods) }}</strong>
-              · 同步入账 +{{ selectedEditTemplate.meals_grant }} 次
+              · 同步入账 {{ mealsGrantCreditLabel(selectedEditTemplate) }}
             </p>
           </div>
           <div class="form-group open-mode-group">

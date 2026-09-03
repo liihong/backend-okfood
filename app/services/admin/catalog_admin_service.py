@@ -171,34 +171,36 @@ def membership_template_public_dump(row: MembershipCardTemplate) -> dict:
 
 def resolve_membership_template_member_filter(
     db: Session, *, template_id: int, tenant_id: int, store_id: int
-) -> tuple[list[int], str | None]:
+) -> tuple[list[int], str | None, tuple[str, ...]]:
     """
     会员档案库按租户卡包筛选：返回同店「种类 + 餐段」相同的模版 id，
-    以及无卡包工单时可用的 plan_type 兜底（仅种类为周卡/月卡且未覆盖晚餐）。
+    以及无卡包工单时按计费周期 + 餐段兜底（只读匹配，不改档案）。
     """
-    from app.models.enums import PlanType
-    from app.services.meal_period.template_periods import normalize_meal_periods_list
+    from app.services.meal_period.template_periods import (
+        catalog_periods_from_template,
+        meal_periods_from_template,
+    )
+    from app.services.member.member_card_order_service import _plan_for_membership_template
 
     row = get_membership_template_row(
         db, template_id=int(template_id), tenant_id=int(tenant_id), store_id=int(store_id)
     )
     want_kind = (row.kind_label or "").strip()
-    want_periods = tuple(normalize_meal_periods_list(getattr(row, "meal_periods", None)))
+    want_periods = tuple(meal_periods_from_template(row))
     ids: list[int] = []
     for t in list_membership_templates(
         db, tenant_id=int(row.tenant_id), store_id=int(row.store_id), active_only=False
     ):
         if (t.kind_label or "").strip() != want_kind:
             continue
-        if tuple(normalize_meal_periods_list(getattr(t, "meal_periods", None))) != want_periods:
+        if tuple(meal_periods_from_template(t)) != want_periods:
             continue
         ids.append(int(t.id))
     if int(row.id) not in ids:
         ids.append(int(row.id))
-    fallback: str | None = None
-    if want_kind in (PlanType.WEEK.value, PlanType.MONTH.value) and "dinner" not in set(want_periods):
-        fallback = want_kind
-    return ids, fallback
+    fallback = _plan_for_membership_template(row).value
+    # 筛选用卡包文案餐段，避免「晚餐」库内勾了午餐后与「午餐+晚餐」混筛
+    return ids, fallback, tuple(catalog_periods_from_template(row))
 
 
 def membership_template_dump(row: MembershipCardTemplate) -> dict:

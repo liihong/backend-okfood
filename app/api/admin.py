@@ -1221,10 +1221,11 @@ def users(
         v = ""
     tpl_ids: list[int] | None = None
     tpl_fallback_plan: str | None = None
+    tpl_fallback_periods: tuple[str, ...] | None = None
     if membership_template_id is not None:
         from app.services.admin.catalog_admin_service import resolve_membership_template_member_filter
 
-        tpl_ids, tpl_fallback_plan = resolve_membership_template_member_filter(
+        tpl_ids, tpl_fallback_plan, tpl_fallback_periods = resolve_membership_template_member_filter(
             db,
             template_id=int(membership_template_id),
             tenant_id=int(tenant_id),
@@ -1278,6 +1279,7 @@ def users(
         plan_type=pt or None,
         membership_template_ids=tpl_ids,
         membership_template_fallback_plan_type=tpl_fallback_plan,
+        membership_template_fallback_meal_periods=tpl_fallback_periods,
         on_leave_only=on_leave_only,
         store_id=store_id,
         renew_pending_only=renew_pending_only,

@@ -4,7 +4,7 @@ import time
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import and_, case, delete, exists, func, literal, or_, select, true, update
+from sqlalchemy import String, and_, case, cast, delete, exists, func, literal, or_, select, true, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, load_only
 
@@ -312,14 +312,78 @@ def _member_awaiting_setup_scope_clause():
     return _member_lifecycle_awaiting_setup_core_scope()
 
 
+def _member_meal_period_match_clause(want_periods: tuple[str, ...] | list[str] | None):
+    """
+    只读匹配餐段资格，与档案套餐展示兜底同一口径：
+    有已入账工单看快照并集；无工单时午餐看 members.balance、晚餐看 member_meal_period_state。
+    """
+    want = {(x or "").strip().lower() for x in (want_periods or []) if x}
+    if not want:
+        want = {"lunch"}
+    want_lunch = "lunch" in want
+    want_dinner = "dinner" in want
+    paid = and_(
+        MemberCardOrder.member_id == Member.id,
+        MemberCardOrder.pay_status == CardOrderPayStatus.PAID.value,
+        MemberCardOrder.applied_to_member.is_(True),
+    )
+    snap_text = func.coalesce(cast(MemberCardOrder.meal_periods_snapshot, String), "")
+    has_any_paid = exists(select(1).select_from(MemberCardOrder).where(paid))
+    has_dinner_snap = exists(
+        select(1).select_from(MemberCardOrder).where(paid, snap_text.like("%dinner%"))
+    )
+    has_lunch_snap = exists(
+        select(1).select_from(MemberCardOrder).where(paid, snap_text.like("%lunch%"))
+    )
+    has_empty_snap = exists(
+        select(1)
+        .select_from(MemberCardOrder)
+        .where(
+            paid,
+            or_(
+                MemberCardOrder.meal_periods_snapshot.is_(None),
+                snap_text == "",
+                snap_text == "[]",
+                snap_text == "null",
+            ),
+        )
+    )
+    # 空快照视为经典午餐卡
+    has_lunch_effective = or_(has_lunch_snap, has_empty_snap)
+    has_dinner_balance = exists(
+        select(1)
+        .select_from(MemberMealPeriodState)
+        .where(
+            MemberMealPeriodState.member_id == Member.id,
+            MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+            MemberMealPeriodState.balance > 0,
+        )
+    )
+    if want_lunch and want_dinner:
+        return or_(
+            and_(has_any_paid, has_dinner_snap, has_lunch_effective),
+            and_(~has_any_paid, Member.balance > 0, has_dinner_balance),
+        )
+    if want_dinner and not want_lunch:
+        return or_(
+            and_(has_any_paid, has_dinner_snap, ~has_lunch_effective),
+            and_(~has_any_paid, has_dinner_balance, Member.balance <= 0),
+        )
+    return or_(
+        and_(has_any_paid, ~has_dinner_snap),
+        and_(~has_any_paid, ~has_dinner_balance),
+    )
+
+
 def _member_membership_template_filter_scope(
     template_ids: list[int],
     *,
     fallback_plan_type: str | None = None,
+    fallback_meal_periods: tuple[str, ...] | list[str] | None = None,
 ):
     """
     最近一笔已缴已入账开卡工单命中指定卡包；
-    无此类工单时，可选按 members.plan_type 兜底（导入档案、经典周/月卡）。
+    无卡包工单（导入档案、经典周/月卡）时按 plan_type + 餐段匹配本店卡包，不改档案。
     """
     ids = sorted({int(x) for x in template_ids if x is not None and int(x) > 0})
     if not ids:
@@ -335,15 +399,6 @@ def _member_membership_template_filter_scope(
         )
         .group_by(MemberCardOrder.member_id)
     ).subquery("latest_paid_card_for_plan")
-    latest_match = [MemberCardOrder.membership_template_id.in_(ids)]
-    fb = (fallback_plan_type or "").strip()
-    if fb:
-        latest_match.append(
-            and_(
-                MemberCardOrder.membership_template_id.is_(None),
-                or_(MemberCardOrder.card_kind == fb, Member.plan_type == fb),
-            )
-        )
     via_latest = exists(
         select(1)
         .select_from(MemberCardOrder)
@@ -355,10 +410,25 @@ def _member_membership_template_filter_scope(
             ),
         )
         .where(MemberCardOrder.member_id == Member.id)
-        .where(or_(*latest_match))
+        .where(MemberCardOrder.membership_template_id.in_(ids))
     )
+    fb = (fallback_plan_type or "").strip()
     if not fb:
         return via_latest
+    latest_unbound = exists(
+        select(1)
+        .select_from(MemberCardOrder)
+        .join(
+            latest_sq,
+            and_(
+                MemberCardOrder.member_id == latest_sq.c.mid,
+                MemberCardOrder.id == latest_sq.c.max_id,
+            ),
+        )
+        .where(MemberCardOrder.member_id == Member.id)
+        .where(MemberCardOrder.membership_template_id.is_(None))
+        .where(or_(MemberCardOrder.card_kind == fb, Member.plan_type == fb))
+    )
     has_applied_paid = exists(
         select(1)
         .select_from(MemberCardOrder)
@@ -368,7 +438,16 @@ def _member_membership_template_filter_scope(
             MemberCardOrder.applied_to_member.is_(True),
         )
     )
-    return or_(via_latest, and_(~has_applied_paid, Member.plan_type == fb))
+    period_ok = (
+        true()
+        if fallback_meal_periods is None
+        else _member_meal_period_match_clause(fallback_meal_periods)
+    )
+    via_catalog_shape = and_(
+        period_ok,
+        or_(and_(~has_applied_paid, Member.plan_type == fb), latest_unbound),
+    )
+    return or_(via_latest, via_catalog_shape)
 
 
 def _apply_member_list_filters(
@@ -384,6 +463,7 @@ def _apply_member_list_filters(
     plan_type: str | None = None,
     membership_template_ids: list[int] | None = None,
     membership_template_fallback_plan_type: str | None = None,
+    membership_template_fallback_meal_periods: tuple[str, ...] | list[str] | None = None,
     on_leave_only: bool = False,
     renew_pending_only: bool = False,
     delivering_only: bool = False,
@@ -430,6 +510,7 @@ def _apply_member_list_filters(
             _member_membership_template_filter_scope(
                 membership_template_ids,
                 fallback_plan_type=membership_template_fallback_plan_type,
+                fallback_meal_periods=membership_template_fallback_meal_periods,
             )
         )
     elif plan_type:
@@ -762,6 +843,7 @@ def list_members_paged(
     plan_type: str | None = None,
     membership_template_ids: list[int] | None = None,
     membership_template_fallback_plan_type: str | None = None,
+    membership_template_fallback_meal_periods: tuple[str, ...] | list[str] | None = None,
     on_leave_only: bool = False,
     renew_pending_only: bool = False,
     delivering_only: bool = False,
@@ -780,6 +862,7 @@ def list_members_paged(
         plan_type=plan_type,
         membership_template_ids=membership_template_ids,
         membership_template_fallback_plan_type=membership_template_fallback_plan_type,
+        membership_template_fallback_meal_periods=membership_template_fallback_meal_periods,
         on_leave_only=on_leave_only,
         store_id=store_id,
         renew_pending_only=renew_pending_only,
@@ -797,6 +880,7 @@ def list_members_paged(
         plan_type=plan_type,
         membership_template_ids=membership_template_ids,
         membership_template_fallback_plan_type=membership_template_fallback_plan_type,
+        membership_template_fallback_meal_periods=membership_template_fallback_meal_periods,
         on_leave_only=on_leave_only,
         store_id=store_id,
         renew_pending_only=renew_pending_only,
@@ -840,6 +924,7 @@ def list_members_paged(
         if addr and addr.delivery_region_id is not None:
             region_ids.add(int(addr.delivery_region_id))
     id_to_name = delivery_region_name_map(db, region_ids)
+    from app.services.admin.catalog_admin_service import list_membership_templates
     from app.services.meal_period.card_eligibility import members_entitled_meal_periods_map
     from app.services.meal_period.plan_type_sync import (
         format_plan_type_display,
@@ -851,11 +936,18 @@ def list_members_paged(
 
     members_by_id = {int(m.id): m for m in members}
     entitled_map = members_entitled_meal_periods_map(db, member_ids, members_by_id=members_by_id)
+    catalog_templates = list_membership_templates(
+        db,
+        tenant_id=int(members[0].tenant_id),
+        store_id=int(members[0].store_id),
+        active_only=False,
+    )
     plan_display_map = load_member_plan_type_display_map(
         db,
         member_ids,
         plan_type_by_member={int(m.id): m.plan_type for m in members},
         periods_by_member=entitled_map,
+        catalog_templates=catalog_templates,
     )
     dinner_state_map = load_dinner_meal_period_states_map(db, member_ids)
     on_leave_by_id = {int(m.id): _member_on_leave_today(m, biz_today) for m in members}

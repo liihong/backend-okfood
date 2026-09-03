@@ -75,9 +75,14 @@ def _infer_meal_periods_from_template_labels(name: str, kind_label: str) -> list
         return None
     if any(marker in text for marker in _FULL_MEAL_LABEL_MARKERS):
         return [MealPeriod.LUNCH.value, MealPeriod.DINNER.value]
-    if any(marker in text for marker in _DINNER_ONLY_LABEL_MARKERS):
+    # 「晚餐」单独出现（无午餐/全餐）视为纯晚餐；须排在全餐标记之后，以免「午餐+晚餐」被拆开
+    if any(marker in text for marker in _DINNER_ONLY_LABEL_MARKERS) or (
+        "晚餐" in text and "午餐" not in text
+    ):
         return [MealPeriod.DINNER.value]
-    if any(marker in text for marker in _LUNCH_ONLY_LABEL_MARKERS):
+    if any(marker in text for marker in _LUNCH_ONLY_LABEL_MARKERS) or (
+        "午餐" in text and "晚餐" not in text
+    ):
         return [MealPeriod.LUNCH.value]
     return None
 
@@ -96,6 +101,20 @@ def meal_periods_from_template(tpl: MembershipCardTemplate) -> list[str]:
         if inferred:
             return inferred
     return explicit
+
+
+def catalog_periods_from_template(tpl: MembershipCardTemplate) -> list[str]:
+    """
+    档案展示/筛选用的卡包餐段：以种类文案为准，不写库。
+    「晚餐」即使库内误勾了午餐，展示上仍视为纯晚餐，避免与「午餐+晚餐」混在一起。
+    """
+    inferred = _infer_meal_periods_from_template_labels(
+        getattr(tpl, "name", "") or "",
+        getattr(tpl, "kind_label", "") or "",
+    )
+    if inferred:
+        return inferred
+    return meal_periods_from_template(tpl)
 
 
 def classic_card_meal_periods_snapshot() -> list[str]:
