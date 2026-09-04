@@ -416,7 +416,7 @@ async function exportMembersExcel() {
       套餐类型: u.plan || '',
       配送片区: u.area && u.area !== '—' ? String(u.area) : '',
       配送地址详情: memberAddressDetailWithoutArea(u) || '',
-      '剩余／总次数': u.balanceLabel || String(u.balance),
+      '午餐/晚餐/总餐次': u.balanceLabel || String(u.balance),
       每日份数: u.daily_meal_units ?? '',
       请假信息: u.leave_kind
         ? [u.leave_badge, u.leave_detail].filter(Boolean).join(' ').trim()
@@ -1389,19 +1389,24 @@ onUnmounted(() => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="剩余 / 总次数" align="center" min-width="90">
+        <el-table-column label="午餐 / 晚餐 / 总餐次" align="left" min-width="128">
           <template #default="{ row: u }">
-            <div class="balance-cell">
-              <span class="balance-text" :class="{ warning: u.balance <= 2 && u.is_active }">{{
-                u.balanceLabel
-              }}</span>
-              <p
-                v-if="u.tomorrow_leave && !u.is_on_leave_today"
-                class="balance-leave-hint balance-leave-hint--tomorrow"
-              >
-                明日配送请假
-              </p>
-            </div>
+            <el-tooltip
+              :content="u.remainTooltip || ''"
+              placement="top"
+              :show-after="400"
+              :disabled="!u.remainTooltip"
+            >
+              <div class="balance-cell">
+                <span class="balance-text" :class="{ warning: u.remainLow }">{{ u.balanceLabel }}</span>
+                <p
+                  v-if="u.tomorrow_leave && !u.is_on_leave_today"
+                  class="balance-leave-hint balance-leave-hint--tomorrow"
+                >
+                  明日配送请假
+                </p>
+              </div>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column label="状态" min-width="108" width="108" class-name="td-col-status">
@@ -1551,9 +1556,9 @@ onUnmounted(() => {
               }}</span>
               <span
                 class="balance-text member-profile-card__balance"
-                :class="{ warning: u.balance <= 2 && u.is_active }"
-                >{{ u.balanceLabel }}</span
-              >
+                :class="{ warning: u.remainLow }"
+                :title="u.remainTooltip || ''"
+              >{{ u.balanceLabel }}</span>
               <span v-if="u.delivery_start_date" class="member-profile-card__start-date">
                 起送 {{ u.delivery_start_date }}
               </span>

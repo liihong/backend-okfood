@@ -713,6 +713,66 @@ export function resolveMemberStatusFromLifecycle(raw, balance = null) {
   return '正常配送中'
 }
 
+/** 档案是否应展示晚餐剩余：有晚餐资格，或晚餐池仍有余次/累计。 */
+export function memberShowsDinnerRemain(row) {
+  if (!row || typeof row !== 'object') return false
+  const periods = Array.isArray(row.entitled_meal_periods) ? row.entitled_meal_periods : []
+  if (periods.map((x) => String(x || '').trim().toLowerCase()).includes('dinner')) return true
+  return (Number(row.dinner_balance) || 0) > 0 || (Number(row.dinner_meal_quota_total) || 0) > 0
+}
+
+/** 纯晚餐卡默认不展示午餐行；仍有午餐余次/累计时例外。 */
+export function memberShowsLunchRemain(row) {
+  if (!row || typeof row !== 'object') return true
+  const periods = Array.isArray(row.entitled_meal_periods) ? row.entitled_meal_periods : []
+  const set = new Set(periods.map((x) => String(x || '').trim().toLowerCase()))
+  if (set.has('lunch') || !set.size) return true
+  if (set.has('dinner') && !set.has('lunch')) {
+    return (Number(row.balance) || 0) > 0 || (Number(row.meal_quota_total) || 0) > 0
+  }
+  return true
+}
+
+/** 生效中且任一展示中的餐段余次 ≤2，用于列表标红。 */
+export function memberRemainLow(row) {
+  if (!row || row.is_active === false) return false
+  if (memberShowsLunchRemain(row) && (Number(row.balance) || 0) <= 2) return true
+  if (memberShowsDinnerRemain(row) && (Number(row.dinner_balance) || 0) <= 2) return true
+  return false
+}
+
+/**
+ * 累计入账文案：开卡/续卡叠加的分母，不随每日扣次减少。
+ * 午晚同额时只写一个数字，续卡后 48→96 即可看出。
+ */
+export function memberQuotaHint(row, displayTotal = null) {
+  if (!row || typeof row !== 'object') return ''
+  const lunchQ = Number(row.meal_quota_total) || 0
+  const dinnerQ = Number(row.dinner_meal_quota_total) || 0
+  const showLunch = memberShowsLunchRemain(row)
+  const showDinner = memberShowsDinnerRemain(row)
+  if (showLunch && showDinner) {
+    if (lunchQ > 0 && dinnerQ > 0 && lunchQ === dinnerQ) return `累计 ${lunchQ}`
+    if (lunchQ > 0 && dinnerQ > 0) return `累计 ${lunchQ}+${dinnerQ}`
+    if (lunchQ > 0) return `累计 ${lunchQ}`
+    if (dinnerQ > 0) return `累计 ${dinnerQ}`
+    return ''
+  }
+  if (showDinner && dinnerQ > 0) return `累计 ${dinnerQ}`
+  if (displayTotal != null && Number(displayTotal) > 0) return `累计 ${displayTotal}`
+  if (lunchQ > 0) return `累计 ${lunchQ}`
+  return ''
+}
+
+/**
+ * 累计入账数字：开卡/续卡叠加，不随每日扣次减少。午晚同额只写一个数。
+ */
+export function memberQuotaTotalText(row, displayTotal = null) {
+  const hint = memberQuotaHint(row, displayTotal)
+  const n = String(hint || '').replace(/^累计\s*/, '').trim()
+  return n || '—'
+}
+
 /** GET /api/admin/users 单条映射为表格行 */
 export function mapAdminUserToRow(raw, idx) {
   if (!raw || typeof raw !== 'object') {
@@ -723,6 +783,16 @@ export function mapAdminUserToRow(raw, idx) {
       balance: 0,
       delivery_start_date: '',
       balanceLabel: '0',
+      remainQuotaHint: '',
+      remainQuotaText: '—',
+      remainLunchText: '0',
+      remainDinnerText: '—',
+      remainTooltip: '',
+      showLunchRemain: true,
+      showDinnerRemain: false,
+      remainLow: false,
+      remainLunchLow: false,
+      remainDinnerLow: false,
       totalQuota: null,
       area: '—',
       delivery_region_id: null,
@@ -771,13 +841,36 @@ export function mapAdminUserToRow(raw, idx) {
   const totalQuota = planDefaultTotal(planBase)
   const mealQuotaTotal = Number(raw.meal_quota_total)
   const hasPersistedTotal = Number.isFinite(mealQuotaTotal) && mealQuotaTotal > 0
-  // 有 meal_quota_total 时与 balance 组成「剩余/总」；否则沿用原周卡/月卡展示规则
+  // 累计入账分母：开卡/续卡叠加；列表主展示改为分餐段剩余
   const displayTotal = hasPersistedTotal
     ? mealQuotaTotal
     : totalQuota != null
       ? Math.max(totalQuota, balance)
       : null
-  const balanceLabel = displayTotal != null ? `${balance} / ${displayTotal}` : String(balance)
+  const dinnerBalance = Number(raw.dinner_balance) || 0
+  const dinnerMealQuotaTotal = Number(raw.dinner_meal_quota_total) || 0
+  const persistQuota = hasPersistedTotal ? mealQuotaTotal : 0
+  const rowForRemain = {
+    entitled_meal_periods: entitledPeriods,
+    balance,
+    dinner_balance: dinnerBalance,
+    meal_quota_total: persistQuota,
+    dinner_meal_quota_total: dinnerMealQuotaTotal,
+    is_active: active,
+  }
+  const showLunchRemain = memberShowsLunchRemain(rowForRemain)
+  const showDinnerRemain = memberShowsDinnerRemain(rowForRemain)
+  const remainLunchText = showLunchRemain ? String(balance) : '—'
+  const remainDinnerText = showDinnerRemain ? String(dinnerBalance) : '—'
+  const remainQuotaHint = memberQuotaHint(rowForRemain, displayTotal)
+  const remainQuotaText = memberQuotaTotalText(rowForRemain, displayTotal)
+  const balanceLabel = `${remainLunchText} / ${remainDinnerText} / ${remainQuotaText}`
+  const remainTooltipBits = []
+  if (showLunchRemain) remainTooltipBits.push(`午餐剩余 ${balance} 次`)
+  if (showDinnerRemain) remainTooltipBits.push(`晚餐剩余 ${dinnerBalance} 次`)
+  if (remainQuotaHint) {
+    remainTooltipBits.push(`总餐次 ${remainQuotaText}（开卡/续卡入账叠加，不随每日扣次减少）`)
+  }
 
   const leaveList = buildLeaveListFields(raw)
 
@@ -795,6 +888,16 @@ export function mapAdminUserToRow(raw, idx) {
     balance,
     delivery_start_date: deliveryStartYmd,
     balanceLabel,
+    remainQuotaHint,
+    remainQuotaText,
+    remainLunchText,
+    remainDinnerText,
+    remainTooltip: remainTooltipBits.join('\n'),
+    showLunchRemain,
+    showDinnerRemain,
+    remainLow: memberRemainLow(rowForRemain),
+    remainLunchLow: showLunchRemain && active && balance <= 2,
+    remainDinnerLow: showDinnerRemain && active && dinnerBalance <= 2,
     totalQuota,
     area: raw.area || '—',
     delivery_region_id:
@@ -810,8 +913,8 @@ export function mapAdminUserToRow(raw, idx) {
     meal_scope_label:
       (raw.meal_scope_label && String(raw.meal_scope_label).trim()) ||
       mealScopeLabelFromPeriods(entitledPeriods),
-    dinner_balance: Number(raw.dinner_balance) || 0,
-    dinner_meal_quota_total: Number(raw.dinner_meal_quota_total) || 0,
+    dinner_balance: dinnerBalance,
+    dinner_meal_quota_total: dinnerMealQuotaTotal,
     dinner_is_leaved_tomorrow: raw.dinner_is_leaved_tomorrow === true,
     dinner_tomorrow_leave_target_date: adminUserYmd(raw.dinner_tomorrow_leave_target_date),
     dinner_leave_range_start: adminUserYmd(raw.dinner_leave_range_start),

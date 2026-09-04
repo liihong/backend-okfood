@@ -7,6 +7,7 @@ import {
   mapAdminUserToRow,
   mealScopeLabelFromPeriods,
   membershipTemplatePlanLabel,
+  memberShowsDinnerRemain,
 } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 
@@ -124,6 +125,10 @@ const autoAreaHintText = computed(() =>
     ? '门店自提不参与配送划区。'
     : '仅勾选后保存才会按已有坐标重算片区；不改片区则不提交，避免动到地址。',
 )
+
+/** 全餐/晚餐卡：档案弹窗只改午餐次数，晚餐余次只读展示 */
+const showDinnerRemain = computed(() => memberShowsDinnerRemain(props.member))
+const dinnerRemainDisplay = computed(() => Math.max(0, Number(props.member?.dinner_balance) || 0))
 
 function normalizeBalance(v) {
   return Math.max(0, Math.min(999999, Math.floor(Number(v) || 0)))
@@ -471,9 +476,13 @@ async function submitEditMember() {
               <div class="mem-grid-3">
                 <div class="mem-field">
                   <label class="mem-lab mem-lab-inline">
-                    剩余次数
+                    {{ showDinnerRemain ? '午餐剩余' : '剩余次数' }}
                     <el-tooltip
-                      content="直接修改将产生余额流水（管理端调整）；常规续卡请走开卡工单入账"
+                      :content="
+                        showDinnerRemain
+                          ? '此处只改午餐次数池；晚餐剩余见右侧只读。直接修改将产生余额流水，常规续卡请走开卡工单'
+                          : '直接修改将产生余额流水（管理端调整）；常规续卡请走开卡工单入账'
+                      "
                       placement="top"
                     >
                       <span class="mem-tip-wrap">
@@ -488,6 +497,24 @@ async function submitEditMember() {
                       :max="999999"
                       :step="1"
                       controls-position="right"
+                      class="mem-input-el mem-affix-inp-el"
+                    />
+                    <span class="mem-affix-suf-el">次</span>
+                  </div>
+                </div>
+                <div v-if="showDinnerRemain" class="mem-field">
+                  <label class="mem-lab mem-lab-inline">
+                    晚餐剩余
+                    <el-tooltip content="只读，与午餐分池；调整晚餐请走补餐或开卡工单" placement="top">
+                      <span class="mem-tip-wrap">
+                        <CircleHelp class="mem-tip" :size="13" />
+                      </span>
+                    </el-tooltip>
+                  </label>
+                  <div class="mem-affix mem-affix--el-row">
+                    <el-input
+                      :model-value="String(dinnerRemainDisplay)"
+                      disabled
                       class="mem-input-el mem-affix-inp-el"
                     />
                     <span class="mem-affix-suf-el">次</span>
