@@ -4,6 +4,7 @@
 --------
 home_banner_service              首页轮播
 home_entry_poster_service        小程序弹窗海报（进入/菜单等场景）
+retail_share_poster_service      零售商品分享海报（太阳码）
 member_card_pay_service          会员卡微信支付
 single_meal_balance_pay_service  单餐余额支付
 store_retail_order_service       门店零售单（用户端）

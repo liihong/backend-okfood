@@ -157,7 +157,9 @@
           "path": "pages/retailProductDetail/retailProductDetail",
           "style": {
             "navigationStyle": "custom",
-            "backgroundColor": "#f8fafc"
+            "backgroundColor": "#f8fafc",
+            "enableShareAppMessage": true,
+            "enableShareTimeline": true
           }
         },
         {

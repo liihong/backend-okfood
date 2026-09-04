@@ -17,8 +17,17 @@ JSCODE2SESSION_URL = "https://api.weixin.qq.com/sns/jscode2session"
 TOKEN_URL = "https://api.weixin.qq.com/cgi-bin/token"
 GET_PHONE_URL = "https://api.weixin.qq.com/wxa/business/getuserphonenumber"
 SUBSCRIBE_SEND_URL = "https://api.weixin.qq.com/cgi-bin/message/subscribe/send"
+GETWXACODEUNLIMIT_URL = "https://api.weixin.qq.com/wxa/getwxacodeunlimit"
 # 微信通用：access_token 无效或已被其它实例刷新
 WX_ERRCODE_INVALID_ACCESS_TOKEN = 40001
+# 商品分享海报：getwxacodeunlimit 常见错误（用户可读）
+WXACODE_ERR_HINTS: dict[int, str] = {
+    41030: "小程序页面路径未发布，请先发布后再生成海报",
+    40169: "小程序码参数不合法",
+    40097: "小程序码版本参数无效",
+    45009: "生成小程序码过于频繁，请稍后再试",
+    85079: "小程序尚未发布正式版，请改用体验版生成",
+}
 
 
 class WeChatMiniError(Exception):
@@ -267,6 +276,99 @@ def get_phone_pure_number(
     if cc == "86":
         return pure
     return f"{cc}{pure}"
+
+
+def _wxacode_error_message(errcode: int, errmsg: str) -> str:
+    """将微信小程序码错误转为用户可读文案。"""
+    hint = WXACODE_ERR_HINTS.get(int(errcode))
+    if hint:
+        return hint
+    raw = (errmsg or "").strip() or "未知错误"
+    return f"生成小程序码失败: {raw}"
+
+
+def _request_getwxacodeunlimit(access_token: str, body: dict[str, Any]) -> bytes:
+    """调用 getwxacodeunlimit；成功返回 PNG 字节，失败抛 WeChatMiniError。"""
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            r = client.post(f"{GETWXACODEUNLIMIT_URL}?access_token={access_token}", json=body)
+            content = r.content or b""
+    except httpx.HTTPError as e:
+        logger.exception("微信 getwxacodeunlimit 请求失败")
+        raise WeChatMiniError("生成小程序码服务暂时不可用", status_code=502) from e
+
+    # 失败时微信仍可能 HTTP 200，body 为 JSON；HTTP 4xx 时同样优先读 errcode
+    ctype = (r.headers.get("content-type") or "").lower()
+    looks_json = "application/json" in ctype or content[:1] in (b"{", b"[")
+    if looks_json:
+        try:
+            payload: dict[str, Any] = r.json()
+        except Exception as e:
+            raise WeChatMiniError("生成小程序码响应异常", status_code=502) from e
+        errcode = payload.get("errcode")
+        if errcode not in (None, 0):
+            msg = _wxacode_error_message(int(errcode), str(payload.get("errmsg") or ""))
+            raise WeChatMiniError(
+                msg,
+                errcode=int(errcode),
+                status_code=400,
+            )
+        raise WeChatMiniError("微信未返回小程序码图片", status_code=502)
+    if r.status_code >= 400 or len(content) < 32:
+        raise WeChatMiniError("微信返回的小程序码无效", status_code=502)
+    return content
+
+
+def get_unlimited_wxacode(
+    *,
+    scene: str,
+    page: str,
+    env_version: str = "release",
+    width: int = 430,
+    is_hyaline: bool = True,
+    check_path: bool | None = None,
+    db: "Session | None" = None,
+    tenant_id: int | None = None,
+) -> bytes:
+    """生成不限制数量的小程序码（太阳码）。
+
+    ``scene`` 最长 32 字符；扫码后落地页 ``onLoad`` 会收到 ``query.scene``。
+    """
+    scene_s = (scene or "").strip()
+    page_s = (page or "").strip().lstrip("/")
+    env = (env_version or "release").strip() or "release"
+    if not scene_s:
+        raise WeChatMiniError("小程序码 scene 不能为空", status_code=400)
+    if len(scene_s) > 32:
+        raise WeChatMiniError("小程序码 scene 超长", status_code=400)
+    if env not in ("release", "trial", "develop"):
+        raise WeChatMiniError("小程序码版本无效", status_code=400)
+
+    path_check = bool(check_path) if check_path is not None else env == "release"
+    body: dict[str, Any] = {
+        "scene": scene_s,
+        "page": page_s,
+        "check_path": path_check,
+        "env_version": env,
+        "width": max(280, min(1280, int(width))),
+        "auto_color": False,
+        "is_hyaline": bool(is_hyaline),
+    }
+    appid, access_token, used_authorizer = _resolve_appid_and_access_token(db, tenant_id)
+    try:
+        return _request_getwxacodeunlimit(access_token, body)
+    except WeChatMiniError as e:
+        if e.errcode != WX_ERRCODE_INVALID_ACCESS_TOKEN:
+            raise
+        logger.warning(
+            "getwxacodeunlimit access_token 失效，重试: appid=%s… authorizer=%s",
+            appid[:8] if len(appid) > 8 else appid,
+            used_authorizer,
+        )
+        access_token = _refresh_access_token_after_40001(
+            appid, db=db, tenant_id=tenant_id, used_authorizer=used_authorizer
+        )
+        return _request_getwxacodeunlimit(access_token, body)
 
 
 def _truncate_subscribe_value(text: str, *, max_chars: int) -> str:

@@ -1,6 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.deps import SessionDep, public_store_dep, PublicStoreContext
+from app.services.client.retail_share_poster_service import build_retail_share_poster
 from app.services.retail.retail_catalog_public import (
     build_sku_lookup_from_menu,
     get_retail_sku_public,
@@ -30,6 +33,27 @@ def catalog_retail_spu_detail(
     if not detail:
         raise HTTPException(status_code=404, detail="商品不存在或已下架")
     return success(data=detail, msg="获取成功")
+
+
+@router.get("/retail-spu/{spu_id}/share-poster")
+def catalog_retail_spu_share_poster(
+    spu_id: int,
+    db: SessionDep,
+    store_ctx: PublicStoreContext = Depends(public_store_dep),
+    env_version: Literal["release", "trial", "develop"] = Query(
+        "release",
+        description="太阳码打开的小程序版本：release / trial / develop",
+    ),
+):
+    """商品分享海报素材（太阳码 + 门店/商品字段）。无需登录。"""
+    data = build_retail_share_poster(
+        db,
+        store_id=int(store_ctx.store_id),
+        tenant_id=int(store_ctx.tenant_id),
+        spu_id=int(spu_id),
+        env_version=env_version,
+    )
+    return success(data=data, msg="获取成功")
 
 
 @router.get("/retail-sku-lookup")

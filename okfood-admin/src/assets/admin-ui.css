@@ -1960,6 +1960,18 @@
   font-style: normal;
   line-height: 1.15;
 }
+.admin-table--members .balance-triple {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.admin-table--members .balance-triple__sep,
+.admin-table--members .balance-triple__n.placeholder {
+  color: #c5d0cc;
+  font-weight: 600;
+}
 .admin-table--members .balance-cell {
   display: flex;
   flex-direction: column;
@@ -2321,9 +2333,23 @@
   font-style: italic;
   color: #0e5a44;
 }
-.balance-text.warning {
+.balance-text.warning,
+.balance-triple__n.warning {
   color: #f43f5e;
   animation: blink 1s infinite;
+}
+.balance-text.balance-triple {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.balance-triple__sep,
+.balance-triple__n.placeholder {
+  color: #c5d0cc;
+  font-style: normal;
 }
 
 .status-indicator {

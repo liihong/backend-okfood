@@ -1398,7 +1398,19 @@ onUnmounted(() => {
               :disabled="!u.remainTooltip"
             >
               <div class="balance-cell">
-                <span class="balance-text" :class="{ warning: u.remainLow }">{{ u.balanceLabel }}</span>
+                 <span class="balance-text balance-triple">
+                    <span class="balance-triple__n" :class="{ warning: u.remainLunchLow }">{{
+                      u.remainLunchText
+                      }}</span>
+                    <span class="balance-triple__sep">/</span>
+                    <span class="balance-triple__n" :class="{
+                      warning: u.remainDinnerLow,
+                      placeholder: u.showDinnerRemain !== true,
+                    }">{{ u.remainDinnerText }}</span>
+                    <span class="balance-triple__sep">/</span>
+                    <span class="balance-triple__n">{{ u.remainQuotaText }}</span>
+                  </span>
+
                 <p
                   v-if="u.tomorrow_leave && !u.is_on_leave_today"
                   class="balance-leave-hint balance-leave-hint--tomorrow"
@@ -1554,11 +1566,19 @@ onUnmounted(() => {
               <span class="t-plan" :class="planTagClass(u.plan, u.planBase, u.meal_scope_label)">{{
                 u.plan
               }}</span>
-              <span
-                class="balance-text member-profile-card__balance"
-                :class="{ warning: u.remainLow }"
-                :title="u.remainTooltip || ''"
-              >{{ u.balanceLabel }}</span>
+             <span class="balance-text balance-triple member-profile-card__balance" :title="u.remainTooltip || ''">
+                <span class="balance-triple__n" :class="{ warning: u.remainLunchLow }">{{
+                  u.remainLunchText
+                }}</span>
+                <span class="balance-triple__sep">/</span>
+               <span
+class="balance-triple__n" :class="{
+                  warning: u.remainDinnerLow,
+                  placeholder: u.showDinnerRemain !== true,
+                }">{{ u.remainDinnerText }}</span>
+                <span class="balance-triple__sep">/</span>
+                <span class="balance-triple__n">{{ u.remainQuotaText }}</span>
+              </span>
               <span v-if="u.delivery_start_date" class="member-profile-card__start-date">
                 起送 {{ u.delivery_start_date }}
               </span>

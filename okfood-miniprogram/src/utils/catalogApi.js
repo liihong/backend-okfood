@@ -192,3 +192,35 @@ export function mapRetailSpuItem(p) {
 
 export const mapRetailProductItem = mapRetailSpuItem
 
+/**
+ * @typedef {{
+ *   spu_id: number,
+ *   store_name: string,
+ *   store_logo_url?: string | null,
+ *   recommend_text?: string | null,
+ *   title: string,
+ *   subtitle?: string | null,
+ *   price_yuan?: string | number | null,
+ *   cover_image_url?: string | null,
+ *   wxacode_base64: string,
+ *   scene: string,
+ * }} RetailSharePosterPayload
+ */
+
+/**
+ * @param {number} spuId
+ * @param {'release' | 'trial' | 'develop'} [envVersion]
+ * @returns {Promise<RetailSharePosterPayload>}
+ */
+export async function fetchRetailSharePoster(spuId, envVersion = 'release') {
+  const id = Number(spuId)
+  if (!Number.isFinite(id) || id < 1) {
+    throw new Error('商品无效')
+  }
+  const env = envVersion === 'trial' || envVersion === 'develop' ? envVersion : 'release'
+  return request(`/api/catalog/retail-spu/${id}/share-poster?env_version=${encodeURIComponent(env)}`, {
+    method: 'GET',
+    retry: 1,
+  })
+}
+

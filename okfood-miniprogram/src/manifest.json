@@ -62,6 +62,9 @@
         "permission" : {
             "scope.userLocation" : {
                 "desc" : "用于获取您当前位置并在地图与附近地点中选取收货位置"
+            },
+            "scope.writePhotosAlbum" : {
+                "desc" : "用于保存商品分享海报到相册，方便发朋友圈"
             }
         }
     },

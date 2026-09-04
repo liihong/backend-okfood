@@ -60,22 +60,46 @@
     </scroll-view>
 
     <view v-if="detail" class="bottom-bar" :style="bottomBarStyle">
+      <view class="btn-share" @tap="openShareSheet">
+        <text class="btn-share__txt">分享</text>
+      </view>
       <button class="btn-cart" type="default" hover-class="none" @tap="addToCart">加入购物车</button>
       <button class="btn-buy" type="default" hover-class="none" @tap="buyNow">立即购买</button>
     </view>
+
+    <view v-if="shareSheetVisible" class="share-mask" @tap="closeShareSheet">
+      <view class="share-sheet" @tap.stop>
+        <text class="share-sheet-title">推荐给好友</text>
+        <view class="share-sheet-btn" @tap="onGeneratePoster">生成分享海报</view>
+        <button class="share-sheet-btn share-sheet-btn--native" open-type="share" @tap="closeShareSheet">
+          分享给微信好友
+        </button>
+        <view class="share-sheet-cancel" @tap="closeShareSheet">取消</view>
+      </view>
+    </view>
+
+    <RetailSharePosterModal
+      :visible="posterVisible"
+      :spu-id="posterSpuId"
+      :price-yuan="priceText"
+      :cover-url="posterCoverUrl"
+      @close="posterVisible = false"
+    />
   </view>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import OkNavbar from '@/components/OkNavbar/OkNavbar.vue'
+import RetailSharePosterModal from '@/components/RetailSharePosterModal/RetailSharePosterModal.vue'
 import { fetchRetailSpuDetail } from '@/utils/catalogApi.js'
 import { addCartItem } from '@/utils/retailCart/retailCartStorage.js'
 import { notifyRetailCartChanged, useRetailCart } from '@/utils/retailCart/useRetailCart.js'
 import { getNavbarLayout } from '@/utils/navbar.js'
 import { optimizeImageUrl } from '@/utils/imageUrl.js'
 import { fitRichTextHtml } from '@/utils/richTextHtml.js'
+import { parseRetailSpuIdFromQuery } from '@/utils/retailSharePoster.js'
 
 const loading = ref(true)
 const detail = ref(null)
@@ -83,6 +107,9 @@ const selectedSkuId = ref(null)
 const quantity = ref(1)
 const scrollStyle = ref({})
 const bottomBarStyle = ref({})
+const shareSheetVisible = ref(false)
+const posterVisible = ref(false)
+const posterSpuId = ref(0)
 const { refresh: refreshCart } = useRetailCart()
 
 const skus = computed(() => (Array.isArray(detail.value?.skus) ? detail.value.skus : []))
@@ -204,13 +231,88 @@ async function loadDetail(spuId) {
   }
 }
 
+const posterCoverUrl = computed(() => {
+  const d = detail.value
+  const urls = d?.gallery_urls
+  if (Array.isArray(urls)) {
+    const first = urls.find((u) => String(u || '').trim())
+    if (first) return String(first).trim()
+  }
+  return d?.cover_image_url != null ? String(d.cover_image_url).trim() : ''
+})
+
+function enableWechatShareMenus() {
+  // #ifdef MP-WEIXIN
+  if (typeof wx !== 'undefined' && typeof wx.showShareMenu === 'function') {
+    wx.showShareMenu({
+      withShareTicket: true,
+      menus: ['shareAppMessage', 'shareTimeline'],
+    })
+  }
+  // #endif
+}
+
+function buildSharePayload() {
+  const d = detail.value
+  const id = posterSpuId.value || Number(d?.id || 0)
+  const name = d && d.title ? String(d.title).trim() : '商品'
+  const title = `给你推荐：${name} ¥${priceText.value}`
+  const path = `/packageOrder/pages/retailProductDetail/retailProductDetail?spu_id=${encodeURIComponent(String(id))}`
+  const imageUrl = posterCoverUrl.value
+  return {
+    title,
+    path,
+    query: `spu_id=${encodeURIComponent(String(id))}`,
+    imageUrl,
+  }
+}
+
+function openShareSheet() {
+  if (!detail.value) return
+  shareSheetVisible.value = true
+}
+
+function closeShareSheet() {
+  shareSheetVisible.value = false
+}
+
+function onGeneratePoster() {
+  closeShareSheet()
+  const id = Number(detail.value?.id || posterSpuId.value || 0)
+  if (!Number.isFinite(id) || id < 1) {
+    uni.showToast({ title: '商品无效', icon: 'none' })
+    return
+  }
+  posterSpuId.value = id
+  posterVisible.value = true
+}
+
 onLoad((options) => {
-  const id = Number(options?.spu_id || options?.id || 0)
-  if (Number.isFinite(id) && id > 0) loadDetail(id)
+  const id = parseRetailSpuIdFromQuery(options)
+  posterSpuId.value = id
+  if (id > 0) loadDetail(id)
   else {
     loading.value = false
     detail.value = null
   }
+})
+
+onShow(() => {
+  enableWechatShareMenus()
+})
+
+onShareAppMessage(() => {
+  const { title, path, imageUrl } = buildSharePayload()
+  const payload = { title, path }
+  if (imageUrl) payload.imageUrl = imageUrl
+  return payload
+})
+
+onShareTimeline(() => {
+  const { title, query, imageUrl } = buildSharePayload()
+  const payload = { title, query }
+  if (imageUrl) payload.imageUrl = imageUrl
+  return payload
 })
 
 onMounted(() => {
@@ -371,11 +473,24 @@ onMounted(() => {
   right: 0;
   bottom: 0;
   display: flex;
+  align-items: center;
   gap: 10px;
   padding: 10px 12px;
   background: #fff;
   border-top: 1px solid #e2e8f0;
   z-index: 10;
+}
+.btn-share {
+  flex: 0 0 52px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-share__txt {
+  font-size: 13px;
+  color: #334155;
+  font-weight: 600;
 }
 .btn-cart,
 .btn-buy {
@@ -393,5 +508,53 @@ onMounted(() => {
 .btn-buy {
   background: #0d5c46;
   color: #fff;
+}
+.share-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: flex-end;
+}
+.share-sheet {
+  width: 100%;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  background: #fff;
+  border-radius: 16px 16px 0 0;
+  box-sizing: border-box;
+}
+.share-sheet-title {
+  display: block;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 650;
+  color: #0f172a;
+  margin-bottom: 12px;
+}
+.share-sheet-btn {
+  width: 100%;
+  height: 44px;
+  line-height: 44px;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 15px;
+  text-align: center;
+  margin-bottom: 8px;
+  border: none;
+}
+.share-sheet-btn--native {
+  padding: 0;
+}
+.share-sheet-btn::after {
+  border: none;
+}
+.share-sheet-cancel {
+  height: 44px;
+  line-height: 44px;
+  text-align: center;
+  color: #64748b;
+  font-size: 15px;
 }
 </style>
