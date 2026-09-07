@@ -13,7 +13,11 @@ from app.api import admin, admin_catalog, admin_couriers, admin_douyin, admin_gi
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.db.session import SessionLocal, engine
-from app.db.schema_patches import apply_address_usage_data_backfill, ensure_member_address_usage_schema
+from app.db.schema_patches import (
+    apply_address_usage_data_backfill,
+    ensure_member_address_usage_schema,
+    ensure_store_sf_merge_same_address_push_schema,
+)
 from app.jobs.scheduler import setup_scheduler, shutdown_scheduler
 from app.services.shared.upload_service import ensure_upload_root
 from app.utils.response import success
@@ -91,6 +95,10 @@ async def lifespan(app: FastAPI):
             patch_db.close()
     except Exception:
         logger.warning("地址用途列补丁失败（不影响启动）", exc_info=True)
+    try:
+        ensure_store_sf_merge_same_address_push_schema(engine)
+    except Exception:
+        logger.warning("门店同址合并推送列补丁失败（不影响启动）", exc_info=True)
     setup_scheduler()
     _prewarm()
     yield

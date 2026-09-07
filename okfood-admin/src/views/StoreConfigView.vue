@@ -23,6 +23,8 @@ const form = ref({
   store_lat: '',
   /** 每日 08:50（上海）自动顺丰推送当日配送单 */
   sf_nightly_auto_push_enabled: false,
+  /** 同地址不同会员是否合并为一单推顺丰；默认否（按会员拆单） */
+  sf_merge_same_address_push: false,
   /** 单次点餐推顺丰：顺丰侧店铺编号，与大表推单租户 shop 区分 */
   sf_retail_push_shop_id: '',
   /** 1 / 2 / 空字符串表示跟随租户 */
@@ -54,6 +56,7 @@ async function loadConfig() {
     form.value.courier_delivery_base_yuan = fmtMoney(d?.courier_delivery_base_yuan)
     form.value.courier_delivery_extra_per_unit_yuan = fmtMoney(d?.courier_delivery_extra_per_unit_yuan)
     form.value.sf_nightly_auto_push_enabled = d?.sf_nightly_auto_push_enabled === true
+    form.value.sf_merge_same_address_push = d?.sf_merge_same_address_push === true
     form.value.sf_retail_push_shop_id =
       d?.sf_retail_push_shop_id != null ? String(d.sf_retail_push_shop_id).trim() : ''
     form.value.sf_retail_push_shop_type =
@@ -130,6 +133,7 @@ async function saveConfig() {
   payload.courier_delivery_base_yuan = base
   payload.courier_delivery_extra_per_unit_yuan = extra
   payload.sf_nightly_auto_push_enabled = form.value.sf_nightly_auto_push_enabled === true
+  payload.sf_merge_same_address_push = form.value.sf_merge_same_address_push === true
   payload.sf_retail_push_shop_id = form.value.sf_retail_push_shop_id.trim() || null
   const rst = String(form.value.sf_retail_push_shop_type ?? '').trim()
   if (rst === '') payload.sf_retail_push_shop_type = null
@@ -320,6 +324,15 @@ onMounted(() => {
             </p>
           </div>
           <el-switch v-model="form.sf_nightly_auto_push_enabled" size="large" />
+        </div>
+        <div class="sc-field sc-switch-row">
+          <div class="sc-switch-text">
+            <span class="sc-label sc-label--inline">同地址合并推送</span>
+            <p class="sc-hint sc-hint--tight">
+              开启后，<strong>同一配送地址</strong>的不同会员合并为 <strong>1</strong> 个顺丰订单、只扣 <strong>1</strong> 份配送费；关闭则一名会员一单（默认，不影响其它门店）。
+            </p>
+          </div>
+          <el-switch v-model="form.sf_merge_same_address_push" size="large" />
         </div>
         <el-divider class="sc-inner-divider" content-position="left">骑手配送费（元）</el-divider>
         <p class="sc-hint sc-hint--card">确认送达时写入骑手待结算：首份基础价 +（份数 − 1）× 每多一份加价。</p>

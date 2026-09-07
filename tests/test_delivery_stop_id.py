@@ -5,6 +5,7 @@ from datetime import date
 from app.services.delivery.delivery_stop_id import (
     compute_delivery_stop_id,
     compute_legacy_address_stop_id,
+    compute_sf_push_stop_id,
     member_ids_from_sf_push_snapshot,
 )
 
@@ -33,3 +34,23 @@ def test_legacy_address_stop_id_differs_from_per_member() -> None:
 def test_member_ids_from_sf_push_snapshot() -> None:
     assert member_ids_from_sf_push_snapshot(None) == []
     assert member_ids_from_sf_push_snapshot({"fulfillment_member_ids": [11, "22", "x"]}) == [11, 22]
+
+
+def test_sf_push_stop_id_split_keeps_per_member() -> None:
+    d = date(2026, 9, 1)
+    area = "互联网区域"
+    addr = "互联网区域 河南省新乡市红旗区 新乡市人民政府北门"
+    a = compute_sf_push_stop_id(d, area, addr, 101, merge_same_address=False)
+    b = compute_sf_push_stop_id(d, area, addr, 202, merge_same_address=False)
+    assert a != b
+    assert a == compute_delivery_stop_id(d, area, addr, member_id=101)
+
+
+def test_sf_push_stop_id_merge_same_address() -> None:
+    d = date(2026, 9, 1)
+    area = "互联网区域"
+    addr = "互联网区域 河南省新乡市红旗区 新乡市人民政府北门"
+    a = compute_sf_push_stop_id(d, area, addr, 101, merge_same_address=True)
+    b = compute_sf_push_stop_id(d, area, addr, 202, merge_same_address=True)
+    assert a == b
+    assert a == compute_legacy_address_stop_id(d, area, addr)

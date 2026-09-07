@@ -1,7 +1,8 @@
 """
-顺丰同城推单：与配送大表、单点餐按会员合并为停靠点（同址不同会员不合并），预览 14+ 列模板，提交 `createorder`。
+顺丰同城推单：配送大表与单点餐聚合为停靠点后提交 `createorder`。
 
-签名为 ``json + && + dev_id + && + appKey`` 再 MD5→Hex→Base64（与常见 openic Java 样例一致）。
+默认一名会员一个停靠点（同址不同会员不合并）；门店开启 ``sf_merge_same_address_push``
+时按历史同址口径合并为一单。签名为 ``json + && + dev_id + && + appKey`` 再 MD5→Hex→Base64。
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ from app.models.single_meal_order import SingleMealOrder
 from app.models.store import Store
 from app.services.meal_period.lunch_delivery import eligible_members_for_lunch_delivery
 from app.services.delivery.delivery_stop_id import (
-    _stop_key,
+    compute_sf_push_stop_id,
     member_ids_from_sf_push_snapshot,
 )
 from app.services.delivery.delivery_sheet_service import (
@@ -348,13 +349,15 @@ def _build_aggs(
     store_id: int,
     meal_period: str | None = None,
 ) -> dict[str, _Agg]:
-    """到家按会员拆停靠点；同一会员的订阅与单次餐仍合并，不同会员同址不合并。"""
+    """到家停靠点聚合：默认按会员拆分；门店开启同址合并时，同地址不同会员并入同一停靠点。"""
     from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
 
     st_row = db.get(Store, int(store_id))
     if st_row is None:
         return {}
     tid = int(st_row.tenant_id)
+    # 仅本门店开关生效；默认 False，其它门店/租户仍按会员拆单
+    merge_same_address = bool(getattr(st_row, "sf_merge_same_address_push", False))
 
     aggs: dict[str, _Agg] = {}
     m_by_id = {int(m.id): m for m in members}
@@ -377,8 +380,14 @@ def _build_aggs(
             continue
         stop_member_id = int(st.members[0][0].id)
         line = _address_line_without_sheet_area(st.area, line_full)
-        sk = _stop_key(d, st.area, line_full, member_id=stop_member_id)
-        a = _Agg(stop_id=sk, group_area=st.area, address_line=line, sub_lines=[])
+        sk = compute_sf_push_stop_id(
+            d, st.area, line_full, stop_member_id, merge_same_address=merge_same_address
+        )
+        # 合并模式下同址会落到同一 stop_id，须追加 sub_lines 而不是覆盖
+        a = aggs.get(sk)
+        if a is None:
+            a = _Agg(stop_id=sk, group_area=st.area, address_line=line, sub_lines=[])
+            aggs[sk] = a
         for mem, is_del in st.members:
             u = 0
             if not is_del and mem.id in m_by_id:
@@ -394,7 +403,6 @@ def _build_aggs(
                     "remarks": _member_line_remarks(mem, addr),
                 }
             )
-        aggs[sk] = a
 
     for o, mem, aaddr, dsh in _single_order_rows(
         db, d, store_id=int(store_id), tenant_id=tid, meal_period=period
@@ -412,7 +420,9 @@ def _build_aggs(
         if not line_full:
             continue
         line = (rline.detail or "").strip() or _address_line_without_sheet_area(ra, line_full)
-        sk = _stop_key(d, ra, line_full, member_id=int(mem.id))
+        sk = compute_sf_push_stop_id(
+            d, ra, line_full, int(mem.id), merge_same_address=merge_same_address
+        )
         if sk not in aggs:
             aggs[sk] = _Agg(stop_id=sk, group_area=ra, address_line=line, sub_lines=[])
         qty = max(1, int(o.quantity or 1))

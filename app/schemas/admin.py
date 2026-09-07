@@ -223,6 +223,10 @@ class StoreConfigOut(BaseModel):
         False,
         description="每日 08:50（上海）自动向顺丰推送当日业务日配送大表（订阅合并）订单；单次零售须手动推单",
     )
+    sf_merge_same_address_push: bool = Field(
+        False,
+        description="同地址不同会员是否合并为一单推顺丰；关=一名会员一单（默认），开=同址合并、扣一份配送费",
+    )
     sf_retail_push_shop_id: str | None = Field(
         None,
         max_length=64,
@@ -301,6 +305,10 @@ class StoreConfigUpdateIn(BaseModel):
     sf_nightly_auto_push_enabled: bool | None = Field(
         None,
         description="顺丰自动推单；不传表示不修改",
+    )
+    sf_merge_same_address_push: bool | None = Field(
+        None,
+        description="同地址是否合并推顺丰；不传表示不修改",
     )
     sf_retail_push_shop_id: str | None = Field(
         None,

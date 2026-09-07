@@ -95,6 +95,8 @@ def _store_out_from_row(st: Store) -> StoreConfigOut:
         member_card_week_list_price_yuan=wl,
         member_card_month_list_price_yuan=ml,
         sf_nightly_auto_push_enabled=bool(getattr(st, "sf_nightly_auto_push_enabled", False)),
+        # 缺省 False：现网按会员拆单；仅门店显式开启才同址合并
+        sf_merge_same_address_push=bool(getattr(st, "sf_merge_same_address_push", False)),
         sf_retail_push_shop_id=(
             str(st.sf_retail_push_shop_id).strip() or None
             if getattr(st, "sf_retail_push_shop_id", None) is not None
@@ -287,6 +289,8 @@ def update_store_config(db: Session, store_id: int, body: StoreConfigUpdateIn) -
         st.member_card_month_list_price_yuan = body.member_card_month_list_price_yuan
     if "sf_nightly_auto_push_enabled" in fs and body.sf_nightly_auto_push_enabled is not None:
         st.sf_nightly_auto_push_enabled = bool(body.sf_nightly_auto_push_enabled)
+    if "sf_merge_same_address_push" in fs and body.sf_merge_same_address_push is not None:
+        st.sf_merge_same_address_push = bool(body.sf_merge_same_address_push)
     if "sf_retail_push_shop_id" in fs:
         raw = body.sf_retail_push_shop_id
         st.sf_retail_push_shop_id = None if raw is None else (str(raw).strip() or None)

@@ -22,10 +22,32 @@ def compute_delivery_stop_id(
 
 
 def compute_legacy_address_stop_id(d: date, group_area: str, address_line: str) -> str:
-    """历史同址合并口径（不含会员 id），仅用于匹配当日已推的旧合并单。"""
+    """同址合并口径（不含会员 id）。
+
+    门店开启 ``sf_merge_same_address_push`` 时作为顺丰 stop_id；
+    亦用于匹配当日已推的历史合并单。
+    """
     return hashlib.sha256(f"{d.isoformat()}|{group_area}|{address_line}".encode()).hexdigest()[
         :32
     ]
+
+
+def compute_sf_push_stop_id(
+    d: date,
+    group_area: str,
+    address_line: str,
+    member_id: int,
+    *,
+    merge_same_address: bool,
+) -> str:
+    """顺丰推单 stop_id：按门店开关决定同址是否合并。
+
+    - merge_same_address=False（默认）：一名会员一个点，同址不同会员拆单。
+    - merge_same_address=True：与历史同址合并口径一致，同址多会员共用一单。
+    """
+    if merge_same_address:
+        return compute_legacy_address_stop_id(d, group_area, address_line)
+    return _stop_key(d, group_area, address_line, member_id)
 
 
 def member_ids_from_sf_push_snapshot(snap: Any) -> list[int]:

@@ -37,6 +37,8 @@ class Store(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # 每日 08:50（上海）自动向顺丰推送「当日」配送大表（订阅合并）订单；单次零售须订单管理手动推单
     sf_nightly_auto_push_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # 同地址不同会员推顺丰：False=一名会员一单（默认，不改现网）；True=同址合并为一单、扣一份配送费
+    sf_merge_same_address_push: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # 订单管理「推顺丰」(单次点餐) 与配送大表「推送及时单」：createorder 使用此处 shop_id，与租户对接中的顺丰店铺（大表预约/夜间推单）可不同
     sf_retail_push_shop_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sf_retail_push_shop_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
