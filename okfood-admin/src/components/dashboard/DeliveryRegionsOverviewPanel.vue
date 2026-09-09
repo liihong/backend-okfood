@@ -962,14 +962,8 @@ onMounted(() => {
       </article>
       </div>
 
-      <!-- 第二行：晚餐（今日晚餐 + 明日晚餐预测；功能暂不上线，卡片见下方注释块） -->
+      <!-- 第二行：晚餐（今日晚餐 + 明日晚餐预测） -->
       <div class="dro-dash-large-row dro-dash-meal-row dro-dash-meal-row--dinner">
-      <!--
-        [功能暂不上线] 今日晚餐营业概览卡片
-        晚餐餐段营业概览暂未对外开放，待晚餐功能上线后，取消本段 HTML 注释即可恢复展示。
-        请勿删除下方模板代码。
-      -->
-      <!--
       <article class="dro-dash-kpi dro-dash-kpi--dinner" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
         <div class="dro-dash-kpi__head">
           <div class="dro-dash-kpi__tags">
@@ -1078,15 +1072,11 @@ onMounted(() => {
           </div>
           <div class="dro-dash-kpi__mid-spacer" aria-hidden="true" />
         </div>
+        <div class="dro-dash-kpi__foot-row">
+          <button type="button" class="dro-dash-adjust-btn" @click="openDinnerStockAdjust">报损耗</button>
+        </div>
       </article>
-      -->
 
-      <!--
-        [功能暂不上线] 明日晚餐预测营业概览卡片
-        晚餐餐段明日预测暂未对外开放，待晚餐功能上线后，取消本段 HTML 注释即可恢复展示。
-        请勿删除下方模板代码。
-      -->
-      <!--
       <article
         class="dro-dash-kpi dro-dash-kpi--tomorrow dro-dash-kpi--dinner"
         :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }"
@@ -1227,7 +1217,6 @@ onMounted(() => {
           </div>
         </div>
       </article>
-      -->
       </div>
 
       <!-- 第三行：后厨计划管理 / 门店自提快速核销舱 -->
