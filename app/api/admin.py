@@ -26,6 +26,7 @@ from app.models.enums import PlanType
 from app.core.limiter import limiter
 from app.core.timeutil import today_shanghai
 from app.schemas.member_address import MemberAddressCreateIn, MemberAddressUpdateIn
+from app.schemas.single_meal_order import AdminSingleMealOrderCreateIn
 from app.schemas.admin import (
     AdminAddressIn,
     AdminDeliveryMarkIn,
@@ -145,6 +146,7 @@ from app.services.order.single_meal_order_service import (
     bulk_admin_mark_single_meal_orders_delivered,
     bulk_admin_resync_single_meal_from_sf_monitor_for_delivery_day,
     bulk_push_single_meal_retail_to_sf,
+    create_admin_single_meal_order,
     diagnose_single_meal_sf_sync,
     list_admin_store_single_meal_orders_by_delivery_day,
     summarize_admin_store_single_meal_orders_by_delivery_day,
@@ -1496,6 +1498,25 @@ def admin_orders_daily_single_meals(
         msg="获取成功",
         summary=bucket_summary,
     )
+
+
+@router.post("/orders/single-meals")
+def admin_create_single_meal_order(
+    body: AdminSingleMealOrderCreateIn,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """零售订单：管理员为单次体验用户手动建单（默认已支付、占用当日库存，配送单可推顺丰）。"""
+    tid, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = create_admin_single_meal_order(
+        db,
+        body=body,
+        tenant_id=int(tid),
+        store_id=int(sid),
+        operator=admin_username,
+    )
+    return success(data=dump_model(out), msg="零售订单已创建")
 
 
 @router.post("/orders/daily/single-meals/sync-delivery-status", response_model=None)

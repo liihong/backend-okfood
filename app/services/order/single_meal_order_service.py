@@ -39,7 +39,10 @@ from app.models.single_meal_order import SingleMealOrder
 from app.constants import STUB_MEMBER_NAME
 from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.schemas.courier import CourierTaskMemberOut
+from app.schemas.member_address import MemberAddressCreateIn
+from app.schemas.user import Location
 from app.schemas.single_meal_order import (
+    AdminSingleMealOrderCreateIn,
     AdminSingleMealOrderListOut,
     SingleMealOrderCreateIn,
     SingleMealOrderOut,
@@ -51,6 +54,7 @@ from app.services.delivery.courier_task_sorting import (
     order_task_rows_by_nearest_neighbor,
 )
 from app.services.member.member_address_service import (
+    create_address,
     delivery_region_name_map,
     full_address_line,
     load_default_address_map,
@@ -785,6 +789,193 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
     invalidate_stock_read_caches(int(mem.store_id))
 
     return _single_meal_order_row_to_out(db, row, dish_title=str(dish.name), address_summary=address_summary)
+
+
+def _resolve_member_for_admin_single_order(
+    db: Session,
+    *,
+    phone: str,
+    name: str | None,
+    tenant_id: int,
+    store_id: int,
+) -> Member:
+    """管理端建单：按手机号匹配会员；不存在时按姓名创建未激活体验会员。"""
+    ph = phone.strip()
+    m = db.scalar(
+        select(Member).where(
+            Member.phone == ph,
+            Member.store_id == int(store_id),
+            Member.deleted_at.is_(None),
+        )
+    )
+    if m:
+        return m
+    nm = (name or "").strip()
+    if not nm:
+        raise HTTPException(status_code=404, detail="会员不存在，请填写姓名以创建新会员")
+    m = Member(
+        phone=ph[:20],
+        name=nm[:100],
+        tenant_id=int(tenant_id),
+        store_id=int(store_id),
+        wechat_name=None,
+        remarks=None,
+        avatar_url=None,
+        balance=0,
+        daily_meal_units=1,
+        meal_quota_total=0,
+        plan_type=None,
+        is_active=False,
+        is_leaved_tomorrow=False,
+        leave_range_start=None,
+        leave_range_end=None,
+        wx_mini_openid=None,
+    )
+    db.add(m)
+    db.flush()
+    return m
+
+
+def create_admin_single_meal_order(
+    db: Session,
+    *,
+    body: AdminSingleMealOrderCreateIn,
+    tenant_id: int,
+    store_id: int,
+    operator: str,
+) -> AdminSingleMealOrderListOut:
+    """管理端手动建零售单：写入供餐日、占用库存；已支付配送单可推顺丰。"""
+    _ = operator
+    sid = int(store_id)
+    from app.services.meal_period.normalize import normalize_meal_period
+
+    period = normalize_meal_period(body.meal_period)
+    member = _resolve_member_for_admin_single_order(
+        db,
+        phone=body.phone,
+        name=body.name,
+        tenant_id=int(tenant_id),
+        store_id=sid,
+    )
+
+    dish: MenuDish | None = None
+    if body.dish_id is not None:
+        dish = db.get(MenuDish, int(body.dish_id))
+        if not dish or not dish.is_enabled or int(dish.store_id) != sid:
+            raise HTTPException(status_code=404, detail="餐品不存在或已停用")
+        if not dish_planned_for_date(db, int(dish.id), body.delivery_date, store_id=sid, meal_period=period):
+            raise HTTPException(status_code=400, detail="所选日期未排该餐品")
+    else:
+        from app.services.admin.menu_day_stock_service import resolve_dish_for_calendar_date
+
+        dish = resolve_dish_for_calendar_date(
+            db, body.delivery_date, store_id=sid, meal_period=period
+        )
+        if dish is None or not dish.is_enabled:
+            raise HTTPException(status_code=400, detail="该供餐日未排餐品")
+
+    if dish.single_order_price_yuan is None:
+        raise HTTPException(status_code=400, detail="该餐品暂未开放单点")
+
+    qty = int(body.quantity)
+    from app.services.admin.menu_day_stock_service import assert_single_order_stock_available
+
+    assert_single_order_stock_available(
+        db,
+        int(dish.id),
+        body.delivery_date,
+        qty,
+        store_id=sid,
+        meal_period=period,
+    )
+
+    addr: MemberAddress | None = None
+    if body.store_pickup:
+        address_summary = "门店自提"
+        area = "门店自提"
+        addr_id: int | None = None
+    elif body.delivery_address is not None:
+        da = body.delivery_address
+        cn = (da.contact_name or member.name or "").strip() or str(member.name or "收件人")
+        cp = (da.contact_phone or member.phone or "").strip() or str(member.phone or "")
+        created = create_address(
+            db,
+            int(member.id),
+            MemberAddressCreateIn(
+                contact_name=cn[:100],
+                contact_phone=cp[:20],
+                map_location_text=da.map_location_text,
+                door_detail=da.door_detail,
+                remarks=da.remarks,
+                is_default=True,
+                usage="meal",
+                location=Location(lng=float(da.lng), lat=float(da.lat)),
+            ),
+            source="admin",
+        )
+        addr_id = int(created.id)
+        area = (created.area or "").strip() or "未分配"
+        address_summary = f"{area} {created.full_address}".strip()
+        addr = db.get(MemberAddress, addr_id)
+    else:
+        addr = db.get(MemberAddress, int(body.member_address_id or 0))
+        if not addr or int(addr.member_id) != int(member.id):
+            raise HTTPException(status_code=404, detail="配送地址不存在或不属于该会员")
+        nm = delivery_region_name_map(db, {int(addr.delivery_region_id)} if addr.delivery_region_id else set())
+        area = routing_area_label(addr, nm)
+        detail_line = full_address_line(addr.map_location_text, addr.door_detail)
+        address_summary = f"{area} {detail_line}".strip()
+        addr_id = int(addr.id)
+
+    unit_dec = Decimal(dish.single_order_price_yuan)
+    if body.store_pickup:
+        fee = get_store_base_delivery_fee_yuan(db, store_id=sid)
+        unit_dec = max(Decimal("0.01"), (unit_dec - fee).quantize(Decimal("0.01")))
+    amt = (unit_dec * Decimal(qty)).quantize(Decimal("0.01"))
+    if body.amount_yuan is not None:
+        amt = Decimal(body.amount_yuan).quantize(Decimal("0.01"))
+
+    pay_status = str(body.pay_status)
+    pay_channel = str(body.pay_channel) if pay_status == "已支付" else None
+    row = SingleMealOrder(
+        tenant_id=int(tenant_id),
+        store_id=sid,
+        out_trade_no=_new_temp_out_trade_no(),
+        member_id=int(member.id),
+        dish_id=int(dish.id),
+        dish_name=(dish.name or "").strip() or None,
+        member_address_id=addr_id,
+        store_pickup=bool(body.store_pickup),
+        quantity=qty,
+        delivery_date=body.delivery_date,
+        meal_period=period,
+        routing_area=area,
+        amount_yuan=amt,
+        pay_status=pay_status,
+        pay_channel=pay_channel,
+        fulfillment_status="pending",
+        courier_id=None,
+    )
+    db.add(row)
+    db.flush()
+    row.out_trade_no = _final_out_trade_no(int(row.id))
+
+    if pay_status == "已支付":
+        _notify_single_meal_order_paid_cs_review(db, row)
+
+    db.commit()
+    db.refresh(row)
+    from app.services.admin.day_stock_service import invalidate_stock_read_caches
+
+    invalidate_stock_read_caches(sid)
+    return _build_admin_single_meal_order_list_out(
+        db,
+        row,
+        order_address=addr,
+        member=member,
+        dish_title=str(dish.name),
+        address_summary=address_summary,
+    )
 
 
 def _single_meal_order_row_to_out(

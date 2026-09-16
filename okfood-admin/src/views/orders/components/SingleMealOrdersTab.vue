@@ -1,7 +1,8 @@
 <script setup>
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown, Plus } from 'lucide-vue-next'
 import { onMounted, onUnmounted, ref } from 'vue'
 import AdminTable from '../../../components/AdminTable.vue'
+import SingleMealManualOrderDialog from './SingleMealManualOrderDialog.vue'
 import {
   isMemberCardPaidSingleMeal,
   singleMealOrderAmountDisplay,
@@ -59,7 +60,26 @@ const {
   onPrintSingleMealOrder,
   onBatchPrintSingleMealOrders,
   retailPrintLoading,
+  fetchActive,
+  orderDate,
 } = useOrdersManageInject()
+
+const manualOrderOpen = ref(false)
+
+function onManualOrderSuccess(data) {
+  page.value = 1
+  if (data && data.pay_status === '已支付') {
+    const next = data.store_pickup ? 'pending_pickup' : 'pending_ship'
+    if (singleFulfillmentFilter.value !== next) {
+      singleFulfillmentFilter.value = next
+      return
+    }
+  } else if (data && singleFulfillmentFilter.value !== 'after_sale') {
+    singleFulfillmentFilter.value = 'after_sale'
+    return
+  }
+  void fetchActive()
+}
 
 /** 窄屏（手机）使用卡片列表，桌面保留表格 */
 const isNarrowScreen = ref(
@@ -163,6 +183,10 @@ function onSingleMobileSelectChange(row, checked) {
         />
       </el-tabs>
       <div class="orders-batch-bar__actions">
+        <el-button type="primary" size="small" @click="manualOrderOpen = true">
+          <Plus :size="14" style="margin-right: 4px" />
+          手动建单
+        </el-button>
         <span v-if="selectedSingleRows.length" class="orders-batch-bar__count">
           已选 {{ selectedSingleRows.length }} 笔
         </span>
@@ -506,5 +530,11 @@ function onSingleMobileSelectChange(row, checked) {
         </footer>
       </article>
     </div>
+
+    <SingleMealManualOrderDialog
+      v-model="manualOrderOpen"
+      :delivery-date="orderDate"
+      @success="onManualOrderSuccess"
+    />
   </div>
 </template>
