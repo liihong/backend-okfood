@@ -130,6 +130,16 @@ def test_admin_member_patch_accepts_template_and_plan_type() -> None:
     assert "membership_template_id" in body.model_fields_set
 
 
+def test_admin_member_patch_accepts_dinner_balance() -> None:
+    """档案可单独覆盖晚餐剩余；不传则不改晚餐池。"""
+    body = AdminMemberPatchIn(phone="13782226812", dinner_balance=8)
+    assert body.dinner_balance == 8
+    assert "dinner_balance" in body.model_fields_set
+    skipped = AdminMemberPatchIn(phone="13782226812", name="刘幸源")
+    assert skipped.dinner_balance is None
+    assert "dinner_balance" not in skipped.model_fields_set
+
+
 def test_same_plan_type_template_switch_should_write_log() -> None:
     """同为月卡但换卡包/餐段时，仍应记操作记录。"""
     prev_pt, new_pt = "月卡", "月卡"

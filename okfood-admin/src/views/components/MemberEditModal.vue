@@ -83,6 +83,8 @@ const editInitialPlanType = ref('次卡')
 const editInitialTemplateId = ref(CURRENT_PLAN_VALUE)
 /** 打开/刷新表单时的剩余次数，仅用户主动修改时才提交 balance，避免 keep-alive 快照误覆盖 */
 const editInitialBalance = ref(0)
+/** 打开时的晚餐剩余；仅用户改过才提交 dinner_balance */
+const editInitialDinnerBalance = ref(0)
 /** 打开时的片区，仅用户改片区或勾选自动划区时才提交，避免备注保存误写地址行 */
 const editInitialDeliveryRegionId = ref('')
 const profileLoading = ref(false)
@@ -98,6 +100,7 @@ const editForm = ref({
   membership_template_id: CURRENT_PLAN_VALUE,
   use_auto_area: false,
   balance: 0,
+  dinner_balance: 0,
   delivery_start_date: '',
   store_pickup: false,
   skip_subscription_saturday: false,
@@ -126,9 +129,8 @@ const autoAreaHintText = computed(() =>
     : '仅勾选后保存才会按已有坐标重算片区；不改片区则不提交，避免动到地址。',
 )
 
-/** 全餐/晚餐卡：档案弹窗只改午餐次数，晚餐余次只读展示 */
+/** 全餐/晚餐卡：档案弹窗可分别改午餐、晚餐次数池 */
 const showDinnerRemain = computed(() => memberShowsDinnerRemain(props.member))
-const dinnerRemainDisplay = computed(() => Math.max(0, Number(props.member?.dinner_balance) || 0))
 
 function normalizeBalance(v) {
   return Math.max(0, Math.min(999999, Math.floor(Number(v) || 0)))
@@ -223,7 +225,9 @@ function fillFormFromMember(u) {
   const dr =
     u.delivery_region_id != null && u.delivery_region_id !== '' ? String(u.delivery_region_id) : ''
   const balance = normalizeBalance(u.balance)
+  const dinnerBalance = normalizeBalance(u.dinner_balance)
   editInitialBalance.value = balance
+  editInitialDinnerBalance.value = dinnerBalance
   editInitialDeliveryRegionId.value = dr
   editForm.value = {
     phone: u.phone,
@@ -234,6 +238,7 @@ function fillFormFromMember(u) {
     membership_template_id: matchedId != null ? matchedId : CURRENT_PLAN_VALUE,
     use_auto_area: false,
     balance,
+    dinner_balance: dinnerBalance,
     delivery_start_date:
       typeof u.delivery_start_date === 'string' && u.delivery_start_date.trim()
         ? u.delivery_start_date.trim().slice(0, 10)
@@ -368,6 +373,12 @@ async function submitEditMember() {
     if (balanceVal !== editInitialBalance.value) {
       payload.balance = balanceVal
     }
+    if (showDinnerRemain.value) {
+      const dinnerVal = normalizeBalance(editForm.value.dinner_balance)
+      if (dinnerVal !== editInitialDinnerBalance.value) {
+        payload.dinner_balance = dinnerVal
+      }
+    }
     // 不提交 address。片区仅在勾选自动划区或手动改了下拉时才提交，避免备注保存写地址行。
     if (editForm.value.use_auto_area) {
       payload.use_auto_area = true
@@ -480,7 +491,7 @@ async function submitEditMember() {
                     <el-tooltip
                       :content="
                         showDinnerRemain
-                          ? '此处只改午餐次数池；晚餐剩余见右侧只读。直接修改将产生余额流水，常规续卡请走开卡工单'
+                          ? '此处只改午餐次数池。直接修改将产生余额流水，常规续卡请走开卡工单'
                           : '直接修改将产生余额流水（管理端调整）；常规续卡请走开卡工单入账'
                       "
                       placement="top"
@@ -505,16 +516,22 @@ async function submitEditMember() {
                 <div v-if="showDinnerRemain" class="mem-field">
                   <label class="mem-lab mem-lab-inline">
                     晚餐剩余
-                    <el-tooltip content="只读，与午餐分池；调整晚餐请走补餐或开卡工单" placement="top">
+                    <el-tooltip
+                      content="此处只改晚餐次数池，与午餐分池。直接修改将产生余额流水，常规续卡请走开卡工单"
+                      placement="top"
+                    >
                       <span class="mem-tip-wrap">
                         <CircleHelp class="mem-tip" :size="13" />
                       </span>
                     </el-tooltip>
                   </label>
                   <div class="mem-affix mem-affix--el-row">
-                    <el-input
-                      :model-value="String(dinnerRemainDisplay)"
-                      disabled
+                    <el-input-number
+                      v-model="editForm.dinner_balance"
+                      :min="0"
+                      :max="999999"
+                      :step="1"
+                      controls-position="right"
                       class="mem-input-el mem-affix-inp-el"
                     />
                     <span class="mem-affix-suf-el">次</span>

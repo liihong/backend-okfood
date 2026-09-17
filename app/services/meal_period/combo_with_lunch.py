@@ -1,7 +1,9 @@
 """全餐卡「与午餐一起配送」：独立于现网午餐扣次。
 
-午餐履约成功后追加扣晚餐，当且仅当会员有已缴已入账的午+晚工单，且：
-开卡快照 deliver_dinner_with_lunch_snapshot=true，或快照未置位但关联模版当前已勾选。
+午餐履约成功后追加扣晚餐，当且仅当：
+已缴已入账且覆盖午+晚的工单快照 deliver_dinner_with_lunch_snapshot=true，
+或快照未置位但关联模版当前已勾选；
+或台账导入等无全餐工单、但午餐+晚餐次数池都在、且本店在售全餐卡勾选一起配送。
 默认 false，不改变纯午餐 / 分送全餐 / 纯晚餐。晚餐流水已送达则幂等跳过，不会扣两次。
 
 本模块不得向午餐主路径抛业务异常，以免晚餐失败回滚午餐扣次。
@@ -54,11 +56,98 @@ def snapshot_deliver_dinner_with_lunch_from_template(
     )
 
 
+def infer_combo_with_lunch_without_full_meal_order(
+    *,
+    has_paid_applied_order: bool,
+    has_lunch_pool: bool,
+    has_dinner_pool: bool,
+    lunch_quota: int,
+    dinner_quota: int,
+    store_combo_meals_grants: frozenset[int] | set[int],
+    store_has_active_combo_with_lunch: bool,
+) -> bool:
+    """无开卡工单时的导入全餐推断。
+
+    已有任何已缴入账工单则不推断。
+    午/晚累计总次数须相同，且等于本店在售「一起配送」全餐卡的入账份数（如 48），
+    避免把午餐卡+晚餐残留或分购 24+24 当成全餐连带。
+    """
+    if has_paid_applied_order:
+        return False
+    if not has_lunch_pool or not has_dinner_pool:
+        return False
+    if not store_has_active_combo_with_lunch:
+        return False
+    lq = int(lunch_quota or 0)
+    dq = int(dinner_quota or 0)
+    if lq <= 0 or lq != dq:
+        return False
+    grants = {int(x) for x in store_combo_meals_grants if int(x) > 0}
+    if not grants:
+        return False
+    return lq in grants
+
+
+def _period_pool_active(balance: object, quota: object) -> bool:
+    """该餐段次数池仍有效：剩余或累计总次数任一大于 0。"""
+    return int(balance or 0) > 0 or int(quota or 0) > 0
+
+
+def _store_active_combo_with_lunch_grants(db: Session, store_id: int) -> set[int]:
+    """本店在售全餐卡（勾选与午餐一起配送）的入账份数。"""
+    rows = db.execute(
+        select(
+            MembershipCardTemplate.meal_periods,
+            MembershipCardTemplate.deliver_dinner_with_lunch,
+            MembershipCardTemplate.meals_grant,
+        ).where(
+            MembershipCardTemplate.store_id == int(store_id),
+            MembershipCardTemplate.is_active.is_(True),
+        )
+    ).all()
+    grants: set[int] = set()
+    for periods, flag, grant in rows:
+        if coerce_deliver_dinner_with_lunch(periods, bool(flag)):
+            g = int(grant or 0)
+            if g > 0:
+                grants.add(g)
+    return grants
+
+
+def _store_has_active_combo_with_lunch(db: Session, store_id: int) -> bool:
+    """本店在售全餐卡是否勾选「与午餐一起配送」。"""
+    return bool(_store_active_combo_with_lunch_grants(db, store_id))
+
+
+def _legacy_import_combo_with_lunch(db: Session, member_id: int) -> bool:
+    """台账导入无全餐工单：按次数池 + 本店全餐卡开关推断是否连带扣晚餐。"""
+    member = db.get(Member, int(member_id))
+    if member is None:
+        return False
+    dinner_row = db.get(
+        MemberMealPeriodState,
+        {"member_id": int(member_id), "meal_period": MealPeriod.DINNER.value},
+    )
+    dinner_bal = int(dinner_row.balance or 0) if dinner_row is not None else 0
+    dinner_quota = int(dinner_row.meal_quota_total or 0) if dinner_row is not None else 0
+    grants = _store_active_combo_with_lunch_grants(db, int(member.store_id))
+    return infer_combo_with_lunch_without_full_meal_order(
+        has_paid_applied_order=False,
+        has_lunch_pool=_period_pool_active(member.balance, member.meal_quota_total),
+        has_dinner_pool=_period_pool_active(dinner_bal, dinner_quota),
+        lunch_quota=int(member.meal_quota_total or 0),
+        dinner_quota=dinner_quota,
+        store_combo_meals_grants=grants,
+        store_has_active_combo_with_lunch=bool(grants),
+    )
+
+
 def member_has_combo_delivered_with_lunch(db: Session, member_id: int) -> bool:
     """是否应按「午餐送达同时扣晚餐」履约。
 
     已缴已入账且覆盖午+晚的工单：快照为 true 即命中（改模版为分开配送也不取消）；
     历史老会员快照默认 false 时，再看关联模版当前是否勾选一起配送。
+    无任何已缴入账工单（台账导入全餐）时：午/晚累计总次数相同且等于本店全餐卡份数、并勾选一起配送，同样命中。
     """
     mid = int(member_id)
     rows = db.execute(
@@ -81,14 +170,19 @@ def member_has_combo_delivered_with_lunch(db: Session, member_id: int) -> bool:
             return True
         if tpl_id is not None:
             template_ids.append(int(tpl_id))
-    if not template_ids:
+    if template_ids:
+        flags = db.scalars(
+            select(MembershipCardTemplate.deliver_dinner_with_lunch).where(
+                MembershipCardTemplate.id.in_(template_ids)
+            )
+        ).all()
+        if any(bool(f) for f in flags):
+            return True
         return False
-    flags = db.scalars(
-        select(MembershipCardTemplate.deliver_dinner_with_lunch).where(
-            MembershipCardTemplate.id.in_(template_ids)
-        )
-    ).all()
-    return any(bool(f) for f in flags)
+    # 已有午餐卡/晚餐卡等非全餐工单：不把导入残留次数当成全餐连带
+    if rows:
+        return False
+    return _legacy_import_combo_with_lunch(db, mid)
 
 
 def try_apply_dinner_deduction_with_lunch(

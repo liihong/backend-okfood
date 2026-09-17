@@ -1661,6 +1661,10 @@ def admin_patch_member_profile(
 
     balance: int | None = None,
 
+    set_dinner_balance: bool = False,
+
+    dinner_balance: int | None = None,
+
     set_delivery_start_date: bool = False,
 
     delivery_start_date: date | None = None,
@@ -1704,6 +1708,8 @@ def admin_patch_member_profile(
         and not use_auto_area
 
         and not set_balance
+
+        and not set_dinner_balance
 
         and not set_delivery_start_date
 
@@ -1751,6 +1757,15 @@ def admin_patch_member_profile(
         "delivery_deferred": bool(m.delivery_deferred),
         "is_active": bool(m.is_active),
     }
+    from app.models.member_meal_period_state import MemberMealPeriodState
+    from app.models.enums import MealPeriod
+    from app.services.meal_period.balance import dinner_balance_and_quota
+
+    _dinner_row_before = db.get(
+        MemberMealPeriodState,
+        {"member_id": int(m.id), "meal_period": MealPeriod.DINNER.value},
+    )
+    prev_snapshot["dinner_balance"] = dinner_balance_and_quota(_dinner_row_before)[0]
 
     if name is not None:
 
@@ -1872,6 +1887,34 @@ def admin_patch_member_profile(
 
             sync_member_is_active_from_period_balances(db, m)
 
+    if set_dinner_balance:
+
+        if dinner_balance is None:
+
+            raise HTTPException(status_code=400, detail="晚餐剩余次数不能为空")
+
+        new_dbal = int(dinner_balance)
+
+        if new_dbal < 0 or new_dbal > 999_999:
+
+            raise HTTPException(status_code=400, detail="晚餐剩余次数超出允许范围")
+
+        old_dbal = int(prev_snapshot["dinner_balance"])
+
+        if new_dbal != old_dbal:
+
+            from app.services.meal_period.balance import apply_dinner_recharge_delta
+
+            op = (operator or "").strip()[:50] or "admin"
+
+            apply_dinner_recharge_delta(
+                db,
+                m,
+                amount=new_dbal - old_dbal,
+                operator=op,
+                log_detail=f"档案修改晚餐 {old_dbal}→{new_dbal}",
+            )
+
     if set_delivery_start_date:
 
         if delivery_start_date is not None:
@@ -1978,6 +2021,11 @@ def admin_patch_member_profile(
         "delivery_deferred": bool(m.delivery_deferred),
         "is_active": bool(m.is_active),
     }
+    _dinner_row_after = db.get(
+        MemberMealPeriodState,
+        {"member_id": int(m.id), "meal_period": MealPeriod.DINNER.value},
+    )
+    new_snapshot["dinner_balance"] = dinner_balance_and_quota(_dinner_row_after)[0]
 
     def _admin_log(op_type: str, summary: str, *, before: dict | None = None, after: dict | None = None) -> None:
         record_member_operation(
@@ -2024,6 +2072,13 @@ def admin_patch_member_profile(
             f"修改剩余次数 {prev_snapshot['balance']}→{new_snapshot['balance']}",
             before={"balance": prev_snapshot["balance"]},
             after={"balance": new_snapshot["balance"]},
+        )
+    if set_dinner_balance and prev_snapshot["dinner_balance"] != new_snapshot["dinner_balance"]:
+        _admin_log(
+            OP_ADMIN_UPDATE_BALANCE,
+            f"修改晚餐剩余次数 {prev_snapshot['dinner_balance']}→{new_snapshot['dinner_balance']}",
+            before={"dinner_balance": prev_snapshot["dinner_balance"]},
+            after={"dinner_balance": new_snapshot["dinner_balance"]},
         )
     if plan_type is not None or membership_template_id is not None:
         from app.services.meal_period.card_eligibility import member_entitled_meal_periods

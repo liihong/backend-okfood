@@ -63,6 +63,9 @@ const templateOptions = computed(() => {
       <el-descriptions-item v-if="publishState?.last_error" label="最近错误">
         <span class="err-text">{{ publishState.last_error }}</span>
       </el-descriptions-item>
+      <el-descriptions-item v-if="publishState?.domain_last_error" label="域名同步">
+        <span class="err-text">{{ publishState.domain_last_error }}</span>
+      </el-descriptions-item>
     </el-descriptions>
 
     <el-alert

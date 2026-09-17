@@ -685,6 +685,12 @@ class AdminMemberPatchIn(BaseModel):
         le=999_999,
         description="会员剩余次数；提交则整单覆盖，差值写入 balance_logs",
     )
+    dinner_balance: int | None = Field(
+        None,
+        ge=0,
+        le=999_999,
+        description="晚餐剩余次数；提交则整单覆盖，差值写入晚餐次数池与 balance_logs",
+    )
     delivery_start_date: date | None = Field(
         None,
         description="起送业务日（上海）：提交则更新；可清空为不参与排期；通常与 is_active/请假等一同生效",

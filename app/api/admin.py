@@ -1927,6 +1927,8 @@ def member_profile_patch(
         membership_template_id=body.membership_template_id,
         set_balance="balance" in fs,
         balance=body.balance,
+        set_dinner_balance="dinner_balance" in fs,
+        dinner_balance=body.dinner_balance,
         set_delivery_start_date="delivery_start_date" in fs,
         delivery_start_date=body.delivery_start_date,
         set_store_pickup="store_pickup" in fs,
