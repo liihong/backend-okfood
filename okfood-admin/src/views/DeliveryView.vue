@@ -1301,7 +1301,7 @@ async function reinstatePhoneToSheet() {
         <section class="delivery-day-block">
           <p v-if="!sheetToday.groups?.length" class="members-loading">
             <template v-if="sheetToday.is_subscription_delivery_day === false">
-              该日非订阅配送业务日：周日、国家法定节假日及国务院调休放假日不生成大表，份数不计入该日。请选择其它业务日，或在「营业概览」核对备餐人数是否为 0。
+              该日非订阅配送业务日：普通周日、国家法定节假日及国务院调休放假日不生成大表，份数不计入该日（调休补班周日除外）。请选择其它业务日，或在「营业概览」核对备餐人数是否为 0。
             </template>
             <template v-else-if="(phoneQuery || '').trim()">
               该业务日无与「{{ (phoneQuery || '').trim() }}」匹配的配送记录（或该会员已请假/未在配送名单中）。

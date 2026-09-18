@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import { Search } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
-import { isSubscriptionDeliveryDayIso } from '../../utils/deliveryCalendar.js'
 
 const props = defineProps({
   /** 营业锚定日 YYYY-MM-DD，与 dashboard-summary 一致 */
@@ -267,10 +266,6 @@ async function saveKitchenPlanForDate(businessDate, plannedTotal, mealPeriod = '
 
 const KITCHEN_DAY_LABELS = ['今日', '明日', '后天']
 
-const dayAfterTomorrowIsBusinessDay = computed(() =>
-  isSubscriptionDeliveryDayIso(props.dayAfterTomorrowBusinessDate),
-)
-
 /** 保存今日/明日/后天午餐+晚餐日总份数；保存完成后由父组件 await dashboard-summary 全量刷新 */
 async function saveKitchenPlan() {
   if (kitchenSaving.value) return
@@ -328,11 +323,8 @@ async function saveKitchenPlan() {
     showToast('请输入正确的日总份数', 'error')
     return
   }
-  const saveTargets = entries.filter((e) => isSubscriptionDeliveryDayIso(e.date))
-  if (!saveTargets.length) {
-    showToast('所选日期均为非营业日，无需保存日总份数', 'error')
-    return
-  }
+  // 是否订阅配送业务日由服务端 delivery_calendar 判定（含补班周日），前端不做周日一刀切
+  const saveTargets = entries
   kitchenSaving.value = true
   try {
     const results = await Promise.allSettled(
@@ -377,10 +369,7 @@ async function saveKitchenPlan() {
       return
     }
     const savedText = saveTargets.map((e) => `${e.label} ${e.value} 份`).join('、')
-    const skipped = entries.filter((e) => !isSubscriptionDeliveryDayIso(e.date))
-    const skipHint =
-      skipped.length > 0 ? `（${skipped.map((e) => e.label).join('、')}为非营业日已跳过）` : ''
-    showToast(`${savedText}已保存，本周菜单已同步${skipHint}`, 'success')
+    showToast(`${savedText}已保存，本周菜单已同步`, 'success')
     emit('menu-day-stock-saved')
   } finally {
     kitchenSaving.value = false
@@ -460,10 +449,7 @@ watch(
           </div>
         </div>
         <div class="dpk-kitchen-grid__row">
-          <label class="dpk-kitchen-grid__row-label">
-            {{ KITCHEN_DAY_LABELS[2] }}日
-            <span v-if="!dayAfterTomorrowIsBusinessDay" class="dpk-nonbiz-hint">（非营业日）</span>
-          </label>
+          <label class="dpk-kitchen-grid__row-label">{{ KITCHEN_DAY_LABELS[2] }}日总份数</label>
           <div class="dpk-input-row">
             <input
               v-model.number="kitchenInputDayAfterTomorrow"
@@ -472,7 +458,6 @@ watch(
               min="0"
               max="99999"
               inputmode="numeric"
-              :disabled="!dayAfterTomorrowIsBusinessDay"
             />
             <span class="dpk-unit">份</span>
           </div>
@@ -484,7 +469,6 @@ watch(
               min="0"
               max="99999"
               inputmode="numeric"
-              :disabled="!dayAfterTomorrowIsBusinessDay"
             />
             <span class="dpk-unit">份</span>
           </div>

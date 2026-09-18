@@ -1263,7 +1263,7 @@ class DeliverySheetOut(BaseModel):
     )
     is_subscription_delivery_day: bool = Field(
         True,
-        description="该日是否视为订阅配送业务日；false 时（周日/法定及调休等）不生成列表，大表为空属正常",
+        description="该日是否视为订阅配送业务日；false 时（普通周日/法定及调休放假日等）不生成列表，补班周日除外",
     )
     total_members: int = Field(
         0,

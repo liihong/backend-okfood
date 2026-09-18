@@ -1,7 +1,7 @@
 """订阅配送业务日判定（上海日历）。
 
 规则摘要：
-- 周日固定不配送（含法定补班周日，仍不配送）。
+- 普通周日不配送；国务院公布的调休补班周日视为工作日，照常配送。
 - 国家法定节假日及国务院公布的调休放假日不配送（依赖 `chinese-calendar` 与国务院安排）。
 - 普通周六照常配送；若周六落在长假调休范围内则不配送；若周六为补班工作日则配送。
 
@@ -18,7 +18,8 @@ import chinese_calendar as cc
 def _is_subscription_delivery_day_with_calendar(d: date) -> bool:
     """使用 chinese-calendar 的判定；仅应在库支持的年份上调用（见外层的 NotImplemented 降级）。"""
     if d.weekday() == 6:
-        return False
+        # 补班周日随国务院 is_workday；其余普通周日不配送
+        return cc.is_workday(d)
     if cc.is_workday(d):
         return True
     if d.weekday() == 5:
