@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.timeutil import beijing_now_naive
-from app.integrations.wechat_mini import WeChatMiniError
+from app.integrations.wechat_mini import WeChatMiniError, format_wechat_api_error
 from app.models.tenant import Tenant
 from app.services.client.tenant_saas_service import (
     DEFAULT_FEATURES,
@@ -161,10 +161,14 @@ def _raise_wechat(data: dict[str, Any], *, fallback: str) -> None:
     errcode = data.get("errcode")
     if errcode in (None, 0):
         return
-    msg = _s(data.get("errmsg")) or fallback
-    # 常见业务错误用 400，凭证类用 503
-    status = 503 if int(errcode or 0) in (40001, 40014, 42001) else 400
-    raise HTTPException(status_code=status, detail=f"微信接口错误({errcode}): {msg}")
+    try:
+        code_int = int(errcode or 0)
+    except (TypeError, ValueError):
+        code_int = 0
+    msg = format_wechat_api_error(code_int, _s(data.get("errmsg")), fallback=fallback)
+    # 凭证失效 / IP 白名单属于环境问题，用 503
+    status = 503 if code_int in (40001, 40014, 42001, 61004, 40164, 45035) else 400
+    raise HTTPException(status_code=status, detail=msg)
 
 
 def list_code_templates(db: Session, *, template_type: int | None = 0) -> list[dict[str, Any]]:
@@ -490,7 +494,12 @@ def get_effective_domains_for_tenant(db: Session, tenant_id: int) -> dict[str, A
 
     try:
         with httpx.Client(timeout=15.0) as client:
-            r = client.get(GET_EFFECTIVE_DOMAIN_URL, params={"access_token": token})
+            # 微信要求 POST；空 body 会返回 44002，须传 {}
+            r = client.post(
+                GET_EFFECTIVE_DOMAIN_URL,
+                params={"access_token": token},
+                json={},
+            )
             r.raise_for_status()
             data: dict[str, Any] = r.json()
     except httpx.HTTPError as e:

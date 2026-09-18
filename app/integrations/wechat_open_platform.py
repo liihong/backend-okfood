@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from app.core.config import get_settings
-from app.integrations.wechat_mini import WeChatMiniError
+from app.integrations.wechat_mini import WeChatMiniError, format_wechat_api_error
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -107,7 +107,11 @@ def get_component_access_token(db: "Session | None" = None) -> str:
         if errcode not in (None, 0):
             msg = str(data.get("errmsg") or "未知错误")
             logger.warning("component_access_token 失败: %s", msg)
-            raise WeChatMiniError(f"第三方平台 token 获取失败: {msg}", status_code=503)
+            raise WeChatMiniError(
+                format_wechat_api_error(errcode, msg, fallback="第三方平台 token 获取失败"),
+                errcode=int(errcode) if errcode is not None else None,
+                status_code=503,
+            )
 
         token = _s(data.get("component_access_token"))
         expires_in = int(data.get("expires_in") or 7200)

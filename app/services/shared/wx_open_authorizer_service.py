@@ -16,7 +16,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.timeutil import beijing_now_naive
-from app.integrations.wechat_mini import WeChatMiniError
+from app.integrations.wechat_mini import (
+    WeChatMiniError,
+    WX_ERRCODE_IP_NOT_WHITELISTED,
+    format_wechat_api_error,
+)
 from app.models.tenant_integration_settings import TenantIntegrationSettings
 from app.models.wx_open_component_state import WxOpenComponentState
 from app.services.shared.tenant_integration_service import get_tenant_integration_row
@@ -352,7 +356,15 @@ def refresh_authorizer_access_token(db: Session, tenant_id: int) -> str:
 
     if data.get("errcode") not in (None, 0):
         msg = str(data.get("errmsg") or "未知错误")
-        raise WeChatMiniError(f"刷新 authorizer token 失败: {msg}", status_code=400)
+        try:
+            code_int = int(data.get("errcode") or 0)
+        except (TypeError, ValueError):
+            code_int = 0
+        raise WeChatMiniError(
+            format_wechat_api_error(code_int, msg, fallback="刷新 authorizer token 失败"),
+            errcode=code_int or None,
+            status_code=503 if code_int in WX_ERRCODE_IP_NOT_WHITELISTED else 400,
+        )
 
     access_token = _s(data.get("authorizer_access_token"))
     new_refresh = _s(data.get("authorizer_refresh_token"))

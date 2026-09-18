@@ -1,6 +1,6 @@
 """零售商品分享海报：scene 编解码。"""
 
-from app.integrations.wechat_mini import _wxacode_error_message
+from app.integrations.wechat_mini import _wxacode_error_message, format_wechat_api_error
 from app.services.client.retail_share_poster_service import (
     encode_retail_share_scene,
     parse_retail_share_scene,
@@ -26,3 +26,13 @@ def test_parse_retail_share_scene() -> None:
 def test_wxacode_error_message_maps_known_codes() -> None:
     assert "未发布" in _wxacode_error_message(41030, "invalid page")
     assert "小程序码" in _wxacode_error_message(12345, "foo")
+
+
+def test_format_wechat_ip_whitelist_error() -> None:
+    msg = format_wechat_api_error(
+        61004,
+        "access clientip is not registered requestIP: 42.226.116.67 rid: abc",
+    )
+    assert "42.226.116.67" in msg
+    assert "白名单" in msg
+    assert "61004" in msg

@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from datetime import date
 from typing import TYPE_CHECKING, Any
@@ -28,6 +29,9 @@ WXACODE_ERR_HINTS: dict[int, str] = {
     45009: "生成小程序码过于频繁，请稍后再试",
     85079: "小程序尚未发布正式版，请改用体验版生成",
 }
+# 第三方平台 / 小程序 API IP 白名单
+WX_ERRCODE_IP_NOT_WHITELISTED = frozenset({61004, 40164, 45035})
+_WX_REQUEST_IP_RE = re.compile(r"requestIP:\s*([0-9a-fA-F:.]+)", re.I)
 
 
 class WeChatMiniError(Exception):
@@ -276,6 +280,27 @@ def get_phone_pure_number(
     if cc == "86":
         return pure
     return f"{cc}{pure}"
+
+
+def format_wechat_api_error(errcode: int | None, errmsg: str, *, fallback: str = "微信接口调用失败") -> str:
+    """把微信 errcode/errmsg 转成管理端可操作的中文说明。"""
+    try:
+        code = int(errcode or 0)
+    except (TypeError, ValueError):
+        code = 0
+    raw = (errmsg or "").strip() or fallback
+    if code in WX_ERRCODE_IP_NOT_WHITELISTED:
+        matched = _WX_REQUEST_IP_RE.search(raw)
+        ip = matched.group(1) if matched else None
+        ip_hint = f"当前出口 IP：{ip}。" if ip else ""
+        return (
+            f"微信拒绝调用（{code}）：出口 IP 未加入第三方平台白名单。"
+            f"{ip_hint}"
+            "请到微信开放平台 → 管理中心 → 第三方平台 → 开发配置 → 开发资料，"
+            "用「修改」把该 IP 加进去（立即生效，不要填 CIDR）。"
+            "宽带 IP 会变，代发布请从已加白的生产服务器操作，或临时加入当前 IP。"
+        )
+    return f"微信接口错误({code}): {raw}"
 
 
 def _wxacode_error_message(errcode: int, errmsg: str) -> str:
