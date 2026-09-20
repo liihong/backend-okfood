@@ -12,10 +12,14 @@ import pytest
 
 from app.services.shared.wx_open_code_service import (
     GET_EFFECTIVE_DOMAIN_URL,
+    _apply_authorizer_server_domain,
     _domain_list_contains,
     _format_modify_domain_error,
+    _snapshot_contains,
+    _split_domain_csv,
     _to_wechat_bare_host,
     _to_wechat_https_origin,
+    ensure_third_party_server_domain_pool,
     get_effective_domains_for_tenant,
 )
 
@@ -56,6 +60,20 @@ def test_domain_list_contains_ignores_scheme_and_path() -> None:
     assert not _domain_list_contains(["https://other.example.com"], "ok.sourcefire.cn")
 
 
+def test_snapshot_contains_third_or_direct_domain() -> None:
+    snap = {
+        "requestdomain": [],
+        "effective_domain": {"requestdomain": []},
+        "third_domain": {"requestdomain": ["https://ok.sourcefire.cn"]},
+        "direct_domain": {"requestdomain": []},
+        "mp_domain": {"requestdomain": []},
+    }
+    assert _snapshot_contains(snap, "requestdomain", "https://ok.sourcefire.cn")
+    snap["third_domain"] = {"requestdomain": []}
+    snap["direct_domain"] = {"requestdomain": ["https://ok.sourcefire.cn"]}
+    assert _snapshot_contains(snap, "requestdomain", "ok.sourcefire.cn")
+
+
 def test_format_85301_lists_invalid_domains() -> None:
     msg = _format_modify_domain_error(
         {
@@ -70,6 +88,7 @@ def test_format_85301_lists_invalid_domains() -> None:
     assert "85301" in msg
     assert "https://ok.sourcefire.cn/api" in msg
     assert "小程序服务器域名" in msg
+    assert "全网发布" in msg
 
 
 @patch("app.services.shared.wx_open_code_service._authorizer_access_token_or_http", return_value="tok")
@@ -85,6 +104,7 @@ def test_get_effective_domains_uses_post_with_empty_json(
     resp.json.return_value = {
         "errcode": 0,
         "effective_domain": {"requestdomain": ["https://ok.sourcefire.cn"]},
+        "third_domain": {"requestdomain": ["https://ok.sourcefire.cn"]},
     }
     client = MagicMock()
     client.post.return_value = resp
@@ -99,3 +119,101 @@ def test_get_effective_domains_uses_post_with_empty_json(
     assert kwargs["json"] == {}
     client.get.assert_not_called()
     assert out["requestdomain"] == ["https://ok.sourcefire.cn"]
+    assert out["third_domain"]["requestdomain"] == ["https://ok.sourcefire.cn"]
+
+
+def test_split_domain_csv_semicolon_and_spaces() -> None:
+    assert _split_domain_csv("ok.sourcefire.cn;okoss.sourcefire.cn") == {
+        "ok.sourcefire.cn",
+        "okoss.sourcefire.cn",
+    }
+    assert _split_domain_csv("ok.sourcefire.cn okoss.sourcefire.cn") == {
+        "ok.sourcefire.cn",
+        "okoss.sourcefire.cn",
+    }
+
+
+@patch("app.integrations.wechat_open_platform.get_component_access_token", return_value="comp")
+@patch("app.services.shared.wx_open_code_service._post_modify_wxa_server_domain")
+def test_domain_pool_adds_to_published_together(
+    mock_post: MagicMock,
+    _token: MagicMock,
+) -> None:
+    """已全网发布平台必须写入 published 池，只写测试版会 85301。"""
+    mock_post.side_effect = [
+        {"errcode": 0, "published_wxa_server_domain": "", "testing_wxa_server_domain": ""},
+        {
+            "errcode": 0,
+            "published_wxa_server_domain": "ok.sourcefire.cn",
+            "testing_wxa_server_domain": "ok.sourcefire.cn",
+        },
+    ]
+    out = ensure_third_party_server_domain_pool(MagicMock(), ["ok.sourcefire.cn"])
+    assert out["added"] == ["ok.sourcefire.cn"]
+    add_body = mock_post.call_args_list[1][0][1]
+    assert add_body["action"] == "add"
+    assert add_body["wxa_server_domain"] == "ok.sourcefire.cn"
+    assert add_body["is_modify_published_together"] is True
+
+
+@patch("app.integrations.wechat_open_platform.get_component_access_token", return_value="comp")
+@patch("app.services.shared.wx_open_code_service._post_modify_wxa_server_domain")
+def test_domain_pool_61028_retries_testing_only(
+    mock_post: MagicMock,
+    _token: MagicMock,
+) -> None:
+    mock_post.side_effect = [
+        {"errcode": 0, "published_wxa_server_domain": "", "testing_wxa_server_domain": ""},
+        {"errcode": 61028, "errmsg": "第三方平台未发布"},
+        {
+            "errcode": 0,
+            "testing_wxa_server_domain": "ok.sourcefire.cn",
+        },
+    ]
+    out = ensure_third_party_server_domain_pool(MagicMock(), ["ok.sourcefire.cn"])
+    assert out["added"] == ["ok.sourcefire.cn"]
+    assert mock_post.call_args_list[1][0][1]["is_modify_published_together"] is True
+    assert mock_post.call_args_list[2][0][1]["is_modify_published_together"] is False
+
+
+@patch("app.integrations.wechat_open_platform.get_component_access_token", return_value="comp")
+@patch("app.services.shared.wx_open_code_service._post_modify_wxa_server_domain")
+def test_domain_pool_9410016_is_not_skipped(
+    mock_post: MagicMock,
+    _token: MagicMock,
+) -> None:
+    mock_post.side_effect = [
+        {"errcode": 0, "published_wxa_server_domain": "", "testing_wxa_server_domain": ""},
+        {"errcode": 9410016, "errmsg": "存在无效域名", "invalid_wxa_server_domain": "ok.sourcefire.cn"},
+    ]
+    with pytest.raises(HTTPException) as exc:
+        ensure_third_party_server_domain_pool(MagicMock(), ["ok.sourcefire.cn"])
+    assert exc.value.status_code == 400
+    assert "9410016" in str(exc.value.detail)
+
+
+@patch("app.services.shared.wx_open_code_service._post_modify_domain_directly")
+@patch("app.services.shared.wx_open_code_service._post_modify_domain")
+def test_apply_falls_back_to_directly_on_85301(
+    mock_modify: MagicMock,
+    mock_direct: MagicMock,
+) -> None:
+    mock_modify.return_value = {
+        "errcode": 85301,
+        "errmsg": "no domain to modify after filtered",
+        "invalid_requestdomain": ["https://ok.sourcefire.cn"],
+    }
+    mock_direct.return_value = {"errcode": 0, "errmsg": "ok"}
+    payload = {
+        "action": "add",
+        "requestdomain": ["https://ok.sourcefire.cn"],
+        "wsrequestdomain": [],
+        "uploaddomain": ["https://ok.sourcefire.cn"],
+        "downloaddomain": ["https://ok.sourcefire.cn"],
+        "udpdomain": [],
+        "tcpdomain": [],
+    }
+    data, method = _apply_authorizer_server_domain("tok", payload)
+    assert method == "modify_domain_directly"
+    assert data.get("errcode") == 0
+    mock_direct.assert_called_once_with("tok", payload)

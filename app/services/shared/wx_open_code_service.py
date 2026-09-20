@@ -46,6 +46,8 @@ RELEASE_URL = "https://api.weixin.qq.com/wxa/release"
 SET_PRIVACY_SETTING_URL = "https://api.weixin.qq.com/cgi-bin/component/setprivacysetting"
 GET_PRIVACY_SETTING_URL = "https://api.weixin.qq.com/cgi-bin/component/getprivacysetting"
 MODIFY_DOMAIN_URL = "https://api.weixin.qq.com/wxa/modify_domain"
+# 快速配置：无需先登记第三方平台域名池；提交代码 / 发布后生效
+MODIFY_DOMAIN_DIRECTLY_URL = "https://api.weixin.qq.com/wxa/modify_domain_directly"
 GET_EFFECTIVE_DOMAIN_URL = "https://api.weixin.qq.com/wxa/get_effective_domain"
 # 第三方平台自身的「小程序服务器域名」池；modify_domain 只能下发此池内的域名
 MODIFY_WXA_SERVER_DOMAIN_URL = "https://api.weixin.qq.com/cgi-bin/component/modify_wxa_server_domain"
@@ -289,10 +291,25 @@ def _normalize_bare_host(raw: Any) -> str:
 
 
 def _split_domain_csv(raw: Any) -> set[str]:
-    text = _s(raw)
+    """微信域名池返回可能用分号或空格分隔。"""
+    text = _s(raw).replace(",", " ").replace(";", " ")
     if not text:
         return set()
-    return {_normalize_bare_host(p) for p in text.split(";") if _s(p)}
+    return {_normalize_bare_host(p) for p in text.split() if _s(p)}
+
+
+# 域名池 add 时「没有新增」可继续下发；9410016 是无效域名，不能当成功
+_DOMAIN_POOL_ALREADY_ERRCODES = frozenset({85017})
+# modify_domain 滤空：域名不在第三方平台全网发布版池中
+_MODIFY_DOMAIN_NEED_DIRECTLY = frozenset({85018, 85301})
+_MODIFY_DOMAIN_OK = frozenset({0, 85017})
+
+
+def _wechat_errcode(data: dict[str, Any]) -> int:
+    try:
+        return int(data.get("errcode") or 0)
+    except (TypeError, ValueError):
+        return -1
 
 
 def _join_domain_hints(items: Any) -> str:
@@ -335,7 +352,10 @@ def _format_modify_domain_error(data: dict[str, Any], *, submitted: dict[str, An
     elif errcode == 85018:
         head = "域名未在第三方平台设置（85018）"
     elif errcode == 85301:
-        head = "微信拒绝了服务器域名（85301）：提交的域名不符合规则（常见原因：带了路径、未进第三方平台域名池）"
+        head = (
+            "微信拒绝了服务器域名（85301）：域名未进入第三方平台「小程序服务器域名」全网发布版"
+            "（测试版不够；带路径也会被滤空）"
+        )
     elif errcode == 85302:
         head = "微信拒绝了服务器域名（85302）：存在未完成 ICP 备案的域名"
     elif errcode == 85303:
@@ -418,13 +438,13 @@ def _post_modify_wxa_server_domain(token: str, body: dict[str, Any]) -> dict[str
 
 def ensure_third_party_server_domain_pool(db: Session, hosts: list[str]) -> dict[str, Any]:
     """
-    把平台域名写入第三方平台「小程序服务器域名」池（含全网发布）。
+    把平台域名写入第三方平台「小程序服务器域名」池（优先全网发布版）。
 
-    modify_domain 只能下发池内域名；未登记时微信会滤空并返回 85018/85301。
+    已全网发布的第三方平台：授权小程序只认 published 池；只写测试版会导致 modify_domain 85301。
     """
     want = [_normalize_bare_host(h) for h in hosts if _normalize_bare_host(h)]
     if not want:
-        return {"added": [], "published": []}
+        return {"added": [], "published": [], "testing": []}
 
     from app.integrations.wechat_open_platform import get_component_access_token
 
@@ -438,39 +458,81 @@ def ensure_third_party_server_domain_pool(db: Session, hosts: list[str]) -> dict
         logger.warning("读取第三方平台服务器域名池失败: %s", got)
     published = _split_domain_csv(got.get("published_wxa_server_domain"))
     testing = _split_domain_csv(got.get("testing_wxa_server_domain"))
-    missing = [h for h in want if h not in published]
-    if not missing:
+    # 授权小程序走 published；仅测试版不够
+    missing_published = [h for h in want if h not in published]
+    if not missing_published:
         return {"added": [], "published": sorted(published), "testing": sorted(testing)}
 
-    add_body = {
-        "action": "add",
-        "wxa_server_domain": ";".join(missing),
-        "is_modify_published_together": True,
-    }
-    added = _post_modify_wxa_server_domain(token, add_body)
-    errcode = added.get("errcode")
+    def _add(hosts_to_add: list[str], *, published_together: bool) -> dict[str, Any]:
+        return _post_modify_wxa_server_domain(
+            token,
+            {
+                "action": "add",
+                "wxa_server_domain": ";".join(hosts_to_add),
+                "is_modify_published_together": published_together,
+            },
+        )
+
+    together = True
+    added = _add(missing_published, published_together=True)
+    errcode = _wechat_errcode(added)
+    if errcode == 61028:
+        # 第三方平台本身未全网发布，只能写测试版
+        missing_testing = [h for h in missing_published if h not in testing]
+        if not missing_testing:
+            return {
+                "added": [],
+                "published": sorted(published),
+                "testing": sorted(testing),
+                "already": True,
+                "skipped_errcode": 61028,
+            }
+        together = False
+        added = _add(missing_testing, published_together=False)
+        errcode = _wechat_errcode(added)
+        missing_published = missing_testing
+
     invalid = _s(added.get("invalid_wxa_server_domain"))
-    if errcode not in (None, 0):
-        # 已在测试版/发布版中时，微信可能返回 85017，视为可继续下发到小程序
-        if int(errcode or 0) == 85017 and not invalid:
-            logger.info("第三方平台域名池已包含 %s", missing)
-            return {"added": [], "published": sorted(published | set(missing)), "already": True}
+    if errcode not in (0,):
+        if errcode in _DOMAIN_POOL_ALREADY_ERRCODES:
+            logger.info("第三方平台域名池已包含 %s", missing_published)
+            return {
+                "added": [],
+                "published": sorted(published | set(missing_published)),
+                "testing": sorted(testing | set(missing_published)),
+                "already": True,
+            }
         msg = _s(added.get("errmsg")) or "写入第三方平台服务器域名失败"
         extra = f"；未通过验证：{invalid}" if invalid else ""
         raise HTTPException(
             status_code=400,
             detail=(
                 f"无法写入第三方平台域名池({errcode}): {msg}{extra}。"
-                "请确认域名已 ICP 备案，并到开放平台「小程序服务器域名」登记纯主机名后全网发布"
+                "请到开放平台「小程序服务器域名」登记纯主机名（不要 https://、不要路径）并点全网发布后重试"
             ),
         )
     if invalid:
-        raise HTTPException(
-            status_code=400,
-            detail=f"第三方平台域名未通过验证：{invalid}。请确认已 ICP 备案且不含路径",
-        )
-    logger.info("已写入第三方平台服务器域名池 hosts=%s", missing)
-    return {"added": missing, "published": sorted(published | set(missing))}
+        still_missing = [
+            h
+            for h in missing_published
+            if h not in _split_domain_csv(invalid) and h not in published and h not in testing
+        ]
+        if still_missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"第三方平台域名未通过验证：{invalid}。请确认已 ICP 备案且不含路径",
+            )
+        logger.warning("第三方平台部分域名未通过验证，已忽略 invalid=%s", invalid)
+        return {"added": [], "published": sorted(published), "testing": sorted(testing), "invalid": invalid}
+
+    published2 = _split_domain_csv(added.get("published_wxa_server_domain"))
+    testing2 = _split_domain_csv(added.get("testing_wxa_server_domain"))
+    if not published2:
+        published2 = (published | set(missing_published)) if together else published
+    if not testing2:
+        testing2 = testing | set(missing_published)
+    logger.info("已写入第三方平台服务器域名池 hosts=%s published=%s", missing_published, sorted(published2))
+    return {"added": missing_published, "published": sorted(published2), "testing": sorted(testing2)}
 
 
 def _post_modify_domain(token: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -485,6 +547,64 @@ def _post_modify_domain(token: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise HTTPException(status_code=502, detail="同步服务器域名失败")
     return data
+
+
+def _post_modify_domain_directly(token: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """方式二：不依赖第三方平台域名池，提交代码后生效。"""
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            r = client.post(MODIFY_DOMAIN_DIRECTLY_URL, params={"access_token": token}, json=payload)
+            r.raise_for_status()
+            data: dict[str, Any] = r.json()
+    except httpx.HTTPError as e:
+        logger.exception("modify_domain_directly 请求失败")
+        raise HTTPException(status_code=502, detail="快速配置服务器域名失败（网络）") from e
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="快速配置服务器域名失败")
+    return data
+
+
+def _apply_authorizer_server_domain(token: str, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """
+    先走 modify_domain（须进全网发布版域名池）；85301/85018 再改 modify_domain_directly。
+    """
+    data = _post_modify_domain(token, payload)
+    code = _wechat_errcode(data)
+    if code in _MODIFY_DOMAIN_OK:
+        return data, "modify_domain"
+    if code not in _MODIFY_DOMAIN_NEED_DIRECTLY:
+        return data, "modify_domain"
+
+    logger.warning(
+        "modify_domain 被滤空 errcode=%s invalid=%s，改走 modify_domain_directly",
+        code,
+        data.get("invalid_requestdomain"),
+    )
+    direct = _post_modify_domain_directly(token, payload)
+    dcode = _wechat_errcode(direct)
+    if dcode in _MODIFY_DOMAIN_OK:
+        return direct, "modify_domain_directly"
+
+    merged = dict(data)
+    merged["direct_errcode"] = dcode
+    merged["direct_errmsg"] = _s(direct.get("errmsg"))
+    return merged, "modify_domain"
+
+
+def _as_domain_bucket(raw: Any) -> dict[str, list[Any]]:
+    src = raw if isinstance(raw, dict) else {}
+    out: dict[str, list[Any]] = {}
+    for key in (
+        "requestdomain",
+        "wsrequestdomain",
+        "uploaddomain",
+        "downloaddomain",
+        "udpdomain",
+        "tcpdomain",
+    ):
+        items = src.get(key) or []
+        out[key] = items if isinstance(items, list) else []
+    return out
 
 
 def get_effective_domains_for_tenant(db: Session, tenant_id: int) -> dict[str, Any]:
@@ -507,7 +627,11 @@ def get_effective_domains_for_tenant(db: Session, tenant_id: int) -> dict[str, A
         raise HTTPException(status_code=502, detail="查询生效域名失败（网络）") from e
 
     _raise_wechat(data, fallback="查询生效域名失败")
-    effective = data.get("effective_domain") if isinstance(data.get("effective_domain"), dict) else {}
+    effective = _as_domain_bucket(data.get("effective_domain"))
+    third = _as_domain_bucket(data.get("third_domain"))
+    direct = _as_domain_bucket(data.get("direct_domain"))
+    mp_domain = _as_domain_bucket(data.get("mp_domain"))
+    # 顶层数组保持兼容：优先发布后生效列表
     return {
         "requestdomain": effective.get("requestdomain") or [],
         "wsrequestdomain": effective.get("wsrequestdomain") or [],
@@ -515,6 +639,10 @@ def get_effective_domains_for_tenant(db: Session, tenant_id: int) -> dict[str, A
         "downloaddomain": effective.get("downloaddomain") or [],
         "udpdomain": effective.get("udpdomain") or [],
         "tcpdomain": effective.get("tcpdomain") or [],
+        "effective_domain": effective,
+        "third_domain": third,
+        "direct_domain": direct,
+        "mp_domain": mp_domain,
     }
 
 
@@ -529,16 +657,28 @@ def _domain_list_contains(domains: list[Any], target: str) -> bool:
     return False
 
 
+def _snapshot_contains(snapshot: dict[str, Any], key: str, target: str) -> bool:
+    """third / direct / effective / mp 任一来源命中即视为已配置。"""
+    if _domain_list_contains(snapshot.get(key) or [], target):
+        return True
+    for source in ("effective_domain", "third_domain", "direct_domain", "mp_domain"):
+        bucket = snapshot.get(source)
+        if isinstance(bucket, dict) and _domain_list_contains(bucket.get(key) or [], target):
+            return True
+    return False
+
+
 def _fail_domain_sync(db: Session, tenant_id: int, msg: str, *, code: int = 400) -> None:
     _patch_publish_blob(db, int(tenant_id), {"domain_last_error": msg})
     raise HTTPException(status_code=code, detail=msg)
 
 
-def _wechat_errcode(data: dict[str, Any]) -> int:
-    try:
-        return int(data.get("errcode") or 0)
-    except (TypeError, ValueError):
-        return -1
+def _pool_status_hint(pool: dict[str, Any]) -> str:
+    if pool.get("error"):
+        return f"第三方平台域名池：{pool.get('error')}"
+    pub = ",".join(pool.get("published") or []) or "空"
+    tes = ",".join(pool.get("testing") or []) or "空"
+    return f"当前域名池全网发布版={pub}；测试版={tes}"
 
 
 def _try_ensure_domain_pool(db: Session, hosts: list[str]) -> dict[str, Any]:
@@ -582,7 +722,7 @@ def sync_server_domains_for_tenant(
     action: str = "add",
 ) -> dict[str, Any]:
     """
-    先写入第三方平台域名池，再通过 modify_domain 下发到已授权小程序。
+    先写入第三方平台全网发布版域名池，再 modify_domain 下发；失败则走快速配置。
 
     request/upload 使用 BASE_URL；OSS download 单独追加，失败不阻止体验版上传。
     """
@@ -594,32 +734,29 @@ def sync_server_domains_for_tenant(
 
     pool = _try_ensure_domain_pool(db, [api_host])
     if not pool.get("ok"):
-        # 池写入失败仍尝试下发：可能运营已在开放平台手工会话登记过
+        # 池写入失败仍尝试下发：可能运营已手工登记，或可走 modify_domain_directly
         logger.warning("API 域名写入第三方平台池失败 tenant_id=%s err=%s", tenant_id, pool.get("error"))
 
     token = _authorizer_access_token_or_http(db, int(tenant_id))
     api_payload = _modify_payload_for_api(str(full.get("action") or "add"), api_domain)
     try:
-        data = _post_modify_domain(token, api_payload)
+        data, method = _apply_authorizer_server_domain(token, api_payload)
     except HTTPException as e:
         detail = e.detail if isinstance(e.detail, str) else str(e.detail)
         _patch_publish_blob(db, int(tenant_id), {"domain_last_error": detail})
         raise
 
     errcode = _wechat_errcode(data)
-    effective = get_effective_domains_for_tenant(db, int(tenant_id))
-    api_ok = _domain_list_contains(effective.get("requestdomain") or [], api_domain)
+    snapshot = get_effective_domains_for_tenant(db, int(tenant_id))
+    api_ok = _snapshot_contains(snapshot, "requestdomain", api_domain) or errcode in _MODIFY_DOMAIN_OK
     if not api_ok:
-        if errcode in (0, 85017):
+        msg = _format_modify_domain_error(data, submitted=api_payload)
+        msg = f"{msg}。{_pool_status_hint(pool)}"
+        if data.get("direct_errcode"):
             msg = (
-                f"域名已提交但生效列表没有 {api_domain}。"
-                "请到微信开放平台 → 第三方平台 → 开发配置 → 小程序服务器域名，"
-                "登记 ok.sourcefire.cn（不要 https://），并点全网发布后再重试"
+                f"{msg}。快速配置 modify_domain_directly 亦失败"
+                f"({data.get('direct_errcode')}): {data.get('direct_errmsg')}"
             )
-        else:
-            msg = _format_modify_domain_error(data, submitted=api_payload)
-        if pool.get("error"):
-            msg = f"{msg}。第三方平台域名池：{pool.get('error')}"
         _fail_domain_sync(db, int(tenant_id), msg)
 
     download_error: str | None = None
@@ -627,36 +764,44 @@ def sync_server_domains_for_tenant(
     if oss_domains:
         oss_hosts = [_to_wechat_bare_host(x) for x in oss_domains]
         oss_pool = _try_ensure_domain_pool(db, oss_hosts)
-        if oss_pool.get("ok"):
-            oss_payload = _modify_payload_for_download(str(full.get("action") or "add"), oss_domains)
-            oss_data = _post_modify_domain(token, oss_payload)
-            oss_code = _wechat_errcode(oss_data)
-            effective = get_effective_domains_for_tenant(db, int(tenant_id))
-            if oss_code in (0, 85017) or all(
-                _domain_list_contains(effective.get("downloaddomain") or [], d) for d in oss_domains
-            ):
-                synced_download = [api_domain, *oss_domains]
-            else:
-                download_error = _format_modify_domain_error(oss_data, submitted=oss_payload)
-                logger.warning("OSS download 域名同步失败 tenant_id=%s err=%s", tenant_id, download_error)
+        if not oss_pool.get("ok"):
+            logger.warning(
+                "OSS 域名写入平台池失败，仍尝试下发 tenant_id=%s err=%s",
+                tenant_id,
+                oss_pool.get("error"),
+            )
+        oss_payload = _modify_payload_for_download(str(full.get("action") or "add"), oss_domains)
+        oss_data, oss_method = _apply_authorizer_server_domain(token, oss_payload)
+        oss_code = _wechat_errcode(oss_data)
+        snapshot = get_effective_domains_for_tenant(db, int(tenant_id))
+        oss_ok = oss_code in _MODIFY_DOMAIN_OK or all(
+            _snapshot_contains(snapshot, "downloaddomain", d) for d in oss_domains
+        )
+        if oss_ok:
+            synced_download = [api_domain, *oss_domains]
+            logger.info("OSS download 域名已同步 method=%s", oss_method)
         else:
-            download_error = str(oss_pool.get("error") or "OSS 域名未进入第三方平台域名池")
-            logger.warning("OSS 域名写入平台池失败 tenant_id=%s err=%s", tenant_id, download_error)
+            download_error = _format_modify_domain_error(oss_data, submitted=oss_payload)
+            logger.warning("OSS download 域名同步失败 tenant_id=%s err=%s", tenant_id, download_error)
 
     now = beijing_now_naive().isoformat(timespec="seconds")
     patch: dict[str, Any] = {
         "domain_synced_at": now,
-        "domain_last_error": download_error,
+        # API 域名已生效则不把 OSS/域名池提示当成致命错误（避免挡住体验版）
+        "domain_last_error": None,
+        "domain_download_warning": download_error,
         "domain_action": api_payload.get("action"),
+        "domain_method": method,
         "domain_request": [api_domain],
         "domain_download": synced_download,
-        "domain_effective": effective,
+        "domain_effective": snapshot,
         "domain_pool_added": pool.get("added"),
     }
     _patch_publish_blob(db, int(tenant_id), patch)
     logger.info(
-        "modify_domain 完成 tenant_id=%s request=%s download=%s oss_err=%s",
+        "服务器域名同步完成 tenant_id=%s method=%s request=%s download=%s oss_err=%s",
         tenant_id,
+        method,
         api_domain,
         synced_download,
         download_error,
@@ -664,10 +809,11 @@ def sync_server_domains_for_tenant(
     return {
         "synced_at": now,
         "action": api_payload.get("action"),
+        "method": method,
         "requestdomain": [api_domain],
         "uploaddomain": [api_domain],
         "downloaddomain": synced_download,
-        "effective_domain": effective,
+        "effective_domain": snapshot,
         "download_warning": download_error,
     }
 
@@ -797,6 +943,8 @@ def get_publish_admin_state(db: Session, tenant_id: int) -> dict[str, Any]:
         "privacy_ver": blob.get("privacy_ver"),
         "domain_synced_at": blob.get("domain_synced_at"),
         "domain_last_error": blob.get("domain_last_error"),
+        "domain_download_warning": blob.get("domain_download_warning"),
+        "domain_method": blob.get("domain_method"),
         "domain_request": blob.get("domain_request"),
         "domain_download": blob.get("domain_download"),
         **_audit_fields_from_blob(blob),
