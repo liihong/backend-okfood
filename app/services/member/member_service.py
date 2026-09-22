@@ -422,6 +422,8 @@ def _to_member_out(
 
         delivery_deferred=bool(m.delivery_deferred),
 
+        pause_effective_date=m.pause_effective_date,
+
         store_pickup=bool(m.store_pickup),
 
         is_active=m.is_active,
@@ -703,6 +705,9 @@ def patch_member_profile(
         "daily_meal_units": int(m.daily_meal_units or 1),
         "daily_meal_units_pending": getattr(m, "daily_meal_units_pending", None),
         "delivery_deferred": bool(m.delivery_deferred),
+        "pause_effective_date": (
+            m.pause_effective_date.isoformat() if getattr(m, "pause_effective_date", None) else None
+        ),
         "store_pickup": bool(m.store_pickup),
         "delivery_start_date": m.delivery_start_date.isoformat() if m.delivery_start_date else None,
         "is_active": bool(m.is_active),
@@ -767,7 +772,8 @@ def patch_member_profile(
 
     defer_applied = set_delivery_deferred and delivery_deferred is True
 
-    if defer_applied and not prev_snapshot["delivery_deferred"]:
+    already_paused = prev_snapshot["delivery_deferred"] or bool(prev_snapshot["pause_effective_date"])
+    if defer_applied and not already_paused:
         from app.services.member.leave import (
             guard_miniprogram_pause_delivery_prep_window,
             guard_miniprogram_self_service_requires_balance,
@@ -778,17 +784,21 @@ def patch_member_profile(
 
     if defer_applied:
 
-        from app.services.member.member_delivery_state_service import apply_pause_delivery
+        from app.services.member.member_delivery_state_service import apply_miniprogram_pause_delivery
 
-        apply_pause_delivery(db, m)
+        # 小程序：当天仍在大表则明日生效；当天本不在大表才立刻停
+        apply_miniprogram_pause_delivery(db, m)
 
-        m.store_pickup = False
+        if bool(m.delivery_deferred):
+            m.store_pickup = False
 
     elif set_delivery_deferred and delivery_deferred is False:
 
         from app.services.member.member_delivery_state_service import apply_resume_delivery
 
         apply_resume_delivery(db, m)
+        # 取消预约暂停（delivery_deferred 可能本就是 false）
+        m.pause_effective_date = None
 
     if set_store_pickup and store_pickup is not None:
 
@@ -885,6 +895,9 @@ def patch_member_profile(
         "daily_meal_units": int(m.daily_meal_units or 1),
         "daily_meal_units_pending": getattr(m, "daily_meal_units_pending", None),
         "delivery_deferred": bool(m.delivery_deferred),
+        "pause_effective_date": (
+            m.pause_effective_date.isoformat() if getattr(m, "pause_effective_date", None) else None
+        ),
         "store_pickup": bool(m.store_pickup),
         "delivery_start_date": m.delivery_start_date.isoformat() if m.delivery_start_date else None,
         "is_active": bool(m.is_active),
@@ -934,17 +947,28 @@ def patch_member_profile(
             },
             ip_address=ip_address,
         )
-    if set_delivery_deferred and prev_snapshot["delivery_deferred"] != new_snapshot["delivery_deferred"]:
+    paused_before = prev_snapshot["delivery_deferred"] or bool(prev_snapshot["pause_effective_date"])
+    paused_after = new_snapshot["delivery_deferred"] or bool(new_snapshot["pause_effective_date"])
+    if set_delivery_deferred and paused_before != paused_after:
+        pause_tomorrow = (
+            paused_after
+            and not new_snapshot["delivery_deferred"]
+            and bool(new_snapshot["pause_effective_date"])
+        )
         record_member_operation(
             db,
             member_id=member_id,
-            operation_type=(
-                OP_PAUSE_DELIVERY if new_snapshot["delivery_deferred"] else OP_RESUME_DELIVERY
+            operation_type=OP_PAUSE_DELIVERY if paused_after else OP_RESUME_DELIVERY,
+            summary="暂停配送（明日生效）" if pause_tomorrow else (
+                "暂停配送" if paused_after else "取消暂停配送"
             ),
-            summary="暂停配送" if new_snapshot["delivery_deferred"] else "取消暂停配送",
-            before={"delivery_deferred": prev_snapshot["delivery_deferred"]},
+            before={
+                "delivery_deferred": prev_snapshot["delivery_deferred"],
+                "pause_effective_date": prev_snapshot["pause_effective_date"],
+            },
             after={
                 "delivery_deferred": new_snapshot["delivery_deferred"],
+                "pause_effective_date": new_snapshot["pause_effective_date"],
                 "delivery_start_date": new_snapshot["delivery_start_date"],
                 "store_pickup": new_snapshot["store_pickup"],
             },
@@ -1042,6 +1066,7 @@ def activate_member(db: Session, member_id: int) -> MemberOut:
     m.is_active = True
 
     m.delivery_deferred = False
+    m.pause_effective_date = None
 
     db.commit()
 

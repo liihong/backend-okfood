@@ -23,6 +23,7 @@
 --  19) members.meal_quota_total周卡月卡累计总次数展示（见 migration_028_members_meal_quota_total.sql）
 --  20) member_addresses.delivery_region_id 外键替代 area/area_manual（见 migration_029_member_addresses_delivery_region_id.sql）
 --  21) members.delivery_deferred 暂不配送标记（见 migrations/20260422_members_delivery_deferred.sql）
+--  28) members.pause_effective_date 小程序暂停生效日（见 sql/migration_members_pause_effective_date.sql）
 --  22) weekly_menu_slot.total_stock 日总份与单次可售（见 migrations/20260425_weekly_menu_slot_total_stock.sql）
 --  23) members.store_pickup 门店自提（见 migrations/20260424_members_store_pickup.sql）
 --  24) members.skip_subscription_saturday 固定周六不履约（见 migrations/20260506_members_skip_subscription_saturday.sql）
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS `members` (
   `wx_renew_remind_quota` INT NOT NULL DEFAULT 0 COMMENT '续费提醒订阅额度（每次授权+1，成功下发-1）',
   `delivery_start_date` DATE NULL COMMENT '起送业务日(上海)：非空则仅当配送日>=该日才参与配送',
   `delivery_deferred` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '暂不配送：无起送日意向且保持未开卡',
+  `pause_effective_date` DATE NULL COMMENT '小程序自助暂停生效业务日；有值且<=履约日则不进大表，当天仍配送',
   `store_pickup` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '门店自提：不参与按地址配送与骑手任务，单独归组备餐',
   `skip_subscription_saturday` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '固定周六不参与订阅履约（全局日历仍为履约日时生效）',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

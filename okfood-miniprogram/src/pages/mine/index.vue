@@ -256,6 +256,7 @@ import {
   shouldCompleteMemberProfile,
   shouldPromptMemberCardPay,
   isDeliveryPausedWithBalance,
+  isMiniprogramPausePending,
   isMemberInActiveDelivery,
   isMemberDeliveryScheduledFuture,
   MEMBER_STUB_NAME,
@@ -496,13 +497,13 @@ const showPauseDeliveryMenuRow = computed(() => {
   if (!isLoggedIn.value || needsMemberSetupPage.value) return false
   const p = memberProfileRaw.value
   if (!p || typeof p !== 'object') return false
-  if (p.delivery_deferred === true) return false
+  if (isDeliveryPausedWithBalance(p)) return false
   return Math.max(0, Math.floor(Number(p.balance) || 0)) > 0
 })
 
 /** 备餐锁窗内且已在履约日配送大表：禁止暂停（与后端 pause_delivery_prep_locked 一致） */
 const PAUSE_DELIVERY_PREP_LOCKED_MSG =
-  '21点后无法操作暂停。明日餐品已准备，可配送后暂停'
+  '明日餐品已备料，暂不能暂停；明天配送后可暂停后续'
 
 const pauseDeliveryPrepLocked = computed(() => {
   const p = memberProfileRaw.value
@@ -835,6 +836,7 @@ const memberDeliveryStatus = computed(() => {
     }
     return '请假中'
   }
+  if (isMiniprogramPausePending(memberProfileRaw.value)) return '明日暂停配送'
   if (isDeliveryPausedWithBalance(memberProfileRaw.value)) return '暂停配送'
   if (showMemberCardModule.value) return ''
   const today = ymdTodayShanghai()
@@ -1287,7 +1289,7 @@ function onPauseDeliveryTap() {
   uni.showModal({
     title: '暂停配送',
     content:
-      '确认后暂停会员卡配送（剩余餐次与起送日保留，不会进入配送大表）。恢复时可沿用原起送日或重选。是否暂停？',
+      '今日餐品已备料，今天仍会配送。暂停从明天生效，剩余餐次与起送日保留。是否暂停？',
     confirmText: '暂停配送',
     cancelText: '取消',
     confirmColor: '#73B054',

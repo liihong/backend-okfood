@@ -91,6 +91,34 @@ def ensure_store_sf_merge_same_address_push_schema(engine: Engine) -> None:
     logger.info("已为 stores 补 sf_merge_same_address_push 列")
 
 
+def ensure_members_pause_effective_date_schema(engine: Engine) -> None:
+    """为 members 补小程序暂停生效日列，已存在则跳过。"""
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    if "members" not in tables:
+        return
+    cols = {c["name"] for c in insp.get_columns("members")}
+    if "pause_effective_date" in cols:
+        return
+    dialect = engine.dialect.name
+    with engine.begin() as conn:
+        if dialect == "sqlite":
+            conn.execute(text("ALTER TABLE members ADD COLUMN pause_effective_date DATE"))
+        else:
+            after = ""
+            if "delivery_deferred" in cols:
+                after = " AFTER `delivery_deferred`"
+            conn.execute(
+                text(
+                    "ALTER TABLE `members` "
+                    "ADD COLUMN `pause_effective_date` DATE NULL "
+                    "COMMENT '小程序自助暂停生效业务日；有值且<=履约日则不进大表，当天仍配送'"
+                    f"{after}"
+                )
+            )
+    logger.info("已为 members 补 pause_effective_date 列")
+
+
 def apply_address_usage_data_backfill(db: Session) -> None:
     """把无餐次用户的地址标为零售，并把商城订单从餐次地址上解绑（复制后改绑）。"""
     from app.services.member.member_address_service import backfill_retail_address_separation

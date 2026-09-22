@@ -309,7 +309,9 @@ def admin_reinstate_member_to_delivery_sheet(
         raise HTTPException(status_code=400, detail="会员未激活，无法补进大表")
     if bool(m.store_pickup):
         raise HTTPException(status_code=400, detail="门店自提会员请走自提名单，无需补进到家大表")
-    if bool(m.delivery_deferred):
+    from app.services.member.member_delivery_state_service import pause_blocks_delivery_date
+
+    if pause_blocks_delivery_date(m, d):
         raise HTTPException(status_code=400, detail="会员已暂停配送，无法补进大表")
 
     today = today_shanghai()

@@ -96,14 +96,31 @@ export function shouldPromptMemberCardPay(profile) {
   return !hasAnyMealBalance(profile)
 }
 
+/** 小程序预约暂停的生效日 YYYY-MM-DD */
+export function pauseEffectiveYmd(profile) {
+  if (!profile || typeof profile !== 'object') return ''
+  return ymdFromApiField(profile.pause_effective_date)
+}
+
 /**
- * 会员卡暂停配送且仍有剩余次数（与后台 delivery_deferred + balance 一致）
+ * 已预约从明天起暂停、当天仍配送
+ * @param {object | null | undefined} profile
+ */
+export function isMiniprogramPausePending(profile) {
+  const ymd = pauseEffectiveYmd(profile)
+  if (!ymd) return false
+  return ymd > ymdTodayShanghai()
+}
+
+/**
+ * 会员卡暂停配送且仍有剩余次数（立刻暂停，或已预约暂停）
  * @param {object | null | undefined} profile GET /api/user/me 的 data
  */
 export function isDeliveryPausedWithBalance(profile) {
   if (!profile || typeof profile !== 'object') return false
   const balance = Math.max(0, Math.floor(Number(profile.balance) || 0))
-  return profile.delivery_deferred === true && balance > 0
+  if (balance <= 0) return false
+  return profile.delivery_deferred === true || Boolean(pauseEffectiveYmd(profile))
 }
 
 /** 配送/自提信息已齐备，不再需进入「完善配送信息」页 */

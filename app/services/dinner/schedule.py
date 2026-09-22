@@ -33,7 +33,9 @@ def member_on_dinner_delivery_schedule(
         return False
     if not bool(member.is_active):
         return False
-    if bool(member.delivery_deferred):
+    from app.services.member.member_delivery_state_service import pause_blocks_delivery_date
+
+    if pause_blocks_delivery_date(member, delivery_date):
         return False
     if bool(member.store_pickup):
         return False

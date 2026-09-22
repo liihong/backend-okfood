@@ -298,8 +298,8 @@ def _split_domain_csv(raw: Any) -> set[str]:
     return {_normalize_bare_host(p) for p in text.split() if _s(p)}
 
 
-# 域名池 add 时「没有新增」可继续下发；9410016 是无效域名，不能当成功
-_DOMAIN_POOL_ALREADY_ERRCODES = frozenset({85017})
+# 域名池 add 时「没有新增」或「已在测试版/格式被拒」均可继续下发小程序
+_DOMAIN_POOL_ALREADY_ERRCODES = frozenset({85017, 9410016, 94100016})
 # modify_domain 滤空：域名不在第三方平台全网发布版池中
 _MODIFY_DOMAIN_NEED_DIRECTLY = frozenset({85018, 85301})
 _MODIFY_DOMAIN_OK = frozenset({0, 85017})
@@ -458,10 +458,21 @@ def ensure_third_party_server_domain_pool(db: Session, hosts: list[str]) -> dict
         logger.warning("读取第三方平台服务器域名池失败: %s", got)
     published = _split_domain_csv(got.get("published_wxa_server_domain"))
     testing = _split_domain_csv(got.get("testing_wxa_server_domain"))
-    # 授权小程序走 published；仅测试版不够
+    # 授权小程序走 published；仅测试版不够。但测试版已有时再 add 全网发布会 9410016
     missing_published = [h for h in want if h not in published]
     if not missing_published:
         return {"added": [], "published": sorted(published), "testing": sorted(testing)}
+    already_testing = [h for h in missing_published if h in testing]
+    still_new = [h for h in missing_published if h not in testing]
+    if not still_new:
+        logger.info("域名已在第三方平台测试版，跳过 add hosts=%s", already_testing)
+        return {
+            "added": [],
+            "published": sorted(published),
+            "testing": sorted(testing),
+            "already": True,
+            "testing_only": True,
+        }
 
     def _add(hosts_to_add: list[str], *, published_together: bool) -> dict[str, Any]:
         return _post_modify_wxa_server_domain(
@@ -474,33 +485,25 @@ def ensure_third_party_server_domain_pool(db: Session, hosts: list[str]) -> dict
         )
 
     together = True
-    added = _add(missing_published, published_together=True)
+    added = _add(still_new, published_together=True)
     errcode = _wechat_errcode(added)
     if errcode == 61028:
         # 第三方平台本身未全网发布，只能写测试版
-        missing_testing = [h for h in missing_published if h not in testing]
-        if not missing_testing:
-            return {
-                "added": [],
-                "published": sorted(published),
-                "testing": sorted(testing),
-                "already": True,
-                "skipped_errcode": 61028,
-            }
         together = False
-        added = _add(missing_testing, published_together=False)
+        added = _add(still_new, published_together=False)
         errcode = _wechat_errcode(added)
-        missing_published = missing_testing
 
     invalid = _s(added.get("invalid_wxa_server_domain"))
     if errcode not in (0,):
         if errcode in _DOMAIN_POOL_ALREADY_ERRCODES:
-            logger.info("第三方平台域名池已包含 %s", missing_published)
+            # 9410016：开放平台已用空格登记过同一域名，再 add 会被当成非法；继续下发小程序
+            logger.info("第三方平台域名池跳过写入 errcode=%s hosts=%s invalid=%s", errcode, still_new, invalid)
             return {
                 "added": [],
-                "published": sorted(published | set(missing_published)),
-                "testing": sorted(testing | set(missing_published)),
+                "published": sorted(published),
+                "testing": sorted(testing | set(still_new)),
                 "already": True,
+                "skipped_errcode": errcode,
             }
         msg = _s(added.get("errmsg")) or "写入第三方平台服务器域名失败"
         extra = f"；未通过验证：{invalid}" if invalid else ""
@@ -514,7 +517,7 @@ def ensure_third_party_server_domain_pool(db: Session, hosts: list[str]) -> dict
     if invalid:
         still_missing = [
             h
-            for h in missing_published
+            for h in still_new
             if h not in _split_domain_csv(invalid) and h not in published and h not in testing
         ]
         if still_missing:
@@ -528,11 +531,11 @@ def ensure_third_party_server_domain_pool(db: Session, hosts: list[str]) -> dict
     published2 = _split_domain_csv(added.get("published_wxa_server_domain"))
     testing2 = _split_domain_csv(added.get("testing_wxa_server_domain"))
     if not published2:
-        published2 = (published | set(missing_published)) if together else published
+        published2 = (published | set(still_new)) if together else published
     if not testing2:
-        testing2 = testing | set(missing_published)
-    logger.info("已写入第三方平台服务器域名池 hosts=%s published=%s", missing_published, sorted(published2))
-    return {"added": missing_published, "published": sorted(published2), "testing": sorted(testing2)}
+        testing2 = testing | set(still_new)
+    logger.info("已写入第三方平台服务器域名池 hosts=%s published=%s", still_new, sorted(published2))
+    return {"added": still_new, "published": sorted(published2), "testing": sorted(testing2)}
 
 
 def _post_modify_domain(token: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -564,10 +567,32 @@ def _post_modify_domain_directly(token: str, payload: dict[str, Any]) -> dict[st
     return data
 
 
-def _apply_authorizer_server_domain(token: str, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+def _apply_authorizer_server_domain(
+    token: str,
+    payload: dict[str, Any],
+    *,
+    prefer_direct: bool = False,
+) -> tuple[dict[str, Any], str]:
     """
-    先走 modify_domain（须进全网发布版域名池）；85301/85018 再改 modify_domain_directly。
+    下发授权小程序服务器域名。
+
+    全网发布版池里没有该域名时，modify_domain 必然 85301，应直接走 modify_domain_directly。
     """
+    if prefer_direct:
+        direct = _post_modify_domain_directly(token, payload)
+        dcode = _wechat_errcode(direct)
+        if dcode in _MODIFY_DOMAIN_OK:
+            return direct, "modify_domain_directly"
+        logger.warning("modify_domain_directly 失败 errcode=%s，回退 modify_domain", dcode)
+        data = _post_modify_domain(token, payload)
+        code = _wechat_errcode(data)
+        if code in _MODIFY_DOMAIN_OK:
+            return data, "modify_domain"
+        merged = dict(data)
+        merged["direct_errcode"] = dcode
+        merged["direct_errmsg"] = _s(direct.get("errmsg"))
+        return merged, "modify_domain_directly"
+
     data = _post_modify_domain(token, payload)
     code = _wechat_errcode(data)
     if code in _MODIFY_DOMAIN_OK:
@@ -739,8 +764,13 @@ def sync_server_domains_for_tenant(
 
     token = _authorizer_access_token_or_http(db, int(tenant_id))
     api_payload = _modify_payload_for_api(str(full.get("action") or "add"), api_domain)
+    published_hosts = {_normalize_bare_host(x) for x in (pool.get("published") or [])}
+    # 开放平台开发资料已有、但现网版没有时，modify_domain 必 85301，直接走快速配置
+    prefer_direct = (not pool.get("ok")) or api_host not in published_hosts
     try:
-        data, method = _apply_authorizer_server_domain(token, api_payload)
+        data, method = _apply_authorizer_server_domain(
+            token, api_payload, prefer_direct=prefer_direct
+        )
     except HTTPException as e:
         detail = e.detail if isinstance(e.detail, str) else str(e.detail)
         _patch_publish_blob(db, int(tenant_id), {"domain_last_error": detail})
@@ -771,7 +801,13 @@ def sync_server_domains_for_tenant(
                 oss_pool.get("error"),
             )
         oss_payload = _modify_payload_for_download(str(full.get("action") or "add"), oss_domains)
-        oss_data, oss_method = _apply_authorizer_server_domain(token, oss_payload)
+        oss_published = {_normalize_bare_host(x) for x in (oss_pool.get("published") or [])}
+        oss_prefer_direct = (not oss_pool.get("ok")) or any(
+            _to_wechat_bare_host(d) not in oss_published for d in oss_domains
+        )
+        oss_data, oss_method = _apply_authorizer_server_domain(
+            token, oss_payload, prefer_direct=oss_prefer_direct
+        )
         oss_code = _wechat_errcode(oss_data)
         snapshot = get_effective_domains_for_tenant(db, int(tenant_id))
         oss_ok = oss_code in _MODIFY_DOMAIN_OK or all(

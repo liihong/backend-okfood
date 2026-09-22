@@ -1428,7 +1428,9 @@ def _validate_agg_subscription_sf_readiness(
         label = _member_label_for_sf_error(member, mid)
         if member is None:
             return f"会员{label}不存在"
-        if bool(member.delivery_deferred):
+        from app.services.member.member_delivery_state_service import pause_blocks_delivery_date
+
+        if pause_blocks_delivery_date(member, delivery_date):
             return f"会员{label}待完善配送信息，不可推顺丰"
         ds = member.delivery_start_date
         if ds is None:

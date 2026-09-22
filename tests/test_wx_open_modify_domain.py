@@ -178,18 +178,65 @@ def test_domain_pool_61028_retries_testing_only(
 
 @patch("app.integrations.wechat_open_platform.get_component_access_token", return_value="comp")
 @patch("app.services.shared.wx_open_code_service._post_modify_wxa_server_domain")
-def test_domain_pool_9410016_is_not_skipped(
+def test_domain_pool_skips_add_when_already_in_testing(
+    mock_post: MagicMock,
+    _token: MagicMock,
+) -> None:
+    """开放平台开发资料用空格登记后，测试版已有域名，再 add 会 9410016。"""
+    mock_post.return_value = {
+        "errcode": 0,
+        "published_wxa_server_domain": "",
+        "testing_wxa_server_domain": "ok.sourcefire.cn okoss.sourcefire.cn",
+    }
+    out = ensure_third_party_server_domain_pool(MagicMock(), ["ok.sourcefire.cn"])
+    assert out["already"] is True
+    assert out.get("testing_only") is True
+    assert "ok.sourcefire.cn" in out["testing"]
+    assert mock_post.call_count == 1
+    assert mock_post.call_args_list[0][0][1] == {"action": "get"}
+
+
+@patch("app.integrations.wechat_open_platform.get_component_access_token", return_value="comp")
+@patch("app.services.shared.wx_open_code_service._post_modify_wxa_server_domain")
+def test_domain_pool_9410016_continues_without_raise(
     mock_post: MagicMock,
     _token: MagicMock,
 ) -> None:
     mock_post.side_effect = [
         {"errcode": 0, "published_wxa_server_domain": "", "testing_wxa_server_domain": ""},
-        {"errcode": 9410016, "errmsg": "存在无效域名", "invalid_wxa_server_domain": "ok.sourcefire.cn"},
+        {
+            "errcode": 9410016,
+            "errmsg": "[ok.sourcefire.cn okoss.sourcefire.cn] violates domain name rules",
+            "invalid_wxa_server_domain": "ok.sourcefire.cn okoss.sourcefire.cn",
+        },
     ]
-    with pytest.raises(HTTPException) as exc:
-        ensure_third_party_server_domain_pool(MagicMock(), ["ok.sourcefire.cn"])
-    assert exc.value.status_code == 400
-    assert "9410016" in str(exc.value.detail)
+    out = ensure_third_party_server_domain_pool(MagicMock(), ["ok.sourcefire.cn"])
+    assert out["already"] is True
+    assert out["skipped_errcode"] == 9410016
+    assert out["published"] == []
+
+
+@patch("app.services.shared.wx_open_code_service._post_modify_domain_directly")
+@patch("app.services.shared.wx_open_code_service._post_modify_domain")
+def test_apply_prefer_direct_skips_modify_domain(
+    mock_modify: MagicMock,
+    mock_direct: MagicMock,
+) -> None:
+    mock_direct.return_value = {"errcode": 0, "errmsg": "ok"}
+    payload = {
+        "action": "add",
+        "requestdomain": ["https://ok.sourcefire.cn"],
+        "wsrequestdomain": [],
+        "uploaddomain": ["https://ok.sourcefire.cn"],
+        "downloaddomain": ["https://ok.sourcefire.cn"],
+        "udpdomain": [],
+        "tcpdomain": [],
+    }
+    data, method = _apply_authorizer_server_domain("tok", payload, prefer_direct=True)
+    assert method == "modify_domain_directly"
+    assert data.get("errcode") == 0
+    mock_direct.assert_called_once_with("tok", payload)
+    mock_modify.assert_not_called()
 
 
 @patch("app.services.shared.wx_open_code_service._post_modify_domain_directly")

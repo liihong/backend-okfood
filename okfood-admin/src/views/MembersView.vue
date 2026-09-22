@@ -497,6 +497,7 @@ const memberStatusClass = (status) => {
   if (status === '未开卡') return 'member-pill member-pill--slate'
   if (status === '暂不开卡') return 'member-pill member-pill--slate'
   if (status === '已暂停') return 'member-pill member-pill--slate'
+  if (status === '明日暂停') return 'member-pill member-pill--amber'
   return 'member-pill member-pill--emerald'
 }
 

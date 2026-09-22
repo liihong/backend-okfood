@@ -244,6 +244,7 @@ def member_membership_refund_confirm(
     m.meal_quota_total = 0
     m.is_active = False
     m.delivery_deferred = True
+    m.pause_effective_date = None
     m.membership_refunded_at = beijing_now_naive()
 
     row = MemberMembershipRefund(

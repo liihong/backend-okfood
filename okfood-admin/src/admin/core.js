@@ -688,6 +688,7 @@ export function resolveMemberStatusFromLifecycle(raw, balance = null) {
   const overlays = Array.isArray(raw.lifecycle_overlays) ? raw.lifecycle_overlays : []
   if (overlays.includes('请假中')) return '请假中'
   if (overlays.includes('待续费')) return '待续费'
+  if (overlays.includes('明日暂停')) return '明日暂停'
 
   const label =
     raw.lifecycle_label != null && String(raw.lifecycle_label).trim()

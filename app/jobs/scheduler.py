@@ -65,6 +65,10 @@ def job_reset_leave_flags() -> None:
 
         applied_units = apply_all_pending_daily_meal_units(db)
         applied_dinner_units = apply_all_pending_dinner_daily_meal_units(db)
+        from app.services.member.member_delivery_state_service import apply_due_miniprogram_pauses
+
+        # 小程序预约暂停落到生效日：写成 delivery_deferred；不改请假字段
+        applied_pauses = apply_due_miniprogram_pauses(db)
         # 晚餐「明日请假」与过期区间清理（平行于 members 表）
         db.execute(
             update(MemberMealPeriodState)
@@ -95,10 +99,11 @@ def job_reset_leave_flags() -> None:
                 drow.leave_range_end = None
         db.commit()
         logger.info(
-            "请假标记重置任务完成: today=%s, applied_daily_meal_units=%s, applied_dinner_units=%s",
+            "请假标记重置任务完成: today=%s, applied_daily_meal_units=%s, applied_dinner_units=%s, applied_pauses=%s",
             today.isoformat(),
             applied_units,
             applied_dinner_units,
+            applied_pauses,
         )
     except Exception:
         logger.exception("请假标记重置任务失败")
