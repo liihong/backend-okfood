@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -17,15 +18,19 @@ from app.models.member_card_order import MemberCardOrder
 from app.models.member_membership_refund import MemberMembershipRefund
 from app.models.single_meal_order import SingleMealOrder
 from app.models.store_retail_order import StoreRetailOrder
+from app.models.store_retail_order_item import StoreRetailOrderItem
 from app.schemas.admin import (
     FinanceReceivedBucketOut,
     FinanceReceivedDayOut,
     FinanceReceivedMonthOut,
     FinanceReceivedSummaryOut,
     FinanceReceivedWindowOut,
+    FinanceRetailSkuRevenueOut,
+    FinanceRetailSkuRevenueRowOut,
     FinanceTodayPaidCardOrderRowOut,
     FinanceTodayPaidCardOrdersOut,
 )
+from app.services.retail.retail_display import retail_sku_display_title
 
 
 def _parse_calendar_date(value: str) -> date:
@@ -254,6 +259,208 @@ def finance_received_summary(db: Session, *, store_id: int | None = None) -> Fin
         cumulative=_window_paid(db, start=None, end=None, store_id=store_id),
         this_month=_window_paid(db, start=m0, end=m1, store_id=store_id),
         today=_window_paid(db, start=d0, end=d1, store_id=store_id),
+    )
+
+
+def allocate_order_amount_to_lines(order_amount: Decimal, line_amounts: list[Decimal]) -> list[Decimal]:
+    """按明细行金额比例分摊订单实收。
+
+    优惠券记在订单头，行金额是券前小计。末行吃掉分位差，保证各行之和等于订单实收。
+    """
+    if not line_amounts:
+        return []
+    payable = Decimal(order_amount).quantize(Decimal("0.01"))
+    if len(line_amounts) == 1:
+        return [payable]
+    total = sum((Decimal(v) for v in line_amounts), Decimal("0"))
+    if total <= 0:
+        shares = [Decimal("0.00")] * len(line_amounts)
+        shares[0] = payable
+        return shares
+    shares: list[Decimal] = []
+    remaining = payable
+    last = len(line_amounts) - 1
+    for i, line in enumerate(line_amounts):
+        if i == last:
+            shares.append(remaining)
+            break
+        share = (payable * Decimal(line) / total).quantize(Decimal("0.01"))
+        if share > remaining:
+            share = remaining
+        remaining -= share
+        shares.append(share)
+    return shares
+
+
+def _sku_display_name(
+    *,
+    spu_title: str | None,
+    spec_label: str | None,
+    product_title: str | None,
+) -> str:
+    """优先用 SPU + 规格；历史单只有订单标题时回退标题。"""
+    spu = (spu_title or "").strip()
+    if spu:
+        return retail_sku_display_title(spu_title=spu, spec_label=spec_label)
+    title = (product_title or "").strip()
+    return title or "未命名 SKU"
+
+
+def finance_retail_sku_revenue(
+    db: Session,
+    *,
+    window: str,
+    calendar_date: str | None = None,
+    calendar_month: str | None = None,
+    store_id: int | None = None,
+) -> FinanceRetailSkuRevenueOut:
+    """已支付商城订单按 SKU 汇总实收，口径与财务卡「商城订单」一致。
+
+    window: day（上海自然日）/ month（上海自然月）/ cumulative（不限时间）。
+    """
+    kind = (window or "").strip().lower()
+    anchor = today_shanghai()
+    start: datetime | None
+    end: datetime | None
+    if kind == "day":
+        day = _parse_calendar_date(calendar_date) if calendar_date else anchor
+        if day > anchor:
+            raise ValueError("不能查询未来日期")
+        start, end = shanghai_naive_range_for_calendar_day(day)
+        period_label = day.isoformat()
+    elif kind == "month":
+        if calendar_month:
+            year, month = _parse_calendar_month(calendar_month)
+        else:
+            year, month = anchor.year, anchor.month
+        if (year, month) > (anchor.year, anchor.month):
+            raise ValueError("不能查询未来月份")
+        start, end = shanghai_naive_range_for_calendar_month(year, month)
+        period_label = f"{year:04d}-{month:02d}"
+    elif kind == "cumulative":
+        start, end = None, None
+        period_label = "累计"
+    else:
+        raise ValueError("window 须为 day、month 或 cumulative")
+
+    conds = [StoreRetailOrder.pay_status == "已支付"]
+    if store_id is not None:
+        conds.append(StoreRetailOrder.store_id == int(store_id))
+    if start is not None:
+        conds.append(StoreRetailOrder.created_at >= start)
+    if end is not None:
+        conds.append(StoreRetailOrder.created_at < end)
+
+    orders = db.execute(select(StoreRetailOrder).where(*conds)).scalars().all()
+    order_ids = [int(o.id) for o in orders]
+    items_by_order: dict[int, list[StoreRetailOrderItem]] = defaultdict(list)
+    if order_ids:
+        item_rows = (
+            db.execute(
+                select(StoreRetailOrderItem)
+                .where(StoreRetailOrderItem.order_id.in_(order_ids))
+                .order_by(StoreRetailOrderItem.order_id.asc(), StoreRetailOrderItem.sort_order.asc())
+            )
+            .scalars()
+            .all()
+        )
+        for it in item_rows:
+            items_by_order[int(it.order_id)].append(it)
+
+    # retail_product_id -> 汇总
+    buckets: dict[int, dict] = {}
+
+    def _touch(
+        *,
+        sku_id: int,
+        sku_name: str,
+        spu_title: str | None,
+        spec_label: str | None,
+        quantity: int,
+        order_id: int,
+        amount: Decimal,
+    ) -> None:
+        bucket = buckets.get(sku_id)
+        if bucket is None:
+            bucket = {
+                "sku_name": sku_name,
+                "spu_title": spu_title,
+                "spec_label": spec_label,
+                "quantity": 0,
+                "order_ids": set(),
+                "amount": Decimal("0.00"),
+            }
+            buckets[sku_id] = bucket
+        elif sku_name and sku_name != "未命名 SKU":
+            bucket["sku_name"] = sku_name
+            bucket["spu_title"] = spu_title
+            bucket["spec_label"] = spec_label
+        bucket["quantity"] += int(quantity)
+        bucket["order_ids"].add(int(order_id))
+        bucket["amount"] += amount
+
+    for order in orders:
+        oid = int(order.id)
+        payable = Decimal(order.amount_yuan or 0).quantize(Decimal("0.01"))
+        lines = items_by_order.get(oid) or []
+        if not lines:
+            sku_id = int(order.retail_product_id or 0)
+            if sku_id < 1:
+                continue
+            _touch(
+                sku_id=sku_id,
+                sku_name=_sku_display_name(
+                    spu_title=None,
+                    spec_label=None,
+                    product_title=order.product_title,
+                ),
+                spu_title=None,
+                spec_label=None,
+                quantity=int(order.quantity or 0),
+                order_id=oid,
+                amount=payable,
+            )
+            continue
+        shares = allocate_order_amount_to_lines(
+            payable,
+            [Decimal(it.line_amount_yuan or 0) for it in lines],
+        )
+        for it, share in zip(lines, shares, strict=True):
+            sku_id = int(it.retail_product_id)
+            _touch(
+                sku_id=sku_id,
+                sku_name=_sku_display_name(
+                    spu_title=it.spu_title,
+                    spec_label=it.spec_label,
+                    product_title=it.product_title,
+                ),
+                spu_title=(it.spu_title or "").strip() or None,
+                spec_label=(it.spec_label or "").strip() or None,
+                quantity=int(it.quantity or 0),
+                order_id=oid,
+                amount=share,
+            )
+
+    rows = [
+        FinanceRetailSkuRevenueRowOut(
+            retail_product_id=sku_id,
+            sku_name=str(bucket["sku_name"]),
+            spu_title=bucket["spu_title"],
+            spec_label=bucket["spec_label"],
+            quantity=int(bucket["quantity"]),
+            order_count=len(bucket["order_ids"]),
+            amount_yuan=Decimal(bucket["amount"]).quantize(Decimal("0.01")),
+        )
+        for sku_id, bucket in buckets.items()
+    ]
+    rows.sort(key=lambda r: (-r.amount_yuan, -r.quantity, r.sku_name))
+    total_amt = sum((r.amount_yuan for r in rows), Decimal("0.00")).quantize(Decimal("0.01"))
+    return FinanceRetailSkuRevenueOut(
+        window=kind,
+        period_label=period_label,
+        order_count=len(orders),
+        amount_yuan=total_amt,
+        items=rows,
     )
 
 

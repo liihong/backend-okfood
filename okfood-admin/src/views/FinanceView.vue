@@ -4,6 +4,7 @@ import { computed, nextTick, onActivated, onMounted, ref } from 'vue'
 import { CreditCard } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import RetailSkuRevenueDialog from './components/RetailSkuRevenueDialog.vue'
 
 const loading = ref(false)
 /** 递增以强制 KPI 网格重挂载，保证 keep-alive 切回时入场动画可重播 */
@@ -24,6 +25,16 @@ const selectedDay = ref('')
 /** @type {import('vue').Ref<any>} */
 const dayWindow = ref(null)
 const dayLoading = ref(false)
+/** 商城 SKU 营业额弹窗 */
+const mallSkuVisible = ref(false)
+/** @type {import('vue').Ref<'day' | 'month' | 'cumulative'>} */
+const mallSkuWindow = ref('month')
+
+/** 点击「商城订单」行，按当前卡片的时间窗口打开 SKU 明细 */
+function openMallSku(windowKind) {
+  mallSkuWindow.value = windowKind
+  mallSkuVisible.value = true
+}
 
 function fmtYuan(raw) {
   if (raw === null || raw === undefined) return '—'
@@ -502,19 +513,35 @@ onActivated(() => {
             <div v-if="row.divider" class="finance-breakdown-divider finance-breakdown-divider--on-primary" />
             <span
               class="finance-breakdown-label"
-              :class="{ 'finance-breakdown-label--indent': row.indent }"
+              :class="{
+                'finance-breakdown-label--indent': row.indent,
+                'finance-breakdown--clickable': row.key === 'mall',
+              }"
+              :role="row.key === 'mall' ? 'button' : undefined"
+              :tabindex="row.key === 'mall' ? 0 : undefined"
+              :title="row.key === 'mall' ? '查看 SKU 营业额' : undefined"
+              @click="row.key === 'mall' && openMallSku('day')"
+              @keydown.enter="row.key === 'mall' && openMallSku('day')"
             >
               <i :class="breakdownDotClass(row.dot, true)" />{{ row.label }}
             </span>
             <span
               class="finance-metric finance-breakdown-count finance-metric--on-primary"
-              :class="{ 'finance-metric--refund-warn': row.refund }"
+              :class="{
+                'finance-metric--refund-warn': row.refund,
+                'finance-breakdown--clickable': row.key === 'mall',
+              }"
+              @click="row.key === 'mall' && openMallSku('day')"
             >
               {{ todayCardBusy ? '…' : countUnitText(row.count, row.unit) }}
             </span>
             <span
               class="finance-metric finance-breakdown-amt finance-metric--on-primary"
-              :class="{ 'finance-metric--refund-warn': row.refund }"
+              :class="{
+                'finance-metric--refund-warn': row.refund,
+                'finance-breakdown--clickable': row.key === 'mall',
+              }"
+              @click="row.key === 'mall' && openMallSku('day')"
             >
               {{ todayCardBusy ? '…' : amountColText(row.amount, { refund: row.refund }) }}
             </span>
@@ -562,16 +589,32 @@ onActivated(() => {
             <div v-if="row.divider" class="finance-breakdown-divider" />
             <span
               class="finance-breakdown-label finance-breakdown-label--muted"
-              :class="{ 'finance-breakdown-label--indent': row.indent }"
+              :class="{
+                'finance-breakdown-label--indent': row.indent,
+                'finance-breakdown--clickable': row.key === 'mall',
+              }"
+              :role="row.key === 'mall' ? 'button' : undefined"
+              :tabindex="row.key === 'mall' ? 0 : undefined"
+              :title="row.key === 'mall' ? '查看 SKU 营业额' : undefined"
+              @click="row.key === 'mall' && openMallSku('month')"
+              @keydown.enter="row.key === 'mall' && openMallSku('month')"
             >
               <i :class="breakdownDotClass(row.dot, false)" />{{ row.label }}
             </span>
-            <span class="finance-metric finance-breakdown-count">
+            <span
+              class="finance-metric finance-breakdown-count"
+              :class="{ 'finance-breakdown--clickable': row.key === 'mall' }"
+              @click="row.key === 'mall' && openMallSku('month')"
+            >
               {{ monthCardBusy ? '…' : countUnitText(row.count, row.unit) }}
             </span>
             <span
               class="finance-metric finance-breakdown-amt"
-              :class="{ 'finance-metric--refund-danger': row.refund }"
+              :class="{
+                'finance-metric--refund-danger': row.refund,
+                'finance-breakdown--clickable': row.key === 'mall',
+              }"
+              @click="row.key === 'mall' && openMallSku('month')"
             >
               {{ monthCardBusy ? '…' : amountColText(row.amount, { refund: row.refund }) }}
             </span>
@@ -606,16 +649,32 @@ onActivated(() => {
             <div v-if="row.divider" class="finance-breakdown-divider" />
             <span
               class="finance-breakdown-label finance-breakdown-label--muted"
-              :class="{ 'finance-breakdown-label--indent': row.indent }"
+              :class="{
+                'finance-breakdown-label--indent': row.indent,
+                'finance-breakdown--clickable': row.key === 'mall',
+              }"
+              :role="row.key === 'mall' ? 'button' : undefined"
+              :tabindex="row.key === 'mall' ? 0 : undefined"
+              :title="row.key === 'mall' ? '查看 SKU 营业额' : undefined"
+              @click="row.key === 'mall' && openMallSku('cumulative')"
+              @keydown.enter="row.key === 'mall' && openMallSku('cumulative')"
             >
               <i :class="breakdownDotClass(row.dot, false)" />{{ row.label }}
             </span>
-            <span class="finance-metric finance-breakdown-count">
+            <span
+              class="finance-metric finance-breakdown-count"
+              :class="{ 'finance-breakdown--clickable': row.key === 'mall' }"
+              @click="row.key === 'mall' && openMallSku('cumulative')"
+            >
               {{ loading ? '…' : countUnitText(row.count, row.unit) }}
             </span>
             <span
               class="finance-metric finance-breakdown-amt"
-              :class="{ 'finance-metric--refund-danger': row.refund }"
+              :class="{
+                'finance-metric--refund-danger': row.refund,
+                'finance-breakdown--clickable': row.key === 'mall',
+              }"
+              @click="row.key === 'mall' && openMallSku('cumulative')"
             >
               {{ loading ? '…' : amountColText(row.amount, { refund: row.refund }) }}
             </span>
@@ -658,6 +717,13 @@ onActivated(() => {
         </table>
       </div>
     </section>
+
+    <RetailSkuRevenueDialog
+      v-model:visible="mallSkuVisible"
+      :window="mallSkuWindow"
+      :calendar-date="selectedDay"
+      :calendar-month="selectedMonth"
+    />
   </section>
 </template>
 
@@ -1075,6 +1141,15 @@ onActivated(() => {
 
 .finance-breakdown-label--indent {
   padding-left: 14px;
+}
+
+.finance-breakdown--clickable {
+  cursor: pointer;
+}
+
+.finance-breakdown--clickable:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .finance-breakdown-grid--on-primary .finance-breakdown-label--indent {

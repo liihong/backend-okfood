@@ -172,6 +172,7 @@ from app.services.admin.finance_received_service import (
     finance_received_day_window,
     finance_received_month_window,
     finance_received_summary,
+    finance_retail_sku_revenue,
 )
 from app.services.admin.member_membership_refund_service import (
     member_membership_refund_confirm,
@@ -485,6 +486,30 @@ def finance_today_paid_card_orders_route(
     try:
         day = _parse_calendar_date(calendar_date) if calendar_date else None
         payload = finance_paid_card_orders_for_day(db, calendar_date=day, store_id=store_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return success(data=dump_model(payload), msg="获取成功")
+
+
+@router.get("/finance/retail-sku-revenue")
+def finance_retail_sku_revenue_route(
+    db: SessionDep,
+    window: Annotated[str, Query(description="day / month / cumulative")],
+    calendar_date: Annotated[str | None, Query(description="window=day 时的上海日历日 YYYY-MM-DD")] = None,
+    calendar_month: Annotated[str | None, Query(description="window=month 时的上海自然月 YYYY-MM")] = None,
+    admin_username: str = Depends(admin_full_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """已支付商城订单按 SKU 汇总实收，口径与财务卡商城订单一致。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    try:
+        payload = finance_retail_sku_revenue(
+            db,
+            window=window,
+            calendar_date=calendar_date,
+            calendar_month=calendar_month,
+            store_id=store_id,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return success(data=dump_model(payload), msg="获取成功")

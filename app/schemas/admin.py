@@ -1101,6 +1101,33 @@ class FinanceTodayPaidCardOrdersOut(BaseModel):
     items: list[FinanceTodayPaidCardOrderRowOut] = Field(default_factory=list)
 
 
+class FinanceRetailSkuRevenueRowOut(BaseModel):
+    """商城已支付订单按 SKU 汇总的一行。"""
+
+    retail_product_id: int = Field(..., ge=1, description="SKU id（store_retail_products.id）")
+    sku_name: str = Field(..., description="展示名：商品名 · 规格")
+    spu_title: str | None = Field(None, description="SPU 名称")
+    spec_label: str | None = Field(None, description="规格")
+    quantity: int = Field(..., ge=0, description="销售件数")
+    order_count: int = Field(..., ge=0, description="包含该 SKU 的已支付订单笔数")
+    amount_yuan: Decimal = Field(
+        ...,
+        max_digits=14,
+        decimal_places=2,
+        description="分摊后的实收营业额（元）；同窗口各 SKU 合计等于商城订单实收",
+    )
+
+
+class FinanceRetailSkuRevenueOut(BaseModel):
+    """财务中心：指定窗口内商城订单 SKU 营业额。"""
+
+    window: str = Field(..., description="day / month / cumulative")
+    period_label: str = Field(..., description="窗口说明，如 2026-09-24、2026-09、累计")
+    order_count: int = Field(..., ge=0, description="已支付商城订单笔数")
+    amount_yuan: Decimal = Field(..., max_digits=14, decimal_places=2, description="商城订单实收合计")
+    items: list[FinanceRetailSkuRevenueRowOut] = Field(default_factory=list)
+
+
 class DeliverySheetMemberOut(BaseModel):
     member_id: int = Field(..., ge=1, description="会员主键，供大表人工标记")
     phone: str
