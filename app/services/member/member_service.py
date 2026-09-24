@@ -1093,9 +1093,14 @@ def leave_request(
 ) -> MemberOut:
     """
     请假/取消。meal_period：lunch / dinner / all（全天）。
-    午/晚餐严格分池写入；默认 lunch 与现网行为一致。
+    小程序不区分午晚，一次请假写入全部已开通餐段；管理端仍按传入餐段分池。
     """
     from app.services.meal_period.coordinated_leave import coordinated_leave_request
+    from app.services.meal_period.leave_scope import LEAVE_MEAL_PERIOD_ALL
+
+    # 小程序请假页没有午餐/晚餐切换，双餐会员须午晚一起停配
+    if source == "miniprogram":
+        meal_period = LEAVE_MEAL_PERIOD_ALL
 
     return coordinated_leave_request(
         db,
