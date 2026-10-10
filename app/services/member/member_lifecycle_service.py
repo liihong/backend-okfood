@@ -261,6 +261,13 @@ def _resolve_member_lifecycle_with_ctx(
     overlays: list[str] = []
     if on_leave_today:
         overlays.append("请假中")
+    # 小程序已预约明日暂停、当天仍配送：叠层提示，不改主状态、不影响请假
+    pe = getattr(member, "pause_effective_date", None)
+    if pe is not None and not bool(member.delivery_deferred):
+        from app.core.timeutil import today_shanghai
+
+        if pe > today_shanghai():
+            overlays.append("明日暂停")
 
     if member.membership_refunded_at is not None:
         return MemberLifecycleView(

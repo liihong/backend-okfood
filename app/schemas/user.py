@@ -40,6 +40,10 @@ class MemberOut(BaseModel):
     plan_type: PlanType | None
     delivery_start_date: date | None = Field(None, description="起送业务日（上海）")
     delivery_deferred: bool = Field(False, description="用户选择暂不配送，无起送日且未开卡")
+    pause_effective_date: date | None = Field(
+        None,
+        description="小程序自助暂停生效业务日（上海）；有值表示已预约从该日起停，当天仍配送",
+    )
     store_pickup: bool = Field(False, description="门店自提：不参与配送线路，仍参与起送日与备餐统计")
     is_active: bool
     is_leaved_tomorrow: bool

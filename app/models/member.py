@@ -51,6 +51,8 @@ class Member(Base):
     wx_renew_remind_quota: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     delivery_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     delivery_deferred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # 小程序自助暂停的生效业务日：有值且 <= 履约日则不进大表；当天仍配送。后台立刻暂停不写此字段。
+    pause_effective_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     store_pickup: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # 固定周六不参与订阅履约（当周六十 global 仍为履约日时）；默认关闭
     skip_subscription_saturday: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

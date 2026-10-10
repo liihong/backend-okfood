@@ -18,6 +18,7 @@ from app.services.delivery.courier_service import (
     _member_scope_clause,
     subscription_delivery_started_clause,
 )
+from app.services.member.member_delivery_state_service import sql_not_blocked_by_pause_on_date
 from app.services.meal_period.card_eligibility import (
     _periods_match_sheet,
     members_entitled_meal_periods_map,
@@ -66,7 +67,7 @@ def eligible_members_for_dinner_delivery(
         .where(
             Member.deleted_at.is_(None),
             Member.is_active.is_(True),
-            Member.delivery_deferred.is_(False),
+            sql_not_blocked_by_pause_on_date(delivery_date),
             dinner_state,
             Member.store_pickup.is_(False),
             started,

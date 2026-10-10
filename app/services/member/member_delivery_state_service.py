@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import select
+from sqlalchemy import and_, not_, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.enums import CardOpenMode, CardOrderActivationMode
@@ -34,10 +34,32 @@ def member_fulfillment_ready(db: Session, member: Member) -> bool:
     return member_has_default_delivery_address(db, int(member.id))
 
 
+def pause_blocks_delivery_date(member: Member, delivery_date: date) -> bool:
+    """指定履约日是否被暂停挡住：立刻暂停，或小程序预约暂停已到生效日。不读请假字段。"""
+    if bool(member.delivery_deferred):
+        return True
+    pe = getattr(member, "pause_effective_date", None)
+    return pe is not None and pe <= delivery_date
+
+
+def sql_not_blocked_by_pause_on_date(delivery_date: date):
+    """大表 SQL：未立刻暂停，且没有「生效日已到」的小程序预约暂停。"""
+    return not_(
+        or_(
+            Member.delivery_deferred.is_(True),
+            and_(
+                Member.pause_effective_date.is_not(None),
+                Member.pause_effective_date <= delivery_date,
+            ),
+        )
+    )
+
+
 def apply_delivery_blocked(db: Session, member: Member) -> None:
-    """订阅大表门禁：阻断履约（暂停/暂不开卡/待完善）。"""
+    """订阅大表门禁：阻断履约（暂停/暂不开卡/待完善）。立刻阻断时清掉预约暂停日。"""
     member.delivery_deferred = True
     member.is_active = False
+    member.pause_effective_date = None
     db.add(member)
 
 
@@ -51,8 +73,58 @@ def apply_delivery_unblocked(db: Session, member: Member) -> None:
 
 
 def apply_pause_delivery(db: Session, member: Member) -> None:
-    """用户/后台暂停：保留 delivery_start_date，仅阻断门禁。"""
+    """后台立刻暂停：保留 delivery_start_date，当天即不再进大表。"""
     apply_delivery_blocked(db, member)
+
+
+def apply_miniprogram_pause_delivery(
+    db: Session,
+    member: Member,
+    *,
+    now: datetime | None = None,
+) -> str:
+    """
+    小程序自助暂停：当天已在午/晚大表则只写 pause_effective_date=明天（当天仍送）；
+    当天本不在大表则立刻暂停。不改请假字段。
+    返回 tomorrow（预约次日）或 immediate（立刻生效）。
+    """
+    from app.core.timeutil import now_shanghai
+    from app.services.dinner.schedule import member_on_dinner_delivery_schedule
+    from app.services.meal_period.lunch_schedule import member_on_lunch_delivery_schedule
+
+    n = now if now is not None else now_shanghai()
+    today = n.date()
+    on_today = member_on_lunch_delivery_schedule(
+        db, member, delivery_date=today, today=today
+    ) or member_on_dinner_delivery_schedule(
+        db, member, delivery_date=today, today=today
+    )
+    if on_today:
+        member.pause_effective_date = date.fromordinal(today.toordinal() + 1)
+        db.add(member)
+        return "tomorrow"
+    apply_pause_delivery(db, member)
+    return "immediate"
+
+
+def apply_due_miniprogram_pauses(db: Session) -> int:
+    """把已到生效日的小程序预约暂停落成 delivery_deferred；不碰请假字段。"""
+    from app.core.timeutil import today_shanghai
+
+    today = today_shanghai()
+    rows = db.scalars(
+        select(Member).where(
+            Member.deleted_at.is_(None),
+            Member.pause_effective_date.is_not(None),
+            Member.pause_effective_date <= today,
+            Member.delivery_deferred.is_(False),
+        )
+    ).all()
+    n = 0
+    for m in rows:
+        apply_pause_delivery(db, m)
+        n += 1
+    return n
 
 
 def apply_resume_delivery(db: Session, member: Member) -> None:

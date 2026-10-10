@@ -14,7 +14,7 @@ MINIPROGRAM_LEAVE_PREP_LOCKED_MSG = (
     "您的菜品原材料已备好，不能请假，感谢理解和认可。"
 )
 MINIPROGRAM_PAUSE_DELIVERY_PREP_LOCKED_MSG = (
-    "21点后无法操作暂停。明日餐品已准备，可配送后暂停"
+    "明日餐品已备料，暂不能暂停；明天配送后可暂停后续"
 )
 MINIPROGRAM_NO_CARD_MSG = "请先购买自律卡包后再操作"
 MINIPROGRAM_AWAITING_SETUP_MSG = "请先完善配送信息后再操作"
@@ -112,8 +112,11 @@ def is_miniprogram_pause_delivery_prep_locked(
     *,
     now: datetime | None = None,
 ) -> bool:
-    """备餐锁窗内且已在锁窗履约日配送大表：小程序不可暂停（已暂停会员不受限）。"""
+    """备餐锁窗内且已在锁窗履约日配送大表：小程序不可暂停（已暂停或已预约明日暂停不受限）。"""
     if bool(member.delivery_deferred):
+        return False
+    # 已预约明日生效的暂停：不再拦，避免重复提交
+    if getattr(member, "pause_effective_date", None) is not None:
         return False
     from app.services.dinner.schedule import member_on_dinner_delivery_schedule
     from app.services.meal_period.lunch_schedule import member_on_lunch_delivery_schedule

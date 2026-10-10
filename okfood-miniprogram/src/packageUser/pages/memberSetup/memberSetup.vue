@@ -277,7 +277,9 @@ async function loadProfile() {
       return
     }
 
-    const pausedWithBalance = data.delivery_deferred === true && serverBalance.value > 0
+    const pausedWithBalance =
+      (data.delivery_deferred === true || Boolean(data.pause_effective_date)) &&
+      serverBalance.value > 0
 
     if (resumeOnlyMode.value) {
       if (!pausedWithBalance) {
@@ -300,7 +302,7 @@ async function loadProfile() {
       pickupAcknowledged.value = false
     }
 
-    if (data.delivery_deferred === true) {
+    if (data.delivery_deferred === true || Boolean(data.pause_effective_date)) {
       deliveryMode.value = data.store_pickup ? 'pickup' : 'delivery'
       // 暂停保留起送日：恢复时预填原日期（早于最早可选日则清空让用户重选）
       const ds = data.delivery_start_date != null ? String(data.delivery_start_date).trim() : ''

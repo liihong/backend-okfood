@@ -33,6 +33,7 @@ from app.services.member.member_address_service import (
     full_address_line,
     load_default_address_map,
 )
+from app.services.member.member_delivery_state_service import sql_not_blocked_by_pause_on_date
 from app.services.member.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
 from app.services.order.single_meal_order_service import list_courier_single_order_tasks
 
@@ -64,7 +65,9 @@ def member_on_subscription_delivery_schedule(
         return False
     if not bool(member.is_active):
         return False
-    if bool(member.delivery_deferred):
+    from app.services.member.member_delivery_state_service import pause_blocks_delivery_date
+
+    if pause_blocks_delivery_date(member, delivery_date):
         return False
     units = effective_daily_meal_units(member)
     if int(member.balance) < units:
@@ -274,7 +277,7 @@ def eligible_members_for_delivery(
         .where(
             Member.deleted_at.is_(None),
             Member.is_active.is_(True),
-            Member.delivery_deferred.is_(False),
+            sql_not_blocked_by_pause_on_date(delivery_date),
             Member.balance >= units_sql,
             Member.store_pickup.is_(False),
             not_(absent),
@@ -350,7 +353,7 @@ def _member_subscription_schedule_where(
     return [
         Member.deleted_at.is_(None),
         Member.is_active.is_(True),
-        Member.delivery_deferred.is_(False),
+        sql_not_blocked_by_pause_on_date(delivery_date),
         not_(absent),
         started,
         _member_not_skip_subscription_saturday(delivery_date),
@@ -445,7 +448,7 @@ def _list_dinner_members_insufficient_balance_for_delivery_day(
         .where(
             Member.deleted_at.is_(None),
             Member.is_active.is_(True),
-            Member.delivery_deferred.is_(False),
+            sql_not_blocked_by_pause_on_date(delivery_date),
             Member.store_pickup.is_(False),
             started,
             _member_not_skip_subscription_saturday(delivery_date),
@@ -595,7 +598,7 @@ def eligible_members_for_store_pickup(
         .where(
             Member.deleted_at.is_(None),
             Member.is_active.is_(True),
-            Member.delivery_deferred.is_(False),
+            sql_not_blocked_by_pause_on_date(delivery_date),
             Member.balance >= units_sql,
             Member.store_pickup.is_(True),
             not_(absent),

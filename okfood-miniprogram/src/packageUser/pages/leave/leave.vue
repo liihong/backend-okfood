@@ -10,19 +10,11 @@
       @refresherrefresh="onLeaveRefresherRefresh"
     >
       <view class="page-leave">
-        <view v-if="showMealPeriodTabs" class="leave-period-tabs">
-          <view
-            v-for="tab in leavePeriodTabs"
-            :key="tab"
-            class="leave-period-tab"
-            :class="{ 'leave-period-tab--active': mealPeriod === tab }"
-            @tap="switchMealPeriod(tab)"
-          >
-            {{ mealPeriodLabel(tab) }}
-          </view>
-        </view>
         <view v-if="leaveRefreshing" class="leave-sync-hint">
           <text class="leave-sync-hint__text">正在同步最新状态…</text>
+        </view>
+        <view v-if="allDayPartialLeaveHint" class="leave-sync-hint">
+          <text class="leave-sync-hint__text">{{ allDayPartialLeaveHint }}</text>
         </view>
         <view v-if="showNewLeavePrepBlock" class="leave-block leave-block--deadline">
           <text class="leave-deadline-copy">{{ LEAVE_PREP_LOCKED_MSG }}</text>
@@ -134,35 +126,78 @@ import {
   MEAL_PERIOD_ALL,
   leaveMealPeriodTabOptions,
   leaveFieldsForPeriod,
-  mealPeriodLabel,
 } from '@/utils/memberMealPeriod.js'
 
 const mealPeriod = ref(MEAL_PERIOD_LUNCH)
 const memberProfileCache = ref(null)
-const leavePeriodTabs = computed(() => leaveMealPeriodTabOptions(memberProfileCache.value))
-const showMealPeriodTabs = computed(() => leavePeriodTabs.value.length > 1)
 
+/** 双餐会员一次请假覆盖午晚；单餐会员只写已开通餐段 */
+function resolveLeaveMealPeriod(me) {
+  const tabs = leaveMealPeriodTabOptions(me)
+  if (tabs.includes(MEAL_PERIOD_ALL)) return MEAL_PERIOD_ALL
+  return tabs[0] || MEAL_PERIOD_LUNCH
+}
+
+function ymdKey(d) {
+  if (d == null || d === '') return ''
+  const s = String(d)
+  return s.length >= 10 ? s.slice(0, 10) : s
+}
+
+/** 午、晚区间起止相同才算全天区间请假 */
+function sameLeaveRange(a, b) {
+  if (!a?.start || !a?.end || !b?.start || !b?.end) return false
+  return ymdKey(a.start) === ymdKey(b.start) && ymdKey(a.end) === ymdKey(b.end)
+}
+
+/**
+ * 全天页只认午、晚都已请假且口径一致的状态。
+ * 仅一侧有请假时不借用另一侧日期，避免把午餐区间展示成「全天请假」。
+ */
 function leaveFieldsForActiveTab(me) {
   if (mealPeriod.value === MEAL_PERIOD_ALL) {
     const lunch = leaveFieldsForPeriod(me, MEAL_PERIOD_LUNCH)
     const dinner = leaveFieldsForPeriod(me, MEAL_PERIOD_DINNER)
-    const lrL = lunch.leave_range
-    const lrD = dinner.leave_range
-    const range =
-      lrL && lrL.start && lrL.end
-        ? lrL
-        : lrD && lrD.start && lrD.end
-          ? lrD
-          : null
+    const sameRange = sameLeaveRange(lunch.leave_range, dinner.leave_range)
+    const lunchTomorrow = ymdKey(lunch.tomorrow_leave_target_date)
+    const dinnerTomorrow = ymdKey(dinner.tomorrow_leave_target_date)
+    const sameTomorrow =
+      Boolean(lunch.is_leaved_tomorrow && dinner.is_leaved_tomorrow) &&
+      Boolean(lunchTomorrow) &&
+      lunchTomorrow === dinnerTomorrow
     return {
-      is_leaved_tomorrow: Boolean(lunch.is_leaved_tomorrow || dinner.is_leaved_tomorrow),
-      tomorrow_leave_target_date:
-        lunch.tomorrow_leave_target_date || dinner.tomorrow_leave_target_date || null,
-      leave_range: range,
+      is_leaved_tomorrow: sameTomorrow,
+      tomorrow_leave_target_date: sameTomorrow ? lunch.tomorrow_leave_target_date : null,
+      leave_range: sameRange ? lunch.leave_range : null,
     }
   }
   return leaveFieldsForPeriod(me, mealPeriod.value)
 }
+
+/** 全天页：只有一侧请假时说明另一餐仍配送 */
+const allDayPartialLeaveHint = computed(() => {
+  if (mealPeriod.value !== MEAL_PERIOD_ALL) return ''
+  const me = memberProfileCache.value
+  if (!me) return ''
+  const lunch = leaveFieldsForPeriod(me, MEAL_PERIOD_LUNCH)
+  const dinner = leaveFieldsForPeriod(me, MEAL_PERIOD_DINNER)
+  const lunchRangeOn = Boolean(lunch.leave_range?.start && lunch.leave_range?.end)
+  const dinnerRangeOn = Boolean(dinner.leave_range?.start && dinner.leave_range?.end)
+  const lunchTomorrowOn = Boolean(lunch.is_leaved_tomorrow)
+  const dinnerTomorrowOn = Boolean(dinner.is_leaved_tomorrow)
+  const lunchOn = lunchRangeOn || lunchTomorrowOn
+  const dinnerOn = dinnerRangeOn || dinnerTomorrowOn
+  if (lunchOn === dinnerOn) {
+    if (lunchRangeOn && dinnerRangeOn && !sameLeaveRange(lunch.leave_range, dinner.leave_range)) {
+      return '午餐与晚餐请假日期不一致，全天页不合并展示。请分别在午餐、晚餐页查看；如需午晚都不送，请在本页重新提交全天请假。'
+    }
+    return ''
+  }
+  if (lunchOn && !dinnerOn) {
+    return '当前只有午餐在请假，晚餐仍会配送。如需午晚都不送，请在本页提交全天请假。'
+  }
+  return '当前只有晚餐在请假，午餐仍会配送。如需午晚都不送，请在本页提交全天请假。'
+})
 
 function leavePostBody(extra = {}) {
   return { meal_period: mealPeriod.value, ...extra }
@@ -187,14 +222,6 @@ function applyLeaveFieldsFromProfile(me) {
     rangeEnd.value = ''
   }
 }
-
-function switchMealPeriod(period) {
-  if (mealPeriod.value === period) return
-  mealPeriod.value = period
-  if (memberProfileCache.value) applyLeaveFieldsFromProfile(memberProfileCache.value)
-}
-
-const activePeriodLabel = computed(() => mealPeriodLabel(mealPeriod.value))
 
 const isTomorrowLeave = ref(false)
 const rangeStart = ref('')
@@ -496,15 +523,14 @@ const rangeEndPickerMinYmd = computed(() => {
 })
 
 const activeLeaveTitle = computed(() => {
-  const prefix = showMealPeriodTabs.value ? `${activePeriodLabel.value} · ` : ''
-  if (isRangeOnlyLeave.value) return `${prefix}当前区间请假`
+  if (isRangeOnlyLeave.value) return '当前区间请假'
   if (isTomorrowLeave.value) {
     const raw = ymdFromApi(tomorrowTargetYmd.value)
     const ymd = raw || addDaysIso(ymdTodayShanghai(), 1)
     const md = ymdToCnMd(ymd)
-    return md ? `${prefix}${md} 请假` : `${prefix}明日请假`
+    return md ? `${md} 请假` : '明日请假'
   }
-  return `${prefix}当前请假`
+  return '当前请假'
 })
 
 /** 请假结束提示：展示目标结束日 24:00，并说明到期自动恢复 */
@@ -574,10 +600,7 @@ async function syncLeaveFromServer(opts = {}) {
     ])
     if (gen !== leaveSyncGeneration) return
     memberProfileCache.value = me
-    const tabs = leaveMealPeriodTabOptions(me)
-    if (tabs.length && !tabs.includes(mealPeriod.value)) {
-      mealPeriod.value = tabs[0]
-    }
+    mealPeriod.value = resolveLeaveMealPeriod(me)
     leavePrepLocked.value = Boolean(me?.leave_prep_locked)
     applyLeaveFieldsFromProfile(me)
     redirectLeaveIfNoCardAndNotOnLeave(me)
