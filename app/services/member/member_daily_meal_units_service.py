@@ -46,10 +46,12 @@ def prep_preview_lunch_daily_meal_units(member: Member) -> int:
 
 
 def delivery_sheet_pushed_today_for_store(db: Session, *, store_id: int) -> bool:
-    """当日该门店是否已有成功的智能配送大表（订阅合并）顺丰推单。"""
-    from app.services.delivery.delivery_day_lock_service import has_delivery_sheet_sf_push_on_date
+    """供餐日当天是否已有成功的午餐大表推单。提前写成今天配送日的推单不算已推。"""
+    from app.services.delivery.delivery_day_lock_service import (
+        has_delivery_sheet_sf_push_created_on_delivery_day,
+    )
 
-    return has_delivery_sheet_sf_push_on_date(
+    return has_delivery_sheet_sf_push_created_on_delivery_day(
         db,
         store_id=int(store_id),
         delivery_date=today_shanghai(),
@@ -105,17 +107,19 @@ def queue_daily_meal_units_change(member: Member, units: int) -> bool:
     return True
 
 
-def apply_all_pending_daily_meal_units(db: Session) -> int:
+def apply_all_pending_daily_meal_units(db: Session, *, store_id: int | None = None) -> int:
     """
     将 daily_meal_units_pending 写入 daily_meal_units 并清空 pending。
     供每日 00:01 定时任务调用；返回实际落库会员数。
+    store_id 有值时只处理该门店，供管理端在任务失败后手动落库。
     """
-    rows = db.scalars(
-        select(Member).where(
-            Member.deleted_at.is_(None),
-            Member.daily_meal_units_pending.isnot(None),
-        )
-    ).all()
+    stmt = select(Member).where(
+        Member.deleted_at.is_(None),
+        Member.daily_meal_units_pending.isnot(None),
+    )
+    if store_id is not None:
+        stmt = stmt.where(Member.store_id == int(store_id))
+    rows = db.scalars(stmt).all()
     n = 0
     for m in rows:
         pending = pending_daily_meal_units(m)

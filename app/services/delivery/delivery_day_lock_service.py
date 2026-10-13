@@ -1,9 +1,9 @@
-"""配送业务日锁单：大表顺丰推单后冻结订阅名单；全部履约完成后口径与冻结快照一致。"""
+"""配送业务日锁单：供餐日当天的大表顺丰推单后冻结订阅名单；全部履约完成后口径与冻结快照一致。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -45,6 +45,52 @@ def _dinner_delivery_sheet_push_kind_clause():
     return SfSameCityPush.push_kind == SF_PUSH_KIND_DINNER_DELIVERY_SHEET
 
 
+def delivery_day_push_window(delivery_date: date) -> tuple[datetime, datetime]:
+    """供餐日当天的推单时间窗（created_at 为北京时间 naive，左闭右开）。"""
+    start = datetime.combine(delivery_date, time.min)
+    return start, start + timedelta(days=1)
+
+
+def snapshot_recorded_before_delivery_day(recorded_at: datetime | None, delivery_date: date) -> bool:
+    """份数/请假快照是否在供餐日之前写入。这类快照不能提前锁住整天名单。"""
+    if recorded_at is None:
+        return False
+    return recorded_at.date() < delivery_date
+
+
+def delivery_date_is_future(delivery_date: date, *, today: date | None = None) -> bool:
+    """业务日是否晚于上海当天。未来日不允许大表推单，也不写冻结快照。"""
+    from app.core.timeutil import today_shanghai
+
+    current = today if today is not None else today_shanghai()
+    return delivery_date > current
+
+
+def reject_future_delivery_sheet_push(delivery_date: date) -> None:
+    """大表推单禁止把业务日写成未来日。
+
+    当天及历史补推保持原样。未来日一旦创单成功，会被当成该日首次推单并拍下整天快照。
+    本函数不改完单扣次：当天创出的单完单后仍按该业务日扣当天次数。
+    """
+    if not delivery_date_is_future(delivery_date):
+        return
+    from app.core.timeutil import today_shanghai
+
+    today = today_shanghai()
+    raise ValueError(
+        f"只能推送上海当天（{today.isoformat()}）及以前的配送大表，"
+        f"不能提前推送 {delivery_date.isoformat()}"
+    )
+
+
+def _created_on_delivery_day_clauses(delivery_date: date) -> tuple:
+    start, end = delivery_day_push_window(delivery_date)
+    return (
+        SfSameCityPush.created_at >= start,
+        SfSameCityPush.created_at < end,
+    )
+
+
 def has_dinner_delivery_sheet_sf_push_on_date(
     db: Session,
     *,
@@ -57,6 +103,43 @@ def has_dinner_delivery_sheet_sf_push_on_date(
         .where(
             *_sf_push_lock_filter(int(store_id), delivery_date),
             _dinner_delivery_sheet_push_kind_clause(),
+        )
+        .limit(1)
+    )
+    return row_id is not None
+
+
+def has_delivery_sheet_sf_push_created_on_delivery_day(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+) -> bool:
+    """供餐日当天是否已有成功的午餐大表推单。提前写成未来配送日的推单不计入。"""
+    row_id = db.scalar(
+        select(SfSameCityPush.id)
+        .where(
+            *_sf_push_lock_filter(int(store_id), delivery_date, delivery_sheet_only=True),
+            *_created_on_delivery_day_clauses(delivery_date),
+        )
+        .limit(1)
+    )
+    return row_id is not None
+
+
+def has_dinner_delivery_sheet_sf_push_created_on_delivery_day(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+) -> bool:
+    """供餐日当天是否已有成功的晚餐大表推单。提前写成未来配送日的推单不计入。"""
+    row_id = db.scalar(
+        select(SfSameCityPush.id)
+        .where(
+            *_sf_push_lock_filter(int(store_id), delivery_date),
+            _dinner_delivery_sheet_push_kind_clause(),
+            *_created_on_delivery_day_clauses(delivery_date),
         )
         .limit(1)
     )
@@ -239,8 +322,11 @@ def is_delivery_day_sheet_frozen_after_sf_push(
     store_id: int,
     delivery_date: date,
 ) -> bool:
-    """大表已向顺丰推单后冻结当日订阅扩表（与 ``has_delivery_sheet_sf_push_on_date`` 同义）。"""
-    return has_delivery_sheet_sf_push_on_date(
+    """供餐日当天已有成功午餐大表推单后，才冻结当日订阅名单。
+
+    配送日被提前写成未来日的推单仍保留在顺丰侧，但不锁整天已售出和大表。
+    """
+    return has_delivery_sheet_sf_push_created_on_delivery_day(
         db, store_id=int(store_id), delivery_date=delivery_date
     )
 

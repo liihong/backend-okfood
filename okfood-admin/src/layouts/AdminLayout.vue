@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessageBox } from 'element-plus'
 import {
   Users,
   Utensils,
@@ -27,6 +28,7 @@ import {
 } from 'lucide-vue-next'
 import {
   handleAdminLogout,
+  apiJson,
   adminKind,
   adminAccessToken,
   adminDisplayName,
@@ -70,6 +72,18 @@ const {
 const { liveClockHm, liveClockDate } = useShanghaiLiveClock()
 
 const notificationPopoverVisible = ref(false)
+const KIND_PENDING_MEAL_UNITS = 'pending_meal_units_apply_failed'
+const pendingMealUnitsDialogVisible = ref(false)
+const pendingMealUnitsLoading = ref(false)
+const pendingMealUnitsApplying = ref(false)
+const pendingMealUnitsNotificationId = ref(null)
+const pendingMealUnitsStatus = ref({
+  lunch_pending: 0,
+  dinner_pending: 0,
+  lunch_sheet_pushed_today: false,
+  dinner_sheet_pushed_today: false,
+  warning: '',
+})
 
 const isDeliveryOnly = computed(() => adminKind.value === 'delivery')
 const isSupportOnly = computed(() => adminKind.value === 'support')
@@ -143,6 +157,70 @@ function goCardOrders(item) {
   const oid = parseCardOrderIdFromNotification(item)
   const query = oid ? { order_id: String(oid) } : {}
   router.push({ path: '/card-orders', query })
+}
+
+/** 明日份数落库失败：点开弹窗，店主或客服可手动执行。 */
+async function openPendingMealUnitsDialog(item) {
+  notificationPopoverVisible.value = false
+  pendingMealUnitsNotificationId.value = item?.id ?? null
+  pendingMealUnitsStatus.value = {
+    lunch_pending: 0,
+    dinner_pending: 0,
+    lunch_sheet_pushed_today: false,
+    dinner_sheet_pushed_today: false,
+    warning: '',
+  }
+  pendingMealUnitsDialogVisible.value = true
+  if (isDeliveryOnly.value) return
+  pendingMealUnitsLoading.value = true
+  try {
+    const data = await apiJson('/api/admin/pending-meal-units/status', {}, { auth: true })
+    pendingMealUnitsStatus.value = {
+      lunch_pending: Number(data?.lunch_pending) || 0,
+      dinner_pending: Number(data?.dinner_pending) || 0,
+      lunch_sheet_pushed_today: Boolean(data?.lunch_sheet_pushed_today),
+      dinner_sheet_pushed_today: Boolean(data?.dinner_sheet_pushed_today),
+      warning: String(data?.warning || ''),
+    }
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : '读取待落库份数失败', 'error')
+  } finally {
+    pendingMealUnitsLoading.value = false
+  }
+}
+
+async function submitPendingMealUnitsApply() {
+  const nid = Number(pendingMealUnitsNotificationId.value)
+  if (!Number.isFinite(nid) || nid <= 0) return
+  const warning = String(pendingMealUnitsStatus.value.warning || '').trim()
+  if (warning) {
+    try {
+      await ElMessageBox.confirm(warning, '确认立即落库', {
+        type: 'warning',
+        confirmButtonText: '仍然落库',
+        cancelButtonText: '取消',
+      })
+    } catch {
+      return
+    }
+  }
+  pendingMealUnitsApplying.value = true
+  try {
+    const data = await apiJson(
+      `/api/admin/system-notifications/${nid}/apply-pending-meal-units`,
+      { method: 'POST' },
+      { auth: true },
+    )
+    const lunch = Number(data?.lunch_applied) || 0
+    const dinner = Number(data?.dinner_applied) || 0
+    showToast(`已落库：午餐 ${lunch} 人，晚餐 ${dinner} 人`, 'success')
+    pendingMealUnitsDialogVisible.value = false
+    await fetchNotifications({ silent: true })
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : '落库失败', 'error')
+  } finally {
+    pendingMealUnitsApplying.value = false
+  }
 }
 
 /** 与模板绑定：明确布尔，避免 Element Plus 菜单缓存旧结构 */
@@ -592,8 +670,16 @@ function onTabClose(tab) {
                   :key="item.id"
                   class="admin-system-notifications-item"
                 >
-                  <p class="admin-system-notifications-item__title">{{ item.title }}</p>
-                  <p class="admin-system-notifications-item__message">{{ item.message }}</p>
+                  <p
+                    class="admin-system-notifications-item__title"
+                    :class="{ 'admin-system-notifications-item__title--action': item.kind === KIND_PENDING_MEAL_UNITS }"
+                    @click="item.kind === KIND_PENDING_MEAL_UNITS && openPendingMealUnitsDialog(item)"
+                  >{{ item.title }}</p>
+                  <p
+                    class="admin-system-notifications-item__message"
+                    :class="{ 'admin-system-notifications-item__message--action': item.kind === KIND_PENDING_MEAL_UNITS }"
+                    @click="item.kind === KIND_PENDING_MEAL_UNITS && openPendingMealUnitsDialog(item)"
+                  >{{ item.message }}</p>
                   <ul
                     v-if="Array.isArray(item.failure_details) && item.failure_details.length"
                     class="admin-system-notifications-item__failures"
@@ -629,6 +715,14 @@ function onTabClose(tab) {
                       @click="goCardOrders(item)"
                     >
                       去开卡工单审批
+                    </el-button>
+                    <el-button
+                      v-if="item.kind === KIND_PENDING_MEAL_UNITS"
+                      size="small"
+                      class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
+                      @click="openPendingMealUnitsDialog(item)"
+                    >
+                      手动落库
                     </el-button>
                     <el-button
                       size="small"
@@ -689,5 +783,63 @@ function onTabClose(tab) {
         </router-view>
       </div>
     </main>
+
+    <el-dialog
+      v-model="pendingMealUnitsDialogVisible"
+      title="明日份数落库失败"
+      width="480px"
+      append-to-body
+      destroy-on-close
+    >
+      <div v-loading="pendingMealUnitsLoading">
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+          title="00:01 没有把预约份数写成当天生效份数。不处理的话，今日备餐仍按旧份数。"
+        />
+        <p v-if="isDeliveryOnly" class="pending-meal-units-dialog__hint">
+          当前是配送账号，不能落库。请让店主或客服打开这条消息并执行。
+        </p>
+        <template v-else>
+          <p class="pending-meal-units-dialog__counts">
+            午餐待落库 {{ pendingMealUnitsStatus.lunch_pending }} 人，晚餐待落库 {{ pendingMealUnitsStatus.dinner_pending }} 人。
+          </p>
+          <el-alert
+            v-if="pendingMealUnitsStatus.warning"
+            type="error"
+            :closable="false"
+            show-icon
+            :title="pendingMealUnitsStatus.warning"
+          />
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="pendingMealUnitsDialogVisible = false">关闭</el-button>
+        <el-button
+          v-if="!isDeliveryOnly"
+          type="primary"
+          :loading="pendingMealUnitsApplying"
+          :disabled="pendingMealUnitsLoading || (pendingMealUnitsStatus.lunch_pending + pendingMealUnitsStatus.dinner_pending) <= 0"
+          @click="submitPendingMealUnitsApply"
+        >
+          立即落库
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.pending-meal-units-dialog__hint,
+.pending-meal-units-dialog__counts {
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #334155;
+}
+
+.pending-meal-units-dialog__counts + .el-alert {
+  margin-top: 12px;
+}
+</style>

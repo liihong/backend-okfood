@@ -1832,6 +1832,23 @@ class AdminSystemNotificationListOut(BaseModel):
     unacknowledged_count: int = 0
 
 
+class PendingMealUnitsStatusOut(BaseModel):
+    """明日份数落库弹窗：当前待生效人数，以及今天是否已经推过大表。"""
+
+    lunch_pending: int = 0
+    dinner_pending: int = 0
+    lunch_sheet_pushed_today: bool = False
+    dinner_sheet_pushed_today: bool = False
+    warning: str = ""
+
+
+class PendingMealUnitsApplyOut(BaseModel):
+    """手动落库结果。"""
+
+    lunch_applied: int = 0
+    dinner_applied: int = 0
+
+
 class TenantIntegrationSettingsOut(BaseModel):
     """租户对接配置（密钥仅以是否已设置展示，不回显明文）。"""
 

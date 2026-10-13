@@ -108,8 +108,34 @@ def job_reset_leave_flags() -> None:
     except Exception:
         logger.exception("请假标记重置任务失败")
         db.rollback()
+        # 事务已回滚，预约份数仍在 pending。另开会话写系统消息，避免和失败事务缠在一起
+        _notify_unapplied_pending_meal_units()
     finally:
         db.close()
+
+
+def _notify_unapplied_pending_meal_units() -> None:
+    """00:01 失败或漏跑后：推单前仍有预约份数则给门店发系统消息。"""
+    from app.services.admin.admin_system_notification_service import (
+        scan_unapplied_pending_meal_unit_notifications,
+    )
+
+    db = SessionLocal()
+    try:
+        n = scan_unapplied_pending_meal_unit_notifications(db)
+        db.commit()
+        if n:
+            logger.warning("明日份数未落库，已写系统消息: stores=%s", n)
+    except Exception:
+        logger.exception("明日份数落库失败提醒写入失败")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def job_alert_unapplied_pending_meal_units() -> None:
+    """00:10 与 07:30：进程在 00:01 没跑起来时，推单前补发落库失败消息。"""
+    _notify_unapplied_pending_meal_units()
 
 
 def job_low_balance_notify() -> None:
@@ -227,6 +253,29 @@ def job_sf_nightly_auto_push() -> None:
 def add_cron_jobs(sched) -> None:
     """向任意 APScheduler 实例注册全部 cron 任务（API 内嵌或独立 worker 共用）。"""
     sched.add_job(job_reset_leave_flags, "cron", hour=0, minute=1, id="reset_leave", replace_existing=True)
+    # 漏跑 00:01 时补提醒。已推单后的 pending 是正常次日预约，扫描本身会跳过
+    sched.add_job(
+        job_alert_unapplied_pending_meal_units,
+        "cron",
+        hour=0,
+        minute=10,
+        id="pending_meal_units_check_night",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=8 * 3600,
+    )
+    sched.add_job(
+        job_alert_unapplied_pending_meal_units,
+        "cron",
+        hour=7,
+        minute=30,
+        id="pending_meal_units_check_morning",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3 * 3600,
+    )
     sched.add_job(job_low_balance_notify, "cron", hour=17, minute=0, id="low_balance", replace_existing=True)
     sched.add_job(
         job_sf_nightly_auto_push,

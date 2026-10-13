@@ -66,6 +66,8 @@ from app.schemas.admin import (
     SfSameCityCancelOut,
     AdminSystemNotificationListOut,
     AdminSystemNotificationOut,
+    PendingMealUnitsApplyOut,
+    PendingMealUnitsStatusOut,
     MemberMembershipRefundConfirmIn,
     MemberMealCompensationIn,
 )
@@ -182,8 +184,10 @@ from app.services.admin.member_meal_compensation_service import admin_member_mea
 from app.services.admin.admin_system_notification_service import (
     acknowledge_admin_system_notification,
     admin_system_notification_to_dict,
+    apply_pending_meal_units_from_notification,
     count_unacknowledged_admin_system_notifications,
     list_admin_system_notifications,
+    pending_meal_units_status_for_store,
     upsert_sf_push_batch_notification,
 )
 from app.integrations.wechat_pay_v2 import WeChatPayV2Error, resolve_request_client_ip
@@ -845,6 +849,36 @@ def admin_system_notification_acknowledge(
         admin_username=admin_username,
     )
     return success(data=AdminSystemNotificationOut(**admin_system_notification_to_dict(row)), msg="已确认")
+
+
+@router.get("/pending-meal-units/status", response_model=None)
+def admin_pending_meal_units_status(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """明日份数落库弹窗：当前待生效人数。店主或客服可看。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    data = pending_meal_units_status_for_store(db, store_id=store_id)
+    return success(data=dump_model(PendingMealUnitsStatusOut(**data)), msg="获取成功")
+
+
+@router.post("/system-notifications/{notification_id}/apply-pending-meal-units", response_model=None)
+def admin_apply_pending_meal_units(
+    notification_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """手动执行 00:01 未完成的明日份数落库，成功后确认对应系统消息。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    data = apply_pending_meal_units_from_notification(
+        db,
+        notification_id=int(notification_id),
+        store_id=store_id,
+        admin_username=admin_username,
+    )
+    return success(data=dump_model(PendingMealUnitsApplyOut(**data)), msg="已落库")
 
 
 @router.get("/delivery-sf/pushes", response_model=None)

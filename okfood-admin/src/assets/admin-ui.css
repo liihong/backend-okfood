@@ -775,6 +775,11 @@
   color: #0f172a;
 }
 
+.admin-system-notifications-item__title--action,
+.admin-system-notifications-item__message--action {
+  cursor: pointer;
+}
+
 .admin-system-notifications-item__message {
   margin: 0 0 0.65rem;
   font-size: 13px;

@@ -8,7 +8,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.timeutil import today_shanghai
+from app.core.timeutil import beijing_now_naive, today_shanghai
 from app.models.delivery_sheet_push_absent_snapshot import DeliverySheetPushAbsentSnapshot
 from app.models.delivery_sheet_push_units_snapshot import DeliverySheetPushUnitsSnapshot
 from app.models.member import Member
@@ -78,6 +78,16 @@ def capture_delivery_sheet_absent_members_on_first_push(
     pk = _snapshot_pk(store_id=sid, delivery_date=d, meal_period=meal_period)
     existing = db.get(DeliverySheetPushAbsentSnapshot, pk)
     if existing is not None:
+        from app.services.delivery.delivery_day_lock_service import snapshot_recorded_before_delivery_day
+
+        # 供餐日当天已有快照不覆盖；供餐日前拍的快照在当天首次推单时按当前请假重写
+        if not snapshot_recorded_before_delivery_day(existing.recorded_at, d):
+            return
+        existing.absent_member_ids = _collect_absent_member_ids_for_delivery_date(
+            db, store_id=sid, delivery_date=d, meal_period=meal_period
+        )
+        existing.recorded_at = beijing_now_naive()
+        db.flush()
         return
     ids = _collect_absent_member_ids_for_delivery_date(
         db, store_id=sid, delivery_date=d, meal_period=meal_period
@@ -100,22 +110,24 @@ def _delivery_sheet_frozen_for_period(
     delivery_date: date,
     meal_period: str = DEFAULT_MEAL_PERIOD,
 ) -> bool:
-    """当日该餐段是否已进入推单冻结口径（份数快照或有效大表推单记录）。"""
-    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
-    if _get_units_snapshot_row(
-        db, store_id=int(store_id), delivery_date=delivery_date, meal_period=period
-    ) is not None:
-        return True
+    """供餐日当天该餐段是否已进入推单冻结。供餐日前写入的份数快照不锁整天。"""
     from app.services.delivery.delivery_day_lock_service import (
-        has_delivery_sheet_sf_push_on_date,
-        has_dinner_delivery_sheet_sf_push_on_date,
+        has_delivery_sheet_sf_push_created_on_delivery_day,
+        has_dinner_delivery_sheet_sf_push_created_on_delivery_day,
+        snapshot_recorded_before_delivery_day,
     )
 
+    period = (meal_period or DEFAULT_MEAL_PERIOD).strip().lower()
+    row = _get_units_snapshot_row(
+        db, store_id=int(store_id), delivery_date=delivery_date, meal_period=period
+    )
+    if row is not None and not snapshot_recorded_before_delivery_day(row.recorded_at, delivery_date):
+        return True
     if period == MealPeriod.DINNER.value:
-        return has_dinner_delivery_sheet_sf_push_on_date(
+        return has_dinner_delivery_sheet_sf_push_created_on_delivery_day(
             db, store_id=int(store_id), delivery_date=delivery_date
         )
-    return has_delivery_sheet_sf_push_on_date(
+    return has_delivery_sheet_sf_push_created_on_delivery_day(
         db, store_id=int(store_id), delivery_date=delivery_date
     )
 
@@ -428,6 +440,25 @@ def capture_delivery_sheet_units_on_first_push(
     except (OperationalError, ProgrammingError):
         return
     if existing is not None:
+        from app.services.delivery.delivery_day_lock_service import snapshot_recorded_before_delivery_day
+
+        # 供餐日当天已有快照不覆盖；供餐日前拍的快照在当天首次推单时按当前应送重写
+        if not snapshot_recorded_before_delivery_day(existing.recorded_at, d):
+            return
+        units = _collect_member_meal_units_for_sf_push_sheet(
+            db, store_id=sid, delivery_date=d, meal_period=meal_period
+        )
+        pickup_units = _collect_pickup_member_meal_units_for_snapshot(
+            db, store_id=sid, delivery_date=d, meal_period=meal_period
+        )
+        units_payload: dict[str, object] = dict(units)
+        for k, v in pickup_units.items():
+            if k not in units_payload:
+                units_payload[k] = v
+        units_payload[FROZEN_MEMBER_IDS_SNAPSHOT_KEY] = sorted(int(k) for k in units.keys())
+        existing.member_meal_units = units_payload
+        existing.recorded_at = beijing_now_naive()
+        db.flush()
         return
     units = _collect_member_meal_units_for_sf_push_sheet(
         db, store_id=sid, delivery_date=d, meal_period=meal_period
@@ -560,8 +591,10 @@ class DeliverySheetDaySnapshots:
         meal_period: str = DEFAULT_MEAL_PERIOD,
     ) -> DeliverySheetDaySnapshots:
         from app.services.delivery.delivery_day_lock_service import (
-            has_delivery_sheet_sf_push_on_date,
+            has_delivery_sheet_sf_push_created_on_delivery_day,
+            has_dinner_delivery_sheet_sf_push_created_on_delivery_day,
             sf_frozen_subscription_member_ids_for_delivery_date,
+            snapshot_recorded_before_delivery_day,
         )
 
         sid = int(store_id)
@@ -582,16 +615,27 @@ class DeliverySheetDaySnapshots:
             units_map = _parse_member_meal_units_json(units_row.member_meal_units) or None
             frozen_from_row = _frozen_member_ids_from_units_json(units_row.member_meal_units)
 
-        if units_row is not None:
-            has_push = True
-        elif period == MealPeriod.DINNER.value:
-            from app.services.delivery.delivery_day_lock_service import has_dinner_delivery_sheet_sf_push_on_date
-
-            has_push = has_dinner_delivery_sheet_sf_push_on_date(
+        premature_snapshot = units_row is not None and snapshot_recorded_before_delivery_day(
+            units_row.recorded_at, d
+        )
+        if period == MealPeriod.DINNER.value:
+            same_day_push = has_dinner_delivery_sheet_sf_push_created_on_delivery_day(
                 db, store_id=sid, delivery_date=d
             )
         else:
-            has_push = has_delivery_sheet_sf_push_on_date(db, store_id=sid, delivery_date=d)
+            same_day_push = has_delivery_sheet_sf_push_created_on_delivery_day(
+                db, store_id=sid, delivery_date=d
+            )
+        # 供餐日当天才冻结。提前推单留下的快照不锁名单；当天已拍过的快照仍保持冻结
+        if same_day_push:
+            has_push = True
+        elif units_row is not None and not premature_snapshot:
+            has_push = True
+        else:
+            has_push = False
+        if not has_push:
+            units_map = None
+            frozen_from_row = None
 
         frozen_ids: frozenset[int] | None = None
         if has_push:
