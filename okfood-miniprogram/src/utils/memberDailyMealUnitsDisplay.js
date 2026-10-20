@@ -5,7 +5,7 @@ import {
   MEAL_PERIOD_LUNCH,
   MEAL_PERIOD_DINNER,
   dailyMealUnitsFieldsForPeriod,
-  hasDinnerEntitlement,
+  entitledMealPeriodsFromProfile,
   mealPeriodLabel,
 } from '@/utils/memberMealPeriod.js'
 
@@ -51,28 +51,45 @@ export function pendingDailyMealUnitsFromProfile(profile, period = MEAL_PERIOD_L
 }
 
 /**
- * 计划卡/地址区附带的份数说明行
+ * 单个已开通餐段的份数短句，如「晚餐 1 份/日」
+ * @param {object | null | undefined} profile
+ * @param {'lunch'|'dinner'} period
+ * @returns {string}
+ */
+function periodUnitsPhrase(profile, period) {
+  const cur = effectiveDailyMealUnitsFromProfile(profile, period)
+  const pending = pendingDailyMealUnitsFromProfile(profile, period)
+  let line = `${mealPeriodLabel(period)} ${cur} 份/日`
+  if (pending != null && pending !== cur) {
+    line += `（已预约 ${pending} 份）`
+  }
+  return line
+}
+
+/**
+ * 计划卡/地址区附带的份数说明行。
+ * 只展示 entitled_meal_periods 里已开通的餐段：纯晚餐卡不带午餐。
+ * 会员表 daily_meal_units 默认是 1，不能据此判断有午餐。
  * @param {object | null | undefined} profile
  * @returns {string}
  */
 export function formatDailyMealUnitsHintLine(profile) {
-  const lunchCur = effectiveDailyMealUnitsFromProfile(profile, MEAL_PERIOD_LUNCH)
-  const lunchPending = pendingDailyMealUnitsFromProfile(profile, MEAL_PERIOD_LUNCH)
-  if (!hasDinnerEntitlement(profile)) {
+  const periods = entitledMealPeriodsFromProfile(profile)
+  const hasLunch = periods.includes(MEAL_PERIOD_LUNCH)
+  const hasDinner = periods.includes(MEAL_PERIOD_DINNER)
+  // 仅午餐：保持原「每日配送」文案
+  if (hasLunch && !hasDinner) {
+    const lunchCur = effectiveDailyMealUnitsFromProfile(profile, MEAL_PERIOD_LUNCH)
+    const lunchPending = pendingDailyMealUnitsFromProfile(profile, MEAL_PERIOD_LUNCH)
     if (lunchPending != null && lunchPending !== lunchCur) {
       return `每日配送 ${lunchCur} 份（已预约改为 ${lunchPending} 份）`
     }
     return `每日配送 ${lunchCur} 份`
   }
-  let lunch = `午餐 ${lunchCur} 份/日`
-  if (lunchPending != null && lunchPending !== lunchCur) {
-    lunch += `（已预约 ${lunchPending} 份）`
-  }
-  const dCur = effectiveDailyMealUnitsFromProfile(profile, MEAL_PERIOD_DINNER)
-  const dPending = pendingDailyMealUnitsFromProfile(profile, MEAL_PERIOD_DINNER)
-  let dinner = `晚餐 ${dCur} 份/日`
-  if (dPending != null && dPending !== dCur) dinner += `（已预约 ${dPending} 份）`
-  return `${lunch} · ${dinner}`
+  const parts = []
+  if (hasLunch) parts.push(periodUnitsPhrase(profile, MEAL_PERIOD_LUNCH))
+  if (hasDinner) parts.push(periodUnitsPhrase(profile, MEAL_PERIOD_DINNER))
+  return parts.join(' · ')
 }
 
 /**

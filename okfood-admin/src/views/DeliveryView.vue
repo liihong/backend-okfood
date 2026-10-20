@@ -63,10 +63,14 @@ function effectiveSfExpectDefaultYmd(deliveryYmd) {
   return yRaw < todayShanghaiStr() ? todayShanghaiStr() : yRaw
 }
 
-/** 顺丰弹窗：期望送达 value-format 字符串，默认当日 12:00（与后端预览一致） */
+/**
+ * 顺丰弹窗：期望送达 value-format 字符串。
+ * 午餐默认当日 12:00（与后端预览一致）；晚餐仅前端改成 18:00，不改后端。
+ */
 function defaultSfExpectAt(ymd) {
   const d = (ymd || '').trim() || todayShanghaiStr()
-  return `${d}T12:00:00`
+  const hour = sheetView.value === SHEET_VIEW_DINNER ? '18' : '12'
+  return `${d}T${hour}:00:00`
 }
 
 /** 将接口返回的 expect_delivery_at 规范为 YYYY-MM-DDTHH:mm:ss，供 el-date-picker */
@@ -100,6 +104,11 @@ function normalizeSfPreviewRows(rows, deliveryYmd) {
       const expYmd = String(exp || '').split('T')[0]
       if (!expYmd || expYmd < today) exp = defaultSfExpectAt(y)
     }
+    // 后端午餐/晚餐预览都固定带当天 12:00；晚餐推单在这里改成 18:00
+    if (sheetView.value === SHEET_VIEW_DINNER) {
+      const noon = String(exp || '').match(/^(\d{4}-\d{2}-\d{2})T12:00:00$/)
+      if (noon) exp = `${noon[1]}T18:00:00`
+    }
     return {
       ...r,
       map_location_text: map0,
@@ -111,7 +120,9 @@ function normalizeSfPreviewRows(rows, deliveryYmd) {
   })
 }
 
-const sfExpectDefaultTime = new Date(2000, 0, 1, 12, 0, 0)
+const sfExpectDefaultTime = computed(
+  () => new Date(2000, 0, 1, sheetView.value === SHEET_VIEW_DINNER ? 18 : 12, 0, 0),
+)
 
 function onSfPushImmediatelyChange(row) {
   if (row && !row.push_immediately) {
@@ -1209,7 +1220,7 @@ async function reinstatePhoneToSheet() {
                   type="datetime"
                   value-format="YYYY-MM-DDTHH:mm:ss"
                   :default-time="sfExpectDefaultTime"
-                  placeholder="默认 12:00，可改"
+                  :placeholder="sheetView === SHEET_VIEW_DINNER ? '默认 18:00，可改' : '默认 12:00，可改'"
                   size="small"
                   class="sf-dt"
                   :disabled="row.push_immediately"
