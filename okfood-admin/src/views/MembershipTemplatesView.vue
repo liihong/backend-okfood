@@ -27,6 +27,8 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const saving = ref(false)
 const editingId = ref(null)
+/** 正在切换上架状态的模版 id，避免连点重复提交 */
+const togglingId = ref(null)
 const cardPhotoUploading = ref(false)
 const cardPhotoUploadKey = ref(0)
 /** 顶部说明横条是否展示 */
@@ -280,6 +282,39 @@ async function saveForm() {
   }
 }
 
+/**
+ * 列表「启用」开关直接上架/下架。
+ * 只 PATCH is_active；小程序卡包列表与详情只展示已启用模版。
+ */
+async function toggleActive(row) {
+  if (!row || togglingId.value != null) return
+  const next = !row.is_active
+  const prev = Boolean(row.is_active)
+  togglingId.value = row.id
+  row.is_active = next
+  try {
+    await apiJson(
+      `/api/admin/catalog/membership-templates/${row.id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: next }),
+      },
+      { auth: true },
+    )
+    showToast(next ? '已上架' : '已下架', 'success')
+  } catch (e) {
+    row.is_active = prev
+    if (e?.status === 401) {
+      alert('登录已过期')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '操作失败', 'error')
+  } finally {
+    togglingId.value = null
+  }
+}
+
 async function removeRow(row) {
   const ok = window.confirm(`确定删除「${row.name}」？`)
   if (!ok) return
@@ -408,14 +443,21 @@ onMounted(() => {
               </td>
               <td>
                 <div class="mcard-cell-center">
-                  <span
+                  <button
+                    type="button"
                     class="mcard-switch"
-                    :class="{ 'mcard-switch--on': row.is_active }"
-                    role="img"
-                    :aria-label="row.is_active ? '已启用' : '未启用'"
+                    :class="{
+                      'mcard-switch--on': row.is_active,
+                      'mcard-switch--busy': togglingId === row.id,
+                    }"
+                    role="switch"
+                    :aria-checked="row.is_active ? 'true' : 'false'"
+                    :aria-label="row.is_active ? '下架该会员卡' : '上架该会员卡'"
+                    :disabled="togglingId === row.id"
+                    @click="toggleActive(row)"
                   >
                     <span class="mcard-switch-knob" />
-                  </span>
+                  </button>
                 </div>
               </td>
               <td>
@@ -1015,15 +1057,32 @@ onMounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
-/* 启用：仅展示态开关（编辑仍在弹窗 el-switch） */
+/* 启用：列表内直接上架/下架（弹窗 el-switch 仍可改同一字段） */
 .mcard-switch {
   display: inline-block;
   position: relative;
+  box-sizing: border-box;
   width: 44px;
   height: 24px;
+  padding: 0;
+  border: none;
   background: #cbd5e1;
   border-radius: 34px;
   flex-shrink: 0;
+  line-height: 0;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.mcard-switch:disabled,
+.mcard-switch--busy {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.mcard-switch:focus-visible {
+  outline: 2px solid var(--mcard-primary);
+  outline-offset: 2px;
 }
 
 .mcard-switch--on {
