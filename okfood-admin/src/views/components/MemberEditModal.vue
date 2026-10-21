@@ -299,7 +299,7 @@ function close() {
   open.value = false
 }
 
-/** 从会员档案推断餐段（纯晚餐卡默认 dinner，否则 lunch） */
+/** 是否展示晚餐配送安排（有晚餐权益、余次、暂停或指定配送日） */
 function showDinnerScheduleFor(u) {
   if (!u) return false
   const periods = Array.isArray(u.entitled_meal_periods) ? u.entitled_meal_periods : []
@@ -311,6 +311,9 @@ function showDinnerScheduleFor(u) {
 }
 
 const showDinnerSchedule = computed(() => showDinnerScheduleFor(props.member))
+
+/** 从会员档案推断餐段（纯晚餐卡默认 dinner，否则 lunch） */
+function resolveMemberMealPeriod(u) {
   const periods = Array.isArray(u?.entitled_meal_periods) ? u.entitled_meal_periods : []
   if (periods.includes('dinner') && !periods.includes('lunch')) return 'dinner'
   return 'lunch'

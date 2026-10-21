@@ -487,7 +487,7 @@ onMounted(() => {
                 </div>
               </td>
               <td>
-                <div class="mcard-cell-center">
+                <div class="mcard-cell-center mcard-meals-cell">
                   <span class="mcard-meals-badge">
                     <span
                       v-for="part in mealsGrantCreditParts(row)"
@@ -560,7 +560,7 @@ onMounted(() => {
     <el-dialog
       v-model="dialogVisible"
       class="mcard-template-dialog"
-      width="680px"
+      width="800px"
       align-center
       destroy-on-close
       :show-close="false"
@@ -606,20 +606,7 @@ onMounted(() => {
             </el-checkbox-group>
           </div>
 
-          <div v-if="showDeliverDinnerWithLunch" class="mcard-field mcard-field--span2">
-            <label class="mcard-form-label">与午餐一起配送</label>
-            <div class="mcard-form-control">
-              <el-radio-group v-model="form.deliver_dinner_with_lunch" size="small">
-                <el-radio :value="false">分开配送（午、晚各扣各的）</el-radio>
-                <el-radio :value="true">一起配送（午餐送达时同时扣晚餐）</el-radio>
-              </el-radio-group>
-              <p class="mcard-form-hint">
-                勾选后，该模版下已入账的全餐卡（含老会员）午餐送达时会同时扣晚餐各 1 次；晚餐大表已送达则不会再扣。取消勾选后，仅开卡快照已是一起配送的工单仍按快照扣次。
-              </p>
-            </div>
-          </div>
-
-          <div class="mcard-field mcard-field--span2">
+          <div class="mcard-field">
             <label class="mcard-form-label">每个餐段入账次数</label>
             <el-input-number
               v-model="form.meals_grant"
@@ -629,89 +616,105 @@ onMounted(() => {
               controls-position="right"
               class="mcard-form-control mcard-form-control--number"
             />
-            <p class="mcard-form-hint">
-              勾选几个餐段就分别写入几次，不是午晚加总。当前将入账：<strong>{{ formCreditPreview }}</strong>
-            </p>
           </div>
+          <p class="mcard-form-hint mcard-form-hint--full">
+            勾选几个餐段就分别写入几次，不是午晚加总。当前将入账：<strong>{{ formCreditPreview }}</strong>
+          </p>
 
-          <div class="mcard-field mcard-field--span2">
-            <label class="mcard-form-label">开卡赠送</label>
-            <div class="mcard-form-control">
-              <el-radio-group v-model="form.gift_mode" size="small">
-                <el-radio value="none">不赠送</el-radio>
-                <el-radio value="dinner">赠送晚餐</el-radio>
-                <el-radio value="juice">赠送果蔬汁</el-radio>
+          <div v-if="showDeliverDinnerWithLunch" class="mcard-field mcard-field--span2 mcard-field--top">
+            <label class="mcard-form-label">与午餐一起配送</label>
+            <div class="mcard-field-main">
+              <el-radio-group v-model="form.deliver_dinner_with_lunch" size="small" class="mcard-form-control">
+                <el-radio :value="false">分开配送（午、晚各扣各的）</el-radio>
+                <el-radio :value="true">一起配送（午餐送达时同时扣晚餐）</el-radio>
               </el-radio-group>
               <p class="mcard-form-hint">
-                赠送晚餐只加晚餐次数，默认暂停，不改变上面的每个餐段入账。正式晚餐、全餐不要选这项。果蔬汁按次数逐笔生成普通商城订单。
+                勾选后，该模版下已入账的全餐卡（含老会员）午餐送达时会同时扣晚餐各 1 次；晚餐大表已送达则不会再扣。取消勾选后，仅开卡快照已是一起配送的工单仍按快照扣次。
               </p>
             </div>
           </div>
 
-          <div v-if="form.gift_mode === 'dinner'" class="mcard-field">
-            <label class="mcard-form-label">赠送晚餐次数</label>
-            <el-input-number
-              v-model="form.gift_dinner_meals"
-              :min="1"
-              :max="366"
-              size="small"
-              controls-position="right"
-              class="mcard-form-control mcard-form-control--number"
-            />
-          </div>
-
-          <template v-if="form.gift_mode === 'juice'">
-            <div class="mcard-field">
-              <label class="mcard-form-label">果蔬汁 SKU</label>
-              <el-select
-                v-model="form.gift_retail_product_id"
-                filterable
-                clearable
-                size="small"
-                class="mcard-form-control"
-                placeholder="选择已上架 SKU"
-                :loading="juiceSkusLoading"
-              >
-                <el-option
-                  v-for="sku in juiceSkus"
-                  :key="sku.id"
-                  :label="skuOptionLabel(sku)"
-                  :value="Number(sku.id)"
-                />
-              </el-select>
+          <div class="mcard-pair">
+            <div class="mcard-field mcard-field--top">
+              <label class="mcard-form-label">开卡赠送</label>
+              <div class="mcard-field-main">
+                <el-radio-group v-model="form.gift_mode" size="small" class="mcard-form-control">
+                  <el-radio value="none">不赠送</el-radio>
+                  <el-radio value="dinner">赠送晚餐</el-radio>
+                  <el-radio value="juice">赠送果蔬汁</el-radio>
+                </el-radio-group>
+                <p class="mcard-form-hint">赠送晚餐只加晚餐次数，默认暂停，不改变上面的每个餐段入账。</p>
+              </div>
             </div>
-            <div class="mcard-field">
-              <label class="mcard-form-label">赠送单数</label>
+
+            <div v-if="form.gift_mode === 'dinner'" class="mcard-field">
+              <label class="mcard-form-label">赠送晚餐次数</label>
               <el-input-number
-                v-model="form.gift_retail_quantity"
+                v-model="form.gift_dinner_meals"
                 :min="1"
-                :max="30"
+                :max="366"
                 size="small"
                 controls-position="right"
                 class="mcard-form-control mcard-form-control--number"
               />
-              <p class="mcard-form-hint">开卡时按这个次数逐笔建单，每笔 1 份。</p>
             </div>
-          </template>
 
-          <div class="mcard-field">
-            <label class="mcard-form-label">原价(元)</label>
-            <el-input
-              v-model="form.list_price_yuan"
-              size="small"
-              class="mcard-form-control"
-              placeholder="划线价，留空不在小程序展示"
-            />
+            <div v-else-if="form.gift_mode === 'juice'" class="mcard-field mcard-field--top">
+              <label class="mcard-form-label">赠送单数</label>
+              <div class="mcard-field-main">
+                <el-input-number
+                  v-model="form.gift_retail_quantity"
+                  :min="1"
+                  :max="30"
+                  size="small"
+                  controls-position="right"
+                  class="mcard-form-control mcard-form-control--number"
+                />
+                <p class="mcard-form-hint">开卡时按这个次数逐笔建单，每笔 1 份。</p>
+              </div>
+            </div>
           </div>
 
-          <div class="mcard-field">
-            <label class="mcard-form-label">优惠价(元)</label>
-            <el-input
-              v-model="form.sale_price_yuan"
+          <div v-if="form.gift_mode === 'juice'" class="mcard-field">
+            <label class="mcard-form-label">果蔬汁 SKU</label>
+            <el-select
+              v-model="form.gift_retail_product_id"
+              filterable
+              clearable
               size="small"
               class="mcard-form-control"
-              placeholder="主推价，留空不在小程序展示"
-            />
+              placeholder="选择已上架 SKU"
+              :loading="juiceSkusLoading"
+            >
+              <el-option
+                v-for="sku in juiceSkus"
+                :key="sku.id"
+                :label="skuOptionLabel(sku)"
+                :value="Number(sku.id)"
+              />
+            </el-select>
+          </div>
+
+          <div class="mcard-pair">
+            <div class="mcard-field">
+              <label class="mcard-form-label">原价(元)</label>
+              <el-input
+                v-model="form.list_price_yuan"
+                size="small"
+                class="mcard-form-control"
+                placeholder="划线价，留空不在小程序展示"
+              />
+            </div>
+
+            <div class="mcard-field">
+              <label class="mcard-form-label">优惠价(元)</label>
+              <el-input
+                v-model="form.sale_price_yuan"
+                size="small"
+                class="mcard-form-control"
+                placeholder="主推价，留空不在小程序展示"
+              />
+            </div>
           </div>
 
           <div class="mcard-field">
@@ -728,26 +731,25 @@ onMounted(() => {
             />
           </div>
 
-          <div class="mcard-field mcard-field--split">
-            <div class="mcard-field">
-              <label class="mcard-form-label">排序</label>
-              <el-input-number
-                v-model="form.sort_order"
-                :min="0"
-                size="small"
-                controls-position="right"
-                class="mcard-form-control mcard-form-control--number"
-              />
-            </div>
-            <div class="mcard-field mcard-field--switch">
-              <label class="mcard-form-label">启用</label>
-              <el-switch v-model="form.is_active" size="small" class="mcard-form-switch" />
-            </div>
+          <div class="mcard-field">
+            <label class="mcard-form-label">排序</label>
+            <el-input-number
+              v-model="form.sort_order"
+              :min="0"
+              size="small"
+              controls-position="right"
+              class="mcard-form-control mcard-form-control--number"
+            />
+          </div>
+
+          <div class="mcard-field mcard-field--switch">
+            <label class="mcard-form-label">启用</label>
+            <el-switch v-model="form.is_active" size="small" class="mcard-form-switch" />
           </div>
 
           <div class="mcard-field mcard-field--span2">
             <label class="mcard-form-label">卡片样式图</label>
-            <div class="mcard-upload-row">
+            <div class="mcard-field-main mcard-upload-row">
               <el-upload
                 :key="cardPhotoUploadKey"
                 class="mcard-style-upload"
@@ -776,9 +778,9 @@ onMounted(() => {
             </div>
           </div>
 
-          <div class="mcard-field mcard-field--span2">
+          <div class="mcard-field mcard-field--span2 mcard-field--top">
             <label class="mcard-form-label">商品简介</label>
-            <div class="mcard-textarea-wrap">
+            <div class="mcard-field-main mcard-textarea-wrap">
               <el-input
                 v-model="form.intro_short"
                 type="textarea"
@@ -793,9 +795,9 @@ onMounted(() => {
             </div>
           </div>
 
-          <div class="mcard-field mcard-field--span2">
+          <div class="mcard-field mcard-field--span2 mcard-field--top">
             <label class="mcard-form-label">购买须知</label>
-            <div class="mcard-textarea-wrap">
+            <div class="mcard-field-main mcard-textarea-wrap">
               <el-input
                 v-model="form.purchase_notice"
                 type="textarea"
@@ -810,7 +812,7 @@ onMounted(() => {
             </div>
           </div>
 
-          <div class="mcard-field mcard-field--span2">
+          <div class="mcard-field mcard-field--span2 mcard-field--top">
             <label class="mcard-form-label">备注</label>
             <el-input
               v-model="form.remark"
@@ -1128,6 +1130,12 @@ onMounted(() => {
   justify-content: center;
 }
 
+.mcard-meals-cell {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
 .mcard-meals-badge {
   background: #ecfdf5;
   color: var(--mcard-primary);
@@ -1153,8 +1161,11 @@ onMounted(() => {
 
 .mcard-meals-gift {
   display: block;
-  margin-top: 4px;
   font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
   color: #0f766e;
 }
 
@@ -1366,40 +1377,52 @@ onMounted(() => {
 }
 
 .mcard-form-grid {
+  --mcard-label-width: 120px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px 14px;
+  gap: 16px 20px;
   align-items: start;
 }
 
 .mcard-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: var(--mcard-label-width) minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
   min-width: 0;
 }
 
-.mcard-field--span2 {
+.mcard-field--span2,
+.mcard-pair {
   grid-column: 1 / -1;
 }
 
-.mcard-field--split {
+.mcard-pair {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 12px;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 20px;
   align-items: start;
 }
 
-.mcard-field--switch {
-  min-width: 48px;
+.mcard-field--top {
+  align-items: start;
+}
+
+.mcard-field--top .mcard-form-label {
+  line-height: 24px;
+}
+
+.mcard-field-main {
+  min-width: 0;
 }
 
 .mcard-form-label {
-  text-align: left;
+  text-align: right;
   font-size: 12px;
   font-weight: 800;
   color: #0f172a;
-  line-height: 1.3;
+  line-height: 24px;
+  white-space: nowrap;
 }
 
 .mcard-form-control {
@@ -1421,7 +1444,7 @@ onMounted(() => {
 
 .mcard-form-control :deep(.el-input__inner) {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 400;
   color: #0f172a;
 }
 
@@ -1438,8 +1461,8 @@ onMounted(() => {
 }
 
 .mcard-form-control--number {
-  width: 100%;
-  --el-input-number-width: 100%;
+  width: 150px;
+  --el-input-number-width: 150px;
 }
 
 .mcard-form-control--number :deep(.el-input__wrapper) {
@@ -1459,8 +1482,14 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
 }
 
+.mcard-form-hint--full {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-left: calc(var(--mcard-label-width) + 8px);
+}
+
 .mcard-field--switch .mcard-form-switch {
-  height: 28px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
 }
@@ -1537,7 +1566,7 @@ onMounted(() => {
   border-radius: 8px;
   border: 1px solid var(--mcard-border);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 400;
   color: #0f172a;
   box-shadow: none;
   min-height: 44px;
@@ -1628,12 +1657,9 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .mcard-form-grid {
+  .mcard-form-grid,
+  .mcard-pair {
     grid-template-columns: 1fr;
-  }
-
-  .mcard-field--split {
-    grid-template-columns: minmax(0, 1fr) auto;
   }
 }
 

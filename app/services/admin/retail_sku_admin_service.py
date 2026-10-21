@@ -116,14 +116,16 @@ def list_retail_skus(
         q = q.where(StoreRetailProduct.is_on_shelf.is_(True))
     rows = list(db.scalars(q).all())
     stock_map = get_retail_stock_snapshots(db, [int(r.id) for r in rows])
-    spu_map = {
-        int(s.id): s
-        for s in db.scalars(
-            select(StoreRetailSpu).where(
-                StoreRetailSpu.id.in_({int(r.spu_id) for r in rows}) if rows else [0]
-            )
-        ).all()
-    }
+    # 没有 SKU 时不要查 SPU：`A if rows else [0]` 会被解析成 where 条件本身是 [0]
+    spu_map: dict[int, StoreRetailSpu] = {}
+    if rows:
+        spu_ids = {int(r.spu_id) for r in rows}
+        spu_map = {
+            int(s.id): s
+            for s in db.scalars(
+                select(StoreRetailSpu).where(StoreRetailSpu.id.in_(spu_ids))
+            ).all()
+        }
     out = []
     for r in rows:
         dump = sku_admin_dump(r, stock=stock_map.get(int(r.id)))
