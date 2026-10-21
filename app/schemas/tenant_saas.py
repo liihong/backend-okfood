@@ -87,7 +87,7 @@ class WxCodeSyncPrivacyIn(BaseModel):
     notice_method: str | None = Field(None, max_length=128, description="隐私变更通知方式，如弹窗提示")
     setting_list: list[WxCodePrivacySettingItemIn] | None = Field(
         None,
-        description="不传则使用 OK饭 模板默认四项：手机号/位置/选点/头像",
+        description="不传则使用 OK饭 模板默认五项：手机号/位置/选点/头像/相册（仅写入）",
     )
     privacy_ver: int = Field(2, ge=1, le=2, description="2=开发版（提审前同步）；1=现网版")
 
