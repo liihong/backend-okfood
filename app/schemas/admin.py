@@ -460,6 +460,14 @@ class MemberAdminOut(BaseModel):
         ge=0,
         description="晚餐累计总次数（展示分母）",
     )
+    dinner_delivery_paused: bool = Field(
+        False,
+        description="只暂停晚餐日程；默认否。不影响午餐，也不等于会员整体暂停",
+    )
+    dinner_deliver_on: date | None = Field(
+        None,
+        description="晚餐指定配送日。暂停时只在这一天进晚餐单；未暂停时不限制每天配送",
+    )
     dinner_is_leaved_tomorrow: bool = Field(False, description="晚餐：已勾选仅明天请假")
     dinner_tomorrow_leave_target_date: date | None = Field(
         None,
@@ -690,6 +698,14 @@ class AdminMemberPatchIn(BaseModel):
         ge=0,
         le=999_999,
         description="晚餐剩余次数；提交则整单覆盖，差值写入晚餐次数池与 balance_logs",
+    )
+    dinner_delivery_paused: bool | None = Field(
+        None,
+        description="只暂停晚餐日程。不改会员整体暂停，不影响午餐。不传则不修改",
+    )
+    dinner_deliver_on: date | None = Field(
+        None,
+        description="晚餐指定配送日。只提交本字段时不会改暂停标记；传 null 表示清空",
     )
     delivery_start_date: date | None = Field(
         None,

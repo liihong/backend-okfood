@@ -17,6 +17,7 @@ from app.db.schema_patches import (
     apply_address_usage_data_backfill,
     ensure_member_address_usage_schema,
     ensure_members_pause_effective_date_schema,
+    ensure_dinner_gift_schema,
     ensure_store_sf_merge_same_address_push_schema,
 )
 from app.jobs.scheduler import setup_scheduler, shutdown_scheduler
@@ -104,6 +105,10 @@ async def lifespan(app: FastAPI):
         ensure_members_pause_effective_date_schema(engine)
     except Exception:
         logger.warning("会员暂停生效日列补丁失败（不影响启动）", exc_info=True)
+    try:
+        ensure_dinner_gift_schema(engine)
+    except Exception:
+        logger.warning("晚餐暂停与开卡赠送列补丁失败（不影响启动）", exc_info=True)
     setup_scheduler()
     _prewarm()
     yield

@@ -22,6 +22,9 @@ class MembershipCardTemplateOut(BaseModel):
     )
     name: str
     meals_grant: int
+    gift_dinner_meals: int = Field(0, description="赠送晚餐次数；0 表示不送")
+    gift_retail_product_id: int | None = Field(None, description="赠送果蔬汁 SKU id")
+    gift_retail_quantity: int = Field(0, description="赠送果蔬汁单数")
     list_price_yuan: str | None = Field(None, description="原价（划线价），可为空")
     sale_price_yuan: str | None = Field(None, description="优惠价（展示）；自助支付仍以门店周/月卡配置为准")
     card_style_image_url: str | None = Field(None, description="卡片样式图，小程序展示")
@@ -37,6 +40,9 @@ class MembershipCardTemplateCreateIn(BaseModel):
     kind_label: str = Field(..., min_length=1, max_length=64, description="种类，自由填写")
     name: str = Field(..., min_length=1, max_length=128)
     meals_grant: int = Field(..., ge=1, le=366)
+    gift_dinner_meals: int = Field(0, ge=0, le=366, description="赠送晚餐次数；与果蔬汁赠送互斥")
+    gift_retail_product_id: int | None = Field(None, ge=1, description="赠送果蔬汁 SKU")
+    gift_retail_quantity: int = Field(0, ge=0, le=30, description="赠送果蔬汁单数，每单 1 份")
     list_price_yuan: Decimal | None = Field(
         None, ge=Decimal("0"), max_digits=12, decimal_places=2, description="原价（划线价）"
     )
@@ -64,6 +70,9 @@ class MembershipCardTemplatePatchIn(BaseModel):
     kind_label: str | None = Field(None, min_length=1, max_length=64)
     name: str | None = Field(None, min_length=1, max_length=128)
     meals_grant: int | None = Field(None, ge=1, le=366)
+    gift_dinner_meals: int | None = Field(None, ge=0, le=366)
+    gift_retail_product_id: int | None = Field(None, ge=1)
+    gift_retail_quantity: int | None = Field(None, ge=0, le=30)
     list_price_yuan: Decimal | None = Field(None, ge=Decimal("0"), max_digits=12, decimal_places=2)
     sale_price_yuan: Decimal | None = Field(None, ge=Decimal("0"), max_digits=12, decimal_places=2)
     card_style_image_url: str | None = Field(None, max_length=512)

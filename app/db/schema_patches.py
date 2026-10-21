@@ -119,6 +119,72 @@ def ensure_members_pause_effective_date_schema(engine: Engine) -> None:
     logger.info("已为 members 补 pause_effective_date 列")
 
 
+def ensure_dinner_gift_schema(engine: Engine) -> None:
+    """补晚餐暂停/指定配送日，以及会员卡赠送晚餐、赠送果蔬汁列。已存在则跳过。"""
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    dialect = engine.dialect.name
+    with engine.begin() as conn:
+        if "member_meal_period_state" in tables:
+            cols = {c["name"] for c in insp.get_columns("member_meal_period_state")}
+            if "dinner_delivery_paused" not in cols:
+                if dialect == "sqlite":
+                    conn.execute(
+                        text(
+                            "ALTER TABLE member_meal_period_state "
+                            "ADD COLUMN dinner_delivery_paused BOOLEAN NOT NULL DEFAULT 0"
+                        )
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE `member_meal_period_state` "
+                            "ADD COLUMN `dinner_delivery_paused` TINYINT(1) NOT NULL DEFAULT 0 "
+                            "COMMENT '只暂停晚餐日程，不影响午餐'"
+                        )
+                    )
+            if "dinner_deliver_on" not in cols:
+                if dialect == "sqlite":
+                    conn.execute(
+                        text("ALTER TABLE member_meal_period_state ADD COLUMN dinner_deliver_on DATE")
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE `member_meal_period_state` "
+                            "ADD COLUMN `dinner_deliver_on` DATE NULL "
+                            "COMMENT '晚餐指定配送日；暂停时只在这一天进晚餐单'"
+                        )
+                    )
+        if "membership_card_templates" in tables:
+            cols = {c["name"] for c in insp.get_columns("membership_card_templates")}
+            if "gift_dinner_meals" not in cols:
+                ddl = (
+                    "ALTER TABLE membership_card_templates ADD COLUMN gift_dinner_meals INTEGER NOT NULL DEFAULT 0"
+                    if dialect == "sqlite"
+                    else "ALTER TABLE `membership_card_templates` ADD COLUMN `gift_dinner_meals` INT NOT NULL DEFAULT 0 "
+                    "COMMENT '赠送晚餐次数，不写入餐段快照'"
+                )
+                conn.execute(text(ddl))
+            if "gift_retail_product_id" not in cols:
+                ddl = (
+                    "ALTER TABLE membership_card_templates ADD COLUMN gift_retail_product_id BIGINT"
+                    if dialect == "sqlite"
+                    else "ALTER TABLE `membership_card_templates` ADD COLUMN `gift_retail_product_id` BIGINT NULL "
+                    "COMMENT '赠送果蔬汁 SKU'"
+                )
+                conn.execute(text(ddl))
+            if "gift_retail_quantity" not in cols:
+                ddl = (
+                    "ALTER TABLE membership_card_templates ADD COLUMN gift_retail_quantity INTEGER NOT NULL DEFAULT 0"
+                    if dialect == "sqlite"
+                    else "ALTER TABLE `membership_card_templates` ADD COLUMN `gift_retail_quantity` INT NOT NULL DEFAULT 0 "
+                    "COMMENT '赠送果蔬汁单数，开卡时逐笔建单'"
+                )
+                conn.execute(text(ddl))
+    logger.info("已检查晚餐暂停与开卡赠送列")
+
+
 def apply_address_usage_data_backfill(db: Session) -> None:
     """把无餐次用户的地址标为零售，并把商城订单从餐次地址上解绑（复制后改绑）。"""
     from app.services.member.member_address_service import backfill_retail_address_separation

@@ -31,6 +31,12 @@ class MembershipCardTemplate(Base):
     kind_label: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     meals_grant: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: 赠送晚餐次数。0 表示不送。只加晚餐余额，不写入餐段快照，避免和 meals_grant 一样每个餐段各加一次。
+    gift_dinner_meals: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: 赠送果蔬汁 SKU（store_retail_products.id）。与赠送晚餐互斥。
+    gift_retail_product_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    #: 赠送果蔬汁单数。开卡时按这个次数逐笔创建普通商城订单（每笔数量 1），不是一笔数量 N。
+    gift_retail_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     list_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     sale_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     card_style_image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)

@@ -19,9 +19,44 @@ import {
   handleAdminLogout,
   mealsGrantCreditLabel,
   mealsGrantCreditParts,
+  adminStoreId,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
+const juiceSkus = ref([])
+const juiceSkusLoading = ref(false)
+
+/** 赠送展示：晚餐次数或果蔬汁单数。与每个餐段入账次数分开。 */
+function giftCreditText(row) {
+  const dinner = Number(row?.gift_dinner_meals) || 0
+  const juice = Number(row?.gift_retail_quantity) || 0
+  if (dinner > 0) return `赠送晚餐 ${dinner} 次（默认暂停）`
+  if (juice > 0) return `赠送果蔬汁 ${juice} 单`
+  return ''
+}
+
+async function loadJuiceSkus() {
+  if (!adminAccessToken.value) return
+  juiceSkusLoading.value = true
+  try {
+    const sid = Math.max(1, Math.floor(Number(adminStoreId.value) || 1))
+    const data = await apiJson(
+      `/api/admin/catalog/retail-products?store_id=${sid}&shelf_only=true`,
+      {},
+      { auth: true },
+    )
+    juiceSkus.value = Array.isArray(data) ? data : []
+  } catch {
+    juiceSkus.value = []
+  } finally {
+    juiceSkusLoading.value = false
+  }
+}
+
+function skuOptionLabel(sku) {
+  const title = String(sku?.display_title || sku?.spec_label || sku?.title || '').trim()
+  return title || `SKU #${sku?.id}`
+}
 const list = ref([])
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -37,6 +72,10 @@ const form = ref({
   kind_label: '',
   name: '',
   meals_grant: 6,
+  gift_mode: 'none',
+  gift_dinner_meals: 0,
+  gift_retail_product_id: null,
+  gift_retail_quantity: 1,
   meal_periods: ['lunch'],
   deliver_dinner_with_lunch: false,
   list_price_yuan: '',
@@ -171,6 +210,10 @@ function openCreate() {
     kind_label: '',
     name: '',
     meals_grant: 6,
+    gift_mode: 'none',
+    gift_dinner_meals: 0,
+    gift_retail_product_id: null,
+    gift_retail_quantity: 1,
     meal_periods: ['lunch'],
     deliver_dinner_with_lunch: false,
     list_price_yuan: '',
@@ -184,14 +227,21 @@ function openCreate() {
     is_active: true,
   }
   dialogVisible.value = true
+  void loadJuiceSkus()
 }
 
 function openEdit(row) {
   editingId.value = row.id
+  const giftDinner = Number(row.gift_dinner_meals) || 0
+  const giftJuice = Number(row.gift_retail_quantity) || 0
   form.value = {
     kind_label: row.kind_label ?? '',
     name: row.name || '',
     meals_grant: row.meals_grant,
+    gift_mode: giftDinner > 0 ? 'dinner' : giftJuice > 0 ? 'juice' : 'none',
+    gift_dinner_meals: giftDinner,
+    gift_retail_product_id: row.gift_retail_product_id != null ? Number(row.gift_retail_product_id) : null,
+    gift_retail_quantity: giftJuice > 0 ? giftJuice : 1,
     meal_periods: Array.isArray(row.meal_periods) && row.meal_periods.length ? [...row.meal_periods] : ['lunch'],
     deliver_dinner_with_lunch: row.deliver_dinner_with_lunch === true,
     list_price_yuan: row.list_price_yuan != null ? String(row.list_price_yuan).trim() : '',
@@ -205,6 +255,7 @@ function openEdit(row) {
     is_active: row.is_active,
   }
   dialogVisible.value = true
+  void loadJuiceSkus()
 }
 
 async function saveForm() {
@@ -223,6 +274,28 @@ async function saveForm() {
   if (!periods.length) {
     showToast('请至少选择一个覆盖餐段', 'error')
     return
+  }
+  const giftMode = String(form.value.gift_mode || 'none')
+  let giftDinner = 0
+  let giftProductId = null
+  let giftJuice = 0
+  if (giftMode === 'dinner') {
+    giftDinner = Math.floor(Number(form.value.gift_dinner_meals) || 0)
+    if (giftDinner < 1) {
+      showToast('请填写赠送晚餐次数', 'error')
+      return
+    }
+  } else if (giftMode === 'juice') {
+    giftJuice = Math.floor(Number(form.value.gift_retail_quantity) || 0)
+    giftProductId = form.value.gift_retail_product_id != null ? Number(form.value.gift_retail_product_id) : null
+    if (!giftProductId) {
+      showToast('请选择果蔬汁 SKU', 'error')
+      return
+    }
+    if (giftJuice < 1) {
+      showToast('请填写果蔬汁赠送次数', 'error')
+      return
+    }
   }
   const listPx = parseOptionalMoney(form.value.list_price_yuan)
   const salePx = parseOptionalMoney(form.value.sale_price_yuan)
@@ -246,6 +319,9 @@ async function saveForm() {
       kind_label: kind,
       name,
       meals_grant: Number(form.value.meals_grant),
+      gift_dinner_meals: giftDinner,
+      gift_retail_product_id: giftProductId,
+      gift_retail_quantity: giftJuice,
       meal_periods: periods,
       deliver_dinner_with_lunch: Boolean(
         periods.includes('lunch') && periods.includes('dinner') && form.value.deliver_dinner_with_lunch,
@@ -419,6 +495,7 @@ onMounted(() => {
                       class="mcard-meals-badge-line"
                     >{{ part.text }}</span>
                   </span>
+                  <span v-if="giftCreditText(row)" class="mcard-meals-gift">{{ giftCreditText(row) }}</span>
                 </div>
               </td>
               <td>
@@ -556,6 +633,66 @@ onMounted(() => {
               勾选几个餐段就分别写入几次，不是午晚加总。当前将入账：<strong>{{ formCreditPreview }}</strong>
             </p>
           </div>
+
+          <div class="mcard-field mcard-field--span2">
+            <label class="mcard-form-label">开卡赠送</label>
+            <div class="mcard-form-control">
+              <el-radio-group v-model="form.gift_mode" size="small">
+                <el-radio value="none">不赠送</el-radio>
+                <el-radio value="dinner">赠送晚餐</el-radio>
+                <el-radio value="juice">赠送果蔬汁</el-radio>
+              </el-radio-group>
+              <p class="mcard-form-hint">
+                赠送晚餐只加晚餐次数，默认暂停，不改变上面的每个餐段入账。正式晚餐、全餐不要选这项。果蔬汁按次数逐笔生成普通商城订单。
+              </p>
+            </div>
+          </div>
+
+          <div v-if="form.gift_mode === 'dinner'" class="mcard-field">
+            <label class="mcard-form-label">赠送晚餐次数</label>
+            <el-input-number
+              v-model="form.gift_dinner_meals"
+              :min="1"
+              :max="366"
+              size="small"
+              controls-position="right"
+              class="mcard-form-control mcard-form-control--number"
+            />
+          </div>
+
+          <template v-if="form.gift_mode === 'juice'">
+            <div class="mcard-field">
+              <label class="mcard-form-label">果蔬汁 SKU</label>
+              <el-select
+                v-model="form.gift_retail_product_id"
+                filterable
+                clearable
+                size="small"
+                class="mcard-form-control"
+                placeholder="选择已上架 SKU"
+                :loading="juiceSkusLoading"
+              >
+                <el-option
+                  v-for="sku in juiceSkus"
+                  :key="sku.id"
+                  :label="skuOptionLabel(sku)"
+                  :value="Number(sku.id)"
+                />
+              </el-select>
+            </div>
+            <div class="mcard-field">
+              <label class="mcard-form-label">赠送单数</label>
+              <el-input-number
+                v-model="form.gift_retail_quantity"
+                :min="1"
+                :max="30"
+                size="small"
+                controls-position="right"
+                class="mcard-form-control mcard-form-control--number"
+              />
+              <p class="mcard-form-hint">开卡时按这个次数逐笔建单，每笔 1 份。</p>
+            </div>
+          </template>
 
           <div class="mcard-field">
             <label class="mcard-form-label">原价(元)</label>
@@ -1012,6 +1149,13 @@ onMounted(() => {
 
 .mcard-meals-badge-line {
   display: block;
+}
+
+.mcard-meals-gift {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #0f766e;
 }
 
 .mcard-price-stack {

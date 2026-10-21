@@ -1695,6 +1695,14 @@ def admin_patch_member_profile(
 
     dinner_balance: int | None = None,
 
+    set_dinner_delivery_paused: bool = False,
+
+    dinner_delivery_paused: bool | None = None,
+
+    set_dinner_deliver_on: bool = False,
+
+    dinner_deliver_on: date | None = None,
+
     set_delivery_start_date: bool = False,
 
     delivery_start_date: date | None = None,
@@ -1740,6 +1748,10 @@ def admin_patch_member_profile(
         and not set_balance
 
         and not set_dinner_balance
+
+        and not set_dinner_delivery_paused
+
+        and not set_dinner_deliver_on
 
         and not set_delivery_start_date
 
@@ -2027,6 +2039,18 @@ def admin_patch_member_profile(
         elif plan_type is not None:
             m.plan_type = plan_type.value
 
+    from app.services.meal_period.dinner_pause import apply_admin_dinner_schedule_update
+    from app.services.member.member_operation_log_service import OP_ADMIN_UPDATE_DINNER_SCHEDULE
+
+    dinner_schedule_summary = apply_admin_dinner_schedule_update(
+        db,
+        m,
+        set_paused=set_dinner_delivery_paused,
+        paused=dinner_delivery_paused,
+        set_deliver_on=set_dinner_deliver_on,
+        deliver_on=dinner_deliver_on,
+    )
+
     addr_after = get_default_address(db, mid)
     new_snapshot = {
         "name": m.name,
@@ -2068,6 +2092,12 @@ def admin_patch_member_profile(
             ip_address=ip_address,
             source="admin",
             operator=admin_op,
+        )
+
+    if dinner_schedule_summary:
+        _admin_log(
+            OP_ADMIN_UPDATE_DINNER_SCHEDULE,
+            dinner_schedule_summary,
         )
 
     if name is not None and prev_snapshot["name"] != new_snapshot["name"]:

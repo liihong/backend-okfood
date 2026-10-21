@@ -82,6 +82,9 @@ const editInitialPlanType = ref('次卡')
 const editInitialTemplateId = ref(CURRENT_PLAN_VALUE)
 /** 打开时的片区，仅用户改片区或勾选自动划区时才提交，避免备注保存误写地址行 */
 const editInitialDeliveryRegionId = ref('')
+/** 打开时的晚餐暂停和指定日，只在有变化时提交，避免改姓名时误改晚餐日程 */
+const editInitialDinnerPaused = ref(false)
+const editInitialDinnerDeliverOn = ref('')
 const profileLoading = ref(false)
 /** 当前租户已开启的会员卡模版（套餐类型下拉） */
 const membershipTemplates = ref([])
@@ -97,6 +100,8 @@ const editForm = ref({
   store_pickup: false,
   skip_subscription_saturday: false,
   delivery_deferred: false,
+  dinner_delivery_paused: false,
+  dinner_deliver_on: '',
   delivery_region_id: '',
 })
 
@@ -210,6 +215,8 @@ function fillFormFromMember(u) {
   const dr =
     u.delivery_region_id != null && u.delivery_region_id !== '' ? String(u.delivery_region_id) : ''
   editInitialDeliveryRegionId.value = dr
+  editInitialDinnerPaused.value = u.dinner_delivery_paused === true
+  editInitialDinnerDeliverOn.value = typeof u.dinner_deliver_on === 'string' ? u.dinner_deliver_on.slice(0, 10) : ''
   editForm.value = {
     phone: u.phone,
     name: u.name || '',
@@ -224,6 +231,11 @@ function fillFormFromMember(u) {
     store_pickup: u.store_pickup === true,
     skip_subscription_saturday: u.skip_subscription_saturday === true,
     delivery_deferred: u.delivery_deferred === true,
+    dinner_delivery_paused: u.dinner_delivery_paused === true,
+    dinner_deliver_on:
+      typeof u.dinner_deliver_on === 'string' && u.dinner_deliver_on.trim()
+        ? u.dinner_deliver_on.trim().slice(0, 10)
+        : '',
     delivery_region_id: dr,
   }
 }
@@ -288,7 +300,17 @@ function close() {
 }
 
 /** 从会员档案推断餐段（纯晚餐卡默认 dinner，否则 lunch） */
-function resolveMemberMealPeriod(u) {
+function showDinnerScheduleFor(u) {
+  if (!u) return false
+  const periods = Array.isArray(u.entitled_meal_periods) ? u.entitled_meal_periods : []
+  if (periods.includes('dinner')) return true
+  if ((Number(u.dinner_balance) || 0) > 0) return true
+  if (u.dinner_delivery_paused === true) return true
+  if (String(u.dinner_deliver_on || '').trim()) return true
+  return false
+}
+
+const showDinnerSchedule = computed(() => showDinnerScheduleFor(props.member))
   const periods = Array.isArray(u?.entitled_meal_periods) ? u.entitled_meal_periods : []
   if (periods.includes('dinner') && !periods.includes('lunch')) return 'dinner'
   return 'lunch'
@@ -344,6 +366,17 @@ async function submitEditMember() {
       store_pickup: isStorePickup,
       skip_subscription_saturday: editForm.value.skip_subscription_saturday === true,
       delivery_deferred: editForm.value.delivery_deferred === true,
+    }
+    // 晚餐暂停和指定配送日分开提交。只改日期不会把暂停勾上，也不改上面的整体暂停。
+    if (showDinnerSchedule.value) {
+      if (editForm.value.dinner_delivery_paused !== editInitialDinnerPaused.value) {
+        payload.dinner_delivery_paused = editForm.value.dinner_delivery_paused === true
+      }
+      const nextDinnerDate = String(editForm.value.dinner_deliver_on ?? '').trim().slice(0, 10)
+      const prevDinnerDate = String(editInitialDinnerDeliverOn.value ?? '').trim().slice(0, 10)
+      if (nextDinnerDate !== prevDinnerDate) {
+        payload.dinner_deliver_on = nextDinnerDate || null
+      }
     }
     // 剩余次数、晚餐次数、每配送日份数不在本弹窗提交，避免改姓名/配送时误写余额或份数
     // 不提交 address。片区仅在勾选自动划区或手动改了下拉时才提交，避免备注保存写地址行。
@@ -543,6 +576,25 @@ async function submitEditMember() {
                 <el-checkbox v-model="editForm.delivery_deferred" class="mem-chk-el mem-chk-el--red">
                   暂停配送
                 </el-checkbox>
+                <template v-if="showDinnerSchedule">
+                  <el-checkbox v-model="editForm.dinner_delivery_paused" class="mem-chk-el mem-chk-el--red">
+                    暂停晚餐
+                  </el-checkbox>
+                  <div class="mem-field mem-field--dinner-date">
+                    <label class="mem-lab">晚餐指定配送日</label>
+                    <el-date-picker
+                      v-model="editForm.dinner_deliver_on"
+                      type="date"
+                      value-format="YYYY-MM-DD"
+                      placeholder="不指定"
+                      class="mem-date-picker"
+                      clearable
+                    />
+                    <p class="mem-dinner-hint">
+                      只影响晚餐日程，不改变上面的暂停配送。选择日期不会自动暂停。赠送晚餐默认暂停，指定某一天才进晚餐单；正式晚餐未暂停时仍按每天配送。
+                    </p>
+                  </div>
+                </template>
                 <el-checkbox
                   v-model="editForm.store_pickup"
                   :disabled="editForm.delivery_deferred"

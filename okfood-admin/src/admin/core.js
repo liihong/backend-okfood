@@ -916,6 +916,8 @@ export function mapAdminUserToRow(raw, idx) {
       mealScopeLabelFromPeriods(entitledPeriods),
     dinner_balance: dinnerBalance,
     dinner_meal_quota_total: dinnerMealQuotaTotal,
+    dinner_delivery_paused: raw.dinner_delivery_paused === true,
+    dinner_deliver_on: adminUserYmd(raw.dinner_deliver_on),
     dinner_is_leaved_tomorrow: raw.dinner_is_leaved_tomorrow === true,
     dinner_tomorrow_leave_target_date: adminUserYmd(raw.dinner_tomorrow_leave_target_date),
     dinner_leave_range_start: adminUserYmd(raw.dinner_leave_range_start),

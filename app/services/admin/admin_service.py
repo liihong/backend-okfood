@@ -998,6 +998,8 @@ def list_members_paged(
                 or format_plan_type_display(m.plan_type, periods),
                 dinner_balance=int(dinner_row.balance or 0) if dinner_row else 0,
                 dinner_meal_quota_total=int(dinner_row.meal_quota_total or 0) if dinner_row else 0,
+                dinner_delivery_paused=bool(dinner_row.dinner_delivery_paused) if dinner_row else False,
+                dinner_deliver_on=dinner_row.dinner_deliver_on if dinner_row else None,
                 dinner_is_leaved_tomorrow=bool(dinner_row.is_leaved_tomorrow) if dinner_row else False,
                 dinner_tomorrow_leave_target_date=(
                     dinner_row.tomorrow_leave_target_date if dinner_row else None

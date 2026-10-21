@@ -29,6 +29,32 @@ def list_membership_templates(
     return list(db.scalars(q).all())
 
 
+def _validate_card_gifts(
+    db: Session,
+    *,
+    store_id: int,
+    gift_dinner_meals: int,
+    gift_retail_product_id: int | None,
+    gift_retail_quantity: int,
+) -> None:
+    """一张卡只能赠送晚餐或果蔬汁。果蔬汁必须选本店 SKU，次数就是开卡时的订单笔数。"""
+    dinner_n = int(gift_dinner_meals or 0)
+    juice_n = int(gift_retail_quantity or 0)
+    if dinner_n > 0 and juice_n > 0:
+        raise HTTPException(status_code=400, detail="一张会员卡只能赠送晚餐或果蔬汁，不能同时赠送")
+    if juice_n > 0 and gift_retail_product_id is None:
+        raise HTTPException(status_code=400, detail="赠送果蔬汁请选择 SKU")
+    if gift_retail_product_id is not None and juice_n <= 0:
+        raise HTTPException(status_code=400, detail="请填写果蔬汁赠送次数")
+    if gift_retail_product_id is None:
+        return
+    from app.models.store_retail_product import StoreRetailProduct
+
+    product = db.get(StoreRetailProduct, int(gift_retail_product_id))
+    if product is None or int(product.store_id) != int(store_id):
+        raise HTTPException(status_code=400, detail="果蔬汁 SKU 不存在或不属于本店")
+
+
 def create_membership_template(
     db: Session, *, tenant_id: int, store_id: int, body: MembershipCardTemplateCreateIn
 ) -> MembershipCardTemplate:
@@ -39,6 +65,16 @@ def create_membership_template(
     from app.services.meal_period.template_periods import normalize_meal_periods_list
 
     periods = normalize_meal_periods_list(body.meal_periods)
+    gift_dinner = int(body.gift_dinner_meals or 0)
+    gift_qty = int(body.gift_retail_quantity or 0)
+    gift_pid = int(body.gift_retail_product_id) if body.gift_retail_product_id is not None else None
+    _validate_card_gifts(
+        db,
+        store_id=int(store_id),
+        gift_dinner_meals=gift_dinner,
+        gift_retail_product_id=gift_pid,
+        gift_retail_quantity=gift_qty,
+    )
     row = MembershipCardTemplate(
         tenant_id=int(tenant_id),
         store_id=int(store_id),
@@ -50,6 +86,9 @@ def create_membership_template(
         kind_label=kl[:64],
         name=body.name.strip(),
         meals_grant=int(body.meals_grant),
+        gift_dinner_meals=gift_dinner,
+        gift_retail_product_id=gift_pid if gift_qty > 0 else None,
+        gift_retail_quantity=gift_qty if gift_pid is not None else 0,
         list_price_yuan=Decimal(body.list_price_yuan) if body.list_price_yuan is not None else None,
         sale_price_yuan=Decimal(body.sale_price_yuan) if body.sale_price_yuan is not None else None,
         card_style_image_url=(body.card_style_image_url.strip() or None) if body.card_style_image_url else None,
@@ -93,6 +132,32 @@ def patch_membership_template(
         row.name = body.name.strip()
     if body.meals_grant is not None:
         row.meals_grant = int(body.meals_grant)
+    fs = body.model_fields_set
+    if "gift_dinner_meals" in fs or "gift_retail_product_id" in fs or "gift_retail_quantity" in fs:
+        gift_dinner = (
+            int(body.gift_dinner_meals)
+            if "gift_dinner_meals" in fs and body.gift_dinner_meals is not None
+            else int(getattr(row, "gift_dinner_meals", 0) or 0)
+        )
+        if "gift_retail_quantity" in fs and body.gift_retail_quantity is not None:
+            gift_qty = int(body.gift_retail_quantity)
+        else:
+            gift_qty = int(getattr(row, "gift_retail_quantity", 0) or 0)
+        if "gift_retail_product_id" in fs:
+            gift_pid = int(body.gift_retail_product_id) if body.gift_retail_product_id is not None else None
+        else:
+            raw_pid = getattr(row, "gift_retail_product_id", None)
+            gift_pid = int(raw_pid) if raw_pid is not None else None
+        _validate_card_gifts(
+            db,
+            store_id=int(store_id),
+            gift_dinner_meals=gift_dinner,
+            gift_retail_product_id=gift_pid,
+            gift_retail_quantity=gift_qty,
+        )
+        row.gift_dinner_meals = gift_dinner
+        row.gift_retail_quantity = gift_qty if gift_pid is not None else 0
+        row.gift_retail_product_id = gift_pid if gift_qty > 0 else None
     if body.remark is not None:
         row.remark = body.remark.strip() or None
     if body.sort_order is not None:
@@ -218,6 +283,11 @@ def membership_template_dump(row: MembershipCardTemplate) -> dict:
         "deliver_dinner_with_lunch": bool(getattr(row, "deliver_dinner_with_lunch", False)),
         "name": row.name,
         "meals_grant": int(row.meals_grant),
+        "gift_dinner_meals": int(getattr(row, "gift_dinner_meals", 0) or 0),
+        "gift_retail_product_id": (
+            int(row.gift_retail_product_id) if getattr(row, "gift_retail_product_id", None) is not None else None
+        ),
+        "gift_retail_quantity": int(getattr(row, "gift_retail_quantity", 0) or 0),
         "list_price_yuan": decimal_to_str_money(getattr(row, "list_price_yuan", None)),
         "sale_price_yuan": decimal_to_str_money(getattr(row, "sale_price_yuan", None)),
         "card_style_image_url": getattr(row, "card_style_image_url", None),
