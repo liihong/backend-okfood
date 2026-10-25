@@ -706,7 +706,8 @@ def delivery_sf_push_instant(
 ):
     """
     配送大表：勾选停靠点推送到「及时单账号」（门店零售推顺丰店铺ID），全部按立即推单创单。
-    适用于当日部分订单需补推、来不及走预约 bulk 推单的场景；创单失败/已取消的记录可覆盖重推。
+    业务日允许上海当天、历史补推和次日；后天及以后拒绝。次日创单不写冻结快照。
+    创单失败/已取消的记录可覆盖重推。
     """
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
@@ -767,6 +768,7 @@ def delivery_sf_dinner_push_instant(
 ):
     """
     晚餐配送大表：勾选停靠点推送到「及时单账号」（门店零售推顺丰店铺ID），全部按立即推单创单。
+    业务日允许上海当天、历史补推和次日；后天及以后拒绝。次日创单不写冻结快照。
     与午餐及时单互不影响；创单失败/已取消的记录可覆盖重推。
     """
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)

@@ -1808,11 +1808,12 @@ def push_sf_same_city(
     ).strip().lower()
     base = get_settings()
     d = body.delivery_date
-    # 午餐/晚餐/及时单/重试都走这里。未来业务日直接拒绝，避免提前创单冻结次日大表。
-    # 自动推单传入的是上海当天，不受影响。完单扣次不在此改。
+    # 预约推单、自动推单、监控重试仍只允许当天及以前。
+    # 及时单（use_instant_shop）额外放行次日；后天及以后仍拒绝。
+    # 次日仍按未来日处理：成功创单不写冻结快照，避免提前锁住次日大表。完单扣次不在此改。
     from app.services.delivery.delivery_day_lock_service import reject_future_delivery_sheet_push
 
-    reject_future_delivery_sheet_push(d)
+    reject_future_delivery_sheet_push(d, allow_next_day=use_instant_shop)
     sid = int(store_id) if store_id is not None else int(base.DEFAULT_STORE_ID)
     st_row = db.get(Store, sid)
     if not st_row:
@@ -2152,7 +2153,10 @@ def push_sf_dinner_same_city_instant(
     *,
     store_id: int | None = None,
 ) -> SfSameCityPushOut:
-    """晚餐配送大表：推送到及时单账号（门店零售 shop，全部立即推单）。"""
+    """晚餐配送大表：推送到及时单账号（门店零售 shop，全部立即推单）。
+
+    业务日允许上海当天、历史补推和次日；后天及以后拒绝。次日创单不写冻结快照。
+    """
     from app.services.delivery.sf_order_fulfillment_service import SF_PUSH_KIND_DINNER_DELIVERY_SHEET
     from app.models.enums import MealPeriod
 
@@ -2732,7 +2736,10 @@ def push_sf_same_city_instant(
     *,
     store_id: int | None = None,
 ) -> SfSameCityPushOut:
-    """配送大表：推送到及时单账号（门店零售 shop，全部立即推单，无需预约时段）。"""
+    """配送大表：推送到及时单账号（门店零售 shop，全部立即推单，无需预约时段）。
+
+    业务日允许上海当天、历史补推和次日；后天及以后拒绝。次日创单不写冻结快照。
+    """
     forced_rows = [
         r.model_copy(update={"push_immediately": True, "expect_delivery_at": None}) for r in body.rows
     ]

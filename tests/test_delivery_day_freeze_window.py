@@ -1,6 +1,6 @@
 """供餐日前的推单快照不能提前锁住当天名单。"""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -28,6 +28,28 @@ def test_future_delivery_date_is_rejected_and_not_snapshotted() -> None:
     assert not delivery_date_is_future(date(2026, 10, 12), today=today)
     with pytest.raises(ValueError, match="不能提前推送"):
         reject_future_delivery_sheet_push(date(2099, 1, 1))
+
+
+def test_instant_push_allows_only_the_next_shanghai_day() -> None:
+    """及时单可推上海次日；预约推单仍拒绝次日；后天及以后两边都拒绝。"""
+    from app.core.timeutil import today_shanghai
+
+    today = today_shanghai()
+    tomorrow = today + timedelta(days=1)
+    day_after = today + timedelta(days=2)
+
+    # 预约推单默认仍拒绝次日
+    with pytest.raises(ValueError, match="只能推送上海当天"):
+        reject_future_delivery_sheet_push(tomorrow)
+
+    # 及时单：次日、当天、历史补推都放行
+    reject_future_delivery_sheet_push(tomorrow, allow_next_day=True)
+    reject_future_delivery_sheet_push(today, allow_next_day=True)
+    reject_future_delivery_sheet_push(today - timedelta(days=1), allow_next_day=True)
+
+    # 及时单：后天及以后仍拒绝，且文案与预约推单区分
+    with pytest.raises(ValueError, match="及时单只能推送上海当天及次日"):
+        reject_future_delivery_sheet_push(day_after, allow_next_day=True)
 
 
 def test_snapshot_before_delivery_day_does_not_lock() -> None:

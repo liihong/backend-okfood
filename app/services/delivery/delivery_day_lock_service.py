@@ -59,24 +59,43 @@ def snapshot_recorded_before_delivery_day(recorded_at: datetime | None, delivery
 
 
 def delivery_date_is_future(delivery_date: date, *, today: date | None = None) -> bool:
-    """业务日是否晚于上海当天。未来日不允许大表推单，也不写冻结快照。"""
+    """业务日是否晚于上海当天。
+
+    晚于当天不写冻结快照。预约推单仍全部拒绝未来日；及时单另放行次日，见 ``reject_future_delivery_sheet_push``。
+    """
     from app.core.timeutil import today_shanghai
 
     current = today if today is not None else today_shanghai()
     return delivery_date > current
 
 
-def reject_future_delivery_sheet_push(delivery_date: date) -> None:
-    """大表推单禁止把业务日写成未来日。
+def reject_future_delivery_sheet_push(
+    delivery_date: date,
+    *,
+    allow_next_day: bool = False,
+) -> None:
+    """大表推单的业务日上限。
 
-    当天及历史补推保持原样。未来日一旦创单成功，会被当成该日首次推单并拍下整天快照。
-    本函数不改完单扣次：当天创出的单完单后仍按该业务日扣当天次数。
+    默认只允许上海当天及以前（预约推单、自动推单、监控重试保持原样）。
+    ``allow_next_day=True`` 仅给及时单：额外允许次日（上海明天），后天及以后仍拒绝。
+    次日仍视为未来日，成功创单不在这里写冻结快照，避免提前锁住次日大表。
+    本函数不改完单扣次：创出的单完单后仍按该业务日扣当天次数。
     """
-    if not delivery_date_is_future(delivery_date):
-        return
     from app.core.timeutil import today_shanghai
 
     today = today_shanghai()
+    # 当天与历史补推：预约推单、及时单都放行
+    if delivery_date <= today:
+        return
+    tomorrow = today + timedelta(days=1)
+    # 及时单只多放行紧挨着的下一天
+    if allow_next_day and delivery_date == tomorrow:
+        return
+    if allow_next_day:
+        raise ValueError(
+            f"及时单只能推送上海当天及次日（{tomorrow.isoformat()}）及以前的配送大表，"
+            f"不能提前推送 {delivery_date.isoformat()}"
+        )
     raise ValueError(
         f"只能推送上海当天（{today.isoformat()}）及以前的配送大表，"
         f"不能提前推送 {delivery_date.isoformat()}"
