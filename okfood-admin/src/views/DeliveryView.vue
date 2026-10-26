@@ -185,6 +185,8 @@ const sheetToday = ref(emptySheet())
 const loading = ref(false)
 /** 正在提交人工标记的 member_id，用于防重复点按 */
 const markingMemberId = ref(null)
+/** 导出 Excel 时并行拉取午餐、晚餐两张大表，避免连点重复请求 */
+const exportBusy = ref(false)
 /** 批量标记送达进行中 */
 const batchMarking = ref(false)
 /** 配送大表 el-table 多选 */
@@ -450,68 +452,231 @@ function addressLineForExcelExport(st) {
   return line
 }
 
+/** 晚餐份数单元格：当日不在晚餐大表为「无」，在表上为「X份」。 */
+function formatDinnerPortionsCell(units) {
+  const n = Number(units)
+  if (!Number.isFinite(n) || n <= 0) return '无'
+  return `${Math.trunc(n)}份`
+}
+
 /**
- * 将当前大表导出为 xlsx：一行对应一名会员，地址为停靠点级别（同址多会员时地址重复）。
- * 数据与页面列表一致（同一配送日 + 手机号筛选）；清空手机号即为当日全量。
+ * 拉取某一餐段当日大表。手机号与查询框一致：空则该餐全量。
+ * @param {'lunch' | 'dinner'} view
+ * @param {string} deliveryDate
+ * @param {string} phone
  */
-function exportSheetToExcel() {
-  const d = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
-  const out = []
-  for (const st of flatStops.value) {
+async function fetchDeliverySheetForExport(view, deliveryDate, phone) {
+  const q = new URLSearchParams()
+  q.set('delivery_date', deliveryDate)
+  q.set('include_member_stats', 'false')
+  const ph = String(phone || '').trim()
+  if (ph) q.set('phone', ph)
+  return apiJson(`${getDeliverySheetApiPath(view)}?${q.toString()}`, {}, { auth: true })
+}
+
+/**
+ * 把大表拆成会员行，保留片区顺序。同一会员只保留第一次出现。
+ * @param {object | null | undefined} sheet
+ */
+function sheetExportEntries(sheet) {
+  const entries = []
+  const seen = new Set()
+  for (const st of flatStopsForSheet(sheet || {})) {
     const isPickup = st.groupArea === '门店自提'
     for (const m of st.members || []) {
-      const status = isPickup
-        ? m.is_delivered
-          ? '已取'
-          : '待自提'
-        : m.is_delivered
-          ? '已送达'
-          : '待送达'
-      out.push({
-        配送业务日: d,
-        线路分组: st.groupArea ?? '',
-        地址片区: st.area ?? '',
-        配送地址: addressLineForExcelExport(st),
-        会员ID: m.member_id,
-        姓名: m.name != null ? String(m.name) : '',
-        手机: m.phone != null ? String(m.phone) : '',
-        plan_type: m.plan_type != null && String(m.plan_type).length ? String(m.plan_type) : '',
-        套餐类型: m.meal_scope != null && String(m.meal_scope).length ? String(m.meal_scope) : '午餐',
-        当日期数: m.daily_meal_units ?? 0,
-        备注: m.remarks != null && String(m.remarks).length ? String(m.remarks) : '',
-        送达状态: status,
-        片区待核实: m.area_issue || st.has_area_issue ? '是' : '否',
-        无坐标: m.missing_coords ? '是' : '否',
-        顺丰推单失败: st.sf_push_failed ? (st.sf_push_error_msg || '是') : '否',
-      })
+      const id = Number(m.member_id)
+      if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue
+      seen.add(id)
+      entries.push({ id, stop: st, member: m, isPickup })
     }
   }
-  if (!out.length) {
-    showToast('没有可导出的配送记录', 'error')
-    return
+  return entries
+}
+
+/** @param {{ isPickup: boolean, member: { is_delivered?: boolean } } | null | undefined} entry */
+function exportFulfillmentStatus(entry) {
+  if (!entry) return '无'
+  if (entry.isPickup) return entry.member.is_delivered ? '已取' : '待自提'
+  return entry.member.is_delivered ? '已送达' : '待送达'
+}
+
+/**
+ * 套餐类型优先用会员餐段资格（午餐 / 晚餐 / 全餐）。
+ * 资格缺失时按当日实际上了哪张大表兜底。
+ * @param {{ member: { meal_scope?: string } } | null} lunchEntry
+ * @param {{ member: { meal_scope?: string } } | null} dinnerEntry
+ */
+function exportMealScopeLabel(lunchEntry, dinnerEntry) {
+  const raw = String(lunchEntry?.member?.meal_scope || dinnerEntry?.member?.meal_scope || '').trim()
+  if (raw) return raw
+  if (lunchEntry && dinnerEntry) return '全餐'
+  if (dinnerEntry) return '晚餐'
+  return '午餐'
+}
+
+/**
+ * @param {{ stop: { sf_push_failed?: boolean, sf_push_error_msg?: string } } | null} lunchEntry
+ * @param {{ stop: { sf_push_failed?: boolean, sf_push_error_msg?: string } } | null} dinnerEntry
+ */
+function exportSfFailCell(lunchEntry, dinnerEntry) {
+  const parts = []
+  if (lunchEntry?.stop?.sf_push_failed) {
+    const msg = lunchEntry.stop.sf_push_error_msg || '是'
+    parts.push(dinnerEntry ? `午餐${msg}` : msg)
   }
-  const ws = XLSX.utils.json_to_sheet(out)
-  ws['!cols'] = [
-    { wch: 12 },
-    { wch: 10 },
-    { wch: 12 },
-    { wch: 40 },
-    { wch: 10 },
-    { wch: 10 },
-    { wch: 14 },
-    { wch: 8 },
-    { wch: 10 },
-    { wch: 8 },
-    { wch: 28 },
-    { wch: 10 },
-    { wch: 10 },
-    { wch: 8 },
-    { wch: 24 },
-  ]
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, '配送清单')
-  XLSX.writeFile(wb, `配送清单_${d}.xlsx`)
-  showToast(`已导出 ${out.length} 行`, 'success')
+  if (dinnerEntry?.stop?.sf_push_failed) {
+    const msg = dinnerEntry.stop.sf_push_error_msg || '是'
+    parts.push(lunchEntry ? `晚餐${msg}` : msg)
+  }
+  return parts.length ? parts.join('；') : '否'
+}
+
+/**
+ * 合并当日午餐大表与晚餐大表：每人一行。
+ * 纯午餐、纯晚餐、全餐都在表里，套餐类型列区分；全餐不拆成两行。
+ * @param {object | null | undefined} lunchSheet
+ * @param {object | null | undefined} dinnerSheet
+ * @param {string} deliveryDate
+ */
+function buildCombinedDeliveryExportRows(lunchSheet, dinnerSheet, deliveryDate) {
+  const lunchEntries = sheetExportEntries(lunchSheet)
+  const dinnerEntries = sheetExportEntries(dinnerSheet)
+  const dinnerById = new Map(dinnerEntries.map((entry) => [entry.id, entry]))
+  const lunchAreas = []
+  const lunchByArea = new Map()
+  for (const entry of lunchEntries) {
+    const area = entry.stop.groupArea || ''
+    if (!lunchByArea.has(area)) {
+      lunchByArea.set(area, [])
+      lunchAreas.push(area)
+    }
+    lunchByArea.get(area).push(entry)
+  }
+  const dinnerByArea = new Map()
+  const dinnerAreas = []
+  for (const entry of dinnerEntries) {
+    const area = entry.stop.groupArea || ''
+    if (!dinnerByArea.has(area)) {
+      dinnerByArea.set(area, [])
+      dinnerAreas.push(area)
+    }
+    dinnerByArea.get(area).push(entry)
+  }
+
+  const emitted = new Set()
+  const out = []
+  const pushRow = (lunchEntry, dinnerEntry) => {
+    const anchor = lunchEntry || dinnerEntry
+    if (!anchor) return
+    emitted.add(anchor.id)
+    if (dinnerEntry) emitted.add(dinnerEntry.id)
+    const member = anchor.member
+    const stop = anchor.stop
+    const lunchUnits = Number(lunchEntry?.member?.daily_meal_units)
+    const dinnerUnits = Number(dinnerEntry?.member?.daily_meal_units)
+    const lunchStatus = exportFulfillmentStatus(lunchEntry)
+    const dinnerStatus = exportFulfillmentStatus(dinnerEntry)
+    let status = lunchEntry ? lunchStatus : dinnerStatus
+    if (lunchEntry && dinnerEntry) status = `午餐${lunchStatus}；晚餐${dinnerStatus}`
+    const areaIssue = Boolean(
+      lunchEntry?.member?.area_issue ||
+        lunchEntry?.stop?.has_area_issue ||
+        dinnerEntry?.member?.area_issue ||
+        dinnerEntry?.stop?.has_area_issue,
+    )
+    const missingCoords = Boolean(lunchEntry?.member?.missing_coords || dinnerEntry?.member?.missing_coords)
+    const remarks = String(lunchEntry?.member?.remarks || dinnerEntry?.member?.remarks || '').trim()
+    out.push({
+      配送业务日: deliveryDate,
+      线路分组: stop.groupArea ?? '',
+      地址片区: stop.area ?? '',
+      配送地址: addressLineForExcelExport(stop),
+      会员ID: member.member_id,
+      姓名: member.name != null ? String(member.name) : '',
+      手机: member.phone != null ? String(member.phone) : '',
+      plan_type: member.plan_type != null && String(member.plan_type).length ? String(member.plan_type) : '',
+      套餐类型: exportMealScopeLabel(lunchEntry, dinnerEntry),
+      午餐份数: lunchEntry && Number.isFinite(lunchUnits) && lunchUnits > 0 ? Math.trunc(lunchUnits) : '无',
+      晚餐份数: formatDinnerPortionsCell(dinnerEntry ? dinnerUnits : null),
+      备注: remarks,
+      送达状态: status,
+      片区待核实: areaIssue ? '是' : '否',
+      无坐标: missingCoords ? '是' : '否',
+      顺丰推单失败: exportSfFailCell(lunchEntry, dinnerEntry),
+    })
+  }
+
+  for (const area of lunchAreas) {
+    for (const lunchEntry of lunchByArea.get(area) || []) {
+      pushRow(lunchEntry, dinnerById.get(lunchEntry.id) || null)
+    }
+    for (const dinnerEntry of dinnerByArea.get(area) || []) {
+      if (emitted.has(dinnerEntry.id)) continue
+      pushRow(null, dinnerEntry)
+    }
+  }
+  for (const area of dinnerAreas) {
+    if (lunchByArea.has(area)) continue
+    for (const dinnerEntry of dinnerByArea.get(area) || []) {
+      if (emitted.has(dinnerEntry.id)) continue
+      pushRow(null, dinnerEntry)
+    }
+  }
+  return out
+}
+
+/**
+ * 导出当日需配送会员：午餐大表、晚餐大表合并，每人一行。
+ * 套餐类型为午餐 / 晚餐 / 全餐。不受当前餐段页签限制。
+ * 手机号有内容时只导出匹配会员；清空则为该业务日全量。
+ */
+async function exportSheetToExcel() {
+  if (exportBusy.value) return
+  const d = String(sheetToday.value.delivery_date || deliveryDateQuery.value || todayShanghaiStr()).trim()
+  const phone = String(phoneQuery.value || '').trim()
+  exportBusy.value = true
+  try {
+    const [lunchSheet, dinnerSheet] = await Promise.all([
+      fetchDeliverySheetForExport(SHEET_VIEW_LUNCH, d, phone),
+      fetchDeliverySheetForExport(SHEET_VIEW_DINNER, d, phone),
+    ])
+    const out = buildCombinedDeliveryExportRows(lunchSheet, dinnerSheet, d)
+    if (!out.length) {
+      showToast('没有可导出的配送记录', 'error')
+      return
+    }
+    const ws = XLSX.utils.json_to_sheet(out)
+    ws['!cols'] = [
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 12 },
+      { wch: 40 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 14 },
+      { wch: 8 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 28 },
+      { wch: 28 },
+      { wch: 10 },
+      { wch: 8 },
+      { wch: 24 },
+    ]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, '配送清单')
+    XLSX.writeFile(wb, `配送清单_${d}.xlsx`)
+    showToast(`已导出 ${out.length} 行`, 'success')
+  } catch (e) {
+    if (handleAdminLogout(e)) {
+      showToast('登录已过期，请重新登录', 'error')
+      return
+    }
+    showToast(e instanceof Error ? e.message : '导出失败', 'error')
+  } finally {
+    exportBusy.value = false
+  }
 }
 
 /** 打印标签：当前片区（含周卡/月卡门店自提）或全部到家；全部时按大表片区顺序逐批出纸 */
@@ -937,12 +1102,12 @@ async function reinstatePhoneToSheet() {
         <button
           type="button"
           class="delivery-btn delivery-btn--outline"
-          :disabled="loading || !flatStops.length"
-          title="与下方列表数据一致；清空手机号可导出该业务日全量"
+          :disabled="loading || exportBusy"
+          title="导出该业务日需配送的午餐、晚餐、全餐会员，每人一行，按套餐类型区分。填写手机号时只导出匹配会员"
           @click="exportSheetToExcel"
         >
           <FileDown :size="16" stroke-width="2" />
-          导出 Excel
+          {{ exportBusy ? '导出中…' : '导出 Excel' }}
         </button>
         <button
           type="button"
