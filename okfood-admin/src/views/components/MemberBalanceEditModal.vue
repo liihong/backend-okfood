@@ -19,13 +19,21 @@ let loadSeq = 0
 /** 打开后拉到的最新档案，用于判断是否展示晚餐次数池 */
 const profile = ref(null)
 /** 打开时的次数与份数；仅与此不同才提交，避免未改动也写余额流水 */
-const initial = ref({ balance: 0, dinner_balance: 0, daily_meal_units: 1 })
-/** 已预约、下一配送日生效的份数；仅作提示，输入框仍展示当日生效份数 */
+const initial = ref({
+  balance: 0,
+  dinner_balance: 0,
+  daily_meal_units: 1,
+  dinner_daily_meal_units: 1,
+})
+/** 已预约、下一配送日生效的午餐份数；仅作提示，输入框仍展示当日生效份数 */
 const pendingUnits = ref(null)
+/** 已预约、下一配送日生效的晚餐份数；与午餐预约互不影响 */
+const pendingDinnerUnits = ref(null)
 const form = ref({
   balance: 0,
   dinner_balance: 0,
   daily_meal_units: 1,
+  dinner_daily_meal_units: 1,
 })
 
 const showDinnerRemain = computed(() => memberShowsDinnerRemain(profile.value || props.member))
@@ -42,23 +50,33 @@ function normalizeUnits(v) {
  * @param {Record<string, unknown>} row
  * @param {Record<string, unknown> | null | undefined} raw
  */
+function pendingUnitsOrNull(rawPending, currentUnits) {
+  const pendingNum = rawPending == null || rawPending === '' ? null : Math.floor(Number(rawPending))
+  return pendingNum != null && pendingNum >= 1 && pendingNum !== currentUnits ? pendingNum : null
+}
+
 function applySnapshot(row, raw) {
   const balance = normalizeBalance(row?.balance)
   const dinnerBalance = normalizeBalance(row?.dinner_balance)
   const units = normalizeUnits(row?.daily_meal_units)
+  const dinnerUnits = normalizeUnits(row?.dinner_daily_meal_units)
   form.value = {
     balance,
     dinner_balance: dinnerBalance,
     daily_meal_units: units,
+    dinner_daily_meal_units: dinnerUnits,
   }
   initial.value = {
     balance,
     dinner_balance: dinnerBalance,
     daily_meal_units: units,
+    dinner_daily_meal_units: dinnerUnits,
   }
-  const pending = raw?.daily_meal_units_pending
-  const pendingNum = pending == null || pending === '' ? null : Math.floor(Number(pending))
-  pendingUnits.value = pendingNum != null && pendingNum >= 1 && pendingNum !== units ? pendingNum : null
+  pendingUnits.value = pendingUnitsOrNull(raw?.daily_meal_units_pending, units)
+  pendingDinnerUnits.value = pendingUnitsOrNull(
+    row?.dinner_daily_meal_units_pending ?? raw?.dinner_daily_meal_units_pending,
+    dinnerUnits,
+  )
   profile.value = row
 }
 
@@ -121,6 +139,11 @@ async function submit() {
   if (showDinnerRemain.value) {
     const dinnerVal = normalizeBalance(form.value.dinner_balance)
     if (dinnerVal !== initial.value.dinner_balance) payload.dinner_balance = dinnerVal
+    // 晚餐份数单独提交；午餐份数仍只在 daily_meal_units 变化时提交
+    const dinnerUnitsVal = normalizeUnits(form.value.dinner_daily_meal_units)
+    if (dinnerUnitsVal !== initial.value.dinner_daily_meal_units) {
+      payload.dinner_daily_meal_units = dinnerUnitsVal
+    }
   }
   if (unitsVal !== initial.value.daily_meal_units) payload.daily_meal_units = unitsVal
   if (Object.keys(payload).length === 1) {
@@ -205,7 +228,7 @@ async function submit() {
         </div>
         <p class="balance-hint">只改晚餐次数池，与午餐分开记账。</p>
       </el-form-item>
-      <el-form-item label="每配送日份数">
+      <el-form-item :label="showDinnerRemain ? '午餐每配送日份数' : '每配送日份数'">
         <div class="balance-affix">
           <el-input-number
             v-model="form.daily_meal_units"
@@ -218,8 +241,29 @@ async function submit() {
           <span class="balance-suf">份</span>
         </div>
         <p class="balance-hint">
-          当日大表已推单时，修改从下一配送日起生效，当日备餐份数不变。
+          {{
+            showDinnerRemain
+              ? '只改午餐份数。当日午餐大表已推单时，从下一配送日起生效。'
+              : '当日大表已推单时，修改从下一配送日起生效，当日备餐份数不变。'
+          }}
           <template v-if="pendingUnits != null">已预约次日改为 {{ pendingUnits }} 份。</template>
+        </p>
+      </el-form-item>
+      <el-form-item v-if="showDinnerRemain" label="晚餐每配送日份数">
+        <div class="balance-affix">
+          <el-input-number
+            v-model="form.dinner_daily_meal_units"
+            :min="1"
+            :max="50"
+            :step="1"
+            :disabled="loading || saving"
+            controls-position="right"
+          />
+          <span class="balance-suf">份</span>
+        </div>
+        <p class="balance-hint">
+          只改晚餐份数，不影响午餐。当日晚餐大表已推单时，从下一配送日起生效。
+          <template v-if="pendingDinnerUnits != null">已预约次日改为 {{ pendingDinnerUnits }} 份。</template>
         </p>
       </el-form-item>
     </el-form>

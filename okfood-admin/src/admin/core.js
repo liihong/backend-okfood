@@ -634,10 +634,13 @@ function formatLeaveDayRangeLabel(rs, re) {
   return `${a.y}年${a.m}月${a.d}号~${b.y}年${b.m}月${b.d}号`
 }
 
-/** 列表「请假时间」：区间优先于「仅明日」 */
-function buildLeaveListFields(raw) {
-  const rs = adminUserYmd(raw.leave_range_start)
-  const re = adminUserYmd(raw.leave_range_end)
+/**
+ * 一组请假字段格式化成列表「请假时间」。
+ * 区间优先于「仅明日」，文案与原先午餐主档一致。
+ */
+function formatLeaveListFields(rangeStart, rangeEnd, isLeavedTomorrow, tomorrowTarget) {
+  const rs = adminUserYmd(rangeStart)
+  const re = adminUserYmd(rangeEnd)
   if (rs && re) {
     if (rs === re) {
       return {
@@ -652,8 +655,8 @@ function buildLeaveListFields(raw) {
       leave_detail: formatLeaveDayRangeLabel(rs, re),
     }
   }
-  if (raw.is_leaved_tomorrow === true) {
-    const td = adminUserYmd(raw.tomorrow_leave_target_date)
+  if (isLeavedTomorrow === true) {
+    const td = adminUserYmd(tomorrowTarget)
     const label = td ? formatLeaveDaySingleLabel(td) : ''
     return {
       leave_kind: 'tomorrow',
@@ -666,6 +669,27 @@ function buildLeaveListFields(raw) {
     leave_badge: '',
     leave_detail: '',
   }
+}
+
+/**
+ * 列表「请假时间」。
+ * 午餐主档有请假时保持原展示；主档没有时才回退晚餐池。
+ * 纯晚餐会员的请假只写在 dinner_*，否则这一列会是空的。不改状态标签的优先级。
+ */
+function buildLeaveListFields(raw) {
+  const lunch = formatLeaveListFields(
+    raw.leave_range_start,
+    raw.leave_range_end,
+    raw.is_leaved_tomorrow,
+    raw.tomorrow_leave_target_date,
+  )
+  if (lunch.leave_kind) return lunch
+  return formatLeaveListFields(
+    raw.dinner_leave_range_start,
+    raw.dinner_leave_range_end,
+    raw.dinner_is_leaved_tomorrow,
+    raw.dinner_tomorrow_leave_target_date,
+  )
 }
 
 /** 周/月卡次数用尽：balance=0 且曾有起送日或累计总次数（与后台 inactive_only 口径一致） */
@@ -682,6 +706,7 @@ export function memberCardExpired(raw, balance = null) {
 /**
  * 会员状态展示：优先使用后端 lifecycle_label（只读，不改档案）。
  * overlays 中「请假中」「待续费」覆盖主标签，与 member_lifecycle_service 一致。
+ * 纯晚餐请假由接口写入 overlays「请假中」，这里的优先级不动；午/全餐仍按原叠层。
  */
 export function resolveMemberStatusFromLifecycle(raw, balance = null) {
   if (!raw || typeof raw !== 'object') return '未开卡'
@@ -806,6 +831,8 @@ export function mapAdminUserToRow(raw, idx) {
       meal_scope_label: '午餐',
       remarks: '',
       daily_meal_units: 1,
+      dinner_daily_meal_units: 1,
+      dinner_daily_meal_units_pending: null,
       meal_quota_total: 0,
       wechat_name: '',
       is_active: false,
@@ -874,6 +901,15 @@ export function mapAdminUserToRow(raw, idx) {
   }
 
   const leaveList = buildLeaveListFields(raw)
+  const dinnerUnitsPendingRaw = raw.dinner_daily_meal_units_pending
+  const dinnerUnitsPendingNum =
+    dinnerUnitsPendingRaw == null || dinnerUnitsPendingRaw === ''
+      ? null
+      : Math.floor(Number(dinnerUnitsPendingRaw))
+  const dinnerDailyMealUnitsPending =
+    dinnerUnitsPendingNum != null && dinnerUnitsPendingNum >= 1 && dinnerUnitsPendingNum <= 50
+      ? dinnerUnitsPendingNum
+      : null
 
   const ds = raw.delivery_start_date
   let deliveryStartYmd = ''
@@ -924,6 +960,8 @@ export function mapAdminUserToRow(raw, idx) {
     dinner_leave_range_end: adminUserYmd(raw.dinner_leave_range_end),
     remarks: raw.remarks ?? '',
     daily_meal_units: Math.max(1, Math.min(50, Number(raw.daily_meal_units) || 1)),
+    dinner_daily_meal_units: Math.max(1, Math.min(50, Number(raw.dinner_daily_meal_units) || 1)),
+    dinner_daily_meal_units_pending: dinnerDailyMealUnitsPending,
     meal_quota_total: hasPersistedTotal ? mealQuotaTotal : 0,
     wechat_name: raw.wechat_name ?? '',
     is_active: active,

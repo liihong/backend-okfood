@@ -1984,6 +1984,7 @@ def member_profile_patch(
         operator=admin_username,
         store_id=store_id,
         daily_meal_units=body.daily_meal_units,
+        dinner_daily_meal_units=body.dinner_daily_meal_units,
         plan_type=body.plan_type,
         membership_template_id=body.membership_template_id,
         set_balance="balance" in fs,

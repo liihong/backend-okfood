@@ -1683,6 +1683,8 @@ def admin_patch_member_profile(
 
     daily_meal_units: int | None = None,
 
+    dinner_daily_meal_units: int | None = None,
+
     plan_type: PlanType | None = None,
 
     membership_template_id: int | None = None,
@@ -1738,6 +1740,8 @@ def admin_patch_member_profile(
         and not set_remarks
 
         and daily_meal_units is None
+
+        and dinner_daily_meal_units is None
 
         and plan_type is None
 
@@ -1807,7 +1811,13 @@ def admin_patch_member_profile(
         MemberMealPeriodState,
         {"member_id": int(m.id), "meal_period": MealPeriod.DINNER.value},
     )
+    from app.services.meal_period.dinner_units import pending_dinner_daily_meal_units
+    from app.services.meal_period.units import dinner_daily_meal_units_from_state
+
     prev_snapshot["dinner_balance"] = dinner_balance_and_quota(_dinner_row_before)[0]
+    # 晚餐份数单独记快照，后面写晚餐池时不读、不改午餐份数
+    prev_snapshot["dinner_daily_meal_units"] = dinner_daily_meal_units_from_state(_dinner_row_before)
+    prev_snapshot["dinner_daily_meal_units_pending"] = pending_dinner_daily_meal_units(_dinner_row_before)
 
     if name is not None:
 
@@ -2010,6 +2020,31 @@ def admin_patch_member_profile(
 
         admin_units_change_mode = set_member_daily_meal_units_change(db, m, daily_meal_units)
 
+    # 晚餐份数只写 member_meal_period_state，不调用午餐 set_member_daily_meal_units_change
+    admin_dinner_units_change_mode: str | None = None
+    if dinner_daily_meal_units is not None:
+        if dinner_daily_meal_units < 1 or dinner_daily_meal_units > MAX_DAILY_MEAL_UNITS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"晚餐每配送日份数须在 1～{MAX_DAILY_MEAL_UNITS} 之间",
+            )
+        from app.services.meal_period.card_eligibility import member_entitled_meal_periods
+
+        dinner_periods = member_entitled_meal_periods(db, int(m.id))
+        dinner_quota = int(getattr(_dinner_row_before, "meal_quota_total", 0) or 0) if _dinner_row_before else 0
+        has_dinner = (
+            "dinner" in dinner_periods
+            or int(prev_snapshot["dinner_balance"]) > 0
+            or dinner_quota > 0
+        )
+        if not has_dinner:
+            raise HTTPException(status_code=400, detail="当前会员没有晚餐配送，无法修改晚餐份数")
+        from app.services.meal_period.dinner_units import set_dinner_daily_meal_units_change
+
+        admin_dinner_units_change_mode = set_dinner_daily_meal_units_change(
+            db, m, int(dinner_daily_meal_units)
+        )
+
     # 套餐：模版优先（写 plan_type + 最近已入账工单餐段）；仅传 plan_type 时只改档案标签
     plan_tpl_apply: dict[str, object] | None = None
     prev_plan_label = ""
@@ -2080,6 +2115,8 @@ def admin_patch_member_profile(
         {"member_id": int(m.id), "meal_period": MealPeriod.DINNER.value},
     )
     new_snapshot["dinner_balance"] = dinner_balance_and_quota(_dinner_row_after)[0]
+    new_snapshot["dinner_daily_meal_units"] = dinner_daily_meal_units_from_state(_dinner_row_after)
+    new_snapshot["dinner_daily_meal_units_pending"] = pending_dinner_daily_meal_units(_dinner_row_after)
 
     def _admin_log(op_type: str, summary: str, *, before: dict | None = None, after: dict | None = None) -> None:
         record_member_operation(
@@ -2213,6 +2250,44 @@ def admin_patch_member_profile(
             after={
                 "daily_meal_units": new_snapshot["daily_meal_units"],
                 **admin_after_units,
+            },
+        )
+    if dinner_daily_meal_units is not None and admin_dinner_units_change_mode != "unchanged" and (
+        prev_snapshot["dinner_daily_meal_units_pending"] != new_snapshot["dinner_daily_meal_units_pending"]
+        or prev_snapshot["dinner_daily_meal_units"] != new_snapshot["dinner_daily_meal_units"]
+    ):
+        # 文案带「晚餐」，与上面午餐份数日志分开，避免对账时看成同一次修改
+        dinner_pending_after = new_snapshot["dinner_daily_meal_units_pending"]
+        if admin_dinner_units_change_mode == "immediate":
+            dinner_units_summary = (
+                f"修改晚餐每日送达份数：{prev_snapshot['dinner_daily_meal_units']} 份"
+                f"→{new_snapshot['dinner_daily_meal_units']} 份（立即生效）"
+            )
+            dinner_after_units: dict[str, int | None] = {
+                "dinner_daily_meal_units": int(new_snapshot["dinner_daily_meal_units"]),
+                "dinner_daily_meal_units_pending": None,
+            }
+        elif dinner_pending_after is None:
+            dinner_units_summary = (
+                f"取消预约晚餐每日送达份数（维持当日 {prev_snapshot['dinner_daily_meal_units']} 份）"
+            )
+            dinner_after_units = {"dinner_daily_meal_units_pending": None}
+        else:
+            dinner_units_summary = (
+                f"预约修改晚餐每日送达份数：当日 {prev_snapshot['dinner_daily_meal_units']} 份，"
+                f"下一配送日起 {dinner_pending_after} 份"
+            )
+            dinner_after_units = {"dinner_daily_meal_units_pending": int(dinner_pending_after)}
+        _admin_log(
+            OP_UPDATE_DAILY_UNITS,
+            dinner_units_summary,
+            before={
+                "dinner_daily_meal_units": prev_snapshot["dinner_daily_meal_units"],
+                "dinner_daily_meal_units_pending": prev_snapshot["dinner_daily_meal_units_pending"],
+            },
+            after={
+                "dinner_daily_meal_units": new_snapshot["dinner_daily_meal_units"],
+                **dinner_after_units,
             },
         )
     if (
