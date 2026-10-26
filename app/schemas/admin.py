@@ -1149,6 +1149,10 @@ class DeliverySheetMemberOut(BaseModel):
     phone: str
     name: str
     plan_type: str | None = Field(None, description="套餐类型：次卡 / 周卡 / 月卡")
+    meal_scope: str = Field(
+        "午餐",
+        description="餐段范围：午餐 / 晚餐 / 全餐（由已入账工单餐段资格得出）",
+    )
     card_kind_label: str | None = Field(
         None,
         description="开卡种类名称，如 午餐卡、晚餐卡、午晚餐卡、午餐+果蔬汁卡",

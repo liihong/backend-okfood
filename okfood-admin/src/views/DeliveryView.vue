@@ -476,6 +476,7 @@ function exportSheetToExcel() {
         姓名: m.name != null ? String(m.name) : '',
         手机: m.phone != null ? String(m.phone) : '',
         plan_type: m.plan_type != null && String(m.plan_type).length ? String(m.plan_type) : '',
+        套餐类型: m.meal_scope != null && String(m.meal_scope).length ? String(m.meal_scope) : '午餐',
         当日期数: m.daily_meal_units ?? 0,
         备注: m.remarks != null && String(m.remarks).length ? String(m.remarks) : '',
         送达状态: status,
@@ -499,10 +500,13 @@ function exportSheetToExcel() {
     { wch: 10 },
     { wch: 14 },
     { wch: 8 },
+    { wch: 10 },
     { wch: 8 },
     { wch: 28 },
     { wch: 10 },
     { wch: 10 },
+    { wch: 8 },
+    { wch: 24 },
   ]
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, '配送清单')
