@@ -85,6 +85,8 @@ const roleLabel = (r) => {
 const storeDialog = ref(false)
 const storeSaving = ref(false)
 const storePatchingId = ref(null)
+/** 非空表示正在编辑已有门店；空表示新建 */
+const storeEditId = ref(null)
 const storeForm = ref({
   name: '',
   leave_deadline_time: '21:00',
@@ -480,12 +482,29 @@ async function loadStoresForTenant(tenantId) {
   }
 }
 
-function openCreateStore() {
-  storeForm.value = {
+function blankStoreForm() {
+  return {
     name: '',
     leave_deadline_time: '21:00',
     is_active: true,
     sf_nightly_auto_push_enabled: false,
+  }
+}
+
+function openCreateStore() {
+  storeEditId.value = null
+  storeForm.value = blankStoreForm()
+  storeDialog.value = true
+}
+
+function openEditStore(row) {
+  if (!row || row.id == null) return
+  storeEditId.value = row.id
+  storeForm.value = {
+    name: row.name || '',
+    leave_deadline_time: String(row.leave_deadline_time || '21:00').trim(),
+    is_active: row.is_active !== false,
+    sf_nightly_auto_push_enabled: row.sf_nightly_auto_push_enabled === true,
   }
   storeDialog.value = true
 }
@@ -498,24 +517,39 @@ async function saveStore() {
     showToast('请填写门店名称', 'error')
     return
   }
+  const editing = storeEditId.value != null
+  const payload = {
+    name,
+    leave_deadline_time: String(storeForm.value.leave_deadline_time || '21:00').trim(),
+    is_active: storeForm.value.is_active !== false,
+    sf_nightly_auto_push_enabled: storeForm.value.sf_nightly_auto_push_enabled === true,
+  }
   storeSaving.value = true
   try {
-    const data = await apiJson(
-      `/api/admin/system/tenants/${tid}/stores`,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          name,
-          leave_deadline_time: String(storeForm.value.leave_deadline_time || '21:00').trim(),
-          is_active: storeForm.value.is_active !== false,
-          sf_nightly_auto_push_enabled: storeForm.value.sf_nightly_auto_push_enabled === true,
-        }),
-      },
-      { auth: true },
-    )
-    storeDialog.value = false
-    const sid = data && data.id != null ? data.id : '—'
-    showToast(`门店已创建，门店 ID=${sid}；管理端 API 需带 store_id=${sid}`, 'success')
+    if (editing) {
+      await apiJson(
+        `/api/admin/system/tenants/${tid}/stores/${storeEditId.value}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        },
+        { auth: true },
+      )
+      storeDialog.value = false
+      showToast('门店已保存', 'success')
+    } else {
+      const data = await apiJson(
+        `/api/admin/system/tenants/${tid}/stores`,
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        },
+        { auth: true },
+      )
+      storeDialog.value = false
+      const sid = data && data.id != null ? data.id : '—'
+      showToast(`门店已创建，门店 ID=${sid}；管理端 API 需带 store_id=${sid}`, 'success')
+    }
     await loadStoresForTenant(tid)
     await loadOverview()
     await loadTenants()
@@ -526,7 +560,7 @@ async function saveStore() {
       handleAdminLogout()
       return
     }
-    showToast(e instanceof Error ? e.message : '创建失败', 'error')
+    showToast(e instanceof Error ? e.message : editing ? '保存失败' : '创建失败', 'error')
   } finally {
     storeSaving.value = false
   }
@@ -859,7 +893,7 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
-    <el-drawer v-model="storesDialog" :title="currentTenant ? `门店：${currentTenant.name}` : '门店'" size="560px">
+    <el-drawer v-model="storesDialog" :title="currentTenant ? `门店：${currentTenant.name}` : '门店'" size="680px">
       <div class="drawer-toolbar">
         <el-button type="primary" size="small" @click="openCreateStore">新建门店</el-button>
       </div>
@@ -886,16 +920,24 @@ onMounted(async () => {
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="72" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="openEditStore(row)">编辑</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-drawer>
 
-    <el-dialog v-model="storeDialog" title="新建门店" width="440px">
+    <el-dialog v-model="storeDialog" :title="storeEditId == null ? '新建门店' : '编辑门店'" width="440px">
       <el-form label-position="top">
         <el-form-item label="门店名称">
           <el-input v-model="storeForm.name" maxlength="128" placeholder="例如：浦东店" />
         </el-form-item>
         <el-form-item label="当日请假截止时间">
-          <el-input v-model="storeForm.leave_deadline_time" placeholder="21:00 或 21:00:00" />
+          <el-input v-model="storeForm.leave_deadline_time" placeholder="17:00 或 17:00:00" />
+          <p class="store-nightly-hint">
+            该时刻起至次日 09:00，小程序不能自助请假。填 17:00 表示每天 09:00 至 17:00 可请第二天的假。
+          </p>
         </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="storeForm.is_active" />
@@ -909,7 +951,9 @@ onMounted(async () => {
       </el-form>
       <template #footer>
         <el-button @click="storeDialog = false">取消</el-button>
-        <el-button type="primary" :loading="storeSaving" @click="saveStore">创建</el-button>
+        <el-button type="primary" :loading="storeSaving" @click="saveStore">
+          {{ storeEditId == null ? '创建' : '保存' }}
+        </el-button>
       </template>
     </el-dialog>
 
