@@ -606,7 +606,7 @@ def create_miniprogram_member_card_order(
                 status_code=400,
                 detail="起送日期须不早于明日（上海业务日）",
             )
-        rmk = _miniprogram_card_order_remark(
+        rmk = _miniprogram_card_order_remark(image.png
             f"卡包模版#{tpl.id}·{tpl.name.strip()}",
             is_renewal=is_renewal,
         )
