@@ -3,6 +3,7 @@ defineOptions({ name: 'WeeklyMenuView' })
 import { computed, onMounted, ref } from 'vue'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import PrepMenuDialog from './prep/PrepMenuDialog.vue'
 
 /** 午餐、晚餐双预览（一次加载两组餐段） */
 const previewLunch = ref(null)
@@ -64,6 +65,9 @@ function formatSlotPrice(v) {
 
 /** 当前查看的周：本周 / 下周 */
 const activeWeekTab = ref(/** @type {WeekTabKey} */ ('this'))
+
+/** 开菜单只读本周排菜，不回写日总份 */
+const prepMenuOpen = ref(false)
 
 /** 从预览中取指定周的行数据 */
 function rowsForPreview(preview, weekKey = 'this') {
@@ -337,7 +341,9 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
           </template>
         </el-tab-pane>
       </el-tabs>
+      <el-button type="primary" class="wmenu-prep-open" @click="prepMenuOpen = true">开菜单</el-button>
     </div>
+    <PrepMenuDialog v-model="prepMenuOpen" :week-start="activeWeekStart" />
     <div v-if="hasPreview" class="wmenu-schedule-scroll">
       <div class="wmenu-schedule-grid">
         <div v-for="card in mealCards" :key="card.key" class="wmenu-week-card">
@@ -461,6 +467,20 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 .wmenu-week-tabs {
   flex-shrink: 0;
   padding: 0 4px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wmenu-week-tabs-el {
+  flex: 1;
+  min-width: 0;
+}
+
+.wmenu-prep-open {
+  margin-bottom: 12px;
+  flex-shrink: 0;
 }
 
 .wmenu-week-tabs-el :deep(.el-tabs__header) {

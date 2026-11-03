@@ -692,11 +692,12 @@ function buildLeaveListFields(raw) {
   )
 }
 
-/** 周/月卡次数用尽：balance=0 且曾有起送日或累计总次数（与后台 inactive_only 口径一致） */
+/** 周/月卡次数用尽：午晚余次都为 0，且曾有起送日或累计总次数（与后台 inactive_only 口径一致） */
 export function memberCardExpired(raw, balance = null) {
   if (!raw || typeof raw !== 'object') return false
   const bal = balance != null ? Number(balance) || 0 : Number(raw.balance) || 0
-  if (bal > 0) return false
+  const dinnerBal = Number(raw.dinner_balance) || 0
+  if (bal > 0 || dinnerBal > 0) return false
   const ds = raw.delivery_start_date
   if (ds != null && String(ds).trim()) return true
   const mqt = Number(raw.meal_quota_total)
@@ -733,9 +734,10 @@ export function resolveMemberStatusFromLifecycle(raw, balance = null) {
   if (membershipRefundedAt) return '已退款'
   if (deferred) return '已暂停'
   if (active && onLeaveToday) return '请假中'
-  if (memberCardExpired(raw, bal) || (active && bal === 0)) return '已过期'
+  const dinnerBal = Number(raw.dinner_balance) || 0
+  if (memberCardExpired(raw, bal) || (active && bal === 0 && dinnerBal === 0)) return '已过期'
   if (!active) return '未开卡'
-  if (bal <= 2) return '待续费'
+  if ((bal > 0 && bal <= 2) || (dinnerBal > 0 && dinnerBal <= 2)) return '待续费'
   return '正常配送中'
 }
 

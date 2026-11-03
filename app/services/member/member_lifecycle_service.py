@@ -346,7 +346,10 @@ def _resolve_member_lifecycle_with_ctx(
 
     threshold = int(get_settings().LOW_BALANCE_THRESHOLD)
     lunch_bal = int(member.balance or 0)
-    if member.is_active and not bool(member.delivery_deferred) and 0 < lunch_bal <= threshold:
+    dinner_bal = int(dinner_row.balance or 0) if dinner_row is not None else 0
+    # 午餐或晚餐任一餐段余次落在 1..阈值，即待续费（与档案列表筛选一致）
+    period_low = (0 < lunch_bal <= threshold) or (0 < dinner_bal <= threshold)
+    if member.is_active and not bool(member.delivery_deferred) and period_low:
         overlays = [*overlays, "待续费"]
         return MemberLifecycleView(
             code=MemberLifecycleCode.RENEW_PENDING.value,

@@ -1312,7 +1312,7 @@ onUnmounted(() => {
       </div>
       <div v-if="isRenewPendingFilter" class="members-renew-banner" role="status">
         <p class="members-renew-banner__text">
-          当前展示<strong>待续费</strong>会员（生效中、剩余次数 ≤ 2，不含暂停/退款/请假）。可导出名单后电话/微信提醒续卡，或批量发放续卡优惠券。
+          当前展示<strong>待续费</strong>会员（生效中、午餐或晚餐剩余次数 ≤ 2，不含暂停/退款/请假）。可导出名单后电话/微信提醒续卡，或批量发放续卡优惠券。
         </p>
         <el-button type="warning" size="small" @click="goBatchGrantCouponsForRenewPending">
           <Ticket :size="14" aria-hidden="true" style="margin-right: 4px; vertical-align: -2px" />

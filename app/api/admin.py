@@ -1267,7 +1267,7 @@ def users(
     ] = False,
     renew_pending_only: Annotated[
         bool,
-        Query(description="true=仅待续费：生效中且剩余次数<=低余额阈值，非暂停/退款/请假"),
+        Query(description="true=仅待续费：生效中且午餐或晚餐剩余次数<=低余额阈值，非暂停/退款/请假"),
     ] = False,
     delivering_only: Annotated[
         bool,

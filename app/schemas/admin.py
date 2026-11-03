@@ -565,7 +565,7 @@ class MemberUnconsumedMealsOut(BaseModel):
 
 
 class MemberRenewPendingStatsOut(BaseModel):
-    """待续费：生效中且剩余次数 <= LOW_BALANCE_THRESHOLD，非暂停/退款/请假。"""
+    """待续费：生效中且午餐或晚餐剩余次数 <= LOW_BALANCE_THRESHOLD，非暂停/退款/请假。"""
 
     count: int = Field(..., ge=0, description="待续费总户数")
     balance_1_count: int = Field(..., ge=0, description="剩余 1 次")

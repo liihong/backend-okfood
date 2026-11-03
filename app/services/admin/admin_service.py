@@ -272,13 +272,28 @@ def _member_exclude_on_leave_scope(*, today: date | None = None):
     return ~_member_archive_on_leave_scope(today=today)
 
 
-def _member_renew_pending_scope(*, threshold: int):
-    """待续费：生效中、剩余次数 <= 阈值、非暂停/退款/请假（与前台状态标签一致）。"""
+def _member_dinner_low_balance_scope(*, threshold: int):
+    """晚餐待续费：晚餐池余次在 1..阈值（0 次不算，避免把已用尽晚餐算进来）。"""
     t = int(threshold)
+    return exists(
+        select(1)
+        .select_from(MemberMealPeriodState)
+        .where(
+            MemberMealPeriodState.member_id == Member.id,
+            MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+            MemberMealPeriodState.balance > 0,
+            MemberMealPeriodState.balance <= t,
+        )
+    )
+
+
+def _member_renew_pending_scope(*, threshold: int):
+    """待续费：生效中、午餐或晚餐剩余次数在 1..阈值、非暂停/退款/请假（与前台状态标签一致）。"""
+    t = int(threshold)
+    lunch_low = and_(Member.balance > 0, Member.balance <= t)
     return and_(
         Member.is_active.is_(True),
-        Member.balance > 0,
-        Member.balance <= t,
+        or_(lunch_low, _member_dinner_low_balance_scope(threshold=t)),
         Member.delivery_deferred.is_(False),
         Member.membership_refunded_at.is_(None),
         _member_exclude_on_leave_scope(),
@@ -386,9 +401,10 @@ def _member_delivering_scope(*, threshold: int):
     正常配送中：与 lifecycle DELIVERING 主状态且无「请假中」叠层一致。
 
     排除待完善、暂停、未开卡、待续费、请假、退款与次数用尽。
-    待续费只看午餐余次 1..threshold；午餐=0 但晚餐有余次仍属配送中。
+    待续费看午餐或晚餐余次 1..threshold；任一餐段落在该区间则离开本列表。
     """
     t = int(threshold)
+    lunch_not_low = or_(Member.balance <= 0, Member.balance > t)
     return and_(
         Member.delivery_deferred.is_(False),
         Member.membership_refunded_at.is_(None),
@@ -398,8 +414,7 @@ def _member_delivering_scope(*, threshold: int):
         or_(Member.is_active.is_(True), _member_has_applied_card_order_scope()),
         or_(
             Member.is_active.is_(False),
-            Member.balance <= 0,
-            Member.balance > t,
+            and_(lunch_not_low, ~_member_dinner_low_balance_scope(threshold=t)),
         ),
     )
 
@@ -824,17 +839,32 @@ def _member_unconsumed_meals_total(db: Session, *, store_id: int) -> MemberUncon
 
 
 def _member_renew_pending_counts(db: Session, *, store_id: int, active_total: int) -> MemberRenewPendingStatsOut:
-    """待续费户数及剩余 1 次 / 阈值次分布（与前台「待续费」标签口径一致）。"""
+    """待续费户数及剩余 1 次 / 阈值次分布（午餐或晚餐，与前台「待续费」标签口径一致）。"""
     from app.core.config import get_settings
 
     threshold = int(get_settings().LOW_BALANCE_THRESHOLD)
+    dinner_state = aliased(MemberMealPeriodState)
+    dinner_bal = func.coalesce(dinner_state.balance, 0)
+    # 任一餐段恰为 1 次优先计入「剩余 1 次」，避免同一人同时出现在两个分档
+    has_one = or_(Member.balance == 1, dinner_bal == 1)
+    has_threshold_hit = or_(Member.balance == threshold, dinner_bal == threshold)
     row = db.execute(
         select(
             func.count().label("total"),
-            func.coalesce(func.sum(case((Member.balance == 1, 1), else_=0)), 0).label("b1"),
-            func.coalesce(func.sum(case((Member.balance == threshold, 1), else_=0)), 0).label("bt"),
+            func.coalesce(func.sum(case((has_one, 1), else_=0)), 0).label("b1"),
+            func.coalesce(
+                func.sum(case((and_(has_threshold_hit, ~has_one), 1), else_=0)),
+                0,
+            ).label("bt"),
         )
         .select_from(Member)
+        .outerjoin(
+            dinner_state,
+            and_(
+                dinner_state.member_id == Member.id,
+                dinner_state.meal_period == MealPeriod.DINNER.value,
+            ),
+        )
         .where(Member.deleted_at.is_(None), _member_archive_scope(), Member.store_id == int(store_id))
         .where(_member_renew_pending_scope(threshold=threshold))
     ).one()

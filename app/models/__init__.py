@@ -10,6 +10,8 @@ from app.models.store import Store
 from app.models.balance_log import BalanceLog
 from app.models.courier import Courier
 from app.models.menu_dish import MenuDish
+from app.models.prep_ingredient import PrepIngredient
+from app.models.dish_prep_sop_line import DishPrepSopLine
 from app.models.menu_schedule import MenuSchedule
 from app.models.product_category import ProductCategory
 from app.models.weekly_menu_slot import WeeklyMenuSlot
@@ -56,6 +58,8 @@ __all__ = [
     "BalanceLog",
     "Courier",
     "MenuDish",
+    "PrepIngredient",
+    "DishPrepSopLine",
     "MenuSchedule",
     "ProductCategory",
     "WeeklyMenuSlot",

@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from app.api import admin, admin_catalog, admin_couriers, admin_douyin, admin_gift_coupon, admin_marketing, admin_member_import, admin_print, admin_regions, admin_retail_orders, admin_system, admin_uploads, catalog, courier, douyin_spi_notify, douyin_webhook_notify, home, menu, sf_open_notify, tenant, user, user_douyin, user_retail_orders, wechat_pay, wx_open_notify
+from app.api import admin, admin_catalog, admin_couriers, admin_douyin, admin_gift_coupon, admin_marketing, admin_member_import, admin_prep_menu, admin_print, admin_regions, admin_retail_orders, admin_system, admin_uploads, catalog, courier, douyin_spi_notify, douyin_webhook_notify, home, menu, sf_open_notify, tenant, user, user_douyin, user_retail_orders, wechat_pay, wx_open_notify
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.db.session import SessionLocal, engine
@@ -18,6 +18,7 @@ from app.db.schema_patches import (
     ensure_member_address_usage_schema,
     ensure_members_pause_effective_date_schema,
     ensure_dinner_gift_schema,
+    ensure_prep_menu_schema,
     ensure_store_sf_merge_same_address_push_schema,
 )
 from app.jobs.scheduler import setup_scheduler, shutdown_scheduler
@@ -109,6 +110,10 @@ async def lifespan(app: FastAPI):
         ensure_dinner_gift_schema(engine)
     except Exception:
         logger.warning("晚餐暂停与开卡赠送列补丁失败（不影响启动）", exc_info=True)
+    try:
+        ensure_prep_menu_schema(engine)
+    except Exception:
+        logger.warning("开菜单表补丁失败（不影响启动）", exc_info=True)
     setup_scheduler()
     _prewarm()
     yield
@@ -153,6 +158,7 @@ app.include_router(admin_regions.router, prefix="/api")
 app.include_router(admin_uploads.router, prefix="/api")
 app.include_router(admin_member_import.router, prefix="/api")
 app.include_router(admin_print.router, prefix="/api")
+app.include_router(admin_prep_menu.router, prefix="/api")
 
 static_root = settings.upload_dir_resolved
 static_root.mkdir(parents=True, exist_ok=True)
