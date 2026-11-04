@@ -44,6 +44,12 @@ const MemberCouponGrantsView = () => import('../views/marketing/MemberCouponGran
 const GiftCouponsView = () => import('../views/marketing/GiftCouponsView.vue')
 const DouyinProductMappingsView = () => import('../views/marketing/douyin/DouyinProductMappingsView.vue')
 const DouyinRedemptionsView = () => import('../views/marketing/douyin/DouyinRedemptionsView.vue')
+const PackagingSkuView = () => import('../views/packaging/PackagingSkuView.vue')
+const PackagingDishRecipeView = () => import('../views/packaging/PackagingDishRecipeView.vue')
+const PackagingStandardView = () => import('../views/packaging/PackagingStandardView.vue')
+const PackagingStockView = () => import('../views/packaging/PackagingStockView.vue')
+const PackagingLedgerView = () => import('../views/packaging/PackagingLedgerView.vue')
+const PackagingStocktakeView = () => import('../views/packaging/PackagingStocktakeView.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -216,6 +222,42 @@ const router = createRouter({
           name: 'weekly-menu',
           component: WeeklyMenuView,
           meta: { title: '本周菜单', fullAdminOnly: true, hidePageTitle: true },
+        },
+        {
+          path: 'packaging/skus',
+          name: 'packaging-skus',
+          component: PackagingSkuView,
+          meta: { title: '库存品类管理', fullAdminOnly: true },
+        },
+        {
+          path: 'packaging/dish-boxes',
+          name: 'packaging-dish-boxes',
+          component: PackagingDishRecipeView,
+          meta: { title: '菜品用盒', fullAdminOnly: true },
+        },
+        {
+          path: 'packaging/standard',
+          name: 'packaging-standard',
+          component: PackagingStandardView,
+          meta: { title: '每份标配', fullAdminOnly: true },
+        },
+        {
+          path: 'packaging/stock',
+          name: 'packaging-stock',
+          component: PackagingStockView,
+          meta: { title: '库存结存', fullAdminOnly: true },
+        },
+        {
+          path: 'packaging/ledger',
+          name: 'packaging-ledger',
+          component: PackagingLedgerView,
+          meta: { title: '库存流水', fullAdminOnly: true },
+        },
+        {
+          path: 'packaging/stocktake',
+          name: 'packaging-stocktake',
+          component: PackagingStocktakeView,
+          meta: { title: '库存校对', fullAdminOnly: true },
         },
         {
           path: 'menu/retail-catalog',

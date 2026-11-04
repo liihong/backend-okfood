@@ -314,6 +314,20 @@ def add_cron_jobs(sched) -> None:
         max_instances=1,
         coalesce=True,
     )
+    # 包装耗材：当天午餐和晚餐都在这一次里扣。漏跑只补昨天，逻辑在 packaging_consume。
+    from app.jobs.packaging_consume import job_packaging_daily_consume
+
+    sched.add_job(
+        job_packaging_daily_consume,
+        "cron",
+        hour=22,
+        minute=0,
+        id="packaging_daily_consume",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=6 * 3600,
+    )
 
 
 def setup_scheduler() -> None:

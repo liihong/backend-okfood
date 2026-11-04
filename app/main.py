@@ -10,9 +10,11 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.api import admin, admin_catalog, admin_couriers, admin_douyin, admin_gift_coupon, admin_marketing, admin_member_import, admin_prep_menu, admin_print, admin_regions, admin_retail_orders, admin_system, admin_uploads, catalog, courier, douyin_spi_notify, douyin_webhook_notify, home, menu, sf_open_notify, tenant, user, user_douyin, user_retail_orders, wechat_pay, wx_open_notify
+from app.api.packaging import router as packaging_router
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.db.session import SessionLocal, engine
+from app.db.packaging_schema import ensure_packaging_schema
 from app.db.schema_patches import (
     apply_address_usage_data_backfill,
     ensure_member_address_usage_schema,
@@ -114,6 +116,10 @@ async def lifespan(app: FastAPI):
         ensure_prep_menu_schema(engine)
     except Exception:
         logger.warning("开菜单表补丁失败（不影响启动）", exc_info=True)
+    try:
+        ensure_packaging_schema(engine)
+    except Exception:
+        logger.warning("包装耗材表补丁失败（不影响启动）", exc_info=True)
     setup_scheduler()
     _prewarm()
     yield
@@ -159,6 +165,7 @@ app.include_router(admin_uploads.router, prefix="/api")
 app.include_router(admin_member_import.router, prefix="/api")
 app.include_router(admin_print.router, prefix="/api")
 app.include_router(admin_prep_menu.router, prefix="/api")
+app.include_router(packaging_router, prefix="/api")
 
 static_root = settings.upload_dir_resolved
 static_root.mkdir(parents=True, exist_ok=True)

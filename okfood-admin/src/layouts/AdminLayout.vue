@@ -21,6 +21,7 @@ import {
   UserCircle,
   Building2,
   Boxes,
+  Warehouse,
   MapPinned,
   Activity,
   Megaphone,
@@ -152,6 +153,11 @@ function parseCardOrderIdFromNotification(item) {
   return null
 }
 
+function goPackagingStock() {
+  notificationPopoverVisible.value = false
+  router.push({ path: '/packaging/stock' })
+}
+
 function goCardOrders(item) {
   notificationPopoverVisible.value = false
   const oid = parseCardOrderIdFromNotification(item)
@@ -273,6 +279,12 @@ const TAB_ROUTE_ICONS = {
   finance: DollarSign,
   menu: Utensils,
   'weekly-menu': Utensils,
+  'packaging-skus': Warehouse,
+  'packaging-dish-boxes': Warehouse,
+  'packaging-standard': Warehouse,
+  'packaging-stock': Warehouse,
+  'packaging-ledger': Warehouse,
+  'packaging-stocktake': Warehouse,
   'menu-retail-catalog': Boxes,
   'store-config': Settings,
   'system-tenants': Building2,
@@ -554,6 +566,21 @@ function onTabClose(tab) {
           <el-menu-item index="/menu/retail-catalog">普通商品管理</el-menu-item>
         </el-sub-menu>
 
+        <el-sub-menu v-if="showFullAdminMenus" index="sub-packaging">
+          <template #title>
+            <div class="menu-item-inner">
+              <Warehouse :size="20" stroke-width="2" />
+              <span class="menu-item-label">库存管理</span>
+            </div>
+          </template>
+          <el-menu-item index="/packaging/skus">库存品类管理</el-menu-item>
+          <el-menu-item index="/packaging/dish-boxes">菜品用盒</el-menu-item>
+          <el-menu-item index="/packaging/standard">每份标配</el-menu-item>
+          <el-menu-item index="/packaging/stock">库存结存</el-menu-item>
+          <el-menu-item index="/packaging/ledger">库存流水</el-menu-item>
+          <el-menu-item index="/packaging/stocktake">库存校对</el-menu-item>
+        </el-sub-menu>
+
         <el-sub-menu v-if="showFullAdminMenus" index="sub-marketing">
           <template #title>
             <div class="menu-item-inner">
@@ -715,6 +742,14 @@ function onTabClose(tab) {
                       @click="goCardOrders(item)"
                     >
                       去开卡工单审批
+                    </el-button>
+                    <el-button
+                      v-if="item.kind === 'packaging_low_stock'"
+                      size="small"
+                      class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
+                      @click="goPackagingStock()"
+                    >
+                      去库存结存
                     </el-button>
                     <el-button
                       v-if="item.kind === KIND_PENDING_MEAL_UNITS"

@@ -1360,6 +1360,20 @@ def _validate_dish_leaf_category(
     return int(cat.id)
 
 
+def _attach_default_packaging_utensils(db: Session, *, store_id: int, dish_id: int) -> None:
+    """新菜默认一双筷子、一个小勺。失败不影响菜品本身已保存。打包袋由每餐自动扣，不写在这里。"""
+    import logging
+
+    try:
+        from app.services.packaging.preset_service import apply_default_utensils_to_new_dish
+
+        apply_default_utensils_to_new_dish(db, store_id=store_id, dish_id=dish_id)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "新菜品默认餐具写入失败 dish_id=%s", dish_id, exc_info=True
+        )
+
+
 def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminOut:
     sid = int(store_id)
     meat_category_id = _validate_dish_leaf_category(
@@ -1403,8 +1417,11 @@ def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminO
             internal_view_sop=body.internal_view_sop,
         )
         db.add(row)
+    is_new_dish = body.id is None
     db.commit()
     db.refresh(row)
+    if is_new_dish:
+        _attach_default_packaging_utensils(db, store_id=sid, dish_id=int(row.id))
     return _dish_admin_out_from_row(row, include_sop=True)
 
 
@@ -1844,6 +1861,20 @@ def admin_weekly_menu_preview(
     }
 
 
+def _copy_packaging_boxes_after_dish_change(db: Session, *, slot_id: int, store_id: int) -> None:
+    """换菜后的用盒同步。包装模块异常不能让周菜单保存失败。"""
+    import logging
+
+    try:
+        from app.services.packaging.recipe_service import copy_dish_defaults_onto_slot
+
+        copy_dish_defaults_onto_slot(db, slot_id=slot_id, store_id=store_id)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "换菜后同步用盒失败 slot_id=%s", slot_id, exc_info=True
+        )
+
+
 def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: int) -> None:
     from app.services.meal_period.normalize import normalize_meal_period
 
@@ -1875,21 +1906,25 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: 
             WeeklyMenuSlot.meal_period == period,
         )
     )
+    dish_changed = row is None or int(row.dish_id) != int(body.dish_id)
+    slot_id: int | None = None
     try:
         if row:
             if int(row.dish_id) != int(body.dish_id):
                 row.total_stock = None
             row.dish_id = body.dish_id
+            slot_id = int(row.id)
         else:
-            db.add(
-                WeeklyMenuSlot(
-                    store_id=sid,
-                    week_start=anchor,
-                    slot=body.slot,
-                    meal_period=period,
-                    dish_id=body.dish_id,
-                )
+            created = WeeklyMenuSlot(
+                store_id=sid,
+                week_start=anchor,
+                slot=body.slot,
+                meal_period=period,
+                dish_id=body.dish_id,
             )
+            db.add(created)
+            db.flush()
+            slot_id = int(created.id)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -1897,6 +1932,9 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: 
             status_code=409,
             detail="保存周菜单槽位失败：数据冲突（例如槽位或关联约束）",
         )
+    # 只有换了菜才抄默认用盒。失败不影响已经保存的周菜单。
+    if dish_changed and slot_id is not None:
+        _copy_packaging_boxes_after_dish_change(db, slot_id=slot_id, store_id=sid)
 
 
 def set_weekly_slot_menu_total_stock(db: Session, body: MenuDayTotalStockIn, *, store_id: int):

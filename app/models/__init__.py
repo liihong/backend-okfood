@@ -44,6 +44,13 @@ from app.models.home_banner import HomeBanner
 from app.models.home_entry_poster import HomeEntryPoster
 from app.models.gift_coupon_campaign import GiftCouponCampaign
 from app.models.gift_coupon_entitlement import GiftCouponEntitlement
+from app.models.packaging_sku import PackagingSku
+from app.models.packaging_stock import PackagingStock
+from app.models.packaging_stock_txn import PackagingStockTxn
+from app.models.packaging_dish_line import PackagingDishLine
+from app.models.packaging_slot_line import PackagingSlotLine
+from app.models.packaging_standard_line import PackagingStandardLine
+from app.models.packaging_consume_run import PackagingConsumeRun
 
 __all__ = [
     "DayStockAdjustmentLog",
@@ -92,6 +99,13 @@ __all__ = [
     "HomeEntryPoster",
     "GiftCouponCampaign",
     "GiftCouponEntitlement",
+    "PackagingSku",
+    "PackagingStock",
+    "PackagingStockTxn",
+    "PackagingDishLine",
+    "PackagingSlotLine",
+    "PackagingStandardLine",
+    "PackagingConsumeRun",
     "SfSameCityCallback",
     "SfSameCityPush",
 ]
