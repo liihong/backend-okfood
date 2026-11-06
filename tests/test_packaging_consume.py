@@ -1,6 +1,6 @@
 """包装扣库：后厨出餐含未售出，午餐和晚餐分开扣，重复跑不双扣。"""
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.db.packaging_schema import ensure_packaging_schema
+from app.jobs.packaging_consume import dates_to_consume
 from app.models.packaging_sku import PackagingSku
 from app.models.packaging_stock import PackagingStock
 from app.models.packaging_stock_txn import PackagingStockTxn
@@ -21,6 +22,33 @@ from app.services.packaging.stock_command_service import purchase_in, stocktake
 
 DAY = date(2026, 11, 4)
 STORE_ID = 1
+
+
+def test_catchup_starts_the_day_after_opening_stock() -> None:
+    """11 月 4 日下午录入的结存不再回扣当天，5 日到今天要补。"""
+    today = date(2026, 11, 6)
+    assert dates_to_consume(today, date(2026, 11, 4)) == [
+        date(2026, 11, 5),
+        date(2026, 11, 6),
+    ]
+
+
+def test_catchup_stops_at_seven_days() -> None:
+    today = date(2026, 11, 20)
+    dates = dates_to_consume(today, date(2026, 11, 1))
+    assert dates[0] == today - timedelta(days=7)
+    assert dates[-1] == today
+    assert len(dates) == 8
+
+
+def test_opening_day_still_runs_that_night() -> None:
+    today = date(2026, 11, 4)
+    assert dates_to_consume(today, today) == [today]
+
+
+def test_no_stock_yet_still_checks_yesterday_and_today() -> None:
+    today = date(2026, 11, 6)
+    assert dates_to_consume(today, None) == [date(2026, 11, 5), today]
 
 
 def test_kitchen_output_keeps_unsold_packages() -> None:

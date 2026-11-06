@@ -314,7 +314,7 @@ def add_cron_jobs(sched) -> None:
         max_instances=1,
         coalesce=True,
     )
-    # 包装耗材：当天午餐和晚餐都在这一次里扣。漏跑只补昨天，逻辑在 packaging_consume。
+    # 包装耗材：当天午餐和晚餐都在这一次里扣。漏跑从入库次日补到今天，最多 7 天。
     from app.jobs.packaging_consume import job_packaging_daily_consume
 
     sched.add_job(
