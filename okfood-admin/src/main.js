@@ -23,7 +23,7 @@ function readInitialAdminTheme() {
   } catch {
     /* ignore */
   }
-  return 'primary-peach'
+  return 'primary-iris'
 }
 
 if (typeof document !== 'undefined') {

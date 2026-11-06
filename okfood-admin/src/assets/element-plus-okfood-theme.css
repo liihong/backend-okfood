@@ -1,5 +1,5 @@
 /*
-  Element Plus 主题：三套主色（蜜桃珊瑚默认 / 莫吉托 / 雾紫）
+  Element Plus 主题：三套主色（蜜桃珊瑚 / 莫吉托 / 雾紫默认）
   由 document.documentElement[data-admin-theme] 切换；见 src/main.js、layouts/AdminLayout.vue
 */
 :root {
@@ -76,9 +76,8 @@
   --okfood-sidebar-child-hover-bg: rgba(232, 146, 124, 0.06);
 }
 
-/* —— 蜜桃珊瑚（默认） —— */
-html[data-admin-theme='primary-peach'],
-html:not([data-admin-theme]) {
+/* —— 蜜桃珊瑚 —— */
+html[data-admin-theme='primary-peach'] {
   --el-color-primary: #e8927c;
   --el-color-primary-rgb: 232, 146, 124;
   --el-color-primary-light-3: #f0a898;
@@ -143,8 +142,9 @@ html[data-admin-theme='primary-mojito'] {
   --okfood-sidebar-child-hover-bg: rgba(92, 191, 142, 0.06);
 }
 
-/* —— 雾紫 —— */
-html[data-admin-theme='primary-iris'] {
+/* —— 雾紫（默认） —— */
+html[data-admin-theme='primary-iris'],
+html:not([data-admin-theme]) {
   --el-color-primary: #8b7ec8;
   --el-color-primary-rgb: 139, 126, 200;
   --el-color-primary-light-3: #a599d4;

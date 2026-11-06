@@ -56,7 +56,7 @@ import OkfoodNavFruitIcon from '../components/OkfoodNavFruitIcon.vue'
 
 /** 桌面侧栏收起状态本地持久化键 */
 const SIDEBAR_COLLAPSED_KEY = 'okfood-admin-sidebar-collapsed'
-/** 三套主色（蜜桃珊瑚默认），与 design 预览、`element-plus-okfood-theme.css` 中 html[data-admin-theme] 对齐 */
+/** 三套主色（雾紫默认），与 design 预览、`element-plus-okfood-theme.css` 中 html[data-admin-theme] 对齐 */
 const ADMIN_THEME_STORAGE_KEY = 'okfood-admin-primary-theme'
 const ADMIN_THEME_VALID = ['primary-peach', 'primary-mojito', 'primary-iris']
 /** 用户菜单内「主题色」三级项（与 localStorage / data-admin-theme 同步） */
@@ -66,7 +66,7 @@ const ADMIN_THEME_MENU_OPTIONS = [
   { value: 'primary-iris', label: '雾紫' },
 ]
 
-const activeAdminTheme = ref('primary-peach')
+const activeAdminTheme = ref('primary-iris')
 
 const route = useRoute()
 const router = useRouter()
@@ -346,7 +346,7 @@ const adminNavbarAvatarChar = computed(() => {
 
 /** 将当前主题写入 :root，驱动 CSS 变量（见 element-plus-okfood-theme.css） */
 function applyAdminTheme(theme) {
-  const t = ADMIN_THEME_VALID.includes(theme) ? theme : 'primary-peach'
+  const t = ADMIN_THEME_VALID.includes(theme) ? theme : 'primary-iris'
   activeAdminTheme.value = t
   try {
     document.documentElement.setAttribute('data-admin-theme', t)
@@ -438,10 +438,10 @@ onMounted(() => {
     if (saved && ADMIN_THEME_VALID.includes(saved)) {
       applyAdminTheme(saved)
     } else {
-      applyAdminTheme('primary-peach')
+      applyAdminTheme('primary-iris')
     }
   } catch {
-    applyAdminTheme('primary-peach')
+    applyAdminTheme('primary-iris')
   }
   if (showSystemNotifications.value) {
     subscribeLayoutPolling()

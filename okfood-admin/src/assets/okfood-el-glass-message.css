@@ -4,7 +4,7 @@
  */
 .el-message {
   display: flex !important;
-  align-items: flex-start !important;
+  align-items: center !important;
   gap: 14px !important;
   min-width: 0 !important;
   max-width: min(92vw, 26rem) !important;

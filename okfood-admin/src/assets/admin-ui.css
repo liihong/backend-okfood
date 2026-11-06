@@ -7,7 +7,7 @@
   transform: translateX(-50%);
   max-width: min(92vw, 26rem);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 14px;
   padding: 16px 18px;
   pointer-events: none;
@@ -4083,13 +4083,16 @@ html.okfood-admin-shell body {
 }
 
 @media (max-width: 900px) {
-  /* 窄屏默认侧栏收起为图标栏（与桌面 .sidebar--collapsed 一致），保持 fixed 占位，为主区留出宽度 */
-  .sidebar {
-    padding: 1.25rem 0.85rem;
+  /* 手机：左侧菜单保持显示，菜单贴左 10px，菜单与主区之间再留 10px */
+  .sidebar.sidebar--collapsed {
+    margin-left: 10px;
   }
-  .main-body {
-    padding: 1rem var(--okfood-admin-gutter);
+
+  .admin-layout.admin-layout--sidebar-collapsed .main-body {
+    margin-left: calc(64px + 10px + 10px);
+    padding-left: 0;
   }
+
   .form-row {
     grid-template-columns: 1fr;
   }
