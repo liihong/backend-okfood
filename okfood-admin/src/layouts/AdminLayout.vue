@@ -12,6 +12,7 @@ import {
   Package,
   ChevronsLeft,
   ChevronsRight,
+  ChevronDown,
   PieChart,
   Settings,
   X,
@@ -51,9 +52,21 @@ import { useAdminSystemNotifications } from '../composables/useAdminSystemNotifi
 import { useShanghaiLiveClock } from '../composables/useShanghaiLiveClock.js'
 import { useToast } from '../composables/useToast.js'
 import { resolveNotificationDeliveryDate } from '../utils/systemNotificationNav.js'
+import OkfoodNavFruitIcon from '../components/OkfoodNavFruitIcon.vue'
 
 /** 桌面侧栏收起状态本地持久化键 */
 const SIDEBAR_COLLAPSED_KEY = 'okfood-admin-sidebar-collapsed'
+/** 三套主色（蜜桃珊瑚默认），与 design 预览、`element-plus-okfood-theme.css` 中 html[data-admin-theme] 对齐 */
+const ADMIN_THEME_STORAGE_KEY = 'okfood-admin-primary-theme'
+const ADMIN_THEME_VALID = ['primary-peach', 'primary-mojito', 'primary-iris']
+/** 用户菜单内「主题色」三级项（与 localStorage / data-admin-theme 同步） */
+const ADMIN_THEME_MENU_OPTIONS = [
+  { value: 'primary-peach', label: '蜜桃珊瑚' },
+  { value: 'primary-mojito', label: '莫吉托' },
+  { value: 'primary-iris', label: '雾紫' },
+]
+
+const activeAdminTheme = ref('primary-peach')
 
 const route = useRoute()
 const router = useRouter()
@@ -331,14 +344,56 @@ const adminNavbarAvatarChar = computed(() => {
   return /[a-z]/i.test(ch) ? ch.toUpperCase() : ch
 })
 
+/** 将当前主题写入 :root，驱动 CSS 变量（见 element-plus-okfood-theme.css） */
+function applyAdminTheme(theme) {
+  const t = ADMIN_THEME_VALID.includes(theme) ? theme : 'primary-peach'
+  activeAdminTheme.value = t
+  try {
+    document.documentElement.setAttribute('data-admin-theme', t)
+  } catch {
+    /* ignore */
+  }
+  try {
+    localStorage.setItem(ADMIN_THEME_STORAGE_KEY, t)
+  } catch {
+    /* ignore */
+  }
+}
+
 function onUserMenuCommand(command) {
+  if (command === 'primary-peach' || command === 'primary-mojito' || command === 'primary-iris') {
+    applyAdminTheme(command)
+    const labels = {
+      'primary-peach': '蜜桃珊瑚',
+      'primary-mojito': '莫吉托',
+      'primary-iris': '雾紫',
+    }
+    showToast(`已切换主题：${labels[command] || command}`, 'success')
+    return
+  }
   if (command === 'logout') {
     handleAdminLogout()
     return
   }
   if (command === 'password') {
     /** 修改密码：后续再接接口与安全流程 */
-    showToast('修改密码功能开发中', 'info')
+    showToast('修改密码功能开发中', 'info', { description: '后续再接接口与安全流程' })
+    return
+  }
+  if (command === 'system-settings') {
+    if (showOwnerAdminMenus.value) {
+      router.push({ name: 'store-config' })
+      return
+    }
+    if (showSystemAdminMenus.value) {
+      router.push({ name: 'system-tenants' })
+      return
+    }
+    if (isDeliveryOnly.value) {
+      router.push({ path: '/delivery' })
+      return
+    }
+    showToast('当前账号无系统设置入口', 'info', { description: '店主可从门店配置进入；平台从租户管理进入。' })
     return
   }
 }
@@ -378,6 +433,16 @@ function toggleSidebar() {
 
 onMounted(() => {
   hydrateTokenFromStorage()
+  try {
+    const saved = localStorage.getItem(ADMIN_THEME_STORAGE_KEY)
+    if (saved && ADMIN_THEME_VALID.includes(saved)) {
+      applyAdminTheme(saved)
+    } else {
+      applyAdminTheme('primary-peach')
+    }
+  } catch {
+    applyAdminTheme('primary-peach')
+  }
   if (showSystemNotifications.value) {
     subscribeLayoutPolling()
   }
@@ -456,24 +521,31 @@ function onTabClose(tab) {
 
 <template>
   <div class="admin-layout" :class="{ 'admin-layout--sidebar-collapsed': sidebarCollapsed }">
-    <aside class="sidebar" :class="{ 'sidebar--collapsed': sidebarCollapsed }">
-      <div class="logo-area">
-        <div
-          class="logo-box"
-          :class="{ 'logo-box--image': !sidebarUsesDefaultLogo }"
-          aria-hidden="true"
-        >
-          <img
-            v-if="!sidebarUsesDefaultLogo"
-            :src="sidebarStoreLogoUrl"
-            alt=""
-            class="logo-box__img"
-          />
-          <span v-else class="logo-box__text">OK</span>
-        </div>
-        <div v-show="!sidebarCollapsed" class="logo-text">
-          <h1 :title="sidebarStoreName">{{ sidebarStoreName }}</h1>
-          <span>{{ portalSubtitle }}</span>
+    <div class="admin-bg-mesh" aria-hidden="true" />
+    <!-- 全宽通条顶栏：品牌/折叠在左，标签居中，铃铛/时钟/用户在右；侧栏仅保留菜单，顶部与之对齐 -->
+    <header class="admin-top-tab-bar">
+      <div class="admin-top-tab-bar__brand">
+        <div class="admin-top-tab-bar__brand-lockup">
+          <div
+            class="logo-box"
+            :class="{
+              'logo-box--image': !sidebarUsesDefaultLogo,
+              'logo-box--fruit-fallback': sidebarUsesDefaultLogo,
+            }"
+            aria-hidden="true"
+          >
+            <img
+              v-if="!sidebarUsesDefaultLogo"
+              :src="sidebarStoreLogoUrl"
+              alt=""
+              class="logo-box__img"
+            />
+            <OkfoodNavFruitIcon v-else fruit="blueberry" title="品牌占位 · 蓝莓" />
+          </div>
+          <div v-show="!sidebarCollapsed" class="logo-text">
+            <h1 :title="sidebarStoreName">{{ sidebarStoreName }}</h1>
+            <span>{{ portalSubtitle }}</span>
+          </div>
         </div>
         <button
           type="button"
@@ -487,6 +559,198 @@ function onTabClose(tab) {
         </button>
       </div>
 
+      <nav v-if="openedTabs.length" class="admin-page-tabs" aria-label="已打开页面">
+        <div class="admin-page-tabs__scroll custom-scrollbar admin-page-tabs__scroll--top-bar">
+          <div
+            v-for="tab in openedTabs"
+            :key="tab.name"
+            role="tab"
+            tabindex="0"
+            class="admin-page-tab"
+            :class="{ 'admin-page-tab--active': activeTabName === tab.name }"
+            :aria-selected="activeTabName === tab.name"
+            @click="onTabClick(tab)"
+            @keydown.enter="onTabClick(tab)"
+          >
+            <component
+              :is="tabLeadingIcon(tab.name)"
+              v-if="tabLeadingIcon(tab.name)"
+              class="admin-page-tab__icon"
+              :size="16"
+              stroke-width="2.25"
+            />
+            <span class="admin-page-tab__label">{{ tab.title }}</span>
+            <button
+              v-if="openedTabs.length > 1"
+              type="button"
+              class="admin-page-tab__close"
+              aria-label="关闭"
+              @click.stop="onTabClose(tab)"
+            >
+              <X :size="14" stroke-width="2" />
+            </button>
+          </div>
+        </div>
+      </nav>
+      <div v-else class="admin-top-tab-bar__tabs-spacer" aria-hidden="true" />
+
+      <div class="admin-top-tab-bar__trailing">
+        <el-popover
+          v-if="showSystemNotifications"
+          v-model:visible="notificationPopoverVisible"
+          placement="bottom-end"
+          :width="400"
+          trigger="click"
+          popper-class="admin-system-notifications-popover"
+        >
+          <template #reference>
+            <button
+              type="button"
+              class="admin-notifications-bell"
+              :class="{ 'admin-notifications-bell--active': hasUnread }"
+              aria-label="系统消息"
+            >
+              <Bell :size="20" stroke-width="2" />
+              <span
+                v-if="hasUnread"
+                class="admin-notifications-badge"
+                aria-hidden="true"
+              >{{ notificationBadgeText }}</span>
+            </button>
+          </template>
+
+          <div class="admin-system-notifications-panel">
+            <div class="admin-system-notifications-panel__head">
+              <strong>系统消息</strong>
+              <span v-if="hasUnread" class="admin-system-notifications-panel__count">
+                {{ unacknowledgedCount }} 条待确认
+              </span>
+            </div>
+
+            <div v-if="notificationsLoading && unreadItems.length === 0" class="admin-system-notifications-empty">
+              加载中…
+            </div>
+            <div v-else-if="unreadItems.length === 0" class="admin-system-notifications-empty">
+              暂无待确认消息
+            </div>
+            <ul v-else class="admin-system-notifications-list">
+              <li
+                v-for="item in unreadItems"
+                :key="item.id"
+                class="admin-system-notifications-item"
+              >
+                <p
+                  class="admin-system-notifications-item__title"
+                  :class="{ 'admin-system-notifications-item__title--action': item.kind === KIND_PENDING_MEAL_UNITS }"
+                  @click="item.kind === KIND_PENDING_MEAL_UNITS && openPendingMealUnitsDialog(item)"
+                >{{ item.title }}</p>
+                <p
+                  class="admin-system-notifications-item__message"
+                  :class="{ 'admin-system-notifications-item__message--action': item.kind === KIND_PENDING_MEAL_UNITS }"
+                  @click="item.kind === KIND_PENDING_MEAL_UNITS && openPendingMealUnitsDialog(item)"
+                >{{ item.message }}</p>
+                <ul
+                  v-if="Array.isArray(item.failure_details) && item.failure_details.length"
+                  class="admin-system-notifications-item__failures"
+                >
+                  <li
+                    v-for="(line, idx) in item.failure_details"
+                    :key="`${item.id}-fail-${idx}`"
+                  >
+                    {{ line }}
+                  </li>
+                </ul>
+                <div class="admin-system-notifications-item__actions">
+                  <el-button
+                    v-if="(item.kind === 'sf_nightly_push' || item.kind === 'sf_push_batch') && !item.skip_reason"
+                    size="small"
+                    class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
+                    @click="goSfMonitor(item)"
+                  >
+                    {{ Number(item.failed) > 0 ? '查看失败明细' : '查看详情' }}
+                  </el-button>
+                  <el-button
+                    v-if="item.kind === 'single_meal_order_paid'"
+                    size="small"
+                    class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
+                    @click="goOrdersManage(item)"
+                  >
+                    去订单管理
+                  </el-button>
+                  <el-button
+                    v-if="item.kind === 'miniprogram_card_order_pending'"
+                    size="small"
+                    class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
+                    @click="goCardOrders(item)"
+                  >
+                    去开卡工单审批
+                  </el-button>
+                  <el-button
+                    v-if="item.kind === 'packaging_low_stock'"
+                    size="small"
+                    class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
+                    @click="goPackagingStock()"
+                  >
+                    去库存结存
+                  </el-button>
+                  <el-button
+                    v-if="item.kind === KIND_PENDING_MEAL_UNITS"
+                    size="small"
+                    class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
+                    @click="openPendingMealUnitsDialog(item)"
+                  >
+                    手动落库
+                  </el-button>
+                  <el-button
+                    size="small"
+                    class="admin-notifications-action-btn admin-notifications-action-btn--primary"
+                    :loading="acknowledgingId === item.id"
+                    @click="onAcknowledgeNotification(item)"
+                  >
+                    确认
+                  </el-button>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </el-popover>
+
+        <div class="admin-header-live-clock" aria-live="polite">
+          <span class="admin-header-live-clock__hm">{{ liveClockHm }}</span>
+          <span class="admin-header-live-clock__date">{{ liveClockDate }}</span>
+        </div>
+
+        <el-dropdown trigger="click" placement="bottom-end" popper-class="okfood-user-account-dropdown" @command="onUserMenuCommand">
+          <button type="button" class="admin-user-menu-trigger" aria-haspopup="menu" aria-label="账户菜单">
+            <span class="admin-user-avatar" aria-hidden="true">{{ adminNavbarAvatarChar }}</span>
+            <span class="admin-user-name">{{ adminNavbarDisplayName }}</span>
+            <ChevronDown class="admin-user-menu-chevron" :size="14" stroke-width="2.25" aria-hidden="true" />
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <!-- 主题色：同一面板内三级项（缩进），不再使用嵌套 ElDropdown 侧向浮层 -->
+              <el-dropdown-item disabled class="okfood-user-menu-theme-group-label">
+                主题色
+              </el-dropdown-item>
+              <el-dropdown-item
+                v-for="opt in ADMIN_THEME_MENU_OPTIONS"
+                :key="opt.value"
+                :command="opt.value"
+                class="okfood-user-menu-theme-sublink"
+                :class="{ 'okfood-user-menu-theme-sublink--active': activeAdminTheme === opt.value }"
+              >
+                {{ opt.label }}
+              </el-dropdown-item>
+              <el-dropdown-item command="system-settings" divided>系统设置</el-dropdown-item>
+              <el-dropdown-item command="password">修改密码</el-dropdown-item>
+              <el-dropdown-item command="logout">退出登录</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </div>
+    </header>
+
+    <aside class="sidebar" :class="{ 'sidebar--collapsed': sidebarCollapsed }">
       <el-menu
         :key="adminKind"
         class="sidebar-menu"
@@ -496,32 +760,30 @@ function onTabClose(tab) {
         :ellipsis="false"
         popper-class="okfood-sidebar-menu-popup"
         background-color="transparent"
-        text-color="rgba(255, 255, 255, 0.75)"
-        active-text-color="#ffffff"
       >
         <el-menu-item v-if="showFullAdminMenus" index="/dashboard">
           <!-- 外层必须用 div：el-menu--collapse 会把 >span 设为 width:0 隐藏，连图标一起没了 -->
           <div class="menu-item-inner">
-            <BarChart3 :size="20" stroke-width="2" />
+            <OkfoodNavFruitIcon fruit="blueberry" title="蓝莓 · 营业概览" />
             <span class="menu-item-label">营业概览</span>
           </div>
         </el-menu-item>
         <el-menu-item v-if="showFullAdminMenus" index="/users">
           <div class="menu-item-inner">
-            <Users :size="20" stroke-width="2" />
+            <OkfoodNavFruitIcon fruit="pomegranate" title="石榴 · 会员档案" />
             <span class="menu-item-label">会员档案</span>
           </div>
         </el-menu-item>
         <el-menu-item v-if="showFullAdminMenus" index="/card-orders">
           <div class="menu-item-inner">
-            <ClipboardList :size="20" stroke-width="2" />
+            <OkfoodNavFruitIcon fruit="cherry" title="樱桃 · 开卡工单" />
             <span class="menu-item-label">开卡工单</span>
           </div>
         </el-menu-item>
         <el-sub-menu v-if="showFullAdminMenus" index="sub-orders">
           <template #title>
             <div class="menu-item-inner">
-              <Package :size="20" stroke-width="2" />
+              <OkfoodNavFruitIcon fruit="banana" title="香蕉 · 订单管理" />
               <span class="menu-item-label">订单管理</span>
             </div>
           </template>
@@ -532,7 +794,7 @@ function onTabClose(tab) {
         <el-sub-menu index="sub-delivery">
           <template #title>
             <div class="menu-item-inner">
-              <MapPin :size="20" stroke-width="2" />
+              <OkfoodNavFruitIcon fruit="pitaya" title="火龙果 · 配送管理" />
               <span class="menu-item-label">配送管理</span>
             </div>
           </template>
@@ -546,7 +808,7 @@ function onTabClose(tab) {
         <el-sub-menu v-if="showFullAdminMenus" index="sub-stats">
           <template #title>
             <div class="menu-item-inner">
-              <PieChart :size="20" stroke-width="2" />
+              <OkfoodNavFruitIcon fruit="pear" title="梨 · 数据统计" />
               <span class="menu-item-label">数据统计</span>
             </div>
           </template>
@@ -557,7 +819,7 @@ function onTabClose(tab) {
         <el-sub-menu v-if="showFullAdminMenus" index="sub-menu-mgmt">
           <template #title>
             <div class="menu-item-inner">
-              <Utensils :size="20" stroke-width="2" />
+              <OkfoodNavFruitIcon fruit="apple" title="苹果 · 菜单管理" />
               <span class="menu-item-label">菜单管理</span>
             </div>
           </template>
@@ -569,7 +831,7 @@ function onTabClose(tab) {
         <el-sub-menu v-if="showFullAdminMenus" index="sub-packaging">
           <template #title>
             <div class="menu-item-inner">
-              <Warehouse :size="20" stroke-width="2" />
+              <OkfoodNavFruitIcon fruit="orange" title="橘子 · 库存管理" />
               <span class="menu-item-label">库存管理</span>
             </div>
           </template>
@@ -584,7 +846,7 @@ function onTabClose(tab) {
         <el-sub-menu v-if="showFullAdminMenus" index="sub-marketing">
           <template #title>
             <div class="menu-item-inner">
-              <Megaphone :size="20" stroke-width="2" />
+              <OkfoodNavFruitIcon fruit="bayberry" title="杨梅 · 小程序营销" />
               <span class="menu-item-label">小程序营销</span>
             </div>
           </template>
@@ -601,7 +863,7 @@ function onTabClose(tab) {
         <el-sub-menu v-if="showOwnerAdminMenus || showSystemAdminMenus" index="sub-system">
           <template #title>
             <div class="menu-item-inner">
-              <Settings :size="20" stroke-width="2" />
+              <OkfoodNavFruitIcon fruit="mangosteen" title="山竹 · 系统管理" />
               <span class="menu-item-label">系统管理</span>
             </div>
           </template>
@@ -616,183 +878,6 @@ function onTabClose(tab) {
     </aside>
 
     <main class="main-body">
-      <!-- 顶栏标签 + 右侧系统消息铃铛（参考稿 top-tab-scroller） -->
-      <div v-if="openedTabs.length" class="admin-top-tab-bar">
-        <nav class="admin-page-tabs" aria-label="已打开页面">
-          <div class="admin-page-tabs__scroll custom-scrollbar admin-page-tabs__scroll--top-bar">
-            <div
-              v-for="tab in openedTabs"
-              :key="tab.name"
-              role="tab"
-              tabindex="0"
-              class="admin-page-tab"
-              :class="{ 'admin-page-tab--active': activeTabName === tab.name }"
-              :aria-selected="activeTabName === tab.name"
-              @click="onTabClick(tab)"
-              @keydown.enter="onTabClick(tab)"
-            >
-              <component
-                :is="tabLeadingIcon(tab.name)"
-                v-if="tabLeadingIcon(tab.name)"
-                class="admin-page-tab__icon"
-                :size="16"
-                stroke-width="2.25"
-              />
-              <span class="admin-page-tab__label">{{ tab.title }}</span>
-              <button
-                v-if="openedTabs.length > 1"
-                type="button"
-                class="admin-page-tab__close"
-                aria-label="关闭"
-                @click.stop="onTabClose(tab)"
-              >
-                <X :size="14" stroke-width="2" />
-              </button>
-            </div>
-          </div>
-        </nav>
-
-        <div class="admin-top-tab-bar__trailing">
-          <el-popover
-            v-if="showSystemNotifications"
-            v-model:visible="notificationPopoverVisible"
-            placement="bottom-end"
-            :width="360"
-            trigger="click"
-            popper-class="admin-system-notifications-popover"
-          >
-            <template #reference>
-              <button
-                type="button"
-                class="admin-notifications-bell"
-                :class="{ 'admin-notifications-bell--active': hasUnread }"
-                aria-label="系统消息"
-              >
-                <Bell :size="20" stroke-width="2" />
-                <span
-                  v-if="hasUnread"
-                  class="admin-notifications-badge"
-                  aria-hidden="true"
-                >{{ notificationBadgeText }}</span>
-              </button>
-            </template>
-
-            <div class="admin-system-notifications-panel">
-              <div class="admin-system-notifications-panel__head">
-                <strong>系统消息</strong>
-                <span v-if="hasUnread" class="admin-system-notifications-panel__count">
-                  {{ unacknowledgedCount }} 条待确认
-                </span>
-              </div>
-
-              <div v-if="notificationsLoading && unreadItems.length === 0" class="admin-system-notifications-empty">
-                加载中…
-              </div>
-              <div v-else-if="unreadItems.length === 0" class="admin-system-notifications-empty">
-                暂无待确认消息
-              </div>
-              <ul v-else class="admin-system-notifications-list">
-                <li
-                  v-for="item in unreadItems"
-                  :key="item.id"
-                  class="admin-system-notifications-item"
-                >
-                  <p
-                    class="admin-system-notifications-item__title"
-                    :class="{ 'admin-system-notifications-item__title--action': item.kind === KIND_PENDING_MEAL_UNITS }"
-                    @click="item.kind === KIND_PENDING_MEAL_UNITS && openPendingMealUnitsDialog(item)"
-                  >{{ item.title }}</p>
-                  <p
-                    class="admin-system-notifications-item__message"
-                    :class="{ 'admin-system-notifications-item__message--action': item.kind === KIND_PENDING_MEAL_UNITS }"
-                    @click="item.kind === KIND_PENDING_MEAL_UNITS && openPendingMealUnitsDialog(item)"
-                  >{{ item.message }}</p>
-                  <ul
-                    v-if="Array.isArray(item.failure_details) && item.failure_details.length"
-                    class="admin-system-notifications-item__failures"
-                  >
-                    <li
-                      v-for="(line, idx) in item.failure_details"
-                      :key="`${item.id}-fail-${idx}`"
-                    >
-                      {{ line }}
-                    </li>
-                  </ul>
-                  <div class="admin-system-notifications-item__actions">
-                    <el-button
-                      v-if="(item.kind === 'sf_nightly_push' || item.kind === 'sf_push_batch') && !item.skip_reason"
-                      size="small"
-                      class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
-                      @click="goSfMonitor(item)"
-                    >
-                      {{ Number(item.failed) > 0 ? '查看失败明细' : '查看详情' }}
-                    </el-button>
-                    <el-button
-                      v-if="item.kind === 'single_meal_order_paid'"
-                      size="small"
-                      class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
-                      @click="goOrdersManage(item)"
-                    >
-                      去订单管理
-                    </el-button>
-                    <el-button
-                      v-if="item.kind === 'miniprogram_card_order_pending'"
-                      size="small"
-                      class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
-                      @click="goCardOrders(item)"
-                    >
-                      去开卡工单审批
-                    </el-button>
-                    <el-button
-                      v-if="item.kind === 'packaging_low_stock'"
-                      size="small"
-                      class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
-                      @click="goPackagingStock()"
-                    >
-                      去库存结存
-                    </el-button>
-                    <el-button
-                      v-if="item.kind === KIND_PENDING_MEAL_UNITS"
-                      size="small"
-                      class="admin-notifications-action-btn admin-notifications-action-btn--secondary"
-                      @click="openPendingMealUnitsDialog(item)"
-                    >
-                      手动落库
-                    </el-button>
-                    <el-button
-                      size="small"
-                      class="admin-notifications-action-btn admin-notifications-action-btn--primary"
-                      :loading="acknowledgingId === item.id"
-                      @click="onAcknowledgeNotification(item)"
-                    >
-                      确认
-                    </el-button>
-                  </div>
-                </li>
-              </ul>
-            </div>
-          </el-popover>
-
-          <div class="admin-header-live-clock" aria-live="polite">
-            <span class="admin-header-live-clock__hm">{{ liveClockHm }}</span>
-            <span class="admin-header-live-clock__date">{{ liveClockDate }}</span>
-          </div>
-
-          <el-dropdown trigger="click" placement="bottom-end" @command="onUserMenuCommand">
-            <button type="button" class="admin-user-menu-trigger" aria-haspopup="menu" aria-label="账户菜单">
-              <span class="admin-user-avatar" aria-hidden="true">{{ adminNavbarAvatarChar }}</span>
-              <span class="admin-user-name">{{ adminNavbarDisplayName }}</span>
-            </button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="password">修改密码</el-dropdown-item>
-                <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
-      </div>
-
       <!-- Teleport：须始终在 DOM（v-show）；与顶栏分离后单独成行 -->
       <div
         v-show="isDeliveryPage"

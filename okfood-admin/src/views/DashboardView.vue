@@ -4,7 +4,7 @@ import DeliveryRegionsOverviewPanel from '../components/dashboard/DeliveryRegion
 </script>
 
 <template>
-  <section class="tab-content animate-up">
+  <section class="dashboard-view tab-content animate-up page-content-shell">
     <DeliveryRegionsOverviewPanel />
   </section>
 </template>

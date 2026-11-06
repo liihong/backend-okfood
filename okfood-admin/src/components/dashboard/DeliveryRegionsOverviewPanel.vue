@@ -565,7 +565,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="dro-page dro-page--modern">
+  <section class="dro-page dro-page--modern ios-glass-dashboard">
 
     <p v-if="summaryMeta?.from_snapshot" class="dro-snapshot-hint">
       已显示归档数据（与智能配送大表口径对齐的首读留存）。
@@ -577,10 +577,19 @@ onMounted(() => {
     <p v-if="dashboardStatsLoading && !summaryMeta" class="dro-loading">正在加载营业概览…</p>
     <p v-else-if="!dashboardStats.length && !summaryMeta" class="dro-loading">暂无营业概览数据。</p>
 
-    <!-- 今日营业概览：午餐一行 + 晚餐一行 + 后厨/自提 -->
+    <!-- 今日营业概览：今日（午|晚）+ 明日（午|晚）分栏 + 后厨/自提 -->
     <div v-if="showDashboardOverview" class="dro-dash-layout">
-      <!-- 第一行：午餐（今日午餐 + 明日午餐预测） -->
-      <div class="dro-dash-large-row dro-dash-meal-row dro-dash-meal-row--lunch">
+      <div class="dro-dash-meal-shelf">
+        <!-- 今日：午餐左、晚餐右 -->
+        <section class="dro-dash-day-cluster dro-dash-day-cluster--today" aria-label="今日午晚餐">
+          <header class="dro-dash-day-cluster__head">
+            <span class="dro-dash-day-cluster__title">今日</span>
+            <span class="dro-dash-day-cluster__meta">{{ businessAnchorMdDisplay || '—' }}</span>
+            <span v-if="businessAnchorWeekdayDisplay" class="dro-dash-day-cluster__weekday">{{
+              businessAnchorWeekdayDisplay
+            }}</span>
+          </header>
+          <div class="dro-dash-day-cluster__grid">
       <article class="dro-dash-kpi" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
         <div class="dro-dash-kpi__head">
           <div class="dro-dash-kpi__tags">
@@ -609,26 +618,39 @@ onMounted(() => {
               </button>
             </nav>
           </div>
-          <button
-            type="button"
-            class="dro-dash-kpi__ico-badge dro-dash-kpi__ico-badge--emerald dro-dash-kpi__ico-badge--action"
-            :disabled="dashboardStatsLoading"
-            title="刷新营业概览"
-            aria-label="刷新营业概览"
-            @click="refreshDashboardOverview"
-          >
-            <RefreshCw
-              :size="18"
-              :class="{ 'dro-dash-refresh-spin': dashboardStatsLoading }"
-              aria-hidden="true"
-            />
-          </button>
+          <div class="dro-dash-kpi__head-actions">
+            <button
+              type="button"
+              class="dro-dash-adjust-btn"
+              title="报损耗"
+              @click="openLunchStockAdjust"
+            >
+              报损耗
+            </button>
+            <button
+              type="button"
+              class="dro-dash-kpi__ico-badge dro-dash-kpi__ico-badge--emerald dro-dash-kpi__ico-badge--action"
+              :disabled="dashboardStatsLoading"
+              title="刷新营业概览"
+              aria-label="刷新营业概览"
+              @click="refreshDashboardOverview"
+            >
+              <RefreshCw
+                :size="18"
+                :class="{ 'dro-dash-refresh-spin': dashboardStatsLoading }"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
         </div>
         <div class="dro-dash-kpi__hero-metric">
-          <span class="dro-dash-kpi__hero-metric-num">{{
-            menuDayTotalStock != null ? menuDayTotalStock : '—'
-          }}</span>
-          <small class="dro-dash-kpi__hero-metric-suffix">份-后厨产出量</small>
+          <span class="dro-dash-kpi__hero-metric-kicker">后厨产出量：</span>
+          <span class="dro-dash-kpi__hero-metric-num-wrap">
+            <span class="dro-dash-kpi__hero-metric-num">{{
+              menuDayTotalStock != null ? menuDayTotalStock : '—'
+            }}</span>
+            <small class="dro-dash-kpi__hero-metric-unit">份</small>
+          </span>
         </div>
         <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
           <div class="dro-dash-kpi__metric-top">
@@ -726,9 +748,6 @@ onMounted(() => {
           </div>
           <div class="dro-dash-kpi__mid-spacer" aria-hidden="true" />
         </div>
-        <div class="dro-dash-kpi__foot-row">
-          <button type="button" class="dro-dash-adjust-btn" @click="openLunchStockAdjust">报损耗</button>
-        </div>
         <div class="dro-dash-kpi__stat-row dro-dash-kpi__stat-row--chips-then-yoy">
           <div class="dro-dash-chip dro-dash-chip--amber">
             <span class="dro-dash-chip__k">今日请假</span>
@@ -780,14 +799,148 @@ onMounted(() => {
           </div>
         </div>
       </article>
+      <article class="dro-dash-kpi dro-dash-kpi--dinner" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
+        <div class="dro-dash-kpi__head">
+          <div class="dro-dash-kpi__tags">
+            <span class="dro-dash-pill dro-dash-pill--emerald">今日晚餐 · {{ businessAnchorMdDisplay || '—' }}</span>
+          </div>
+          <div class="dro-dash-kpi__head-actions">
+            <button
+              type="button"
+              class="dro-dash-adjust-btn"
+              title="报损耗"
+              @click="openDinnerStockAdjust"
+            >
+              报损耗
+            </button>
+          </div>
+        </div>
+        <div class="dro-dash-kpi__hero-metric">
+          <span class="dro-dash-kpi__hero-metric-kicker">后厨产出量：</span>
+          <span class="dro-dash-kpi__hero-metric-num-wrap">
+            <span class="dro-dash-kpi__hero-metric-num">{{
+              dinnerMenuDayTotalStock != null ? dinnerMenuDayTotalStock : '—'
+            }}</span>
+            <small class="dro-dash-kpi__hero-metric-unit">份</small>
+          </span>
+        </div>
+        <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
+          <div class="dro-dash-kpi__metric-top">
+            <div
+              class="dro-dash-distribution-chain"
+              role="note"
+              :aria-label="
+                dinnerMenuDayTotalStock != null
+                  ? `${dinnerMenuDayTotalStock}份当日晚餐出餐量等于配送、自提、单次零售与可卖数量之和`
+                  : '当日晚餐出餐量未配置'
+              "
+            >
+              <div class="dro-dash-chain-node-header">
+                <span class="dro-dash-chain-node-label">配额去向拆解线</span>
+                <span class="dro-dash-chain-node dro-dash-chain-node--main">
+                  已售出 {{ todayDinnerSoldTotal != null ? `${todayDinnerSoldTotal}份` : '—' }}
+                </span>
+              </div>
+              <div class="dro-dash-stacked-bar" aria-hidden="true">
+                <div
+                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--deliver"
+                  :style="{
+                    width: distributionStackWidth(todayDinnerDelivery, dinnerMenuDayTotalStock),
+                  }"
+                />
+                <div
+                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--pickup"
+                  :style="{
+                    width: distributionStackWidth(todayDinnerPickup, dinnerMenuDayTotalStock),
+                  }"
+                />
+                <div
+                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--retail"
+                  :style="{
+                    width: distributionStackWidth(todayDinnerRetail, dinnerMenuDayTotalStock),
+                  }"
+                />
+                <div
+                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--sellable"
+                  :class="{
+                    'dro-dash-stacked-bar__seg--sellable-empty':
+                      todayDinnerRemaining != null && todayDinnerRemaining <= 0,
+                  }"
+                  :style="{
+                    width: distributionStackWidth(todayDinnerRemaining, dinnerMenuDayTotalStock),
+                  }"
+                />
+              </div>
+              <div class="dro-dash-branch-pill-grid dro-dash-branch-pill-grid--5">
+                <div class="dro-dash-branch-pill">
+                  <span class="dro-dash-branch-pill__lbl"
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />配送</span
+                  >
+                  <span class="dro-dash-branch-pill__val">{{
+                    todayDinnerDelivery == null ? '—' : `${Math.trunc(Number(todayDinnerDelivery))}`
+                  }}</span>
+                </div>
+                <div class="dro-dash-branch-pill">
+                  <span class="dro-dash-branch-pill__lbl"
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提</span
+                  >
+                  <span class="dro-dash-branch-pill__val">{{
+                    todayDinnerPickup == null ? '—' : `${Math.trunc(Number(todayDinnerPickup))}`
+                  }}</span>
+                </div>
+                <div class="dro-dash-branch-pill">
+                  <span class="dro-dash-branch-pill__lbl"
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />零售</span
+                  >
+                  <span class="dro-dash-branch-pill__val">{{ todayDinnerRetail }}</span>
+                </div>
+                <div class="dro-dash-branch-pill">
+                  <span class="dro-dash-branch-pill__lbl"
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--waste" aria-hidden="true" />损耗</span
+                  >
+                  <span class="dro-dash-branch-pill__val">{{ todayDinnerWasteTotal }}</span>
+                </div>
+                <div class="dro-dash-branch-pill">
+                  <span class="dro-dash-branch-pill__lbl"
+                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--sellable" aria-hidden="true" />剩余</span
+                  >
+                  <span
+                    class="dro-dash-branch-pill__val dro-dash-branch-pill__val--sellable"
+                    :class="{
+                      'dro-dash-branch-pill__val--sellable-muted':
+                        todayDinnerRemaining != null && todayDinnerRemaining <= 0,
+                    }"
+                    >{{
+                      todayDinnerRemaining == null ? '—' : `${todayDinnerRemaining}`
+                    }}</span
+                  >
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="dro-dash-kpi__mid-spacer" aria-hidden="true" />
+        </div>
+      </article>
+          </div>
+        </section>
 
+        <!-- 明日：午餐左、晚餐右 -->
+        <section class="dro-dash-day-cluster dro-dash-day-cluster--tomorrow" aria-label="明日午晚餐预测">
+          <header class="dro-dash-day-cluster__head">
+            <span class="dro-dash-day-cluster__title">明日</span>
+            <span class="dro-dash-day-cluster__meta">{{ businessAnchorTomorrowMdDisplay || '—' }}</span>
+            <span v-if="businessAnchorTomorrowWeekdayDisplay" class="dro-dash-day-cluster__weekday">{{
+              businessAnchorTomorrowWeekdayDisplay
+            }}</span>
+          </header>
+          <div class="dro-dash-day-cluster__grid">
       <article
         class="dro-dash-kpi dro-dash-kpi--tomorrow"
         :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }"
       >
         <div class="dro-dash-kpi__head">
           <div class="dro-dash-kpi__tags">
-            <span class="dro-dash-pill dro-dash-pill--emerald"
+            <span class="dro-dash-pill dro-dash-pill--blue"
               >明日午餐预测 · {{ businessAnchorTomorrowMdDisplay || '—'
               }}<template v-if="businessAnchorTomorrowWeekdayDisplay">
                 {{ businessAnchorTomorrowWeekdayDisplay }}</template
@@ -804,8 +957,11 @@ onMounted(() => {
           </span>
         </div>
         <div class="dro-dash-kpi__hero-metric">
-          <span class="dro-dash-kpi__hero-metric-num">{{ tomorrowDistributionMainTotal }}</span>
-          <small class="dro-dash-kpi__hero-metric-suffix">份-后厨产出量</small>
+          <span class="dro-dash-kpi__hero-metric-kicker">后厨产出量：</span>
+          <span class="dro-dash-kpi__hero-metric-num-wrap">
+            <span class="dro-dash-kpi__hero-metric-num">{{ tomorrowDistributionMainTotal }}</span>
+            <small class="dro-dash-kpi__hero-metric-unit">份</small>
+          </span>
         </div>
         <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
           <div class="dro-dash-kpi__metric-top">
@@ -960,122 +1116,6 @@ onMounted(() => {
           </div>
         </div>
       </article>
-      </div>
-
-      <!-- 第二行：晚餐（今日晚餐 + 明日晚餐预测） -->
-      <div class="dro-dash-large-row dro-dash-meal-row dro-dash-meal-row--dinner">
-      <article class="dro-dash-kpi dro-dash-kpi--dinner" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
-        <div class="dro-dash-kpi__head">
-          <div class="dro-dash-kpi__tags">
-            <span class="dro-dash-pill dro-dash-pill--violet">今日晚餐 · {{ businessAnchorMdDisplay || '—' }}</span>
-          </div>
-        </div>
-        <div class="dro-dash-kpi__hero-metric">
-          <span class="dro-dash-kpi__hero-metric-num">{{
-            dinnerMenuDayTotalStock != null ? dinnerMenuDayTotalStock : '—'
-          }}</span>
-          <small class="dro-dash-kpi__hero-metric-suffix">份-后厨产出量</small>
-        </div>
-        <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
-          <div class="dro-dash-kpi__metric-top">
-            <div
-              class="dro-dash-distribution-chain"
-              role="note"
-              :aria-label="
-                dinnerMenuDayTotalStock != null
-                  ? `${dinnerMenuDayTotalStock}份当日晚餐出餐量等于配送、自提、单次零售与可卖数量之和`
-                  : '当日晚餐出餐量未配置'
-              "
-            >
-              <div class="dro-dash-chain-node-header">
-                <span class="dro-dash-chain-node-label">配额去向拆解线</span>
-                <span class="dro-dash-chain-node dro-dash-chain-node--main">
-                  已售出 {{ todayDinnerSoldTotal != null ? `${todayDinnerSoldTotal}份` : '—' }}
-                </span>
-              </div>
-              <div class="dro-dash-stacked-bar" aria-hidden="true">
-                <div
-                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--deliver"
-                  :style="{
-                    width: distributionStackWidth(todayDinnerDelivery, dinnerMenuDayTotalStock),
-                  }"
-                />
-                <div
-                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--pickup"
-                  :style="{
-                    width: distributionStackWidth(todayDinnerPickup, dinnerMenuDayTotalStock),
-                  }"
-                />
-                <div
-                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--retail"
-                  :style="{
-                    width: distributionStackWidth(todayDinnerRetail, dinnerMenuDayTotalStock),
-                  }"
-                />
-                <div
-                  class="dro-dash-stacked-bar__seg dro-dash-stacked-bar__seg--sellable"
-                  :class="{
-                    'dro-dash-stacked-bar__seg--sellable-empty':
-                      todayDinnerRemaining != null && todayDinnerRemaining <= 0,
-                  }"
-                  :style="{
-                    width: distributionStackWidth(todayDinnerRemaining, dinnerMenuDayTotalStock),
-                  }"
-                />
-              </div>
-              <div class="dro-dash-branch-pill-grid dro-dash-branch-pill-grid--5">
-                <div class="dro-dash-branch-pill">
-                  <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />配送</span
-                  >
-                  <span class="dro-dash-branch-pill__val">{{
-                    todayDinnerDelivery == null ? '—' : `${Math.trunc(Number(todayDinnerDelivery))}`
-                  }}</span>
-                </div>
-                <div class="dro-dash-branch-pill">
-                  <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提</span
-                  >
-                  <span class="dro-dash-branch-pill__val">{{
-                    todayDinnerPickup == null ? '—' : `${Math.trunc(Number(todayDinnerPickup))}`
-                  }}</span>
-                </div>
-                <div class="dro-dash-branch-pill">
-                  <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />零售</span
-                  >
-                  <span class="dro-dash-branch-pill__val">{{ todayDinnerRetail }}</span>
-                </div>
-                <div class="dro-dash-branch-pill">
-                  <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--waste" aria-hidden="true" />损耗</span
-                  >
-                  <span class="dro-dash-branch-pill__val">{{ todayDinnerWasteTotal }}</span>
-                </div>
-                <div class="dro-dash-branch-pill">
-                  <span class="dro-dash-branch-pill__lbl"
-                    ><span class="dro-dash-branch-dot dro-dash-branch-dot--sellable" aria-hidden="true" />剩余</span
-                  >
-                  <span
-                    class="dro-dash-branch-pill__val dro-dash-branch-pill__val--sellable"
-                    :class="{
-                      'dro-dash-branch-pill__val--sellable-muted':
-                        todayDinnerRemaining != null && todayDinnerRemaining <= 0,
-                    }"
-                    >{{
-                      todayDinnerRemaining == null ? '—' : `${todayDinnerRemaining}`
-                    }}</span
-                  >
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="dro-dash-kpi__mid-spacer" aria-hidden="true" />
-        </div>
-        <div class="dro-dash-kpi__foot-row">
-          <button type="button" class="dro-dash-adjust-btn" @click="openDinnerStockAdjust">报损耗</button>
-        </div>
-      </article>
 
       <article
         class="dro-dash-kpi dro-dash-kpi--tomorrow dro-dash-kpi--dinner"
@@ -1083,7 +1123,7 @@ onMounted(() => {
       >
         <div class="dro-dash-kpi__head">
           <div class="dro-dash-kpi__tags">
-            <span class="dro-dash-pill dro-dash-pill--violet">明日晚餐预测</span>
+            <span class="dro-dash-pill dro-dash-pill--blue">明日晚餐预测</span>
           </div>
           <span
             class="dro-dash-kpi__ico-badge dro-dash-kpi__ico-badge--blue"
@@ -1095,8 +1135,11 @@ onMounted(() => {
           </span>
         </div>
         <div class="dro-dash-kpi__hero-metric">
-          <span class="dro-dash-kpi__hero-metric-num">{{ tomorrowDinnerDistributionMainTotal }}</span>
-          <small class="dro-dash-kpi__hero-metric-suffix">份-后厨产出量</small>
+          <span class="dro-dash-kpi__hero-metric-kicker">后厨产出量：</span>
+          <span class="dro-dash-kpi__hero-metric-num-wrap">
+            <span class="dro-dash-kpi__hero-metric-num">{{ tomorrowDinnerDistributionMainTotal }}</span>
+            <small class="dro-dash-kpi__hero-metric-unit">份</small>
+          </span>
         </div>
         <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
           <div class="dro-dash-kpi__metric-top">
@@ -1217,9 +1260,11 @@ onMounted(() => {
           </div>
         </div>
       </article>
+          </div>
+        </section>
       </div>
 
-      <!-- 第三行：后厨计划管理 / 门店自提快速核销舱 -->
+      <!-- 后厨计划管理 / 门店自提快速核销舱 -->
       <DashboardPickupKitchenPanel
         :business-date="businessAnchorIsoNormalized"
         :tomorrow-business-date="businessAnchorTomorrowIso"
@@ -1255,6 +1300,12 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* iOS 毛玻璃方向：仅影响本页容器与 KPI 材质，不改动接口与结构 */
+.ios-glass-dashboard.dro-page--modern {
+  /* 画布由 admin-layout / main-body 统一铺色；本页不再叠第二层实底，避免与毛玻璃卡「打架」 */
+  background: transparent;
+}
+
 .dro-page--modern {
   /* 与 main-body 下其他页一致：占满内容区宽度，不额外居中收窄 */
   margin: 0;
@@ -1273,12 +1324,15 @@ onMounted(() => {
 .dro-snapshot-hint {
   font-size: 13px;
   color: #0369a1;
-  background: #f0f9ff;
-  border: 1px solid #bae6fd;
-  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(186, 230, 253, 0.85);
+  border-radius: 14px;
   padding: 10px 12px;
   margin: 0 0 1rem;
   line-height: 1.45;
+  backdrop-filter: saturate(1.15) blur(10px);
+  -webkit-backdrop-filter: saturate(1.15) blur(10px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.85) inset, 0 8px 24px rgba(15, 23, 42, 0.04);
 }
 
 .dro-loading,
@@ -1295,25 +1349,261 @@ onMounted(() => {
 .dro-dash-layout {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-  margin-bottom: 1rem;
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
 }
 
 .dro-dash-layout :deep(.dpk-grid) {
   margin-bottom: 0;
 }
 
-.dro-dash-large-row {
+/**
+ * 营业概览：左「今日」、右「明日」分栏；每栏内午餐 | 晚餐 并排
+ * 外层 .dro-dash-day-cluster 用边框/底色区分今日 vs 明日预测
+ */
+.dro-dash-meal-shelf {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  width: 100%;
+  min-width: 0;
+}
+
+@media (min-width: 1200px) {
+  .dro-dash-meal-shelf {
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0.55rem;
+  }
+}
+
+.dro-dash-day-cluster {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.42rem;
+  padding: 0.45rem 0.55rem 0.55rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.32);
+  backdrop-filter: saturate(1.15) blur(12px);
+  -webkit-backdrop-filter: saturate(1.15) blur(12px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.42) inset;
+}
+
+/* 左栏「今日」：蓝系晕 + 浅底（与右侧主色区分） */
+.dro-dash-day-cluster--today {
+  border-color: color-mix(in srgb, #3b82f6 34%, rgba(255, 255, 255, 0.52));
+  background: color-mix(in srgb, #3b82f6 9%, rgba(255, 255, 255, 0.34));
+}
+
+/* 右栏「明日」：主色晕 + 浅底（右侧更偏品牌暖色） */
+.dro-dash-day-cluster--tomorrow {
+  border-color: color-mix(in srgb, var(--el-color-primary) 30%, rgba(255, 255, 255, 0.55));
+  background: color-mix(in srgb, var(--el-color-primary) 8%, rgba(255, 255, 255, 0.38));
+}
+
+.dro-dash-day-cluster__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+  padding: 0 0.15rem;
+  flex-shrink: 0;
+}
+
+.dro-dash-day-cluster__title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--el-text-color-secondary, #64748b);
+}
+
+.dro-dash-day-cluster__meta {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-primary, #0f172a);
+}
+
+.dro-dash-day-cluster__weekday {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--el-text-color-regular, #475569);
+}
+
+.dro-dash-day-cluster__grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1rem;
+  gap: 0.4rem;
+  min-width: 0;
   align-items: stretch;
 }
 
-@media (min-width: 1024px) {
-  .dro-dash-large-row {
+@media (min-width: 640px) {
+  .dro-dash-day-cluster__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1.25rem;
+    gap: 0.4rem;
+  }
+}
+
+/* 大屏：分栏内 KPI 再收紧，四卡同屏更易一眼扫完 */
+@media (min-width: 1400px) {
+  .dro-dash-meal-shelf .dro-dash-kpi {
+    min-height: 0;
+    padding: 0.65rem 0.7rem;
+    border-radius: 14px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-kpi__head {
+    min-height: 1.65rem;
+    margin-bottom: 0.12rem;
+    gap: 0.35rem;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-kpi__head-actions {
+    gap: 4px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-pill {
+    font-size: 9.5px;
+    padding: 0.16rem 0.45rem;
+    max-width: 100%;
+    white-space: normal;
+    line-height: 1.25;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-day-nav-btn {
+    padding: 2px 6px;
+    font-size: 9.5px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-adjust-btn {
+    padding: 2px 7px;
+    font-size: 9px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-kpi__ico-badge {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-kpi__ico-badge--action :deep(svg) {
+    width: 14px;
+    height: 14px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-kpi__ico-badge--blue :deep(svg) {
+    width: 14px;
+    height: 14px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-kpi__hero-metric {
+    margin: 0.1rem 0 0;
+    gap: 0.08rem 0.2rem;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-kpi__hero-metric-num {
+    font-size: clamp(1.52rem, 1.58vw, 1.82rem);
+  }
+
+  .dro-dash-meal-shelf .dro-dash-kpi__hero-metric-kicker {
+    font-size: 11px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-kpi__hero-metric-unit {
+    font-size: 11px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-kpi__mid--distribution-chain {
+    margin-top: 0.35rem;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-distribution-chain {
+    gap: 0.45rem;
+    padding: 0.45rem 0.5rem;
+    border-radius: 10px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-chain-node-label {
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-chain-node {
+    padding: 0.2rem 0.46rem;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-stacked-bar {
+    height: 7px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-branch-pill-grid--5 {
+    gap: 0.28rem;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-branch-pill {
+    padding: 0.22rem 0.14rem;
+    border-radius: 8px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-branch-pill__lbl {
+    font-size: 8.5px;
+    margin-bottom: 0.06rem;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-branch-dot {
+    width: 4px;
+    height: 4px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-branch-pill__val {
+    font-size: 11.5px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-kpi__stat-row--chips-then-yoy {
+    gap: 0.35rem;
+    padding-top: 0.28rem;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-kpi--tomorrow:not(.dro-dash-kpi--dinner) .dro-dash-kpi__stat-row--chips-then-yoy {
+    padding-top: 0.2rem;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-chip {
+    padding: 0.36rem 0.46rem;
+    font-size: 10px;
+    border-radius: 8px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-chip__k {
+    font-size: 10px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-chip__v {
+    font-size: 0.88rem;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-yoy-chip {
+    padding: 0.42rem 0.52rem;
+    border-radius: 8px;
+    gap: 0.35rem;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-yoy-chip__val {
+    font-size: 0.88rem;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-yoy-chip__val--caption {
+    font-size: 10px;
+  }
+
+  .dro-dash-meal-shelf .dro-dash-yoy-chip__prefix {
+    font-size: 10px;
   }
 }
 
@@ -1349,80 +1639,71 @@ onMounted(() => {
   }
 }
 
-/* ——— 配送区域总览：顶部三张 KPI 卡（对齐 Tailwind 参考稿） ——— */
+/* ——— 配送区域总览：顶部 KPI 卡（iOS 毛玻璃：统一圆角描边 + 内高光，无额外彩色顶线） ——— */
 .dro-dash-kpi {
-  background: #fff;
-  border: 1px solid #eaedf1;
-  border-radius: 28px;
-  padding: 1.5rem 1.75rem;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 18px;
+  padding: 1.15rem 1.25rem;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  min-height: 250px;
+  min-height: 232px;
   height: 100%;
-  box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.04);
-  transition:
-    transform 0.3s ease,
-    box-shadow 0.3s ease,
-    border-color 0.3s ease;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.55) inset,
+    0 6px 22px rgba(25, 45, 55, 0.045),
+    0 2px 8px color-mix(in srgb, var(--el-color-primary, #e8927c) 8%, transparent);
+  backdrop-filter: saturate(1.25) blur(16px);
+  -webkit-backdrop-filter: saturate(1.25) blur(16px);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
-.dro-dash-kpi:not(.dro-dash-kpi--tomorrow):not(.dro-dash-kpi--maplib):not(.dro-dash-kpi--dinner) {
-  border-top: 4px solid #0d5c46;
-}
-
-.dro-dash-kpi--dinner {
-  border-top: 4px solid #7c3aed;
+/** 营业概览午/晚四张顶卡：在现有卡片的宽高内略放大字号，提升扫读清晰度 */
+.dro-dash-meal-shelf .dro-dash-kpi {
+  padding: 1.02rem 1.08rem;
+  min-height: 228px;
 }
 
 .dro-dash-kpi--dinner:hover {
-  border-color: rgba(124, 58, 237, 0.25);
-}
-
-.dro-dash-kpi--tomorrow {
-  border-top: 4px solid #3b82f6;
-}
-
-.dro-dash-kpi--tomorrow.dro-dash-kpi--dinner {
-  border-top-color: #7c3aed;
-}
-
-.dro-dash-kpi--maplib {
-  border-top: 4px solid #7c3aed;
+  border-color: rgba(124, 58, 237, 0.22);
 }
 
 .dro-dash-kpi:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(148, 163, 184, 0.08);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.65) inset,
+    0 10px 28px rgba(25, 45, 55, 0.055),
+    0 3px 12px color-mix(in srgb, var(--el-color-primary, #e8927c) 12%, transparent);
 }
 
 .dro-dash-kpi--tomorrow:hover {
-  border-color: rgba(59, 130, 246, 0.25);
+  border-color: rgba(59, 130, 246, 0.28);
 }
 
 .dro-dash-kpi--maplib:hover {
-  border-color: rgba(139, 92, 246, 0.22);
+  border-color: rgba(139, 92, 246, 0.26);
 }
 
 .dro-dash-kpi--dim {
   opacity: 0.88;
 }
 
-.dro-dash-kpi__foot-row {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: auto;
-  padding-top: 0.5rem;
+/* 顶栏右侧：报损耗 + 刷新等成组，与标题行对齐、省出中间纵向空间 */
+.dro-dash-kpi__head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .dro-dash-adjust-btn {
-  border: 1px solid #cbd5e1;
-  background: #fff;
+  border: 1px solid rgba(203, 213, 225, 0.75);
+  background: rgba(255, 255, 255, 0.45);
   color: #475569;
   border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 11px;
-  font-weight: 800;
+  padding: 4px 11px;
+  font-size: 10.5px;
+  font-weight: 700;
   cursor: pointer;
   transition:
     border-color 0.2s ease,
@@ -1431,15 +1712,15 @@ onMounted(() => {
 }
 
 .dro-dash-adjust-btn:hover {
-  border-color: #0d5c46;
-  color: #0d5c46;
-  background: #ecfdf5;
+  border-color: color-mix(in srgb, var(--el-color-primary) 55%, #cbd5e1);
+  color: var(--el-color-primary-dark-2);
+  background: color-mix(in srgb, var(--el-color-primary) 8%, rgba(255, 255, 255, 0.5));
 }
 
 .dro-dash-kpi--dinner .dro-dash-adjust-btn:hover {
   border-color: #7c3aed;
   color: #7c3aed;
-  background: #f5f3ff;
+  background: rgba(245, 243, 255, 0.55);
 }
 
 .dro-dash-kpi__head {
@@ -1452,28 +1733,169 @@ onMounted(() => {
   min-height: 2rem;
 }
 
-/** 顶卡主数字：已售/预计 */
+/** 顶卡主数字：后厨产出量：数字 + 份（读数从左到右更符合中文习惯） */
 .dro-dash-kpi__hero-metric {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 0.15rem 0.35rem;
+  gap: 0.12rem 0.4rem;
   margin: 0.25rem 0 0;
-  line-height: 1.1;
+  line-height: 1.15;
+}
+
+.dro-dash-kpi__hero-metric-kicker {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.02em;
+  flex: 0 0 auto;
+}
+
+.dro-dash-kpi__hero-metric-num-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.15rem;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .dro-dash-kpi__hero-metric-num {
-  font-size: clamp(2.15rem, 5vw, 2.5rem);
-  font-weight: 900;
+  font-size: clamp(1.6rem, 3.35vw, 1.95rem);
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: #0f172a;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.035em;
+  font-family: var(--okfood-font-number, ui-sans-serif, system-ui, sans-serif);
 }
 
-.dro-dash-kpi__hero-metric-suffix {
-  font-size: 14px;
-  font-weight: 700;
+.dro-dash-kpi__hero-metric-unit {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+/**
+ * 营业概览四卡：收敛字号阶梯与字重（参考稿感：主数字突出，其余偏说明性、少抢戏）
+ */
+.dro-dash-meal-shelf .dro-dash-kpi__hero-metric {
+  gap: 0.1rem 0.32rem;
+}
+
+.dro-dash-meal-shelf .dro-dash-kpi__hero-metric-kicker {
+  font-size: 12px;
+  font-weight: 600;
   color: #64748b;
+}
+
+.dro-dash-meal-shelf .dro-dash-kpi__hero-metric-num {
+  font-size: clamp(1.62rem, 3.4vw, 1.92rem);
+  font-weight: 800;
+}
+
+.dro-dash-meal-shelf .dro-dash-kpi__hero-metric-unit {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.dro-dash-meal-shelf .dro-dash-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0.2rem 0.52rem;
+}
+
+.dro-dash-meal-shelf .dro-dash-day-nav-btn {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+}
+
+.dro-dash-meal-shelf .dro-dash-adjust-btn {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.dro-dash-meal-shelf .dro-dash-kpi__mid--distribution-chain {
+  margin-top: 0.5rem;
+}
+
+.dro-dash-meal-shelf .dro-dash-distribution-chain {
+  gap: 0.52rem;
+  padding: 0.58rem 0.72rem;
+}
+
+.dro-dash-meal-shelf .dro-dash-chain-node-label {
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.dro-dash-meal-shelf .dro-dash-chain-node {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 0.22rem 0.48rem;
+}
+
+.dro-dash-meal-shelf .dro-dash-branch-pill {
+  padding: 0.32rem 0.22rem;
+}
+
+.dro-dash-meal-shelf .dro-dash-branch-pill__lbl {
+  font-size: 8.75px;
+  font-weight: 600;
+}
+
+.dro-dash-meal-shelf .dro-dash-branch-pill__val {
+  font-size: 11.25px;
+  font-weight: 700;
+}
+
+.dro-dash-meal-shelf .dro-dash-kpi__stat-row {
+  gap: 0.55rem;
+  padding-top: 0.5rem;
+}
+
+.dro-dash-meal-shelf .dro-dash-kpi__stat-row--chips-then-yoy {
+  gap: 0.5rem;
+  padding-top: 0.45rem;
+}
+
+.dro-dash-meal-shelf .dro-dash-kpi__stat-row--chips-then-yoy .dro-dash-yoy-chip {
+  padding: 0.45rem 0.55rem;
+  font-size: 11px;
+}
+
+.dro-dash-meal-shelf .dro-dash-chip {
+  font-size: 10.5px;
+  padding: 0.38rem 0.48rem;
+}
+
+.dro-dash-meal-shelf .dro-dash-chip__k {
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.dro-dash-meal-shelf .dro-dash-chip__v {
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.dro-dash-meal-shelf .dro-dash-yoy-chip {
+  font-size: 11px;
+  padding: 0.48rem 0.58rem;
+}
+
+.dro-dash-meal-shelf .dro-dash-yoy-chip__prefix {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.dro-dash-meal-shelf .dro-dash-yoy-chip__val {
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.dro-dash-meal-shelf .dro-dash-yoy-chip__week {
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .dro-dash-kpi__tags {
@@ -1487,10 +1909,10 @@ onMounted(() => {
 .dro-dash-pill {
   display: inline-flex;
   align-items: center;
-  font-size: 12px;
-  font-weight: 900;
+  font-size: 11px;
+  font-weight: 700;
   letter-spacing: 0.02em;
-  padding: 0.3rem 0.85rem;
+  padding: 0.22rem 0.65rem;
   border-radius: 999px;
   border: 1px solid transparent;
   line-height: 1.2;
@@ -1498,9 +1920,9 @@ onMounted(() => {
 }
 
 .dro-dash-pill--emerald {
-  background: #ecfdf5;
-  color: #047857;
-  border-color: #d1fae5;
+  background: color-mix(in srgb, var(--el-color-primary) 10%, rgba(255, 255, 255, 0.5));
+  color: var(--el-text-color-primary);
+  border-color: color-mix(in srgb, var(--el-color-primary) 22%, rgba(255, 255, 255, 0.55));
 }
 
 /* 今日总盘：上一日 / 下一日快捷切换 */
@@ -1511,12 +1933,12 @@ onMounted(() => {
 }
 
 .dro-dash-day-nav-btn {
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  background: rgba(255, 255, 255, 0.45);
   color: #475569;
   font-size: 11px;
-  font-weight: 800;
-  padding: 4px 10px;
+  font-weight: 700;
+  padding: 3px 9px;
   border-radius: 8px;
   cursor: pointer;
   transition:
@@ -1542,21 +1964,21 @@ onMounted(() => {
 }
 
 .dro-dash-pill--blue {
-  background: #eff6ff;
+  background: rgba(239, 246, 255, 0.65);
   color: #1d4ed8;
-  border-color: #dbeafe;
+  border-color: rgba(191, 219, 254, 0.55);
 }
 
 .dro-dash-pill--purple {
-  background: #faf5ff;
+  background: rgba(250, 245, 255, 0.6);
   color: #7c3aed;
-  border-color: #ede9fe;
+  border-color: rgba(237, 233, 254, 0.55);
 }
 
 .dro-dash-pill--violet {
-  background: #f5f3ff;
+  background: rgba(245, 243, 255, 0.58);
   color: #6d28d9;
-  border-color: #ddd6fe;
+  border-color: rgba(221, 214, 254, 0.5);
 }
 
 .dro-dash-kpi__kicker {
@@ -1576,11 +1998,11 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
   flex-shrink: 0;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.55) inset;
 }
 
 .dro-dash-kpi__ico-badge--emerald {
@@ -1701,11 +2123,11 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
   align-items: center;
   gap: 1rem;
   width: 100%;
-  padding: 0.875rem 0.5rem;
-  background: #fafbfc;
-  border: 1px solid #eaedf1;
-  border-radius: 20px;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.01);
+  padding: 0.75rem 0.45rem;
+  background: rgba(255, 255, 255, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 14px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset;
   flex-shrink: 0;
 }
 
@@ -1768,12 +2190,14 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
 .dro-dash-distribution-chain {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.65rem;
   width: 100%;
-  padding: 0.875rem 1.125rem;
-  background: #f8fafc;
-  border: 1px solid #eaedf1;
-  border-radius: 20px;
+  padding: 0.75rem 0.9rem;
+  /* 略高于玻璃主卡的不透明度：五项指标数字读数更清楚，仍带轻微透 */
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 14px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.92) inset;
 }
 
 .dro-dash-chain-node-header {
@@ -1802,25 +2226,25 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
 }
 
 .dro-dash-chain-node--main {
-  background: #0d5c46;
+  background: color-mix(in srgb, var(--el-color-primary) 88%, #0f172a);
   color: #fff;
-  box-shadow: 0 4px 10px rgba(13, 92, 70, 0.15);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--el-color-primary) 22%, transparent);
 }
 
 .dro-dash-chain-node--main-blue {
-  background: #3b82f6;
-  box-shadow: 0 4px 10px rgba(59, 130, 246, 0.15);
+  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.18);
 }
 
 /** 堆叠式比例流条 */
 .dro-dash-stacked-bar {
   display: flex;
   width: 100%;
-  height: 12px;
-  background: #e2e8f0;
+  height: 9px;
+  background: rgba(226, 232, 240, 0.65);
   border-radius: 999px;
   overflow: hidden;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+  box-shadow: inset 0 1px 1px rgba(15, 23, 42, 0.06);
 }
 
 .dro-dash-stacked-bar__seg {
@@ -1884,10 +2308,10 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
   align-items: center;
   justify-content: center;
   min-width: 0;
-  padding: 0.5rem 0.375rem;
-  border-radius: 12px;
-  border: 1px solid #eaedf1;
-  background: #fff;
+  padding: 0.38rem 0.28rem;
+  border-radius: 10px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  background: #ffffff;
   transition:
     transform 0.2s ease,
     box-shadow 0.2s ease;
@@ -1895,7 +2319,7 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
 
 .dro-dash-branch-pill:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(148, 163, 184, 0.05);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.04);
 }
 
 .dro-dash-branch-pill__lbl {
@@ -1904,8 +2328,8 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
   gap: 0.25rem;
   margin-bottom: 0.125rem;
   font-size: 9px;
-  font-weight: 900;
-  color: #64748b;
+  font-weight: 800;
+  color: #475569;
   line-height: 1.2;
   text-align: center;
 }
@@ -1938,8 +2362,8 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
 }
 
 .dro-dash-branch-pill__val {
-  font-size: 13px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
   color: #0f172a;
@@ -2030,17 +2454,19 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
   justify-content: space-between;
   gap: 0.65rem;
   margin-top: 0.5rem;
-  padding: 0.65rem 0.85rem;
-  border-radius: 1rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
   border: 1px solid transparent;
   flex-shrink: 0;
 }
 
 /* 今日：翠绿底边（与今日胶囊、进度条同系） */
 .dro-dash-yoy-chip--today {
-  background: rgba(236, 253, 245, 0.94);
-  border-color: rgba(16, 185, 129, 0.38);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+  background: rgba(236, 253, 245, 0.48);
+  border-color: rgba(16, 185, 129, 0.22);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.45) inset;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .dro-dash-yoy-chip--today .dro-dash-yoy-chip__prefix {
@@ -2069,9 +2495,11 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
 
 /* 明日卡片「同比上周」：与今日同比条同为翠绿系，便于对齐阅读 */
 .dro-dash-yoy-chip--tomorrow {
-  background: rgba(236, 253, 245, 0.94);
-  border-color: rgba(16, 185, 129, 0.38);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+  background: rgba(236, 253, 245, 0.48);
+  border-color: rgba(16, 185, 129, 0.22);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.45) inset;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .dro-dash-yoy-chip--tomorrow .dro-dash-yoy-chip__prefix {
@@ -2145,7 +2573,7 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
 }
 
 .dro-dash-yoy-chip__val {
-  font-size: 1rem;
+  font-size: 0.9rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
@@ -2407,6 +2835,11 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
   margin-top: auto;
 }
 
+/* 明日午餐预测：拆解区与下方请假/同比 chip 之间略收紧（晚餐明日卡保持原间距） */
+.dro-dash-kpi--tomorrow:not(.dro-dash-kpi--dinner) .dro-dash-kpi__stat-row--chips-then-yoy {
+  padding-top: 0.35rem;
+}
+
 .dro-dash-kpi__stat-row--plans {
   align-items: stretch;
 }
@@ -2427,24 +2860,26 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
 
 .dro-dash-chip {
   border-radius: 10px;
-  padding: 0.625rem 0.875rem;
+  padding: 0.5rem 0.65rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.35rem;
-  border: 1px solid transparent;
-  background: #f8fafc;
-  font-size: 11.5px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.38);
+  font-size: 11px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .dro-dash-chip__k {
-  font-size: 11.5px;
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .dro-dash-chip__v {
-  font-size: 1rem;
-  font-weight: 900;
+  font-size: 0.925rem;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2455,8 +2890,8 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
 }
 
 .dro-dash-chip--amber {
-  background: rgba(255, 251, 235, 0.85);
-  border-color: rgba(252, 211, 77, 0.35);
+  background: rgba(255, 251, 235, 0.55);
+  border-color: rgba(252, 211, 77, 0.28);
   color: #b45309;
 }
 
@@ -2465,8 +2900,8 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
 }
 
 .dro-dash-chip--rose {
-  background: rgba(255, 241, 242, 0.85);
-  border-color: rgba(251, 207, 232, 0.5);
+  background: rgba(255, 241, 242, 0.55);
+  border-color: rgba(251, 207, 232, 0.38);
   color: #be123c;
 }
 
@@ -2475,8 +2910,8 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
 }
 
 .dro-dash-chip--emerald {
-  background: rgba(236, 253, 245, 0.85);
-  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(236, 253, 245, 0.5);
+  border-color: rgba(16, 185, 129, 0.28);
   color: #047857;
 }
 
@@ -2486,8 +2921,8 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
 
 /** 今日单次零售：与「明日预测」蓝系 pill 对齐，便于与日区绿色区分 */
 .dro-dash-chip--blue {
-  background: rgba(239, 246, 255, 0.92);
-  border-color: rgba(191, 219, 254, 0.75);
+  background: rgba(239, 246, 255, 0.55);
+  border-color: rgba(191, 219, 254, 0.45);
   color: #1d4ed8;
 }
 
@@ -2496,8 +2931,8 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
 }
 
 .dro-dash-chip--slate {
-  background: #f8fafc;
-  border-color: #e2e8f0;
+  background: rgba(248, 250, 252, 0.45);
+  border-color: rgba(226, 232, 240, 0.65);
   color: #64748b;
 }
 

@@ -9,6 +9,15 @@
 
 本规范适用于 `okfood-admin/src/**` 下所有页面、组件与工具代码。
 
+## 视觉方向：iOS 毛玻璃（可选落地）
+
+若当前迭代按 **「壳层毛玻璃 + 蜜桃珊瑚默认」** 方向改 UI，除遵守本文件外，还须对照：
+
+- 讨论稿与 token：`design/VISUAL-DIRECTION-IOS-GLASS.md`
+- **工程落地硬边界**（Phase 分级、壳层布局、毛玻璃适用范围、Dashboard 微调范围）：`design/IOS-GLASS-IMPLEMENTATION.md`
+
+两者与本文冲突时：**交互与数据规范以本文为准**；视觉与层级以讨论稿 + 落地说明为准。
+
 ## UI 组件约束（强制）
 
 新建或重构管理端页面时，**交互与数据展示须优先使用 Element Plus**，禁止用原生 HTML 替代已有 EP 能力：

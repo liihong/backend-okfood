@@ -390,11 +390,10 @@ watch(
   <section class="dpk-grid" aria-label="后厨计划与门店自提核销">
     <!-- 后厨计划管理（左） -->
     <article class="dpk-card dpk-card--kitchen">
-      <div class="dpk-card-title dpk-card-title--blue">🍳 后厨计划管理</div>
-
       <div class="dpk-kitchen-grid">
-        <div class="dpk-kitchen-grid__head">
-          <span class="dpk-kitchen-grid__corner" />
+        <!-- 标题行与下方输入列同一栅格：左标题 + 右「午餐 / 晚餐」列头 -->
+        <div class="dpk-kitchen-grid__title-row">
+          <div class="dpk-kitchen-grid__title-brand">🍳 后厨计划管理</div>
           <span class="dpk-kitchen-grid__col">午餐</span>
           <span class="dpk-kitchen-grid__col dpk-kitchen-grid__col--dinner">晚餐</span>
         </div>
@@ -484,22 +483,21 @@ watch(
       </button>
     </article>
 
-    <!-- 门店自提快速核销舱（右） -->
-    <article class="dpk-card">
-      <div class="dpk-card-title">
-        <span>🏪 门店自提快速核销舱</span>
+    <!-- 门店自提快速核销舱（右）：搜索框与标题同行（标题 ↔ 搜索 ↔ 待自提） -->
+    <article class="dpk-card dpk-card--pickup">
+      <div class="dpk-card-title dpk-card-title--pickup-row">
+        <span class="dpk-card-title__pickup-brand">🏪 门店自提快速核销舱</span>
+        <div class="dpk-search-box dpk-search-box--header">
+          <Search :size="14" class="dpk-search-icon" aria-hidden="true" />
+          <input
+            v-model="pickupSearch"
+            type="search"
+            class="dpk-search-input"
+            placeholder="输入姓名、手机号后四位或单号模糊搜索..."
+            autocomplete="off"
+          />
+        </div>
         <span class="dpk-pending-label">待自提：{{ pendingPickupCount }} 份</span>
-      </div>
-
-      <div class="dpk-search-box">
-        <Search :size="14" class="dpk-search-icon" aria-hidden="true" />
-        <input
-          v-model="pickupSearch"
-          type="search"
-          class="dpk-search-input"
-          placeholder="输入姓名、手机号后四位或单号模糊搜索..."
-          autocomplete="off"
-        />
       </div>
 
       <div class="dpk-scroll-wrap">
@@ -583,39 +581,51 @@ watch(
 .dpk-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1rem;
+  gap: 0.9rem;
   margin-bottom: 1rem;
 }
 
 @media (min-width: 1024px) {
   .dpk-grid {
     grid-template-columns: 1.2fr 1.8fr;
-    gap: 1.5rem;
+    gap: 1rem;
   }
 }
 
 .dpk-card {
-  background: #fff;
-  border-radius: 28px;
-  border: 1px solid #eaedf1;
-  padding: 1.25rem 1.5rem;
-  box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.04);
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  padding: 1rem 1.15rem;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 6px 22px rgba(25, 45, 55, 0.045);
+  backdrop-filter: saturate(1.2) blur(14px);
+  -webkit-backdrop-filter: saturate(1.2) blur(14px);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.85rem;
   min-height: 0;
 }
 
-.dpk-card--kitchen {
-  border-color: #bfdbfe;
+/* 与 KPI 卡一致：仅整圈浅描边 + 毛玻璃，无彩色顶线 */
+
+/* 后厨卡：在「日总份数」表格与主按钮之间留出可呼吸间距，避免整卡内容贴顶贴底 */
+.dpk-card--kitchen .dpk-btn-save {
+  margin-top: 0.65rem;
+}
+
+.dpk-card--pickup {
+  gap: 0.65rem;
 }
 
 .dpk-card-title {
-  font-size: 14.5px;
-  font-weight: 900;
+  font-size: 13px;
+  font-weight: 700;
   color: #0f172a;
-  border-left: 4px solid #0d5c46;
-  padding-left: 10px;
+  border: none;
+  border-left: none;
+  padding-left: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -624,18 +634,47 @@ watch(
 }
 
 .dpk-card-title--blue {
-  border-left-color: #3b82f6;
+  border-left: none;
+}
+
+/* 自提卡标题行：左标题 + 中间搜索（占满剩余宽度）+ 右待自提份数 */
+.dpk-card-title--pickup-row {
+  width: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
+  justify-content: flex-start;
+}
+
+.dpk-card-title__pickup-brand {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.dpk-card-title--pickup-row .dpk-pending-label {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .dpk-pending-label {
-  font-size: 11px;
-  font-weight: 800;
-  color: #0d5c46;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--el-color-primary-dark-2, #047857);
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--el-color-primary) 10%, rgba(255, 255, 255, 0.35));
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 22%, rgba(255, 255, 255, 0.5));
 }
 
 .dpk-search-box {
   position: relative;
   width: 100%;
+}
+
+.dpk-search-box--header {
+  flex: 1 1 12rem;
+  min-width: 8rem;
+  max-width: 100%;
 }
 
 .dpk-search-icon {
@@ -649,28 +688,40 @@ watch(
 
 .dpk-search-input {
   width: 100%;
-  padding: 10px 16px 10px 38px;
-  border-radius: 12px;
-  border: 1px solid #eaedf1;
-  background: #f8fafc;
-  font-size: 12.5px;
-  font-weight: 700;
+  padding: 8px 12px 8px 34px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 18%, rgba(148, 163, 184, 0.45));
+  /* 与毛玻璃卡区分，保证输入区底色肉眼可见 */
+  background: color-mix(in srgb, #f8fafc 92%, var(--el-color-primary) 8%);
+  font-size: 12px;
+  font-weight: 600;
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
 }
 
 .dpk-search-input:focus {
-  border-color: #0d5c46;
-  background: #fff;
-  box-shadow: 0 0 0 3px rgba(13, 92, 70, 0.05);
+  border-color: color-mix(in srgb, var(--el-color-primary) 38%, rgba(148, 163, 184, 0.35));
+  background: #ffffff;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+}
+
+@media (max-width: 720px) {
+  .dpk-card-title--pickup-row .dpk-search-box--header {
+    flex: 1 1 100%;
+    order: 3;
+  }
+
+  .dpk-card-title--pickup-row .dpk-pending-label {
+    margin-left: 0;
+  }
 }
 
 .dpk-scroll-wrap {
   max-height: 290px;
   overflow-y: auto;
-  border: 1px solid #eaedf1;
-  border-radius: 16px;
-  background: #fafbfc;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.32);
 }
 
 .dpk-scroll-wrap::-webkit-scrollbar {
@@ -697,10 +748,10 @@ watch(
 }
 
 .dpk-table th {
-  background: #f1f5f9;
-  padding: 10px 14px;
-  font-size: 11px;
-  font-weight: 800;
+  background: rgba(241, 245, 249, 0.55);
+  padding: 8px 12px;
+  font-size: 10.5px;
+  font-weight: 700;
   color: #64748b;
   position: sticky;
   top: 0;
@@ -713,15 +764,15 @@ watch(
 }
 
 .dpk-table td {
-  padding: 12px 14px;
-  font-size: 12.5px;
-  border-bottom: 1px solid #eaedf1;
+  padding: 10px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.65);
   font-weight: 600;
   vertical-align: middle;
 }
 
 .dpk-table tbody tr:hover {
-  background: rgba(241, 245, 249, 0.65);
+  background: rgba(255, 255, 255, 0.38);
 }
 
 .dpk-td-name {
@@ -745,9 +796,10 @@ watch(
   border-radius: 6px;
   font-family: var(--okfood-font-number);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 800;
   color: #0f172a;
-  background: #f1f5f9;
+  background: rgba(241, 245, 249, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.45);
 }
 
 .dpk-ref-empty {
@@ -770,9 +822,9 @@ watch(
 .dpk-portion {
   display: block;
   font-family: var(--okfood-font-number);
-  font-weight: 900;
-  font-size: 13px;
-  color: #0d5c46;
+  font-weight: 800;
+  font-size: 12.5px;
+  color: var(--el-color-primary-dark-2, #0d5c46);
 }
 
 .dpk-portion--muted {
@@ -811,23 +863,29 @@ watch(
 }
 
 .dpk-btn-verify {
-  background: #0d5c46;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--el-color-primary) 92%, #ffffff) 0%,
+    var(--el-color-primary) 100%
+  );
   color: #fff;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 800;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 35%, rgba(255, 255, 255, 0.5));
+  padding: 5px 11px;
+  border-radius: 9px;
+  font-size: 10.5px;
+  font-weight: 700;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: opacity 0.2s, box-shadow 0.2s;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset;
 }
 
 .dpk-btn-verify:hover:not(:disabled) {
-  background: #0a4635;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--el-color-primary) 22%, transparent);
 }
 
 .dpk-btn-verify:disabled {
-  background: #cbd5e1;
+  background: rgba(203, 213, 225, 0.65);
+  border-color: rgba(203, 213, 225, 0.85);
   color: #94a3b8;
   cursor: not-allowed;
 }
@@ -854,10 +912,10 @@ watch(
 .dpk-kitchen-grid {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.55rem;
 }
 
-.dpk-kitchen-grid__head,
+.dpk-kitchen-grid__title-row,
 .dpk-kitchen-grid__row {
   display: grid;
   grid-template-columns: minmax(88px, 1fr) minmax(0, 1fr) minmax(0, 1fr);
@@ -865,13 +923,26 @@ watch(
   align-items: center;
 }
 
-.dpk-kitchen-grid__head {
-  margin-bottom: 0.15rem;
+.dpk-kitchen-grid__title-row {
+  /* 标题区与「今日日总份数」行之间多留一点呼吸感，避免头重脚轻 */
+  /* padding-bottom 加大：横线（border-bottom）随之下移，与「午餐/晚餐」更分开 */
+  padding-bottom: 0.58rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+  margin-bottom: 0.55rem;
+}
+
+.dpk-kitchen-grid__title-brand {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.35;
+  min-width: 0;
 }
 
 .dpk-kitchen-grid__col {
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
   color: #3b82f6;
   text-align: center;
 }
@@ -930,23 +1001,47 @@ watch(
   flex: 1;
   min-width: 0;
   max-width: 120px;
-  padding: 10px 14px;
+  padding: 8px 10px;
   border-radius: 10px;
-  border: 1px solid #eaedf1;
-  font-size: 13.5px;
+  /* 实底 + 清晰描边：避免与白底毛玻璃融成一团、看不出是可编辑数字 */
+  border: 1px solid color-mix(in srgb, #64748b 32%, rgba(255, 255, 255, 0.55));
+  font-size: 13px;
   font-weight: 800;
+  font-family: var(--okfood-font-number, ui-sans-serif, system-ui, sans-serif);
   outline: none;
-  background: #f8fafc;
+  background: color-mix(in srgb, #ffffff 94%, #3b82f6 6%);
+  color: #0f172a;
   text-align: center;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.75) inset;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+/* 数字框：统一展示上下调节柄区域的可点击感（WebKit） */
+.dpk-form-control::-webkit-outer-spin-button,
+.dpk-form-control::-webkit-inner-spin-button {
+  opacity: 0.85;
+  height: 2rem;
 }
 
 .dpk-form-control:focus {
-  border-color: #3b82f6;
-  background: #fff;
+  border-color: color-mix(in srgb, #3b82f6 55%, #94a3b8);
+  background: #ffffff;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.85) inset,
+    0 0 0 2px color-mix(in srgb, #3b82f6 18%, transparent);
+}
+
+.dpk-form-control--dinner {
+  border-color: color-mix(in srgb, #7c3aed 28%, #94a3b8);
+  background: color-mix(in srgb, #ffffff 94%, #7c3aed 6%);
 }
 
 .dpk-form-control--dinner:focus {
-  border-color: #7c3aed;
+  border-color: color-mix(in srgb, #7c3aed 52%, #94a3b8);
+  background: #ffffff;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.85) inset,
+    0 0 0 2px color-mix(in srgb, #7c3aed 16%, transparent);
 }
 
 .dpk-unit {
@@ -956,21 +1051,30 @@ watch(
 }
 
 .dpk-btn-save {
-  background: #3b82f6;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, #3b82f6 85%, #ffffff) 0%,
+    #2563eb 100%
+  );
   color: #fff;
-  border: none;
-  padding: 12px 20px;
+  border: 1px solid rgba(191, 219, 254, 0.55);
+  padding: 10px 18px;
   border-radius: 12px;
-  font-size: 13px;
-  font-weight: 800;
+  font-size: 12.5px;
+  font-weight: 700;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: box-shadow 0.2s, opacity 0.2s;
   text-align: center;
   margin-top: auto;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 6px 18px rgba(37, 99, 235, 0.18);
 }
 
 .dpk-btn-save:hover:not(:disabled) {
-  background: #2563eb;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.45) inset,
+    0 8px 22px rgba(37, 99, 235, 0.26);
 }
 
 .dpk-btn-save:disabled {

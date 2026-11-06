@@ -1,6 +1,5 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
-import { ElMessage } from 'element-plus'
 import { apiJson, handleAdminLogout } from '../../../admin/core.js'
 import { showToast } from '../../../composables/useToast.js'
 
@@ -75,11 +74,11 @@ async function preview() {
   const kinds = Array.isArray(form.value.plan_kinds) ? form.value.plan_kinds : []
   const range = form.value.date_range || []
   if (!kinds.length) {
-    ElMessage.warning('请至少选择月卡或季卡')
+    showToast('请至少选择月卡或季卡', 'warning')
     return
   }
   if (!range[0] || !range[1]) {
-    ElMessage.warning('请先选择开卡入账日区间，再预览名单')
+    showToast('请先选择开卡入账日区间，再预览名单', 'warning')
     return
   }
   previewing.value = true
@@ -91,10 +90,10 @@ async function preview() {
     )
     previewItems.value = Array.isArray(data?.items) ? data.items : []
     const n = Number(data?.total) || previewItems.value.length
-    ElMessage.success(n ? `圈到 ${n} 人，请在下方核对` : '该规则下没有符合条件的会员')
+    showToast(n ? `圈到 ${n} 人，请在下方核对` : '该规则下没有符合条件的会员', 'success')
   } catch (e) {
     if (handleAdminLogout(e)) return
-    ElMessage.error(e instanceof Error ? e.message : '预览失败')
+    showToast(e instanceof Error ? e.message : '预览失败', 'error')
   } finally {
     previewing.value = false
   }

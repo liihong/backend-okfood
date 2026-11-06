@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OK 轻食后台 · 设计方向预览（静态稿）</title>
+    <!--
+      说明：本页为「设计语言 + Token」静态预览，不接入 Vue / Element Plus。
+      本地查看：在 okfood-admin 下执行 npm run dev 后访问
+      http://localhost:5173/design/okfood-admin-theme-preview.html
+      或直接双击用浏览器打开本文件（file://）。
+    -->
+    <style>
+      :root {
+        /* ===== 品牌与语义色（低饱和、护眼向）===== */
+        --color-primary: #2f6f5e;
+        --color-primary-hover: #275a4d;
+        --color-primary-muted: #e8f2ef;
+        --color-accent: #c45c3e;
+        --color-accent-muted: #f7ebe7;
+        --color-success: #3d7a5a;
+        --color-warning: #b8860b;
+        --color-danger: #b44a4a;
+        --color-info: #3d6b8a;
+
+        /* ===== 中性色（5 档 + 边框）暖灰底，减少刺眼纯白 ===== */
+        --gray-950: #1c1f1e;
+        --gray-700: #3d4442;
+        --gray-500: #6b736f;
+        --gray-300: #c4cbc7;
+        --gray-100: #f1f3f2;
+        --gray-50: #fafbf9;
+        --border-subtle: #e2e6e4;
+
+        /* ===== 图表序列（同色相明度阶梯，避免彩虹条）===== */
+        --chart-1: #2f6f5e;
+        --chart-2: #5a8f7c;
+        --chart-3: #8db5a8;
+        --chart-4: #c4d8ce;
+        --chart-5: #5c6b66;
+
+        /* ===== 字号与行高（运营后台可读优先）===== */
+        --font-sans: ui-sans-serif, system-ui, "PingFang SC", "Microsoft YaHei",
+          sans-serif;
+        --text-xs: 0.75rem;
+        --text-sm: 0.875rem;
+        --text-base: 1rem;
+        --text-lg: 1.125rem;
+        --text-xl: 1.25rem;
+        --text-2xl: 1.5rem;
+        --text-3xl: 1.875rem;
+        --leading-tight: 1.25;
+        --leading-normal: 1.5;
+
+        /* ===== 间距：8px 网格 ===== */
+        --space-1: 0.25rem;
+        --space-2: 0.5rem;
+        --space-3: 0.75rem;
+        --space-4: 1rem;
+        --space-5: 1.25rem;
+        --space-6: 1.5rem;
+        --space-8: 2rem;
+        --space-10: 2.5rem;
+
+        --radius-sm: 8px;
+        --radius-md: 12px;
+        --radius-lg: 16px;
+
+        --shadow-card: 0 1px 2px rgba(28, 31, 30, 0.06),
+          0 4px 12px rgba(28, 31, 30, 0.04);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: var(--font-sans);
+        font-size: var(--text-base);
+        line-height: var(--leading-normal);
+        color: var(--gray-950);
+        background: var(--gray-100);
+      }
+
+      .page {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: var(--space-8) var(--space-6) var(--space-10);
+      }
+
+      h1 {
+        font-size: var(--text-2xl);
+        font-weight: 600;
+        margin: 0 0 var(--space-2);
+        letter-spacing: -0.02em;
+      }
+
+      .subtitle {
+        color: var(--gray-500);
+        font-size: var(--text-sm);
+        margin: 0 0 var(--space-8);
+      }
+
+      h2 {
+        font-size: var(--text-lg);
+        font-weight: 600;
+        margin: var(--space-8) 0 var(--space-4);
+        color: var(--gray-700);
+      }
+
+      .note {
+        font-size: var(--text-sm);
+        color: var(--gray-500);
+        background: var(--gray-50);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-md);
+        padding: var(--space-4);
+        margin-bottom: var(--space-8);
+      }
+
+      /* —— Token 色块 —— */
+      .swatches {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: var(--space-4);
+      }
+
+      .swatch {
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        border: 1px solid var(--border-subtle);
+        background: #fff;
+        box-shadow: var(--shadow-card);
+      }
+
+      .swatch-color {
+        height: 56px;
+      }
+
+      .swatch-meta {
+        padding: var(--space-3);
+        font-size: var(--text-xs);
+        color: var(--gray-700);
+      }
+
+      .swatch-meta code {
+        display: block;
+        font-size: 0.65rem;
+        color: var(--gray-500);
+        margin-top: var(--space-1);
+        word-break: break-all;
+      }
+
+      /* —— 模拟布局：侧栏 + 内容 —— */
+      .shell {
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        gap: var(--space-6);
+        align-items: start;
+      }
+
+      @media (max-width: 768px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .sidebar {
+        background: #243832;
+        color: #e8f0ed;
+        border-radius: var(--radius-lg);
+        padding: var(--space-5);
+        font-size: var(--text-sm);
+        box-shadow: var(--shadow-card);
+      }
+
+      .sidebar-brand {
+        font-weight: 600;
+        margin-bottom: var(--space-5);
+        padding-bottom: var(--space-4);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+
+      .sidebar-item {
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-sm);
+        margin-bottom: var(--space-1);
+        color: rgba(255, 255, 255, 0.75);
+      }
+
+      .sidebar-item.active {
+        background: rgba(255, 255, 255, 0.12);
+        color: #fff;
+      }
+
+      .main {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-6);
+      }
+
+      .header-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+        background: #fff;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-lg);
+        padding: var(--space-4) var(--space-5);
+        box-shadow: var(--shadow-card);
+      }
+
+      .header-bar h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: 600;
+      }
+
+      .header-actions {
+        display: flex;
+        gap: var(--space-2);
+      }
+
+      /* —— 按钮 —— */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-2) var(--space-4);
+        font-size: var(--text-sm);
+        font-weight: 500;
+        border-radius: var(--radius-sm);
+        border: 1px solid transparent;
+        cursor: default;
+        font-family: inherit;
+      }
+
+      .btn-primary {
+        background: var(--color-primary);
+        color: #fff;
+      }
+
+      .btn-primary:hover {
+        background: var(--color-primary-hover);
+      }
+
+      .btn-ghost {
+        background: #fff;
+        color: var(--gray-700);
+        border-color: var(--border-subtle);
+      }
+
+      /* —— KPI 卡片 —— */
+      .grid-kpi {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-4);
+      }
+
+      @media (max-width: 640px) {
+        .grid-kpi {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .card {
+        background: #fff;
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-lg);
+        padding: var(--space-5);
+        box-shadow: var(--shadow-card);
+      }
+
+      .card-label {
+        font-size: var(--text-sm);
+        color: var(--gray-500);
+        margin-bottom: var(--space-2);
+      }
+
+      .card-value {
+        font-size: var(--text-3xl);
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        color: var(--gray-950);
+        line-height: var(--leading-tight);
+      }
+
+      .card-foot {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+        margin-top: var(--space-4);
+        font-size: var(--text-xs);
+        color: var(--gray-500);
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px var(--space-2);
+        border-radius: 999px;
+        background: var(--color-primary-muted);
+        color: var(--color-primary);
+      }
+
+      .pill-warn {
+        background: #faf6e8;
+        color: var(--color-warning);
+      }
+
+      /* —— 堆叠条（替代彩虹进度条）—— */
+      .stacked-bar {
+        height: 10px;
+        border-radius: 999px;
+        overflow: hidden;
+        display: flex;
+        margin-top: var(--space-4);
+        background: var(--gray-100);
+      }
+
+      .stacked-bar span {
+        height: 100%;
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-4);
+        margin-top: var(--space-3);
+        font-size: var(--text-xs);
+        color: var(--gray-500);
+      }
+
+      .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+
+      /* —— 表格 —— */
+      .table-wrap {
+        overflow: auto;
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        background: #fff;
+        box-shadow: var(--shadow-card);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-sm);
+      }
+
+      th {
+        text-align: left;
+        padding: var(--space-3) var(--space-4);
+        font-weight: 600;
+        color: var(--gray-700);
+        background: var(--gray-50);
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      td {
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border-subtle);
+        color: var(--gray-950);
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+
+      tbody tr:hover td {
+        background: #fbfcfb;
+      }
+
+      .badge {
+        display: inline-flex;
+        font-size: var(--text-xs);
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        background: var(--color-primary-muted);
+        color: var(--color-success);
+      }
+
+      .type-scale {
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-lg);
+        background: #fff;
+        padding: var(--space-5);
+        box-shadow: var(--shadow-card);
+      }
+
+      .type-row {
+        display: grid;
+        grid-template-columns: 120px 1fr;
+        gap: var(--space-4);
+        align-items: baseline;
+        padding: var(--space-3) 0;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .type-row:last-child {
+        border-bottom: none;
+      }
+
+      .type-label {
+        font-size: var(--text-xs);
+        color: var(--gray-500);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>OK 轻食门店后台 · 视觉方向（讨论稿）</h1>
+      <p class="subtitle">
+        方向：<strong>清晰、低饱和、大留白</strong>；图表用<strong>同一绿色相的明度阶梯</strong>，避免金融感霓虹与彩虹条。可与 Element Plus 的 CSS
+        变量对齐后落地。
+      </p>
+
+      <div class="note">
+        <strong>和「最新设计语言」对齐怎么说？</strong><br />
+        近年产品后台常见共识是：<strong>内容优先、少装饰</strong>（弱玻璃/弱拟物）、<strong>Bento
+        分区但克制圆角与阴影</strong>、<strong>类型与密度可切换</strong>、<strong>图表语义色固定</strong>。轻食品牌更适合<strong>有机绿 + 暖灰底</strong>，少用冷紫/电青渐变。本页即「看得见」的 token + 局部组件样式参考。
+      </div>
+
+      <h2>色板（主色 + 中性 + 图表序列）</h2>
+      <div class="swatches">
+        <div class="swatch">
+          <div class="swatch-color" style="background: var(--color-primary)"></div>
+          <div class="swatch-meta">
+            主色 Primary
+            <code>#2F6F5E</code>
+          </div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: var(--color-primary-hover)"></div>
+          <div class="swatch-meta">
+            主色 Hover
+            <code>#275A4D</code>
+          </div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: var(--color-primary-muted)"></div>
+          <div class="swatch-meta">
+            主色浅底
+            <code>#E8F2EF</code>
+          </div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: var(--color-accent)"></div>
+          <div class="swatch-meta">
+            辅助强调（少量）
+            <code>#C45C3E</code>
+          </div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: var(--gray-950)"></div>
+          <div class="swatch-meta">
+            文字主色
+            <code>#1C1F1E</code>
+          </div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: var(--gray-500)"></div>
+          <div class="swatch-meta">
+            次级文字
+            <code>#6B736F</code>
+          </div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: var(--gray-300)"></div>
+          <div class="swatch-meta">
+            边框 / 分割线
+            <code>#C4CBC7</code>
+          </div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: var(--gray-100)"></div>
+          <div class="swatch-meta">
+            页面背景
+            <code>#F1F3F2</code>
+          </div>
+        </div>
+        <div class="swatch">
+          <div
+            class="swatch-color"
+            style="
+              background: linear-gradient(
+                90deg,
+                var(--chart-1),
+                var(--chart-2),
+                var(--chart-3),
+                var(--chart-4)
+              );
+            "
+          ></div>
+          <div class="swatch-meta">
+            图表序列（同色相阶梯）
+            <code>chart-1 … chart-4</code>
+          </div>
+        </div>
+      </div>
+
+      <h2>字号阶梯（示例）</h2>
+      <div class="type-scale">
+        <div class="type-row">
+          <span class="type-label">3XL · KPI</span>
+          <span style="font-size: var(--text-3xl); font-weight: 600; line-height: var(--leading-tight)"
+            >128</span
+          >
+        </div>
+        <div class="type-row">
+          <span class="type-label">LG · 卡片标题</span>
+          <span style="font-size: var(--text-lg); font-weight: 600">今日午市产出</span>
+        </div>
+        <div class="type-row">
+          <span class="type-label">SM · 辅助说明</span>
+          <span style="font-size: var(--text-sm); color: var(--gray-500)"
+            >较昨日 +6%，含新会员单</span
+          >
+        </div>
+        <div class="type-row">
+          <span class="type-label">Base · 正文</span>
+          <span>用于表格正文、表单说明，行高约 1.5 便于长时间阅读。</span>
+        </div>
+      </div>
+
+      <h2>页面局部示意（侧栏 + KPI + 分布条 + 表）</h2>
+      <div class="shell">
+        <aside class="sidebar">
+          <div class="sidebar-brand">OK 近近健康餐</div>
+          <div class="sidebar-item active">经营概况</div>
+          <div class="sidebar-item">订单管理</div>
+          <div class="sidebar-item">菜单管理</div>
+          <div class="sidebar-item">系统管理</div>
+        </aside>
+        <div class="main">
+          <div class="header-bar">
+            <h3>经营概况</h3>
+            <div class="header-actions">
+              <button type="button" class="btn btn-ghost">导出</button>
+              <button type="button" class="btn btn-primary">保存日汇总</button>
+            </div>
+          </div>
+
+          <div class="grid-kpi">
+            <div class="card">
+              <div class="card-label">今日午市 · 后厨产出</div>
+              <div class="card-value">115</div>
+              <div class="stacked-bar" aria-hidden="true">
+                <span style="width: 42%; background: var(--chart-1)"></span>
+                <span style="width: 28%; background: var(--chart-2)"></span>
+                <span style="width: 18%; background: var(--chart-3)"></span>
+                <span style="width: 12%; background: var(--chart-4)"></span>
+              </div>
+              <div class="legend">
+                <span class="legend-item"
+                  ><span class="dot" style="background: var(--chart-1)"></span>标餐</span
+                >
+                <span class="legend-item"
+                  ><span class="dot" style="background: var(--chart-2)"></span>减脂</span
+                >
+                <span class="legend-item"
+                  ><span class="dot" style="background: var(--chart-3)"></span>定制</span
+                >
+                <span class="legend-item"
+                  ><span class="dot" style="background: var(--chart-4)"></span>其他</span
+                >
+              </div>
+              <div class="card-foot">
+                <span class="pill">今日单量 +12%</span>
+                <span class="pill pill-warn">待备料 3 类</span>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-label">明日午市 · 预估</div>
+              <div class="card-value">100</div>
+              <p style="margin: var(--space-4) 0 0; font-size: var(--text-sm); color: var(--gray-500)">
+                数字区只保留一层强调；明细进表格或抽屉，避免「框套框」。
+              </p>
+              <div class="card-foot">
+                <span class="pill">基于近 7 日加权</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>取餐码 / 会员</th>
+                  <th>份数</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>0921 · 王先生</td>
+                  <td>2</td>
+                  <td><span class="badge">已核销</span></td>
+                  <td><button type="button" class="btn btn-ghost" style="padding: 2px 10px">详情</button></td>
+                </tr>
+                <tr>
+                  <td>0922 · 李女士</td>
+                  <td>1</td>
+                  <td><span class="badge">已核销</span></td>
+                  <td><button type="button" class="btn btn-ghost" style="padding: 2px 10px">详情</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <h2>与 Element Plus 对齐时可覆盖的变量（讨论）</h2>
+      <div class="note" style="margin-bottom: 0">
+        落地时可用：<code>--el-color-primary</code>、<code>--el-bg-color</code>、<code
+          >--el-fill-color-blank</code
+        >、<code>--el-border-color</code>、<code>--el-border-radius-base</code> 等与上表
+        token 对齐；图表组件单独用 <code>chart-1…4</code> 序列，不把「语义色」当装饰彩虹使用。
+      </div>
+    </div>
+  </body>
+</html>

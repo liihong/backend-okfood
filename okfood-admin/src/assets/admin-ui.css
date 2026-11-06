@@ -1,27 +1,101 @@
-/* --- 鍏ㄥ眬杞绘彁绀猴紙鐧诲綍鎴愬姛绛夛級 --- */
+/* --- 全局轻提示（showToast）：iOS 玻璃 + 图标格 + 标题/副文（与 design 约定一致） --- */
 .app-toast {
   position: fixed;
   top: 1.25rem;
   left: 50%;
   z-index: 10000;
   transform: translateX(-50%);
-  max-width: min(90vw, 22rem);
-  padding: 0.75rem 1.25rem;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: #0e5a44;
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
-  border-radius: 0.75rem;
-  box-shadow: 0 10px 40px rgba(14, 90, 68, 0.15);
+  max-width: min(92vw, 26rem);
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 18px;
   pointer-events: none;
+  font-family: var(--okfood-font-sans);
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: saturate(1.2) blur(14px);
+  backdrop-filter: saturate(1.2) blur(14px);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 14px 40px rgba(25, 45, 55, 0.1),
+    0 6px 18px rgba(15, 23, 42, 0.06);
 }
 
-.app-toast.app-toast--error {
-  color: #9f1239;
-  background: #fff1f2;
-  border-color: #fda4af;
-  box-shadow: 0 10px 40px rgba(159, 18, 57, 0.12);
+.app-toast__icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.5) inset,
+    0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.app-toast--success .app-toast__icon {
+  color: #047857;
+  background: linear-gradient(145deg, rgba(209, 250, 229, 0.85), rgba(167, 243, 208, 0.55));
+}
+.app-toast--success .app-toast__icon::before {
+  content: '✓';
+}
+
+.app-toast--error .app-toast__icon {
+  color: #be123c;
+  background: linear-gradient(145deg, rgba(255, 228, 235, 0.9), rgba(254, 205, 211, 0.55));
+}
+.app-toast--error .app-toast__icon::before {
+  content: '!';
+  font-family: var(--okfood-font-sans), system-ui, sans-serif;
+}
+
+.app-toast--warning .app-toast__icon {
+  color: #b45309;
+  background: linear-gradient(145deg, rgba(254, 243, 199, 0.95), rgba(253, 230, 138, 0.55));
+}
+.app-toast--warning .app-toast__icon::before {
+  content: '!';
+}
+
+.app-toast--info .app-toast__icon {
+  color: #0369a1;
+  background: linear-gradient(145deg, rgba(224, 242, 254, 0.95), rgba(186, 230, 253, 0.55));
+}
+.app-toast--info .app-toast__icon::before {
+  content: 'i';
+  font-size: 16px;
+  font-style: italic;
+  font-weight: 900;
+}
+
+.app-toast__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.app-toast__title {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.app-toast__desc {
+  margin: 6px 0 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: #64748b;
 }
 
 .toast-fade-enter-active,
@@ -433,26 +507,100 @@
   }
 }
 
+/* 管理路由（AdminLayout）：禁止整页(document)随右侧长内容增高；仅主内容列内部纵向滚动 */
+html.okfood-admin-shell,
+html.okfood-admin-shell body {
+  height: 100%;
+  overflow: hidden;
+}
+
 .admin-layout {
   display: flex;
-  min-height: 100vh;
-  background-color: #f8fafc;
+  height: 100vh;
+  max-height: 100vh;
+  min-height: 0;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  /* 与预览稿一致：浅色画布 + 主色淡晕（侧栏毛玻璃叠在其上） */
+  background-color: var(--okfood-bg-canvas, var(--el-bg-color-page, #f7fafb));
   font-family: var(--okfood-font-sans);
-  color: #1e293b;
+  color: var(--el-text-color-primary, #1d1f21);
+  /* 固定顶栏高度：侧栏/主内容区上沿与之对齐（与「今日午餐」等卡片顶对齐） */
+  --okfood-admin-top-bar-h: 60px;
+  /* 顶栏与侧栏、主区左右对齐：统一水平「边沟」= 侧栏 margin-left、主区 horizontal padding */
+  --okfood-admin-gutter: 12px;
+  --okfood-admin-shelf-top: calc(var(--okfood-admin-top-bar-h) + 1rem);
+}
+
+/* 全页柔色 mesh（与 design/okfood-admin-theme-preview-ios-glass.html .bg-mesh 同源） */
+.admin-layout .admin-bg-mesh {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background: var(--okfood-bg-canvas, var(--el-bg-color-page, #f7fafb));
+}
+
+.admin-layout .admin-bg-mesh::before,
+.admin-layout .admin-bg-mesh::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.65;
+}
+
+.admin-layout .admin-bg-mesh::before {
+  width: min(92vw, 680px);
+  height: min(92vw, 680px);
+  top: -18%;
+  left: -8%;
+  background: var(--okfood-bg-mesh-a, rgba(255, 200, 185, 0.48));
+}
+
+.admin-layout .admin-bg-mesh::after {
+  width: min(85vw, 560px);
+  height: min(85vw, 560px);
+  bottom: -22%;
+  right: -12%;
+  background: var(--okfood-bg-mesh-b, rgba(255, 225, 210, 0.42));
+}
+
+.admin-layout > .sidebar,
+.admin-layout > .main-body {
+  position: relative;
+  z-index: 1;
 }
 
 .sidebar {
-  /* 参考超级后台稿：brand-sidebar-bg + 单列导航 */
+  /* iOS 毛玻璃侧栏：与预览稿 aside.sidebar.glass 一致（浅色、主色晕影边框） */
   width: 250px;
-  background-color: #093f30;
-  color: #ffffff;
+  background: var(--okfood-sidebar-glass-bg, rgba(255, 255, 255, 0.7));
+  -webkit-backdrop-filter: saturate(1.2) blur(14px);
+  backdrop-filter: saturate(1.2) blur(14px);
+  border: 1px solid var(--okfood-sidebar-glass-border, rgba(255, 255, 255, 0.82));
+  box-shadow: var(
+    --okfood-sidebar-glass-shadow,
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(255, 255, 255, 0.42) inset,
+    0 14px 38px rgba(25, 45, 55, 0.08),
+    0 6px 18px rgba(232, 146, 124, 0.12)
+  );
+  color: var(--okfood-sidebar-text, #1d1f21);
+  /* 四角同半径，避免贴屏一侧呈直角、仅右侧圆角的不对称观感 */
+  border-radius: 22px;
+  /* 顶栏为全宽通条 fixed，侧栏从通条下沿与主内容区同一水平线开始 */
+  margin: 0 0 12px var(--okfood-admin-gutter);
+  height: calc(100vh - var(--okfood-admin-shelf-top) - 12px);
   padding: 0;
   display: flex;
   flex-direction: column;
   position: fixed;
-  height: 100vh;
+  top: var(--okfood-admin-shelf-top);
+  left: 0;
   z-index: 100;
-  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.05);
   overflow: hidden;
   transition:
     width 0.22s ease,
@@ -463,24 +611,7 @@
 .sidebar.sidebar--collapsed {
   width: 64px;
   padding: 1rem 0.35rem;
-}
-
-.logo-area {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-  margin-bottom: 0;
-  padding: 24px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background-color: rgba(0, 0, 0, 0.1);
-}
-
-.sidebar.sidebar--collapsed .logo-area {
-  flex-direction: column;
-  margin-bottom: 1.5rem;
-  padding: 0;
-  gap: 0.5rem;
+  margin-left: var(--okfood-admin-gutter);
 }
 
 .sidebar.sidebar--collapsed .logo-box {
@@ -498,10 +629,10 @@
   justify-content: center;
   width: 2.25rem;
   height: 2.25rem;
-  border: none;
+  border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: 0.65rem;
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--okfood-sidebar-text-muted, #5c6670);
   cursor: pointer;
   transition:
     background 0.2s ease,
@@ -509,40 +640,100 @@
 }
 
 .sidebar-collapse-toggle:hover {
-  background: rgba(255, 255, 255, 0.22);
-  color: #ffffff;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--okfood-sidebar-text, #1d1f21);
 }
 
 .sidebar.sidebar--collapsed .sidebar-collapse-toggle {
   margin-left: 0;
 }
 
+/* 顶栏内：品牌区 + 折叠（与侧栏顶部菜单起点对齐，不再占用侧栏高度） */
+.admin-top-tab-bar__brand {
+  display: flex;
+  align-items: center;
+  /* 左侧：logo+店名；右侧：折叠；中间缝 = 顶栏上下 padding（8px） */
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: min(320px, 34vw);
+}
+
+.admin-top-tab-bar__brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--okfood-admin-gutter);
+  min-width: 0;
+}
+
+.admin-top-tab-bar__brand .logo-text {
+  min-width: 0;
+}
+
+.admin-top-tab-bar__brand .logo-text h1 {
+  color: var(--el-text-color-primary);
+}
+
+.admin-top-tab-bar__brand .logo-text span {
+  color: var(--el-text-color-regular);
+}
+
+.admin-top-tab-bar__brand .sidebar-collapse-toggle {
+  margin-left: 0;
+  flex-shrink: 0;
+}
+
 .logo-box {
-  width: 40px;
-  height: 40px;
-  background-color: #ffffff;
-  border-radius: 11px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 900;
-  font-size: 18px;
-  font-style: italic;
   line-height: 1;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-  color: #0d5c46;
+  /* 预览稿 sidebar-brand-logo：主色渐变角块 */
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: #fff;
+  background: linear-gradient(145deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2, #dd7f68) 100%);
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.35) inset,
+    0 6px 16px rgba(var(--el-color-primary-rgb), 0.35);
   flex-shrink: 0;
   overflow: hidden;
 }
 
 .logo-box--image {
   padding: 2px;
+  background: #ffffff;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+}
+
+.logo-box--fruit-fallback {
+  padding: 0;
 }
 
 .logo-box__text {
-  font-weight: 900;
-  font-style: italic;
+  font-weight: 800;
+  font-style: normal;
   line-height: 1;
+}
+
+.logo-box .okfood-nav-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.logo-box .okfood-nav-icon__svg {
+  width: 32px;
+  height: 32px;
 }
 
 .logo-box__img {
@@ -554,13 +745,13 @@
 }
 
 .logo-text h1 {
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
   margin: 0;
   font-style: normal;
-  color: inherit;
+  color: var(--okfood-sidebar-text, inherit);
   max-width: 9.5rem;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -568,12 +759,13 @@
 }
 
 .logo-text span {
-  font-size: 10px;
-  font-weight: 700;
-  opacity: 0.6;
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--okfood-sidebar-text-muted, #5c6670);
+  letter-spacing: 0.02em;
   display: block;
-  margin-top: 1px;
+  margin-top: 2px;
+  line-height: 1.35;
 }
 
 .nav-list {
@@ -661,13 +853,16 @@
   flex: 1;
   /* 允许在 admin-layout 横向 flex 下收缩，避免子内容把主区宽度撑破出现「横向不断增长」 */
   min-width: 0;
-  margin-left: 250px;
-  padding: 1rem 1rem;
+  /* 侧栏 fixed 占位：栏宽 + 左右各一道 gutter + 栏与主区间距 10px */
+  /* margin-left: calc(250px + 2 * var(--okfood-admin-gutter) + 10px); */
+  /* 顶栏 fixed：主区 padding-top = 侧栏 top（--okfood-admin-shelf-top），右侧卡片顶与左侧菜单顶同一条水平线 */
+  padding: var(--okfood-admin-shelf-top) var(--okfood-admin-gutter) 1rem;
   transition: margin-left 0.22s ease;
   position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 /* 顶栏 / 附属工具条之下的主视区：flex-basis 0 更易吃满纵向剩余空间（避免仅随内容长高） */
@@ -676,6 +871,10 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* 仅此区域随路由页变长而纵向滚动；侧栏固定，菜单项过多时仅在 .sidebar-menu 内滚 */
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .admin-notifications-bell {
@@ -683,27 +882,43 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border: 1px solid #e2e8f0;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #475569;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 14px;
+  background: linear-gradient(
+    155deg,
+    rgba(255, 255, 255, 0.78) 0%,
+    color-mix(in srgb, var(--el-color-primary) 12%, transparent) 52%,
+    color-mix(in srgb, var(--el-color-primary) 22%, transparent) 100%
+  );
+  color: var(--el-color-primary);
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  backdrop-filter: saturate(1.15) blur(12px);
+  -webkit-backdrop-filter: saturate(1.15) blur(12px);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.55) inset,
+    0 6px 16px color-mix(in srgb, var(--el-color-primary) 14%, transparent);
   transition: color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .admin-notifications-bell:hover {
-  color: #0f172a;
-  border-color: #cbd5e1;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  color: var(--el-color-primary-dark-2);
+  border-color: rgba(255, 255, 255, 0.95);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.65) inset,
+    0 8px 20px rgba(15, 23, 42, 0.08);
 }
 
 .admin-notifications-bell--active {
-  color: #b45309;
-  border-color: #fcd34d;
-  background: #fffbeb;
+  color: var(--el-color-primary-dark-2);
+  border-color: color-mix(in srgb, var(--el-color-primary) 45%, #ffffff);
+  background: linear-gradient(
+    155deg,
+    rgba(255, 255, 255, 0.9) 0%,
+    color-mix(in srgb, var(--el-color-primary) 18%, transparent) 55%,
+    color-mix(in srgb, var(--el-color-primary) 28%, transparent) 100%
+  );
 }
 
 .admin-notifications-badge {
@@ -723,55 +938,106 @@
   box-shadow: 0 0 0 2px #ffffff;
 }
 
+/* 系统消息：ElPopover 外壳（与 iOS 玻璃 / 主色 token 一致） */
+.admin-system-notifications-popover.el-popover.el-popper {
+  padding: 0 !important;
+  border-radius: 20px !important;
+  border: 1px solid rgba(255, 255, 255, 0.88) !important;
+  background: rgba(255, 255, 255, 0.82) !important;
+  -webkit-backdrop-filter: saturate(1.2) blur(18px) !important;
+  backdrop-filter: saturate(1.2) blur(18px) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 20px 48px rgba(25, 45, 55, 0.12),
+    0 8px 22px color-mix(in srgb, var(--el-color-primary) 16%, transparent) !important;
+}
+
+.admin-system-notifications-popover.el-popper .el-popper__arrow::before {
+  border: 1px solid rgba(255, 255, 255, 0.88) !important;
+  background: rgba(255, 255, 255, 0.82) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+.admin-system-notifications-panel {
+  padding: 16px 16px 14px;
+}
+
 .admin-system-notifications-panel__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid #e2e8f0;
+  margin: 0 -4px 12px;
+  padding: 0 4px 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
 }
 
 .admin-system-notifications-panel__head strong {
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   color: #0f172a;
 }
 
 .admin-system-notifications-panel__count {
   font-size: 12px;
-  color: #64748b;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--el-color-primary) 55%, #64748b);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 22%, #ffffff);
 }
 
 .admin-system-notifications-empty {
-  padding: 1rem 0;
+  padding: 1.35rem 0.5rem;
   text-align: center;
   font-size: 13px;
+  font-weight: 500;
   color: #64748b;
 }
 
 .admin-system-notifications-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 2px 2px 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  max-height: 320px;
+  gap: 10px;
+  max-height: 360px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--el-color-primary) 28%, #cbd5e1) transparent;
+}
+
+.admin-system-notifications-list::-webkit-scrollbar {
+  width: 5px;
+}
+.admin-system-notifications-list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--el-color-primary) 35%, #cbd5e1);
+  border-radius: 6px;
 }
 
 .admin-system-notifications-item {
-  padding: 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #f8fafc;
+  padding: 14px 14px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 16px;
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.92) 0%,
+    color-mix(in srgb, var(--el-color-primary) 5%, #f8fafc) 100%
+  );
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 6px 18px rgba(15, 23, 42, 0.06);
 }
 
 .admin-system-notifications-item__title {
-  margin: 0 0 0.35rem;
-  font-size: 13px;
-  font-weight: 600;
+  margin: 0 0 0.45rem;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
   color: #0f172a;
 }
 
@@ -781,19 +1047,19 @@
 }
 
 .admin-system-notifications-item__message {
-  margin: 0 0 0.65rem;
+  margin: 0 0 0.85rem;
   font-size: 13px;
-  line-height: 1.5;
-  color: #334155;
+  line-height: 1.55;
+  color: #475569;
   white-space: pre-line;
 }
 
 .admin-system-notifications-item__failures {
   margin: 0 0 0.65rem;
   padding: 0.5rem 0.55rem 0.5rem 1.25rem;
-  border-radius: 6px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: color-mix(in srgb, #fef2f2 88%, var(--el-color-primary-light-9));
+  border: 1px solid color-mix(in srgb, #fecaca 85%, var(--el-color-primary-light-5));
   list-style: disc;
 }
 
@@ -814,66 +1080,88 @@
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
-  margin-top: 0.15rem;
+  margin-top: 0.25rem;
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.05);
 }
 
 .admin-system-notifications-item__actions .admin-notifications-action-btn {
   margin: 0 !important;
-  height: 30px;
-  padding: 0 14px;
+  height: 32px;
+  padding: 0 16px;
   font-size: 13px;
-  font-weight: 600;
-  border-radius: 8px;
+  font-weight: 700;
+  border-radius: 999px;
   border: 1px solid transparent;
 }
 
 .admin-system-notifications-item__actions .admin-notifications-action-btn--secondary {
-  color: #0e5a44 !important;
-  background: #ecfdf5 !important;
-  border-color: #a7f3d0 !important;
+  color: var(--el-color-primary) !important;
+  background: rgba(255, 255, 255, 0.65) !important;
+  border-color: color-mix(in srgb, var(--el-color-primary) 35%, #e2e8f0) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .admin-system-notifications-item__actions .admin-notifications-action-btn--secondary:hover,
 .admin-system-notifications-item__actions .admin-notifications-action-btn--secondary:focus {
-  color: #0e5a44 !important;
-  background: #d1fae5 !important;
-  border-color: #6ee7b7 !important;
+  color: var(--el-color-primary-dark-2) !important;
+  background: color-mix(in srgb, var(--el-color-primary-light-9) 88%, #ffffff) !important;
+  border-color: color-mix(in srgb, var(--el-color-primary) 42%, #e2e8f0) !important;
 }
 
 .admin-system-notifications-item__actions .admin-notifications-action-btn--primary {
   color: #fff !important;
-  background: #0e5a44 !important;
-  border-color: #0e5a44 !important;
+  background: linear-gradient(
+    145deg,
+    var(--el-color-primary-light-3) 0%,
+    var(--el-color-primary) 48%,
+    var(--el-color-primary-dark-2) 100%
+  ) !important;
+  border-color: color-mix(in srgb, var(--el-color-primary) 55%, #ffffff) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 6px 14px color-mix(in srgb, var(--el-color-primary) 28%, transparent);
 }
 
 .admin-system-notifications-item__actions .admin-notifications-action-btn--primary:hover,
 .admin-system-notifications-item__actions .admin-notifications-action-btn--primary:focus {
   color: #fff !important;
-  background: #0c4d3a !important;
-  border-color: #0c4d3a !important;
+  background: var(--el-color-primary-dark-2) !important;
+  border-color: var(--el-color-primary-dark-2) !important;
 }
 
 .admin-layout.admin-layout--sidebar-collapsed .main-body {
-  margin-left: 64px;
+  margin-left: calc(64px + 2 * var(--okfood-admin-gutter) + 10px);
 }
 
-/* 顶栏：标签行 + 右侧铃铛（参考稿 top-tab-scroller / tab-tag-item） */
+/* 顶栏：全宽通条（品牌左 · 标签中 · 铃铛/时钟/用户右）+ 标签行（参考稿 top-tab-scroller / tab-tag-item） */
 .admin-top-tab-bar {
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 12px;
-  min-height: 60px;
-  margin: -1rem -1rem 1rem;
-  /* 上下留白，避免激活页签描边/阴影被裁切 */
-  padding: 8px clamp(20px, 2.4vw, 28px);
+  min-height: var(--okfood-admin-top-bar-h);
+  margin: 0;
+  width: 100%;
+  /* 上下留白，避免激活页签描边/阴影被裁切；左右与侧栏/主区同一 gutter，logo 与用户区与下方对齐 */
+  padding: 8px var(--okfood-admin-gutter);
   flex-shrink: 0;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.92) 0%,
+    color-mix(in srgb, var(--el-color-primary) 5%, #f8fafc) 100%
+  );
+  border-bottom: 1px solid rgba(226, 232, 240, 0.75);
   box-sizing: border-box;
-  position: relative;
-  z-index: 5;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 110;
   overflow: visible;
+  backdrop-filter: saturate(1.15) blur(14px);
+  -webkit-backdrop-filter: saturate(1.15) blur(14px);
 }
 
 .admin-top-tab-bar__trailing {
@@ -883,6 +1171,13 @@
   align-self: stretch;
   justify-content: center;
   gap: 0.65rem;
+}
+
+/* 尚无页签时：保留品牌与右侧工具区，中间区域占位避免 trailing 挤向左侧 */
+.admin-top-tab-bar__tabs-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
 }
 
 /* 全局顶栏电子钟（上海时区）：铃铛与用户菜单之间 */
@@ -901,14 +1196,14 @@
 .admin-header-live-clock__hm {
   font-size: clamp(15px, 1.25vw, 18px);
   font-weight: 800;
-  color: #0d5c46;
+  color: var(--el-text-color-primary);
 }
 
 .admin-header-live-clock__date {
   margin-top: 3px;
   font-size: clamp(12px, 1vw, 14px);
   font-weight: 700;
-  color: #475569;
+  color: var(--el-text-color-regular);
 }
 
 /* 顶栏：当前登录用户（JWT sub 优先） */
@@ -916,12 +1211,14 @@
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  max-width: 12rem;
-  padding: 0.28rem 0.65rem 0.28rem 0.28rem;
+  max-width: 14rem;
+  padding: 0.35rem 0.65rem 0.35rem 0.35rem;
   margin: 0;
-  border: 1px solid #e2e8f0;
-  border-radius: 999px;
-  background: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   cursor: pointer;
   font: inherit;
   outline: none;
@@ -931,20 +1228,31 @@
     box-shadow 0.15s ease;
 }
 .admin-user-menu-trigger:hover {
-  border-color: #cbd5e1;
-  background: #f1f5f9;
+  border-color: rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.72);
 }
 .admin-user-menu-trigger:focus-visible {
-  box-shadow: 0 0 0 2px rgba(13, 92, 70, 0.25);
-  border-color: #0d5c46;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+  border-color: color-mix(in srgb, var(--el-color-primary) 35%, #e2e8f0);
+}
+
+.admin-user-menu-chevron {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--el-text-color-secondary);
+  opacity: 0.85;
 }
 
 .admin-user-avatar {
   flex-shrink: 0;
   width: 34px;
   height: 34px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #0d5c46 0%, #059669 100%);
+  border-radius: 10px;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--el-color-primary) 55%, #ffffff) 0%,
+    var(--el-color-primary) 100%
+  );
   color: #fff;
   font-size: 13px;
   font-weight: 900;
@@ -960,7 +1268,44 @@
   white-space: nowrap;
   font-size: 13px;
   font-weight: 800;
-  color: #0f172a;
+  color: var(--el-text-color-primary);
+}
+
+/* 用户菜单：「主题色」为分组标题，三套主题为同面板内缩进三级项（无侧向子浮层） */
+.okfood-user-account-dropdown .okfood-user-menu-theme-group-label {
+  opacity: 1 !important;
+  cursor: default !important;
+  pointer-events: none;
+  margin-top: 2px;
+  padding: 6px 16px 4px !important;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--el-text-color-secondary) !important;
+  background: transparent !important;
+}
+
+.okfood-user-account-dropdown .okfood-user-menu-theme-sublink {
+  padding: 5px 12px 5px 28px !important;
+  margin: 0 6px 2px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--el-text-color-regular);
+}
+
+.okfood-user-account-dropdown .okfood-user-menu-theme-sublink:hover,
+.okfood-user-account-dropdown .okfood-user-menu-theme-sublink:focus {
+  background: color-mix(in srgb, var(--el-color-primary) 8%, #f8fafc) !important;
+  color: var(--el-text-color-primary) !important;
+}
+
+.okfood-user-account-dropdown .okfood-user-menu-theme-sublink--active {
+  color: var(--el-color-primary) !important;
+  font-weight: 800 !important;
+  background: color-mix(in srgb, var(--el-color-primary) 14%, transparent) !important;
 }
 
 .admin-top-tab-bar .admin-page-tabs {
@@ -1022,20 +1367,28 @@
 
 /* 激活态：加重描边、文字与投影，与未选中态拉开层次 */
 .admin-top-tab-bar .admin-page-tab--active {
-  background: linear-gradient(180deg, #ffffff 0%, #ecfdf5 100%);
-  color: #064e3b;
-  border: 1.5px solid #0d5c46;
+  background: linear-gradient(
+    180deg,
+    #ffffff 0%,
+    color-mix(in srgb, var(--el-color-primary-light-9) 92%, #ffffff) 100%
+  );
+  color: var(--el-color-primary-dark-2);
+  border: 1.5px solid var(--el-color-primary);
   box-shadow:
-    0 0 0 1px rgba(13, 92, 70, 0.08),
-    0 8px 18px -6px rgba(13, 92, 70, 0.22),
+    0 0 0 1px color-mix(in srgb, var(--el-color-primary) 10%, transparent),
+    0 8px 18px -6px color-mix(in srgb, var(--el-color-primary) 28%, transparent),
     0 4px 10px rgba(15, 23, 42, 0.08);
   font-weight: 900;
 }
 
 .admin-top-tab-bar .admin-page-tab--active:hover {
-  background: linear-gradient(180deg, #ffffff 0%, #d1fae5 100%);
-  border-color: #093f30;
-  color: #052e16;
+  background: linear-gradient(
+    180deg,
+    #ffffff 0%,
+    color-mix(in srgb, var(--el-color-primary-light-8) 85%, #ffffff) 100%
+  );
+  border-color: var(--el-color-primary-dark-2);
+  color: var(--el-color-primary-dark-2);
 }
 
 .admin-top-tab-bar .admin-page-tab__icon {
@@ -1049,7 +1402,7 @@
 }
 
 .admin-top-tab-bar .admin-page-tab--active .admin-page-tab__icon {
-  color: #0d5c46;
+  color: var(--el-color-primary);
 }
 
 /* 胶囊化关闭按钮 */
@@ -1065,7 +1418,7 @@
 
 .admin-top-tab-bar .admin-page-tab--active .admin-page-tab__close {
   opacity: 0.65;
-  color: #0d5c46;
+  color: var(--el-color-primary);
 }
 
 .admin-top-tab-bar .admin-page-tab__close:hover {
@@ -3735,7 +4088,7 @@
     padding: 1.25rem 0.85rem;
   }
   .main-body {
-    padding: 1rem 1rem;
+    padding: 1rem var(--okfood-admin-gutter);
   }
   .form-row {
     grid-template-columns: 1fr;

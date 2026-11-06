@@ -1,14 +1,8 @@
-/* Element Plus tokens aligned with admin-ui.css (forest green #0e5a44, slate neutrals). Load after Element base styles. */
+/*
+  Element Plus 主题：三套主色（蜜桃珊瑚默认 / 莫吉托 / 雾紫）
+  由 document.documentElement[data-admin-theme] 切换；见 src/main.js、layouts/AdminLayout.vue
+*/
 :root {
-  --el-color-primary: #0e5a44;
-  --el-color-primary-rgb: 14, 90, 68;
-  --el-color-primary-light-3: #3d7561;
-  --el-color-primary-light-5: #618a7a;
-  --el-color-primary-light-7: #8ba096;
-  --el-color-primary-light-8: #a3b0a9;
-  --el-color-primary-light-9: #d2dcd8;
-  --el-color-primary-dark-2: #084232;
-
   --el-color-success: #059669;
   --el-color-success-rgb: 5, 150, 105;
   --el-color-success-light-3: #39a883;
@@ -50,27 +44,139 @@
   --el-border-radius-base: 12px;
   --el-border-radius-small: 8px;
 
-  --el-bg-color-page: #f8fafc;
-  --el-fill-color-light: #f1f5f9;
-  --el-fill-color-lighter: #f8fafc;
   --el-border-color: #e2e8f0;
   --el-border-color-light: #e2e8f0;
   --el-border-color-lighter: #f1f5f9;
   --el-border-color-extra-light: #f8fafc;
 
-  --el-text-color-primary: #1e293b;
+  --el-text-color-primary: #1d1f21;
   --el-text-color-regular: #475569;
   --el-text-color-secondary: #64748b;
   --el-text-color-placeholder: #94a3b8;
 
-  /* el-table 表头：与后台墨绿侧栏同源 */
-  --okfood-el-table-header-bg: #0e5a44;
-  --okfood-el-table-header-bg-hover: #0a4937;
-  --okfood-el-table-header-text: rgba(255, 255, 255, 0.95);
-  --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
+  /* 侧栏 / 画布：与 design/okfood-admin-theme-preview-ios-glass.html 对齐（浅色毛玻璃 + 深色字） */
+  --okfood-bg-canvas: #f7fafb;
+  --okfood-bg-mesh-a: rgba(255, 200, 185, 0.48);
+  --okfood-bg-mesh-b: rgba(255, 225, 210, 0.42);
+  --okfood-sidebar-glass-bg: rgba(255, 255, 255, 0.7);
+  --okfood-sidebar-glass-border: rgba(255, 255, 255, 0.82);
+  --okfood-sidebar-glass-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(255, 255, 255, 0.42) inset,
+    0 14px 38px rgba(25, 45, 55, 0.08),
+    0 6px 18px rgba(232, 146, 124, 0.12);
+  --okfood-sidebar-logo-strip-border: rgba(0, 0, 0, 0.06);
+  --okfood-sidebar-text: #1d1f21;
+  --okfood-sidebar-text-muted: #5c6670;
+  --okfood-sidebar-menu-active-bg: rgba(232, 146, 124, 0.14);
+  --okfood-sidebar-menu-active-fg: #1d1f21;
+  --okfood-sidebar-menu-hover-bg: rgba(232, 146, 124, 0.08);
+  --okfood-sidebar-child-fg: #5c6670;
+  --okfood-sidebar-child-active-bg: rgba(232, 146, 124, 0.1);
+  --okfood-sidebar-child-hover-bg: rgba(232, 146, 124, 0.06);
 }
 
-/* --- 侧栏 el-menu：与参考稿 sidebar-menu（#093f30 / primary-green-light 高亮）一致 --- */
+/* —— 蜜桃珊瑚（默认） —— */
+html[data-admin-theme='primary-peach'],
+html:not([data-admin-theme]) {
+  --el-color-primary: #e8927c;
+  --el-color-primary-rgb: 232, 146, 124;
+  --el-color-primary-light-3: #f0a898;
+  --el-color-primary-light-5: #f4bfb0;
+  --el-color-primary-light-7: #f8d5cb;
+  --el-color-primary-light-8: #fbe0d8;
+  --el-color-primary-light-9: #fdf2ee;
+  --el-color-primary-dark-2: #dd7f68;
+
+  --el-bg-color-page: #f7fafb;
+  --el-fill-color-light: #f1f5f9;
+  --el-fill-color-lighter: #f8fafc;
+
+  --okfood-el-table-header-bg: #c75f48;
+  --okfood-el-table-header-bg-hover: #b55540;
+  --okfood-el-table-header-text: rgba(255, 255, 255, 0.95);
+  --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
+
+  --okfood-bg-mesh-a: rgba(255, 200, 185, 0.48);
+  --okfood-bg-mesh-b: rgba(255, 225, 210, 0.42);
+  --okfood-sidebar-glass-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(255, 255, 255, 0.42) inset,
+    0 14px 38px rgba(25, 45, 55, 0.08),
+    0 6px 18px rgba(232, 146, 124, 0.14);
+  --okfood-sidebar-menu-active-bg: rgba(232, 146, 124, 0.14);
+  --okfood-sidebar-menu-hover-bg: rgba(232, 146, 124, 0.08);
+  --okfood-sidebar-child-active-bg: rgba(232, 146, 124, 0.1);
+  --okfood-sidebar-child-hover-bg: rgba(232, 146, 124, 0.06);
+}
+
+/* —— 莫吉托 —— */
+html[data-admin-theme='primary-mojito'] {
+  --el-color-primary: #5cbf8e;
+  --el-color-primary-rgb: 92, 191, 142;
+  --el-color-primary-light-3: #7dcda2;
+  --el-color-primary-light-5: #a0dcc0;
+  --el-color-primary-light-7: #c2ebd9;
+  --el-color-primary-light-8: #d4f2e5;
+  --el-color-primary-light-9: #ecfbf4;
+  --el-color-primary-dark-2: #4ab37e;
+
+  --el-bg-color-page: #f7fafb;
+  --el-fill-color-light: #f1f5f9;
+  --el-fill-color-lighter: #f8fafc;
+
+  --okfood-el-table-header-bg: #3a8f67;
+  --okfood-el-table-header-bg-hover: #2f7d59;
+  --okfood-el-table-header-text: rgba(255, 255, 255, 0.95);
+  --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
+
+  --okfood-bg-mesh-a: rgba(190, 245, 215, 0.48);
+  --okfood-bg-mesh-b: rgba(215, 235, 255, 0.44);
+  --okfood-sidebar-glass-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(255, 255, 255, 0.42) inset,
+    0 14px 38px rgba(25, 45, 55, 0.08),
+    0 6px 18px rgba(92, 191, 142, 0.14);
+  --okfood-sidebar-menu-active-bg: rgba(92, 191, 142, 0.14);
+  --okfood-sidebar-menu-hover-bg: rgba(92, 191, 142, 0.08);
+  --okfood-sidebar-child-active-bg: rgba(92, 191, 142, 0.1);
+  --okfood-sidebar-child-hover-bg: rgba(92, 191, 142, 0.06);
+}
+
+/* —— 雾紫 —— */
+html[data-admin-theme='primary-iris'] {
+  --el-color-primary: #8b7ec8;
+  --el-color-primary-rgb: 139, 126, 200;
+  --el-color-primary-light-3: #a599d4;
+  --el-color-primary-light-5: #beb4df;
+  --el-color-primary-light-7: #d7ccea;
+  --el-color-primary-light-8: #e4dbf1;
+  --el-color-primary-light-9: #f1edfa;
+  --el-color-primary-dark-2: #7a6db8;
+
+  --el-bg-color-page: #f7fafb;
+  --el-fill-color-light: #f1f5f9;
+  --el-fill-color-lighter: #f8fafc;
+
+  --okfood-el-table-header-bg: #6454a8;
+  --okfood-el-table-header-bg-hover: #574899;
+  --okfood-el-table-header-text: rgba(255, 255, 255, 0.95);
+  --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
+
+  --okfood-bg-mesh-a: rgba(210, 200, 255, 0.45);
+  --okfood-bg-mesh-b: rgba(230, 215, 255, 0.42);
+  --okfood-sidebar-glass-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(255, 255, 255, 0.42) inset,
+    0 14px 38px rgba(25, 45, 55, 0.08),
+    0 6px 18px rgba(139, 126, 200, 0.16);
+  --okfood-sidebar-menu-active-bg: rgba(139, 126, 200, 0.14);
+  --okfood-sidebar-menu-hover-bg: rgba(139, 126, 200, 0.08);
+  --okfood-sidebar-child-active-bg: rgba(139, 126, 200, 0.1);
+  --okfood-sidebar-child-hover-bg: rgba(139, 126, 200, 0.06);
+}
+
+/* --- 侧栏 el-menu：与主色同谱的深色底 + 实色选中条 --- */
 .admin-layout .sidebar .sidebar-menu.el-menu {
   flex: 1;
   width: 100%;
@@ -81,12 +187,11 @@
   padding: 18px 14px;
   overflow-x: hidden;
   overflow-y: auto;
-  /* Firefox 窄滚动条 */
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
-  --el-menu-hover-bg-color: #146c53;
-  --el-menu-hover-text-color: #ffffff;
-  --el-menu-active-color: #ffffff;
+  scrollbar-color: rgba(15, 23, 42, 0.15) transparent;
+  --el-menu-hover-bg-color: var(--okfood-sidebar-menu-hover-bg);
+  --el-menu-hover-text-color: var(--okfood-sidebar-text);
+  --el-menu-active-color: var(--el-color-primary);
 }
 
 .admin-layout .sidebar .sidebar-menu.el-menu::-webkit-scrollbar {
@@ -94,7 +199,7 @@
 }
 
 .admin-layout .sidebar .sidebar-menu.el-menu::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(15, 23, 42, 0.12);
   border-radius: 2px;
 }
 
@@ -102,9 +207,9 @@
 .admin-layout .sidebar .sidebar-menu .el-sub-menu__title {
   border-radius: 12px;
   margin-bottom: 10px;
-  font-weight: 700;
-  font-size: 17px;
-  color: rgba(255, 255, 255, 0.75) !important;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--okfood-sidebar-text-muted) !important;
   transition:
     background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
     color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -112,7 +217,6 @@
 
 .admin-layout .sidebar .sidebar-menu .el-menu-item .menu-item-inner,
 .admin-layout .sidebar .sidebar-menu .el-sub-menu__title .menu-item-inner {
-  /* inline-flex + div：避免被 el-menu--collapse 的 >span 规则整块隐藏（Lucide 图标在 span 内会一起消失） */
   display: inline-flex;
   align-items: center;
   gap: 1rem;
@@ -121,8 +225,9 @@
 }
 
 .admin-layout .sidebar .sidebar-menu .el-menu-item.is-active {
-  background-color: #146c53 !important;
-  color: #ffffff !important;
+  background-color: var(--okfood-sidebar-menu-active-bg) !important;
+  color: var(--el-color-primary) !important;
+  font-weight: 600;
   box-shadow: none;
 }
 
@@ -132,7 +237,8 @@
 
 .admin-layout .sidebar .sidebar-menu .el-sub-menu__title .el-sub-menu__icon-arrow {
   font-size: 13px;
-  opacity: 0.7;
+  opacity: 0.45;
+  color: var(--okfood-sidebar-text-muted);
   transition: transform 0.3s ease;
 }
 
@@ -153,28 +259,125 @@
   padding-left: 42px !important;
   margin-bottom: 8px;
   min-height: 0 !important;
-  font-size: 15px !important;
-  font-weight: 700;
+  font-size: 13px !important;
+  font-weight: 500;
   height: auto !important;
   line-height: 1.35 !important;
-  color: rgba(255, 255, 255, 0.55) !important;
+  color: var(--okfood-sidebar-child-fg) !important;
 }
 
 .admin-layout .sidebar .sidebar-menu .el-sub-menu .el-menu-item:hover {
-  background-color: rgba(255, 255, 255, 0.06) !important;
-  color: #ffffff !important;
+  background-color: var(--okfood-sidebar-child-hover-bg) !important;
+  color: var(--okfood-sidebar-text) !important;
 }
 
 .admin-layout .sidebar .sidebar-menu .el-sub-menu .el-menu-item.is-active {
-  background-color: rgba(255, 255, 255, 0.08) !important;
-  color: #ffffff !important;
+  background-color: var(--okfood-sidebar-child-active-bg) !important;
+  color: var(--el-color-primary) !important;
+  font-weight: 600;
+}
+
+/* 一级父菜单（有子项）：字色略深，与预览稿 nav-parent-mild 一致 */
+.admin-layout .sidebar .sidebar-menu .el-sub-menu > .el-sub-menu__title {
+  color: var(--okfood-sidebar-text) !important;
+  font-weight: 600;
+}
+
+/* 有子路由选中时，父级标题字色与主色呼应 */
+.admin-layout .sidebar .sidebar-menu .el-sub-menu.is-active > .el-sub-menu__title {
+  color: var(--el-color-primary) !important;
+}
+
+/* 侧栏菜单左侧水果图标格（与预览稿 .nav-icon / .fruit-svg-* 一致） */
+.admin-layout .sidebar .okfood-nav-icon {
+  --fruit-tile-bg: linear-gradient(155deg, rgba(255, 255, 255, 0.55) 0%, rgba(235, 240, 250, 0.35) 100%);
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: var(--fruit-tile-bg);
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.65) inset,
+    0 -2px 8px rgba(0, 0, 0, 0.05) inset,
+    0 8px 18px rgba(25, 40, 55, 0.1);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.admin-layout .sidebar .okfood-nav-icon__svg {
+  display: block;
+  width: 30px;
+  height: 30px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
+}
+
+.admin-layout .sidebar .okfood-nav-icon.fruit-svg-apple {
+  --fruit-tile-bg: linear-gradient(145deg, rgba(210, 255, 215, 0.58), rgba(55, 175, 95, 0.38));
+}
+
+.admin-layout .sidebar .okfood-nav-icon.fruit-svg-banana {
+  --fruit-tile-bg: linear-gradient(150deg, rgba(255, 250, 200, 0.68), rgba(255, 205, 55, 0.45));
+}
+
+.admin-layout .sidebar .okfood-nav-icon.fruit-svg-orange {
+  --fruit-tile-bg: linear-gradient(145deg, rgba(255, 235, 195, 0.62), rgba(255, 130, 35, 0.44));
+}
+
+.admin-layout .sidebar .okfood-nav-icon.fruit-svg-pear {
+  --fruit-tile-bg: linear-gradient(145deg, rgba(200, 255, 248, 0.58), rgba(45, 195, 175, 0.38));
+}
+
+.admin-layout .sidebar .okfood-nav-icon.fruit-svg-pitaya {
+  --fruit-tile-bg: linear-gradient(155deg, rgba(240, 210, 255, 0.55), rgba(175, 55, 210, 0.42));
+}
+
+.admin-layout .sidebar .okfood-nav-icon.fruit-svg-blueberry {
+  --fruit-tile-bg: linear-gradient(145deg, rgba(195, 228, 255, 0.6), rgba(70, 130, 255, 0.4));
+}
+
+.admin-layout .sidebar .okfood-nav-icon.fruit-svg-pomegranate {
+  --fruit-tile-bg: linear-gradient(145deg, rgba(255, 205, 210, 0.55), rgba(175, 28, 55, 0.4));
+}
+
+.admin-layout .sidebar .okfood-nav-icon.fruit-svg-cherry {
+  --fruit-tile-bg: linear-gradient(145deg, rgba(255, 220, 245, 0.56), rgba(230, 55, 165, 0.42));
+}
+
+.admin-layout .sidebar .okfood-nav-icon.fruit-svg-bayberry {
+  --fruit-tile-bg: linear-gradient(155deg, rgba(255, 220, 200, 0.56), rgba(255, 95, 55, 0.44));
+}
+
+.admin-layout .sidebar .okfood-nav-icon.fruit-svg-mangosteen {
+  --fruit-tile-bg: linear-gradient(145deg, rgba(220, 215, 255, 0.55), rgba(95, 65, 200, 0.42));
+}
+
+.admin-layout .sidebar .sidebar-menu .el-menu-item.is-active .okfood-nav-icon,
+.admin-layout .sidebar .sidebar-menu .el-sub-menu.is-active > .el-sub-menu__title .okfood-nav-icon {
+  border-color: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.45) inset,
+    0 8px 20px rgba(0, 0, 0, 0.14);
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0.12) 100%),
+    var(--fruit-tile-bg);
+}
+
+.admin-layout .sidebar .sidebar-menu .el-menu-item.is-active .okfood-nav-icon__svg,
+.admin-layout .sidebar .sidebar-menu .el-sub-menu.is-active > .el-sub-menu__title .okfood-nav-icon__svg {
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.14));
 }
 
 .admin-layout .sidebar .sidebar-menu .el-icon {
   margin-right: 0;
 }
 
-/* 侧栏收起：仅图标，子菜单通过悬浮层展开 */
 .admin-layout .sidebar .sidebar-menu.el-menu.el-menu--collapse {
   width: 100%;
 }
@@ -204,14 +407,12 @@
   display: none;
 }
 
-/* 窄屏侧栏改为默认图标收起后，沿用竖向菜单与桌面一致的交互（子菜单仍为弹出层），不再使用横向铺满布局 */
-
-/* 侧栏收起时子菜单弹出层（teleport + 浅底 tooltip）：覆盖继承的白字，保证可读 */
+/* 侧栏收起时子菜单弹出层 */
 .okfood-sidebar-menu-popup.el-menu--popup-container,
 .okfood-sidebar-menu-popup .el-menu.el-menu--popup {
   --el-menu-text-color: #1e293b;
-  --el-menu-hover-text-color: #0e5a44;
-  --el-menu-active-color: #0e5a44;
+  --el-menu-hover-text-color: var(--el-color-primary);
+  --el-menu-active-color: var(--el-color-primary);
   --el-menu-bg-color: #ffffff;
   --el-menu-hover-bg-color: #f1f5f9;
 }
@@ -221,16 +422,16 @@
 }
 
 .okfood-sidebar-menu-popup .el-menu-item:hover {
-  color: #0e5a44 !important;
+  color: var(--el-color-primary) !important;
   background-color: #f1f5f9 !important;
 }
 
 .okfood-sidebar-menu-popup .el-menu-item.is-active {
-  color: #0e5a44 !important;
-  background-color: #ecfdf5 !important;
+  color: var(--el-color-primary) !important;
+  background-color: var(--el-color-primary-light-9) !important;
 }
 
-/* --- el-table 表头：墨绿背景（与侧栏 / 主色 #0e5a44 一致）--- */
+/* --- el-table 表头：与当前主色同谱加深，保证白字对比 --- */
 .el-table thead th.el-table__cell {
   background-color: var(--okfood-el-table-header-bg) !important;
   color: var(--okfood-el-table-header-text);
@@ -260,7 +461,6 @@
   color: inherit;
 }
 
-/* 表头排序：弱态白 + 选中态琥珀黄（与导航强调色呼应）*/
 .el-table th.el-table__cell .sort-caret.ascending {
   border-bottom-color: rgba(255, 255, 255, 0.35);
 }
@@ -282,7 +482,6 @@
   border-top-color: rgba(250, 204, 21, 0.55);
 }
 
-/* 表头筛选触发器图标 */
 .el-table th.el-table__cell .el-table__column-filter-trigger {
   color: rgba(255, 255, 255, 0.78);
 }
@@ -291,7 +490,7 @@
   color: rgba(255, 255, 255, 1);
 }
 
-/* --- el-button 默认（无 type / 默认 type）：边框与标签使用墨绿主色，与 sidebar / primary 一致 --- */
+/* --- el-button 默认：边框与文字跟随主色 --- */
 .el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--info):not(.is-text):not(.is-link) {
   --el-button-text-color: var(--el-color-primary);
   --el-button-border-color: var(--el-color-primary);

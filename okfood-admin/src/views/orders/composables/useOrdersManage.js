@@ -1,6 +1,6 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { apiJson, adminAccessToken, adminStoreBranding, handleAdminLogout } from '../../../admin/core.js'
 import { showToast } from '../../../composables/useToast.js'
 import { useStorePrint } from '../../../composables/useStorePrint.js'
@@ -572,7 +572,7 @@ export function useOrdersManage(orderKind = 'single') {
         return
       }
       if (status === 501) {
-        ElMessage.warning(e instanceof Error ? e.message : 'UU 跑腿尚未对接')
+        showToast(e instanceof Error ? e.message : 'UU 跑腿尚未对接', 'warning')
         return
       }
       showToast(e instanceof Error ? e.message : '请求失败', 'error')

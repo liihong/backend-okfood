@@ -2,7 +2,7 @@
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 import { useToast } from './composables/useToast.js'
 
-const { toastOpen, toastText, toastKind } = useToast()
+const { toastOpen, toastTitle, toastDetail, toastKind } = useToast()
 </script>
 
 <template>
@@ -12,10 +12,14 @@ const { toastOpen, toastText, toastKind } = useToast()
       <div
         v-if="toastOpen"
         class="app-toast"
-        :class="{ 'app-toast--error': toastKind === 'error' }"
+        :class="`app-toast--${toastKind}`"
         :role="toastKind === 'error' ? 'alert' : 'status'"
       >
-        {{ toastText }}
+        <span class="app-toast__icon" aria-hidden="true" />
+        <div class="app-toast__body">
+          <strong class="app-toast__title">{{ toastTitle }}</strong>
+          <p v-if="toastDetail" class="app-toast__desc">{{ toastDetail }}</p>
+        </div>
       </div>
     </Transition>
   </el-config-provider>
