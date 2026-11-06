@@ -2,7 +2,7 @@
 defineOptions({ name: 'MenuView' })
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import { Search, Camera, Trash2, X } from 'lucide-vue-next'
+import { Search, Camera, Trash2 } from 'lucide-vue-next'
 import {
   apiJson,
   apiForm,
@@ -125,6 +125,18 @@ function dishLastUsedLabel(row) {
 }
 const dishPhotoUploading = ref(false)
 
+/** 菜品编辑预览图 URL（与会员端展示一致，用于大图预览） */
+const dishEditorPreviewDisplayUrl = computed(() => {
+  const u = dishForm.image_url
+  if (!u || String(u).trim() === '') return ''
+  return dishImageDisplayUrl(u) || ''
+})
+
+const dishEditorPreviewSrcList = computed(() => {
+  const url = dishEditorPreviewDisplayUrl.value
+  return url ? [url] : []
+})
+
 async function fetchCategoriesForDishes() {
   if (!adminAccessToken.value) return
   try {
@@ -238,8 +250,6 @@ const closeDishModal = () => {
   showDishModal.value = false
 }
 
-const dishPhotoUploadKey = ref(0)
-
 const onDishPhotoUploadChange = async (uploadFile) => {
   const file = uploadFile?.raw
   if (!file || !file.type.startsWith('image/')) return
@@ -269,7 +279,6 @@ const onDishPhotoUploadChange = async (uploadFile) => {
     showToast(err instanceof Error ? err.message : '上传失败', 'error')
   } finally {
     dishPhotoUploading.value = false
-    dishPhotoUploadKey.value += 1
   }
 }
 
@@ -477,53 +486,75 @@ onMounted(() => {
       </section>
     </div>
 
-    <div
-      v-if="showDishModal"
-      class="modal-overlay menu-editor-overlay"
-      v-esc-close="closeDishModal"
-      @click.self="closeDishModal"
+    <el-drawer
+      v-model="showDishModal"
+      direction="rtl"
+      size="1020px"
+      destroy-on-close
+      :close-on-click-modal="true"
+      class="dish-editor-drawer"
     >
-      <div class="modal-card menu-editor-card">
-        <div class="modal-header">
-          <div class="header-info">
+      <template #header>
+        <div class="dish-editor-drawer-head">
+          <div>
             <h3 class="menu-editor-title-h3">
               {{ isEditingDish ? '编辑菜品' : '新建菜品' }}
             </h3>
             <p class="menu-editor-subtitle">DISH CATALOG · CRUD</p>
           </div>
-          <button type="button" class="close-btn" @click="closeDishModal"><X :size="20" /></button>
         </div>
-        <div class="modal-body menu-editor-body">
+      </template>
+
+      <div class="dish-editor-drawer-body">
+        <!-- 左侧：大图预览 + 独立上传按钮 -->
+        <aside class="dish-editor-media">
+          <div
+            class="dish-editor-preview"
+            :class="{ 'dish-editor-preview--has-image': !!dishForm.image_url }"
+          >
+            <el-image
+              v-if="dishForm.image_url"
+              class="dish-editor-preview-el"
+              :src="dishEditorPreviewDisplayUrl"
+              :preview-src-list="dishEditorPreviewSrcList"
+              fit="cover"
+              preview-teleported
+              hide-on-click-modal
+            >
+              <template #error>
+                <div class="dish-editor-preview-placeholder dish-editor-preview-placeholder--small">
+                  <span>图片加载失败</span>
+                </div>
+              </template>
+            </el-image>
+            <div v-else class="dish-editor-preview-placeholder">
+              <Camera :size="40" stroke-width="1.75" class="menu-upload-icon" />
+              <p class="menu-upload-text">
+                {{ dishPhotoUploading ? '正在上传…' : '暂无图片，可上传或右侧粘贴链接' }}
+              </p>
+            </div>
+            <!-- 悬停提示：点击进入 Element Plus 大图预览 -->
+            <div v-if="dishForm.image_url" class="dish-editor-preview-hover" aria-hidden="true">
+              <span class="dish-editor-preview-hover-text">点击查看大图</span>
+            </div>
+          </div>
           <el-upload
-            :key="dishPhotoUploadKey"
-            class="menu-dish-photo-upload"
             :show-file-list="false"
             :auto-upload="false"
             accept="image/*"
+            class="dish-editor-upload-trigger"
             @change="onDishPhotoUploadChange"
           >
-            <button
-              type="button"
-              class="menu-upload-sim"
-              :disabled="dishPhotoUploading"
-            >
-              <img
-                v-if="dishForm.image_url"
-                :src="dishImageDisplayUrl(dishForm.image_url)"
-                alt=""
-                class="menu-upload-preview"
-              />
-              <div v-else class="menu-upload-inner">
-                <Camera :size="32" stroke-width="1.75" class="menu-upload-icon" />
-                <p class="menu-upload-text">
-                  {{ dishPhotoUploading ? '正在上传…' : '点击上传至服务器，或下方粘贴外链' }}
-                </p>
-              </div>
-              <span v-if="dishForm.image_url && !dishPhotoUploading" class="menu-upload-change-hint"
-                >点击更换</span
-              >
-            </button>
+            <template #trigger>
+              <el-button type="primary" :loading="dishPhotoUploading" :disabled="dishPhotoUploading">
+                {{ dishForm.image_url ? '更换菜品图' : '上传菜品图' }}
+              </el-button>
+            </template>
           </el-upload>
+        </aside>
+
+        <!-- 右侧：表单 -->
+        <div class="dish-editor-form-col">
           <label class="menu-editor-label" for="dish-image-url">图片链接（可选，支持 https外链）</label>
           <el-input
             id="dish-image-url"
@@ -624,20 +655,18 @@ onMounted(() => {
             clearable
           />
 
-          <div class="menu-editor-footer-btns">
-            <button type="button" class="menu-btn-draft" @click="closeDishModal">取消</button>
-            <button
-              type="button"
-              class="menu-btn-save-sync"
-              :disabled="dishModalSaving"
-              @click="saveDish"
-            >
-              {{ dishModalSaving ? '保存中…' : '保存' }}
-            </button>
-          </div>
         </div>
       </div>
-    </div>
+
+      <template #footer>
+        <div class="dish-editor-drawer-footer">
+          <el-button class="menu-btn-draft" @click="closeDishModal">取消</el-button>
+          <el-button type="primary" class="menu-btn-save-sync" :loading="dishModalSaving" @click="saveDish">
+            {{ dishModalSaving ? '保存中…' : '保存' }}
+          </el-button>
+        </div>
+      </template>
+    </el-drawer>
   </section>
 </template>
 
@@ -894,5 +923,165 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+/* 菜品编辑：左侧抽屉 + 左图右表（大图用 contain 便于看清整图） */
+/* 避免标题区被 drawer header 默认裁切（斜体/字距导致顶部露不全） */
+.dish-editor-drawer :deep(.el-drawer__header) {
+  align-items: flex-start;
+  padding-top: 1.25rem;
+  padding-bottom: 1rem;
+  overflow: visible;
+}
+
+.dish-editor-drawer :deep(.el-drawer__body) {
+  padding-top: 0.5rem;
+}
+
+.dish-editor-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-top: 0.25rem;
+}
+
+/* 抽屉内标题与副标题：行高留足，避免上行笔画被裁 */
+.dish-editor-drawer-head .menu-editor-title-h3 {
+  line-height: 1.3;
+  padding-top: 0.15em;
+}
+
+.dish-editor-drawer-head .menu-editor-subtitle {
+  line-height: 1.45;
+  margin-top: 8px;
+}
+
+.dish-editor-drawer-body {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 1.25rem;
+  min-height: 280px;
+  box-sizing: border-box;
+}
+
+.dish-editor-media {
+  /* 与表单列左右均分（抽屉总宽约 1020px） */
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  /* 与标题区拉开一点距离，整体视觉略下移 */
+  margin-top: 0.75rem;
+}
+
+.dish-editor-preview {
+  position: relative;
+  width: 100%;
+  /* 竖构图更接近实拍菜品比例，预览区尽量撑满列宽 */
+  aspect-ratio: 3 / 4;
+  min-height: 220px;
+  max-height: min(58vh, 520px);
+  border-radius: 1.25rem;
+  border: 2px dashed #e2e8f0;
+  background: #e8eef3;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dish-editor-preview-el {
+  width: 100%;
+  height: 100%;
+}
+
+.dish-editor-preview-el :deep(.el-image__inner) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 58%;
+}
+
+/* 悬停时显示「点击查看大图」，遮罩不拦截点击（由 el-image 打开预览） */
+.dish-editor-preview-hover {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0) 0%, rgba(15, 23, 42, 0.5) 100%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  border-radius: inherit;
+}
+
+.dish-editor-preview-hover-text {
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #0e5a44;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+
+.dish-editor-preview--has-image:hover .dish-editor-preview-hover {
+  opacity: 1;
+}
+
+.dish-editor-preview-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1.5rem;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.dish-editor-preview-placeholder--small {
+  padding: 0.75rem;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dish-editor-upload-trigger {
+  width: 100%;
+}
+
+.dish-editor-upload-trigger :deep(.el-upload) {
+  display: block;
+}
+
+.dish-editor-upload-trigger :deep(.el-button) {
+  width: 100%;
+}
+
+.dish-editor-form-col {
+  flex: 1 1 50%;
+  min-width: 0;
+}
+
+.dish-editor-drawer-footer {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .dish-editor-drawer-body {
+    flex-direction: column;
+  }
+  .dish-editor-media {
+    flex-basis: auto;
+    max-width: none;
+    width: 100%;
+  }
 }
 </style>
