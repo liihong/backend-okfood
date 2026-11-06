@@ -455,10 +455,28 @@ class MemberAdminOut(BaseModel):
     meal_scope_label: str = Field("", description="午餐 / 晚餐 / 全餐")
     plan_type_display: str = Field("", description="管理端展示：本店卡包名称；无卡包工单时按周期+餐段匹配")
     dinner_balance: int = Field(0, ge=0, description="晚餐剩余次数")
+    dinner_daily_meal_units: int = Field(
+        1,
+        ge=1,
+        le=50,
+        description="晚餐每配送日份数；与午餐 daily_meal_units 分开，不随午餐份数改动",
+    )
+    dinner_daily_meal_units_pending: int | None = Field(
+        None,
+        description="晚餐已预约、下一配送日生效的份数；无预约为 null",
+    )
     dinner_meal_quota_total: int = Field(
         0,
         ge=0,
         description="晚餐累计总次数（展示分母）",
+    )
+    dinner_delivery_paused: bool = Field(
+        False,
+        description="只暂停晚餐日程；默认否。不影响午餐，也不等于会员整体暂停",
+    )
+    dinner_deliver_on: date | None = Field(
+        None,
+        description="晚餐指定配送日。暂停时只在这一天进晚餐单；未暂停时不限制每天配送",
     )
     dinner_is_leaved_tomorrow: bool = Field(False, description="晚餐：已勾选仅明天请假")
     dinner_tomorrow_leave_target_date: date | None = Field(
@@ -479,7 +497,10 @@ class MemberAdminOut(BaseModel):
     )
     leave_range_start: date | None = None
     leave_range_end: date | None = None
-    is_on_leave_today: bool = Field(False, description="区间请假是否覆盖上海当前业务日")
+    is_on_leave_today: bool = Field(
+        False,
+        description="档案请假是否覆盖上海当前业务日；纯晚餐会员同时看晚餐池，午/全餐仍只看午餐字段",
+    )
     membership_refunded_at: str | None = Field(
         None,
         description="退卡退款确认时刻（ISO）；非空则档案状态为已退款",
@@ -544,7 +565,7 @@ class MemberUnconsumedMealsOut(BaseModel):
 
 
 class MemberRenewPendingStatsOut(BaseModel):
-    """待续费：生效中且剩余次数 <= LOW_BALANCE_THRESHOLD，非暂停/退款/请假。"""
+    """待续费：生效中且午餐或晚餐剩余次数 <= LOW_BALANCE_THRESHOLD，非暂停/退款/请假。"""
 
     count: int = Field(..., ge=0, description="待续费总户数")
     balance_1_count: int = Field(..., ge=0, description="剩余 1 次")
@@ -670,6 +691,12 @@ class AdminMemberPatchIn(BaseModel):
         validation_alias=AliasChoices("daily_meal_units", "dailyMealUnits"),
         description="每配送日需送达份数；不传则不修改（可与前端约定 snake_case 或 camelCase）",
     )
+    dinner_daily_meal_units: int | None = Field(
+        None,
+        ge=1,
+        le=50,
+        description="晚餐每配送日份数；不传则不修改，也不改午餐份数",
+    )
     plan_type: PlanType | None = Field(
         None,
         description="仅更新档案套餐标签（周卡/月卡/次卡），不改动余额；与开卡工单入账互补",
@@ -690,6 +717,14 @@ class AdminMemberPatchIn(BaseModel):
         ge=0,
         le=999_999,
         description="晚餐剩余次数；提交则整单覆盖，差值写入晚餐次数池与 balance_logs",
+    )
+    dinner_delivery_paused: bool | None = Field(
+        None,
+        description="只暂停晚餐日程。不改会员整体暂停，不影响午餐。不传则不修改",
+    )
+    dinner_deliver_on: date | None = Field(
+        None,
+        description="晚餐指定配送日。只提交本字段时不会改暂停标记；传 null 表示清空",
     )
     delivery_start_date: date | None = Field(
         None,
@@ -727,6 +762,28 @@ class AdminMemberPatchIn(BaseModel):
         if isinstance(v, float):
             if abs(v - round(v)) > 1e-9:
                 raise ValueError("每配送日份数须为整数")
+            v = int(round(v))
+        return v
+
+    @field_validator("dinner_daily_meal_units", mode="before")
+    @classmethod
+    def _coerce_dinner_daily_meal_units(cls, v: object) -> int | None:
+        """与午餐份数同样兼容数字串；只校验晚餐字段，不改午餐校验。"""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            if s == "":
+                return None
+            try:
+                v = int(s, 10)
+            except ValueError as e:
+                raise ValueError("晚餐每配送日份数须为 1～50 的整数") from e
+        if isinstance(v, bool):
+            raise ValueError("晚餐每配送日份数格式无效")
+        if isinstance(v, float):
+            if abs(v - round(v)) > 1e-9:
+                raise ValueError("晚餐每配送日份数须为整数")
             v = int(round(v))
         return v
 
@@ -1133,6 +1190,10 @@ class DeliverySheetMemberOut(BaseModel):
     phone: str
     name: str
     plan_type: str | None = Field(None, description="套餐类型：次卡 / 周卡 / 月卡")
+    meal_scope: str = Field(
+        "午餐",
+        description="餐段范围：午餐 / 晚餐 / 全餐（由已入账工单餐段资格得出）",
+    )
     card_kind_label: str | None = Field(
         None,
         description="开卡种类名称，如 午餐卡、晚餐卡、午晚餐卡、午餐+果蔬汁卡",
@@ -1830,6 +1891,23 @@ class AdminSystemNotificationOut(BaseModel):
 class AdminSystemNotificationListOut(BaseModel):
     items: list[AdminSystemNotificationOut] = Field(default_factory=list)
     unacknowledged_count: int = 0
+
+
+class PendingMealUnitsStatusOut(BaseModel):
+    """明日份数落库弹窗：当前待生效人数，以及今天是否已经推过大表。"""
+
+    lunch_pending: int = 0
+    dinner_pending: int = 0
+    lunch_sheet_pushed_today: bool = False
+    dinner_sheet_pushed_today: bool = False
+    warning: str = ""
+
+
+class PendingMealUnitsApplyOut(BaseModel):
+    """手动落库结果。"""
+
+    lunch_applied: int = 0
+    dinner_applied: int = 0
 
 
 class TenantIntegrationSettingsOut(BaseModel):

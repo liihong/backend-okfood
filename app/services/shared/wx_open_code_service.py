@@ -67,12 +67,28 @@ PUBLISH_BLOB_KEY = "wx_code_publish"
 # 普通模板库 commit 必带隐私接口声明（缺省易报 61040）
 REQUIRED_PRIVATE_INFOS = ["getLocation", "chooseLocation"]
 
+# 相册（仅写入）。微信授权弹窗展示为「为了{privacy_text}」，用途里不再写「用于」。
+ALBUM_WRITE_ONLY_PRIVACY_KEY = "AlbumWriteOnly"
+ALBUM_WRITE_ONLY_PRIVACY_TEXT = (
+    "保存订单核销二维码、分享海报图片到用户相册，仅写入相册，不会读取相册内其他照片、视频"
+)
+
+
+def album_write_only_privacy_item() -> dict[str, str]:
+    """OK饭「相册（仅写入）」隐私项：只保存核销码和分享海报，不读取相册里的其它内容。"""
+    return {
+        "privacy_key": ALBUM_WRITE_ONLY_PRIVACY_KEY,
+        "privacy_text": ALBUM_WRITE_ONLY_PRIVACY_TEXT,
+    }
+
+
 # 小程序模板实际使用的隐私项（与 manifest / 页面能力对齐）
 DEFAULT_PRIVACY_SETTING_LIST: list[dict[str, str]] = [
     {"privacy_key": "PhoneNumber", "privacy_text": "会员登录、订单联系与配送通知"},
     {"privacy_key": "Location", "privacy_text": "获取当前位置并校验是否在配送范围内"},
     {"privacy_key": "ChooseLocation", "privacy_text": "在地图中选择收货地址"},
     {"privacy_key": "UserInfo", "privacy_text": "完善会员头像与昵称"},
+    album_write_only_privacy_item(),
 ]
 
 
@@ -1296,33 +1312,86 @@ def get_privacy_setting_for_tenant(
     }
 
 
-def sync_privacy_setting_for_tenant(
+def _configured_privacy_items(setting_list: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    """已填写用途的隐私项。空文案表示尚未配置，不能原样回写给微信。相册项由调用方单独写入。"""
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw in setting_list or []:
+        if not isinstance(raw, dict):
+            continue
+        key = _s(raw.get("privacy_key"))
+        text = _s(raw.get("privacy_text"))
+        if not key or not text or key in seen or key == ALBUM_WRITE_ONLY_PRIVACY_KEY:
+            continue
+        seen.add(key)
+        out.append({"privacy_key": key, "privacy_text": text})
+    return out
+
+
+def merge_album_write_only_privacy(
+    setting_list: list[dict[str, Any]] | None,
+) -> tuple[list[dict[str, str]], bool]:
+    """补齐相册（仅写入），并返回 (setting_list, 是否回退到 OK饭 全量模板)。
+
+    已有其它权限时只新增或覆盖 AlbumWriteOnly，用途文案不动。
+    一项都没配置过时提交完整模板，避免新小程序只申报相册。
+    """
+    kept = _configured_privacy_items(setting_list)
+    if not kept:
+        template = [
+            {"privacy_key": _s(x.get("privacy_key")), "privacy_text": _s(x.get("privacy_text"))}
+            for x in DEFAULT_PRIVACY_SETTING_LIST
+            if _s(x.get("privacy_key")) and _s(x.get("privacy_text"))
+        ]
+        return template, True
+    kept.append(album_write_only_privacy_item())
+    return kept, False
+
+
+def _reuse_owner_setting(remote_owner: Any) -> dict[str, Any] | None:
+    """沿用微信上已有的收集方信息，避免更新相册权限时改掉联系方式或补充文件。"""
+    owner = remote_owner if isinstance(remote_owner, dict) else {}
+    notice = _s(owner.get("notice_method"))
+    contacts = {
+        key: _s(owner.get(key))
+        for key in ("contact_phone", "contact_email", "contact_qq", "contact_weixin")
+    }
+    if not notice or not any(contacts.values()):
+        return None
+    out: dict[str, Any] = {"notice_method": notice}
+    for key, value in contacts.items():
+        if value:
+            out[key] = value
+    expire = _s(owner.get("store_expire_timestamp"))
+    if expire:
+        out["store_expire_timestamp"] = expire
+    media_id = _s(owner.get("ext_file_media_id"))
+    if media_id:
+        out["ext_file_media_id"] = media_id
+    try:
+        region = int(owner.get("store_region") or 0)
+    except (TypeError, ValueError):
+        region = 0
+    if region > 0:
+        out["store_region"] = region
+    return out
+
+
+def _passthrough_sdk_privacy_info_list(raw: Any) -> list[dict[str, Any]] | None:
+    """原样带回已配置的第三方 SDK 隐私说明，避免 set 时被清空。"""
+    if not isinstance(raw, list):
+        return None
+    items = [item for item in raw if isinstance(item, dict) and item]
+    return items or None
+
+
+def _post_set_privacy_setting(
     db: Session,
     tenant_id: int,
-    *,
-    contact_phone: str | None = None,
-    contact_email: str | None = None,
-    contact_qq: str | None = None,
-    contact_weixin: str | None = None,
-    notice_method: str | None = None,
-    setting_list: list[dict[str, str]] | None = None,
-    privacy_ver: int = 2,
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """同步用户隐私保护指引到微信（开发版默认，提审前须完成）。"""
-    _ensure_authorizer_for_code_ops(db, int(tenant_id))
-    payload = build_privacy_setting_payload(
-        db,
-        int(tenant_id),
-        contact_phone=contact_phone,
-        contact_email=contact_email,
-        contact_qq=contact_qq,
-        contact_weixin=contact_weixin,
-        notice_method=notice_method,
-        setting_list=setting_list,
-        privacy_ver=privacy_ver,
-    )
+    """提交 setprivacysetting，并把同步结果写入发布摘要。"""
     token = _authorizer_access_token_or_http(db, int(tenant_id))
-
     try:
         with httpx.Client(timeout=30.0) as client:
             r = client.post(
@@ -1365,6 +1434,66 @@ def sync_privacy_setting_for_tenant(
         "setting_list": payload.get("setting_list") or [],
         "owner_setting": payload.get("owner_setting") or {},
     }
+
+
+def sync_privacy_setting_for_tenant(
+    db: Session,
+    tenant_id: int,
+    *,
+    contact_phone: str | None = None,
+    contact_email: str | None = None,
+    contact_qq: str | None = None,
+    contact_weixin: str | None = None,
+    notice_method: str | None = None,
+    setting_list: list[dict[str, str]] | None = None,
+    privacy_ver: int = 2,
+) -> dict[str, Any]:
+    """同步用户隐私保护指引到微信（开发版默认，提审前须完成）。"""
+    _ensure_authorizer_for_code_ops(db, int(tenant_id))
+    payload = build_privacy_setting_payload(
+        db,
+        int(tenant_id),
+        contact_phone=contact_phone,
+        contact_email=contact_email,
+        contact_qq=contact_qq,
+        contact_weixin=contact_weixin,
+        notice_method=notice_method,
+        setting_list=setting_list,
+        privacy_ver=privacy_ver,
+    )
+    return _post_set_privacy_setting(db, int(tenant_id), payload)
+
+
+def sync_album_write_only_privacy_for_tenant(db: Session, tenant_id: int) -> dict[str, Any]:
+    """为已授权小程序补齐「相册（仅写入）」开发版隐私指引。
+
+    开发版提交后体验版即可按新指引调用保存相册；现网要等代码审核通过并发布。
+    已配置的其它隐私项、收集方联系方式和 SDK 说明保持不变。
+    """
+    _ensure_authorizer_for_code_ops(db, int(tenant_id))
+    current = get_privacy_setting_for_tenant(db, int(tenant_id), privacy_ver=2)
+    setting_list, used_default_template = merge_album_write_only_privacy(current.get("setting_list"))
+    owner = _reuse_owner_setting(current.get("owner_setting"))
+    if owner is None:
+        payload = build_privacy_setting_payload(
+            db,
+            int(tenant_id),
+            setting_list=setting_list,
+            privacy_ver=2,
+        )
+    else:
+        payload = {
+            "privacy_ver": 2,
+            "owner_setting": owner,
+            "setting_list": setting_list,
+        }
+    sdk_list = _passthrough_sdk_privacy_info_list(current.get("sdk_privacy_info_list"))
+    if sdk_list:
+        payload["sdk_privacy_info_list"] = sdk_list
+    result = _post_set_privacy_setting(db, int(tenant_id), payload)
+    result["used_default_template"] = used_default_template
+    result["album_write_only"] = album_write_only_privacy_item()
+    return result
 
 
 def submit_code_audit(

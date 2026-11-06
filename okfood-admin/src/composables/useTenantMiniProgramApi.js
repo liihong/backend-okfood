@@ -39,6 +39,10 @@ export function createTenantMiniProgramApi(tenantId) {
       const q = path ? `?path=${encodeURIComponent(path)}` : ''
       return apiJson(`${base}/wx-code/trial-qrcode${q}`, {}, authOpts)
     },
+    loadPrivacySetting: (privacyVer = 2) =>
+      apiJson(`${base}/wx-code/privacy-setting?privacy_ver=${privacyVer}`, {}, authOpts),
+    syncAlbumWritePrivacy: () =>
+      apiJson(`${base}/wx-code/sync-album-write-privacy`, { method: 'POST', body: '{}' }, authOpts),
     loadAuditCategories: () => apiJson(`${base}/wx-code/categories`, {}, authOpts),
     submitAudit: (body) =>
       apiJson(`${base}/wx-code/submit-audit`, { method: 'POST', body: JSON.stringify(body) }, authOpts),

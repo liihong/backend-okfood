@@ -19,14 +19,51 @@ import {
   handleAdminLogout,
   mealsGrantCreditLabel,
   mealsGrantCreditParts,
+  adminStoreId,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
+const juiceSkus = ref([])
+const juiceSkusLoading = ref(false)
+
+/** 赠送展示：晚餐次数或果蔬汁单数。与每个餐段入账次数分开。 */
+function giftCreditText(row) {
+  const dinner = Number(row?.gift_dinner_meals) || 0
+  const juice = Number(row?.gift_retail_quantity) || 0
+  if (dinner > 0) return `赠送晚餐 ${dinner} 次（默认暂停）`
+  if (juice > 0) return `赠送果蔬汁 ${juice} 单`
+  return ''
+}
+
+async function loadJuiceSkus() {
+  if (!adminAccessToken.value) return
+  juiceSkusLoading.value = true
+  try {
+    const sid = Math.max(1, Math.floor(Number(adminStoreId.value) || 1))
+    const data = await apiJson(
+      `/api/admin/catalog/retail-products?store_id=${sid}&shelf_only=true`,
+      {},
+      { auth: true },
+    )
+    juiceSkus.value = Array.isArray(data) ? data : []
+  } catch {
+    juiceSkus.value = []
+  } finally {
+    juiceSkusLoading.value = false
+  }
+}
+
+function skuOptionLabel(sku) {
+  const title = String(sku?.display_title || sku?.spec_label || sku?.title || '').trim()
+  return title || `SKU #${sku?.id}`
+}
 const list = ref([])
 const loading = ref(false)
 const dialogVisible = ref(false)
 const saving = ref(false)
 const editingId = ref(null)
+/** 正在切换上架状态的模版 id，避免连点重复提交 */
+const togglingId = ref(null)
 const cardPhotoUploading = ref(false)
 const cardPhotoUploadKey = ref(0)
 /** 顶部说明横条是否展示 */
@@ -35,6 +72,10 @@ const form = ref({
   kind_label: '',
   name: '',
   meals_grant: 6,
+  gift_mode: 'none',
+  gift_dinner_meals: 0,
+  gift_retail_product_id: null,
+  gift_retail_quantity: 1,
   meal_periods: ['lunch'],
   deliver_dinner_with_lunch: false,
   list_price_yuan: '',
@@ -169,6 +210,10 @@ function openCreate() {
     kind_label: '',
     name: '',
     meals_grant: 6,
+    gift_mode: 'none',
+    gift_dinner_meals: 0,
+    gift_retail_product_id: null,
+    gift_retail_quantity: 1,
     meal_periods: ['lunch'],
     deliver_dinner_with_lunch: false,
     list_price_yuan: '',
@@ -182,14 +227,21 @@ function openCreate() {
     is_active: true,
   }
   dialogVisible.value = true
+  void loadJuiceSkus()
 }
 
 function openEdit(row) {
   editingId.value = row.id
+  const giftDinner = Number(row.gift_dinner_meals) || 0
+  const giftJuice = Number(row.gift_retail_quantity) || 0
   form.value = {
     kind_label: row.kind_label ?? '',
     name: row.name || '',
     meals_grant: row.meals_grant,
+    gift_mode: giftDinner > 0 ? 'dinner' : giftJuice > 0 ? 'juice' : 'none',
+    gift_dinner_meals: giftDinner,
+    gift_retail_product_id: row.gift_retail_product_id != null ? Number(row.gift_retail_product_id) : null,
+    gift_retail_quantity: giftJuice > 0 ? giftJuice : 1,
     meal_periods: Array.isArray(row.meal_periods) && row.meal_periods.length ? [...row.meal_periods] : ['lunch'],
     deliver_dinner_with_lunch: row.deliver_dinner_with_lunch === true,
     list_price_yuan: row.list_price_yuan != null ? String(row.list_price_yuan).trim() : '',
@@ -203,6 +255,7 @@ function openEdit(row) {
     is_active: row.is_active,
   }
   dialogVisible.value = true
+  void loadJuiceSkus()
 }
 
 async function saveForm() {
@@ -221,6 +274,28 @@ async function saveForm() {
   if (!periods.length) {
     showToast('请至少选择一个覆盖餐段', 'error')
     return
+  }
+  const giftMode = String(form.value.gift_mode || 'none')
+  let giftDinner = 0
+  let giftProductId = null
+  let giftJuice = 0
+  if (giftMode === 'dinner') {
+    giftDinner = Math.floor(Number(form.value.gift_dinner_meals) || 0)
+    if (giftDinner < 1) {
+      showToast('请填写赠送晚餐次数', 'error')
+      return
+    }
+  } else if (giftMode === 'juice') {
+    giftJuice = Math.floor(Number(form.value.gift_retail_quantity) || 0)
+    giftProductId = form.value.gift_retail_product_id != null ? Number(form.value.gift_retail_product_id) : null
+    if (!giftProductId) {
+      showToast('请选择果蔬汁 SKU', 'error')
+      return
+    }
+    if (giftJuice < 1) {
+      showToast('请填写果蔬汁赠送次数', 'error')
+      return
+    }
   }
   const listPx = parseOptionalMoney(form.value.list_price_yuan)
   const salePx = parseOptionalMoney(form.value.sale_price_yuan)
@@ -244,6 +319,9 @@ async function saveForm() {
       kind_label: kind,
       name,
       meals_grant: Number(form.value.meals_grant),
+      gift_dinner_meals: giftDinner,
+      gift_retail_product_id: giftProductId,
+      gift_retail_quantity: giftJuice,
       meal_periods: periods,
       deliver_dinner_with_lunch: Boolean(
         periods.includes('lunch') && periods.includes('dinner') && form.value.deliver_dinner_with_lunch,
@@ -277,6 +355,39 @@ async function saveForm() {
     showToast(e instanceof Error ? e.message : '保存失败', 'error')
   } finally {
     saving.value = false
+  }
+}
+
+/**
+ * 列表「启用」开关直接上架/下架。
+ * 只 PATCH is_active；小程序卡包列表与详情只展示已启用模版。
+ */
+async function toggleActive(row) {
+  if (!row || togglingId.value != null) return
+  const next = !row.is_active
+  const prev = Boolean(row.is_active)
+  togglingId.value = row.id
+  row.is_active = next
+  try {
+    await apiJson(
+      `/api/admin/catalog/membership-templates/${row.id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: next }),
+      },
+      { auth: true },
+    )
+    showToast(next ? '已上架' : '已下架', 'success')
+  } catch (e) {
+    row.is_active = prev
+    if (e?.status === 401) {
+      alert('登录已过期')
+      handleAdminLogout()
+      return
+    }
+    showToast(e instanceof Error ? e.message : '操作失败', 'error')
+  } finally {
+    togglingId.value = null
   }
 }
 
@@ -376,7 +487,7 @@ onMounted(() => {
                 </div>
               </td>
               <td>
-                <div class="mcard-cell-center">
+                <div class="mcard-cell-center mcard-meals-cell">
                   <span class="mcard-meals-badge">
                     <span
                       v-for="part in mealsGrantCreditParts(row)"
@@ -384,6 +495,7 @@ onMounted(() => {
                       class="mcard-meals-badge-line"
                     >{{ part.text }}</span>
                   </span>
+                  <span v-if="giftCreditText(row)" class="mcard-meals-gift">{{ giftCreditText(row) }}</span>
                 </div>
               </td>
               <td>
@@ -408,14 +520,21 @@ onMounted(() => {
               </td>
               <td>
                 <div class="mcard-cell-center">
-                  <span
+                  <button
+                    type="button"
                     class="mcard-switch"
-                    :class="{ 'mcard-switch--on': row.is_active }"
-                    role="img"
-                    :aria-label="row.is_active ? '已启用' : '未启用'"
+                    :class="{
+                      'mcard-switch--on': row.is_active,
+                      'mcard-switch--busy': togglingId === row.id,
+                    }"
+                    role="switch"
+                    :aria-checked="row.is_active ? 'true' : 'false'"
+                    :aria-label="row.is_active ? '下架该会员卡' : '上架该会员卡'"
+                    :disabled="togglingId === row.id"
+                    @click="toggleActive(row)"
                   >
                     <span class="mcard-switch-knob" />
-                  </span>
+                  </button>
                 </div>
               </td>
               <td>
@@ -441,7 +560,7 @@ onMounted(() => {
     <el-dialog
       v-model="dialogVisible"
       class="mcard-template-dialog"
-      width="680px"
+      width="800px"
       align-center
       destroy-on-close
       :show-close="false"
@@ -487,20 +606,7 @@ onMounted(() => {
             </el-checkbox-group>
           </div>
 
-          <div v-if="showDeliverDinnerWithLunch" class="mcard-field mcard-field--span2">
-            <label class="mcard-form-label">与午餐一起配送</label>
-            <div class="mcard-form-control">
-              <el-radio-group v-model="form.deliver_dinner_with_lunch" size="small">
-                <el-radio :value="false">分开配送（午、晚各扣各的）</el-radio>
-                <el-radio :value="true">一起配送（午餐送达时同时扣晚餐）</el-radio>
-              </el-radio-group>
-              <p class="mcard-form-hint">
-                勾选后，该模版下已入账的全餐卡（含老会员）午餐送达时会同时扣晚餐各 1 次；晚餐大表已送达则不会再扣。取消勾选后，仅开卡快照已是一起配送的工单仍按快照扣次。
-              </p>
-            </div>
-          </div>
-
-          <div class="mcard-field mcard-field--span2">
+          <div class="mcard-field">
             <label class="mcard-form-label">每个餐段入账次数</label>
             <el-input-number
               v-model="form.meals_grant"
@@ -510,29 +616,105 @@ onMounted(() => {
               controls-position="right"
               class="mcard-form-control mcard-form-control--number"
             />
-            <p class="mcard-form-hint">
-              勾选几个餐段就分别写入几次，不是午晚加总。当前将入账：<strong>{{ formCreditPreview }}</strong>
-            </p>
+          </div>
+          <p class="mcard-form-hint mcard-form-hint--full">
+            勾选几个餐段就分别写入几次，不是午晚加总。当前将入账：<strong>{{ formCreditPreview }}</strong>
+          </p>
+
+          <div v-if="showDeliverDinnerWithLunch" class="mcard-field mcard-field--span2 mcard-field--top">
+            <label class="mcard-form-label">与午餐一起配送</label>
+            <div class="mcard-field-main">
+              <el-radio-group v-model="form.deliver_dinner_with_lunch" size="small" class="mcard-form-control">
+                <el-radio :value="false">分开配送（午、晚各扣各的）</el-radio>
+                <el-radio :value="true">一起配送（午餐送达时同时扣晚餐）</el-radio>
+              </el-radio-group>
+              <p class="mcard-form-hint">
+                勾选后，该模版下已入账的全餐卡（含老会员）午餐送达时会同时扣晚餐各 1 次；晚餐大表已送达则不会再扣。取消勾选后，仅开卡快照已是一起配送的工单仍按快照扣次。
+              </p>
+            </div>
           </div>
 
-          <div class="mcard-field">
-            <label class="mcard-form-label">原价(元)</label>
-            <el-input
-              v-model="form.list_price_yuan"
-              size="small"
-              class="mcard-form-control"
-              placeholder="划线价，留空不在小程序展示"
-            />
+          <div class="mcard-pair">
+            <div class="mcard-field mcard-field--top">
+              <label class="mcard-form-label">开卡赠送</label>
+              <div class="mcard-field-main">
+                <el-radio-group v-model="form.gift_mode" size="small" class="mcard-form-control">
+                  <el-radio value="none">不赠送</el-radio>
+                  <el-radio value="dinner">赠送晚餐</el-radio>
+                  <el-radio value="juice">赠送果蔬汁</el-radio>
+                </el-radio-group>
+                <p class="mcard-form-hint">赠送晚餐只加晚餐次数，默认暂停，不改变上面的每个餐段入账。</p>
+              </div>
+            </div>
+
+            <div v-if="form.gift_mode === 'dinner'" class="mcard-field">
+              <label class="mcard-form-label">赠送晚餐次数</label>
+              <el-input-number
+                v-model="form.gift_dinner_meals"
+                :min="1"
+                :max="366"
+                size="small"
+                controls-position="right"
+                class="mcard-form-control mcard-form-control--number"
+              />
+            </div>
+
+            <div v-else-if="form.gift_mode === 'juice'" class="mcard-field mcard-field--top">
+              <label class="mcard-form-label">赠送单数</label>
+              <div class="mcard-field-main">
+                <el-input-number
+                  v-model="form.gift_retail_quantity"
+                  :min="1"
+                  :max="30"
+                  size="small"
+                  controls-position="right"
+                  class="mcard-form-control mcard-form-control--number"
+                />
+                <p class="mcard-form-hint">开卡时按这个次数逐笔建单，每笔 1 份。</p>
+              </div>
+            </div>
           </div>
 
-          <div class="mcard-field">
-            <label class="mcard-form-label">优惠价(元)</label>
-            <el-input
-              v-model="form.sale_price_yuan"
+          <div v-if="form.gift_mode === 'juice'" class="mcard-field">
+            <label class="mcard-form-label">果蔬汁 SKU</label>
+            <el-select
+              v-model="form.gift_retail_product_id"
+              filterable
+              clearable
               size="small"
               class="mcard-form-control"
-              placeholder="主推价，留空不在小程序展示"
-            />
+              placeholder="选择已上架 SKU"
+              :loading="juiceSkusLoading"
+            >
+              <el-option
+                v-for="sku in juiceSkus"
+                :key="sku.id"
+                :label="skuOptionLabel(sku)"
+                :value="Number(sku.id)"
+              />
+            </el-select>
+          </div>
+
+          <div class="mcard-pair">
+            <div class="mcard-field">
+              <label class="mcard-form-label">原价(元)</label>
+              <el-input
+                v-model="form.list_price_yuan"
+                size="small"
+                class="mcard-form-control"
+                placeholder="划线价，留空不在小程序展示"
+              />
+            </div>
+
+            <div class="mcard-field">
+              <label class="mcard-form-label">优惠价(元)</label>
+              <el-input
+                v-model="form.sale_price_yuan"
+                size="small"
+                class="mcard-form-control"
+                placeholder="主推价，留空不在小程序展示"
+              />
+            </div>
           </div>
 
           <div class="mcard-field">
@@ -549,26 +731,25 @@ onMounted(() => {
             />
           </div>
 
-          <div class="mcard-field mcard-field--split">
-            <div class="mcard-field">
-              <label class="mcard-form-label">排序</label>
-              <el-input-number
-                v-model="form.sort_order"
-                :min="0"
-                size="small"
-                controls-position="right"
-                class="mcard-form-control mcard-form-control--number"
-              />
-            </div>
-            <div class="mcard-field mcard-field--switch">
-              <label class="mcard-form-label">启用</label>
-              <el-switch v-model="form.is_active" size="small" class="mcard-form-switch" />
-            </div>
+          <div class="mcard-field">
+            <label class="mcard-form-label">排序</label>
+            <el-input-number
+              v-model="form.sort_order"
+              :min="0"
+              size="small"
+              controls-position="right"
+              class="mcard-form-control mcard-form-control--number"
+            />
+          </div>
+
+          <div class="mcard-field mcard-field--switch">
+            <label class="mcard-form-label">启用</label>
+            <el-switch v-model="form.is_active" size="small" class="mcard-form-switch" />
           </div>
 
           <div class="mcard-field mcard-field--span2">
             <label class="mcard-form-label">卡片样式图</label>
-            <div class="mcard-upload-row">
+            <div class="mcard-field-main mcard-upload-row">
               <el-upload
                 :key="cardPhotoUploadKey"
                 class="mcard-style-upload"
@@ -597,9 +778,9 @@ onMounted(() => {
             </div>
           </div>
 
-          <div class="mcard-field mcard-field--span2">
+          <div class="mcard-field mcard-field--span2 mcard-field--top">
             <label class="mcard-form-label">商品简介</label>
-            <div class="mcard-textarea-wrap">
+            <div class="mcard-field-main mcard-textarea-wrap">
               <el-input
                 v-model="form.intro_short"
                 type="textarea"
@@ -614,9 +795,9 @@ onMounted(() => {
             </div>
           </div>
 
-          <div class="mcard-field mcard-field--span2">
+          <div class="mcard-field mcard-field--span2 mcard-field--top">
             <label class="mcard-form-label">购买须知</label>
-            <div class="mcard-textarea-wrap">
+            <div class="mcard-field-main mcard-textarea-wrap">
               <el-input
                 v-model="form.purchase_notice"
                 type="textarea"
@@ -631,7 +812,7 @@ onMounted(() => {
             </div>
           </div>
 
-          <div class="mcard-field mcard-field--span2">
+          <div class="mcard-field mcard-field--span2 mcard-field--top">
             <label class="mcard-form-label">备注</label>
             <el-input
               v-model="form.remark"
@@ -949,6 +1130,12 @@ onMounted(() => {
   justify-content: center;
 }
 
+.mcard-meals-cell {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
 .mcard-meals-badge {
   background: #ecfdf5;
   color: var(--mcard-primary);
@@ -970,6 +1157,16 @@ onMounted(() => {
 
 .mcard-meals-badge-line {
   display: block;
+}
+
+.mcard-meals-gift {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
+  color: #0f766e;
 }
 
 .mcard-price-stack {
@@ -1015,15 +1212,32 @@ onMounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
-/* 启用：仅展示态开关（编辑仍在弹窗 el-switch） */
+/* 启用：列表内直接上架/下架（弹窗 el-switch 仍可改同一字段） */
 .mcard-switch {
   display: inline-block;
   position: relative;
+  box-sizing: border-box;
   width: 44px;
   height: 24px;
+  padding: 0;
+  border: none;
   background: #cbd5e1;
   border-radius: 34px;
   flex-shrink: 0;
+  line-height: 0;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.mcard-switch:disabled,
+.mcard-switch--busy {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.mcard-switch:focus-visible {
+  outline: 2px solid var(--mcard-primary);
+  outline-offset: 2px;
 }
 
 .mcard-switch--on {
@@ -1163,40 +1377,52 @@ onMounted(() => {
 }
 
 .mcard-form-grid {
+  --mcard-label-width: 120px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px 14px;
+  gap: 16px 20px;
   align-items: start;
 }
 
 .mcard-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: var(--mcard-label-width) minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
   min-width: 0;
 }
 
-.mcard-field--span2 {
+.mcard-field--span2,
+.mcard-pair {
   grid-column: 1 / -1;
 }
 
-.mcard-field--split {
+.mcard-pair {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 12px;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 20px;
   align-items: start;
 }
 
-.mcard-field--switch {
-  min-width: 48px;
+.mcard-field--top {
+  align-items: start;
+}
+
+.mcard-field--top .mcard-form-label {
+  line-height: 24px;
+}
+
+.mcard-field-main {
+  min-width: 0;
 }
 
 .mcard-form-label {
-  text-align: left;
+  text-align: right;
   font-size: 12px;
   font-weight: 800;
   color: #0f172a;
-  line-height: 1.3;
+  line-height: 24px;
+  white-space: nowrap;
 }
 
 .mcard-form-control {
@@ -1218,7 +1444,7 @@ onMounted(() => {
 
 .mcard-form-control :deep(.el-input__inner) {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 400;
   color: #0f172a;
 }
 
@@ -1235,8 +1461,8 @@ onMounted(() => {
 }
 
 .mcard-form-control--number {
-  width: 100%;
-  --el-input-number-width: 100%;
+  width: 150px;
+  --el-input-number-width: 150px;
 }
 
 .mcard-form-control--number :deep(.el-input__wrapper) {
@@ -1256,8 +1482,14 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
 }
 
+.mcard-form-hint--full {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-left: calc(var(--mcard-label-width) + 8px);
+}
+
 .mcard-field--switch .mcard-form-switch {
-  height: 28px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
 }
@@ -1334,7 +1566,7 @@ onMounted(() => {
   border-radius: 8px;
   border: 1px solid var(--mcard-border);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 400;
   color: #0f172a;
   box-shadow: none;
   min-height: 44px;
@@ -1425,12 +1657,9 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .mcard-form-grid {
+  .mcard-form-grid,
+  .mcard-pair {
     grid-template-columns: 1fr;
-  }
-
-  .mcard-field--split {
-    grid-template-columns: minmax(0, 1fr) auto;
   }
 }
 

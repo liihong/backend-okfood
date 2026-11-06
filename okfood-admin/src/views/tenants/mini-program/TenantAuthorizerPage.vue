@@ -2,10 +2,12 @@
 defineOptions({ name: 'TenantMiniAuthorizerPage' })
 
 import { ref, onMounted } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import TenantMiniProgramLayout from './TenantMiniProgramLayout.vue'
 import TenantAuthorizerPanel from '../TenantAuthorizerPanel.vue'
 import { useTenantMiniProgramPage } from '../../../composables/useTenantMiniProgramPage.js'
 import { showToast } from '../../../composables/useToast.js'
+import { ALBUM_WRITE_ONLY_PRIVACY_TEXT } from './albumWritePrivacy.js'
 
 const { tenantId, tenantName, api, backToTenants, toastError, ensureReady } = useTenantMiniProgramPage()
 
@@ -33,6 +35,10 @@ const preAuthLink = ref({
   expires_in: 0,
   pre_auth_code: '',
 })
+const privacySetting = ref(null)
+const privacyLoading = ref(false)
+const privacySyncing = ref(false)
+const privacyError = ref('')
 
 function resetAuthorizerFromPayload(data) {
   authorizer.value = {
@@ -58,16 +64,62 @@ function resetAuthorizerFromPayload(data) {
   }
 }
 
+async function loadPrivacySetting() {
+  if (!api.value || !authorizer.value.authorizer_mode_active) {
+    privacySetting.value = null
+    privacyError.value = ''
+    return
+  }
+  privacyLoading.value = true
+  privacyError.value = ''
+  try {
+    privacySetting.value = await api.value.loadPrivacySetting()
+  } catch (e) {
+    privacySetting.value = null
+    privacyError.value = e?.message || '查询隐私指引失败'
+  } finally {
+    privacyLoading.value = false
+  }
+}
+
 async function load() {
   if (!ensureReady() || !api.value) return
   loading.value = true
   try {
     const data = await api.value.loadAuthorizer()
     resetAuthorizerFromPayload(data)
+    await loadPrivacySetting()
   } catch (e) {
     toastError(e, '加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function syncAlbumPrivacy() {
+  if (!api.value || !authorizer.value.authorizer_mode_active) return
+  try {
+    await ElMessageBox.confirm(
+      `将为该小程序更新开发版用户隐私保护指引，写入「相册（仅写入）」：${ALBUM_WRITE_ONLY_PRIVACY_TEXT}。若尚未配置过隐私指引，会一并提交 OK饭 模板（手机号、位置、选点、头像、相册仅写入）；已有其它权限的用途保持不变。开发版提交后即更新，现网需再提交版本审核并发布。`,
+      '更新隐私指引',
+      { type: 'warning', confirmButtonText: '更新隐私指引', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  privacySyncing.value = true
+  try {
+    const data = await api.value.syncAlbumWritePrivacy()
+    const wroteTemplate = Boolean(data?.used_default_template)
+    showToast(
+      wroteTemplate ? '已提交 OK饭 隐私模板（含相册仅写入）' : '相册（仅写入）隐私指引已更新',
+      'success',
+    )
+    await loadPrivacySetting()
+  } catch (e) {
+    toastError(e, '更新隐私指引失败')
+  } finally {
+    privacySyncing.value = false
   }
 }
 
@@ -80,6 +132,7 @@ async function saveAuthorizer() {
     if (rt) body.authorizer_refresh_token = rt
     const data = await api.value.patchAuthorizer(body)
     resetAuthorizerFromPayload(data)
+    await loadPrivacySetting()
     showToast('Authorizer 配置已保存', 'success')
   } catch (e) {
     toastError(e, '保存失败')
@@ -99,6 +152,7 @@ async function exchangeAuthorizerCode() {
   try {
     const data = await api.value.exchangeAuthorizerCode(code)
     resetAuthorizerFromPayload(data)
+    await loadPrivacySetting()
     showToast('授权码已换取并落库', 'success')
   } catch (e) {
     toastError(e, '换取失败')
@@ -113,6 +167,7 @@ async function refreshAuthorizerToken() {
   try {
     const data = await api.value.refreshAuthorizerToken()
     resetAuthorizerFromPayload(data)
+    await loadPrivacySetting()
     const domainErr = String(data?.domain_sync_error || '').trim()
     if (domainErr) {
       showToast(`access_token 已刷新；域名同步失败：${domainErr}`, 'success')
@@ -180,11 +235,17 @@ onMounted(() => {
       :loading="loading"
       :saving="saving"
       :pre-auth-loading="preAuthLoading"
+      :privacy-setting="privacySetting"
+      :privacy-loading="privacyLoading"
+      :privacy-syncing="privacySyncing"
+      :privacy-error="privacyError"
       @generate-pre-auth="generatePreAuthLink"
       @copy-pre-auth="copyPreAuthLink"
       @exchange-code="exchangeAuthorizerCode"
       @save-token="saveAuthorizer"
       @refresh-token="refreshAuthorizerToken"
+      @sync-album-privacy="syncAlbumPrivacy"
+      @refresh-privacy="loadPrivacySetting"
     />
   </TenantMiniProgramLayout>
 </template>

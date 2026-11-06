@@ -52,11 +52,14 @@ export function balanceForPeriod(profile, period) {
   return Math.max(0, Math.floor(Number(profile.balance) || 0))
 }
 
-/** 午餐或晚餐任一有余次即视为仍有餐次 */
+/** 已开通餐段中，午餐或晚餐任一有余次即视为仍有餐次 */
 export function hasAnyMealBalance(profile) {
   if (!profile || typeof profile !== 'object') return false
-  if (balanceForPeriod(profile, MEAL_PERIOD_LUNCH) > 0) return true
-  if (hasDinnerEntitlement(profile) && balanceForPeriod(profile, MEAL_PERIOD_DINNER) > 0) {
+  const periods = entitledMealPeriodsFromProfile(profile)
+  if (periods.includes(MEAL_PERIOD_LUNCH) && balanceForPeriod(profile, MEAL_PERIOD_LUNCH) > 0) {
+    return true
+  }
+  if (periods.includes(MEAL_PERIOD_DINNER) && balanceForPeriod(profile, MEAL_PERIOD_DINNER) > 0) {
     return true
   }
   return false
@@ -137,8 +140,12 @@ export function leaveStatusBriefForPeriod(profile, period, todayYmd = ymdTodaySh
 export function combinedLeaveStatusLine(profile) {
   if (!profile || typeof profile !== 'object') return ''
   const today = ymdTodayShanghai()
-  const lunch = leaveStatusBriefForPeriod(profile, MEAL_PERIOD_LUNCH, today)
-  if (!hasDinnerEntitlement(profile)) return lunch
+  const periods = entitledMealPeriodsFromProfile(profile)
+  const hasLunch = periods.includes(MEAL_PERIOD_LUNCH)
+  const hasDinner = periods.includes(MEAL_PERIOD_DINNER)
+  const lunch = hasLunch ? leaveStatusBriefForPeriod(profile, MEAL_PERIOD_LUNCH, today) : ''
+  // 仅午餐：不加重餐段前缀，与原展示一致
+  if (!hasDinner) return lunch
   const dinner = leaveStatusBriefForPeriod(profile, MEAL_PERIOD_DINNER, today)
   const parts = []
   if (lunch) parts.push(`午餐${lunch}`)

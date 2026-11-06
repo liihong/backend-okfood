@@ -240,7 +240,7 @@ let leaveSyncGeneration = 0
 const leaveActionBusy = ref(false)
 /** scroll-view 下拉刷新动画状态 */
 const refresherTriggered = ref(false)
-/** 备餐锁窗：当日 21:00 起至次日 09:00，与后端 leave_prep_locked 一致 */
+/** 备餐锁窗：门店 leave_deadline_time 起至次日 09:00，与后端 leave_prep_locked 一致 */
 const leavePrepLocked = ref(false)
 /** 未开卡：禁止新提交请假（若仍有历史请假记录则仅可取消） */
 const memberCardBlocked = ref(false)

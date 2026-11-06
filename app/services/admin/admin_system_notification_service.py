@@ -31,6 +31,8 @@ KIND_SINGLE_MEAL_ORDER_PAID = "single_meal_order_paid"
 KIND_STORE_RETAIL_ORDER_PAID = "store_retail_order_paid"
 # 每日多份但剩余次数不足当日份数，未进配送大表，待客服联系确认续卡
 KIND_MEMBER_INSUFFICIENT_BALANCE_FOR_DELIVERY = "member_insufficient_balance_for_delivery"
+# 00:01 未把预约份数写成当日份数。推单后新写的 pending 不记入此消息
+KIND_PENDING_MEAL_UNITS_APPLY_FAILED = "pending_meal_units_apply_failed"
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +195,29 @@ def build_sf_push_failure_details(
     return lines
 
 
+def combine_sf_push_notification_counts(
+    *,
+    batch_total: int,
+    batch_failed: int,
+    db_total: int,
+    db_success: int,
+    db_failed: int,
+) -> tuple[int, int, int]:
+    """把本批结果和落库统计合成通知上的总数、成功、失败。
+
+    创单成功后又取消的单 ``error_code`` 仍是 0，落库失败数不含它们。
+    通知里的失败数要加上这部分，否则总数含取消单、失败却显示 0。
+    """
+    success = int(db_success)
+    # 落库 total = 成功 + 创单失败 + 创单成功但已取消；后一项才是要补进失败的差额
+    cancelled_success = max(0, int(db_total) - success - int(db_failed))
+    # 批次里失败但库里还没有对应失败行时补上，避免通知漏掉未落库的失败
+    unpersisted_failed = max(0, int(batch_failed) - int(db_failed))
+    failed = int(db_failed) + cancelled_success + unpersisted_failed
+    total = max(int(batch_total), int(db_total), success + failed)
+    return total, success, failed
+
+
 def compute_sf_push_notification_counts(
     db: Session,
     *,
@@ -202,10 +227,10 @@ def compute_sf_push_notification_counts(
     meal_period: str | None = None,
 ) -> tuple[int, int, int]:
     """
-    顺丰推单系统消息统计：与监控页创单成功/失败口径对齐。
+    顺丰推单系统消息统计。
 
-    - 成功：落库 ``error_code=0`` 且未取消（同 ``count_sf_same_city_pushes_for_delivery_date``）
-    - 失败：落库创单失败 + 批次内仍未落库的失败（兜底；正常路径失败应已写入 ``sf_same_city_pushes``）
+    - 成功：落库 ``error_code=0`` 且未取消
+    - 失败：落库创单失败 + 创单成功但已取消 + 批次内仍未落库的失败
     - total：上述合计，保证 total >= success + failed
     """
     from app.services.delivery.sf_order_fulfillment_service import count_sf_same_city_pushes_for_delivery_date
@@ -228,11 +253,96 @@ def compute_sf_push_notification_counts(
         db_failed = int(sheet["failed"])
         db_total = int(sheet["total"])
 
-    success = db_success
-    unpersisted_failed = max(0, int(batch_failed) - db_failed)
-    failed = db_failed + unpersisted_failed
-    total = max(int(batch_total), db_total, success + failed)
-    return total, success, failed
+    return combine_sf_push_notification_counts(
+        batch_total=int(batch_total),
+        batch_failed=int(batch_failed),
+        db_total=db_total,
+        db_success=db_success,
+        db_failed=db_failed,
+    )
+
+
+def list_cancelled_success_sf_push_failure_lines(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    meal_period: str | None = None,
+    exclude_stop_ids: set[str] | None = None,
+) -> list[str]:
+    """创单成功但已取消的推单，写成与失败明细相同的一行（原因：订单已取消）。"""
+    from app.models.member import Member
+    from app.services.delivery.delivery_stop_id import member_ids_from_sf_push_snapshot
+    from app.services.delivery.sf_order_fulfillment_service import (
+        _sf_push_monitor_cancelled_clause,
+        _sf_push_monitor_meal_period_clause,
+    )
+
+    conds = [
+        SfSameCityPush.store_id == int(store_id),
+        SfSameCityPush.delivery_date == delivery_date,
+        SfSameCityPush.error_code == 0,
+        _sf_push_monitor_cancelled_clause(),
+    ]
+    mp_clause = _sf_push_monitor_meal_period_clause(meal_period)
+    if mp_clause is not None:
+        conds.append(mp_clause)
+    rows = list(
+        db.scalars(select(SfSameCityPush).where(*conds).order_by(SfSameCityPush.id)).all()
+    )
+    skip = {str(x).strip() for x in (exclude_stop_ids or set()) if str(x).strip()}
+    rows = [r for r in rows if str(r.stop_id or "").strip() not in skip]
+    if not rows:
+        return []
+
+    member_ids: list[int] = []
+    for row in rows:
+        member_ids.extend(member_ids_from_sf_push_snapshot(row.request_snapshot))
+    members_by_id: dict[int, Member] = {}
+    if member_ids:
+        for m in db.scalars(select(Member).where(Member.id.in_(set(member_ids)))).all():
+            members_by_id[int(m.id)] = m
+
+    lines: list[str] = []
+    for row in rows:
+        snap = row.request_snapshot if isinstance(row.request_snapshot, dict) else {}
+        preview = snap.get("preview_row") if isinstance(snap.get("preview_row"), dict) else {}
+        names: list[str] = []
+        phones: list[str] = []
+        for mid in member_ids_from_sf_push_snapshot(snap):
+            m = members_by_id.get(int(mid))
+            if m is None:
+                continue
+            n = str(m.name or "").strip()
+            p = str(m.phone or "").strip()
+            if n and n not in names:
+                names.append(n)
+            if p and p not in phones:
+                phones.append(p)
+        if not names:
+            rn = str(preview.get("recv_name") or "").strip()
+            if rn:
+                names.append(rn)
+        if not phones:
+            rp = str(preview.get("recv_phone") or "").strip()
+            if rp and rp != "—":
+                phones.append(rp)
+        area = str(preview.get("group_area") or "").strip()
+        addr = str(preview.get("recv_address") or preview.get("address_line") or "").strip()
+        if addr and len(addr) > 36:
+            addr = addr[:36] + "…"
+        name_s = "、".join(names[:3]) if names else "未知会员"
+        phone_s = "、".join(phones[:2])
+        chunks = [f"· {name_s}"]
+        if phone_s:
+            chunks.append(phone_s)
+        if area:
+            chunks.append(area)
+        if addr:
+            chunks.append(addr)
+        chunks.append("原因：订单已取消")
+        lines.append(" · ".join(chunks))
+    return lines
 
 
 def upsert_sf_push_batch_notification(
@@ -1239,6 +1349,234 @@ def try_notify_delivery_sheet_manual_attention(
         member_phone=member_phone,
         member_name=member_name,
     )
+
+
+def stuck_pending_meal_unit_counts(
+    *,
+    lunch_pending: int,
+    dinner_pending: int,
+    lunch_sheet_pushed_today: bool,
+    dinner_sheet_pushed_today: bool,
+) -> tuple[int, int]:
+    """推单前仍有 pending，说明 00:01 没有把预约份数写成当日份数。
+
+    当天大表推单之后新写入的 pending 是正常的次日预约，不能当成落库失败。
+    返回 (午餐待落库人数, 晚餐待落库人数)。
+    """
+    lunch_stuck = int(lunch_pending) if int(lunch_pending) > 0 and not lunch_sheet_pushed_today else 0
+    dinner_stuck = int(dinner_pending) if int(dinner_pending) > 0 and not dinner_sheet_pushed_today else 0
+    return lunch_stuck, dinner_stuck
+
+
+def pending_meal_units_alert_message(*, lunch_stuck: int, dinner_stuck: int) -> str:
+    """系统消息正文：提醒客服在推单前手动把预约份数落库。"""
+    return (
+        "00:01 的明日份数自动落库没有完成，预约份数还停在待生效。\n"
+        f"午餐待落库 {int(lunch_stuck)} 人，晚餐待落库 {int(dinner_stuck)} 人。\n"
+        "今日备餐若按当前生效份数统计，会和会员已预约的份数不一致。请在当天配送大表推单前手动落库。"
+    )
+
+
+def pending_meal_units_apply_warning(*, lunch_pushed: bool, dinner_pushed: bool) -> str:
+    """当天大表已推单时，手动落库会把推单后的新预约也写成生效份数。"""
+    pushed: list[str] = []
+    if lunch_pushed:
+        pushed.append("午餐")
+    if dinner_pushed:
+        pushed.append("晚餐")
+    if not pushed:
+        return ""
+    joined = "、".join(pushed)
+    return (
+        f"今日{joined}配送大表已经推单。"
+        "现在落库会把推单之后新预约的份数也立即写成生效份数。"
+        "已经冻结的大表名单不会改，之后扣次会按新份数。"
+    )
+
+
+def _pending_meal_unit_counts_by_store(db: Session) -> tuple[dict[int, int], dict[int, int]]:
+    """各门店当前仍挂着 pending 的人数（含非法值，落库时会清掉）。"""
+    from app.models.enums import MealPeriod
+    from app.models.member import Member
+    from app.models.member_meal_period_state import MemberMealPeriodState
+
+    lunch_rows = db.execute(
+        select(Member.store_id, func.count())
+        .where(
+            Member.deleted_at.is_(None),
+            Member.daily_meal_units_pending.isnot(None),
+        )
+        .group_by(Member.store_id)
+    ).all()
+    dinner_rows = db.execute(
+        select(Member.store_id, func.count())
+        .select_from(MemberMealPeriodState)
+        .join(Member, Member.id == MemberMealPeriodState.member_id)
+        .where(
+            MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+            MemberMealPeriodState.daily_meal_units_pending.isnot(None),
+            Member.deleted_at.is_(None),
+        )
+        .group_by(Member.store_id)
+    ).all()
+    lunch = {int(sid): int(n or 0) for sid, n in lunch_rows if sid is not None}
+    dinner = {int(sid): int(n or 0) for sid, n in dinner_rows if sid is not None}
+    return lunch, dinner
+
+
+def _upsert_pending_meal_units_alert(
+    db: Session,
+    *,
+    store_id: int,
+    business_date: date,
+    lunch_stuck: int,
+    dinner_stuck: int,
+) -> AdminSystemNotification:
+    """同店同日只保留一条。问题还在时重新打开已确认的消息，避免点掉后不再提醒。"""
+    title = f"明日份数落库失败 · {business_date.isoformat()}"
+    message = pending_meal_units_alert_message(lunch_stuck=lunch_stuck, dinner_stuck=dinner_stuck)
+    row = db.scalar(
+        select(AdminSystemNotification).where(
+            AdminSystemNotification.store_id == int(store_id),
+            AdminSystemNotification.kind == KIND_PENDING_MEAL_UNITS_APPLY_FAILED,
+            AdminSystemNotification.business_date == business_date,
+        )
+    )
+    if row is None:
+        row = AdminSystemNotification(
+            store_id=int(store_id),
+            kind=KIND_PENDING_MEAL_UNITS_APPLY_FAILED,
+            business_date=business_date,
+            title=title,
+            message=message,
+            total_count=int(lunch_stuck) + int(dinner_stuck),
+            success_count=int(lunch_stuck),
+            failed_count=int(dinner_stuck),
+            skip_reason=None,
+        )
+        db.add(row)
+    else:
+        row.title = title
+        row.message = message
+        row.total_count = int(lunch_stuck) + int(dinner_stuck)
+        row.success_count = int(lunch_stuck)
+        row.failed_count = int(dinner_stuck)
+        row.skip_reason = None
+        row.acknowledged_at = None
+        row.acknowledged_by = None
+    db.flush()
+    return row
+
+
+def scan_unapplied_pending_meal_unit_notifications(db: Session) -> int:
+    """当天大表尚未推单、但仍有预约份数时写入系统消息。返回本次写入或重新打开的门店数。"""
+    from app.services.delivery.delivery_day_lock_service import (
+        has_delivery_sheet_sf_push_created_on_delivery_day,
+        has_dinner_delivery_sheet_sf_push_on_date,
+    )
+
+    today = today_shanghai()
+    lunch_counts, dinner_counts = _pending_meal_unit_counts_by_store(db)
+    n = 0
+    for sid in sorted(set(lunch_counts) | set(dinner_counts)):
+        lunch_pending = int(lunch_counts.get(sid, 0))
+        dinner_pending = int(dinner_counts.get(sid, 0))
+        lunch_pushed = has_delivery_sheet_sf_push_created_on_delivery_day(
+            db, store_id=sid, delivery_date=today
+        )
+        dinner_pushed = has_dinner_delivery_sheet_sf_push_on_date(
+            db, store_id=sid, delivery_date=today
+        )
+        lunch_stuck, dinner_stuck = stuck_pending_meal_unit_counts(
+            lunch_pending=lunch_pending,
+            dinner_pending=dinner_pending,
+            lunch_sheet_pushed_today=lunch_pushed,
+            dinner_sheet_pushed_today=dinner_pushed,
+        )
+        if lunch_stuck <= 0 and dinner_stuck <= 0:
+            continue
+        _upsert_pending_meal_units_alert(
+            db,
+            store_id=sid,
+            business_date=today,
+            lunch_stuck=lunch_stuck,
+            dinner_stuck=dinner_stuck,
+        )
+        n += 1
+    return n
+
+
+def pending_meal_units_status_for_store(db: Session, *, store_id: int) -> dict[str, object]:
+    """弹窗打开时读取该门店当前待落库人数，以及今天是否已经推过大表。"""
+    from app.services.delivery.delivery_day_lock_service import (
+        has_delivery_sheet_sf_push_created_on_delivery_day,
+        has_dinner_delivery_sheet_sf_push_on_date,
+    )
+
+    sid = int(store_id)
+    today = today_shanghai()
+    lunch_counts, dinner_counts = _pending_meal_unit_counts_by_store(db)
+    lunch_pending = int(lunch_counts.get(sid, 0))
+    dinner_pending = int(dinner_counts.get(sid, 0))
+    lunch_pushed = has_delivery_sheet_sf_push_created_on_delivery_day(
+        db, store_id=sid, delivery_date=today
+    )
+    dinner_pushed = has_dinner_delivery_sheet_sf_push_on_date(
+        db, store_id=sid, delivery_date=today
+    )
+    return {
+        "lunch_pending": lunch_pending,
+        "dinner_pending": dinner_pending,
+        "lunch_sheet_pushed_today": lunch_pushed,
+        "dinner_sheet_pushed_today": dinner_pushed,
+        "warning": pending_meal_units_apply_warning(
+            lunch_pushed=lunch_pushed,
+            dinner_pushed=dinner_pushed,
+        ),
+    }
+
+
+def apply_pending_meal_units_from_notification(
+    db: Session,
+    *,
+    notification_id: int,
+    store_id: int,
+    admin_username: str,
+) -> dict[str, int]:
+    """按系统消息手动执行当日份数落库，成功后确认该消息。"""
+    from app.services.admin.day_stock_service import invalidate_stock_read_caches
+    from app.services.meal_period.dinner_units import apply_all_pending_dinner_daily_meal_units
+    from app.services.member.member_daily_meal_units_service import apply_all_pending_daily_meal_units
+
+    sid = int(store_id)
+    row = db.get(AdminSystemNotification, int(notification_id))
+    if row is None or int(row.store_id) != sid:
+        raise HTTPException(status_code=404, detail="系统消息不存在")
+    if row.kind != KIND_PENDING_MEAL_UNITS_APPLY_FAILED:
+        raise HTTPException(status_code=400, detail="该消息不能手动落库")
+
+    lunch_applied = apply_all_pending_daily_meal_units(db, store_id=sid)
+    dinner_applied = apply_all_pending_dinner_daily_meal_units(db, store_id=sid)
+    now = beijing_now_naive()
+    operator = str(admin_username or "").strip() or None
+    siblings = db.scalars(
+        select(AdminSystemNotification).where(
+            AdminSystemNotification.store_id == sid,
+            AdminSystemNotification.kind == KIND_PENDING_MEAL_UNITS_APPLY_FAILED,
+            AdminSystemNotification.business_date == row.business_date,
+            AdminSystemNotification.acknowledged_at.is_(None),
+        )
+    ).all()
+    seen: set[int] = set()
+    for item in (*siblings, row):
+        if int(item.id) in seen or item.acknowledged_at is not None:
+            continue
+        seen.add(int(item.id))
+        item.acknowledged_at = now
+        item.acknowledged_by = operator
+    db.commit()
+    invalidate_stock_read_caches(sid)
+    return {"lunch_applied": int(lunch_applied), "dinner_applied": int(dinner_applied)}
 
 
 def list_admin_system_notifications(

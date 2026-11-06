@@ -111,8 +111,8 @@ function goList() {
   align-items: center;
   justify-content: space-between;
   gap: 16rpx;
-  padding: 0 32rpx;
-  margin-bottom: 20rpx;
+  padding: 0 24rpx;
+  margin-bottom: 16rpx;
   box-sizing: border-box;
 }
 
@@ -148,20 +148,16 @@ function goList() {
 .home-card-strip__row {
   display: flex;
   flex-direction: row;
-  gap: 20rpx;
-  padding: 0 32rpx;
+  gap: 12rpx;
+  padding: 0 24rpx;
   box-sizing: border-box;
 }
 
-.home-card-strip__row--1 .home-card-strip__card {
-  flex: 1;
-  width: 100%;
-}
-
+/* 与横滑卡同一宽度，避免 1～2 张时被拉满整行 */
+.home-card-strip__row--1 .home-card-strip__card,
 .home-card-strip__row--2 .home-card-strip__card {
-  flex: 1;
-  width: 0;
-  min-width: 0;
+  flex: 0 0 280rpx;
+  width: 280rpx;
 }
 
 .home-card-strip__scroll {
@@ -171,24 +167,25 @@ function goList() {
 .home-card-strip__inner {
   display: flex;
   flex-direction: row;
-  gap: 20rpx;
-  padding: 0 32rpx 4rpx;
+  gap: 12rpx;
+  padding: 0 24rpx 4rpx;
   box-sizing: border-box;
 }
 
 .home-card-strip__card {
   position: relative;
-  min-height: 176rpx;
-  border-radius: 24rpx;
-  padding: 24rpx 22rpx 20rpx;
+  min-height: 148rpx;
+  border-radius: 20rpx;
+  padding: 16rpx 14rpx 14rpx;
   box-sizing: border-box;
   overflow: hidden;
-  box-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.12);
+  box-shadow: 0 8rpx 20rpx rgba(15, 23, 42, 0.1);
 }
 
+/* 一屏约 2.5 张：左 24 + 卡 280 + 间距 12 + 卡 280 + 间距 12 + 半张 142 ≈ 750 */
 .home-card-strip__card--scroll {
-  width: 520rpx;
-  flex-shrink: 0;
+  width: 280rpx;
+  flex: 0 0 280rpx;
 }
 
 .home-card-strip__card--a {
@@ -205,9 +202,9 @@ function goList() {
 
 .home-card-strip__water {
   position: absolute;
-  right: -8rpx;
-  bottom: -24rpx;
-  font-size: 120rpx;
+  right: -6rpx;
+  bottom: -16rpx;
+  font-size: 72rpx;
   font-weight: 900;
   color: rgba(255, 255, 255, 0.08);
   line-height: 1;
@@ -218,21 +215,21 @@ function goList() {
   position: relative;
   z-index: 1;
   display: block;
-  font-size: 16rpx;
-  letter-spacing: 0.14em;
+  font-size: 14rpx;
+  letter-spacing: 0.08em;
   color: rgba(255, 255, 255, 0.72);
-  margin-bottom: 8rpx;
+  margin-bottom: 4rpx;
 }
 
 .home-card-strip__name {
   position: relative;
   z-index: 1;
   display: block;
-  font-size: 28rpx;
+  font-size: 24rpx;
   font-weight: 800;
   color: #fff;
-  line-height: 1.35;
-  margin-bottom: 20rpx;
+  line-height: 1.3;
+  margin-bottom: 12rpx;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -244,13 +241,13 @@ function goList() {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 12rpx;
-  padding-top: 16rpx;
+  gap: 8rpx;
+  padding-top: 10rpx;
   border-top: 1rpx solid rgba(255, 255, 255, 0.2);
 }
 
 .home-card-strip__meals {
-  font-size: 22rpx;
+  font-size: 20rpx;
   font-weight: 700;
   color: rgba(255, 255, 255, 0.88);
   flex-shrink: 0;
@@ -274,7 +271,7 @@ function goList() {
 }
 
 .home-card-strip__price {
-  font-size: 34rpx;
+  font-size: 28rpx;
   font-weight: 900;
   color: #fef08a;
   line-height: 1;

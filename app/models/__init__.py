@@ -10,6 +10,8 @@ from app.models.store import Store
 from app.models.balance_log import BalanceLog
 from app.models.courier import Courier
 from app.models.menu_dish import MenuDish
+from app.models.prep_ingredient import PrepIngredient
+from app.models.dish_prep_sop_line import DishPrepSopLine
 from app.models.menu_schedule import MenuSchedule
 from app.models.product_category import ProductCategory
 from app.models.weekly_menu_slot import WeeklyMenuSlot
@@ -42,6 +44,13 @@ from app.models.home_banner import HomeBanner
 from app.models.home_entry_poster import HomeEntryPoster
 from app.models.gift_coupon_campaign import GiftCouponCampaign
 from app.models.gift_coupon_entitlement import GiftCouponEntitlement
+from app.models.packaging_sku import PackagingSku
+from app.models.packaging_stock import PackagingStock
+from app.models.packaging_stock_txn import PackagingStockTxn
+from app.models.packaging_dish_line import PackagingDishLine
+from app.models.packaging_slot_line import PackagingSlotLine
+from app.models.packaging_standard_line import PackagingStandardLine
+from app.models.packaging_consume_run import PackagingConsumeRun
 
 __all__ = [
     "DayStockAdjustmentLog",
@@ -56,6 +65,8 @@ __all__ = [
     "BalanceLog",
     "Courier",
     "MenuDish",
+    "PrepIngredient",
+    "DishPrepSopLine",
     "MenuSchedule",
     "ProductCategory",
     "WeeklyMenuSlot",
@@ -88,6 +99,13 @@ __all__ = [
     "HomeEntryPoster",
     "GiftCouponCampaign",
     "GiftCouponEntitlement",
+    "PackagingSku",
+    "PackagingStock",
+    "PackagingStockTxn",
+    "PackagingDishLine",
+    "PackagingSlotLine",
+    "PackagingStandardLine",
+    "PackagingConsumeRun",
     "SfSameCityCallback",
     "SfSameCityPush",
 ]

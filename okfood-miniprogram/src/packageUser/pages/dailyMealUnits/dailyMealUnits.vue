@@ -5,6 +5,7 @@
       <view class="wrap">
         <view v-if="showMealPeriodTabs" class="period-tabs">
           <view
+            v-if="hasLunchEntitled"
             class="period-tab"
             :class="{ 'period-tab--active': mealPeriod === 'lunch' }"
             @tap="switchMealPeriod('lunch')"
@@ -12,6 +13,7 @@
             午餐
           </view>
           <view
+            v-if="hasDinnerEntitled"
             class="period-tab"
             :class="{ 'period-tab--active': mealPeriod === 'dinner' }"
             @tap="switchMealPeriod('dinner')"
@@ -89,8 +91,9 @@ import { markMinePageNeedsRefresh } from '@/utils/minePageRefresh.js'
 import { guardMemberDeliverySelfService } from '@/utils/memberSelfServiceGuard.js'
 import { showOkAlert } from '@/utils/okAlert.js'
 import {
+  MEAL_PERIOD_DINNER,
   MEAL_PERIOD_LUNCH,
-  hasDinnerEntitlement,
+  entitledMealPeriodsFromProfile,
   mealPeriodLabel,
 } from '@/utils/memberMealPeriod.js'
 import {
@@ -117,8 +120,16 @@ const units = ref(1)
 const mealPeriod = ref(MEAL_PERIOD_LUNCH)
 const memberProfileCache = ref(null)
 
-const showMealPeriodTabs = computed(() => hasDinnerEntitlement(memberProfileCache.value))
-const periodLabel = computed(() => (showMealPeriodTabs.value ? mealPeriodLabel(mealPeriod.value) : ''))
+const entitledPeriods = computed(() => entitledMealPeriodsFromProfile(memberProfileCache.value))
+const hasLunchEntitled = computed(() => entitledPeriods.value.includes(MEAL_PERIOD_LUNCH))
+const hasDinnerEntitled = computed(() => entitledPeriods.value.includes(MEAL_PERIOD_DINNER))
+/** 午、晚都开通才出切换；纯晚餐卡只编辑晚餐 */
+const showMealPeriodTabs = computed(() => hasLunchEntitled.value && hasDinnerEntitled.value)
+const periodLabel = computed(() => {
+  if (showMealPeriodTabs.value) return mealPeriodLabel(mealPeriod.value)
+  if (hasDinnerEntitled.value && !hasLunchEntitled.value) return '晚餐'
+  return ''
+})
 
 const hasPendingDiff = computed(
   () =>
@@ -159,8 +170,20 @@ function applyProfileToForm(data) {
   baselineUnits.value = editorVal
 }
 
+/** 当前选中餐段不在资格内时，改到已开通餐段（纯晚餐默认晚餐） */
+function syncMealPeriodFromProfile(data) {
+  const periods = entitledMealPeriodsFromProfile(data)
+  if (periods.includes(mealPeriod.value)) return
+  if (periods.includes(MEAL_PERIOD_DINNER)) {
+    mealPeriod.value = MEAL_PERIOD_DINNER
+    return
+  }
+  mealPeriod.value = periods[0] || MEAL_PERIOD_LUNCH
+}
+
 function switchMealPeriod(period) {
   if (mealPeriod.value === period) return
+  if (!entitledPeriods.value.includes(period)) return
   mealPeriod.value = period
   if (memberProfileCache.value) applyProfileToForm(memberProfileCache.value)
 }
@@ -180,6 +203,7 @@ async function loadMe() {
       return
     }
     memberProfileCache.value = data
+    syncMealPeriodFromProfile(data)
     if (!guardSfSelfServiceLocked(data, mealPeriod.value)) {
       setTimeout(() => uni.navigateBack(), 400)
       return

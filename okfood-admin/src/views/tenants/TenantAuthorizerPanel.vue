@@ -3,13 +3,24 @@
  * 租户小程序 · 代授权（Authorizer）面板
  * 仅运维代开发小程序；OK饭等未授权租户保持「未启用（走直连 Secret）」。
  */
-defineProps({
+import { computed } from 'vue'
+import {
+  ALBUM_WRITE_ONLY_PRIVACY_TEXT,
+  buildPrivacyDisplayRows,
+  formatPrivacyUpdateTime,
+} from './mini-program/albumWritePrivacy.js'
+
+const props = defineProps({
   authorizer: { type: Object, required: true },
   authorizerForm: { type: Object, required: true },
   preAuthLink: { type: Object, required: true },
   loading: { type: Boolean, default: false },
   saving: { type: Boolean, default: false },
   preAuthLoading: { type: Boolean, default: false },
+  privacySetting: { type: Object, default: null },
+  privacyLoading: { type: Boolean, default: false },
+  privacySyncing: { type: Boolean, default: false },
+  privacyError: { type: String, default: '' },
 })
 
 const emit = defineEmits([
@@ -18,7 +29,15 @@ const emit = defineEmits([
   'exchange-code',
   'save-token',
   'refresh-token',
+  'sync-album-privacy',
+  'refresh-privacy',
 ])
+
+const privacyRows = computed(() => buildPrivacyDisplayRows(props.privacySetting?.setting_list))
+const privacyUpdatedAt = computed(() => formatPrivacyUpdateTime(props.privacySetting?.update_time))
+const albumConfigured = computed(() =>
+  privacyRows.value.some((row) => row.isAlbum && row.configured),
+)
 </script>
 
 <template>
@@ -133,6 +152,75 @@ const emit = defineEmits([
         </el-button>
       </div>
     </el-form>
+
+    <div v-loading="privacyLoading" class="pre-auth-block">
+      <div class="pre-auth-head">
+        <strong>用户隐私保护指引 · 相册（仅写入）</strong>
+        <div class="auth-actions">
+          <el-button
+            size="small"
+            :disabled="!authorizer.authorizer_mode_active"
+            :loading="privacyLoading"
+            @click="emit('refresh-privacy')"
+          >
+            查询当前指引
+          </el-button>
+          <el-button
+            type="primary"
+            size="small"
+            :loading="privacySyncing"
+            :disabled="!authorizer.authorizer_mode_active"
+            @click="emit('sync-album-privacy')"
+          >
+            更新隐私指引
+          </el-button>
+        </div>
+      </div>
+      <p class="panel-tip pre-auth-tip">
+        代开发小程序只能由服务商调用 <code>setPrivacySetting</code> 配置，商户后台无法自行完善。
+        本次写入「相册（仅写入）」：{{ ALBUM_WRITE_ONLY_PRIVACY_TEXT }}。
+        开发版提交后即更新；现网需再提交版本审核并发布。
+      </p>
+      <el-alert
+        v-if="!authorizer.authorizer_mode_active"
+        type="info"
+        :closable="false"
+        show-icon
+        title="请先完成代授权，再为该小程序更新隐私指引。"
+        class="auth-prereq-alert"
+      />
+      <el-alert
+        v-else-if="privacyError"
+        type="error"
+        :closable="false"
+        show-icon
+        :title="privacyError"
+        class="auth-prereq-alert"
+      />
+      <template v-else-if="privacySetting">
+        <el-descriptions :column="1" border size="small" class="auth-desc">
+          <el-descriptions-item label="相册（仅写入）">
+            <el-tag :type="albumConfigured ? 'success' : 'warning'" size="small">
+              {{ albumConfigured ? '已配置' : '未配置' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="privacyUpdatedAt" label="微信更新时间">
+            {{ privacyUpdatedAt }}
+          </el-descriptions-item>
+        </el-descriptions>
+        <el-table :data="privacyRows" size="small" empty-text="暂无隐私项">
+          <el-table-column prop="label" label="权限" min-width="180" />
+          <el-table-column prop="privacy_text" label="已配置用途" min-width="280" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.configured ? 'success' : 'warning'" size="small">
+                {{ row.configured ? '已配置' : '未配置' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+      </template>
+    </div>
   </div>
 </template>
 

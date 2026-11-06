@@ -66,6 +66,8 @@ from app.schemas.admin import (
     SfSameCityCancelOut,
     AdminSystemNotificationListOut,
     AdminSystemNotificationOut,
+    PendingMealUnitsApplyOut,
+    PendingMealUnitsStatusOut,
     MemberMembershipRefundConfirmIn,
     MemberMealCompensationIn,
 )
@@ -182,8 +184,10 @@ from app.services.admin.member_meal_compensation_service import admin_member_mea
 from app.services.admin.admin_system_notification_service import (
     acknowledge_admin_system_notification,
     admin_system_notification_to_dict,
+    apply_pending_meal_units_from_notification,
     count_unacknowledged_admin_system_notifications,
     list_admin_system_notifications,
+    pending_meal_units_status_for_store,
     upsert_sf_push_batch_notification,
 )
 from app.integrations.wechat_pay_v2 import WeChatPayV2Error, resolve_request_client_ip
@@ -702,7 +706,8 @@ def delivery_sf_push_instant(
 ):
     """
     配送大表：勾选停靠点推送到「及时单账号」（门店零售推顺丰店铺ID），全部按立即推单创单。
-    适用于当日部分订单需补推、来不及走预约 bulk 推单的场景；创单失败/已取消的记录可覆盖重推。
+    业务日允许上海当天、历史补推和次日；后天及以后拒绝。次日创单不写冻结快照。
+    创单失败/已取消的记录可覆盖重推。
     """
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     try:
@@ -763,6 +768,7 @@ def delivery_sf_dinner_push_instant(
 ):
     """
     晚餐配送大表：勾选停靠点推送到「及时单账号」（门店零售推顺丰店铺ID），全部按立即推单创单。
+    业务日允许上海当天、历史补推和次日；后天及以后拒绝。次日创单不写冻结快照。
     与午餐及时单互不影响；创单失败/已取消的记录可覆盖重推。
     """
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
@@ -845,6 +851,36 @@ def admin_system_notification_acknowledge(
         admin_username=admin_username,
     )
     return success(data=AdminSystemNotificationOut(**admin_system_notification_to_dict(row)), msg="已确认")
+
+
+@router.get("/pending-meal-units/status", response_model=None)
+def admin_pending_meal_units_status(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """明日份数落库弹窗：当前待生效人数。店主或客服可看。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    data = pending_meal_units_status_for_store(db, store_id=store_id)
+    return success(data=dump_model(PendingMealUnitsStatusOut(**data)), msg="获取成功")
+
+
+@router.post("/system-notifications/{notification_id}/apply-pending-meal-units", response_model=None)
+def admin_apply_pending_meal_units(
+    notification_id: int,
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """手动执行 00:01 未完成的明日份数落库，成功后确认对应系统消息。"""
+    _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    data = apply_pending_meal_units_from_notification(
+        db,
+        notification_id=int(notification_id),
+        store_id=store_id,
+        admin_username=admin_username,
+    )
+    return success(data=dump_model(PendingMealUnitsApplyOut(**data)), msg="已落库")
 
 
 @router.get("/delivery-sf/pushes", response_model=None)
@@ -1231,7 +1267,7 @@ def users(
     ] = False,
     renew_pending_only: Annotated[
         bool,
-        Query(description="true=仅待续费：生效中且剩余次数<=低余额阈值，非暂停/退款/请假"),
+        Query(description="true=仅待续费：生效中且午餐或晚餐剩余次数<=低余额阈值，非暂停/退款/请假"),
     ] = False,
     delivering_only: Annotated[
         bool,
@@ -1948,12 +1984,17 @@ def member_profile_patch(
         operator=admin_username,
         store_id=store_id,
         daily_meal_units=body.daily_meal_units,
+        dinner_daily_meal_units=body.dinner_daily_meal_units,
         plan_type=body.plan_type,
         membership_template_id=body.membership_template_id,
         set_balance="balance" in fs,
         balance=body.balance,
         set_dinner_balance="dinner_balance" in fs,
         dinner_balance=body.dinner_balance,
+        set_dinner_delivery_paused="dinner_delivery_paused" in fs,
+        dinner_delivery_paused=body.dinner_delivery_paused,
+        set_dinner_deliver_on="dinner_deliver_on" in fs,
+        dinner_deliver_on=body.dinner_deliver_on,
         set_delivery_start_date="delivery_start_date" in fs,
         delivery_start_date=body.delivery_start_date,
         set_store_pickup="store_pickup" in fs,

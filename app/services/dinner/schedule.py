@@ -12,6 +12,7 @@ from app.models.enums import DeliverySheetView, MealPeriod
 from app.models.member import Member
 from app.models.member_meal_period_state import MemberMealPeriodState
 from app.services.meal_period.card_eligibility import member_entitled_for_sheet
+from app.services.meal_period.dinner_pause import dinner_schedule_allows_delivery
 from app.services.meal_period.leave import is_dinner_absent_on_delivery_date
 from app.services.meal_period.units import dinner_daily_meal_units_from_state
 
@@ -26,6 +27,7 @@ def member_on_dinner_delivery_schedule(
     """
     会员在指定业务日是否应计入晚餐配送大表（到家）。
     仅读晚餐池；午餐 members 表请假/余额不影响本判定。
+    晚餐暂停、指定配送日也只在这里生效，不改变午餐日程。
     """
     if not is_subscription_delivery_day(delivery_date):
         return False
@@ -39,7 +41,18 @@ def member_on_dinner_delivery_schedule(
         return False
     if bool(member.store_pickup):
         return False
-    if not member_entitled_for_sheet(db, int(member.id), DeliverySheetView.DINNER.value):
+    row = db.get(
+        MemberMealPeriodState,
+        {"member_id": int(member.id), "meal_period": MealPeriod.DINNER.value},
+    )
+    entitled = member_entitled_for_sheet(db, int(member.id), DeliverySheetView.DINNER.value)
+    # 与晚餐大表同一口径：赠送晚餐无资格时，仅指定配送日命中才算在晚餐日程上
+    if not dinner_schedule_allows_delivery(
+        entitled=entitled,
+        dinner_delivery_paused=bool(row.dinner_delivery_paused) if row is not None else False,
+        dinner_deliver_on=row.dinner_deliver_on if row is not None else None,
+        delivery_date=delivery_date,
+    ):
         return False
     from app.services.member.member_card_order_service import member_paid_card_awaiting_setup
 
@@ -51,10 +64,6 @@ def member_on_dinner_delivery_schedule(
     if delivery_date.weekday() == 5 and bool(member.skip_subscription_saturday):
         return False
 
-    row = db.get(
-        MemberMealPeriodState,
-        {"member_id": int(member.id), "meal_period": MealPeriod.DINNER.value},
-    )
     units = dinner_daily_meal_units_from_state(row)
     d_bal = max(0, int(row.balance or 0)) if row is not None else 0
     if d_bal < units:

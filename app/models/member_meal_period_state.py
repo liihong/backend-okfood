@@ -30,6 +30,11 @@ class MemberMealPeriodState(Base):
     balance: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     #: 该餐段累计总次数（展示分母）
     meal_quota_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: 只停晚餐日程。默认否。不写 members.delivery_deferred，午餐大表不读此列。
+    #: 赠送晚餐入账时写成是；正式晚餐/全餐入账写成否，避免把付费晚餐强制暂停。
+    dinner_delivery_paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    #: 客服指定的晚餐配送日。暂停时只有这一天进晚餐单；改这一列不会自动改暂停标记。
+    dinner_deliver_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=beijing_now_naive, onupdate=beijing_now_naive

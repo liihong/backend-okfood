@@ -91,13 +91,67 @@ def _dish_spice_level_out(raw: str | None) -> str | None:
     return None
 
 
-def _member_on_leave_today(m: Member, today: date) -> bool:
-    if m.leave_range_start and m.leave_range_end:
-        if m.leave_range_start <= today <= m.leave_range_end:
+def _leave_fields_cover_archive_today(
+    *,
+    leave_range_start: date | None,
+    leave_range_end: date | None,
+    is_leaved_tomorrow: bool,
+    tomorrow_leave_target_date: date | None,
+    today: date,
+) -> bool:
+    """
+    档案「请假中」日期口径（午餐主档与晚餐池共用，不改判定本身）。
+
+    区间含上海今日，或「仅明日」仍未过目标日（提交当日起到目标日都算请假中）。
+    """
+    if leave_range_start and leave_range_end:
+        if leave_range_start <= today <= leave_range_end:
             return True
-    if m.tomorrow_leave_target_date is not None and m.is_leaved_tomorrow:
-        return today <= m.tomorrow_leave_target_date
+    if tomorrow_leave_target_date is not None and is_leaved_tomorrow:
+        return today <= tomorrow_leave_target_date
     return False
+
+
+def _member_on_leave_today(m: Member, today: date) -> bool:
+    """午餐主档请假。纯晚餐请假不在这里判断，避免把全餐的晚餐请假当成整体请假。"""
+    return _leave_fields_cover_archive_today(
+        leave_range_start=m.leave_range_start,
+        leave_range_end=m.leave_range_end,
+        is_leaved_tomorrow=bool(m.is_leaved_tomorrow),
+        tomorrow_leave_target_date=m.tomorrow_leave_target_date,
+        today=today,
+    )
+
+
+def _is_dinner_only_entitlement(periods: frozenset[str] | set[str] | None) -> bool:
+    """有晚餐资格且没有午餐资格。午/全餐不走这条，档案状态仍只看 members 表。"""
+    period_set = {str(x).strip().lower() for x in (periods or ()) if str(x).strip()}
+    return "dinner" in period_set and "lunch" not in period_set
+
+
+def _archive_member_on_leave_today(
+    m: Member,
+    dinner_row: MemberMealPeriodState | None,
+    periods: frozenset[str] | set[str] | None,
+    today: date,
+) -> bool:
+    """
+    会员档案是否「请假中」。
+
+    午餐、全餐会员维持原逻辑，只看 members 请假字段。
+    纯晚餐会员的请假写在晚餐池，按同一日期口径计入，否则列表会显示「正常配送中」且没有请假时间。
+    """
+    if _member_on_leave_today(m, today):
+        return True
+    if not _is_dinner_only_entitlement(periods) or dinner_row is None:
+        return False
+    return _leave_fields_cover_archive_today(
+        leave_range_start=dinner_row.leave_range_start,
+        leave_range_end=dinner_row.leave_range_end,
+        is_leaved_tomorrow=bool(dinner_row.is_leaved_tomorrow),
+        tomorrow_leave_target_date=dinner_row.tomorrow_leave_target_date,
+        today=today,
+    )
 
 
 def _member_archive_scope():
@@ -152,30 +206,94 @@ def _member_card_expired_scope():
     )
 
 
-def _member_exclude_on_leave_scope(*, today: date | None = None):
-    """非请假中（与列表「请假中」状态互斥，待续费口径需排除）。"""
-    biz_today = today or today_shanghai()
+def _leave_columns_cover_archive_today(start_col, end_col, tomorrow_flag_col, target_col, biz_today: date):
+    """SQL 版档案「请假中」日期口径，与 ``_leave_fields_cover_archive_today`` 一致。"""
     in_leave_range = and_(
-        Member.leave_range_start.isnot(None),
-        Member.leave_range_end.isnot(None),
-        Member.leave_range_start <= biz_today,
-        Member.leave_range_end >= biz_today,
+        start_col.isnot(None),
+        end_col.isnot(None),
+        start_col <= biz_today,
+        end_col >= biz_today,
     )
     tomorrow_leave_active = and_(
-        Member.is_leaved_tomorrow.is_(True),
-        Member.tomorrow_leave_target_date.isnot(None),
-        biz_today <= Member.tomorrow_leave_target_date,
+        tomorrow_flag_col.is_(True),
+        target_col.isnot(None),
+        biz_today <= target_col,
     )
-    return ~or_(in_leave_range, tomorrow_leave_active)
+    return or_(in_leave_range, tomorrow_leave_active)
+
+
+def _member_lunch_on_leave_scope(*, today: date | None = None):
+    """午餐主档请假。筛选条件与改前一致，不包含晚餐池。"""
+    biz_today = today or today_shanghai()
+    return _leave_columns_cover_archive_today(
+        Member.leave_range_start,
+        Member.leave_range_end,
+        Member.is_leaved_tomorrow,
+        Member.tomorrow_leave_target_date,
+        biz_today,
+    )
+
+
+def _dinner_only_archive_on_leave_scope(*, today: date | None = None):
+    """
+    纯晚餐会员的晚餐池请假。
+
+    用「只要晚餐、不要午餐」收窄，全餐会员即使晚餐请假也不进这里，档案主状态仍按午餐字段。
+    """
+    biz_today = today or today_shanghai()
+    dinner_on_leave = exists(
+        select(1)
+        .select_from(MemberMealPeriodState)
+        .where(
+            MemberMealPeriodState.member_id == Member.id,
+            MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+            _leave_columns_cover_archive_today(
+                MemberMealPeriodState.leave_range_start,
+                MemberMealPeriodState.leave_range_end,
+                MemberMealPeriodState.is_leaved_tomorrow,
+                MemberMealPeriodState.tomorrow_leave_target_date,
+                biz_today,
+            ),
+        )
+    )
+    return and_(_member_meal_period_match_clause(("dinner",)), dinner_on_leave)
+
+
+def _member_archive_on_leave_scope(*, today: date | None = None):
+    """档案「请假中」：午餐主档请假，或纯晚餐会员的晚餐请假。"""
+    return or_(
+        _member_lunch_on_leave_scope(today=today),
+        _dinner_only_archive_on_leave_scope(today=today),
+    )
+
+
+def _member_exclude_on_leave_scope(*, today: date | None = None):
+    """非请假中（与列表「请假中」状态互斥，待续费口径需排除）。"""
+    return ~_member_archive_on_leave_scope(today=today)
+
+
+def _member_dinner_low_balance_scope(*, threshold: int):
+    """晚餐待续费：晚餐池余次在 1..阈值（0 次不算，避免把已用尽晚餐算进来）。"""
+    t = int(threshold)
+    return exists(
+        select(1)
+        .select_from(MemberMealPeriodState)
+        .where(
+            MemberMealPeriodState.member_id == Member.id,
+            MemberMealPeriodState.meal_period == MealPeriod.DINNER.value,
+            MemberMealPeriodState.balance > 0,
+            MemberMealPeriodState.balance <= t,
+        )
+    )
 
 
 def _member_renew_pending_scope(*, threshold: int):
-    """待续费：生效中、剩余次数 <= 阈值、非暂停/退款/请假（与前台状态标签一致）。"""
+    """待续费：生效中、午餐或晚餐剩余次数在 1..阈值、非暂停/退款/请假（与前台状态标签一致）。"""
     t = int(threshold)
+    lunch_low = and_(Member.balance > 0, Member.balance <= t)
     return and_(
         Member.is_active.is_(True),
-        Member.balance > 0,
-        Member.balance <= t,
+        or_(lunch_low, _member_dinner_low_balance_scope(threshold=t)),
         Member.delivery_deferred.is_(False),
         Member.membership_refunded_at.is_(None),
         _member_exclude_on_leave_scope(),
@@ -283,9 +401,10 @@ def _member_delivering_scope(*, threshold: int):
     正常配送中：与 lifecycle DELIVERING 主状态且无「请假中」叠层一致。
 
     排除待完善、暂停、未开卡、待续费、请假、退款与次数用尽。
-    待续费只看午餐余次 1..threshold；午餐=0 但晚餐有余次仍属配送中。
+    待续费看午餐或晚餐余次 1..threshold；任一餐段落在该区间则离开本列表。
     """
     t = int(threshold)
+    lunch_not_low = or_(Member.balance <= 0, Member.balance > t)
     return and_(
         Member.delivery_deferred.is_(False),
         Member.membership_refunded_at.is_(None),
@@ -295,8 +414,7 @@ def _member_delivering_scope(*, threshold: int):
         or_(Member.is_active.is_(True), _member_has_applied_card_order_scope()),
         or_(
             Member.is_active.is_(False),
-            Member.balance <= 0,
-            Member.balance > t,
+            and_(lunch_not_low, ~_member_dinner_low_balance_scope(threshold=t)),
         ),
     )
 
@@ -548,20 +666,8 @@ def _apply_member_list_filters(
             )
         )
     if on_leave_only:
-        # 与 `_member_on_leave_today` / 列表「请假中」状态一致（上海当前业务日）
-        biz_today = today_shanghai()
-        in_leave_range = and_(
-            Member.leave_range_start.isnot(None),
-            Member.leave_range_end.isnot(None),
-            Member.leave_range_start <= biz_today,
-            Member.leave_range_end >= biz_today,
-        )
-        tomorrow_leave_active = and_(
-            Member.is_leaved_tomorrow.is_(True),
-            Member.tomorrow_leave_target_date.isnot(None),
-            biz_today <= Member.tomorrow_leave_target_date,
-        )
-        stmt = stmt.where(or_(in_leave_range, tomorrow_leave_active))
+        # 与列表「请假中」一致：午餐主档，或纯晚餐会员的晚餐池（上海当前业务日）
+        stmt = stmt.where(_member_archive_on_leave_scope())
     if renew_pending_only:
         from app.core.config import get_settings
 
@@ -733,17 +839,32 @@ def _member_unconsumed_meals_total(db: Session, *, store_id: int) -> MemberUncon
 
 
 def _member_renew_pending_counts(db: Session, *, store_id: int, active_total: int) -> MemberRenewPendingStatsOut:
-    """待续费户数及剩余 1 次 / 阈值次分布（与前台「待续费」标签口径一致）。"""
+    """待续费户数及剩余 1 次 / 阈值次分布（午餐或晚餐，与前台「待续费」标签口径一致）。"""
     from app.core.config import get_settings
 
     threshold = int(get_settings().LOW_BALANCE_THRESHOLD)
+    dinner_state = aliased(MemberMealPeriodState)
+    dinner_bal = func.coalesce(dinner_state.balance, 0)
+    # 任一餐段恰为 1 次优先计入「剩余 1 次」，避免同一人同时出现在两个分档
+    has_one = or_(Member.balance == 1, dinner_bal == 1)
+    has_threshold_hit = or_(Member.balance == threshold, dinner_bal == threshold)
     row = db.execute(
         select(
             func.count().label("total"),
-            func.coalesce(func.sum(case((Member.balance == 1, 1), else_=0)), 0).label("b1"),
-            func.coalesce(func.sum(case((Member.balance == threshold, 1), else_=0)), 0).label("bt"),
+            func.coalesce(func.sum(case((has_one, 1), else_=0)), 0).label("b1"),
+            func.coalesce(
+                func.sum(case((and_(has_threshold_hit, ~has_one), 1), else_=0)),
+                0,
+            ).label("bt"),
         )
         .select_from(Member)
+        .outerjoin(
+            dinner_state,
+            and_(
+                dinner_state.member_id == Member.id,
+                dinner_state.meal_period == MealPeriod.DINNER.value,
+            ),
+        )
         .where(Member.deleted_at.is_(None), _member_archive_scope(), Member.store_id == int(store_id))
         .where(_member_renew_pending_scope(threshold=threshold))
     ).one()
@@ -931,7 +1052,11 @@ def list_members_paged(
         load_member_plan_type_display_map,
         meal_scope_label_from_periods,
     )
-    from app.services.meal_period.units import load_dinner_meal_period_states_map
+    from app.services.meal_period.dinner_units import pending_dinner_daily_meal_units
+    from app.services.meal_period.units import (
+        dinner_daily_meal_units_from_state,
+        load_dinner_meal_period_states_map,
+    )
     from app.services.member.member_lifecycle_service import resolve_members_lifecycle_map
 
     members_by_id = {int(m.id): m for m in members}
@@ -950,7 +1075,16 @@ def list_members_paged(
         catalog_templates=catalog_templates,
     )
     dinner_state_map = load_dinner_meal_period_states_map(db, member_ids)
-    on_leave_by_id = {int(m.id): _member_on_leave_today(m, biz_today) for m in members}
+    # 纯晚餐请假计入档案「请假中」；午餐/全餐仍只看 members 表，叠层逻辑不变
+    on_leave_by_id = {
+        int(m.id): _archive_member_on_leave_today(
+            m,
+            dinner_state_map.get(int(m.id)),
+            entitled_map.get(int(m.id), frozenset()),
+            biz_today,
+        )
+        for m in members
+    }
     lifecycle_map = resolve_members_lifecycle_map(
         db,
         members,
@@ -997,7 +1131,11 @@ def list_members_paged(
                 plan_type_display=plan_display_map.get(int(m.id))
                 or format_plan_type_display(m.plan_type, periods),
                 dinner_balance=int(dinner_row.balance or 0) if dinner_row else 0,
+                dinner_daily_meal_units=dinner_daily_meal_units_from_state(dinner_row),
+                dinner_daily_meal_units_pending=pending_dinner_daily_meal_units(dinner_row),
                 dinner_meal_quota_total=int(dinner_row.meal_quota_total or 0) if dinner_row else 0,
+                dinner_delivery_paused=bool(dinner_row.dinner_delivery_paused) if dinner_row else False,
+                dinner_deliver_on=dinner_row.dinner_deliver_on if dinner_row else None,
                 dinner_is_leaved_tomorrow=bool(dinner_row.is_leaved_tomorrow) if dinner_row else False,
                 dinner_tomorrow_leave_target_date=(
                     dinner_row.tomorrow_leave_target_date if dinner_row else None
@@ -1010,7 +1148,7 @@ def list_members_paged(
                 tomorrow_leave_target_date=m.tomorrow_leave_target_date,
                 leave_range_start=m.leave_range_start,
                 leave_range_end=m.leave_range_end,
-                is_on_leave_today=_member_on_leave_today(m, biz_today),
+                is_on_leave_today=on_leave_by_id[int(m.id)],
                 membership_refunded_at=(
                     m.membership_refunded_at.isoformat() if m.membership_refunded_at else None
                 ),
@@ -1222,6 +1360,20 @@ def _validate_dish_leaf_category(
     return int(cat.id)
 
 
+def _attach_default_packaging_utensils(db: Session, *, store_id: int, dish_id: int) -> None:
+    """新菜默认一双筷子、一个小勺。失败不影响菜品本身已保存。打包袋由每餐自动扣，不写在这里。"""
+    import logging
+
+    try:
+        from app.services.packaging.preset_service import apply_default_utensils_to_new_dish
+
+        apply_default_utensils_to_new_dish(db, store_id=store_id, dish_id=dish_id)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "新菜品默认餐具写入失败 dish_id=%s", dish_id, exc_info=True
+        )
+
+
 def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminOut:
     sid = int(store_id)
     meat_category_id = _validate_dish_leaf_category(
@@ -1265,8 +1417,11 @@ def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminO
             internal_view_sop=body.internal_view_sop,
         )
         db.add(row)
+    is_new_dish = body.id is None
     db.commit()
     db.refresh(row)
+    if is_new_dish:
+        _attach_default_packaging_utensils(db, store_id=sid, dish_id=int(row.id))
     return _dish_admin_out_from_row(row, include_sop=True)
 
 
@@ -1706,6 +1861,20 @@ def admin_weekly_menu_preview(
     }
 
 
+def _copy_packaging_boxes_after_dish_change(db: Session, *, slot_id: int, store_id: int) -> None:
+    """换菜后的用盒同步。包装模块异常不能让周菜单保存失败。"""
+    import logging
+
+    try:
+        from app.services.packaging.recipe_service import copy_dish_defaults_onto_slot
+
+        copy_dish_defaults_onto_slot(db, slot_id=slot_id, store_id=store_id)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "换菜后同步用盒失败 slot_id=%s", slot_id, exc_info=True
+        )
+
+
 def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: int) -> None:
     from app.services.meal_period.normalize import normalize_meal_period
 
@@ -1737,21 +1906,25 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: 
             WeeklyMenuSlot.meal_period == period,
         )
     )
+    dish_changed = row is None or int(row.dish_id) != int(body.dish_id)
+    slot_id: int | None = None
     try:
         if row:
             if int(row.dish_id) != int(body.dish_id):
                 row.total_stock = None
             row.dish_id = body.dish_id
+            slot_id = int(row.id)
         else:
-            db.add(
-                WeeklyMenuSlot(
-                    store_id=sid,
-                    week_start=anchor,
-                    slot=body.slot,
-                    meal_period=period,
-                    dish_id=body.dish_id,
-                )
+            created = WeeklyMenuSlot(
+                store_id=sid,
+                week_start=anchor,
+                slot=body.slot,
+                meal_period=period,
+                dish_id=body.dish_id,
             )
+            db.add(created)
+            db.flush()
+            slot_id = int(created.id)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -1759,6 +1932,9 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: 
             status_code=409,
             detail="保存周菜单槽位失败：数据冲突（例如槽位或关联约束）",
         )
+    # 只有换了菜才抄默认用盒。失败不影响已经保存的周菜单。
+    if dish_changed and slot_id is not None:
+        _copy_packaging_boxes_after_dish_change(db, slot_id=slot_id, store_id=sid)
 
 
 def set_weekly_slot_menu_total_stock(db: Session, body: MenuDayTotalStockIn, *, store_id: int):

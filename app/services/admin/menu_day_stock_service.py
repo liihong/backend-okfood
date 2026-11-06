@@ -162,20 +162,26 @@ def dashboard_meal_totals_by_dates(
     return out
 
 
-# 单次零售库存占用：仅系统取消(cancelled)不计入；顺丰取消(sf_cancelled)仍占用
+# 自提核销、订单管理「已支付份数」不展示系统取消单。库存占用不看这个元组。
 SINGLE_RETAIL_INVENTORY_EXCLUDED_FULFILLMENT = ("cancelled",)
-_SINGLE_RETAIL_EXCLUDED_FULFILLMENT = SINGLE_RETAIL_INVENTORY_EXCLUDED_FULFILLMENT
+
+# 提交时剩余不足（含最后一份被并发订单抢走）
+SINGLE_ORDER_SOLD_OUT_DETAIL = "已经卖完了，最后一餐被别人抢了"
 
 
 def _single_retail_inventory_scope_filters(*, store_id: int) -> list:
-    """单次零售占用库存口径：已支付未取消 + 未支付待支付；已取消/已退款不计入。"""
+    """单次零售占用库存。
+
+    已支付且未退款一律占用，取消履约但不退款也占着，避免把后厨名额放回公售。
+    只有 pay_status 变成「已退款」才释放。
+    未支付且仍是待支付：下单到付款前先占住；超时关闭或用户取消后不再占。
+    """
     sid = int(store_id)
     return [
         or_(
             and_(
                 SingleMealOrder.store_id == sid,
                 SingleMealOrder.pay_status == "已支付",
-                SingleMealOrder.fulfillment_status.notin_(_SINGLE_RETAIL_EXCLUDED_FULFILLMENT),
             ),
             and_(
                 SingleMealOrder.store_id == sid,
@@ -184,6 +190,31 @@ def _single_retail_inventory_scope_filters(*, store_id: int) -> list:
             ),
         )
     ]
+
+
+def _lock_current_single_retail_portions(
+    db: Session,
+    menu_date: date,
+    *,
+    store_id: int,
+    meal_period: str,
+) -> int:
+    """当前读该日该餐段仍占用的零售份数，并锁住这些订单行。
+
+    普通 SUM 在可重复读下沿用事务开头的快照。后拿到周槽锁的请求必须用 FOR UPDATE，
+    才能看见前一笔刚刚提交的订单，否则两人会同时把最后 1 份买走。
+    """
+    period = normalize_meal_period(meal_period)
+    quantities = db.scalars(
+        select(SingleMealOrder.quantity)
+        .where(
+            SingleMealOrder.delivery_date == menu_date,
+            SingleMealOrder.meal_period == period,
+            *_single_retail_inventory_scope_filters(store_id=int(store_id)),
+        )
+        .with_for_update()
+    ).all()
+    return sum(int(q or 0) for q in quantities)
 
 
 def paid_single_retail_portions_by_dates(
@@ -478,13 +509,48 @@ def assert_single_order_stock_available(
     store_id: int,
     meal_period: str = DEFAULT_MEAL_PERIOD,
 ) -> None:
-    info = single_order_stock_for_dish_date(
-        db, dish_id, menu_date, store_id=int(store_id), meal_period=meal_period
+    """提交订单前校验，通过后由调用方在同一事务里写入订单再提交。
+
+    先锁当日周槽，把同时点「最后 1 份」的第二个人挡在锁外；拿到锁后用当前读重算零售占用。
+    调用方在本函数和 commit 之间不能再 commit，否则锁会提前放开。
+    """
+    from app.services.admin.day_stock_service import get_day_stock_breakdown
+
+    sid = int(store_id)
+    period = normalize_meal_period(meal_period)
+    qty = int(quantity)
+    slot = weekly_slot_row_for_dish_date(
+        db, int(dish_id), menu_date, store_id=sid, meal_period=period
     )
-    rem = 0 if info.remaining is None else int(info.remaining)
+    if slot is None or slot.total_stock is None:
+        raise HTTPException(status_code=400, detail=SINGLE_ORDER_SOLD_OUT_DETAIL)
+
+    # 锁周槽行：后到的事务在这里等待，前一笔提交后才能继续
+    locked = db.scalar(
+        select(WeeklyMenuSlot).where(WeeklyMenuSlot.id == int(slot.id)).with_for_update()
+    )
+    if locked is None or locked.total_stock is None:
+        raise HTTPException(status_code=400, detail=SINGLE_ORDER_SOLD_OUT_DETAIL)
+
+    kitchen = max(0, int(locked.total_stock))
+    breakdown = get_day_stock_breakdown(
+        db, store_id=sid, business_date=menu_date, meal_period=period
+    )
+    # 零售占用用当前读，不用拆解里那次普通 SUM（可能还是事务开头的快照）
+    retail = _lock_current_single_retail_portions(
+        db, menu_date, store_id=sid, meal_period=period
+    )
+    rem = max(
+        0,
+        kitchen
+        - int(breakdown.delivery_total)
+        - int(breakdown.pickup_total)
+        - retail
+        + int(breakdown.adjustment_delta_sum),
+    )
     if rem <= 0:
-        raise HTTPException(status_code=400, detail="该日单次卡已无库存，请改日再试")
-    if quantity > rem:
+        raise HTTPException(status_code=400, detail=SINGLE_ORDER_SOLD_OUT_DETAIL)
+    if qty > rem:
         raise HTTPException(
             status_code=400,
             detail=f"该日单次卡剩余{rem}份，请减少份数或改日再试",

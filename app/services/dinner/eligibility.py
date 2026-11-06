@@ -23,6 +23,7 @@ from app.services.meal_period.card_eligibility import (
     _periods_match_sheet,
     members_entitled_meal_periods_map,
 )
+from app.services.meal_period.dinner_pause import dinner_schedule_allows_delivery
 from app.services.meal_period.leave import is_dinner_absent_on_delivery_date
 from app.services.meal_period.units import (
     dinner_daily_meal_units_from_state,
@@ -84,16 +85,25 @@ def eligible_members_for_dinner_delivery(
 
     member_ids = [int(m.id) for m, _ in rows]
     entitled_map = members_entitled_meal_periods_map(db, member_ids)
+    # 先装晚餐状态：赠送晚餐没有餐段资格，要靠指定配送日才能进名单
+    state_map = load_dinner_meal_period_states_map(db, member_ids)
     dinner_view = DeliverySheetView.DINNER.value
-    candidates: list[tuple[Member, MemberAddress | None]] = [
-        (m, addr)
-        for m, addr in rows
-        if _periods_match_sheet(entitled_map.get(int(m.id), frozenset()), dinner_view)
-    ]
+    candidates: list[tuple[Member, MemberAddress | None]] = []
+    for m, addr in rows:
+        mid = int(m.id)
+        entitled = _periods_match_sheet(entitled_map.get(mid, frozenset()), dinner_view)
+        state_row = state_map.get(mid)
+        # 暂停与指定日只过滤晚餐名单，上面的会员整体暂停仍走 sql_not_blocked_by_pause_on_date
+        if not dinner_schedule_allows_delivery(
+            entitled=entitled,
+            dinner_delivery_paused=bool(state_row.dinner_delivery_paused) if state_row is not None else False,
+            dinner_deliver_on=state_row.dinner_deliver_on if state_row is not None else None,
+            delivery_date=d,
+        ):
+            continue
+        candidates.append((m, addr))
     if not candidates:
         return [], {}
-
-    state_map = load_dinner_meal_period_states_map(db, [int(m.id) for m, _ in candidates])
 
     members: list[Member] = []
     defaults: dict[int, MemberAddress | None] = {}

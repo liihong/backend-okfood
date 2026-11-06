@@ -53,6 +53,9 @@ from app.services.marketing.coupon_checkout_service import (
 
 logger = logging.getLogger(__name__)
 
+# 加盟店未配特约商户号时，不要把后台配置指引暴露给购卡顾客
+CUSTOMER_CARD_PAY_NOT_READY_MSG = "暂不支持直接支付，想开卡的宝宝可以联系客服。"
+
 # 与单次零售未支付单一致：超时释放 locked 券并恢复订单原价
 UNPAID_MINIPROGRAM_CARD_ORDER_EXPIRE_MINUTES = 30
 MINIPROGRAM_WECHAT_ORDER_CREATOR = "miniprogram"
@@ -710,7 +713,24 @@ def prepare_wechat_jsapi_for_member_card_order(
     if is_member_card_order_cancelled(order):
         raise HTTPException(status_code=400, detail="订单已取消")
 
-    pay_cfg = assert_tenant_pay_config_ready(db, int(order.tenant_id), store_id=int(order.store_id))
+    try:
+        pay_cfg = assert_tenant_pay_config_ready(
+            db, int(order.tenant_id), store_id=int(order.store_id)
+        )
+    except HTTPException as exc:
+        # 503 是支付配置不全：顾客只看友好提示，原技术原因留在日志
+        if exc.status_code == 503:
+            logger.warning(
+                "开卡微信支付未就绪 tenant_id=%s store_id=%s detail=%s",
+                order.tenant_id,
+                order.store_id,
+                exc.detail,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail=CUSTOMER_CARD_PAY_NOT_READY_MSG,
+            ) from exc
+        raise
 
     member = db.get(Member, member_id)
     if not member or member.deleted_at is not None:

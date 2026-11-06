@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+import logging
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
@@ -35,6 +36,8 @@ from app.services.marketing.coupon_checkout_service import (
     mark_member_coupon_used_for_order,
     release_member_coupon_for_order,
 )
+
+logger = logging.getLogger(__name__)
 
 MINIPROGRAM_OFFLINE_CLAIM_ORDER_CREATOR = "miniprogram-offline"
 MINIPROGRAM_SELF_SERVICE_ORDER_CREATOR = "miniprogram"
@@ -607,6 +610,28 @@ def _apply_paid_card_order_to_member_balance(
             operator=operator,
             log_detail=log_detail,
         )
+    # 赠送晚餐只加晚餐余额，不写入 meal_periods_snapshot，避免晚餐也被加上整卡 meals_grant。
+    gift_dinner = int(getattr(tpl, "gift_dinner_meals", 0) or 0) if tpl is not None else 0
+    if gift_dinner > 0:
+        apply_dinner_recharge_delta(
+            db,
+            m,
+            amount=gift_dinner,
+            plan_type=plan,
+            bump_meal_quota_total=True,
+            skip_plan_type_update=True,
+            operator=operator,
+            log_detail=f"{log_detail}；赠送晚餐+{gift_dinner}次",
+        )
+    from app.services.meal_period.dinner_pause import apply_dinner_pause_after_card_credit
+
+    # 正式晚餐/全餐：暂停写成否。仅赠送晚餐：默认暂停。午餐卡不改这个标记。
+    apply_dinner_pause_after_card_credit(
+        db,
+        m,
+        paid_dinner=MealPeriod.DINNER.value in periods,
+        gift_dinner=gift_dinner,
+    )
     _apply_delivery_activation_after_card_credit(
         db,
         m,
@@ -628,6 +653,17 @@ def _apply_paid_card_order_to_member_balance(
         try_auto_grant_after_card_credit(db, order)
     except Exception:
         pass
+    # 果蔬汁赠送失败只回滚果汁订单，不回滚上面已经写入的午餐/晚餐次数。
+    try:
+        from app.services.member.card_gift_juice import create_gift_juice_orders_for_card
+
+        with db.begin_nested():
+            create_gift_juice_orders_for_card(db, order=order, template=tpl)
+    except Exception:
+        logger.exception(
+            "开卡赠送果蔬汁失败（不影响开卡入账） order_id=%s",
+            getattr(order, "id", None),
+        )
 
 
 def _meals_grant_units_for_card_order(db: Session, order: MemberCardOrder) -> tuple[int, bool]:
@@ -679,7 +715,17 @@ def _revoke_target_periods_for_card_order(db: Session, order: MemberCardOrder) -
 
 
 def revoke_paid_card_order_member_sync(db: Session, order: MemberCardOrder, *, operator: str) -> None:
-    """微信原路退款前：若工单已同步入账，按餐段快照扣回次数/总配额并标记未入账。"""
+    """微信原路退款前：若工单已同步入账，按餐段快照扣回次数/总配额并标记未入账。
+
+    下个版本退款待办（本次开卡赠送未改这里）：
+    1. 赠送晚餐写了同工单号的晚餐入账流水。当前按 meals_grant 从午餐、晚餐各扣一次，
+       会把「午餐 22 + 赠送晚餐 5」扣成晚餐也扣 22，余额不够就整单退不掉。
+    2. 应只从午餐扣 meals_grant，从晚餐扣当时的赠送次数。次数要在入账时记到工单上，
+       不能退款时再读模版，否则事后改卡会扣错。
+    3. 备注为「开卡工单#id赠送果蔬汁」的 0 元商城单要一并取消，并退回库存。
+    4. 若这张卡把晚餐暂停写成了赠送默认暂停，退完后不要误停正式晚餐。
+    5. 没有赠送的午餐、正式晚餐、全餐，仍按现在的 meals_grant 扣，不要改口径。
+    """
     if not order.applied_to_member:
         return
     m = db.get(Member, int(order.member_id))

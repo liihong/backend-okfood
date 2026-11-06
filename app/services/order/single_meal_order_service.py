@@ -545,7 +545,11 @@ def _unpaid_single_order_expire_cutoff():
 def try_restore_single_meal_fulfillment_after_timeout_cancel(
     db: Session, order: SingleMealOrder
 ) -> None:
-    """超时自动取消(cancelled)后补入账：有库存则恢复 pending，否则保持 cancelled 避免超卖。"""
+    """超时自动取消(cancelled)后补入账：有库存则恢复 pending，否则保持 cancelled 避免超卖。
+
+    此时支付状态还没落库，本单仍是未支付+已取消，不占剩余。
+    恢复失败后若最终写成已支付且未退款，会重新占库存，不能再卖给下一位。
+    """
     if str(order.fulfillment_status or "").strip().lower() != "cancelled":
         return
     dish_id = order.dish_id
@@ -719,6 +723,7 @@ def create_single_meal_order(db: Session, member_id: int, body: SingleMealOrderC
         address_summary = f"{area} {detail_line}".strip()
         addr_id = int(addr.id)
 
+    # 地址等前置步骤可能已经 commit。库存锁必须放在写订单之前，并持有到本函数末尾的 commit。
     from app.services.admin.menu_day_stock_service import assert_single_order_stock_available
 
     assert_single_order_stock_available(
@@ -878,16 +883,6 @@ def create_admin_single_meal_order(
         raise HTTPException(status_code=400, detail="该餐品暂未开放单点")
 
     qty = int(body.quantity)
-    from app.services.admin.menu_day_stock_service import assert_single_order_stock_available
-
-    assert_single_order_stock_available(
-        db,
-        int(dish.id),
-        body.delivery_date,
-        qty,
-        store_id=sid,
-        meal_period=period,
-    )
 
     addr: MemberAddress | None = None
     if body.store_pickup:
@@ -937,6 +932,17 @@ def create_admin_single_meal_order(
 
     pay_status = str(body.pay_status)
     pay_channel = str(body.pay_channel) if pay_status == "已支付" else None
+    # 新建地址会先 commit。库存锁放在写订单之前，持有到下面的 commit，避免并发抢走最后一份。
+    from app.services.admin.menu_day_stock_service import assert_single_order_stock_available
+
+    assert_single_order_stock_available(
+        db,
+        int(dish.id),
+        body.delivery_date,
+        qty,
+        store_id=sid,
+        meal_period=period,
+    )
     row = SingleMealOrder(
         tenant_id=int(tenant_id),
         store_id=sid,
@@ -2448,6 +2454,7 @@ def admin_cancel_single_meal_order(
             db, order=o, operator="admin:cancel"
         )
 
+    # 未退款只取消履约。已支付单仍占库存，要等 pay_status 写成「已退款」才释放。
     o.fulfillment_status = "cancelled"
     o.courier_id = None
     if pay == "未支付":

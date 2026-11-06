@@ -45,6 +45,7 @@ from app.services.shared.wx_open_code_service import (
     list_code_templates,
     release_audited_code,
     get_privacy_setting_for_tenant,
+    sync_album_write_only_privacy_for_tenant,
     sync_privacy_setting_for_tenant,
     sync_server_domains_for_tenant,
     submit_code_audit,
@@ -444,6 +445,18 @@ def platform_wx_code_sync_privacy_setting(
     )
     state = get_publish_admin_state(db, tenant_id)
     return success(data={**row, "publish_state": state}, msg="隐私保护指引已同步")
+
+
+@router.post("/tenants/{tenant_id}/wx-code/sync-album-write-privacy")
+def platform_wx_code_sync_album_write_privacy(
+    tenant_id: int,
+    db: SessionDep,
+    _admin: Annotated[str, Depends(admin_system_subject)],
+):
+    """平台：为已授权小程序补齐相册（仅写入）隐私指引（开发版）。"""
+    row = sync_album_write_only_privacy_for_tenant(db, tenant_id)
+    state = get_publish_admin_state(db, tenant_id)
+    return success(data={**row, "publish_state": state}, msg="相册（仅写入）隐私指引已更新")
 
 
 @router.post("/tenants/{tenant_id}/wx-code/sync-domains")

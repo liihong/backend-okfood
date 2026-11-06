@@ -19,6 +19,7 @@ import {
   UtensilsCrossed,
   Ticket,
   Truck,
+  Hash,
 } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import {
@@ -32,6 +33,7 @@ import {
 import { showToast } from '../composables/useToast.js'
 import { parseApiDateTimeBeijing } from '../utils/beijingDateTime.js'
 import MemberEditModal from './components/MemberEditModal.vue'
+import MemberBalanceEditModal from './components/MemberBalanceEditModal.vue'
 import MemberImportModal from './components/MemberImportModal.vue'
 import MemberAddressesModal from './components/MemberAddressesModal.vue'
 import MemberMealCompensationModal from './components/MemberMealCompensationModal.vue'
@@ -287,6 +289,10 @@ function onMembersActionDropdown(command, row) {
   }
   if (command === 'edit') {
     void openEditMember(row)
+    return
+  }
+  if (command === 'edit_balance') {
+    openBalanceEdit(row)
     return
   }
   if (command === 'records') {
@@ -724,6 +730,19 @@ function memberAddressTooltipContent(u) {
 function openEditMember(u) {
   editTargetMember.value = u
   showEditModal.value = true
+}
+
+/** 修改剩余次数与每配送日份数（与档案弹窗分开，避免改资料时覆盖次数） */
+const showBalanceModal = ref(false)
+const balanceTargetMember = ref(null)
+
+watch(showBalanceModal, (v) => {
+  if (!v) balanceTargetMember.value = null
+})
+
+function openBalanceEdit(u) {
+  balanceTargetMember.value = u
+  showBalanceModal.value = true
 }
 
 /** --- 会员地址管理（地图选点子组件 MemberAddressesModal） --- */
@@ -1293,7 +1312,7 @@ onUnmounted(() => {
       </div>
       <div v-if="isRenewPendingFilter" class="members-renew-banner" role="status">
         <p class="members-renew-banner__text">
-          当前展示<strong>待续费</strong>会员（生效中、剩余次数 ≤ 2，不含暂停/退款/请假）。可导出名单后电话/微信提醒续卡，或批量发放续卡优惠券。
+          当前展示<strong>待续费</strong>会员（生效中、午餐或晚餐剩余次数 ≤ 2，不含暂停/退款/请假）。可导出名单后电话/微信提醒续卡，或批量发放续卡优惠券。
         </p>
         <el-button type="warning" size="small" @click="goBatchGrantCouponsForRenewPending">
           <Ticket :size="14" aria-hidden="true" style="margin-right: 4px; vertical-align: -2px" />
@@ -1484,6 +1503,12 @@ onUnmounted(() => {
                         修改
                       </span>
                     </el-dropdown-item>
+                    <el-dropdown-item command="edit_balance">
+                      <span class="members-dropdown-item-inner" title="修改剩余次数与每配送日份数">
+                        <Hash :size="14" aria-hidden="true" />
+                        修改次数
+                      </span>
+                    </el-dropdown-item>
                     <el-dropdown-item command="records" divided>
                       <span class="members-dropdown-item-inner" title="套餐已确认送达的业务日（扣次记录）">
                         <Receipt :size="14" aria-hidden="true" />
@@ -1664,6 +1689,12 @@ class="balance-triple__n" :class="{
                         修改
                       </span>
                     </el-dropdown-item>
+                    <el-dropdown-item command="edit_balance">
+                      <span class="members-dropdown-item-inner" title="修改剩余次数与每配送日份数">
+                        <Hash :size="14" aria-hidden="true" />
+                        修改次数
+                      </span>
+                    </el-dropdown-item>
                     <el-dropdown-item command="records" divided>
                       <span class="members-dropdown-item-inner" title="套餐已确认送达的业务日（扣次记录）">
                         <Receipt :size="14" aria-hidden="true" />
@@ -1812,6 +1843,11 @@ class="balance-triple__n" :class="{
 
     <MemberEditModal v-model:open="showEditModal" :member="editTargetMember" :region-options="regionFilterOptions"
       @saved="onMemberEditSaved" />
+    <MemberBalanceEditModal
+      v-model:open="showBalanceModal"
+      :member="balanceTargetMember"
+      @saved="onMemberEditSaved"
+    />
     <MemberImportModal v-model:open="showImportModal" @imported="loadMembersPage" />
 
     <MemberAddressesModal

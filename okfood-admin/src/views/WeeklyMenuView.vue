@@ -3,6 +3,9 @@ defineOptions({ name: 'WeeklyMenuView' })
 import { computed, onMounted, ref } from 'vue'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import PrepMenuDialog from './prep/PrepMenuDialog.vue'
+import WeeklySlotPackagingDialog from './packaging/WeeklySlotPackagingDialog.vue'
+import { listSlotPackagingUsage } from '../api/packaging/recipe.js'
 
 /** 午餐、晚餐双预览（一次加载两组餐段） */
 const previewLunch = ref(null)
@@ -64,6 +67,18 @@ function formatSlotPrice(v) {
 
 /** 当前查看的周：本周 / 下周 */
 const activeWeekTab = ref(/** @type {WeekTabKey} */ ('this'))
+
+/** 开菜单只读本周排菜，不回写日总份 */
+const prepMenuOpen = ref(false)
+/** 槽位是否已设用盒。加载失败时保持空，不挡住周菜单。 */
+const slotBoxUsage = ref(/** @type {Record<string, boolean>} */ ({}))
+const packagingDialog = ref({
+  open: false,
+  weekStart: '',
+  slot: 1,
+  mealPeriod: 'lunch',
+  dishName: '',
+})
 
 /** 从预览中取指定周的行数据 */
 function rowsForPreview(preview, weekKey = 'this') {
@@ -195,6 +210,7 @@ async function loadPreview() {
     previewLunch.value = lunch
     previewDinner.value = dinner
     totalStockDraft.value = {}
+    await loadSlotBoxUsage()
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -312,6 +328,45 @@ function isRowBusy(row, mealPeriod) {
   return savingSlot.value === k1 || savingSlot.value === k2
 }
 
+async function loadSlotBoxUsage() {
+  const preview = previewLunch.value || previewDinner.value
+  const starts = [preview?.this_week_start, preview?.next_week_start].filter(Boolean)
+  if (!starts.length) {
+    slotBoxUsage.value = {}
+    return
+  }
+  const next = {}
+  for (const weekStart of starts) {
+    try {
+      const rows = await listSlotPackagingUsage(weekStart)
+      for (const row of rows || []) {
+        next[`${row.meal_period}|${weekStart}|${row.slot}`] = !!row.has_boxes
+      }
+    } catch {
+      /* 用盒接口不可用时，周菜单仍按原样展示 */
+    }
+  }
+  slotBoxUsage.value = next
+}
+
+function slotHasBoxes(row, mealPeriod) {
+  return !!slotBoxUsage.value[`${mealPeriod}|${row.weekStart}|${row.slot}`]
+}
+
+function openSlotPackaging(row, mealPeriod) {
+  if (!row.dish_id) {
+    showToast('请先选择菜品', 'error')
+    return
+  }
+  packagingDialog.value = {
+    open: true,
+    weekStart: row.weekStart,
+    slot: row.slot,
+    mealPeriod,
+    dishName: row.name || '',
+  }
+}
+
 onMounted(() => {
   void fetchDishes()
   void loadPreview()
@@ -337,7 +392,17 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
           </template>
         </el-tab-pane>
       </el-tabs>
+      <el-button type="primary" class="wmenu-prep-open" @click="prepMenuOpen = true">开菜单</el-button>
     </div>
+    <PrepMenuDialog v-model="prepMenuOpen" :week-start="activeWeekStart" />
+    <WeeklySlotPackagingDialog
+      v-model="packagingDialog.open"
+      :week-start="packagingDialog.weekStart"
+      :slot="packagingDialog.slot"
+      :meal-period="packagingDialog.mealPeriod"
+      :dish-name="packagingDialog.dishName"
+      @saved="loadSlotBoxUsage"
+    />
     <div v-if="hasPreview" class="wmenu-schedule-scroll">
       <div class="wmenu-schedule-grid">
         <div v-for="card in mealCards" :key="card.key" class="wmenu-week-card">
@@ -411,6 +476,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                     </span>
                   </td>
                   <td>
+                    <div class="wmenu-dish-cell">
                     <el-select
                       :model-value="row.dish_id"
                       filterable
@@ -429,6 +495,15 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                         :disabled="opt.disabled"
                       />
                     </el-select>
+                    <el-button
+                      v-if="row.dish_id"
+                      link
+                      :type="slotHasBoxes(row, card.mealPeriod) ? 'primary' : 'warning'"
+                      @click="openSlotPackaging(row, card.mealPeriod)"
+                    >
+                      {{ slotHasBoxes(row, card.mealPeriod) ? '用盒' : '未设用盒' }}
+                    </el-button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -461,6 +536,20 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 .wmenu-week-tabs {
   flex-shrink: 0;
   padding: 0 4px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wmenu-week-tabs-el {
+  flex: 1;
+  min-width: 0;
+}
+
+.wmenu-prep-open {
+  margin-bottom: 12px;
+  flex-shrink: 0;
 }
 
 .wmenu-week-tabs-el :deep(.el-tabs__header) {
@@ -822,6 +911,12 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   border: 1px solid rgba(239, 68, 68, 0.15);
 }
 
+.wmenu-dish-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
 .wmenu-dish-select {
   width: 100%;
   min-width: 170px;

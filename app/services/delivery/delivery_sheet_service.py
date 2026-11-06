@@ -1775,7 +1775,10 @@ def build_delivery_sheet(
         dinner_state_map = load_dinner_meal_period_states_map(db, sorted(all_member_ids))
     from app.services.meal_period.balance import balance_quota_for_sheet_period
     from app.services.meal_period.card_eligibility import members_entitled_meal_periods_map
-    from app.services.meal_period.plan_type_sync import load_member_card_kind_label_map
+    from app.services.meal_period.plan_type_sync import (
+        load_member_card_kind_label_map,
+        meal_scope_label_from_periods,
+    )
 
     periods_map = members_entitled_meal_periods_map(db, sorted(all_member_ids))
     card_kind_map = load_member_card_kind_label_map(
@@ -1814,6 +1817,9 @@ def build_delivery_sheet(
                 phone=mem.phone,
                 name=mem.name,
                 plan_type=(mem.plan_type or "").strip() or None,
+                meal_scope=meal_scope_label_from_periods(
+                    periods_map.get(int(mem.id), frozenset())
+                ),
                 card_kind_label=card_kind_map.get(int(mem.id)) or None,
                 daily_meal_units=mem_units,
                 balance=bal,
@@ -1917,6 +1923,9 @@ def build_delivery_sheet(
                     phone=mem.phone,
                     name=mem.name,
                     plan_type=(mem.plan_type or "").strip() or None,
+                    meal_scope=meal_scope_label_from_periods(
+                        periods_map.get(int(mem.id), frozenset())
+                    ),
                     card_kind_label=card_kind_map.get(int(mem.id)) or None,
                     daily_meal_units=mem_units,
                     balance=bal,

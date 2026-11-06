@@ -44,6 +44,7 @@ OP_ADMIN_UPDATE_BALANCE = "admin_update_balance"              # 后台修改剩�
 OP_ADMIN_UPDATE_PLAN_TYPE = "admin_update_plan_type"          # 后台修改套餐类型
 OP_ADMIN_UPDATE_DELIVERY_REGION = "admin_update_delivery_region"  # 后台修改配送片区
 OP_ADMIN_UPDATE_SKIP_SATURDAY = "admin_update_skip_saturday"  # 后台修改固定周六不履约
+OP_ADMIN_UPDATE_DINNER_SCHEDULE = "admin_update_dinner_schedule"  # 后台修改晚餐暂停或指定配送日
 
 _OPERATION_LABELS: dict[str, str] = {
     OP_PAUSE_DELIVERY: "暂停配送",
@@ -69,6 +70,7 @@ _OPERATION_LABELS: dict[str, str] = {
     OP_ADMIN_UPDATE_PLAN_TYPE: "后台修改套餐类型",
     OP_ADMIN_UPDATE_DELIVERY_REGION: "后台修改配送片区",
     OP_ADMIN_UPDATE_SKIP_SATURDAY: "后台修改周六不履约",
+    OP_ADMIN_UPDATE_DINNER_SCHEDULE: "后台修改晚餐日程",
 }
 
 

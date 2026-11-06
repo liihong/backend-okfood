@@ -1,13 +1,12 @@
 <script setup>
 import { ref, watch, computed, onActivated } from 'vue'
-import { X, UserPen, CircleHelp, Info, Save, Truck } from 'lucide-vue-next'
+import { X, UserPen, Info, Save, Truck } from 'lucide-vue-next'
 import {
   apiJson,
   handleAdminLogout,
   mapAdminUserToRow,
   mealScopeLabelFromPeriods,
   membershipTemplatePlanLabel,
-  memberShowsDinnerRemain,
 } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 
@@ -81,12 +80,11 @@ const reinstateBusy = ref(false)
 const editInitialPlanType = ref('次卡')
 /** 打开时选中的卡包模版 id；换模版即使仍是月卡也要提交，否则不落库、不写操作记录 */
 const editInitialTemplateId = ref(CURRENT_PLAN_VALUE)
-/** 打开/刷新表单时的剩余次数，仅用户主动修改时才提交 balance，避免 keep-alive 快照误覆盖 */
-const editInitialBalance = ref(0)
-/** 打开时的晚餐剩余；仅用户改过才提交 dinner_balance */
-const editInitialDinnerBalance = ref(0)
 /** 打开时的片区，仅用户改片区或勾选自动划区时才提交，避免备注保存误写地址行 */
 const editInitialDeliveryRegionId = ref('')
+/** 打开时的晚餐暂停和指定日，只在有变化时提交，避免改姓名时误改晚餐日程 */
+const editInitialDinnerPaused = ref(false)
+const editInitialDinnerDeliverOn = ref('')
 const profileLoading = ref(false)
 /** 当前租户已开启的会员卡模版（套餐类型下拉） */
 const membershipTemplates = ref([])
@@ -95,16 +93,15 @@ const editForm = ref({
   phone: '',
   name: '',
   remarks: '',
-  daily_meal_units: 1,
   plan_type: '次卡',
   membership_template_id: CURRENT_PLAN_VALUE,
   use_auto_area: false,
-  balance: 0,
-  dinner_balance: 0,
   delivery_start_date: '',
   store_pickup: false,
   skip_subscription_saturday: false,
   delivery_deferred: false,
+  dinner_delivery_paused: false,
+  dinner_deliver_on: '',
   delivery_region_id: '',
 })
 
@@ -128,13 +125,6 @@ const autoAreaHintText = computed(() =>
     ? '门店自提不参与配送划区。'
     : '仅勾选后保存才会按已有坐标重算片区；不改片区则不提交，避免动到地址。',
 )
-
-/** 全餐/晚餐卡：档案弹窗可分别改午餐、晚餐次数池 */
-const showDinnerRemain = computed(() => memberShowsDinnerRemain(props.member))
-
-function normalizeBalance(v) {
-  return Math.max(0, Math.min(999999, Math.floor(Number(v) || 0)))
-}
 
 /** 当前租户已开启卡包 → 套餐下拉选项（按展示文案去重） */
 const planOptions = computed(() => {
@@ -224,21 +214,16 @@ function fillFormFromMember(u) {
   editInitialTemplateId.value = matchedId != null ? matchedId : CURRENT_PLAN_VALUE
   const dr =
     u.delivery_region_id != null && u.delivery_region_id !== '' ? String(u.delivery_region_id) : ''
-  const balance = normalizeBalance(u.balance)
-  const dinnerBalance = normalizeBalance(u.dinner_balance)
-  editInitialBalance.value = balance
-  editInitialDinnerBalance.value = dinnerBalance
   editInitialDeliveryRegionId.value = dr
+  editInitialDinnerPaused.value = u.dinner_delivery_paused === true
+  editInitialDinnerDeliverOn.value = typeof u.dinner_deliver_on === 'string' ? u.dinner_deliver_on.slice(0, 10) : ''
   editForm.value = {
     phone: u.phone,
     name: u.name || '',
     remarks: u.remarks || '',
-    daily_meal_units: Math.max(1, Math.min(50, Number(u.daily_meal_units) || 1)),
     plan_type: p0,
     membership_template_id: matchedId != null ? matchedId : CURRENT_PLAN_VALUE,
     use_auto_area: false,
-    balance,
-    dinner_balance: dinnerBalance,
     delivery_start_date:
       typeof u.delivery_start_date === 'string' && u.delivery_start_date.trim()
         ? u.delivery_start_date.trim().slice(0, 10)
@@ -246,6 +231,11 @@ function fillFormFromMember(u) {
     store_pickup: u.store_pickup === true,
     skip_subscription_saturday: u.skip_subscription_saturday === true,
     delivery_deferred: u.delivery_deferred === true,
+    dinner_delivery_paused: u.dinner_delivery_paused === true,
+    dinner_deliver_on:
+      typeof u.dinner_deliver_on === 'string' && u.dinner_deliver_on.trim()
+        ? u.dinner_deliver_on.trim().slice(0, 10)
+        : '',
     delivery_region_id: dr,
   }
 }
@@ -300,7 +290,7 @@ watch(
   { flush: 'sync' },
 )
 
-/** 标签页 keep-alive 切回且弹窗仍打开时，同步最新剩余次数等字段 */
+/** 标签页 keep-alive 切回且弹窗仍打开时，同步姓名、套餐、配送等档案字段 */
 onActivated(() => {
   if (open.value && props.member) void refreshMemberFormFromServer(props.member)
 })
@@ -308,6 +298,19 @@ onActivated(() => {
 function close() {
   open.value = false
 }
+
+/** 是否展示晚餐配送安排（有晚餐权益、余次、暂停或指定配送日） */
+function showDinnerScheduleFor(u) {
+  if (!u) return false
+  const periods = Array.isArray(u.entitled_meal_periods) ? u.entitled_meal_periods : []
+  if (periods.includes('dinner')) return true
+  if ((Number(u.dinner_balance) || 0) > 0) return true
+  if (u.dinner_delivery_paused === true) return true
+  if (String(u.dinner_deliver_on || '').trim()) return true
+  return false
+}
+
+const showDinnerSchedule = computed(() => showDinnerScheduleFor(props.member))
 
 /** 从会员档案推断餐段（纯晚餐卡默认 dinner，否则 lunch） */
 function resolveMemberMealPeriod(u) {
@@ -356,12 +359,10 @@ async function submitEditMember() {
   const isStorePickup = editForm.value.store_pickup === true
   editSaving.value = true
   try {
-    const balanceVal = normalizeBalance(editForm.value.balance)
     const payload = {
       phone: editForm.value.phone,
       name: editForm.value.name.trim(),
       remarks: editForm.value.remarks.trim() || null,
-      daily_meal_units: Math.max(1, Math.min(50, Number(editForm.value.daily_meal_units) || 1)),
       delivery_start_date: String(editForm.value.delivery_start_date ?? '').trim()
         ? String(editForm.value.delivery_start_date).trim().slice(0, 10)
         : null,
@@ -369,16 +370,18 @@ async function submitEditMember() {
       skip_subscription_saturday: editForm.value.skip_subscription_saturday === true,
       delivery_deferred: editForm.value.delivery_deferred === true,
     }
-    // 仅运营主动修改剩余次数时才提交，避免暂停配送等操作附带过期 balance 写库
-    if (balanceVal !== editInitialBalance.value) {
-      payload.balance = balanceVal
-    }
-    if (showDinnerRemain.value) {
-      const dinnerVal = normalizeBalance(editForm.value.dinner_balance)
-      if (dinnerVal !== editInitialDinnerBalance.value) {
-        payload.dinner_balance = dinnerVal
+    // 晚餐暂停和指定配送日分开提交。只改日期不会把暂停勾上，也不改上面的整体暂停。
+    if (showDinnerSchedule.value) {
+      if (editForm.value.dinner_delivery_paused !== editInitialDinnerPaused.value) {
+        payload.dinner_delivery_paused = editForm.value.dinner_delivery_paused === true
+      }
+      const nextDinnerDate = String(editForm.value.dinner_deliver_on ?? '').trim().slice(0, 10)
+      const prevDinnerDate = String(editInitialDinnerDeliverOn.value ?? '').trim().slice(0, 10)
+      if (nextDinnerDate !== prevDinnerDate) {
+        payload.dinner_deliver_on = nextDinnerDate || null
       }
     }
+    // 剩余次数、晚餐次数、每配送日份数不在本弹窗提交，避免改姓名/配送时误写余额或份数
     // 不提交 address。片区仅在勾选自动划区或手动改了下拉时才提交，避免备注保存写地址行。
     if (editForm.value.use_auto_area) {
       payload.use_auto_area = true
@@ -478,119 +481,38 @@ async function submitEditMember() {
               </div>
             </section>
 
-            <!-- 2. 权益资产 -->
+            <!-- 2. 套餐类型（次数与每日份数在「修改次数」弹窗，本表单不提交） -->
             <section class="mem-sec">
               <div class="mem-sec-head">
                 <span class="mem-bar" aria-hidden="true"></span>
-                <h2 class="mem-sec-title">权益资产</h2>
+                <h2 class="mem-sec-title">套餐类型</h2>
               </div>
-              <div class="mem-grid-3">
-                <div class="mem-field">
-                  <label class="mem-lab mem-lab-inline">
-                    {{ showDinnerRemain ? '午餐剩余' : '剩余次数' }}
-                    <el-tooltip
-                      :content="
-                        showDinnerRemain
-                          ? '此处只改午餐次数池。直接修改将产生余额流水，常规续卡请走开卡工单'
-                          : '直接修改将产生余额流水（管理端调整）；常规续卡请走开卡工单入账'
-                      "
-                      placement="top"
-                    >
-                      <span class="mem-tip-wrap">
-                        <CircleHelp class="mem-tip" :size="13" />
-                      </span>
-                    </el-tooltip>
-                  </label>
-                  <div class="mem-affix mem-affix--el-row">
-                    <el-input-number
-                      v-model="editForm.balance"
-                      :min="0"
-                      :max="999999"
-                      :step="1"
-                      controls-position="right"
-                      class="mem-input-el mem-affix-inp-el"
-                    />
-                    <span class="mem-affix-suf-el">次</span>
-                  </div>
-                </div>
-                <div v-if="showDinnerRemain" class="mem-field">
-                  <label class="mem-lab mem-lab-inline">
-                    晚餐剩余
-                    <el-tooltip
-                      content="此处只改晚餐次数池，与午餐分池。直接修改将产生余额流水，常规续卡请走开卡工单"
-                      placement="top"
-                    >
-                      <span class="mem-tip-wrap">
-                        <CircleHelp class="mem-tip" :size="13" />
-                      </span>
-                    </el-tooltip>
-                  </label>
-                  <div class="mem-affix mem-affix--el-row">
-                    <el-input-number
-                      v-model="editForm.dinner_balance"
-                      :min="0"
-                      :max="999999"
-                      :step="1"
-                      controls-position="right"
-                      class="mem-input-el mem-affix-inp-el"
-                    />
-                    <span class="mem-affix-suf-el">次</span>
-                  </div>
-                </div>
-                <div class="mem-field">
-                  <label class="mem-lab mem-lab-inline">
-                    每配送日份数
-                    <el-tooltip placement="top">
-                      <template #content>
-                        <div class="mem-tip-body">
-                          修改后次日配送日起生效，当日备餐/顺丰推单份数不变；若须调整当日配送请协调顺丰或厨房。
-                        </div>
-                      </template>
-                      <span class="mem-tip-wrap">
-                        <CircleHelp class="mem-tip" :size="13" />
-                      </span>
-                    </el-tooltip>
-                  </label>
-                  <div class="mem-affix mem-affix--el-row">
-                    <el-input-number
-                      v-model="editForm.daily_meal_units"
-                      :min="1"
-                      :max="50"
-                      :step="1"
-                      controls-position="right"
-                      class="mem-input-el mem-affix-inp-el"
-                    />
-                    <span class="mem-affix-suf-el">份</span>
-                  </div>
-                </div>
-                <div class="mem-field">
-                  <label class="mem-lab">套餐类型</label>
-                  <el-select
-                    v-model="editForm.membership_template_id"
-                    class="mem-input-el mem-select-el"
-                    :loading="membershipTemplatesLoading"
-                    :placeholder="
-                      membershipTemplatesLoading
-                        ? '加载本店会员卡…'
-                        : planOptions.length
-                          ? '请选择本店会员卡'
-                          : '暂无已开启的会员卡'
-                    "
-                  >
-                    <el-option
-                      v-for="opt in planOptions"
-                      :key="String(opt.id)"
-                      :label="opt.label"
-                      :value="opt.id"
-                    />
-                  </el-select>
-                  <p
-                    v-if="!membershipTemplatesLoading && !membershipTemplates.length"
-                    class="mem-hint-soft"
-                  >
-                    暂无已开启的卡包，请先在「会员卡管理」中创建并开启。
-                  </p>
-                </div>
+              <div class="mem-field">
+                <el-select
+                  v-model="editForm.membership_template_id"
+                  class="mem-input-el mem-select-el"
+                  :loading="membershipTemplatesLoading"
+                  :placeholder="
+                    membershipTemplatesLoading
+                      ? '加载本店会员卡…'
+                      : planOptions.length
+                        ? '请选择本店会员卡'
+                        : '暂无已开启的会员卡'
+                  "
+                >
+                  <el-option
+                    v-for="opt in planOptions"
+                    :key="String(opt.id)"
+                    :label="opt.label"
+                    :value="opt.id"
+                  />
+                </el-select>
+                <p
+                  v-if="!membershipTemplatesLoading && !membershipTemplates.length"
+                  class="mem-hint-soft"
+                >
+                  暂无已开启的卡包，请先在「会员卡管理」中创建并开启。
+                </p>
               </div>
             </section>
 
@@ -657,6 +579,25 @@ async function submitEditMember() {
                 <el-checkbox v-model="editForm.delivery_deferred" class="mem-chk-el mem-chk-el--red">
                   暂停配送
                 </el-checkbox>
+                <template v-if="showDinnerSchedule">
+                  <el-checkbox v-model="editForm.dinner_delivery_paused" class="mem-chk-el mem-chk-el--red">
+                    暂停晚餐
+                  </el-checkbox>
+                  <div class="mem-field mem-field--dinner-date">
+                    <label class="mem-lab">晚餐指定配送日</label>
+                    <el-date-picker
+                      v-model="editForm.dinner_deliver_on"
+                      type="date"
+                      value-format="YYYY-MM-DD"
+                      placeholder="不指定"
+                      class="mem-date-picker"
+                      clearable
+                    />
+                    <p class="mem-dinner-hint">
+                      只影响晚餐日程，不改变上面的暂停配送。选择日期不会自动暂停。赠送晚餐默认暂停，指定某一天才进晚餐单；正式晚餐未暂停时仍按每天配送。
+                    </p>
+                  </div>
+                </template>
                 <el-checkbox
                   v-model="editForm.store_pickup"
                   :disabled="editForm.delivery_deferred"
@@ -953,12 +894,6 @@ select.mem-input {
   gap: 0.55rem 0.85rem;
 }
 
-.mem-grid-3 {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.55rem 0.85rem;
-}
-
 .mem-region-row {
   display: flex;
   align-items: center;
@@ -976,40 +911,6 @@ select.mem-input {
   white-space: nowrap;
 }
 
-.mem-affix {
-  position: relative;
-}
-
-.mem-affix-inp {
-  padding-right: 2.2rem;
-}
-
-.mem-affix-suf {
-  position: absolute;
-  right: 0.75rem;
-  top: 50%;
-  transform: translateY(-50%);
-  pointer-events: none;
-  font-size: 10px;
-  font-weight: 700;
-  color: #94a3b8;
-}
-
-.mem-affix--el-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-.mem-affix-inp-el {
-  flex: 1;
-  min-width: 0;
-}
-.mem-affix-suf-el {
-  flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 700;
-  color: #94a3b8;
-}
 .mem-input-el {
   width: 100%;
 }
@@ -1188,8 +1089,7 @@ select.mem-input {
 }
 
 @media (max-width: 680px) {
-  .mem-grid-2,
-  .mem-grid-3 {
+  .mem-grid-2 {
     grid-template-columns: 1fr;
   }
 

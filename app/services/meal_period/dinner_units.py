@@ -95,9 +95,12 @@ def set_dinner_daily_meal_units_change(
     return "immediate"
 
 
-def apply_all_pending_dinner_daily_meal_units(db: Session) -> int:
-    """00:01 任务：将晚餐 pending 份数落库（仅处理未删除会员的有效行）。"""
-    rows = db.scalars(
+def apply_all_pending_dinner_daily_meal_units(db: Session, *, store_id: int | None = None) -> int:
+    """00:01 任务：将晚餐 pending 份数落库（仅处理未删除会员的有效行）。
+
+    store_id 有值时只处理该门店，供管理端在任务失败后手动落库。
+    """
+    stmt = (
         select(MemberMealPeriodState)
         .join(Member, Member.id == MemberMealPeriodState.member_id)
         .where(
@@ -105,7 +108,10 @@ def apply_all_pending_dinner_daily_meal_units(db: Session) -> int:
             MemberMealPeriodState.daily_meal_units_pending.isnot(None),
             Member.deleted_at.is_(None),
         )
-    ).all()
+    )
+    if store_id is not None:
+        stmt = stmt.where(Member.store_id == int(store_id))
+    rows = db.scalars(stmt).all()
     n = 0
     for row in rows:
         pending = pending_dinner_daily_meal_units(row)

@@ -179,7 +179,9 @@
                     mode="aspectFit"
                   />
                 </view>
-                <text class="menu-cap">地址管理</text>
+                  <text class="menu-cap">收餐地址</text>
+
+ 
               </view>
               <view class="menu-cell" @tap="goSingleOrders">
                 <view class="menu-ico-wrap">

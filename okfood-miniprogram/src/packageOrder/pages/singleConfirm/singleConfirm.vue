@@ -766,7 +766,18 @@ async function handlePay() {
       /* 已引导至待支付订单 */
     } else {
       const msg = e instanceof Error ? e.message : errMsg || '下单或支付失败'
-      uni.showToast({ title: msg, icon: 'none' })
+      // 最后一份被别人先提交时，toast 会截断，付款前用弹窗把整句给客户看
+      if (msg.includes('已经卖完了')) {
+        uni.hideLoading()
+        showOkAlert({
+          title: '已经卖完了',
+          content: '最后一餐被别人抢了，请改日再试',
+          showCancel: false,
+          tone: 'warning',
+        })
+      } else {
+        uni.showToast({ title: msg, icon: 'none' })
+      }
     }
   } finally {
     paying.value = false

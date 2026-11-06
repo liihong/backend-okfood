@@ -244,9 +244,64 @@ function renderOneLayout(lodop, layout, defaultW, defaultH) {
   return { lw, lh }
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms)
+/** 等 C-Lodop 回执的上限。回执正常是几十毫秒；超时就停，避免按钮一直转圈。 */
+const LODOP_PRINT_QUEUE_TIMEOUT_MS = 8000
+
+/**
+ * 打印当前这张并等到它已进入打印队列。
+ *
+ * C-Lodop 的 PRINT() 立刻返回，是否入队只在 On_Return 里给出（Value 为 true 或任务号表示已入队，不表示纸已出完）。
+ * 未收到回执就 PRINT_INIT 下一张时，队列里还没收下的那一张会被冲掉。配送大表「打印全部」因此会少一张，且少的是哪一位不固定。
+ * 每一张都要等，包括最后一张：本函数返回后，下一片区会马上开始新任务。
+ *
+ * @param {object} lodop
+ * @returns {Promise<unknown>}
+ */
+function waitForLodopPrintQueued(lodop) {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    /** @type {string} PRINT() 的同步返回若是任务号，则只认这一号的回执，避免吃到上一张的迟到回调 */
+    let expectedTaskId = ''
+    const finish = (error, value) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timer)
+      if (lodop.On_Return === onReturn) lodop.On_Return = null
+      if (error) reject(error)
+      else resolve(value)
+    }
+    const timer = window.setTimeout(() => {
+      finish(new Error('打印任务入队超时，请确认 C-Lodop 已启动后重试'))
+    }, LODOP_PRINT_QUEUE_TIMEOUT_MS)
+    const onReturn = (taskId, value) => {
+      if (expectedTaskId && taskId != null && String(taskId) !== expectedTaskId) return
+      // 明确拒绝才中断；任务号、true 都算已入队
+      if (value === false || value === 0 || value === '0' || value === 'false') {
+        finish(new Error('打印机未接受该标签，已停止后续出纸'))
+        return
+      }
+      finish(null, value)
+    }
+    // 先挂回调再 PRINT，否则回执可能在赋值前到达
+    lodop.On_Return = onReturn
+    let syncResult
+    try {
+      syncResult = lodop.PRINT()
+    } catch (error) {
+      finish(error instanceof Error ? error : new Error('打印失败'))
+      return
+    }
+    if (syncResult != null && syncResult !== true && syncResult !== false && syncResult !== 0 && syncResult !== '0') {
+      expectedTaskId = String(syncResult)
+    }
+    // 旧版 Lodop（无 CVERSION）同步返回结果，不会走 On_Return
+    if (!lodop.CVERSION) {
+      if (syncResult === false || syncResult === 0 || syncResult === '0') {
+        finish(new Error('打印机未接受该标签，已停止后续出纸'))
+        return
+      }
+      finish(null, syncResult)
+    }
   })
 }
 
@@ -285,7 +340,8 @@ export async function printLocalPayload(localPayload, options = {}) {
     return printerMeta
   }
 
-  // 出纸：每张标签独立 PRINT_INIT + PRINT，避免多页任务中打印项互相叠加/重复
+  // 出纸：每张标签独立 PRINT_INIT + PRINT，避免多页任务中打印项互相叠加/重复。
+  // 每张（含最后一张）都要等 C-Lodop 确认已入队，再开始下一张。
   for (let i = 0; i < layouts.length; i += 1) {
     const layout = layouts[i]
     const jobTitle =
@@ -301,11 +357,7 @@ export async function printLocalPayload(localPayload, options = {}) {
       applyPrinterIndex(lodop, printerMeta)
     }
     renderOneLayout(lodop, layout, defaultW, defaultH)
-    lodop.PRINT()
-    // 标签机驱动队列缓冲：批量出纸时略作间隔，降低丢单/乱序概率
-    if (i < layouts.length - 1) {
-      await sleep(60)
-    }
+    await waitForLodopPrintQueued(lodop)
   }
   return printerMeta
 }

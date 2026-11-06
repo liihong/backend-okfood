@@ -19,7 +19,7 @@
           :aria-selected="mainTab === 'retail'"
           @tap="selectMainTab('retail')"
         >
-          <text class="main-tab-text">商城订单</text>
+          <text class="main-tab-text">其他餐品</text>
         </view>
         <view
           class="main-tab"
