@@ -1131,9 +1131,8 @@ html.okfood-admin-shell body {
   border-color: var(--el-color-primary-dark-2) !important;
 }
 
-.admin-layout.admin-layout--sidebar-collapsed .main-body {
-  margin-left: calc(64px + 2 * var(--okfood-admin-gutter) + 10px);
-}
+/* 侧栏在文档流中占位（.admin-layout > .sidebar 为 relative，盖过 .sidebar 的 fixed）。
+   主区不要再按固定侧栏加 margin-left，否则收起后右侧会被挤出屏幕。 */
 
 /* 顶栏：全宽通条（品牌左 · 标签中 · 铃铛/时钟/用户右）+ 标签行（参考稿 top-tab-scroller / tab-tag-item） */
 .admin-top-tab-bar {
@@ -4083,14 +4082,24 @@ html.okfood-admin-shell body {
 }
 
 @media (max-width: 900px) {
-  /* 手机：左侧菜单保持显示，菜单贴左 10px，菜单与主区之间再留 10px */
+  /* 手机：侧栏在文档流里占位。展开变宽、收起变窄，主区用剩余宽度，不再额外留一块左边距 */
+  .admin-layout > .sidebar,
   .sidebar.sidebar--collapsed {
     margin-left: 10px;
+    margin-right: 10px;
+    flex: 0 0 auto;
   }
 
-  .admin-layout.admin-layout--sidebar-collapsed .main-body {
-    margin-left: calc(64px + 10px + 10px);
+  .admin-layout > .main-body,
+  .admin-layout.admin-layout--sidebar-collapsed > .main-body {
+    margin-left: 0;
+    width: auto;
+    max-width: none;
+    flex: 1 1 0%;
+    min-width: 0;
+    box-sizing: border-box;
     padding-left: 0;
+    padding-right: 10px;
   }
 
   .form-row {
