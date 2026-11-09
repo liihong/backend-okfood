@@ -891,8 +891,8 @@ html.okfood-admin-shell body {
   background: transparent !important;
 }
 
-.okfood-user-account-dropdown .okfood-user-menu-theme-sublink {
-  padding: 5px 12px 5px 28px !important;
+.okfood-user-account-dropdown .okfood-user-menu-theme-sublink,
+.okfood-user-account-dropdown .okfood-user-menu-footer-link {
   margin: 0 6px 2px;
   border-radius: 10px;
   font-size: 13px;
@@ -901,8 +901,20 @@ html.okfood-admin-shell body {
   color: var(--el-text-color-regular);
 }
 
+.okfood-user-account-dropdown .okfood-user-menu-theme-sublink {
+  padding: 5px 12px 5px 28px !important;
+}
+
+.okfood-user-account-dropdown .okfood-user-menu-footer-link {
+  padding: 5px 12px !important;
+  margin-top: 4px;
+}
+
+/* 与主题色三级项一致：主色浅底胶囊，而非 EP 默认「仅文字变主色」 */
 .okfood-user-account-dropdown .okfood-user-menu-theme-sublink:hover,
-.okfood-user-account-dropdown .okfood-user-menu-theme-sublink:focus {
+.okfood-user-account-dropdown .okfood-user-menu-theme-sublink:focus,
+.okfood-user-account-dropdown .okfood-user-menu-footer-link:hover,
+.okfood-user-account-dropdown .okfood-user-menu-footer-link:focus {
   background: color-mix(in srgb, var(--el-color-primary) 8%, #f8fafc) !important;
   color: var(--el-text-color-primary) !important;
 }

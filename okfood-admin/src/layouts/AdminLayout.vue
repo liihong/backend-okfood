@@ -373,28 +373,6 @@ function onUserMenuCommand(command) {
   }
   if (command === 'logout') {
     handleAdminLogout()
-    return
-  }
-  if (command === 'password') {
-    /** 修改密码：后续再接接口与安全流程 */
-    showToast('修改密码功能开发中', 'info', { description: '后续再接接口与安全流程' })
-    return
-  }
-  if (command === 'system-settings') {
-    if (showOwnerAdminMenus.value) {
-      router.push({ name: 'store-config' })
-      return
-    }
-    if (showSystemAdminMenus.value) {
-      router.push({ name: 'system-tenants' })
-      return
-    }
-    if (isDeliveryOnly.value) {
-      router.push({ path: '/delivery' })
-      return
-    }
-    showToast('当前账号无系统设置入口', 'info', { description: '店主可从门店配置进入；平台从租户管理进入。' })
-    return
   }
 }
 /** 桌面：侧栏收起偏好（持久化；Logo 旁双箭头按钮切换） */
@@ -741,9 +719,9 @@ function onTabClose(tab) {
               >
                 {{ opt.label }}
               </el-dropdown-item>
-              <el-dropdown-item command="system-settings" divided>系统设置</el-dropdown-item>
-              <el-dropdown-item command="password">修改密码</el-dropdown-item>
-              <el-dropdown-item command="logout">退出登录</el-dropdown-item>
+              <el-dropdown-item command="logout" divided class="okfood-user-menu-footer-link">
+                退出登录
+              </el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
