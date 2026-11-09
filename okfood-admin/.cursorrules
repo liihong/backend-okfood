@@ -9,6 +9,16 @@
 
 本规范适用于 `okfood-admin/src/**` 下所有页面、组件与工具代码。
 
+## 列表 / 弹窗 / 表头设计规范（会员档案已定稿部分）
+
+会员「更多」操作、修改会员弹窗、会员列表与表头等 **布局与交互硬规范** 见：
+
+- **`design/ADMIN-UI-DIALOG-LIST-SPEC.md`**（真源说明 + 自检清单）
+- 场景预览：`design/okfood-admin-members-actions-preview.html`
+- Cursor 规则：仓库根目录 `.cursor/rules/okfood-admin-dialogs-members.mdc`、`.cursor/rules/okfood-admin-lists-tables.mdc`
+
+改造弹窗时 **须用 `OkfoodAdminDialogShell`**，禁止回退深绿全屏 `modal-overlay`；样式优先 `admin-ui.css` 中的 `okfood-admin-dlg--*` / `okfood-mem-edit-*` / `admin-table--members`。
+
 ## 视觉方向：iOS 毛玻璃（可选落地）
 
 若当前迭代按 **「壳层毛玻璃 + 蜜桃珊瑚默认」** 方向改 UI，除遵守本文件外，还须对照：

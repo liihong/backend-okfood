@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-admin-theme="primary-peach">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>会员档案 · 顶栏工具条优化 · 讨论预览</title>
+    <!--
+      查看：npm run dev 后打开
+      http://localhost:5173/design/okfood-admin-members-toolbar-preview.html
+      定稿：搜索左置 · 筛选 10px 间距 · 无顶栏汇总统计 · 表格列不变
+    -->
+    <style>
+      :root {
+        --bg-canvas: #f7fafb;
+        --text-primary: #1d1f21;
+        --text-secondary: #5c6670;
+        --border-hairline: rgba(0, 0, 0, 0.06);
+        --color-primary: #e8927c;
+        --color-primary-rgb: 232, 146, 124;
+        --color-primary-soft: rgba(232, 146, 124, 0.14);
+        --surface: #ffffff;
+        --radius-card: 22px;
+        --radius-pill: 999px;
+        --radius-control: 12px;
+        --font-sans: ui-sans-serif, system-ui, "PingFang SC", "Microsoft YaHei",
+          -apple-system, sans-serif;
+      }
+
+      html[data-admin-theme="primary-mojito"] {
+        --color-primary: #5cbf8e;
+        --color-primary-rgb: 92, 191, 142;
+        --color-primary-soft: rgba(92, 191, 142, 0.14);
+      }
+
+      html[data-admin-theme="primary-iris"] {
+        --color-primary: #8b7ec8;
+        --color-primary-rgb: 139, 126, 200;
+        --color-primary-soft: rgba(139, 126, 200, 0.14);
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: var(--font-sans);
+        color: var(--text-primary);
+        background: var(--bg-canvas);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .preview-shell {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 1.25rem 1rem 2.5rem;
+      }
+
+      .preview-meta {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+        padding: 0.65rem 0.85rem;
+        border-radius: 14px;
+        border: 1px solid var(--border-hairline);
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(12px);
+      }
+
+      .preview-meta__title {
+        margin: 0;
+        font-size: 0.9375rem;
+        font-weight: 800;
+      }
+
+      .preview-meta__hint {
+        margin: 0.15rem 0 0;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+      }
+
+      .preview-toggle {
+        display: inline-flex;
+        padding: 3px;
+        border-radius: var(--radius-pill);
+        background: #eef2f6;
+        border: 1px solid var(--border-hairline);
+      }
+
+      .preview-toggle__btn {
+        border: none;
+        background: transparent;
+        padding: 0.4rem 0.85rem;
+        font-size: 0.8125rem;
+        font-weight: 700;
+        color: var(--text-secondary);
+        border-radius: var(--radius-pill);
+        cursor: pointer;
+      }
+
+      .preview-toggle__btn--active {
+        background: #fff;
+        color: var(--text-primary);
+        box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+      }
+
+      /* —— 表格卡片（示意） —— */
+      .members-card {
+        border-radius: var(--radius-card);
+        border: 1px solid #e2e8f0;
+        background: var(--surface);
+        box-shadow: 0 4px 18px rgba(15, 23, 42, 0.04);
+        overflow: hidden;
+      }
+
+      .members-card__header {
+        padding: 0.85rem 1rem 0.75rem;
+        border-bottom: 1px solid #e2e8f0;
+      }
+
+      /* 现版顶栏 */
+      .toolbar-final-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+      }
+
+      .toolbar-final-row .search-pill {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 0 auto;
+        min-width: 19rem;
+        max-width: 22rem;
+        padding: 0 12px;
+        height: 40px;
+        border-radius: var(--radius-pill);
+        border: 1px solid #e2e8f0;
+        background: #fff;
+        font-size: 13px;
+        font-weight: 500;
+        color: #94a3b8;
+      }
+
+      .toolbar-final-row .search-pill span:first-child {
+        color: #64748b;
+        font-size: 14px;
+      }
+
+      .toolbar-final-row .filters-scroll {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+
+      .toolbar-final-row .filters-row {
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 10px;
+        width: max-content;
+      }
+
+      .filter-label {
+        font-size: 12px;
+        font-weight: 700;
+        color: #64748b;
+        align-self: center;
+      }
+
+      .filter-select {
+        height: 36px;
+        padding: 0 0.65rem;
+        min-width: 5.75rem;
+        border-radius: 10px;
+        border: 1px solid var(--border-hairline);
+        background: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .toolbar-trailing {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px 12px;
+        margin-left: auto;
+      }
+
+      .btn-outline,
+      .btn-primary-sm {
+        height: 32px;
+        padding: 0 0.85rem;
+        border-radius: var(--radius-pill);
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+        border: 1px solid var(--border-hairline);
+        background: #fff;
+        color: var(--text-primary);
+      }
+
+      .btn-primary-sm {
+        border-color: transparent;
+        background: var(--color-primary);
+        color: #fff;
+      }
+
+      /* 优化稿顶栏 */
+      .toolbar--proposed {
+        display: none;
+      }
+
+      .toolbar--proposed.is-on {
+        display: block;
+      }
+
+      .toolbar--legacy.is-off {
+        display: none;
+      }
+
+      .proposed-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .proposed-row--secondary {
+        margin-top: 0.65rem;
+        padding-top: 0.65rem;
+        border-top: 1px dashed #e2e8f0;
+        justify-content: space-between;
+      }
+
+      .search-pill--grow {
+        flex: 1 1 280px;
+        max-width: 420px;
+      }
+
+      .search-pill input {
+        border: none;
+        outline: none;
+        background: transparent;
+        flex: 1;
+        font-size: 13px;
+        font-weight: 600;
+        font-family: inherit;
+        color: var(--text-primary);
+      }
+
+      .filter-select--main {
+        min-width: 9rem;
+      }
+
+      .btn-more-filter {
+        height: 36px;
+        padding: 0 0.75rem;
+        border-radius: 10px;
+        border: 1px dashed color-mix(in srgb, var(--color-primary) 35%, #cbd5e1);
+        background: color-mix(in srgb, var(--color-primary) 6%, #fff);
+        font-size: 12px;
+        font-weight: 800;
+        color: var(--color-primary);
+        cursor: pointer;
+      }
+
+      .btn-more-filter[aria-expanded="true"] {
+        border-style: solid;
+        background: var(--color-primary-soft);
+      }
+
+      .actions-cluster {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+
+      .stats-mini {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 6px 14px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #64748b;
+      }
+
+      .stat-pill {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 4px;
+        padding: 0.25rem 0.55rem;
+        border-radius: 8px;
+        background: #f8fafc;
+        border: 1px solid var(--border-hairline);
+      }
+
+      .stat-pill strong {
+        font-size: 15px;
+        font-weight: 800;
+        color: #0f172a;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .stat-pill--active strong {
+        color: #0d5c46;
+      }
+
+      .link-stats {
+        border: none;
+        background: none;
+        padding: 0;
+        font-size: 12px;
+        font-weight: 800;
+        color: var(--color-primary);
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+
+      .filter-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 0.55rem;
+      }
+
+      .filter-chips:empty {
+        display: none;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0.2rem 0.45rem 0.2rem 0.55rem;
+        border-radius: var(--radius-pill);
+        font-size: 11px;
+        font-weight: 700;
+        background: var(--color-primary-soft);
+        color: var(--text-primary);
+        border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+      }
+
+      .chip button {
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+        color: #64748b;
+        padding: 0;
+      }
+
+      /* 更多筛选浮层 */
+      .popover {
+        display: none;
+        position: absolute;
+        z-index: 30;
+        margin-top: 6px;
+        padding: 0.85rem;
+        width: min(100vw - 2rem, 22rem);
+        border-radius: 14px;
+        border: 1px solid var(--border-hairline);
+        background: #fff;
+        box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
+      }
+
+      .popover.is-open {
+        display: block;
+      }
+
+      .popover-wrap {
+        position: relative;
+      }
+
+      .popover__title {
+        margin: 0 0 0.65rem;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+      }
+
+      .popover__grid {
+        display: grid;
+        gap: 0.55rem;
+      }
+
+      .popover__field label {
+        display: block;
+        margin-bottom: 0.25rem;
+        font-size: 11px;
+        font-weight: 700;
+        color: #64748b;
+      }
+
+      .popover__actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 0.75rem;
+      }
+
+      .mock-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      .mock-table thead th {
+        padding: 0.65rem 0.75rem;
+        text-align: left;
+        font-size: 12px;
+        font-weight: 800;
+        color: #fff;
+        background: color-mix(in srgb, var(--color-primary) 72%, #3d2a24);
+        white-space: nowrap;
+      }
+
+      .mock-table tbody td {
+        padding: 0.55rem 0.75rem;
+        border-bottom: 1px solid #f1f5f9;
+        color: #334155;
+      }
+
+      .mock-table tbody tr:hover td {
+        background: #fafbfc;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 0.15rem 0.45rem;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 800;
+        background: #ecfdf5;
+        color: #047857;
+      }
+
+      .compare-note {
+        margin: 0.75rem 0 0;
+        font-size: 0.75rem;
+        line-height: 1.55;
+        color: var(--text-secondary);
+      }
+
+      .compare-note strong {
+        color: var(--text-primary);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preview-shell">
+      <header class="preview-meta">
+        <div>
+          <h1 class="preview-meta__title">会员档案 · 顶栏定稿预览</h1>
+          <p class="preview-meta__hint">
+            与正式 MembersView 一致：搜索左置，筛选间距 10px，无顶栏汇总统计
+          </p>
+        </div>
+      </header>
+
+      <div class="members-card">
+        <div class="members-card__header">
+          <div class="toolbar-final-row">
+            <div class="search-pill" aria-hidden="true">
+              <span>⌕</span>
+              输入姓名、手机后四位或地址检索…
+            </div>
+            <div class="filters-scroll">
+              <div class="filters-row">
+                <span class="filter-label">状态</span>
+                <select class="filter-select"><option>全部</option></select>
+                <span class="filter-label">套餐</span>
+                <select class="filter-select"><option>全部</option></select>
+                <span class="filter-label">片区</span>
+                <select class="filter-select"><option>全部</option></select>
+                <span class="filter-label">会员卡状态</span>
+                <select class="filter-select"><option>全部</option></select>
+              </div>
+            </div>
+            <div class="toolbar-trailing">
+              <button type="button" class="btn-outline">导入会员</button>
+              <button type="button" class="btn-primary-sm">导出 Excel</button>
+            </div>
+          </div>
+        </div>
+
+        <table class="mock-table" aria-label="会员列表示意">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>用户名</th>
+              <th>地址片区</th>
+              <th>套餐</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>12031</td>
+              <td>张**</td>
+              <td>金水区</td>
+              <td>月卡</td>
+              <td><span class="badge">正常配送中</span></td>
+            </tr>
+            <tr>
+              <td>12028</td>
+              <td>李**</td>
+              <td>未分配</td>
+              <td>周卡</td>
+              <td><span class="badge">待续费</span></td>
+            </tr>
+            <tr>
+              <td>12019</td>
+              <td>王**</td>
+              <td>二七区</td>
+              <td>月卡</td>
+              <td><span class="badge">正常配送中</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var THEME_KEY = "okfood-admin-primary-theme";
+        var VALID = ["primary-peach", "primary-mojito", "primary-iris"];
+        try {
+          var t = localStorage.getItem(THEME_KEY);
+          if (t && VALID.indexOf(t) !== -1) {
+            document.documentElement.setAttribute("data-admin-theme", t);
+            return;
+          }
+        } catch (e) {
+          /* ignore */
+        }
+        document.documentElement.setAttribute("data-admin-theme", "primary-peach");
+      })();
+    </script>
+  </body>
+</html>

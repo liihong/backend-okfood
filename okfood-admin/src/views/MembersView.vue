@@ -3,24 +3,7 @@ defineOptions({ name: 'MembersView' })
 import { ref, watch, computed, onMounted, onActivated, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import {
-  Search,
-  X,
-  Trash2,
-  MapPin,
-  CalendarOff,
-  Pencil,
-  Download,
-  Upload,
-  Receipt,
-  ChevronDown,
-  History,
-  Banknote,
-  UtensilsCrossed,
-  Ticket,
-  Truck,
-  Hash,
-} from 'lucide-vue-next'
+import { Search, Download, Upload, Ticket, ChevronDown } from 'lucide-vue-next'
 import * as XLSX from 'xlsx'
 import {
   apiJson,
@@ -31,14 +14,44 @@ import {
   membershipTemplatePlanLabel,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
+import { confirmForceReinstateDelivery } from '../composables/confirmForceReinstateDelivery.js'
 import { parseApiDateTimeBeijing } from '../utils/beijingDateTime.js'
 import MemberEditModal from './components/MemberEditModal.vue'
 import MemberBalanceEditModal from './components/MemberBalanceEditModal.vue'
 import MemberImportModal from './components/MemberImportModal.vue'
 import MemberAddressesModal from './components/MemberAddressesModal.vue'
 import MemberMealCompensationModal from './components/MemberMealCompensationModal.vue'
+import MembersMoreDropdownMenu from './components/MembersMoreDropdownMenu.vue'
+import OkfoodAdminDialogShell from '../components/OkfoodAdminDialogShell.vue'
+import MemberOperationContext from '../components/MemberOperationContext.vue'
 
 const MOBILE_MEDIA = '(max-width: 768px)'
+
+/**
+ * 「更多」下拉 Popper：fixed + 视口内约束，菜单自身滚动，避免撑开 .main-body__router-host 导致整页上移
+ */
+const membersMoreDropdownPopperOptions = {
+  strategy: 'fixed',
+  modifiers: [
+    { name: 'offset', options: { offset: [0, 6] } },
+    {
+      name: 'flip',
+      options: {
+        fallbackPlacements: ['top-end', 'bottom-end', 'top-start', 'bottom-start'],
+        padding: 10,
+      },
+    },
+    {
+      name: 'preventOverflow',
+      options: {
+        padding: 10,
+        altAxis: true,
+        tether: false,
+        rootBoundary: 'viewport',
+      },
+    },
+  ],
+}
 
 /** 窄屏（手机）使用卡片列表，桌面保留表格 */
 const isNarrowScreen = ref(
@@ -124,10 +137,6 @@ function applyMembersRouteQueryFilters() {
   }
 }
 
-/** 顶栏全库统计（不受当前搜索/筛选影响） */
-const membersStats = ref({ total: null, active: null, expired: null, refunded: null, refund_rate_percent: null })
-const membersStatsLoading = ref(true)
-
 const membersTotalPages = computed(() =>
   Math.max(1, Math.ceil(membersTotal.value / membersPageSize.value)),
 )
@@ -210,42 +219,38 @@ function onValidityFilterChange() {
   void fetchMembers()
 }
 
-async function fetchMemberStats() {
-  if (!adminAccessToken.value) return
-  membersStatsLoading.value = true
-  try {
-    const data = await apiJson('/api/admin/users/stats', {}, { auth: true })
-    membersStats.value = {
-      total: Number(data?.total) || 0,
-      active: Number(data?.active) || 0,
-      expired: Number(data?.expired) || 0,
-      refunded: Number(data?.refunded) || 0,
-      refund_rate_percent: data?.refund_rate_percent ?? null,
-    }
-  } catch (e) {
-    const status = e && typeof e.status === 'number' ? e.status : 0
-    if (status === 401) {
-      membersStats.value = { total: null, active: null, expired: null, refunded: null, refund_rate_percent: null }
-      return
-    }
-    membersStats.value = { total: null, active: null, expired: null, refunded: null, refund_rate_percent: null }
-  } finally {
-    membersStatsLoading.value = false
-  }
-}
-
 const memberDeletingId = ref(null)
 const membersExporting = ref(false)
 const showImportModal = ref(false)
 
+/** MessageBox 文案转义（dangerouslyUseHTMLString 用） */
+function escapeMessageBoxHtml(text) {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
 async function deleteMemberRow(u) {
   if (!u?.id) return
   const label = `${u.name || '—'} · ${u.phone || ''}`
+  const deleteDetail =
+    '若有余额流水、配送记录、单次点餐或开卡工单，将仅做逻辑删除并保留数据；若四项均无记录则物理删除档案与地址。'
   try {
     await ElMessageBox.confirm(
-      `${label}\n\n若有余额流水、配送记录、单次点餐或开卡工单，将仅做逻辑删除并保留数据；若四项均无记录则物理删除档案与地址。`,
+      `<p class="okfood-message-box__subject">${escapeMessageBoxHtml(label)}</p><p class="okfood-message-box__detail">${deleteDetail}</p>`,
       '确定删除该会员？',
-      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
+      {
+        customClass: 'okfood-message-box okfood-message-box--delete',
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'okfood-message-box__confirm--danger',
+        cancelButtonClass: 'okfood-message-box__cancel',
+        distinguishCancelAndClose: true,
+        autofocus: 'cancel',
+        dangerouslyUseHTMLString: true,
+      },
     )
   } catch {
     return
@@ -258,7 +263,6 @@ async function deleteMemberRow(u) {
         ? data.msg
         : '已删除'
     showToast(detail, 'success')
-    await fetchMemberStats()
     await fetchMembers()
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
@@ -517,6 +521,13 @@ function planTagClass(plan, planBase, mealScopeLabel) {
   return 't-plan--count'
 }
 
+/** 会员表副行：仅展示昵称，去掉「微信」字样（含历史脏数据前缀） */
+function memberWechatLineText(wechatRaw) {
+  const s = String(wechatRaw ?? '').trim()
+  if (!s) return ''
+  return s.replace(/^微信\s*/u, '').trim()
+}
+
 /** --- 手工请假（管理端，不受小程序当日截止时间限制） --- */
 const showLeaveModal = ref(false)
 const leaveSaving = ref(false)
@@ -640,7 +651,6 @@ async function submitLeaveMember() {
     showLeaveModal.value = false
     showToast('请假状态已更新', 'success')
     await fetchMembers()
-    await fetchMemberStats()
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -660,9 +670,8 @@ async function reinstateMemberToDeliverySheet(u) {
   const periods = Array.isArray(u?.entitled_meal_periods) ? u.entitled_meal_periods : []
   let mealPeriod = 'lunch'
   if (periods.includes('dinner') && !periods.includes('lunch')) mealPeriod = 'dinner'
-  const ok = window.confirm(
-    `确认将 ${u.name || u.phone} 强制加入今日${mealPeriod === 'dinner' ? '晚餐' : '午餐'}配送大表？\n仅用于推单后取消请假需当日补送；其他锁表逻辑不变。`,
-  )
+  const periodLabel = mealPeriod === 'dinner' ? '晚餐' : '午餐'
+  const ok = await confirmForceReinstateDelivery(u, periodLabel)
   if (!ok) return
   try {
     await apiJson(
@@ -695,7 +704,6 @@ watch(showEditModal, (v) => {
 
 async function onMemberEditSaved() {
   await fetchMembers()
-  await fetchMemberStats()
 }
 
 /** 不含所属片区：map_location_text + door_detail；否则从列表 address 去掉片区前缀 */
@@ -850,12 +858,9 @@ const operationLogTarget = ref(null)
 const operationLogLoading = ref(false)
 const operationLogItems = ref([])
 const operationLogTotal = ref(0)
-const operationLogPage = ref(1)
-const operationLogPageSize = 20
-
-const operationLogTotalPages = computed(() =>
-  Math.max(1, Math.ceil(operationLogTotal.value / operationLogPageSize)),
-)
+/** 与后端 list_member_operations 上限一致；弹窗内列表滚动，不再分页按钮 */
+const OPERATION_LOG_FETCH_SIZE = 200
+const operationLogTruncated = ref(false)
 
 function formatOperationLogTime(iso) {
   const s = typeof iso === 'string' ? iso.trim() : ''
@@ -893,20 +898,20 @@ function operationLogOperatorLabel(op) {
   return s
 }
 
-async function fetchMemberOperationLogsPage() {
+async function fetchMemberOperationLogs() {
   if (!operationLogTarget.value?.id) return
   operationLogLoading.value = true
   try {
     const mid = Number(operationLogTarget.value.id)
-    const p = operationLogPage.value
-    const ps = operationLogPageSize
     const data = await apiJson(
-      `/api/admin/users/${mid}/operation-logs?page=${p}&page_size=${ps}`,
+      `/api/admin/users/${mid}/operation-logs?page=1&page_size=${OPERATION_LOG_FETCH_SIZE}`,
       {},
       { auth: true },
     )
     operationLogItems.value = Array.isArray(data?.items) ? data.items : []
     operationLogTotal.value = Number(data?.total) || 0
+    operationLogTruncated.value =
+      operationLogTotal.value > operationLogItems.value.length
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -925,23 +930,11 @@ async function fetchMemberOperationLogsPage() {
 async function openMemberOperationLogs(u) {
   if (!u?.id) return
   operationLogTarget.value = u
-  operationLogPage.value = 1
   operationLogItems.value = []
   operationLogTotal.value = 0
+  operationLogTruncated.value = false
   showOperationLogModal.value = true
-  await fetchMemberOperationLogsPage()
-}
-
-function goOperationLogPrev() {
-  if (operationLogPage.value <= 1) return
-  operationLogPage.value -= 1
-  void fetchMemberOperationLogsPage()
-}
-
-function goOperationLogNext() {
-  if (operationLogPage.value >= operationLogTotalPages.value) return
-  operationLogPage.value += 1
-  void fetchMemberOperationLogsPage()
+  await fetchMemberOperationLogs()
 }
 
 watch(showOperationLogModal, (v) => {
@@ -949,7 +942,7 @@ watch(showOperationLogModal, (v) => {
     operationLogTarget.value = null
     operationLogItems.value = []
     operationLogTotal.value = 0
-    operationLogPage.value = 1
+    operationLogTruncated.value = false
   }
 })
 
@@ -969,7 +962,6 @@ function openMemberMealCompensation(u) {
 
 async function onMemberMealCompensationSaved() {
   await fetchMembers()
-  await fetchMemberStats()
 }
 
 /** --- 退卡退款：按剩余次数 × 菜单单价计算应退（不按开卡实收） --- */
@@ -1068,7 +1060,6 @@ async function submitMemberRefund() {
     showRefundModal.value = false
     showToast('退卡退款已确认，请按应退金额退款给用户', 'success')
     await fetchMembers()
-    await fetchMemberStats()
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -1116,7 +1107,6 @@ async function onMemberAddressesSaved() {
 onMounted(async () => {
   applyMembersRouteQueryFilters()
   await Promise.all([loadRegionFilterOptions(), loadMembershipPlanFilterOptions()])
-  await fetchMemberStats()
   await fetchMembers()
   if (typeof window !== 'undefined') {
     mobileMediaQuery = window.matchMedia(MOBILE_MEDIA)
@@ -1150,22 +1140,24 @@ onUnmounted(() => {
   <section class="tab-content animate-up members-view-fill">
     <div class="table-container table-container--members-fill">
       <div class="table-header table-header--members">
-        <!-- 单行工具栏：左起「搜索 → 全部/筛选…」，右侧「统计 + 导出」 -->
+        <!-- 顶栏：搜索左置 → 筛选（10px 间距）→ 右侧导入/导出；不展示汇总统计 -->
         <div class="members-toolbar-row">
-          <div class="members-toolbar-primary">
-            <div class="search-box search-box--members-inline">
-              <Search :size="18" />
-              <el-input
-                v-model="searchQuery"
-                clearable
-                placeholder="输入姓名、手机后四位或地址检索…"
-                class="members-search-el-input"
-              />
-            </div>
-            <div class="members-toolbar-filters-scroll">
-              <div class="members-filter-toolbar">
-                <div class="members-extra-filters" aria-label="状态、套餐、片区与会员卡状态筛选">
-                  <label class="members-filter-label" for="members-validity-filter">状态</label>
+          <div class="members-toolbar-search members-search-wrap">
+            <el-input
+              v-model="searchQuery"
+              clearable
+              placeholder="姓名/手机/地址…"
+              class="members-search-el-input"
+            >
+              <template #prefix>
+                <Search :size="14" class="members-search-el-icon" aria-hidden="true" />
+              </template>
+            </el-input>
+          </div>
+          <div class="members-toolbar-filters-scroll">
+            <div class="members-filter-toolbar">
+              <div class="members-extra-filters" aria-label="状态、套餐、片区与会员卡状态筛选">
+                <label class="members-filter-label" for="members-validity-filter">状态</label>
                   <el-select
                     id="members-validity-filter"
                     v-model="membersValidityFilter"
@@ -1235,49 +1227,12 @@ onUnmounted(() => {
                     <el-option label="已暂停" value="paused" />
                     <el-option label="请假中" value="leave" />
                     <el-option label="待续费" value="renew_pending" />
-                  </el-select>
-                </div>
+                </el-select>
               </div>
             </div>
           </div>
-          <div class="members-toolbar-trailing">
-            <div v-if="adminAccessToken" class="members-overview-stats" aria-label="会员档案统计">
-              <span class="members-overview-stat">
-                <span class="members-overview-stat__label">总户数</span><span class="members-overview-stat__sep">:</span>
-                <strong class="members-overview-stat__value members-overview-stat__value--neutral">{{
-                  membersStatsLoading ? '…' : membersStats.total ?? '—'
-                }}</strong>
-              </span>
-              <span class="members-overview-stat">
-                <span class="members-overview-stat__label">生效中</span><span class="members-overview-stat__sep">:</span>
-                <strong class="members-overview-stat__value members-overview-stat__value--active">{{
-                  membersStatsLoading ? '…' : membersStats.active ?? '—'
-                }}</strong>
-              </span>
-              <span class="members-overview-stat">
-                <span class="members-overview-stat__label">已过期</span><span class="members-overview-stat__sep">:</span>
-                <strong class="members-overview-stat__value members-overview-stat__value--muted">{{
-                  membersStatsLoading ? '…' : membersStats.expired ?? '—'
-                }}</strong>
-              </span>
-              <span class="members-overview-stat">
-                <span class="members-overview-stat__label">已退款</span><span class="members-overview-stat__sep">:</span>
-                <strong class="members-overview-stat__value members-overview-stat__value--danger">{{
-                  membersStatsLoading ? '…' : membersStats.refunded ?? '—'
-                }}</strong>
-              </span>
-              <span class="members-overview-stat">
-                <span class="members-overview-stat__label">退款率</span><span class="members-overview-stat__sep">:</span>
-                <strong class="members-overview-stat__value members-overview-stat__value--danger">
-                  <template v-if="membersStatsLoading">…</template>
-                  <template v-else-if="membersStats.refund_rate_percent != null">
-                    {{ Number(membersStats.refund_rate_percent).toFixed(2) }}%
-                  </template>
-                  <template v-else>—</template>
-                </strong>
-              </span>
-            </div>
-            <div v-if="adminAccessToken" class="members-export-actions">
+          <div v-if="adminAccessToken" class="members-toolbar-trailing">
+            <div class="members-export-actions">
               <el-button
                 type="default"
                 size="small"
@@ -1357,7 +1312,9 @@ onUnmounted(() => {
         <el-table-column label="会员信息" min-width="100">
           <template #default="{ row: u }">
             <div class="t-name">{{ u.name || '—' }}</div>
-            <div v-if="u.wechat_name" class="t-sub t-wechat">微信 {{ u.wechat_name }}</div>
+            <div v-if="memberWechatLineText(u.wechat_name)" class="t-sub t-wechat">
+              {{ memberWechatLineText(u.wechat_name) }}
+            </div>
           </template>
         </el-table-column>
         <el-table-column
@@ -1378,7 +1335,8 @@ onUnmounted(() => {
         <el-table-column
           label="起送日期"
           align="center"
-          min-width="104"
+          width="112"
+          min-width="112"
           class-name="td-delivery-start"
           label-class-name="td-delivery-start"
         >
@@ -1401,7 +1359,7 @@ onUnmounted(() => {
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="请假时间" min-width="150" width="120" class-name="td-col-leave">
+        <el-table-column label="请假时间" width="92" min-width="92" class-name="td-col-leave">
           <template #default="{ row: u }">
             <div v-if="!u.leave_kind" class="leave-cell leave-cell--empty">—</div>
             <div v-else class="leave-cell" :title="u.leave_detail || ''">
@@ -1409,7 +1367,7 @@ onUnmounted(() => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="午餐 / 晚餐 / 总餐次" align="left" min-width="128">
+        <el-table-column label="午 / 晚 / 总" align="left" min-width="96">
           <template #default="{ row: u }">
             <el-tooltip
               :content="u.remainTooltip || ''"
@@ -1466,102 +1424,23 @@ onUnmounted(() => {
         <el-table-column label="操作" align="right" min-width="100" fixed="right">
           <template #default="{ row: u }">
             <div class="members-row-actions members-row-actions--denoised">
-              <el-dropdown trigger="click" @command="(cmd) => onMembersActionDropdown(cmd, u)">
+              <el-dropdown
+                trigger="click"
+                placement="bottom-end"
+                :popper-options="membersMoreDropdownPopperOptions"
+                popper-class="okfood-members-more-dropdown"
+                @command="(cmd) => onMembersActionDropdown(cmd, u)"
+              >
                 <el-button type="primary" link size="small" class="btn-members-link">
                   更多
                   <ChevronDown :size="14" aria-hidden="true" class="members-more-chevron" />
                 </el-button>
                 <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="leave">
-                      <span class="members-dropdown-item-inner" title="手工请假">
-                        <CalendarOff :size="14" aria-hidden="true" />
-                        请假
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="reinstate_delivery">
-                      <span
-                        class="members-dropdown-item-inner"
-                        title="推单后取消请假默认不加回；仅此操作可强制写入当日配送大表"
-                      >
-                        <Truck :size="14" aria-hidden="true" />
-                        强制加入当天配送大表
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="addresses">
-                      <span
-                        class="members-dropdown-item-inner"
-                        title="地址管理：查看全部配送地址，编辑、地图选点，并可代为切换默认地址"
-                      >
-                        <MapPin :size="14" aria-hidden="true" />
-                        地址
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="edit">
-                      <span class="members-dropdown-item-inner" title="修改会员信息">
-                        <Pencil :size="14" aria-hidden="true" />
-                        修改
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="edit_balance">
-                      <span class="members-dropdown-item-inner" title="修改剩余次数与每配送日份数">
-                        <Hash :size="14" aria-hidden="true" />
-                        修改次数
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="records" divided>
-                      <span class="members-dropdown-item-inner" title="套餐已确认送达的业务日（扣次记录）">
-                        <Receipt :size="14" aria-hidden="true" />
-                        消费记录
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="operation_logs">
-                      <span
-                        class="members-dropdown-item-inner"
-                        title="该会员在小程序或后台触发的配送、地址、请假等操作留痕"
-                      >
-                        <History :size="14" aria-hidden="true" />
-                        操作记录
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="meal_compensation" divided>
-                      <span
-                        class="members-dropdown-item-inner"
-                        title="餐品问题赔付：将已消费次数补回余额，并写入操作审计"
-                      >
-                        <UtensilsCrossed :size="14" aria-hidden="true" />
-                        补餐赔付
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="grant_coupon">
-                      <span
-                        class="members-dropdown-item-inner"
-                        title="跳转优惠券发放页，向该会员发放续卡优惠券"
-                      >
-                        <Ticket :size="14" aria-hidden="true" />
-                        发优惠券
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="refund" :disabled="!canMemberRefund(u)">
-                      <span
-                        class="members-dropdown-item-inner"
-                        title="按剩余次数 × 菜单单价计算应退金额，确认后写入财务扣减"
-                      >
-                        <Banknote :size="14" aria-hidden="true" />
-                        退卡退款
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                      command="delete"
-                      :disabled="memberDeletingId === u.id"
-                      class="members-dd-item-delete"
-                    >
-                      <span class="members-dropdown-item-inner">
-                        <Trash2 :size="14" aria-hidden="true" />
-                        {{ memberDeletingId === u.id ? '删除中…' : '删除' }}
-                      </span>
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
+                  <MembersMoreDropdownMenu
+                    :refund-disabled="!canMemberRefund(u)"
+                    :delete-disabled="memberDeletingId === u.id"
+                    :delete-label="memberDeletingId === u.id ? '删除中…' : '删除'"
+                  />
                 </template>
               </el-dropdown>
             </div>
@@ -1582,7 +1461,9 @@ onUnmounted(() => {
                 <span class="members-cell-pill members-cell-pill--idx">{{ tableRowIndex(idx) }}</span>
                 <div class="member-profile-card__identity">
                   <span class="member-profile-card__name">{{ u.name || '—' }}</span>
-                  <span v-if="u.wechat_name" class="member-profile-card__wechat">微信 {{ u.wechat_name }}</span>
+                  <span v-if="memberWechatLineText(u.wechat_name)" class="member-profile-card__wechat">
+                    {{ memberWechatLineText(u.wechat_name) }}
+                  </span>
                 </div>
               </div>
               <span :class="memberStatusClass(u.status)">{{ u.status }}</span>
@@ -1652,109 +1533,30 @@ class="balance-triple__n" :class="{
               <time class="member-profile-card__time" :title="u.updated_at || ''">
                 {{ formatMemberOperationTime(u.updated_at) }}
               </time>
-              <el-dropdown trigger="click" @command="(cmd) => onMembersActionDropdown(cmd, u)">
+              <el-dropdown
+                trigger="click"
+                placement="bottom-end"
+                :popper-options="membersMoreDropdownPopperOptions"
+                popper-class="okfood-members-more-dropdown"
+                @command="(cmd) => onMembersActionDropdown(cmd, u)"
+              >
                 <el-button type="primary" size="small" plain class="member-profile-card__more-btn">
                   更多操作
                   <ChevronDown :size="14" aria-hidden="true" class="members-more-chevron" />
                 </el-button>
                 <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="leave">
-                      <span class="members-dropdown-item-inner" title="手工请假">
-                        <CalendarOff :size="14" aria-hidden="true" />
-                        请假
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="reinstate_delivery">
-                      <span
-                        class="members-dropdown-item-inner"
-                        title="推单后取消请假默认不加回；仅此操作可强制写入当日配送大表"
-                      >
-                        <Truck :size="14" aria-hidden="true" />
-                        强制加入当天配送大表
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="addresses">
-                      <span
-                        class="members-dropdown-item-inner"
-                        title="地址管理：查看全部配送地址，编辑、地图选点，并可代为切换默认地址"
-                      >
-                        <MapPin :size="14" aria-hidden="true" />
-                        地址
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="edit">
-                      <span class="members-dropdown-item-inner" title="修改会员信息">
-                        <Pencil :size="14" aria-hidden="true" />
-                        修改
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="edit_balance">
-                      <span class="members-dropdown-item-inner" title="修改剩余次数与每配送日份数">
-                        <Hash :size="14" aria-hidden="true" />
-                        修改次数
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="records" divided>
-                      <span class="members-dropdown-item-inner" title="套餐已确认送达的业务日（扣次记录）">
-                        <Receipt :size="14" aria-hidden="true" />
-                        消费记录
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="operation_logs">
-                      <span
-                        class="members-dropdown-item-inner"
-                        title="该会员在小程序或后台触发的配送、地址、请假等操作留痕"
-                      >
-                        <History :size="14" aria-hidden="true" />
-                        操作记录
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="meal_compensation" divided>
-                      <span
-                        class="members-dropdown-item-inner"
-                        title="餐品问题赔付：将已消费次数补回余额，并写入操作审计"
-                      >
-                        <UtensilsCrossed :size="14" aria-hidden="true" />
-                        补餐赔付
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="grant_coupon">
-                      <span
-                        class="members-dropdown-item-inner"
-                        title="跳转优惠券发放页，向该会员发放续卡优惠券"
-                      >
-                        <Ticket :size="14" aria-hidden="true" />
-                        发优惠券
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="refund" :disabled="!canMemberRefund(u)">
-                      <span
-                        class="members-dropdown-item-inner"
-                        title="按剩余次数 × 菜单单价计算应退金额，确认后写入财务扣减"
-                      >
-                        <Banknote :size="14" aria-hidden="true" />
-                        退卡退款
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                      command="delete"
-                      :disabled="memberDeletingId === u.id"
-                      class="members-dd-item-delete"
-                    >
-                      <span class="members-dropdown-item-inner">
-                        <Trash2 :size="14" aria-hidden="true" />
-                        {{ memberDeletingId === u.id ? '删除中…' : '删除' }}
-                      </span>
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
+                  <MembersMoreDropdownMenu
+                    :refund-disabled="!canMemberRefund(u)"
+                    :delete-disabled="memberDeletingId === u.id"
+                    :delete-label="memberDeletingId === u.id ? '删除中…' : '删除'"
+                  />
                 </template>
               </el-dropdown>
             </footer>
           </article>
         </div>
       </div>
-      <div v-if="adminAccessToken" class="members-pagination">
+      <div v-if="adminAccessToken" class="members-pagination members-pagination--float">
         <button type="button" class="btn-sm" :disabled="membersPage <= 1" @click="goMembersPrev">上一页</button>
         <span class="members-page-meta"
           >第 {{ membersPage }} / {{ membersTotalPages }} 页 · 共 {{ membersTotal }} 条</span
@@ -1770,76 +1572,74 @@ class="balance-triple__n" :class="{
       </div>
     </div>
 
-    <div
-      v-if="showLeaveModal"
-      class="modal-overlay"
-      v-esc-close="() => (showLeaveModal = false)"
-      @click.self="showLeaveModal = false"
+    <OkfoodAdminDialogShell
+      v-model:open="showLeaveModal"
+      title="手工请假"
+      subtitle="后台代操作，不校验小程序当日截止时间"
+      size="md"
+      :close-disabled="leaveSaving"
     >
-      <div class="modal-card modal-card--leave">
-        <div class="modal-header">
-          <div class="header-info">
-            <h3>手工请假</h3>
-            <p>ADMIN LEAVE</p>
-          </div>
-          <el-button text circle class="close-btn" @click="showLeaveModal = false">
-            <X :size="20" />
-          </el-button>
-        </div>
-        <form class="modal-form" @submit.prevent="submitLeaveMember">
-          <p v-if="leaveTarget" class="modal-hint modal-hint--tight">
-            {{ leaveTarget.name || '—' }} · {{ leaveTarget.phone || '' }}
-            <span v-if="leaveTarget.plan"> · {{ leaveTarget.plan }}</span>
-          </p>
-          <div v-if="leavePeriodTabs.length > 1" class="form-group">
-            <label>请假餐段</label>
-            <el-radio-group v-model="leaveMealPeriod" class="leave-period-radio">
-              <el-radio v-for="tab in leavePeriodTabs" :key="tab.value" :value="tab.value">
-                {{ tab.label }}
-              </el-radio>
-            </el-radio-group>
-          </div>
-          <div class="form-group">
-            <label>操作类型</label>
-            <el-select v-model="leaveMode" class="leave-mode-select" placeholder="请选择">
-              <el-option value="tomorrow" label="明日配送请假（与小程序「明天有事」一致）" />
-              <el-option value="range" label="多天配送请假（与小程序「多天请假」一致，需选起止日期）" />
-              <el-option value="clear_tomorrow" label="仅取消「明日请假」" />
-              <el-option value="cancel" label="清空全部请假" />
-            </el-select>
-            <template v-if="leaveMode === 'range'">
-              <div class="form-group form-group--leave-range">
-                <label>开始日期</label>
-                <el-date-picker
-                  v-model="leaveRangeStart"
-                  type="date"
-                  value-format="YYYY-MM-DD"
-                  placeholder="开始日期"
-                  class="leave-range-picker"
-                  :disabled-date="(d) => leaveDateDisabledBeforeMin(d, shanghaiTodayYmd())"
-                />
-              </div>
-              <div class="form-group form-group--leave-range">
-                <label>结束日期</label>
-                <el-date-picker
-                  v-model="leaveRangeEnd"
-                  type="date"
-                  value-format="YYYY-MM-DD"
-                  placeholder="结束日期"
-                  class="leave-range-picker"
-                  :disabled-date="(d) => leaveDateDisabledBeforeMin(d, leaveRangeStart || shanghaiTodayYmd())"
-                />
-              </div>
-            </template>
-            <p class="modal-hint">后台代操作不校验当日请假截止时间；日期均为业务日。</p>
-          </div>
-          <el-button type="primary" class="btn-submit-order" native-type="submit" :loading="leaveSaving"
-            :disabled="leaveSaving">
-            {{ leaveSaving ? '提交中…' : '确认' }}
-          </el-button>
-        </form>
+      <template v-if="leaveTarget" #operation-context>
+        <MemberOperationContext
+          :name="leaveTarget.name"
+          :phone="leaveTarget.phone"
+          :plan="leaveTarget.plan"
+        />
+      </template>
+      <div v-if="leavePeriodTabs.length > 1" class="form-group">
+        <label>请假餐段</label>
+        <el-radio-group v-model="leaveMealPeriod" class="leave-period-radio">
+          <el-radio v-for="tab in leavePeriodTabs" :key="tab.value" :value="tab.value">
+            {{ tab.label }}
+          </el-radio>
+        </el-radio-group>
       </div>
-    </div>
+      <div class="form-group">
+        <label>操作类型</label>
+        <el-select v-model="leaveMode" class="leave-mode-select" placeholder="请选择">
+          <el-option value="tomorrow" label="明日配送请假（与小程序「明天有事」一致）" />
+          <el-option value="range" label="多天配送请假（与小程序「多天请假」一致，需选起止日期）" />
+          <el-option value="clear_tomorrow" label="仅取消「明日请假」" />
+          <el-option value="cancel" label="清空全部请假" />
+        </el-select>
+        <template v-if="leaveMode === 'range'">
+          <div class="form-group form-group--leave-range">
+            <label>开始日期</label>
+            <el-date-picker
+              v-model="leaveRangeStart"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="开始日期"
+              class="leave-range-picker"
+              :disabled-date="(d) => leaveDateDisabledBeforeMin(d, shanghaiTodayYmd())"
+            />
+          </div>
+          <div class="form-group form-group--leave-range">
+            <label>结束日期</label>
+            <el-date-picker
+              v-model="leaveRangeEnd"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="结束日期"
+              class="leave-range-picker"
+              :disabled-date="(d) => leaveDateDisabledBeforeMin(d, leaveRangeStart || shanghaiTodayYmd())"
+            />
+          </div>
+        </template>
+      </div>
+      <div class="okfood-dlg-hint-block">
+        <span class="okfood-dlg-hint-block__label">业务说明</span>
+        <p class="okfood-dlg-hint-block__text">
+          日期均为业务日；多天请假需选起止日期。后台代操作不校验当日请假截止时间。
+        </p>
+      </div>
+      <template #footer>
+        <el-button round :disabled="leaveSaving" @click="showLeaveModal = false">取消</el-button>
+        <el-button round type="primary" :loading="leaveSaving" :disabled="leaveSaving" @click="submitLeaveMember">
+          {{ leaveSaving ? '提交中…' : '确认' }}
+        </el-button>
+      </template>
+    </OkfoodAdminDialogShell>
 
     <MemberEditModal v-model:open="showEditModal" :member="editTargetMember" :region-options="regionFilterOptions"
       @saved="onMemberEditSaved" />
@@ -1862,327 +1662,302 @@ class="balance-triple__n" :class="{
       @saved="onMemberMealCompensationSaved"
     />
 
-    <div
-      v-if="showDeliveryRecordModal"
-      class="modal-overlay"
-      v-esc-close="() => (showDeliveryRecordModal = false)"
-      @click.self="showDeliveryRecordModal = false"
+    <OkfoodAdminDialogShell
+      v-model:open="showDeliveryRecordModal"
+      title="消费记录"
+      :subtitle="
+        deliveryRecordLoading
+          ? ''
+          : `截至当前已消费 ${deliveryRecordTotalMeals} 份餐`
+      "
+      size="wide"
+      dlg-class="okfood-admin-dlg--delivery-records"
     >
-      <div class="modal-card modal-card--delivery-records">
-        <div class="modal-header">
-          <div class="header-info">
-            <h3>消费记录</h3>
-            <p>套餐送达 · 单次购买</p>
-          </div>
-          <div
-            v-if="!deliveryRecordLoading"
-            class="delivery-records-header-stat"
+      <template v-if="deliveryRecordTarget" #operation-context>
+        <MemberOperationContext
+          :name="deliveryRecordTarget.name"
+          :phone="deliveryRecordTarget.phone"
+        />
+      </template>
+      <div class="okfood-dlg-hint-block" style="margin-top: 0">
+        <span class="okfood-dlg-hint-block__label">记录口径说明</span>
+        <p class="okfood-dlg-hint-block__text">
+          含送达扣次、单次购买、补餐与开卡入账；+ / − 与餐段标注，按新到旧排列。
+        </p>
+      </div>
+      <div v-if="deliveryRecordLoading" class="delivery-records-loading">加载中…</div>
+      <template v-else>
+        <p class="delivery-records-summary">
+          共 <strong>{{ deliveryRecordTotal }}</strong> 条记录
+          <span v-if="deliveryRecordTruncated" class="delivery-records-truncated"
+            >（仅显示最近部分，可联系技术导出全量）</span
           >
-            截至当前已消费 <strong>{{ deliveryRecordTotalMeals }}</strong> 份餐
-          </div>
-          <el-button text circle class="close-btn" @click="showDeliveryRecordModal = false">
-            <X :size="20" />
-          </el-button>
-        </div>
-        <div class="modal-body modal-body--delivery-records">
-          <p v-if="deliveryRecordTarget" class="modal-hint modal-hint--tight">
-            {{ deliveryRecordTarget.name || '—' }} · {{ deliveryRecordTarget.phone || '' }}
-          </p>
-          <p class="modal-hint delivery-records-caption">
-            下列包含订阅套餐确认送达扣次、单次购买使用会员卡扣次的供餐日，以及补餐赔付与开卡入账记录；入账显示 +，扣次显示 -，会标明午餐或晚餐，按新到旧排列。
-          </p>
-          <div v-if="deliveryRecordLoading" class="delivery-records-loading">加载中…</div>
-          <template v-else>
-            <p class="delivery-records-summary">
-              共 <strong>{{ deliveryRecordTotal }}</strong> 条记录
-              <span v-if="deliveryRecordTruncated" class="delivery-records-truncated">（仅显示最近部分，可联系技术导出全量）</span>
-            </p>
-            <ul v-if="deliveryRecordDates.length" class="delivery-records-list">
-              <li
-                v-for="(row, idx) in deliveryRecordDates"
-                :key="`${row.delivery_date}-${row.deduction_kind}-${row.meal_period}-${idx}`"
+        </p>
+        <ul
+          v-if="deliveryRecordDates.length"
+          class="delivery-records-list delivery-records-list--scroll-5"
+        >
+          <li
+            v-for="(row, idx) in deliveryRecordDates"
+            :key="`${row.delivery_date}-${row.deduction_kind}-${row.meal_period}-${idx}`"
+          >
+            <span class="delivery-records-idx">{{ idx + 1 }}</span>
+            <span class="delivery-records-line">
+              {{ row.delivery_date }}
+              <span
+                class="delivery-records-kind-badge"
+                :class="
+                  row.meal_period === 'dinner'
+                    ? 'delivery-records-kind-badge--dinner'
+                    : 'delivery-records-kind-badge--lunch'
+                "
+                >{{ consumptionMealPeriodLabel(row.meal_period) }}</span
               >
-                <span class="delivery-records-idx">{{ idx + 1 }}</span>
-                <span class="delivery-records-line">
-                  {{ row.delivery_date }}
-                  <span
-                    class="delivery-records-kind-badge"
-                    :class="row.meal_period === 'dinner'
-                      ? 'delivery-records-kind-badge--dinner'
-                      : 'delivery-records-kind-badge--lunch'"
-                  >{{ consumptionMealPeriodLabel(row.meal_period) }}</span>
-                  <span
-                    v-if="row.deduction_kind === 'single_meal'"
-                    class="delivery-records-kind-badge"
-                  >单次购买</span>
-                  <span
-                    v-else-if="row.deduction_kind === 'meal_compensation'"
-                    class="delivery-records-kind-badge delivery-records-kind-badge--compensation"
-                  >补餐</span>
-                  <span
-                    v-else-if="row.deduction_kind === 'card_recharge'"
-                    class="delivery-records-kind-badge delivery-records-kind-badge--recharge"
-                  >开卡入账</span>
-                </span>
-                <span
-                  class="delivery-records-units"
-                  :class="{
-                    'delivery-records-units--addition': isConsumptionAdditionKind(row.deduction_kind),
-                    'delivery-records-units--deduction': !isConsumptionAdditionKind(row.deduction_kind),
-                  }"
-                >
-                  {{ formatSignedMealUnits(row.deduction_kind, row.meal_units) }}
-                </span>
-              </li>
-            </ul>
-            <p v-else class="delivery-records-empty">
-              暂无消费记录。套餐确认送达扣次或单次购买（会员卡）扣次后将显示在此。
-            </p>
-          </template>
-        </div>
-      </div>
-    </div>
-
-    <div
-      v-if="showOperationLogModal"
-      class="modal-overlay"
-      v-esc-close="() => (showOperationLogModal = false)"
-      @click.self="showOperationLogModal = false"
-    >
-      <div class="modal-card modal-card--operation-logs">
-        <div class="modal-header">
-          <div class="header-info">
-            <h3>操作记录</h3>
-            <p>审计日志 · 新到旧</p>
-          </div>
-          <el-button text circle class="close-btn" @click="showOperationLogModal = false">
-            <X :size="20" />
-          </el-button>
-        </div>
-        <div class="modal-body modal-body--operation-logs">
-          <p v-if="operationLogTarget" class="modal-hint modal-hint--tight">
-            {{ operationLogTarget.name || '—' }} · {{ operationLogTarget.phone || '' }}
-          </p>
-          <p class="modal-hint operation-logs-caption">
-            记录该会员通过小程序或后台产生的关键操作（暂停配送、修改份数、地址与请假、档案修改等），含时间、摘要与操作人，便于后期追责。
-          </p>
-          <div v-if="operationLogLoading" class="delivery-records-loading">加载中…</div>
-          <template v-else>
-            <p class="delivery-records-summary operation-logs-summary-line">
-              共 <strong>{{ operationLogTotal }}</strong> 条
-              <span v-if="operationLogTotalPages > 1" class="operation-logs-page-inline">
-                · 第 {{ operationLogPage }} / {{ operationLogTotalPages }} 页
-              </span>
-            </p>
-            <div v-if="operationLogItems.length" class="operation-logs-table-wrap">
-              <table class="operation-logs-table">
-                <thead>
-                  <tr>
-                    <th scope="col">时间</th>
-                    <th scope="col">操作</th>
-                    <th scope="col">摘要</th>
-                    <th scope="col">来源</th>
-                    <th scope="col">操作人</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in operationLogItems" :key="row.id">
-                    <td class="operation-logs-td-time">{{ formatOperationLogTime(row.created_at) }}</td>
-                    <td class="operation-logs-td-op">
-                      {{ row.operation_label || row.operation_type || '—' }}
-                    </td>
-                    <td class="operation-logs-td-summary">{{ row.summary || '—' }}</td>
-                    <td class="operation-logs-td-src">
-                      <span class="operation-logs-src">{{ operationLogSourceLabel(row.source) }}</span>
-                    </td>
-                    <td class="operation-logs-td-operator">{{ row.operator_label || operationLogOperatorLabel(row.operator) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p v-else class="delivery-records-empty">暂无操作记录。</p>
-            <div v-if="operationLogTotal > 0" class="operation-logs-pagination">
-              <el-button
-                plain
-                size="small"
-                :disabled="operationLogPage <= 1 || operationLogLoading"
-                @click="goOperationLogPrev"
+              <span v-if="row.deduction_kind === 'single_meal'" class="delivery-records-kind-badge">单次购买</span>
+              <span
+                v-else-if="row.deduction_kind === 'meal_compensation'"
+                class="delivery-records-kind-badge delivery-records-kind-badge--compensation"
+                >补餐</span
               >
-                上一页
-              </el-button>
-              <el-button
-                plain
-                size="small"
-                :disabled="operationLogPage >= operationLogTotalPages || operationLogLoading"
-                @click="goOperationLogNext"
+              <span
+                v-else-if="row.deduction_kind === 'card_recharge'"
+                class="delivery-records-kind-badge delivery-records-kind-badge--recharge"
+                >开卡入账</span
               >
-                下一页
-              </el-button>
-            </div>
-          </template>
-        </div>
-      </div>
-    </div>
-
-    <div
-      v-if="showRefundModal"
-      class="modal-overlay"
-      v-esc-close="() => !refundSubmitting && (showRefundModal = false)"
-      @click.self="!refundSubmitting && (showRefundModal = false)"
-    >
-      <div class="modal-card modal-card--refund">
-        <div class="modal-header">
-          <div class="header-info">
-            <h3>退卡退款</h3>
-            <p>按剩余次数 × 菜单单价计算应退，不按开卡实收（避免抖音等渠道已退款重复计算）</p>
-          </div>
-          <el-button text circle class="close-btn" :disabled="refundSubmitting" @click="showRefundModal = false">
-            <X :size="20" />
-          </el-button>
-        </div>
-        <form class="modal-form" @submit.prevent="submitMemberRefund">
-          <p v-if="refundTarget" class="modal-hint modal-hint--tight">
-            {{ refundTarget.name || '—' }} · {{ refundTarget.phone || '' }}
-            <span v-if="refundTarget.plan"> · {{ refundTarget.plan }}</span>
-          </p>
-          <div v-if="refundPreviewLoading" class="delivery-records-loading">计算中…</div>
-          <template v-else-if="refundPreview">
-            <dl class="members-refund-summary">
-              <div class="members-refund-row">
-                <dt>已消费</dt>
-                <dd>{{ refundPreview.meals_consumed }} 次</dd>
-              </div>
-              <div class="members-refund-row">
-                <dt>可退剩余</dt>
-                <dd>{{ refundPreview.meals_remaining }} 次</dd>
-              </div>
-              <div class="members-refund-row">
-                <dt>累计总次数</dt>
-                <dd>{{ refundPreview.meal_quota_total }} 次</dd>
-              </div>
-              <div class="members-refund-row">
-                <dt>退款单价</dt>
-                <dd>¥ {{ fmtRefundYuan(refundPreview.unit_price_yuan) }}</dd>
-              </div>
-              <div class="members-refund-row">
-                <dt>计算</dt>
-                <dd>
-                  {{ refundPreview.meals_remaining }} 次 × ¥ {{ fmtRefundYuan(refundPreview.unit_price_yuan) }}
-                </dd>
-              </div>
-              <div class="members-refund-row members-refund-row--amount">
-                <dt>应退金额</dt>
-                <dd class="members-refund-amount">¥ {{ fmtRefundYuan(refundPreview.refund_amount_yuan) }}</dd>
-              </div>
-            </dl>
-            <p v-if="Array.isArray(refundPreview.consumption_items) && refundPreview.consumption_items.length" class="modal-hint members-refund-consumption-label">
-              已消费明细（仅供核对，不从应退中扣减）
-            </p>
-            <ul
-              v-if="Array.isArray(refundPreview.consumption_items) && refundPreview.consumption_items.length"
-              class="members-refund-consumption-list"
+            </span>
+            <span
+              class="delivery-records-units"
+              :class="{
+                'delivery-records-units--addition': isConsumptionAdditionKind(row.deduction_kind),
+                'delivery-records-units--deduction': !isConsumptionAdditionKind(row.deduction_kind),
+              }"
             >
-              <li
-                v-for="(row, idx) in refundPreview.consumption_items"
-                :key="`${row.delivery_date}-${idx}`"
-              >
-                <span class="members-refund-consumption-date">{{ row.delivery_date }}</span>
-                <span class="members-refund-consumption-dish">{{ row.dish_name || '—' }}</span>
-                <span class="members-refund-consumption-amt">
-                  {{ row.meal_units }} 份 × ¥ {{ fmtRefundYuan(row.unit_price_yuan) }}
-                  = ¥ {{ fmtRefundYuan(row.line_total_yuan) }}
-                </span>
-              </li>
-            </ul>
-            <p class="modal-hint members-refund-tip">
-              确认后将清零该会员剩余次数、暂停配送，并写入财务扣减。请在线下或微信侧按应退金额退款给用户。
-            </p>
-            <div class="form-group">
-              <label for="members-refund-remark">备注（选填）</label>
-              <el-input
-                id="members-refund-remark"
-                v-model="refundRemark"
-                type="textarea"
-                :rows="2"
-                maxlength="500"
-                show-word-limit
-                placeholder="如：微信转账已退、现场现金退等"
-                :disabled="refundSubmitting"
-              />
-            </div>
-            <div class="modal-actions">
-              <el-button :disabled="refundSubmitting" @click="showRefundModal = false">取消</el-button>
-              <el-button type="danger" native-type="submit" :loading="refundSubmitting">确认退卡</el-button>
-            </div>
-          </template>
-        </form>
+              {{ formatSignedMealUnits(row.deduction_kind, row.meal_units) }}
+            </span>
+          </li>
+        </ul>
+        <p v-else class="delivery-records-empty">
+          暂无消费记录。套餐确认送达扣次或单次购买（会员卡）扣次后将显示在此。
+        </p>
+      </template>
+      <template #footer>
+        <el-button round type="primary" @click="showDeliveryRecordModal = false">关闭</el-button>
+      </template>
+    </OkfoodAdminDialogShell>
+
+    <OkfoodAdminDialogShell
+      v-model:open="showOperationLogModal"
+      title="操作记录"
+      subtitle="审计日志 · 新到旧"
+      size="wide"
+      fit-content
+    >
+      <template v-if="operationLogTarget" #operation-context>
+        <MemberOperationContext
+          :name="operationLogTarget.name"
+          :phone="operationLogTarget.phone"
+        />
+      </template>
+      <div class="okfood-dlg-hint-block" style="margin-top: 0">
+        <span class="okfood-dlg-hint-block__label">审计说明</span>
+        <p class="okfood-dlg-hint-block__text">
+          记录该会员通过小程序或后台产生的关键操作（暂停配送、修改份数、地址与请假、档案修改等），含时间、摘要与操作人。
+        </p>
       </div>
-    </div>
+      <div v-if="operationLogLoading" class="delivery-records-loading">加载中…</div>
+      <template v-else>
+        <p class="delivery-records-summary operation-logs-summary-line">
+          共 <strong>{{ operationLogTotal }}</strong> 条
+          <span v-if="operationLogItems.length" class="delivery-records-summary-hint">
+            · 列表最多展示约 5 行，超出滚动
+          </span>
+          <span v-if="operationLogTruncated" class="delivery-records-truncated"
+            >（仅显示最近 {{ operationLogItems.length }} 条，可联系技术导出全量）</span
+          >
+        </p>
+        <div
+          v-if="operationLogItems.length"
+          class="operation-logs-table-wrap operation-logs-table-wrap--scroll-5"
+        >
+          <table class="operation-logs-table">
+            <thead>
+              <tr>
+                <th scope="col">时间</th>
+                <th scope="col">操作</th>
+                <th scope="col">摘要</th>
+                <th scope="col">来源</th>
+                <th scope="col">操作人</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in operationLogItems" :key="row.id">
+                <td class="operation-logs-td-time">{{ formatOperationLogTime(row.created_at) }}</td>
+                <td class="operation-logs-td-op">
+                  {{ row.operation_label || row.operation_type || '—' }}
+                </td>
+                <td class="operation-logs-td-summary">{{ row.summary || '—' }}</td>
+                <td class="operation-logs-td-src">
+                  <span class="operation-logs-src">{{ operationLogSourceLabel(row.source) }}</span>
+                </td>
+                <td class="operation-logs-td-operator">
+                  {{ row.operator_label || operationLogOperatorLabel(row.operator) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="delivery-records-empty">暂无操作记录。</p>
+      </template>
+      <template #footer>
+        <el-button round type="primary" @click="showOperationLogModal = false">关闭</el-button>
+      </template>
+    </OkfoodAdminDialogShell>
+
+    <OkfoodAdminDialogShell
+      v-model:open="showRefundModal"
+      title="退卡退款"
+      subtitle="按剩余次数 × 菜单单价计算应退"
+      size="wide"
+      dlg-class="okfood-admin-dlg--refund-fit"
+      :close-disabled="refundSubmitting"
+      :close-on-backdrop="!refundSubmitting"
+    >
+      <template v-if="refundTarget" #operation-context>
+        <MemberOperationContext
+          :name="refundTarget.name"
+          :phone="refundTarget.phone"
+          :plan="refundTarget.plan"
+        />
+      </template>
+      <div v-if="refundPreviewLoading" class="delivery-records-loading">计算中…</div>
+      <div v-else-if="refundPreview" class="okfood-refund-dlg-layout">
+        <div class="okfood-refund-summary-v2">
+          <div class="okfood-refund-summary-v2__chips">
+            <span class="okfood-refund-summary-v2__chip"
+              >已消费 <strong>{{ refundPreview.meals_consumed }}</strong> 次</span
+            >
+            <span class="okfood-refund-summary-v2__chip"
+              >可退 <strong>{{ refundPreview.meals_remaining }}</strong> 次</span
+            >
+            <span class="okfood-refund-summary-v2__chip">
+              累计 <strong>{{ refundPreview.meal_quota_total }}</strong> 次 · 单价 ¥
+              {{ fmtRefundYuan(refundPreview.unit_price_yuan) }}
+            </span>
+          </div>
+          <div class="okfood-refund-summary-v2__amount">
+            <span class="okfood-refund-summary-v2__amount-label">应退金额</span>
+            <span class="okfood-refund-summary-v2__amount-value"
+              >¥ {{ fmtRefundYuan(refundPreview.refund_amount_yuan) }}</span
+            >
+          </div>
+        </div>
+        <div class="okfood-dlg-hint-block okfood-refund-hint-static">
+          <span class="okfood-dlg-hint-block__label">退款与财务说明</span>
+          <p class="okfood-dlg-hint-block__text">
+            确认后将清零剩余次数、暂停配送并写入财务扣减；请在线下或微信侧按应退金额退款给用户。不按开卡实收计算，避免渠道重复退款。
+          </p>
+        </div>
+        <div
+          v-if="Array.isArray(refundPreview.consumption_items) && refundPreview.consumption_items.length"
+          class="okfood-refund-body-scroll"
+          aria-label="已消费明细列表"
+        >
+          <ul
+            class="members-refund-consumption-list members-refund-consumption-list--refund-detail"
+          >
+            <li v-for="(row, idx) in refundPreview.consumption_items" :key="`${row.delivery_date}-${idx}`">
+              <span class="members-refund-consumption-date">{{ row.delivery_date }}</span>
+              <span class="members-refund-consumption-dish">{{ row.dish_name || '—' }}</span>
+              <span class="members-refund-consumption-amt">
+                {{ row.meal_units }} 份 × ¥ {{ fmtRefundYuan(row.unit_price_yuan) }}
+                = ¥ {{ fmtRefundYuan(row.line_total_yuan) }}
+              </span>
+            </li>
+          </ul>
+        </div>
+        <div class="form-group okfood-refund-remark">
+          <label for="members-refund-remark">备注（选填）</label>
+          <el-input
+            id="members-refund-remark"
+            v-model="refundRemark"
+            type="textarea"
+            :rows="2"
+            maxlength="500"
+            show-word-limit
+            placeholder="如：微信转账已退、现场现金退等"
+            :disabled="refundSubmitting"
+          />
+        </div>
+      </div>
+      <template v-if="refundPreview && !refundPreviewLoading" #footer>
+        <el-button round :disabled="refundSubmitting" @click="showRefundModal = false">取消</el-button>
+        <el-button round type="danger" :loading="refundSubmitting" @click="submitMemberRefund">确认退卡</el-button>
+      </template>
+    </OkfoodAdminDialogShell>
 
   </section>
 </template>
 
 <style scoped>
+/* 顶栏：搜索 / 筛选 / 按钮统一高度 */
+.members-toolbar-row {
+  --members-toolbar-control-h: 32px;
+}
+
+/* 宽度按 11 位手机号 + 图标/清除钮即可，给筛选与导入导出留一排空间 */
+.members-search-wrap {
+  flex: 0 1 auto;
+  width: clamp(9.25rem, 11vw, 11rem);
+  min-width: 9.25rem;
+  max-width: 11rem;
+}
+
 .members-search-el-input {
-  flex: 1;
-  min-width: 14rem;
   width: 100%;
 }
 
+/* 单层白色圆角搜索框（图标在框内左侧），不再套灰色 search-box 外容器 */
 .members-search-el-input :deep(.el-input__wrapper) {
   width: 100%;
-}
-.members-overview-stats {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: flex-end;
-  row-gap: 8px;
-  column-gap: 12px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #64748b;
-  flex: 0 1 auto;
-  min-width: 0;
-  margin-bottom: 0;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-}
-.members-overview-stat {
-  display: inline-flex;
-  align-items: baseline;
-  flex-wrap: nowrap;
-  gap: 0;
-  white-space: nowrap;
-}
-.members-overview-stat__label {
-  color: #64748b;
-  font-weight: 700;
-}
-.members-overview-stat__sep {
-  color: #64748b;
-}
-.members-overview-stat__value {
-  margin-left: 2px;
-  font-size: 16px;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  font-family: var(--okfood-font-number);
-}
-.members-overview-stat__value--neutral {
-  color: #0f172a;
-}
-.members-overview-stat__value--active {
-  color: #0d5c46;
-}
-.members-overview-stat__value--muted {
-  color: #64748b;
-}
-.members-overview-stat__value--danger {
-  color: #ef4444;
+  min-height: var(--members-toolbar-control-h);
+  height: var(--members-toolbar-control-h);
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  box-shadow: none;
 }
 
+.members-search-el-input :deep(.el-input__wrapper.is-focus) {
+  border-color: rgba(var(--el-color-primary-rgb, 232, 146, 124), 0.42);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+}
+
+.members-search-el-input :deep(.el-input__inner) {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.members-search-el-input :deep(.el-input__inner::placeholder) {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.members-search-el-input :deep(.el-input__prefix) {
+  display: inline-flex;
+  align-items: center;
+}
+
+.members-search-el-input :deep(.members-search-el-icon) {
+  flex-shrink: 0;
+  color: #64748b;
+}
+
+.members-search-el-input :deep(.el-input__wrapper.is-focus .members-search-el-icon) {
+  color: var(--el-color-primary);
+}
 .members-renew-banner {
   display: flex;
   flex-wrap: wrap;
@@ -2227,7 +2002,48 @@ class="balance-triple__n" :class="{
 }
 .members-region-select-el {
   width: 118px;
+  --el-component-size: var(--members-toolbar-control-h);
 }
+
+.members-region-select-el :deep(.el-select__wrapper) {
+  min-height: var(--members-toolbar-control-h);
+  height: var(--members-toolbar-control-h);
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.members-region-select-el :deep(.el-select__wrapper.is-focused) {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--el-color-primary) 42%, #e2e8f0) inset,
+    0 0 0 3px color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+}
+
+.members-region-select-el :deep(.el-select__placeholder),
+.members-region-select-el :deep(.el-select__selected-item) {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.members-export-actions .members-export-btn {
+  --el-button-size: var(--members-toolbar-control-h);
+  height: var(--members-toolbar-control-h);
+  min-height: var(--members-toolbar-control-h);
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 999px;
+}
+
+.members-export-actions .members-export-btn :deep(.el-icon),
+.members-export-actions .members-export-btn svg {
+  vertical-align: -2px;
+}
+
 .members-region-select-el--wide {
   width: 168px;
 }
@@ -2237,44 +2053,8 @@ class="balance-triple__n" :class="{
 .leave-range-picker {
   width: 100%;
 }
-.members-refund-summary {
-  margin: 0 0 12px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: var(--el-fill-color-light, #f5f7fa);
-}
-.members-refund-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 0;
-  font-size: 13px;
-}
-.members-refund-row + .members-refund-row {
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-}
-.members-refund-row dt {
-  margin: 0;
-  color: var(--el-text-color-secondary, #909399);
-}
-.members-refund-row dd {
-  margin: 0;
-  font-weight: 600;
-  text-align: right;
-}
-.members-refund-row--amount dd.members-refund-amount {
-  color: var(--el-color-danger, #f56c6c);
-  font-size: 18px;
-}
-.members-refund-tip {
-  margin-bottom: 12px;
-  line-height: 1.5;
-}
-.members-refund-consumption-label {
-  margin: 0 0 6px;
-}
 .members-refund-consumption-list {
-  margin: 0 0 12px;
+  margin: 0;
   padding: 0;
   list-style: none;
   border: 1px solid rgba(0, 0, 0, 0.06);
@@ -2283,27 +2063,20 @@ class="balance-triple__n" :class="{
 }
 .members-refund-consumption-list li {
   display: grid;
-  grid-template-columns: 92px 1fr auto;
   gap: 8px;
-  align-items: center;
   padding: 8px 10px;
   font-size: 12px;
   background: #fff;
+}
+.members-refund-consumption-list:not(.members-refund-consumption-list--refund-detail) li {
+  grid-template-columns: 92px 1fr auto;
+  align-items: center;
 }
 .members-refund-consumption-list li + li {
   border-top: 1px solid rgba(0, 0, 0, 0.06);
 }
 .members-refund-consumption-date {
   color: var(--el-text-color-secondary, #909399);
-}
-.members-refund-consumption-dish {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.members-refund-consumption-amt {
-  font-weight: 600;
-  white-space: nowrap;
 }
 .modal-card--refund {
   max-width: 440px;
@@ -2414,6 +2187,7 @@ class="balance-triple__n" :class="{
 .member-profile-card__wechat {
   font-size: 11px;
   font-weight: 600;
+  line-height: 1.25;
   color: #94a3b8;
 }
 
@@ -2563,15 +2337,10 @@ class="balance-triple__n" :class="{
   .members-toolbar-row {
     flex-direction: column;
     align-items: stretch;
+    gap: 10px;
   }
 
-  .members-toolbar-primary {
-    flex-direction: column;
-    align-items: stretch;
-    width: 100%;
-  }
-
-  .members-toolbar-row .members-toolbar-primary .search-box.search-box--members-inline {
+  .members-search-wrap {
     width: 100%;
     min-width: 0;
     max-width: none;
@@ -2580,18 +2349,7 @@ class="balance-triple__n" :class="{
   .members-toolbar-trailing {
     width: 100%;
     margin-left: 0;
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .members-overview-stats {
-    justify-content: flex-start;
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
-    flex-wrap: nowrap;
-    padding-bottom: 2px;
+    justify-content: flex-end;
   }
 
   .members-export-actions {

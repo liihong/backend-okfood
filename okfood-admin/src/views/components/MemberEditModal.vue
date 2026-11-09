@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, computed, onActivated } from 'vue'
-import { X, UserPen, Info, Save, Truck } from 'lucide-vue-next'
+import { Info, Truck } from 'lucide-vue-next'
 import {
   apiJson,
   handleAdminLogout,
@@ -9,6 +9,9 @@ import {
   membershipTemplatePlanLabel,
 } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
+import { confirmForceReinstateDelivery } from '../../composables/confirmForceReinstateDelivery.js'
+import OkfoodAdminDialogShell from '../../components/OkfoodAdminDialogShell.vue'
+import MemberOperationContext from '../../components/MemberOperationContext.vue'
 
 /** 档案套餐无法匹配已开启卡包时的占位值，避免下拉空白 */
 const CURRENT_PLAN_VALUE = '__current__'
@@ -73,6 +76,10 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['saved'])
+
+/** 晚餐指定配送日说明：小屏收进 tooltip，桌面仍展示全文 */
+const DINNER_SCHEDULE_HINT =
+  '只影响晚餐日程，不改变上面的暂停配送。选择日期不会自动暂停。赠送晚餐默认暂停，指定某一天才进晚餐单；正式晚餐未暂停时仍按每天配送。'
 
 const editSaving = ref(false)
 const reinstateBusy = ref(false)
@@ -296,6 +303,7 @@ onActivated(() => {
 })
 
 function close() {
+  if (editSaving.value || profileLoading.value) return
   open.value = false
 }
 
@@ -325,9 +333,7 @@ async function forceReinstateToDeliverySheet() {
   if (!u?.phone || reinstateBusy.value) return
   const mealPeriod = resolveMemberMealPeriod(u)
   const periodLabel = mealPeriod === 'dinner' ? '晚餐' : '午餐'
-  const ok = window.confirm(
-    `确认将 ${u.name || u.phone} 强制加入今日${periodLabel}配送大表？\n仅用于推单后取消请假需当日补送；其他锁表逻辑不变。`,
-  )
+  const ok = await confirmForceReinstateDelivery(u, periodLabel)
   if (!ok) return
   reinstateBusy.value = true
   try {
@@ -414,7 +420,7 @@ async function submitEditMember() {
       },
       { auth: true },
     )
-    close()
+    open.value = false
     emit('saved')
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
@@ -431,693 +437,239 @@ async function submitEditMember() {
 </script>
 
 <template>
-  <div v-if="open" class="modal-overlay" v-esc-close="close" @click.self="close">
-    <div class="modal-card modal-card--member-edit mem-root">
-      <form class="mem-form" @submit.prevent="submitEditMember">
-        <!-- 顶栏（参考稿 #064e3b） -->
-        <header class="mem-top">
-          <div class="mem-top-left">
-            <div class="mem-top-ico" aria-hidden="true">
-              <UserPen :size="16" :stroke-width="2.25" />
-            </div>
-            <div>
-              <h1 class="mem-top-title">修改会员信息</h1>
-              <p class="mem-top-sub">Edit Member Profile</p>
-            </div>
+  <OkfoodAdminDialogShell
+    v-model:open="open"
+    title="修改会员信息"
+    subtitle="地址请在「地址」入口单独维护 · 次数在「修改次数」"
+    size="wide"
+    fit-content
+    dlg-class="okfood-admin-dlg--edit-fit"
+    :close-disabled="editSaving || profileLoading"
+    :close-on-backdrop="!editSaving && !profileLoading"
+    @close="close"
+  >
+    <template v-if="member" #operation-context>
+      <MemberOperationContext :name="member.name" :phone="member.phone" :plan="member.plan" />
+    </template>
+    <div v-loading="profileLoading" class="okfood-mem-edit-inner">
+      <section class="okfood-mem-edit-sec">
+        <div class="okfood-mem-edit-sec-head">
+          <span class="okfood-mem-edit-bar" aria-hidden="true"></span>
+          <h3 class="okfood-mem-edit-sec-title">档案与套餐</h3>
+        </div>
+        <div class="okfood-mem-edit-grid-3">
+          <div class="okfood-mem-edit-field">
+            <label class="okfood-mem-edit-lab">会员手机号</label>
+            <el-input
+              class="okfood-mem-edit-input okfood-mem-edit-input--ro"
+              :model-value="editForm.phone"
+              disabled
+            />
           </div>
-          <button type="button" class="mem-top-close" @click="close">
-            <X :size="20" aria-hidden="true" />
-          </button>
-        </header>
-
-        <!-- 主区：单列居中 max-w-3xl，可滚动 -->
-        <div class="mem-main">
-          <div class="mem-main-inner">
-            <!-- 1. 会员基础档案（地址不在此编辑，请走地址管理） -->
-            <section class="mem-sec">
-              <div class="mem-sec-head">
-                <span class="mem-bar" aria-hidden="true"></span>
-                <h2 class="mem-sec-title">会员基础档案</h2>
-              </div>
-              <div class="mem-grid-2">
-                <div class="mem-field">
-                  <label class="mem-lab">会员手机号</label>
-                  <el-input
-                    class="mem-input-el mem-input-readonly"
-                    :model-value="editForm.phone"
-                    disabled
-                  />
-                </div>
-                <div class="mem-field">
-                  <label class="mem-lab">姓名</label>
-                  <el-input
-                    v-model="editForm.name"
-                    maxlength="100"
-                    placeholder="请输入姓名"
-                    clearable
-                    class="mem-input-el"
-                  />
-                </div>
-              </div>
-            </section>
-
-            <!-- 2. 套餐类型（次数与每日份数在「修改次数」弹窗，本表单不提交） -->
-            <section class="mem-sec">
-              <div class="mem-sec-head">
-                <span class="mem-bar" aria-hidden="true"></span>
-                <h2 class="mem-sec-title">套餐类型</h2>
-              </div>
-              <div class="mem-field">
-                <el-select
-                  v-model="editForm.membership_template_id"
-                  class="mem-input-el mem-select-el"
-                  :loading="membershipTemplatesLoading"
-                  :placeholder="
-                    membershipTemplatesLoading
-                      ? '加载本店会员卡…'
-                      : planOptions.length
-                        ? '请选择本店会员卡'
-                        : '暂无已开启的会员卡'
-                  "
-                >
-                  <el-option
-                    v-for="opt in planOptions"
-                    :key="String(opt.id)"
-                    :label="opt.label"
-                    :value="opt.id"
-                  />
-                </el-select>
-                <p
-                  v-if="!membershipTemplatesLoading && !membershipTemplates.length"
-                  class="mem-hint-soft"
-                >
-                  暂无已开启的卡包，请先在「会员卡管理」中创建并开启。
-                </p>
-              </div>
-            </section>
-
-            <!-- 3. 配送与时间设置 -->
-            <section class="mem-sec">
-              <div class="mem-sec-head">
-                <span class="mem-bar" aria-hidden="true"></span>
-                <h2 class="mem-sec-title">配送与时间设置</h2>
-              </div>
-
-              <div class="mem-grid-2">
-                <div class="mem-field">
-                  <label class="mem-lab mem-lab-inline">
-                    配送片区
-                    <el-tooltip placement="top">
-                      <template #content>
-                        <div class="mem-tip-body">{{ autoAreaHintText }}</div>
-                      </template>
-                      <span class="mem-tip-wrap">
-                        <Info class="mem-tip" :size="13" />
-                      </span>
-                    </el-tooltip>
-                  </label>
-                  <div class="mem-region-row">
-                    <el-select
-                      v-model="editForm.delivery_region_id"
-                      class="mem-input-el mem-select-el"
-                      :disabled="editForm.use_auto_area"
-                      clearable
-                      placeholder="未分配"
-                    >
-                      <el-option label="未分配" value="" />
-                      <el-option
-                        v-for="r in regionOptions"
-                        :key="r.id"
-                        :label="r.name || '—'"
-                        :value="String(r.id)"
-                      />
-                    </el-select>
-                    <el-checkbox
-                      v-model="editForm.use_auto_area"
-                      :disabled="editForm.store_pickup"
-                      class="mem-auto-inline"
-                      title="仅勾选后保存才按已有坐标重算片区，不会改小区名或门牌"
-                    >
-                      自动划区
-                    </el-checkbox>
-                  </div>
-                </div>
-                <div class="mem-field">
-                  <label class="mem-lab">业务起送日期</label>
-                  <el-date-picker
-                    v-model="editForm.delivery_start_date"
-                    type="date"
-                    value-format="YYYY-MM-DD"
-                    placeholder="选择日期"
-                    class="mem-date-picker"
-                    clearable
-                  />
-                </div>
-              </div>
-
-              <div class="mem-chk-band">
-                <el-checkbox v-model="editForm.delivery_deferred" class="mem-chk-el mem-chk-el--red">
-                  暂停配送
-                </el-checkbox>
-                <template v-if="showDinnerSchedule">
-                  <el-checkbox v-model="editForm.dinner_delivery_paused" class="mem-chk-el mem-chk-el--red">
-                    暂停晚餐
-                  </el-checkbox>
-                  <div class="mem-field mem-field--dinner-date">
-                    <label class="mem-lab">晚餐指定配送日</label>
-                    <el-date-picker
-                      v-model="editForm.dinner_deliver_on"
-                      type="date"
-                      value-format="YYYY-MM-DD"
-                      placeholder="不指定"
-                      class="mem-date-picker"
-                      clearable
-                    />
-                    <p class="mem-dinner-hint">
-                      只影响晚餐日程，不改变上面的暂停配送。选择日期不会自动暂停。赠送晚餐默认暂停，指定某一天才进晚餐单；正式晚餐未暂停时仍按每天配送。
-                    </p>
-                  </div>
-                </template>
-                <el-checkbox
-                  v-model="editForm.store_pickup"
-                  :disabled="editForm.delivery_deferred"
-                  class="mem-chk-el mem-chk-el--blue"
-                >
-                  门店自提
-                </el-checkbox>
-                <el-checkbox
-                  v-model="editForm.skip_subscription_saturday"
-                  class="mem-chk-el mem-chk-el--amber"
-                >
-                  周六不参与
-                </el-checkbox>
-                <el-tooltip placement="top">
-                  <template #content>
-                    <div class="mem-tip-body">
-                      若会员今日已推单冻结且早上取消请假需补送，可点此强制写入当日配送大表；须先取消请假且会员符合配送条件。
-                    </div>
-                  </template>
-                  <span class="mem-reinstate-wrap">
-                    <button
-                      type="button"
-                      class="mem-reinstate-btn"
-                      :disabled="reinstateBusy || editSaving"
-                      @click="forceReinstateToDeliverySheet"
-                    >
-                      <Truck :size="14" aria-hidden="true" />
-                      {{ reinstateBusy ? '加入中…' : '强制加入当天配送大表' }}
-                    </button>
-                  </span>
-                </el-tooltip>
-              </div>
-            </section>
-
-            <!-- 4. 备注：空时两行，有内容时最多三行 -->
-            <section class="mem-sec">
-              <div class="mem-sec-head">
-                <span class="mem-bar" aria-hidden="true"></span>
-                <h2 class="mem-sec-title">备注</h2>
-              </div>
-              <el-input
-                v-model="editForm.remarks"
-                type="textarea"
-                :autosize="{ minRows: 2, maxRows: 3 }"
-                maxlength="500"
-                show-word-limit
-                class="mem-input-el mem-ta-el"
-                placeholder="请在此输入特别说明或客户需求..."
+          <div class="okfood-mem-edit-field">
+            <label class="okfood-mem-edit-lab">姓名</label>
+            <el-input
+              v-model="editForm.name"
+              maxlength="100"
+              placeholder="请输入姓名"
+              clearable
+              class="okfood-mem-edit-input"
+            />
+          </div>
+          <div class="okfood-mem-edit-field">
+            <label class="okfood-mem-edit-lab">本店会员卡</label>
+            <el-select
+              v-model="editForm.membership_template_id"
+              class="okfood-mem-edit-input"
+              :loading="membershipTemplatesLoading"
+              :placeholder="
+                membershipTemplatesLoading
+                  ? '加载本店会员卡…'
+                  : planOptions.length
+                    ? '请选择本店会员卡'
+                    : '暂无已开启的会员卡'
+              "
+            >
+              <el-option
+                v-for="opt in planOptions"
+                :key="String(opt.id)"
+                :label="opt.label"
+                :value="opt.id"
               />
-            </section>
+            </el-select>
           </div>
         </div>
+        <p
+          v-if="!membershipTemplatesLoading && !membershipTemplates.length"
+          class="okfood-mem-edit-hint-soft okfood-mem-edit-hint-soft--full"
+        >
+          暂无已开启的卡包，请先在「会员卡管理」中创建并开启。
+        </p>
+      </section>
 
-        <footer class="mem-ft">
-          <div class="mem-ft-inner">
-            <button type="submit" class="mem-btn mem-btn-primary" :disabled="editSaving || profileLoading">
-              <Save :size="16" aria-hidden="true" />
-              {{ profileLoading ? '同步档案中…' : editSaving ? '保存中…' : '确认并保存修改' }}
-            </button>
-            <button type="button" class="mem-btn mem-btn-ghost" @click="close">取消</button>
+      <section class="okfood-mem-edit-sec">
+        <div class="okfood-mem-edit-sec-head">
+          <span class="okfood-mem-edit-bar" aria-hidden="true"></span>
+          <h3 class="okfood-mem-edit-sec-title">配送与时间设置</h3>
+        </div>
+
+        <div
+          class="okfood-mem-edit-delivery-grid"
+          :class="{ 'okfood-mem-edit-delivery-grid--dinner': showDinnerSchedule }"
+        >
+          <div class="okfood-mem-edit-field okfood-mem-edit-field--region">
+            <div class="okfood-mem-edit-lab-row">
+              <label class="okfood-mem-edit-lab okfood-mem-edit-lab--inline">
+                配送片区
+                <el-tooltip placement="top">
+                  <template #content>
+                    <div class="okfood-mem-edit-tip-body">{{ autoAreaHintText }}</div>
+                  </template>
+                  <span class="okfood-mem-edit-lab-tip-wrap">
+                    <Info class="okfood-mem-edit-lab-tip" :size="13" />
+                  </span>
+                </el-tooltip>
+              </label>
+              <el-checkbox
+                v-model="editForm.use_auto_area"
+                :disabled="editForm.store_pickup"
+                class="okfood-mem-edit-auto-inline"
+                title="仅勾选后保存才按已有坐标重算片区，不会改小区名或门牌"
+              >
+                自动划区
+              </el-checkbox>
+            </div>
+            <el-select
+              v-model="editForm.delivery_region_id"
+              class="okfood-mem-edit-input okfood-mem-edit-region-select"
+              :disabled="editForm.use_auto_area"
+              clearable
+              placeholder="未分配"
+            >
+              <el-option label="未分配" value="" />
+              <el-option
+                v-for="r in regionOptions"
+                :key="r.id"
+                :label="r.name || '—'"
+                :value="String(r.id)"
+              />
+            </el-select>
           </div>
-        </footer>
-      </form>
+          <div class="okfood-mem-edit-field">
+            <label class="okfood-mem-edit-lab">业务起送日期</label>
+            <el-date-picker
+              v-model="editForm.delivery_start_date"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="选择日期"
+              class="okfood-mem-edit-input okfood-mem-edit-date"
+              clearable
+            />
+          </div>
+          <div v-if="showDinnerSchedule" class="okfood-mem-edit-field">
+            <label class="okfood-mem-edit-lab">
+              晚餐指定配送日
+              <el-tooltip placement="top">
+                <template #content>
+                  <div class="okfood-mem-edit-tip-body">{{ DINNER_SCHEDULE_HINT }}</div>
+                </template>
+                <span class="okfood-mem-edit-dinner-hint-trigger" tabindex="0" aria-label="晚餐指定配送日说明">
+                  <Info class="okfood-mem-edit-lab-tip" :size="13" />
+                </span>
+              </el-tooltip>
+            </label>
+            <el-date-picker
+              v-model="editForm.dinner_deliver_on"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="不指定"
+              class="okfood-mem-edit-input okfood-mem-edit-date"
+              clearable
+            />
+          </div>
+        </div>
+        <p
+          v-if="showDinnerSchedule"
+          class="okfood-mem-edit-dinner-hint okfood-mem-edit-dinner-hint--desk"
+        >
+          {{ DINNER_SCHEDULE_HINT }}
+        </p>
+
+        <div class="okfood-mem-edit-chk-band okfood-mem-edit-chk-band--one-row">
+          <el-checkbox
+            v-model="editForm.store_pickup"
+            :disabled="editForm.delivery_deferred"
+            class="okfood-mem-edit-chk-el okfood-mem-edit-chk-el--blue"
+          >
+            门店自提
+          </el-checkbox>
+          <el-checkbox
+            v-model="editForm.delivery_deferred"
+            class="okfood-mem-edit-chk-el okfood-mem-edit-chk-el--red"
+          >
+            暂停配送
+          </el-checkbox>
+          <el-checkbox
+            v-if="showDinnerSchedule"
+            v-model="editForm.dinner_delivery_paused"
+            class="okfood-mem-edit-chk-el okfood-mem-edit-chk-el--red"
+          >
+            暂停晚餐
+          </el-checkbox>
+          <el-checkbox
+            v-model="editForm.skip_subscription_saturday"
+            class="okfood-mem-edit-chk-el okfood-mem-edit-chk-el--amber"
+          >
+            周六不参与
+          </el-checkbox>
+          <el-tooltip placement="top">
+            <template #content>
+              <div class="okfood-mem-edit-tip-body">
+                若会员今日已推单冻结且早上取消请假需补送，可点此强制写入当日配送大表；须先取消请假且会员符合配送条件。
+              </div>
+            </template>
+            <span class="okfood-mem-edit-reinstate-wrap">
+              <button
+                type="button"
+                class="okfood-mem-edit-reinstate-btn"
+                :disabled="reinstateBusy || editSaving"
+                @click="forceReinstateToDeliverySheet"
+              >
+                <Truck :size="14" aria-hidden="true" />
+                {{ reinstateBusy ? '加入中…' : '强制加入当天配送大表' }}
+              </button>
+            </span>
+          </el-tooltip>
+        </div>
+      </section>
+
+      <section class="okfood-mem-edit-sec">
+        <div class="okfood-mem-edit-sec-head">
+          <span class="okfood-mem-edit-bar" aria-hidden="true"></span>
+          <h3 class="okfood-mem-edit-sec-title">备注</h3>
+        </div>
+        <el-input
+          v-model="editForm.remarks"
+          type="textarea"
+          :autosize="{ minRows: 1, maxRows: 3 }"
+          maxlength="500"
+          show-word-limit
+          class="okfood-mem-edit-input okfood-mem-edit-ta"
+          placeholder="请在此输入特别说明或客户需求..."
+        />
+      </section>
     </div>
-  </div>
+    <template #footer>
+      <el-button round :disabled="editSaving" @click="close">取消</el-button>
+      <el-button
+        round
+        type="primary"
+        :loading="editSaving"
+        :disabled="profileLoading"
+        @click="submitEditMember"
+      >
+        {{ profileLoading ? '同步档案中…' : '确认并保存修改' }}
+      </el-button>
+    </template>
+  </OkfoodAdminDialogShell>
 </template>
-
-<style scoped>
-.font-mono {
-  font-family: var(--okfood-font-number);
-}
-
-/* 弹窗本体：单列、接近参考稿「整页中间容器」宽度 */
-.mem-root {
-  width: min(48rem, calc(100vw - 1.25rem));
-  max-height: calc(100dvh - 2rem);
-  padding: 0 !important;
-  overflow: hidden;
-  border-radius: 1rem !important;
-  display: flex;
-  flex-direction: column;
-}
-
-.mem-form {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
-.mem-top {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.5rem 1.15rem;
-  background: #064e3b;
-  color: #fff;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
-  z-index: 3;
-}
-
-.mem-top-left {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  min-width: 0;
-}
-
-.mem-top-ico {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.mem-top-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-
-.mem-top-sub {
-  margin: 1px 0 0;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  opacity: 0.58;
-}
-
-.mem-top-close {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.mem-top-close:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.mem-main {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  background: #f8fafc;
-  scrollbar-width: thin;
-}
-
-.mem-main-inner {
-  box-sizing: border-box;
-  max-width: 48rem;
-  margin: 0 auto;
-  padding: 0.7rem 1.15rem 0.75rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.mem-sec {
-  flex-shrink: 0;
-  background: #fff;
-  border-radius: 10px;
-  border: 1px solid #e2e8f0;
-  padding: 0.7rem 0.9rem;
-}
-
-.mem-sec-head {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.5rem;
-}
-
-.mem-bar {
-  width: 3px;
-  height: 14px;
-  border-radius: 999px;
-  background: #10b981;
-}
-
-.mem-sec-title {
-  margin: 0;
-  font-size: 0.875rem;
-  font-weight: 800;
-  color: #1e293b;
-}
-
-.mem-field {
-  min-width: 0;
-}
-
-.mem-lab {
-  display: flex;
-  align-items: center;
-  margin-bottom: 0.25rem;
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: #475569;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.mem-lab-inline {
-  gap: 0.2rem;
-}
-
-.mem-tip-wrap {
-  display: inline-flex;
-  align-items: center;
-  cursor: help;
-  line-height: 1;
-}
-
-.mem-tip {
-  flex-shrink: 0;
-  color: #94a3b8;
-}
-
-.mem-tip-wrap:hover .mem-tip {
-  color: #059669;
-}
-
-.mem-tip-body {
-  max-width: 280px;
-  line-height: 1.5;
-  font-size: 12px;
-}
-
-.mem-input {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 0.58rem 0.82rem;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #0f172a;
-  outline: none;
-  transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease,
-    background 0.2s ease;
-}
-
-.mem-input:not(:disabled):hover {
-  background: #fafbfc;
-}
-
-.mem-input:focus {
-  background: #fff;
-  border-color: #059669;
-  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.1);
-}
-
-.mem-input-readonly {
-  cursor: default;
-  color: #64748b !important;
-  background: #f1f5f9 !important;
-  border-color: #e2e8f0 !important;
-  box-shadow: none !important;
-}
-
-.mem-input-em {
-  font-weight: 800;
-  color: #047857 !important;
-}
-
-select.mem-input {
-  cursor: pointer;
-}
-
-.mem-grid-2 {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.55rem 0.85rem;
-}
-
-.mem-region-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.mem-region-row .mem-select-el {
-  flex: 1;
-  min-width: 0;
-}
-
-.mem-auto-inline {
-  flex-shrink: 0;
-  margin-right: 0 !important;
-  white-space: nowrap;
-}
-
-.mem-input-el {
-  width: 100%;
-}
-.mem-input-readonly :deep(.el-input__wrapper) {
-  background: #f1f5f9;
-}
-.mem-select-el {
-  width: 100%;
-}
-.mem-date-picker {
-  width: 100%;
-}
-.mem-ta-el {
-  width: 100%;
-}
-
-.mem-hint-soft {
-  margin: 0.28rem 0 0;
-  font-size: 10px;
-  line-height: 1.4;
-  color: #94a3b8;
-}
-
-.mem-chk-band {
-  margin-top: 0.55rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid #f1f5f9;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem 0.85rem;
-  align-items: center;
-}
-
-.mem-chk {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  cursor: pointer;
-  user-select: none;
-}
-
-.mem-chk span {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #475569;
-}
-
-.mem-chk input {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-}
-
-.mem-chk--red input {
-  accent-color: #ef4444;
-}
-
-.mem-chk--blue input {
-  accent-color: #3b82f6;
-}
-
-.mem-chk--amber input {
-  accent-color: #d97706;
-}
-
-.mem-reinstate-wrap {
-  display: inline-flex;
-}
-
-.mem-reinstate-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.28rem 0.62rem;
-  border: 1px solid rgba(16, 185, 129, 0.45);
-  border-radius: 8px;
-  background: rgba(236, 253, 245, 0.85);
-  color: #047857;
-  font-size: 0.75rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-.mem-reinstate-btn:hover:not(:disabled) {
-  background: rgba(209, 250, 229, 0.95);
-  border-color: rgba(16, 185, 129, 0.65);
-}
-
-.mem-reinstate-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.mem-chk:hover span {
-  color: #0f172a;
-}
-
-.mem-ta {
-  resize: none;
-  min-height: 80px;
-  font-weight: 500;
-  font-size: 0.875rem;
-  line-height: 1.48;
-}
-
-.mem-ft {
-  flex-shrink: 0;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.5rem 1rem;
-  background: #fff;
-  border-top: 1px solid #e2e8f0;
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.05);
-  z-index: 4;
-}
-
-.mem-ft-inner {
-  box-sizing: border-box;
-  max-width: 48rem;
-  width: 100%;
-  margin: 0 auto;
-  display: flex;
-  gap: 0.85rem;
-  align-items: center;
-}
-
-.mem-btn {
-  height: 2.35rem;
-  border-radius: 10px;
-  font-weight: 800;
-  font-size: 0.85rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  cursor: pointer;
-  border: none;
-  transition:
-    transform 0.12s ease,
-    background 0.15s ease,
-    opacity 0.15s ease;
-}
-
-.mem-btn:active:not(:disabled) {
-  transform: scale(0.99);
-}
-
-.mem-btn-primary {
-  flex: 3;
-  background: #047857;
-  color: #fff;
-  box-shadow: 0 4px 18px rgba(6, 78, 59, 0.12);
-}
-
-.mem-btn-primary:hover:not(:disabled) {
-  background: #065f46;
-}
-
-.mem-btn-primary:disabled {
-  opacity: 0.62;
-  cursor: not-allowed;
-}
-
-.mem-btn-ghost {
-  flex: 1;
-  background: #fff;
-  border: 1px solid #e2e8f0 !important;
-  color: #64748b;
-}
-
-.mem-btn-ghost:hover {
-  background: #f8fafc;
-}
-
-@media (max-width: 680px) {
-  .mem-grid-2 {
-    grid-template-columns: 1fr;
-  }
-
-  .mem-region-row {
-    flex-wrap: wrap;
-  }
-
-  .mem-main-inner {
-    padding-left: 0.75rem;
-    padding-right: 0.75rem;
-  }
-
-  .mem-ft-inner {
-    flex-direction: column;
-    height: auto;
-    gap: 0.5rem;
-  }
-
-  .mem-ft {
-    height: auto;
-    padding-top: 0.65rem;
-    padding-bottom: 0.75rem;
-  }
-
-  .mem-btn-primary,
-  .mem-btn-ghost {
-    flex: none;
-    width: 100%;
-  }
-}
-</style>

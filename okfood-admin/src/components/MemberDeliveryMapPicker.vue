@@ -57,6 +57,27 @@ let autoComplete = null
 let geocoder = null
 /** @type {ResizeObserver | null} */
 let resizeObs = null
+/** @type {IntersectionObserver | null} */
+let visibleObs = null
+
+/** 弹窗动画 / display:none 切换后容器才有尺寸，需多次 resize 才能出图 */
+function scheduleMapResize() {
+  if (!map) return
+  const run = () => {
+    try {
+      map.resize?.()
+    } catch {
+      /* ignore */
+    }
+  }
+  requestAnimationFrame(() => {
+    run()
+    requestAnimationFrame(run)
+  })
+  for (const ms of [80, 200, 400, 700]) {
+    setTimeout(run, ms)
+  }
+}
 
 function parseCoord(s) {
   const n = Number(String(s ?? '').trim())
@@ -275,10 +296,30 @@ async function initMap() {
   }
 
   if (typeof ResizeObserver !== 'undefined' && mapEl.value) {
-    resizeObs = new ResizeObserver(() => map?.resize?.())
+    resizeObs = new ResizeObserver(() => scheduleMapResize())
     resizeObs.observe(mapEl.value)
   }
+
+  scheduleMapResize()
+
+  visibleObs?.disconnect()
+  visibleObs = null
+  if (typeof IntersectionObserver !== 'undefined' && mapEl.value) {
+    visibleObs = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting && e.intersectionRatio > 0) {
+            scheduleMapResize()
+          }
+        }
+      },
+      { threshold: [0, 0.08, 0.25, 0.5] },
+    )
+    visibleObs.observe(mapEl.value)
+  }
 }
+
+defineExpose({ scheduleMapResize })
 
 function finishSearchPick(lng, lat, mapText) {
   if (!Number.isFinite(lng) || !Number.isFinite(lat) || !map) return
@@ -345,6 +386,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  visibleObs?.disconnect()
+  visibleObs = null
   resizeObs?.disconnect()
   resizeObs = null
   if (autoComplete) {

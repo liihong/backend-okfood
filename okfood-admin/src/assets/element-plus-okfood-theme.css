@@ -187,7 +187,8 @@ html:not([data-admin-theme]) {
   padding: 18px 14px;
   overflow-x: hidden;
   overflow-y: auto;
-  scrollbar-width: thin;
+  /* 默认隐藏滚动条，滚动中由 .is-scrolling 显示（见 AdminLayout） */
+  scrollbar-width: none;
   scrollbar-color: rgba(15, 23, 42, 0.15) transparent;
   --el-menu-hover-bg-color: var(--okfood-sidebar-menu-hover-bg);
   --el-menu-hover-text-color: var(--okfood-sidebar-text);
@@ -195,10 +196,20 @@ html:not([data-admin-theme]) {
 }
 
 .admin-layout .sidebar .sidebar-menu.el-menu::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.admin-layout .sidebar .sidebar-menu.el-menu.is-scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.15) transparent;
+}
+
+.admin-layout .sidebar .sidebar-menu.el-menu.is-scrolling::-webkit-scrollbar {
   width: 4px;
 }
 
-.admin-layout .sidebar .sidebar-menu.el-menu::-webkit-scrollbar-thumb {
+.admin-layout .sidebar .sidebar-menu.el-menu.is-scrolling::-webkit-scrollbar-thumb {
   background: rgba(15, 23, 42, 0.12);
   border-radius: 2px;
 }

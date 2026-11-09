@@ -1,8 +1,9 @@
 <script setup>
 import { ref, watch } from 'vue'
-import { X, UtensilsCrossed } from 'lucide-vue-next'
 import { apiJson, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
+import OkfoodAdminDialogShell from '../../components/OkfoodAdminDialogShell.vue'
+import MemberOperationContext from '../../components/MemberOperationContext.vue'
 
 const open = defineModel('open', { type: Boolean, default: false })
 
@@ -63,89 +64,59 @@ async function submit() {
 </script>
 
 <template>
-  <div
-    v-if="open"
-    class="modal-overlay"
-    v-esc-close="() => !submitting && (open = false)"
-    @click.self="!submitting && (open = false)"
+  <OkfoodAdminDialogShell
+    v-model:open="open"
+    title="补餐赔付"
+    subtitle="餐品问题 · 补回已消费次数"
+    size="md"
+    :close-disabled="submitting"
+    :close-on-backdrop="!submitting"
   >
-    <div class="modal-card modal-card--meal-compensation">
-      <div class="modal-header">
-        <div class="header-info">
-          <h3>补餐赔付</h3>
-          <p>餐品问题 · 补回已消费次数</p>
-        </div>
-        <el-button text circle class="close-btn" :disabled="submitting" @click="open = false">
-          <X :size="20" />
-        </el-button>
-      </div>
-      <form class="modal-form" @submit.prevent="submit">
-        <p v-if="member" class="modal-hint modal-hint--tight">
-          {{ member.name || '—' }} · {{ member.phone || '' }}
-          <span v-if="member.plan"> · {{ member.plan }}</span>
-          <span v-if="member.balance != null"> · 当前剩余 {{ member.balance }} 次</span>
-        </p>
-        <p class="modal-hint meal-compensation-tip">
-          因餐品质量问题等原因，将已消费次数补回会员余额。操作将写入审计日志，用户可在小程序消费记录中查看补送记录。
-        </p>
-        <div class="form-group">
-          <label for="meal-compensation-units">补餐份数</label>
-          <el-input-number
-            id="meal-compensation-units"
-            v-model="mealUnits"
-            :min="1"
-            :max="50"
-            :step="1"
-            :disabled="submitting"
-            controls-position="right"
-            class="meal-compensation-units-input"
-          />
-        </div>
-        <div class="form-group">
-          <label for="meal-compensation-remark">赔付说明（选填）</label>
-          <el-input
-            id="meal-compensation-remark"
-            v-model="remark"
-            type="textarea"
-            :rows="2"
-            maxlength="500"
-            show-word-limit
-            placeholder="如：6月8日午餐漏送配菜，补回1次"
-            :disabled="submitting"
-          />
-        </div>
-        <div class="modal-actions">
-          <el-button :disabled="submitting" @click="open = false">取消</el-button>
-          <el-button type="primary" native-type="submit" :loading="submitting">
-            <UtensilsCrossed :size="16" aria-hidden="true" class="meal-compensation-btn-icon" />
-            确认补餐
-          </el-button>
-        </div>
-      </form>
+    <template v-if="member" #operation-context>
+      <MemberOperationContext
+        dual-member-info
+        :name="member.name"
+        :phone="member.phone"
+        :plan="member.plan"
+        :balance="member.balance"
+      />
+    </template>
+    <div class="okfood-dlg-hint-block" style="margin-top: 0">
+      <span class="okfood-dlg-hint-block__label">审计与小程序可见性</span>
+      <p class="okfood-dlg-hint-block__text">
+        操作写入审计日志，用户可在小程序消费记录中查看补送记录。
+      </p>
     </div>
-  </div>
+    <div class="form-group">
+      <label for="meal-compensation-units">补餐份数</label>
+      <el-input-number
+        id="meal-compensation-units"
+        v-model="mealUnits"
+        :min="1"
+        :max="50"
+        :step="1"
+        :disabled="submitting"
+        controls-position="right"
+        class="okfood-dlg-input-number"
+      />
+    </div>
+    <div class="form-group">
+      <label for="meal-compensation-remark">赔付说明（选填）</label>
+      <el-input
+        id="meal-compensation-remark"
+        v-model="remark"
+        type="textarea"
+        :rows="2"
+        maxlength="500"
+        show-word-limit
+        placeholder="如：6月8日午餐漏送配菜，补回1次"
+        :disabled="submitting"
+      />
+    </div>
+    <template #footer>
+      <el-button round :disabled="submitting" @click="open = false">取消</el-button>
+      <el-button round type="primary" :loading="submitting" @click="submit">确认补餐</el-button>
+    </template>
+  </OkfoodAdminDialogShell>
 </template>
 
-<style scoped>
-.modal-card--meal-compensation {
-  max-width: 28rem;
-}
-
-.meal-compensation-tip {
-  line-height: 1.5;
-  margin-bottom: 0.5rem;
-}
-
-.meal-compensation-units-input {
-  width: 100%;
-}
-
-.meal-compensation-units-input :deep(.el-input__wrapper) {
-  width: 100%;
-}
-
-.meal-compensation-btn-icon {
-  margin-right: 4px;
-  vertical-align: -2px;
-}
-</style>

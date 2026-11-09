@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import {
@@ -401,6 +401,38 @@ const sidebarCollapsed = computed(() =>
   isNarrowScreen.value ? !narrowSidebarExpanded.value : sidebarCollapsedPref.value,
 )
 
+/** 侧栏 el-menu 根节点：滚动时临时显示滚动条 */
+const sidebarMenuRef = ref(null)
+let sidebarMenuScrollEndTimer = null
+let unbindSidebarMenuScroll = null
+
+function bindSidebarMenuScroll() {
+  const raw = sidebarMenuRef.value?.$el
+  const el = raw instanceof HTMLElement ? raw : null
+  if (!el) return undefined
+
+  const onScroll = () => {
+    el.classList.add('is-scrolling')
+    if (sidebarMenuScrollEndTimer != null) {
+      window.clearTimeout(sidebarMenuScrollEndTimer)
+    }
+    sidebarMenuScrollEndTimer = window.setTimeout(() => {
+      el.classList.remove('is-scrolling')
+      sidebarMenuScrollEndTimer = null
+    }, 700)
+  }
+
+  el.addEventListener('scroll', onScroll, { passive: true })
+  return () => {
+    el.removeEventListener('scroll', onScroll)
+    if (sidebarMenuScrollEndTimer != null) {
+      window.clearTimeout(sidebarMenuScrollEndTimer)
+      sidebarMenuScrollEndTimer = null
+    }
+    el.classList.remove('is-scrolling')
+  }
+}
+
 function toggleSidebar() {
   if (isNarrowScreen.value) {
     narrowSidebarExpanded.value = !narrowSidebarExpanded.value
@@ -438,9 +470,14 @@ onMounted(() => {
   } catch {
     /* 忽略私有模式等导致的存储异常 */
   }
+  nextTick(() => {
+    unbindSidebarMenuScroll = bindSidebarMenuScroll()
+  })
 })
 
 onUnmounted(() => {
+  unbindSidebarMenuScroll?.()
+  unbindSidebarMenuScroll = null
   sidebarMediaQuery?.removeEventListener('change', syncNarrowScreen)
   unsubscribeLayoutPolling()
 })
@@ -730,6 +767,7 @@ function onTabClose(tab) {
 
     <aside class="sidebar" :class="{ 'sidebar--collapsed': sidebarCollapsed }">
       <el-menu
+        ref="sidebarMenuRef"
         :key="adminKind"
         class="sidebar-menu"
         :default-active="activeMenuPath"

@@ -137,6 +137,12 @@ html.okfood-admin-shell body {
   /* 顶栏与侧栏、主区左右对齐：统一水平「边沟」= 侧栏 margin-left、主区 horizontal padding */
   --okfood-admin-gutter: 12px;
   --okfood-admin-shelf-top: calc(var(--okfood-admin-top-bar-h) + 1rem);
+  /* 侧栏与主内容区底边对齐：统一距视口底留白 */
+  --okfood-admin-shelf-bottom: 12px;
+  /* 大块布局圆角：侧栏略收（原 22px）；主区白卡略收（原 2.5rem） */
+  --okfood-shell-radius: 14px;
+  /* 主区白卡与侧栏/外框同半径，避免左上「外圆内直」错位 */
+  --okfood-surface-radius: var(--okfood-shell-radius);
 }
 
 /* 全页柔色 mesh（与 design/okfood-admin-theme-preview-ios-glass.html .bg-mesh 同源） */
@@ -196,10 +202,10 @@ html.okfood-admin-shell body {
   );
   color: var(--okfood-sidebar-text, #1d1f21);
   /* 四角同半径，避免贴屏一侧呈直角、仅右侧圆角的不对称观感 */
-  border-radius: 22px;
+  border-radius: var(--okfood-shell-radius);
   /* 顶栏为全宽通条 fixed，侧栏从通条下沿与主内容区同一水平线开始 */
-  margin: 0 0 12px var(--okfood-admin-gutter);
-  height: calc(100vh - var(--okfood-admin-shelf-top) - 12px);
+  margin: 0 0 var(--okfood-admin-shelf-bottom) var(--okfood-admin-gutter);
+  height: calc(100vh - var(--okfood-admin-shelf-top) - var(--okfood-admin-shelf-bottom));
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -462,7 +468,9 @@ html.okfood-admin-shell body {
   /* 侧栏 fixed 占位：栏宽 + 左右各一道 gutter + 栏与主区间距 10px */
   /* margin-left: calc(250px + 2 * var(--okfood-admin-gutter) + 10px); */
   /* 顶栏 fixed：主区 padding-top = 侧栏 top（--okfood-admin-shelf-top），右侧卡片顶与左侧菜单顶同一条水平线 */
-  padding: var(--okfood-admin-shelf-top) var(--okfood-admin-gutter) 1rem;
+  padding: var(--okfood-admin-shelf-top) var(--okfood-admin-gutter) var(--okfood-admin-shelf-bottom);
+  box-sizing: border-box;
+  max-height: 100vh;
   transition: margin-left 0.22s ease;
   position: relative;
   display: flex;
@@ -1191,7 +1199,7 @@ html.okfood-admin-shell body {
   font-size: 0.875rem;
 }
 
-/* 会员档案：统计在内容区首行，避免 Teleport 与 el-table 同帧更新触发 patch 到已卸载节点 */
+/* 会员档案：原顶栏统计已移除；汇总数据见「数据统计」页 */
 .members-header-stats--inline {
   width: 100%;
   margin-bottom: 0.35rem;
@@ -1415,7 +1423,7 @@ html.okfood-admin-shell body {
 
 .table-container {
   background: white;
-  border-radius: 2.5rem;
+  border-radius: var(--okfood-surface-radius);
   border: 1px solid #f1f5f9;
   overflow: hidden;
 }
@@ -1434,16 +1442,55 @@ html.okfood-admin-shell body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* 显式圆角：flex 子级依赖父级裁剪时，左上须与 --okfood-shell-radius 一致 */
+  border-radius: var(--okfood-surface-radius);
 }
 
 .table-container.table-container--members-fill > .table-header {
   flex-shrink: 0;
 }
 
+/* 会员档案顶栏：白底下沉投影（与底部分页上浮对称，对齐退卡弹窗底栏层次） */
+.table-container.table-container--members-fill > .table-header.table-header--members {
+  position: relative;
+  z-index: 3;
+  padding: 10px 18px 8px;
+  background: #fff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: var(--okfood-surface-radius) var(--okfood-surface-radius) 0 0;
+  overflow: hidden;
+  box-shadow:
+    0 14px 32px rgba(15, 23, 42, 0.11),
+    0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
 .members-table-host {
   flex: 1 1 0%;
   min-height: 0;
   overflow: hidden;
+}
+
+/* 会员表体底渐隐：衬托分页条上浮（对齐退卡 okfood-admin-dlg__foot） */
+.table-container.table-container--members-fill > .members-table-host {
+  position: relative;
+  z-index: 0;
+}
+
+.table-container.table-container--members-fill > .members-table-host::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 36px;
+  pointer-events: none;
+  z-index: 2;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.55) 45%,
+    rgba(255, 255, 255, 0.96) 100%
+  );
 }
 
 .table-container.table-container--members-fill > .members-pagination {
@@ -1464,6 +1511,7 @@ html.okfood-admin-shell body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-radius: var(--okfood-surface-radius);
 }
 
 .table-container.table-container--card-orders-fill > .table-header {
@@ -1486,30 +1534,27 @@ html.okfood-admin-shell body {
 .table-header--members {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0;
   border-bottom: 1px solid #e2e8f0;
 }
 
-/* 会员档案顶栏单行：左侧「搜索 + 筛选（可横向滑）」，右侧「统计 + 导出」 */
+/* 会员档案顶栏：搜索左置 → 筛选 → 导入/导出（统一 10px 间距，无顶栏汇总统计） */
 .members-toolbar-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 10px 12px;
+  gap: 10px;
   width: 100%;
 }
 
-.members-toolbar-primary {
-  display: flex;
-  align-items: center;
-  gap: 8px 10px;
-  flex: 1 1 auto;
-  min-width: 0;
+.members-toolbar-search {
+  flex: 0 0 auto;
 }
 
 .members-toolbar-filters-scroll {
   flex: 1 1 auto;
   min-width: 0;
+  margin: 0;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
@@ -1519,25 +1564,20 @@ html.okfood-admin-shell body {
 
 .members-toolbar-trailing {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px 12px;
-  flex: 0 1 auto;
+  gap: 10px;
+  flex: 0 0 auto;
   margin-left: auto;
 }
 
-.members-toolbar-row .members-toolbar-primary .search-box.search-box--members-inline {
-  flex: 0 0 auto;
-  width: auto;
-  min-width: 19rem;
-  max-width: min(22rem, 100%);
-}
+/* 会员档案搜索：样式在 MembersView scoped（members-search-wrap） */
 
 .members-toolbar-filters-scroll .members-filter-toolbar {
   flex: 0 0 auto;
   flex-wrap: nowrap;
-  gap: 0.45rem 0.55rem;
+  gap: 10px;
   width: max-content;
   max-width: none;
 }
@@ -1547,6 +1587,7 @@ html.okfood-admin-shell body {
   display: flex;
   align-items: center;
   align-self: center;
+  gap: 10px;
 }
 
 .members-toolbar-filters-scroll .members-region-select {
@@ -1571,17 +1612,26 @@ html.okfood-admin-shell body {
 }
 
 .members-toolbar-filters-scroll .members-extra-filters {
+  display: flex;
   flex-wrap: nowrap;
-  gap: 0.35rem 0.45rem;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 1080px) {
+  .members-toolbar-row {
+    flex-wrap: wrap;
+  }
 }
 
 @media (max-width: 768px) {
   .table-container.table-container--members-fill {
-    border-radius: 1.25rem;
+    border-radius: var(--okfood-surface-radius);
   }
 
-  .table-header--members {
-    padding: 0.85rem;
+  .table-container.table-container--members-fill > .table-header.table-header--members {
+    padding: 10px 14px 9px;
+    border-radius: var(--okfood-surface-radius) var(--okfood-surface-radius) 0 0;
   }
 
   .table-container.table-container--members-fill > .members-pagination {
@@ -1589,21 +1639,12 @@ html.okfood-admin-shell body {
     gap: 0.65rem;
     padding: 1rem;
   }
-}
 
-.search-box.search-box--members-inline {
-  width: auto;
-  flex: 1 1 auto;
-  min-width: 19rem;
-  max-width: 22rem;
-  padding: 0 0.85rem;
-  border-radius: 999px;
-}
-
-.search-box.search-box--members-inline input {
-  padding: 0.6rem 0;
-  font-size: 13px;
-  font-weight: 600;
+  .table-container.table-container--members-fill > .members-pagination.members-pagination--float {
+    margin: 0;
+    padding: 6px 12px 7px;
+    border-radius: 0 0 var(--okfood-surface-radius) var(--okfood-surface-radius);
+  }
 }
 
 .members-recharge-hint {
@@ -1675,7 +1716,7 @@ html.okfood-admin-shell body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.45rem 0.65rem;
+  gap: 10px;
   flex: 0 1 auto;
   min-width: 0;
 }
@@ -1683,7 +1724,7 @@ html.okfood-admin-shell body {
 .members-extra-filters {
   display: flex;
   align-items: center;
-  gap: 0.35rem 0.45rem;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -1839,10 +1880,34 @@ html.okfood-admin-shell body {
 .admin-table--members.el-table.el-table--small .el-table__header th.el-table__cell {
   padding: 0.45rem 0.65rem;
 }
+
+/* 会员档案主表：表头再压一格，少占纵向空间 */
+.members-el-table-body-scroll.admin-table--members.el-table.el-table--small .el-table__header th.el-table__cell {
+  padding: 0.3rem 0.55rem;
+}
+
+.members-el-table-body-scroll.admin-table--members.el-table.el-table--small
+  .el-table__header
+  th.el-table__cell
+  .cell {
+  line-height: 1.2;
+  font-size: 12px;
+  font-weight: 800;
+}
 .admin-table--members.el-table.el-table--small .el-table__body td.el-table__cell {
   padding: 0.38rem 0.65rem;
 }
+.admin-table--members.el-table .el-table__cell.td-delivery-start {
+  min-width: 112px;
+}
 .admin-table--members.el-table td.td-delivery-start .cell {
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+.admin-table--members .members-delivery-start-date {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 /* 电话列：11 位手机号 + 图标需略宽于 120px；避免 Element .cell 默认 ellipsis 截断 */
@@ -1854,8 +1919,14 @@ html.okfood-admin-shell body {
   white-space: nowrap;
   text-overflow: clip;
 }
+.admin-table--members.el-table .el-table__cell.td-col-leave {
+  width: 92px;
+  max-width: 92px;
+}
 .admin-table--members.el-table td.td-col-leave .cell {
   overflow: hidden;
+  padding-left: 0.4rem;
+  padding-right: 0.4rem;
 }
 .admin-table--members.el-table td.td-col-status .cell {
   white-space: nowrap;
@@ -1918,16 +1989,17 @@ html.okfood-admin-shell body {
   line-height: 1.2;
 }
 .admin-table--members .leave-detail {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  display: block;
   overflow: hidden;
-  word-break: break-word;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
   line-height: 1.25;
   font-size: 11px;
   font-weight: 600;
   margin: 0;
   color: #dc2626;
+  max-width: 100%;
 }
 .admin-table--members .balance-cell .balance-text {
   font-size: 1rem;
@@ -1975,6 +2047,8 @@ html.okfood-admin-shell body {
   margin-top: 1px;
   font-size: 11px;
   line-height: 1.2;
+  color: #94a3b8;
+  font-weight: 600;
 }
 
 .admin-table--delivery.el-table {
@@ -2148,21 +2222,122 @@ html.okfood-admin-shell body {
   margin-left: 0;
 }
 
-/* 会员表 ·「更多」下拉项（挂载在 body，勿写 scoped） */
+/* 会员档案 ·「更多」下拉（teleport 到 body，勿写 scoped） */
+.okfood-members-more-dropdown.el-popper {
+  border: 1px solid color-mix(in srgb, var(--el-border-color) 85%, #e2e8f0);
+  border-radius: 14px;
+  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+  /* 相对视口限高，超出部分在菜单内滚，不触发主内容区 scrollIntoView */
+  max-height: min(72vh, calc(100dvh - var(--okfood-admin-shelf-top, 76px) - 20px));
+}
+
+.okfood-members-more-dropdown .members-more-menu.el-dropdown-menu {
+  min-width: min(280px, 92vw);
+  max-height: min(72vh, calc(100dvh - var(--okfood-admin-shelf-top, 76px) - 20px));
+  padding: 6px;
+  border: none;
+  box-shadow: none;
+  background: #fff;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.okfood-members-more-dropdown .el-dropdown-menu__item.members-more-menu__group {
+  opacity: 1 !important;
+  cursor: default !important;
+  pointer-events: none;
+  height: auto;
+  line-height: 1.3;
+  margin-top: 6px;
+  padding: 6px 10px 4px !important;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--el-text-color-secondary) !important;
+  background: transparent !important;
+}
+
+.okfood-members-more-dropdown .el-dropdown-menu__item.members-more-menu__group:first-child {
+  margin-top: 0;
+}
+
+.okfood-members-more-dropdown .el-dropdown-menu__item.members-more-menu__item {
+  padding: 0 !important;
+  margin: 0 0 2px;
+  border-radius: 10px;
+  line-height: 1.45;
+}
+
+.okfood-members-more-dropdown .members-more-menu__inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.okfood-members-more-dropdown .members-more-menu__icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid color-mix(in srgb, var(--el-border-color) 80%, #e2e8f0);
+  line-height: 1;
+  user-select: none;
+}
+
+/* 与讨论稿一致：系统彩色 Emoji，无需额外图标库 */
+.okfood-members-more-dropdown .members-more-menu__icon--emoji {
+  font-size: 14px;
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+}
+
+.okfood-members-more-dropdown .members-more-menu__icon--glyph {
+  font-size: 15px;
+  font-weight: 800;
+  color: #334155;
+  font-family: inherit;
+}
+
+.okfood-members-more-dropdown .members-more-menu__label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.okfood-members-more-dropdown .el-dropdown-menu__item.members-more-menu__item:not(.is-disabled):hover,
+.okfood-members-more-dropdown .el-dropdown-menu__item.members-more-menu__item:focus {
+  background: color-mix(in srgb, var(--el-color-primary) 8%, #f8fafc) !important;
+  color: var(--el-text-color-primary) !important;
+}
+
+.okfood-members-more-dropdown .el-dropdown-menu__item.members-more-menu__item--danger:not(.is-disabled) {
+  color: #dc2626;
+  font-weight: 700;
+}
+
+.okfood-members-more-dropdown .el-dropdown-menu__item.members-more-menu__item--danger:not(.is-disabled):hover,
+.okfood-members-more-dropdown .el-dropdown-menu__item.members-more-menu__item--danger:not(.is-disabled):focus {
+  color: #b91c1c !important;
+  background: rgba(239, 68, 68, 0.08) !important;
+}
+
+/* 兼容旧类名（若别处仍引用） */
 .members-dropdown-item-inner {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-
-.el-dropdown-menu__item.members-dd-item-delete {
-  color: #b91c1c;
-  font-weight: 800;
-}
-
-.el-dropdown-menu__item.members-dd-item-delete:not(.is-disabled):hover {
-  color: #991b1b;
-  background-color: #fef2f2;
 }
 
 /* 会员表 · 配送地址列悬停气泡（挂载在 body） */
@@ -2671,6 +2846,68 @@ html.okfood-admin-shell body {
   color: #64748b;
 }
 
+/* 会员档案底部分页：压低高度 + 白底上浮（对齐退卡弹窗底栏立体感） */
+.table-container.table-container--members-fill > .members-pagination.members-pagination--float {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 3;
+  margin: 0;
+  padding: 6px 16px 8px;
+  gap: 8px;
+  background: #fff;
+  /* 贴表格底：上沿平直，仅左下/右下圆角与卡片一致 */
+  border: none;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 0 0 var(--okfood-surface-radius) var(--okfood-surface-radius);
+  box-shadow:
+    0 -14px 32px rgba(15, 23, 42, 0.11),
+    0 -4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.members-pagination--float .members-page-meta {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary, #64748b);
+}
+
+.members-pagination--float .btn-sm {
+  margin-left: 0;
+  min-height: 28px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 32%, #e2e8f0);
+  background: #fff;
+  color: var(--el-color-primary);
+  box-shadow: none;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.members-pagination--float .btn-sm:first-of-type:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--el-color-primary) 8%, #fff);
+}
+
+.members-pagination--float .btn-sm:last-of-type {
+  border-color: transparent;
+  background: var(--el-color-primary);
+  color: #fff;
+}
+
+.members-pagination--float .btn-sm:last-of-type:hover:not(:disabled) {
+  background: var(--el-color-primary-dark-2, #0e5a44);
+  color: #fff;
+}
+
+.members-pagination--float .btn-sm:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
 .t-wechat {
   color: #94a3b8;
 }
@@ -2934,6 +3171,1472 @@ html.okfood-admin-shell body {
   font-size: 0.8rem;
 }
 
+/* —— 会员等 · iOS 浅色弹窗外壳（OkfoodAdminDialogShell） —— */
+.okfood-admin-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.32);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  /* 高于 .admin-top-tab-bar (110)，全屏遮罩含顶栏 */
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(0.75rem, env(safe-area-inset-top, 0px)) 1rem
+    max(0.75rem, env(safe-area-inset-bottom, 0px)) 1rem;
+  box-sizing: border-box;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.okfood-admin-dlg {
+  --okfood-dlg-radius: 22px;
+  width: 100%;
+  max-width: 560px;
+  max-height: min(88vh, 640px);
+  min-height: 0;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: var(--okfood-dlg-radius);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+  animation: zoomIn 0.28s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.okfood-admin-dlg--md {
+  max-width: 440px;
+}
+
+.okfood-admin-dlg--wide {
+  max-width: min(820px, 100%);
+  max-height: min(90vh, 720px);
+}
+
+/* 一屏展示表单：body 不滚动，仅内部列表等区域滚动 */
+.okfood-admin-dlg--fit-content {
+  max-height: min(94vh, 880px);
+  height: auto;
+}
+
+.okfood-admin-dlg--fit-content.okfood-admin-dlg--wide {
+  max-height: min(94vh, 880px);
+}
+
+.okfood-admin-dlg--fit-content .okfood-admin-dlg__body {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+/* 送餐地址：随内容撑高，弹窗内不单独滚动（地址很多时遮罩层可滚） */
+.okfood-admin-dlg--addr-fit.okfood-admin-dlg--fit-content {
+  max-height: none;
+  height: auto;
+  /* 壳层保持 hidden，圆角落在白色顶栏；仅 body 不内嵌滚动 */
+}
+
+.okfood-admin-dlg--addr-fit .okfood-admin-dlg__body {
+  padding: 12px 14px;
+  overflow: visible;
+}
+
+.okfood-admin-dlg--addr-fit .okfood-admin-dlg__foot {
+  box-shadow:
+    0 -14px 32px rgba(15, 23, 42, 0.11),
+    0 -4px 12px rgba(15, 23, 42, 0.06);
+}
+
+/* 修改会员 · 灰底 + 四白卡片（对齐 design dlg--edit-fit / MemberEditModal） */
+.okfood-admin-dlg--edit-fit.okfood-admin-dlg--fit-content {
+  max-height: none;
+  height: auto;
+}
+
+.okfood-admin-dlg--edit-fit .okfood-admin-dlg__body {
+  /* 与送餐地址弹窗一致：左右 14px，白卡片贴齐内容区 */
+  padding: 12px 14px 14px;
+  overflow: visible;
+  background: #f8fafc;
+}
+
+.okfood-admin-dlg--edit-fit .okfood-admin-dlg__foot {
+  box-shadow:
+    0 -14px 32px rgba(15, 23, 42, 0.11),
+    0 -4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.okfood-mem-edit-inner {
+  box-sizing: border-box;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.okfood-mem-edit-sec {
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  padding: 12px 14px;
+}
+
+.okfood-mem-edit-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.okfood-mem-edit-bar {
+  width: 3px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--el-color-primary);
+  flex-shrink: 0;
+}
+
+.okfood-mem-edit-sec-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.okfood-mem-edit-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.okfood-mem-edit-grid-3 {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 1.05fr) minmax(5rem, 0.85fr) minmax(6.5rem, 1.1fr);
+  gap: 10px 12px;
+  align-items: start;
+}
+
+.okfood-mem-edit-hint-soft--full {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+}
+
+@media (max-width: 560px) {
+  .okfood-mem-edit-grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .okfood-mem-edit-grid-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.okfood-mem-edit-field {
+  min-width: 0;
+}
+
+.okfood-mem-edit-lab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #475569;
+}
+
+.okfood-mem-edit-lab-tip-wrap {
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  line-height: 1;
+}
+
+.okfood-mem-edit-lab-tip {
+  flex-shrink: 0;
+  color: #94a3b8;
+}
+
+.okfood-mem-edit-lab-tip-wrap:hover .okfood-mem-edit-lab-tip {
+  color: var(--el-color-primary);
+}
+
+.okfood-mem-edit-tip-body {
+  max-width: 280px;
+  line-height: 1.5;
+  font-size: 12px;
+}
+
+.okfood-mem-edit-input {
+  width: 100%;
+}
+
+.okfood-mem-edit-input--ro .el-input__wrapper {
+  background: #f1f5f9;
+  cursor: default;
+}
+
+.okfood-mem-edit-delivery-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  align-items: start;
+}
+
+.okfood-mem-edit-delivery-grid--dinner {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* 配送片区：标签行右侧放「自动划区」 */
+.okfood-mem-edit-lab-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  min-width: 0;
+}
+
+.okfood-mem-edit-lab--inline {
+  margin-bottom: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.okfood-mem-edit-region-select {
+  width: 100%;
+}
+
+.okfood-mem-edit-auto-inline {
+  flex: 0 0 auto;
+  margin-right: 0 !important;
+  white-space: nowrap;
+  height: auto;
+  align-items: center;
+}
+
+/* 与左侧「配送片区」标签同字号、字重 */
+.okfood-mem-edit-lab-row .okfood-mem-edit-auto-inline .el-checkbox__label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #475569;
+  line-height: 1.2;
+  padding-left: 6px;
+}
+
+.okfood-mem-edit-lab-row .okfood-mem-edit-auto-inline .el-checkbox__inner {
+  width: 14px;
+  height: 14px;
+}
+
+.okfood-mem-edit-lab-row .okfood-mem-edit-auto-inline .el-checkbox__inner::after {
+  height: 7px;
+  left: 4px;
+  top: 1px;
+  width: 3px;
+}
+
+.okfood-mem-edit-hint-soft {
+  margin: 6px 0 0;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #94a3b8;
+}
+
+.okfood-mem-edit-chk-band {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+}
+
+.okfood-mem-edit-chk-band--one-row {
+  flex-wrap: nowrap;
+  gap: 8px 10px;
+  overflow-x: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.okfood-mem-edit-chk-band--one-row .okfood-mem-edit-chk-el {
+  flex-shrink: 0;
+}
+
+.okfood-mem-edit-chk-band--one-row .okfood-mem-edit-reinstate-wrap {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.okfood-mem-edit-dinner-hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--el-text-color-secondary);
+}
+
+.okfood-mem-edit-chk-el .el-checkbox__label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.okfood-mem-edit-chk-el--red .el-checkbox__input.is-checked .el-checkbox__inner {
+  background-color: #ef4444;
+  border-color: #ef4444;
+}
+
+.okfood-mem-edit-chk-el--blue .el-checkbox__input.is-checked .el-checkbox__inner {
+  background-color: #3b82f6;
+  border-color: #3b82f6;
+}
+
+.okfood-mem-edit-chk-el--amber .el-checkbox__input.is-checked .el-checkbox__inner {
+  background-color: #d97706;
+  border-color: #d97706;
+}
+
+.okfood-mem-edit-reinstate-wrap {
+  display: inline-flex;
+}
+
+.okfood-mem-edit-reinstate-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--el-color-primary) 8%, #fff);
+  color: color-mix(in srgb, var(--el-color-primary) 85%, #0f172a);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.okfood-mem-edit-reinstate-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--el-color-primary) 14%, #fff);
+  border-color: color-mix(in srgb, var(--el-color-primary) 55%, transparent);
+}
+
+.okfood-mem-edit-reinstate-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.okfood-mem-edit-ta {
+  width: 100%;
+}
+
+.okfood-mem-edit-plan-block {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+}
+
+/* 小屏 / 矮屏：修改会员纵向压缩（仍可由遮罩滚动） */
+.okfood-mem-edit-dinner-hint-trigger {
+  display: none;
+  align-items: center;
+  cursor: help;
+  line-height: 1;
+}
+
+@media (max-height: 780px), (max-width: 680px) {
+  .okfood-admin-dlg--edit-fit .okfood-admin-dlg__sub {
+    display: none;
+  }
+
+  .okfood-admin-dlg--edit-fit .okfood-admin-dlg__head {
+    padding: 12px 14px 8px;
+  }
+
+  .okfood-admin-dlg--edit-fit .okfood-member-op-ctx__inner {
+    padding: 8px 12px;
+  }
+
+  .okfood-admin-dlg--edit-fit .okfood-admin-dlg__body {
+    padding: 8px 12px 10px;
+  }
+
+  .okfood-admin-dlg--edit-fit .okfood-admin-dlg__foot {
+    padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+    gap: 8px;
+  }
+
+  .okfood-mem-edit-inner {
+    gap: 6px;
+  }
+
+  .okfood-mem-edit-sec {
+    padding: 8px 10px;
+  }
+
+  .okfood-mem-edit-sec-head {
+    margin-bottom: 6px;
+  }
+
+  .okfood-mem-edit-grid-2,
+  .okfood-mem-edit-grid-3,
+  .okfood-mem-edit-delivery-grid,
+  .okfood-mem-edit-delivery-grid--dinner {
+    gap: 6px 10px;
+  }
+
+  .okfood-mem-edit-delivery-grid,
+  .okfood-mem-edit-delivery-grid--dinner {
+    grid-template-columns: 1fr;
+  }
+
+  .okfood-mem-edit-chk-band {
+    margin-top: 6px;
+    padding-top: 6px;
+    gap: 6px 10px;
+  }
+
+  .okfood-mem-edit-chk-band--one-row {
+    flex-wrap: wrap;
+  }
+
+  .okfood-mem-edit-chk-band--one-row .okfood-mem-edit-reinstate-wrap {
+    margin-left: 0;
+    flex: 1 1 100%;
+  }
+
+  .okfood-mem-edit-dinner-hint--desk {
+    display: none;
+  }
+
+  .okfood-mem-edit-dinner-hint-trigger {
+    display: inline-flex;
+  }
+
+  .okfood-admin-dlg--edit-fit .okfood-mem-edit-input .el-input__wrapper,
+  .okfood-admin-dlg--edit-fit .okfood-mem-edit-input.el-select .el-select__wrapper {
+    min-height: 36px;
+  }
+
+  .okfood-admin-dlg--edit-fit .okfood-mem-edit-ta .el-textarea__inner {
+    min-height: 52px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+}
+
+/* 送餐地址弹窗 · 双栏布局（对齐 design addr-*） */
+.okfood-admin-dlg--addr-fit .members-addr-modal-body {
+  padding: 0;
+  overflow: visible;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-layout {
+  display: grid;
+  grid-template-columns: minmax(168px, 210px) 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-pane {
+  position: sticky;
+  top: 0;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--el-text-color-secondary);
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-add-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: none;
+  padding: 0;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-add-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: none;
+  overflow: visible;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-item {
+  text-align: left;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  background: var(--el-fill-color-blank);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-item:hover {
+  border-color: var(--el-color-primary-light-5);
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-item--active {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-item--draft {
+  border-style: dashed;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-item-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 2px;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-pill {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.45;
+  border: 1px solid transparent;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-pill--default {
+  color: var(--el-color-success);
+  background: color-mix(in srgb, var(--el-color-success) 12%, #fff);
+  border-color: color-mix(in srgb, var(--el-color-success) 28%, transparent);
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-pill--draft {
+  color: var(--el-color-warning);
+  background: color-mix(in srgb, var(--el-color-warning) 12%, #fff);
+  border-color: color-mix(in srgb, var(--el-color-warning) 35%, transparent);
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-item-name {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-item-phone {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-item-addr {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--el-text-color-regular);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-item-area {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--el-text-color-secondary);
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-empty {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-edit-pane {
+  min-width: 0;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-edit-toolbar {
+  display: none;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-first-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  font-size: 12px;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-k {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-member-name {
+  font-weight: 700;
+  max-width: 6.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-member-phone {
+  color: var(--el-text-color-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-vsep {
+  width: 1px;
+  height: 12px;
+  background: var(--el-border-color-lighter);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-coord-pill {
+  display: inline-block;
+  max-width: 200px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-el-form .el-form-item {
+  margin-bottom: 8px;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-el-form .el-form-item__label {
+  margin-bottom: 2px !important;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-map-form-item .el-form-item__content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-map-wrap {
+  width: 100%;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-map-wrap .mdmp {
+  margin-bottom: 0;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-map-wrap .mdmp-search {
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-map-wrap .mdmp-search-input {
+  min-width: 0;
+  flex: 1;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-map-wrap .mdmp-search-btn {
+  padding: 0.4rem 0.75rem;
+  font-size: 12px;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-map-wrap .mdmp-map {
+  position: relative;
+  width: 100%;
+  height: min(200px, 32vh);
+  min-height: 148px;
+  border-radius: 8px;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-el-form {
+  margin-top: 0;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-actions {
+  margin-bottom: 0 !important;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-actions .el-form-item__content {
+  display: block;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-actions-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 28px;
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-default-hint {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.6;
+  color: var(--el-color-success);
+  background: color-mix(in srgb, var(--el-color-success) 12%, #fff);
+  border: 1px solid color-mix(in srgb, var(--el-color-success) 28%, transparent);
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-save-btn {
+  min-height: 32px;
+  padding-left: 16px;
+  padding-right: 16px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+}
+
+@media (max-width: 720px) {
+  .okfood-admin-dlg--addr-fit .members-addr-layout {
+    display: block;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-list-pane {
+    position: static;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-list-hint-desk {
+    display: none;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-list-hint-mobi {
+    display: inline;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-layout:not(.is-mobile-edit) .members-addr-edit-pane {
+    display: none;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-layout.is-mobile-edit .members-addr-list-pane {
+    display: none;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-edit-toolbar {
+    display: flex;
+    align-items: center;
+    margin: -2px 0 8px;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-back-btn {
+    padding-left: 0;
+    margin-left: -4px;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-map-wrap .mdmp-map {
+    height: min(160px, 28vh);
+    min-height: 132px;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-actions-inner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-save-btn {
+    width: 100%;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-coord-pill {
+    max-width: 100%;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-member-name {
+    max-width: 8rem;
+  }
+
+  .okfood-admin-dlg--addr-fit .members-addr-list-item {
+    padding: 8px 10px;
+  }
+}
+
+.okfood-admin-dlg--addr-fit .members-addr-list-hint-mobi {
+  display: none;
+}
+
+/* 退卡退款 · 小屏安全布局（对齐 design dlg--refund-fit） */
+.okfood-admin-dlg--refund-fit {
+  max-height: min(90dvh, calc(100dvh - 2rem));
+  width: 100%;
+}
+
+.okfood-admin-dlg--refund-fit.okfood-admin-dlg--wide {
+  max-height: min(90dvh, calc(100dvh - 2rem));
+}
+
+.okfood-admin-dlg--refund-fit .okfood-admin-dlg__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 8px;
+}
+
+.okfood-admin-dlg--refund-fit .okfood-admin-dlg__foot {
+  flex-shrink: 0;
+  z-index: 3;
+  background: #fff;
+  box-shadow:
+    0 -14px 32px rgba(15, 23, 42, 0.11),
+    0 -4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.okfood-refund-dlg-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.okfood-refund-summary-v2 {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--el-fill-color-light, #f5f7fa);
+}
+
+.okfood-refund-summary-v2__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.okfood-refund-summary-v2__chip {
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.okfood-refund-summary-v2__chip strong {
+  font-weight: 800;
+  color: var(--el-text-color-primary);
+}
+
+.okfood-refund-summary-v2__amount {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  margin-top: 6px;
+  border-top: 1px dashed color-mix(in srgb, var(--el-color-primary) 12%, #e2e8f0);
+}
+
+.okfood-refund-summary-v2__amount-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+}
+
+.okfood-refund-summary-v2__amount-value {
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-color-danger);
+}
+
+.okfood-refund-body-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 220px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+}
+
+.okfood-refund-body-scroll .okfood-dlg-hint-block__label,
+.okfood-refund-body-scroll .members-refund-consumption-label {
+  margin: 0 0 6px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 4px 0 6px;
+  background: linear-gradient(180deg, #fff 70%, rgba(255, 255, 255, 0));
+}
+
+.okfood-refund-body-scroll .members-refund-consumption-list {
+  margin-bottom: 0;
+}
+
+/* 退卡弹窗：财务说明常驻展示（不再折叠，置于已消费明细上方以免被挤出视口） */
+.okfood-refund-hint-static {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--el-fill-color-lighter, #fafafa);
+}
+
+.okfood-refund-hint-static .okfood-dlg-hint-block__label {
+  margin-bottom: 6px;
+}
+
+.okfood-refund-hint-static .okfood-dlg-hint-block__text {
+  color: var(--el-text-color-regular);
+}
+
+.okfood-refund-remark.form-group {
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+
+.okfood-admin-dlg--refund-fit .okfood-refund-remark .el-textarea__inner {
+  min-height: 52px !important;
+  max-height: 72px;
+  padding: 8px 12px;
+  resize: none;
+  line-height: 1.45;
+}
+
+@media (max-width: 520px) {
+  .okfood-admin-dlg--refund-fit {
+    max-height: 94dvh;
+    border-radius: 18px;
+  }
+
+  .okfood-admin-dlg--refund-fit .okfood-admin-dlg__head {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .okfood-admin-dlg--refund-fit .okfood-member-op-ctx__inner {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .okfood-admin-dlg--refund-fit .okfood-admin-dlg__foot {
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    gap: 8px;
+  }
+
+  .okfood-admin-dlg--refund-fit .okfood-admin-dlg__foot .el-button {
+    flex: 1 1 0;
+    margin: 0;
+  }
+
+  .okfood-refund-body-scroll {
+    max-height: min(200px, 38vh);
+  }
+
+  .okfood-refund-summary-v2__chips {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .okfood-refund-summary-v2__chip:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+}
+
+.okfood-admin-dlg__head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: #fff;
+  /* 与外壳同弧：黄框处为标题白底左上/右上，非下方操作对象灰条 */
+  border-radius: var(--okfood-dlg-radius) var(--okfood-dlg-radius) 0 0;
+}
+
+.okfood-admin-dlg__head-text {
+  min-width: 0;
+}
+
+.okfood-admin-dlg__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.35;
+  color: var(--el-text-color-primary);
+}
+
+.okfood-admin-dlg__sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--el-text-color-secondary);
+}
+
+.okfood-admin-dlg__close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+}
+
+.okfood-admin-dlg__close:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: var(--el-text-color-primary);
+}
+
+.okfood-admin-dlg__close:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 操作对象条：对谁 · 下方表单为具体动作（MemberOperationContext） */
+.okfood-member-op-ctx {
+  flex-shrink: 0;
+  margin: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--el-color-primary) 22%, rgba(0, 0, 0, 0.06));
+  border-left: 4px solid var(--el-color-primary);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--el-color-primary) 14%, #fff) 0%,
+    color-mix(in srgb, var(--el-color-primary) 6%, #f8fafc) 48%,
+    #f8fafc 100%
+  );
+}
+
+.okfood-member-op-ctx__inner {
+  display: grid;
+  grid-template-columns: 4.25rem minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: baseline;
+  padding: 12px 16px 12px 14px;
+}
+
+.okfood-member-op-ctx__kicker {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.35;
+  color: var(--el-color-primary);
+}
+
+.okfood-member-op-ctx__subject-line {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--el-text-color-primary);
+}
+
+.okfood-admin-dlg__meta-name {
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  color: var(--el-text-color-primary);
+}
+
+.okfood-admin-dlg__meta-phone {
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: #1e293b;
+}
+
+.okfood-admin-dlg__meta-sep {
+  font-weight: 700;
+  color: color-mix(in srgb, var(--el-text-color-secondary) 70%, transparent);
+  user-select: none;
+}
+
+.okfood-admin-dlg__meta-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--el-color-primary);
+  background: color-mix(in srgb, var(--el-color-primary) 12%, #fff);
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+}
+
+.okfood-member-op-ctx__subject-line strong,
+.okfood-member-op-ctx__subject-line .okfood-admin-dlg__meta-em {
+  font-weight: 900;
+  color: var(--el-color-primary);
+}
+
+.okfood-member-op-ctx__subject-line .okfood-admin-dlg__meta-muted {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+/* 补餐等：操作对象 + 会员信息双行 */
+.okfood-member-op-ctx:has(.okfood-member-op-ctx__line--member-info) {
+  display: block;
+  padding: 0;
+  background: #fff;
+}
+
+.okfood-member-op-ctx__line--subject {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--el-color-primary) 14%, #fff) 0%,
+    color-mix(in srgb, var(--el-color-primary) 6%, #f8fafc) 48%,
+    #f8fafc 100%
+  );
+}
+
+.okfood-member-op-ctx__line--member-info {
+  border-top: 1px dashed color-mix(in srgb, var(--el-color-primary) 18%, #e2e8f0);
+  background: #fafafa;
+}
+
+/* 退卡明细等：约 5 行滚动（消费记录、操作记录见各自段落） */
+.members-refund-consumption-list--scroll-5 {
+  max-height: 212px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.members-refund-consumption-list--scroll-5 li {
+  min-height: 40px;
+  align-items: start;
+}
+
+.members-refund-consumption-list--refund-detail li {
+  grid-template-columns: 5.75rem minmax(0, 1fr) auto;
+  gap: 8px 12px;
+}
+
+.members-refund-consumption-dish {
+  min-width: 0;
+  line-height: 1.45;
+  word-break: break-word;
+  white-space: normal;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.members-refund-consumption-date {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.members-refund-consumption-amt {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.delivery-records-summary-hint {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.okfood-admin-dlg__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px 18px;
+}
+
+.okfood-admin-dlg__foot {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  background: #fff;
+}
+
+.okfood-admin-dlg__body .form-group {
+  margin-bottom: 14px;
+  gap: 0;
+}
+
+.okfood-admin-dlg__body .form-group:last-child {
+  margin-bottom: 0;
+}
+
+/* 弹窗表单：对齐 design .field / .control（覆盖旧版 .form-group 大圆角灰底） */
+.okfood-admin-dlg__body .form-group > label {
+  display: block;
+  margin: 0 0 6px;
+  padding-left: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--el-text-color-regular);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.okfood-admin-dlg__body .form-group > input:not([type='checkbox']):not([type='radio']),
+.okfood-admin-dlg__body .form-group > select,
+.okfood-admin-dlg__body .form-group > textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.okfood-admin-dlg__body .form-group > textarea {
+  min-height: 88px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.okfood-admin-dlg__body .form-group > input:focus,
+.okfood-admin-dlg__body .form-group > select:focus,
+.okfood-admin-dlg__body .form-group > textarea:focus {
+  border-color: color-mix(in srgb, var(--el-color-primary) 42%, #e2e8f0);
+  background: #fff;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-primary) 14%, transparent);
+  outline: none;
+}
+
+/* Element Plus 控件在弹窗内与 .control 一致 */
+.okfood-admin-dlg__body .form-group .el-input,
+.okfood-admin-dlg__body .form-group .el-input-number,
+.okfood-admin-dlg__body .form-group .el-select {
+  width: 100%;
+}
+
+.okfood-admin-dlg__body .form-group .el-input__wrapper,
+.okfood-admin-dlg__body .form-group .el-textarea__inner {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 12px !important;
+  border: 1px solid #e2e8f0 !important;
+  background: #fff !important;
+  box-shadow: none !important;
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.okfood-admin-dlg__body .form-group .el-textarea__inner {
+  min-height: 88px;
+  padding: 10px 12px;
+}
+
+.okfood-admin-dlg__body .form-group .el-input__wrapper.is-focus,
+.okfood-admin-dlg__body .form-group .el-textarea__inner:focus {
+  border-color: color-mix(in srgb, var(--el-color-primary) 42%, #e2e8f0) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-primary) 14%, transparent) !important;
+}
+
+/* 避免全局 .form-group input 灰底套在 EP 内层 input 上 */
+.okfood-admin-dlg__body .form-group .el-input__wrapper input,
+.okfood-admin-dlg__body .form-group .el-input-number input {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  min-height: auto;
+  font-weight: 600;
+  text-align: left;
+}
+
+.okfood-admin-dlg__body .form-group .el-input-number .el-input__wrapper {
+  padding-right: 42px;
+}
+
+.okfood-admin-dlg__body .okfood-dlg-readonly-line {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+/* 修改次数：午/晚剩余并排标签（只读） */
+.okfood-balance-remain-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.okfood-balance-remain-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+  background: color-mix(in srgb, var(--el-color-primary) 10%, #fff);
+  color: var(--el-text-color-primary);
+}
+
+.okfood-balance-remain-tag__label {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--el-color-primary);
+}
+
+.okfood-balance-remain-tag__value {
+  font-size: 15px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-color-primary);
+}
+
+.okfood-admin-dlg__body .okfood-dlg-field-hint,
+.okfood-admin-dlg__body .balance-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+}
+
+.okfood-admin-dlg__body .delivery-records-summary {
+  margin-top: 0;
+}
+
+/* 消费记录弹窗：区块间距 + 列表固定约 5 行内滚 */
+.okfood-admin-dlg--delivery-records .okfood-admin-dlg__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.okfood-admin-dlg--delivery-records .okfood-dlg-hint-block {
+  margin: 0;
+}
+
+.okfood-admin-dlg--delivery-records .delivery-records-summary {
+  margin: 0;
+}
+
+.okfood-admin-dlg--delivery-records .delivery-records-list {
+  margin: 0;
+}
+
+.okfood-admin-dlg--delivery-records .delivery-records-list li {
+  padding: 0.62rem 1.05rem;
+  gap: 0.85rem;
+}
+
+.okfood-admin-dlg__body .operation-logs-table-wrap {
+  margin-top: 8px;
+}
+
+.okfood-dlg-hint-block,
+.leave-biz-hint {
+  margin: 0.25rem 0 0.85rem;
+}
+
+.okfood-dlg-hint-block__label,
+.leave-biz-hint__label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--el-color-primary);
+}
+
+.okfood-dlg-hint-block__text,
+.leave-biz-hint__text {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--el-text-color-secondary);
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -3051,7 +4754,7 @@ html.okfood-admin-shell body {
 }
 .delivery-records-truncated {
   font-weight: 600;
-  color: #b45309;
+  color: var(--el-color-warning);
   font-size: 12px;
 }
 .delivery-records-list {
@@ -3065,6 +4768,30 @@ html.okfood-admin-shell body {
   border-radius: 12px;
   background: rgba(248, 250, 247, 0.95);
 }
+
+/* 弹窗消费记录：固定可视 5 行，超出在列表内滚动 */
+.delivery-records-list.delivery-records-list--scroll-5 {
+  max-height: 230px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+}
+
+.delivery-records-list.delivery-records-list--scroll-5::-webkit-scrollbar {
+  width: 6px;
+}
+
+.delivery-records-list.delivery-records-list--scroll-5::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.15);
+  border-radius: 999px;
+}
+
+.delivery-records-list.delivery-records-list--scroll-5 li {
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
 .delivery-records-list li {
   display: flex;
   align-items: center;
@@ -3083,13 +4810,13 @@ html.okfood-admin-shell body {
   justify-content: center;
   border-radius: 50%;
   box-sizing: border-box;
-  border: 2px solid rgba(14, 90, 68, 0.45);
+  border: 2px solid color-mix(in srgb, var(--el-color-primary) 45%, transparent);
   background: rgba(255, 255, 255, 0.9);
-  box-shadow: inset 0 0 0 1px rgba(14, 90, 68, 0.06);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--el-color-primary) 8%, transparent);
   font-size: 12px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-  color: #0e5a44;
+  color: var(--el-color-primary);
   line-height: 1;
 }
 .delivery-records-line {
@@ -3100,7 +4827,7 @@ html.okfood-admin-shell body {
   flex-shrink: 0;
   font-size: 13px;
   font-weight: 800;
-  color: #0e5a44;
+  color: var(--el-color-primary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -3131,30 +4858,30 @@ html.okfood-admin-shell body {
   font-size: 11px;
   font-weight: 800;
   vertical-align: middle;
-  background: rgba(217, 119, 6, 0.14);
-  color: #b45309;
+  background: color-mix(in srgb, var(--el-color-warning) 14%, transparent);
+  color: var(--el-color-warning-dark-2, var(--el-color-warning));
 }
 .delivery-records-kind-badge--compensation {
-  background: rgba(245, 158, 11, 0.16);
-  color: #d97706;
+  background: color-mix(in srgb, var(--el-color-warning) 16%, transparent);
+  color: var(--el-color-warning);
 }
 .delivery-records-kind-badge--recharge {
-  background: rgba(14, 90, 68, 0.12);
-  color: #0e5a44;
+  background: color-mix(in srgb, var(--el-color-primary) 14%, transparent);
+  color: var(--el-color-primary);
 }
 .delivery-records-kind-badge--lunch {
-  background: rgba(14, 90, 68, 0.1);
-  color: #0e5a44;
+  background: color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+  color: var(--el-color-primary);
 }
 .delivery-records-kind-badge--dinner {
-  background: rgba(67, 56, 202, 0.12);
-  color: #4338ca;
+  background: color-mix(in srgb, var(--el-color-primary) 10%, #6366f1 12%);
+  color: color-mix(in srgb, var(--el-color-primary) 55%, #4f46e5);
 }
 .delivery-records-units--addition {
-  color: #d97706;
+  color: var(--el-color-warning);
 }
 .delivery-records-units--deduction {
-  color: #0e5a44;
+  color: var(--el-color-primary);
 }
 .delivery-records-ymd-muted {
   font-weight: 500;
@@ -3208,6 +4935,31 @@ html.okfood-admin-shell body {
   border-radius: 12px;
   background: rgba(248, 250, 247, 0.95);
 }
+
+/* 弹窗操作记录：表头固定 + 约 5 行数据，超出仅在表格容器内滚（勿滚弹窗 body） */
+.operation-logs-table-wrap.operation-logs-table-wrap--scroll-5 {
+  max-height: 252px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  position: relative;
+  isolation: isolate;
+}
+
+.operation-logs-table-wrap.operation-logs-table-wrap--scroll-5 .operation-logs-table tbody td {
+  min-height: 2.5rem;
+  box-sizing: border-box;
+}
+
+.operation-logs-table-wrap.operation-logs-table-wrap--scroll-5 .operation-logs-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  background-color: #e8f2ec !important;
+  box-shadow:
+    0 1px 0 rgba(14, 90, 68, 0.22),
+    0 4px 8px rgba(15, 23, 42, 0.08);
+}
+
 .operation-logs-table {
   width: 100%;
   border-collapse: separate;
@@ -3245,7 +4997,7 @@ html.okfood-admin-shell body {
 .operation-logs-td-op {
   white-space: nowrap;
   font-weight: 700;
-  color: #0e5a44;
+  color: var(--el-color-primary);
 }
 .operation-logs-td-summary {
   min-width: 160px;
@@ -3266,8 +5018,8 @@ html.okfood-admin-shell body {
   border-radius: 6px;
   font-size: 12px;
   font-weight: 700;
-  background: rgba(14, 90, 68, 0.1);
-  color: #0e5a44;
+  background: color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+  color: var(--el-color-primary);
 }
 .operation-logs-pagination {
   display: flex;
@@ -3276,11 +5028,7 @@ html.okfood-admin-shell body {
   padding-top: 0.35rem;
 }
 
-/* 会员管理 — 修改会员信息：单列居中（MemberEditModal.vue scoped 细调） */
-.modal-card.modal-card--member-edit {
-  max-width: min(48rem, calc(100vw - 1.25rem));
-  border-radius: 1rem;
-}
+/* 会员管理 — 修改会员信息：见 .okfood-admin-dlg--edit-fit / .okfood-mem-edit-* */
 
 .modal-form.modal-form--member-two-col {
   display: grid;
@@ -3765,7 +5513,6 @@ html.okfood-admin-shell body {
   .finance-detail-datetime,
   .finance-month-picker-input,
   .finance-day-picker-input,
-  .members-overview-stat__value,
   .dro-map-ring__pct,
   .dro-rank-pct,
   .admin-header-live-clock
