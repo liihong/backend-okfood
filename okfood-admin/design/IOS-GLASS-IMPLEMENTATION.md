@@ -17,7 +17,7 @@
 
 1. **色与层级气质**：以 `VISUAL-DIRECTION-IOS-GLASS.md` 的 token 表 + `COLOR-PRIMARY-CANDIDATES.md` 为准。  
 2. **布局与交互示意**：以 `okfood-admin-theme-preview-ios-glass.html` 为准（仅讨论稿，非运行时代码）。  
-3. **运行时代码**：`src/assets/admin-ui.css` + `src/layouts/AdminLayout.vue`；新工具类加在 `admin-ui.css` 或 `scoped` 中**小而命名清晰**的块，避免复制预览 HTML 整段内联样式。
+3. **运行时代码**：壳层 `src/assets/admin-ui.css` + `AdminLayout.vue`；**登录页** `src/assets/login-glass.css` + `LoginView.vue`。新工具类加在对应 CSS 或 `scoped` 中**小而命名清晰**的块，避免复制预览 HTML 整段内联样式。
 
 ## 3. 三套主色（默认蜜桃珊瑚）
 
@@ -68,6 +68,9 @@
 |------|------|
 | 2025-11-06 | 初版：壳层 + Dashboard Phase 1 边界与 EP 约束 |
 | 2025-11-06 | 侧栏对齐预览：浅色毛玻璃、水果图标组件、画布 mesh |
+| 2026-03-22 | 登录页定稿落地：`LoginView.vue` + `src/assets/login-glass.css`（本地头图、手机上图下文 / PC 左图右表单）；讨论稿 `design/okfood-admin-login-preview-opendesign.html` |
+
+**登录页：** 样式真源为 `login-glass.css`；旧 `admin-ui.css` 中 `.login-page` 已移除。首访默认主题与壳层一致为 `primary-peach`（`main.js`）。
 
 ---
 

@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import 'element-plus/dist/index.css'
 import './style.css'
 import './assets/admin-ui.css'
+import './assets/login-glass.css'
 import './assets/element-plus-okfood-theme.css'
 import './assets/okfood-el-glass-message.css'
 import App from './App.vue'
@@ -23,7 +24,8 @@ function readInitialAdminTheme() {
   } catch {
     /* ignore */
   }
-  return 'primary-iris'
+  /* 与 design 定稿一致：首访默认蜜桃珊瑚 */
+  return 'primary-peach'
 }
 
 if (typeof document !== 'undefined') {

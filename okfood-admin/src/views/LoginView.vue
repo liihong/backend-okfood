@@ -11,7 +11,16 @@ import {
   adminKind,
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
-import companyLogo from '../assets/company-logo.png'
+import loginBgm from '../assets/login/logo-bgm.jpeg'
+
+/** 登录页售卖能力（与左侧五宫格一致） */
+const LOGIN_SELLING_POINTS = [
+  { key: 'member', label: '会员履约' },
+  { key: 'delivery', label: '配送调度' },
+  { key: 'finance', label: '财务透明' },
+  { key: 'orders', label: '订单统计' },
+  { key: 'renew', label: '续卡管理' },
+]
 
 const router = useRouter()
 
@@ -19,14 +28,6 @@ const loginUsername = ref(LOGIN_PRESET_USER)
 const loginPassword = ref(LOGIN_PRESET_PASSWORD)
 const loginLoading = ref(false)
 const loginError = ref(false)
-
-const brandFeatures = [
-  { label: '会员履约', emoji: '👥' },
-  { label: '配送调度', emoji: '🚚' },
-  { label: '财务透明', emoji: '💰' },
-  { label: '订单统计', emoji: '📊' },
-  { label: '续卡管理', emoji: '💳' },
-]
 
 const handleAdminLogin = async () => {
   if (loginLoading.value) return
@@ -72,122 +73,191 @@ const handleAdminLogin = async () => {
 
 <template>
   <div class="login-page">
-    <div class="login-wrapper">
-      <div class="brand-side">
-        <div class="brand-side-bg"></div>
-        <div class="brand-side-content">
-          <img
-            class="brand-logo-mark"
-            :src="companyLogo"
-            alt="火源网络科技"
-            width="160"
-            height="160"
-          />
-          <h1>轻食解决方案管理系统</h1>
-          <h2>火源网络科技</h2>
-          <div class="brand-features">
-            <div v-for="item in brandFeatures" :key="item.label" class="feature-item">
-              <div class="feature-icon-wrap">
-                <span class="feature-emoji" aria-hidden="true">{{ item.emoji }}</span>
-              </div>
-              <span>{{ item.label }}</span>
-            </div>
-          </div>
-        </div>
+    <div class="login-canvas">
+      <div class="login-canvas__mesh" aria-hidden="true">
+        <div class="mesh-blob mesh-blob--a"></div>
+        <div class="mesh-blob mesh-blob--b"></div>
+        <div class="mesh-blob mesh-blob--c"></div>
       </div>
 
-      <div class="form-side">
-        <div class="form-container" :class="{ 'shake-err': loginError }">
-          <div class="form-header">
-            <h2>欢迎回来 &#128076;</h2>
-            <p>请登录超级管家后台</p>
+      <div class="deco-bubbles" aria-hidden="true">
+        <span class="deco-bubble deco-bubble--1"></span>
+        <span class="deco-bubble deco-bubble--2"></span>
+      </div>
+
+      <div class="login-stage-wrap">
+        <article class="login-stage" aria-labelledby="login-title">
+          <div class="login-stage__cover">
+            <div class="login-stage__cover-inner">
+              <img
+                :src="loginBgm"
+                alt=""
+                width="1200"
+                height="800"
+                loading="eager"
+              />
+              <div class="login-stage__cover-dock">
+                <header class="login-stage__dock-head">
+                  <p class="login-stage__title">私域会员配送管理系统</p>
+                </header>
+                <ul class="login-stage__features" aria-label="系统核心能力">
+                  <li
+                    v-for="item in LOGIN_SELLING_POINTS"
+                    :key="item.key"
+                    class="login-stage__feature"
+                  >
+                    <span class="login-feature__icon" aria-hidden="true">
+                      <svg
+                        v-if="item.key === 'member'"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+                      </svg>
+                      <svg
+                        v-else-if="item.key === 'delivery'"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <path d="M5 17h12l2-7H7l-2 7z" />
+                        <path d="M5 17l-1.5 3M19 17l1.5 3" />
+                        <circle cx="7.5" cy="20" r="1.5" fill="currentColor" />
+                        <circle cx="16.5" cy="20" r="1.5" fill="currentColor" />
+                      </svg>
+                      <svg
+                        v-else-if="item.key === 'finance'"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <path d="M12 3v18M8 7h8a3 3 0 0 1 0 6H8a3 3 0 0 0 0 6h8" />
+                      </svg>
+                      <svg
+                        v-else-if="item.key === 'orders'"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <path d="M4 19V5" />
+                        <path d="M4 19h16" />
+                        <path d="M10 19V13" />
+                        <path d="M16 19V9" />
+                      </svg>
+                      <svg
+                        v-else
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <rect x="2" y="5" width="20" height="14" rx="2" />
+                        <path d="M2 10h20" />
+                      </svg>
+                    </span>
+                    <span class="login-feature__label">{{ item.label }}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
           </div>
 
-          <form class="login-form" @submit.prevent="handleAdminLogin">
-            <div class="form-group login-form-group">
-              <label>管理员账号 / Account</label>
-              <div class="input-box input-box--el">
-                <el-input
-                  v-model="loginUsername"
-                  placeholder="Admin ID"
-                  clearable
-                  autocomplete="username"
-                  class="login-el-field"
-                >
-                  <template #prefix>
-                    <svg
-                      class="input-icon"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2.5"
-                    >
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                      <circle cx="12" cy="7" r="4" />
-                    </svg>
-                  </template>
-                </el-input>
+          <div class="login-stage__main" :class="{ 'is-shake': loginError }">
+            <h2 id="login-title">登录</h2>
+            <p class="login-lead">
+              <strong>租户管理员</strong> · 使用账号密码进入后台
+            </p>
+
+            <form class="login-form" @submit.prevent="handleAdminLogin">
+              <div class="form-group login-form-group">
+                <label>管理员账号</label>
+                <div class="input-box input-box--el">
+                  <el-input
+                    v-model="loginUsername"
+                    placeholder="请输入账号"
+                    clearable
+                    autocomplete="username"
+                    class="login-el-field"
+                  >
+                    <template #prefix>
+                      <svg
+                        class="input-icon"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                        <circle cx="12" cy="7" r="4" />
+                      </svg>
+                    </template>
+                  </el-input>
+                </div>
               </div>
-            </div>
 
-            <div class="form-group login-form-group">
-              <label>登录密码 / Password</label>
-              <div class="input-box input-box--el">
-                <el-input
-                  v-model="loginPassword"
-                  type="password"
-                  placeholder="********"
-                  show-password
-                  autocomplete="current-password"
-                  class="login-el-field login-el-field--pwd"
-                >
-                  <template #prefix>
-                    <svg
-                      class="input-icon"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2.5"
-                    >
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                    </svg>
-                  </template>
-                </el-input>
+              <div class="form-group login-form-group">
+                <label>登录密码</label>
+                <div class="input-box input-box--el">
+                  <el-input
+                    v-model="loginPassword"
+                    type="password"
+                    placeholder="请输入密码"
+                    show-password
+                    autocomplete="current-password"
+                    class="login-el-field login-el-field--pwd"
+                  >
+                    <template #prefix>
+                      <svg
+                        class="input-icon"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <rect x="3" y="11" width="18" height="11" rx="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </svg>
+                    </template>
+                  </el-input>
+                </div>
               </div>
-            </div>
 
-            <div class="form-extras">
-              <el-checkbox v-model="rememberLogin" class="login-remember-el">记住登录</el-checkbox>
-              <a href="#" class="forgot-link" @click.prevent>忘记密码？</a>
-            </div>
+              <div class="form-extras">
+                <el-checkbox v-model="rememberLogin" class="login-remember-el">记住登录</el-checkbox>
+              </div>
 
-            <button type="submit" class="btn-submit" :disabled="loginLoading">
-              <template v-if="!loginLoading">进入管理台 &#128076;</template>
-              <template v-else>
-                <svg
-                  class="loading-icon"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="3"
-                  stroke-linecap="round"
-                >
-                  <path
-                    d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"
-                  />
-                </svg>
-                正在同步数据中...
-              </template>
-            </button>
-          </form>
-        </div>
-
-        <div class="form-footer">
-          <p>© 2026 OK FINE · NEW XIANG BRANCH · V2.0</p>
-        </div>
+              <button type="submit" class="btn-submit" :disabled="loginLoading">
+                <template v-if="!loginLoading">进入管理台</template>
+                <template v-else>
+                  <svg
+                    class="loading-icon"
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="3"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4"
+                    />
+                  </svg>
+                  正在登录…
+                </template>
+              </button>
+            </form>
+          </div>
+        </article>
+        <p class="login-footer">© 2026 火源网络科技</p>
       </div>
     </div>
   </div>
