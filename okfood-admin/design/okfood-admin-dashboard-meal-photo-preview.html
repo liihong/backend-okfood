@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>营业概览 · 餐次菜品图预览</title>
+  <style>
+    :root {
+      --primary: #e8927c;
+      --text: #0f172a;
+      --muted: #64748b;
+      --canvas: #f4f7fb;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(900px 420px at 8% -10%, rgba(232, 146, 124, 0.18), transparent 60%),
+        radial-gradient(800px 380px at 96% 0%, rgba(96, 165, 250, 0.16), transparent 55%),
+        var(--canvas);
+      padding: 28px 28px 40px;
+    }
+
+    .note {
+      max-width: 1440px;
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .note h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+
+    .note p {
+      margin: 4px 0 0;
+      font-size: 12.5px;
+      line-height: 1.55;
+      color: #475569;
+      max-width: 820px;
+    }
+
+    .note .tag {
+      flex-shrink: 0;
+      font-size: 11px;
+      font-weight: 700;
+      color: #9a3412;
+      background: rgba(255, 247, 237, 0.9);
+      border: 1px solid rgba(253, 186, 116, 0.7);
+      border-radius: 999px;
+      padding: 4px 10px;
+    }
+
+    .shelf {
+      max-width: 1440px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .cluster {
+      flex: 1 1 0;
+      min-width: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 8px 10px 10px;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      background: rgba(255, 255, 255, 0.32);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
+    }
+
+    .cluster--today {
+      border-color: rgba(59, 130, 246, 0.28);
+      background: rgba(59, 130, 246, 0.07);
+    }
+
+    .cluster--tomorrow {
+      border-color: rgba(232, 146, 124, 0.38);
+      background: rgba(232, 146, 124, 0.08);
+    }
+
+    .cluster__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 32px;
+      padding: 0 2px;
+    }
+
+    .cluster__id {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .day-nav {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .cluster__title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #64748b;
+    }
+
+    .cluster__meta { font-size: 12px; font-weight: 700; }
+    .cluster__weekday { font-size: 11px; font-weight: 600; color: #475569; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 8px;
+      align-items: stretch;
+      min-width: 0;
+    }
+
+    .card {
+      min-width: 0;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.85);
+      border-radius: 14px;
+      padding: 12px 12px 11px;
+      display: flex;
+      flex-direction: column;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.7),
+        0 8px 22px rgba(25, 45, 55, 0.05);
+    }
+
+    .head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 28px;
+    }
+
+    .tags { display: flex; align-items: center; gap: 6px; min-width: 0; }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      font-size: 11px;
+      font-weight: 650;
+      padding: 3px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .pill--today {
+      background: rgba(232, 146, 124, 0.12);
+      color: #1e293b;
+      border: 1px solid rgba(232, 146, 124, 0.28);
+    }
+
+    .pill--tomorrow {
+      background: rgba(239, 246, 255, 0.9);
+      color: #1d4ed8;
+      border: 1px solid rgba(191, 219, 254, 0.8);
+    }
+
+    .nav-btn, .adjust {
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      background: rgba(255, 255, 255, 0.7);
+      color: #475569;
+      font-size: 10.5px;
+      font-weight: 650;
+      border-radius: 8px;
+      padding: 3px 8px;
+      white-space: nowrap;
+    }
+
+    .adjust { border-radius: 999px; font-size: 10px; padding: 3px 9px; }
+
+    .actions { display: flex; align-items: center; gap: 6px; }
+
+    .ico {
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(236, 253, 245, 0.95);
+      border: 1px solid rgba(167, 243, 208, 0.9);
+      color: #059669;
+    }
+
+    .ico--blue {
+      background: rgba(239, 246, 255, 0.95);
+      border-color: rgba(191, 219, 254, 0.9);
+      color: #2563eb;
+    }
+
+    .dish-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      min-width: 0;
+    }
+
+    .dish {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      gap: 8px 10px;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .dish > div:nth-child(2) { min-width: 0; }
+
+    .photo {
+      width: 72px;
+      height: 72px;
+      border-radius: 14px;
+      overflow: hidden;
+      position: relative;
+      background: #e8f5e9;
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.7),
+        0 4px 12px rgba(15, 23, 42, 0.08);
+    }
+
+    .photo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .photo__meal {
+      position: absolute;
+      left: 6px;
+      bottom: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      background: rgba(15, 23, 42, 0.55);
+      backdrop-filter: blur(6px);
+      border-radius: 999px;
+      padding: 1px 6px;
+      letter-spacing: 0.02em;
+    }
+
+    .dish-name {
+      font-size: 14px;
+      font-weight: 750;
+      line-height: 1.3;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .dish-sub {
+      margin-top: 0;
+      font-size: 12px;
+      color: #475569;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .dish .hero { margin-top: 6px; }
+
+    .hero {
+      margin-top: 8px;
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+      white-space: nowrap;
+    }
+
+    .hero__k {
+      font-size: 12px;
+      font-weight: 650;
+      color: #64748b;
+    }
+
+    .hero__n {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+
+    .hero__u {
+      font-size: 12.5px;
+      font-weight: 650;
+      color: #94a3b8;
+    }
+
+    .chain {
+      margin-top: 10px;
+      background: rgba(248, 250, 252, 0.72);
+      border: 1px solid rgba(226, 232, 240, 0.7);
+      border-radius: 10px;
+      padding: 8px 10px 9px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .chain__top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .chain__label { font-size: 10.5px; font-weight: 650; color: #64748b; }
+
+    .sold {
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #fff;
+      background: linear-gradient(135deg, #34d399, #10b981);
+      border-radius: 999px;
+      padding: 3px 8px;
+      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.22);
+    }
+
+    .sold--blue {
+      background: linear-gradient(135deg, #60a5fa, #3b82f6);
+      box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+    }
+
+    .bar {
+      display: flex;
+      height: 7px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(226, 232, 240, 0.8);
+    }
+
+    .bar i { display: block; height: 100%; }
+    .seg-d { background: #3b82f6; }
+    .seg-p { background: #8b5cf6; }
+    .seg-r { background: #f59e0b; }
+    .seg-s { background: #10b981; }
+    .seg-s.empty { background: #cbd5e1; }
+
+    .pills5 {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 4px;
+    }
+
+    .bp {
+      text-align: center;
+      background: rgba(255, 255, 255, 0.7);
+      border-radius: 8px;
+      padding: 4px 2px 5px;
+    }
+
+    .bp__l {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      font-size: 10px;
+      font-weight: 650;
+      color: #64748b;
+    }
+
+    .dot { width: 5px; height: 5px; border-radius: 99px; }
+    .dot-d { background: #3b82f6; }
+    .dot-p { background: #8b5cf6; }
+    .dot-r { background: #f59e0b; }
+    .dot-w { background: #f43f5e; }
+    .dot-s { background: #10b981; }
+
+    .bp__v {
+      display: block;
+      margin-top: 1px;
+      font-size: 13px;
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bp__v.sell { color: #059669; }
+    .bp__v.sell-blue { color: #2563eb; }
+    .bp__v.muted { color: #94a3b8; }
+
+    .chips {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .chip {
+      border-radius: 8px;
+      padding: 6px 4px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 1px;
+    }
+
+    .chip span { font-size: 12px; font-weight: 650; white-space: nowrap; text-align: center; }
+    .chip b {
+      font-size: 15px;
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+      text-align: center;
+      min-width: 2.2em;
+    }
+
+    .chip--amber { background: rgba(255, 247, 237, 0.95); color: #c2410c; }
+    .chip--rose { background: rgba(255, 241, 242, 0.95); color: #e11d48; }
+    .chip--slate { background: rgba(241, 245, 249, 0.95); color: #475569; }
+    .chip--down { background: rgba(254, 242, 242, 0.95); color: #dc2626; }
+    .chip--up { background: rgba(240, 253, 244, 0.95); color: #16a34a; }
+
+    .spacer { flex: 1; }
+
+    .boards {
+      max-width: 1680px;
+      margin: 0 auto;
+      display: flex;
+      align-items: flex-start;
+      gap: 18px;
+    }
+
+    .boards .shelf { flex: 1 1 auto; margin: 0; }
+
+    .phone-col { width: 390px; flex: 0 0 390px; }
+
+    .phone-label {
+      margin: 0 0 8px 4px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #64748b;
+    }
+
+    .phone-frame {
+      border-radius: 28px;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      background: rgba(255, 255, 255, 0.55);
+      padding: 14px 12px 16px;
+      box-shadow: 0 12px 36px rgba(15, 23, 42, 0.06);
+    }
+
+    .phone-frame .shelf {
+      flex-direction: column;
+      max-width: none;
+      gap: 10px;
+    }
+
+    .phone-frame .cluster {
+      flex: 0 0 auto;
+      width: 100%;
+      overflow: visible;
+    }
+
+    .phone-frame .grid { grid-template-columns: minmax(0, 1fr); }
+  </style>
+</head>
+<body>
+  <div class="note">
+    <div>
+      <h1>营业概览 · 餐次菜品图</h1>
+      <p>日期和「上一日 / 下一日」抽到「今日」栏头，一次切换午餐、晚餐两张卡。卡片上只留餐次，不再重复日期。手机端两张卡上下叠放时，栏头仍在它们上面，切换不会掉进某一张卡里。</p>
+    </div>
+    <span class="tag">预览 · 未接入数据</span>
+  </div>
+
+  <div class="boards">
+  <div class="shelf">
+    <section class="cluster cluster--today">
+      <header class="cluster__head">
+        <div class="cluster__id">
+          <span class="cluster__title">今日</span>
+          <span class="cluster__meta">11月9日</span>
+          <span class="cluster__weekday">周一</span>
+        </div>
+        <div class="day-nav" aria-label="切换营业日">
+          <span class="nav-btn">上一日</span>
+          <span class="nav-btn">下一日</span>
+          <span class="ico" aria-hidden="true" title="刷新">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 1 1-2.2-5.8"/><path d="M21 3v6h-6"/></svg>
+          </span>
+        </div>
+      </header>
+      <div class="grid">
+        <article class="card">
+<div class="dish-meta">
+            <span class="dish-sub">本周菜单：午餐</span>
+            <span class="adjust">报损耗</span>
+          </div>
+          <div class="dish">
+            <div class="photo">
+              <img src="meal-preview-lunch-today.jpg" alt="照烧鸡腿时蔬" />
+            </div>
+            <div>
+              <div class="dish-name">照烧鸡腿时蔬</div>
+              <div class="hero">
+            <span class="hero__k">后厨产出量：</span>
+                <span class="hero__n">115</span>
+                <span class="hero__u">份</span>
+          </div>
+            </div>
+          </div>
+          <div class="chain">
+            <div class="chain__top">
+              <span class="chain__label">配额去向拆解线</span>
+              <span class="sold">已售出 110份</span>
+            </div>
+            <div class="bar" aria-hidden="true">
+              <i class="seg-d" style="width:92.2%"></i>
+              <i class="seg-p" style="width:1.7%"></i>
+              <i class="seg-r" style="width:1.7%"></i>
+              <i class="seg-s empty" style="width:4.4%"></i>
+            </div>
+            <div class="pills5">
+              <div class="bp"><span class="bp__l"><i class="dot dot-d"></i>配送</span><b class="bp__v">106</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-p"></i>自提</span><b class="bp__v">2</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-r"></i>零售</span><b class="bp__v">2</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-w"></i>损耗</span><b class="bp__v">0</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-s"></i>剩余</span><b class="bp__v sell muted">5</b></div>
+            </div>
+          </div>
+          <div class="chips">
+            <div class="chip chip--amber"><span>请假</span><b>52</b></div>
+            <div class="chip chip--rose"><span>过期</span><b>4</b></div>
+            <div class="chip chip--slate"><span>暂停</span><b>220</b></div>
+            <div class="chip chip--down"><span>同比</span><b>-12</b></div>
+          </div>
+        </article>
+
+        <article class="card">
+<div class="dish-meta">
+            <span class="dish-sub">本周菜单：晚餐</span>
+            <span class="adjust">报损耗</span>
+          </div>
+          <div class="dish">
+            <div class="photo">
+              <img src="meal-preview-dinner-today.jpg" alt="黑椒牛柳时蔬" />
+            </div>
+            <div>
+              <div class="dish-name">黑椒牛柳时蔬</div>
+              <div class="hero">
+            <span class="hero__k">后厨产出量：</span>
+                <span class="hero__n">10</span>
+                <span class="hero__u">份</span>
+          </div>
+            </div>
+          </div>
+          <div class="chain">
+            <div class="chain__top">
+              <span class="chain__label">配额去向拆解线</span>
+              <span class="sold">已售出 10份</span>
+            </div>
+            <div class="bar">
+              <i class="seg-d" style="width:80%"></i>
+              <i class="seg-r" style="width:20%"></i>
+            </div>
+            <div class="pills5">
+              <div class="bp"><span class="bp__l"><i class="dot dot-d"></i>配送</span><b class="bp__v">8</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-p"></i>自提</span><b class="bp__v">0</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-r"></i>零售</span><b class="bp__v">2</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-w"></i>损耗</span><b class="bp__v">0</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-s"></i>剩余</span><b class="bp__v sell muted">0</b></div>
+            </div>
+          </div>
+          <div class="spacer"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="cluster cluster--tomorrow">
+      <header class="cluster__head">
+        <div class="cluster__id">
+          <span class="cluster__title">明日</span>
+          <span class="cluster__meta">11月10日</span>
+          <span class="cluster__weekday">周二</span>
+        </div>
+      </header>
+      <div class="grid">
+        <article class="card">
+<div class="dish-meta">
+            <span class="dish-sub">本周菜单：午餐</span>
+          </div>
+          <div class="dish">
+            <div class="photo">
+              <img src="meal-preview-lunch-tomorrow.jpg" alt="宫保鸡丁能量碗" />
+            </div>
+            <div>
+              <div class="dish-name">宫保鸡丁能量碗</div>
+              <div class="hero">
+            <span class="hero__k">后厨产出量：</span>
+                <span class="hero__n">130</span>
+                <span class="hero__u">份</span>
+          </div>
+            </div>
+          </div>
+          <div class="chain">
+            <div class="chain__top">
+              <span class="chain__label">明日排产指标线</span>
+              <span class="sold sold--blue">已售出 129份</span>
+            </div>
+            <div class="bar">
+              <i class="seg-d" style="width:95.4%"></i>
+              <i class="seg-p" style="width:1.5%"></i>
+              <i class="seg-r" style="width:0.8%"></i>
+              <i class="seg-s" style="width:2.3%"></i>
+            </div>
+            <div class="pills5">
+              <div class="bp"><span class="bp__l"><i class="dot dot-d"></i>配送</span><b class="bp__v">124</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-p"></i>自提</span><b class="bp__v">2</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-r"></i>零售</span><b class="bp__v">1</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-w"></i>损耗</span><b class="bp__v">0</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-s"></i>剩余</span><b class="bp__v sell-blue">1</b></div>
+            </div>
+          </div>
+          <div class="chips">
+            <div class="chip chip--amber"><span>请假</span><b>50</b></div>
+            <div class="chip chip--rose"><span>新客</span><b>12</b></div>
+            <div class="chip chip--slate"><span>暂停</span><b>220</b></div>
+            <div class="chip chip--up"><span>同比</span><b>+25</b></div>
+          </div>
+        </article>
+
+        <article class="card">
+<div class="dish-meta">
+            <span class="dish-sub">本周菜单：晚餐</span>
+          </div>
+          <div class="dish">
+            <div class="photo">
+              <img src="meal-preview-dinner-tomorrow.jpg" alt="香煎鲈鱼时蔬" />
+            </div>
+            <div>
+              <div class="dish-name">香煎鲈鱼时蔬</div>
+              <div class="hero">
+            <span class="hero__k">后厨产出量：</span>
+                <span class="hero__n">10</span>
+                <span class="hero__u">份</span>
+          </div>
+            </div>
+          </div>
+          <div class="chain">
+            <div class="chain__top">
+              <span class="chain__label">明日排产指标线</span>
+              <span class="sold sold--blue">已售出 8份</span>
+            </div>
+            <div class="bar">
+              <i class="seg-d" style="width:80%"></i>
+              <i class="seg-s" style="width:20%"></i>
+            </div>
+            <div class="pills5">
+              <div class="bp"><span class="bp__l"><i class="dot dot-d"></i>配送</span><b class="bp__v">8</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-p"></i>自提</span><b class="bp__v">0</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-r"></i>零售</span><b class="bp__v">0</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-w"></i>损耗</span><b class="bp__v">0</b></div>
+              <div class="bp"><span class="bp__l"><i class="dot dot-s"></i>剩余</span><b class="bp__v sell-blue">2</b></div>
+            </div>
+          </div>
+          <div class="spacer"></div>
+        </article>
+      </div>
+    </section>
+  </div>
+  <aside class="phone-col">
+    <p class="phone-label">手机端 · 午晚上下叠放</p>
+    <div class="phone-frame">
+      <div class="shelf">
+        <section class="cluster cluster--today">
+          <header class="cluster__head">
+            <div class="cluster__id">
+              <span class="cluster__title">今日</span>
+              <span class="cluster__meta">11月9日</span>
+              <span class="cluster__weekday">周一</span>
+            </div>
+            <div class="day-nav" aria-label="切换营业日">
+              <span class="nav-btn">上一日</span>
+              <span class="nav-btn">下一日</span>
+              <span class="ico" aria-hidden="true" title="刷新">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 1 1-2.2-5.8"/><path d="M21 3v6h-6"/></svg>
+              </span>
+            </div>
+          </header>
+          <div class="grid">
+            <article class="card">
+<div class="dish-meta">
+            <span class="dish-sub">本周菜单：午餐</span>
+            <span class="adjust">报损耗</span>
+          </div>
+          <div class="dish">
+            <div class="photo">
+                  <img src="meal-preview-lunch-today.jpg" alt="照烧鸡腿时蔬" />
+                </div>
+            <div>
+              <div class="dish-name">照烧鸡腿时蔬</div>
+              <div class="hero">
+            <span class="hero__k">后厨产出量：</span>
+                    <span class="hero__n">115</span>
+                    <span class="hero__u">份</span>
+          </div>
+            </div>
+          </div>
+              <div class="chain">
+                <div class="chain__top">
+                  <span class="chain__label">配额去向拆解线</span>
+                  <span class="sold">已售出 110份</span>
+                </div>
+                <div class="bar" aria-hidden="true">
+                  <i class="seg-d" style="width:92.2%"></i>
+                  <i class="seg-p" style="width:1.7%"></i>
+                  <i class="seg-r" style="width:1.7%"></i>
+                  <i class="seg-s empty" style="width:4.4%"></i>
+                </div>
+                <div class="pills5">
+                  <div class="bp"><span class="bp__l"><i class="dot dot-d"></i>配送</span><b class="bp__v">106</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-p"></i>自提</span><b class="bp__v">2</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-r"></i>零售</span><b class="bp__v">2</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-w"></i>损耗</span><b class="bp__v">0</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-s"></i>剩余</span><b class="bp__v sell muted">5</b></div>
+                </div>
+              </div>
+              <div class="chips">
+                <div class="chip chip--amber"><span>请假</span><b>52</b></div>
+                <div class="chip chip--rose"><span>过期</span><b>4</b></div>
+                <div class="chip chip--slate"><span>暂停</span><b>220</b></div>
+                <div class="chip chip--down"><span>同比</span><b>-12</b></div>
+              </div>
+            </article>
+
+            <article class="card">
+<div class="dish-meta">
+            <span class="dish-sub">本周菜单：晚餐</span>
+            <span class="adjust">报损耗</span>
+          </div>
+          <div class="dish">
+            <div class="photo">
+                  <img src="meal-preview-dinner-today.jpg" alt="黑椒牛柳时蔬" />
+                </div>
+            <div>
+              <div class="dish-name">黑椒牛柳时蔬</div>
+              <div class="hero">
+            <span class="hero__k">后厨产出量：</span>
+                    <span class="hero__n">10</span>
+                    <span class="hero__u">份</span>
+          </div>
+            </div>
+          </div>
+              <div class="chain">
+                <div class="chain__top">
+                  <span class="chain__label">配额去向拆解线</span>
+                  <span class="sold">已售出 10份</span>
+                </div>
+                <div class="bar">
+                  <i class="seg-d" style="width:80%"></i>
+                  <i class="seg-r" style="width:20%"></i>
+                </div>
+                <div class="pills5">
+                  <div class="bp"><span class="bp__l"><i class="dot dot-d"></i>配送</span><b class="bp__v">8</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-p"></i>自提</span><b class="bp__v">0</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-r"></i>零售</span><b class="bp__v">2</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-w"></i>损耗</span><b class="bp__v">0</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-s"></i>剩余</span><b class="bp__v sell muted">0</b></div>
+                </div>
+              </div>
+              <div class="spacer"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="cluster cluster--tomorrow">
+          <header class="cluster__head">
+            <div class="cluster__id">
+              <span class="cluster__title">明日</span>
+              <span class="cluster__meta">11月10日</span>
+              <span class="cluster__weekday">周二</span>
+            </div>
+          </header>
+          <div class="grid">
+            <article class="card">
+<div class="dish-meta">
+            <span class="dish-sub">本周菜单：午餐</span>
+          </div>
+          <div class="dish">
+            <div class="photo">
+                  <img src="meal-preview-lunch-tomorrow.jpg" alt="宫保鸡丁能量碗" />
+                </div>
+            <div>
+              <div class="dish-name">宫保鸡丁能量碗</div>
+              <div class="hero">
+            <span class="hero__k">后厨产出量：</span>
+                    <span class="hero__n">130</span>
+                    <span class="hero__u">份</span>
+          </div>
+            </div>
+          </div>
+              <div class="chain">
+                <div class="chain__top">
+                  <span class="chain__label">明日排产指标线</span>
+                  <span class="sold sold--blue">已售出 129份</span>
+                </div>
+                <div class="bar">
+                  <i class="seg-d" style="width:95.4%"></i>
+                  <i class="seg-p" style="width:1.5%"></i>
+                  <i class="seg-r" style="width:0.8%"></i>
+                  <i class="seg-s" style="width:2.3%"></i>
+                </div>
+                <div class="pills5">
+                  <div class="bp"><span class="bp__l"><i class="dot dot-d"></i>配送</span><b class="bp__v">124</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-p"></i>自提</span><b class="bp__v">2</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-r"></i>零售</span><b class="bp__v">1</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-w"></i>损耗</span><b class="bp__v">0</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-s"></i>剩余</span><b class="bp__v sell-blue">1</b></div>
+                </div>
+              </div>
+              <div class="chips">
+                <div class="chip chip--amber"><span>请假</span><b>50</b></div>
+                <div class="chip chip--rose"><span>新客</span><b>12</b></div>
+                <div class="chip chip--slate"><span>暂停</span><b>220</b></div>
+                <div class="chip chip--up"><span>同比</span><b>+25</b></div>
+              </div>
+            </article>
+
+            <article class="card">
+<div class="dish-meta">
+            <span class="dish-sub">本周菜单：晚餐</span>
+          </div>
+          <div class="dish">
+            <div class="photo">
+                  <img src="meal-preview-dinner-tomorrow.jpg" alt="香煎鲈鱼时蔬" />
+                </div>
+            <div>
+              <div class="dish-name">香煎鲈鱼时蔬</div>
+              <div class="hero">
+            <span class="hero__k">后厨产出量：</span>
+                    <span class="hero__n">10</span>
+                    <span class="hero__u">份</span>
+          </div>
+            </div>
+          </div>
+              <div class="chain">
+                <div class="chain__top">
+                  <span class="chain__label">明日排产指标线</span>
+                  <span class="sold sold--blue">已售出 8份</span>
+                </div>
+                <div class="bar">
+                  <i class="seg-d" style="width:80%"></i>
+                  <i class="seg-s" style="width:20%"></i>
+                </div>
+                <div class="pills5">
+                  <div class="bp"><span class="bp__l"><i class="dot dot-d"></i>配送</span><b class="bp__v">8</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-p"></i>自提</span><b class="bp__v">0</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-r"></i>零售</span><b class="bp__v">0</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-w"></i>损耗</span><b class="bp__v">0</b></div>
+                  <div class="bp"><span class="bp__l"><i class="dot dot-s"></i>剩余</span><b class="bp__v sell-blue">2</b></div>
+                </div>
+              </div>
+              <div class="spacer"></div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </div>
+  </aside>
+  </div>
+<script>
+  /** 页内所有业务数字：ease-out cubic，约 720ms，与营业概览数字滚动一致 */
+  function rollAllNumbers() {
+    document.querySelectorAll('.hero__n, .sold, .bp__v, .chip b').forEach((el) => {
+      const raw = (el.dataset.target || el.textContent || '').trim()
+      el.dataset.target = raw
+      const matched = raw.match(/^(\D*?)([+-]?\d+)(\D*)$/)
+      if (!matched) return
+      const prefix = matched[1]
+      const target = Number(matched[2])
+      const suffix = matched[3]
+      const showPlus = matched[2].startsWith('+')
+      if (!Number.isFinite(target)) return
+      const start = performance.now()
+      const duration = 720
+      const paint = (value) => {
+        const signed = showPlus && value > 0 ? `+${value}` : String(value)
+        el.textContent = `${prefix}${signed}${suffix}`
+      }
+      const tick = (now) => {
+        const t = Math.min(1, (now - start) / duration)
+        const eased = 1 - (1 - t) ** 3
+        paint(Math.round(target * eased))
+        if (t < 1) requestAnimationFrame(tick)
+        else el.textContent = raw
+      }
+      paint(0)
+      requestAnimationFrame(tick)
+    })
+  }
+  rollAllNumbers()
+</script>
+</body>

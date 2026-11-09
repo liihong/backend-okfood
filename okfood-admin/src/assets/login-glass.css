@@ -120,40 +120,221 @@
   position: absolute;
   border-radius: 50%;
   background: radial-gradient(
-    circle at 35% 30%,
-    rgba(255, 255, 255, 0.55),
-    rgba(var(--el-color-primary-rgb, 232, 146, 124), 0.35) 45%,
-    rgba(var(--el-color-primary-rgb, 232, 146, 124), 0.08) 100%
+    circle at 32% 28%,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(255, 255, 255, 0.62) 14%,
+    rgba(var(--el-color-primary-rgb, 232, 146, 124), 0.5) 42%,
+    rgba(var(--el-color-primary-rgb, 232, 146, 124), 0.22) 100%
   );
-  opacity: 0.5;
+  box-shadow:
+    inset -10px -14px 18px rgba(255, 255, 255, 0.35),
+    0 18px 40px rgba(var(--el-color-primary-rgb, 232, 146, 124), 0.16);
+  opacity: 0.82;
+  will-change: transform;
 }
 
+/* 高光点，让球体有玻璃体积感 */
+.deco-bubble::after {
+  content: '';
+  position: absolute;
+  width: 26%;
+  height: 16%;
+  left: 22%;
+  top: 16%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.78);
+  filter: blur(0.6px);
+  transform: rotate(-24deg);
+}
+
+/* 位置相对居中卡片（最宽 58rem）：贴在左右留白里，只让大球微微探进卡片边缘 */
 .deco-bubble--1 {
   width: 9rem;
   height: 9rem;
-  right: 6%;
-  bottom: 12%;
-  animation: login-bubble-1 14s ease-in-out infinite;
+  right: max(1.25rem, calc(50% - 35rem));
+  bottom: 8%;
+  animation: login-bubble-1 16s ease-in-out infinite;
 }
 
 .deco-bubble--2 {
-  width: 5.5rem;
-  height: 5.5rem;
-  right: 18%;
-  bottom: 28%;
-  opacity: 0.35;
+  width: 4.75rem;
+  height: 4.75rem;
+  right: max(0.75rem, calc(50% - 31.2rem));
+  bottom: 14%;
+  opacity: 0.78;
+  animation: login-bubble-2 19s ease-in-out infinite;
+  animation-delay: -4s;
+}
+
+.deco-bubble--3 {
+  width: 2.35rem;
+  height: 2.35rem;
+  left: max(1.25rem, calc(50% - 33rem));
+  top: 18%;
+  opacity: 0.7;
+  animation: login-bubble-3 13s ease-in-out infinite;
+  animation-delay: -2s;
+}
+
+.deco-bubble--4 {
+  width: 5.4rem;
+  height: 5.4rem;
+  left: max(-0.25rem, calc(50% - 34.8rem));
+  bottom: 3%;
+  opacity: 0.76;
+  animation: login-bubble-4 17s ease-in-out infinite;
+  animation-delay: -6s;
+}
+
+.deco-bubble--5 {
+  width: 1.35rem;
+  height: 1.35rem;
+  left: max(2rem, calc(50% - 32.2rem));
+  top: 8%;
+  opacity: 0.8;
+  animation: login-bubble-5 11s ease-in-out infinite;
+  animation-delay: -1s;
+}
+
+.deco-bubble--6 {
+  width: 2.6rem;
+  height: 2.6rem;
+  right: max(1.25rem, calc(50% - 32.4rem));
+  top: 16%;
+  animation: login-bubble-6 14s ease-in-out infinite;
+  animation-delay: -3s;
+}
+
+.deco-bubble--7 {
+  width: 5.2rem;
+  height: 5.2rem;
+  left: max(0.15rem, calc(50% - 35.6rem));
+  top: 2%;
+  opacity: 0.8;
   animation: login-bubble-2 18s ease-in-out infinite;
+  animation-delay: -8s;
+}
+
+.deco-bubble--8 {
+  width: 4.1rem;
+  height: 4.1rem;
+  right: max(0.35rem, calc(50% - 35.2rem));
+  top: 3%;
+  opacity: 0.76;
+  animation: login-bubble-4 15s ease-in-out infinite reverse;
+  animation-delay: -5s;
+}
+
+/* 左右中段：贴着卡片两侧的留白，避免只剩四个角 */
+.deco-bubble--9 {
+  width: 4.4rem;
+  height: 4.4rem;
+  right: max(1rem, calc(50% - 37.6rem));
+  top: 36%;
+  opacity: 0.8;
+  animation: login-bubble-1 18s ease-in-out infinite;
+  animation-delay: -7s;
+}
+
+.deco-bubble--10 {
+  width: 4.8rem;
+  height: 4.8rem;
+  left: max(0.75rem, calc(50% - 38rem));
+  top: 34%;
+  opacity: 0.78;
+  animation: login-bubble-4 16s ease-in-out infinite;
+  animation-delay: -3.5s;
+}
+
+.deco-bubble--11 {
+  width: 2.45rem;
+  height: 2.45rem;
+  left: max(2.2rem, calc(50% - 33.6rem));
+  top: 54%;
+  opacity: 0.84;
+  animation: login-bubble-3 12s ease-in-out infinite;
+  animation-delay: -9s;
+}
+
+.deco-bubble--12 {
+  width: 2.55rem;
+  height: 2.55rem;
+  right: max(1.8rem, calc(50% - 33.4rem));
+  top: 56%;
+  opacity: 0.82;
+  animation: login-bubble-6 13s ease-in-out infinite;
+  animation-delay: -2.5s;
 }
 
 @keyframes login-bubble-1 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
   50% {
-    transform: translate(-12px, -22px);
+    transform: translate(-22px, -34px) scale(1.06);
   }
 }
 
 @keyframes login-bubble-2 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
   50% {
-    transform: translate(-18px, -14px);
+    transform: translate(20px, -26px) scale(1.04);
+  }
+}
+
+@keyframes login-bubble-3 {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(16px, -30px) scale(1.08);
+  }
+}
+
+@keyframes login-bubble-4 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-18px, 24px) scale(1.05);
+  }
+}
+
+@keyframes login-bubble-5 {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(12px, 18px) scale(1.1);
+  }
+}
+
+@keyframes login-bubble-6 {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(-16px, 28px) scale(1.05);
+  }
+}
+
+@media (max-width: 1100px) {
+  .deco-bubble--4,
+  .deco-bubble--5,
+  .deco-bubble--7,
+  .deco-bubble--9,
+  .deco-bubble--10,
+  .deco-bubble--11,
+  .deco-bubble--12 {
+    display: none;
   }
 }
 

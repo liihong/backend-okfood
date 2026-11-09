@@ -1,12 +1,18 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { TrendingUp, RefreshCw } from 'lucide-vue-next'
-import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
+import { computed, onMounted, onScopeDispose, ref } from 'vue'
+import { RefreshCw } from 'lucide-vue-next'
+import { apiJson, adminAccessToken, dishImageDisplayUrl, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 import { useAnimatedInteger } from '../../composables/useAnimatedInteger.js'
 import DashboardPickupKitchenPanel from './DashboardPickupKitchenPanel.vue'
 import DayStockAdjustmentModal from './DayStockAdjustmentModal.vue'
 import { useDayStockAdjustments } from '../../composables/useDayStockAdjustments.js'
+
+/** 电脑宽屏：数字滚动、短文案、芯片竖排。菜品图各端都显示 */
+const PC_MEAL_SHELF_MQ = '(min-width: 1200px)'
+const isPcMealShelf = ref(
+  typeof window !== 'undefined' && window.matchMedia(PC_MEAL_SHELF_MQ).matches,
+)
 
 /** 营业概览顶卡数字条（请假/备餐/当日过期份数）；与 dashboard-summary / 归档接口回填 */
 const dashboardStats = ref([])
@@ -135,13 +141,6 @@ function formatYoyWeekHeadsSigned(delta) {
   return `${delta}份`
 }
 
-/** 顶卡右上角剩余可售：图标胶囊的无障碍/悬停文案 */
-function formatSellableGateLabel(qty) {
-  if (qty == null) return '剩余可售：—'
-  if (qty > 0) return `剩余可售：${qty}份（可售）`
-  return '剩余可售：0份（已售罄）'
-}
-
 /** 与 Date#getUTCDay() 一致：0=周日 … 6=周六（UTC，与锚定业务日一致） */
 const WEEKDAY_CN_SHORT = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
@@ -258,6 +257,7 @@ async function fetchDashboardSummary() {
     if (d && typeof d.business_anchor_date === 'string') {
       summaryAnchorDate.value = d.business_anchor_date
     }
+    void loadWeeklyMenuDishes()
     const tl = Number(d?.today_leave_members) || 0
     const tp = Number(d?.today_meals_to_prepare) || 0
     const nl = Number(d?.tomorrow_leave_members) || 0
@@ -555,11 +555,218 @@ const pausedDeliveryAnimated = useAnimatedInteger(() => pausedDeliveryCount.valu
   duration: 620,
 })
 
+/** 电脑端数字滚动；手机仍读原始值 */
+const menuDayTotalStockAnimated = useAnimatedInteger(() => menuDayTotalStock.value)
+const dinnerMenuDayTotalStockAnimated = useAnimatedInteger(() => dinnerMenuDayTotalStock.value)
+const tomorrowDistributionMainTotalAnimated = useAnimatedInteger(() => tomorrowDistributionMainTotal.value)
+const tomorrowDinnerDistributionMainTotalAnimated = useAnimatedInteger(
+  () => tomorrowDinnerDistributionMainTotal.value,
+)
+const todaySoldTotalAnimated = useAnimatedInteger(() => todaySoldTotal.value)
+const todayDinnerSoldTotalAnimated = useAnimatedInteger(() => todayDinnerSoldTotal.value)
+const cardTomorrowPrepTotalAnimated = useAnimatedInteger(() => cardTomorrowPrepTotal.value)
+const tomorrowDinnerSoldTotalAnimated = useAnimatedInteger(() => tomorrowDinnerSoldTotal.value)
+const todayMealsDeliveryAnimated = useAnimatedInteger(() => todayMealsDelivery.value)
+const todayMealsPickupAnimated = useAnimatedInteger(() => todayMealsPickup.value)
+const todaySingleRetailAnimated = useAnimatedInteger(() => todaySingleRetailTotalCount.value)
+const todayLunchWasteAnimated = useAnimatedInteger(() => todayLunchWasteTotal.value)
+const todayLunchRemainingAnimated = useAnimatedInteger(() => todayLunchRemainingDisplay.value)
+const todayDinnerDeliveryAnimated = useAnimatedInteger(() => todayDinnerDelivery.value)
+const todayDinnerPickupAnimated = useAnimatedInteger(() => todayDinnerPickup.value)
+const todayDinnerRetailAnimated = useAnimatedInteger(() => todayDinnerRetail.value)
+const todayDinnerWasteAnimated = useAnimatedInteger(() => todayDinnerWasteTotal.value)
+const todayDinnerRemainingAnimated = useAnimatedInteger(() => todayDinnerRemaining.value)
+const tomorrowPrepDeliveryAnimated = useAnimatedInteger(() => tomorrowPrepDelivery.value)
+const tomorrowPrepPickupAnimated = useAnimatedInteger(() => tomorrowPrepPickup.value)
+const tomorrowSingleRetailAnimated = useAnimatedInteger(() => tomorrowSingleRetailTotalCount.value)
+const tomorrowSellableAnimated = useAnimatedInteger(() => tomorrowSellableQuantity.value)
+const tomorrowDinnerDeliveryAnimated = useAnimatedInteger(() => tomorrowDinnerDelivery.value)
+const tomorrowDinnerPickupAnimated = useAnimatedInteger(() => tomorrowDinnerPickup.value)
+const tomorrowDinnerRetailAnimated = useAnimatedInteger(() => tomorrowDinnerRetail.value)
+const tomorrowDinnerSellableAnimated = useAnimatedInteger(() => tomorrowDinnerSellableQuantity.value)
+const todayYoyDeltaAnimated = useAnimatedInteger(() => todayPrepHeadsYoyDelta.value)
+const tomorrowYoyDeltaAnimated = useAnimatedInteger(() => tomorrowPrepHeadsYoyDelta.value)
+
+/**
+ * 本周菜单槽位上的菜名和图片。
+ * 键：`YYYY-MM-DD|lunch` / `YYYY-MM-DD|dinner`。
+ * 营业概览新字段还没从线上接口返回时，用已有的周菜单接口。
+ */
+const weeklyDishMap = ref(/** @type {Record<string, { name: string, image: string }>} */ ({}))
+
+/** @param {string} iso */
+function mondayOfIso(iso) {
+  const raw = String(iso || '').trim().slice(0, 10)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
+  if (!m) return ''
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+  const day = dt.getUTCDay()
+  const delta = day === 0 ? -6 : 1 - day
+  return shiftIsoYmd(raw, delta)
+}
+
+/**
+ * @param {unknown} payload
+ * @param {'lunch'|'dinner'} period
+ * @param {Record<string, { name: string, image: string, dishId: number | null }>} into
+ */
+function collectWeekSlotDishes(payload, period, into) {
+  const preview = payload && typeof payload === 'object' ? payload : null
+  if (!preview) return
+  /** @type {Array<[unknown, unknown]>} */
+  const groups = []
+  if ('week_start' in preview && 'slots' in preview) {
+    groups.push([preview.week_start, preview.slots])
+  }
+  if ('this_week_start' in preview) groups.push([preview.this_week_start, preview.this_week])
+  if ('next_week_start' in preview) groups.push([preview.next_week_start, preview.next_week])
+  for (const [start, slots] of groups) {
+    const startIso = String(start || '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startIso) || !Array.isArray(slots)) continue
+    for (const slotRow of slots) {
+      const slot = Number(slotRow?.slot)
+      if (!Number.isFinite(slot)) continue
+      const iso = shiftIsoYmd(startIso, slot - 1)
+      if (!iso) continue
+      const dishIdRaw = slotRow?.dish_id
+      const dishId = dishIdRaw == null || dishIdRaw === '' ? null : Number(dishIdRaw)
+      into[`${iso}|${period}`] = {
+        name: String(slotRow?.name || '').trim(),
+        image: dishImageDisplayUrl(String(slotRow?.image_url || '')),
+        dishId: Number.isFinite(dishId) ? dishId : null,
+      }
+    }
+  }
+}
+
+/** 按锚定日拉取午餐、晚餐周槽位，缺图时再读菜品详情 */
+async function loadWeeklyMenuDishes() {
+  const weeks = [
+    ...new Set(
+      [mondayOfIso(businessAnchorIsoNormalized.value), mondayOfIso(businessAnchorTomorrowIso.value)].filter(
+        Boolean,
+      ),
+    ),
+  ]
+  const periods = /** @type {const} */ (['lunch', 'dinner'])
+  const weekList = weeks.length ? weeks : ['']
+  const rows = await Promise.all(
+    weekList.flatMap((week) =>
+      periods.map((period) => {
+        const q = week
+          ? `week_start=${encodeURIComponent(week)}&meal_period=${period}`
+          : `meal_period=${period}`
+        return apiJson(`/api/admin/menu/weekly-slots?${q}`, {}, { auth: true })
+          .then((data) => ({ period, data }))
+          .catch(() => ({ period, data: null }))
+      }),
+    ),
+  )
+  /** @type {Record<string, { name: string, image: string, dishId: number | null }>} */
+  const map = {}
+  for (const row of rows) {
+    if (row.data) collectWeekSlotDishes(row.data, row.period, map)
+  }
+  const missingIds = [
+    ...new Set(Object.values(map).filter((item) => item.dishId && !item.image).map((item) => item.dishId)),
+  ]
+  if (missingIds.length) {
+    const details = await Promise.all(
+      missingIds.map((id) => apiJson(`/api/admin/dish/${id}`, {}, { auth: true }).catch(() => null)),
+    )
+    /** @type {Record<number, string>} */
+    const imageById = {}
+    for (const detail of details) {
+      if (!detail || detail.id == null) continue
+      imageById[Number(detail.id)] = dishImageDisplayUrl(String(detail.image_url || ''))
+    }
+    for (const item of Object.values(map)) {
+      if (!item.image && item.dishId && imageById[item.dishId]) item.image = imageById[item.dishId]
+    }
+  }
+  /** @type {Record<string, { name: string, image: string }>} */
+  const brief = {}
+  for (const [key, item] of Object.entries(map)) {
+    brief[key] = { name: item.name, image: item.image }
+  }
+  weeklyDishMap.value = brief
+}
+
+/**
+ * 卡片菜品：优先本周菜单槽位，概览接口里的菜名字段作为补充。
+ * @param {string} nameKey
+ * @param {string} imageKey
+ * @param {() => string} isoGetter
+ * @param {'lunch'|'dinner'} period
+ */
+function menuDishBrief(nameKey, imageKey, isoGetter, period) {
+  return computed(() => {
+    const slot = weeklyDishMap.value[`${isoGetter()}|${period}`]
+    const meta = summaryMeta.value
+    const summaryName = String(meta?.[nameKey] ?? '').trim()
+    const summaryImage = dishImageDisplayUrl(String(meta?.[imageKey] ?? ''))
+    return {
+      name: (slot?.name || summaryName || '').trim(),
+      image: slot?.image || summaryImage || '',
+    }
+  })
+}
+const todayLunchDish = menuDishBrief(
+  'today_lunch_dish_name',
+  'today_lunch_dish_image_url',
+  () => businessAnchorIsoNormalized.value,
+  'lunch',
+)
+const todayDinnerDish = menuDishBrief(
+  'today_dinner_dish_name',
+  'today_dinner_dish_image_url',
+  () => businessAnchorIsoNormalized.value,
+  'dinner',
+)
+const tomorrowLunchDish = menuDishBrief(
+  'tomorrow_lunch_dish_name',
+  'tomorrow_lunch_dish_image_url',
+  () => businessAnchorTomorrowIso.value,
+  'lunch',
+)
+const tomorrowDinnerDish = menuDishBrief(
+  'tomorrow_dinner_dish_name',
+  'tomorrow_dinner_dish_image_url',
+  () => businessAnchorTomorrowIso.value,
+  'dinner',
+)
+
+/** 拆解数字：空值保持「—」，电脑端用滚动值 */
+function shelfCountText(value, rolling, pc) {
+  if (value == null || Number.isNaN(Number(value))) return '—'
+  const n = pc ? rolling : value
+  return `${Math.trunc(Number(n))}`
+}
+
+function shelfSoldText(total, rolling, pc) {
+  if (total == null || Number.isNaN(Number(total))) return '—'
+  const n = pc ? rolling : total
+  return `${Math.trunc(Number(n))}份`
+}
+
+function yoyShelfText(caption, delta, rolling, pc) {
+  if (caption) return caption
+  if (delta == null) return '—'
+  return formatYoyWeekHeadsSigned(pc ? rolling : delta)
+}
+
 const showDashboardOverview = computed(
   () => Boolean(summaryMeta.value) || (!dashboardStatsLoading.value && dashboardStats.value.length > 0),
 )
 
 onMounted(() => {
+  const mq = window.matchMedia(PC_MEAL_SHELF_MQ)
+  const syncPcShelf = () => {
+    isPcMealShelf.value = mq.matches
+  }
+  syncPcShelf()
+  mq.addEventListener('change', syncPcShelf)
+  onScopeDispose(() => mq.removeEventListener('change', syncPcShelf))
   void fetchDashboardSummary()
 })
 </script>
@@ -579,7 +786,7 @@ onMounted(() => {
 
     <!-- 今日营业概览：今日（午|晚）+ 明日（午|晚）分栏 + 后厨/自提 -->
     <div v-if="showDashboardOverview" class="dro-dash-layout">
-      <div class="dro-dash-meal-shelf">
+      <div class="dro-dash-meal-shelf" :class="{ 'dro-dash-meal-shelf--pc': isPcMealShelf }">
         <!-- 今日：午餐左、晚餐右 -->
         <section class="dro-dash-day-cluster dro-dash-day-cluster--today" aria-label="今日午晚餐">
           <header class="dro-dash-day-cluster__head">
@@ -588,18 +795,7 @@ onMounted(() => {
             <span v-if="businessAnchorWeekdayDisplay" class="dro-dash-day-cluster__weekday">{{
               businessAnchorWeekdayDisplay
             }}</span>
-          </header>
-          <div class="dro-dash-day-cluster__grid">
-      <article class="dro-dash-kpi" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
-        <div class="dro-dash-kpi__head">
-          <div class="dro-dash-kpi__tags">
-            <span class="dro-dash-pill dro-dash-pill--emerald">
-              {{ summaryIsLiveToday ? '今日午餐' : '当日午餐' }} · {{ businessAnchorMdDisplay || '—'
-              }}<template v-if="businessAnchorWeekdayDisplay">
-                {{ businessAnchorWeekdayDisplay }}</template
-              >
-            </span>
-            <nav class="dro-dash-day-nav" aria-label="切换营业日">
+            <div class="dro-dash-day-nav dro-dash-pc-day-nav" aria-label="切换营业日">
               <button
                 type="button"
                 class="dro-dash-day-nav-btn"
@@ -616,41 +812,53 @@ onMounted(() => {
               >
                 下一日
               </button>
-            </nav>
-          </div>
-          <div class="dro-dash-kpi__head-actions">
-            <button
-              type="button"
-              class="dro-dash-adjust-btn"
-              title="报损耗"
-              @click="openLunchStockAdjust"
-            >
+              <button
+                type="button"
+                class="dro-dash-kpi__ico-badge dro-dash-kpi__ico-badge--emerald dro-dash-kpi__ico-badge--action"
+                :disabled="dashboardStatsLoading"
+                title="刷新营业概览"
+                aria-label="刷新营业概览"
+                @click="refreshDashboardOverview"
+              >
+                <RefreshCw
+                  :size="18"
+                  :class="{ 'dro-dash-refresh-spin': dashboardStatsLoading }"
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
+          </header>
+          <div class="dro-dash-day-cluster__grid">
+      <article class="dro-dash-kpi" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
+        <div class="dro-pc-dish">
+          <div class="dro-pc-dish__meta">
+            <span class="dro-pc-dish__menu">本周菜单：午餐</span>
+            <button type="button" class="dro-dash-adjust-btn" title="报损耗" @click="openLunchStockAdjust">
               报损耗
             </button>
-            <button
-              type="button"
-              class="dro-dash-kpi__ico-badge dro-dash-kpi__ico-badge--emerald dro-dash-kpi__ico-badge--action"
-              :disabled="dashboardStatsLoading"
-              title="刷新营业概览"
-              aria-label="刷新营业概览"
-              @click="refreshDashboardOverview"
-            >
-              <RefreshCw
-                :size="18"
-                :class="{ 'dro-dash-refresh-spin': dashboardStatsLoading }"
-                aria-hidden="true"
-              />
-            </button>
           </div>
-        </div>
-        <div class="dro-dash-kpi__hero-metric">
-          <span class="dro-dash-kpi__hero-metric-kicker">后厨产出量：</span>
-          <span class="dro-dash-kpi__hero-metric-num-wrap">
-            <span class="dro-dash-kpi__hero-metric-num">{{
-              menuDayTotalStock != null ? menuDayTotalStock : '—'
-            }}</span>
-            <small class="dro-dash-kpi__hero-metric-unit">份</small>
-          </span>
+          <div class="dro-pc-dish__row">
+            <div class="dro-pc-photo" :class="{ 'dro-pc-photo--empty': !todayLunchDish.image }">
+              <img v-if="todayLunchDish.image" :src="todayLunchDish.image" :alt="todayLunchDish.name || '午餐'" />
+              <span v-else>未排菜</span>
+            </div>
+            <div class="dro-pc-dish__copy">
+              <div class="dro-pc-dish__name">{{ todayLunchDish.name || '未排菜' }}</div>
+              <div class="dro-dash-kpi__hero-metric">
+                <span class="dro-dash-kpi__hero-metric-kicker">后厨产出量：</span>
+                <span class="dro-dash-kpi__hero-metric-num-wrap">
+                  <span class="dro-dash-kpi__hero-metric-num">{{
+                    menuDayTotalStock != null
+                      ? isPcMealShelf
+                        ? menuDayTotalStockAnimated
+                        : menuDayTotalStock
+                      : '—'
+                  }}</span>
+                  <small class="dro-dash-kpi__hero-metric-unit">份</small>
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
           <div class="dro-dash-kpi__metric-top">
@@ -666,7 +874,7 @@ onMounted(() => {
               <div class="dro-dash-chain-node-header">
                 <span class="dro-dash-chain-node-label">配额去向拆解线</span>
                 <span class="dro-dash-chain-node dro-dash-chain-node--main">
-                  已售出 {{ todaySoldTotal != null ? `${todaySoldTotal}份` : '—' }}
+                  已售出 {{ shelfSoldText(todaySoldTotal, todaySoldTotalAnimated, isPcMealShelf) }}
                 </span>
               </div>
               <div class="dro-dash-stacked-bar" aria-hidden="true">
@@ -705,7 +913,7 @@ onMounted(() => {
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />配送</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
-                    todayMealsDelivery == null ? '—' : `${Math.trunc(Number(todayMealsDelivery))}`
+                    shelfCountText(todayMealsDelivery, todayMealsDeliveryAnimated, isPcMealShelf)
                   }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
@@ -713,20 +921,20 @@ onMounted(() => {
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
-                    todayMealsPickup == null ? '—' : `${Math.trunc(Number(todayMealsPickup))}`
+                    shelfCountText(todayMealsPickup, todayMealsPickupAnimated, isPcMealShelf)
                   }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />零售</span
                   >
-                  <span class="dro-dash-branch-pill__val">{{ todaySingleRetailTotalCount }}</span>
+                  <span class="dro-dash-branch-pill__val">{{ shelfCountText(todaySingleRetailTotalCount, todaySingleRetailAnimated, isPcMealShelf) }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--waste" aria-hidden="true" />损耗</span
                   >
-                  <span class="dro-dash-branch-pill__val">{{ todayLunchWasteTotal }}</span>
+                  <span class="dro-dash-branch-pill__val">{{ shelfCountText(todayLunchWasteTotal, todayLunchWasteAnimated, isPcMealShelf) }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
@@ -739,7 +947,7 @@ onMounted(() => {
                         todayLunchRemainingDisplay != null && todayLunchRemainingDisplay <= 0,
                     }"
                     >{{
-                      todayLunchRemainingDisplay == null ? '—' : `${todayLunchRemainingDisplay}`
+                      shelfCountText(todayLunchRemainingDisplay, todayLunchRemainingAnimated, isPcMealShelf)
                     }}</span
                   >
                 </div>
@@ -750,11 +958,11 @@ onMounted(() => {
         </div>
         <div class="dro-dash-kpi__stat-row dro-dash-kpi__stat-row--chips-then-yoy">
           <div class="dro-dash-chip dro-dash-chip--amber">
-            <span class="dro-dash-chip__k">今日请假</span>
+            <span class="dro-dash-chip__k">{{ isPcMealShelf ? '请假' : '今日请假' }}</span>
             <span class="dro-dash-chip__v">{{ todayLeaveAnimated }} <small></small></span>
           </div>
           <div class="dro-dash-chip dro-dash-chip--rose">
-            <span class="dro-dash-chip__k">当日过期</span>
+            <span class="dro-dash-chip__k">{{ isPcMealShelf ? '过期' : '当日过期' }}</span>
             <span class="dro-dash-chip__v">{{ expireMealPortionsAnimated }} <small></small></span>
           </div>
           <div
@@ -764,7 +972,7 @@ onMounted(() => {
             :aria-label="`暂停配送 ${pausedDeliveryCount} `"
             title="与档案库「已暂停」筛选口径一致"
           >
-            <span class="dro-dash-chip__k">暂停配送</span>
+            <span class="dro-dash-chip__k">{{ isPcMealShelf ? '暂停' : '暂停配送' }}</span>
             <span class="dro-dash-chip__v">{{ pausedDeliveryAnimated }} <small></small></span>
           </div>
           <div
@@ -776,7 +984,7 @@ onMounted(() => {
             "
           >
             <div class="dro-dash-yoy-chip__left">
-              <span class="dro-dash-yoy-chip__prefix">同比上周</span>
+              <span class="dro-dash-yoy-chip__prefix">{{ isPcMealShelf ? '同比' : '同比上周' }}</span>
             </div>
             <span
               class="dro-dash-yoy-chip__val"
@@ -793,36 +1001,42 @@ onMounted(() => {
                     }
               "
               >{{
-                todayMealsWeekOverWeekCaption || formatYoyWeekHeadsSigned(todayPrepHeadsYoyDelta)
+                yoyShelfText(todayMealsWeekOverWeekCaption, todayPrepHeadsYoyDelta, todayYoyDeltaAnimated, isPcMealShelf)
               }}</span
             >
           </div>
         </div>
       </article>
       <article class="dro-dash-kpi dro-dash-kpi--dinner" :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }">
-        <div class="dro-dash-kpi__head">
-          <div class="dro-dash-kpi__tags">
-            <span class="dro-dash-pill dro-dash-pill--emerald">今日晚餐 · {{ businessAnchorMdDisplay || '—' }}</span>
-          </div>
-          <div class="dro-dash-kpi__head-actions">
-            <button
-              type="button"
-              class="dro-dash-adjust-btn"
-              title="报损耗"
-              @click="openDinnerStockAdjust"
-            >
+        <div class="dro-pc-dish">
+          <div class="dro-pc-dish__meta">
+            <span class="dro-pc-dish__menu">本周菜单：晚餐</span>
+            <button type="button" class="dro-dash-adjust-btn" title="报损耗" @click="openDinnerStockAdjust">
               报损耗
             </button>
           </div>
-        </div>
-        <div class="dro-dash-kpi__hero-metric">
-          <span class="dro-dash-kpi__hero-metric-kicker">后厨产出量：</span>
-          <span class="dro-dash-kpi__hero-metric-num-wrap">
-            <span class="dro-dash-kpi__hero-metric-num">{{
-              dinnerMenuDayTotalStock != null ? dinnerMenuDayTotalStock : '—'
-            }}</span>
-            <small class="dro-dash-kpi__hero-metric-unit">份</small>
-          </span>
+          <div class="dro-pc-dish__row">
+            <div class="dro-pc-photo" :class="{ 'dro-pc-photo--empty': !todayDinnerDish.image }">
+              <img v-if="todayDinnerDish.image" :src="todayDinnerDish.image" :alt="todayDinnerDish.name || '晚餐'" />
+              <span v-else>未排菜</span>
+            </div>
+            <div class="dro-pc-dish__copy">
+              <div class="dro-pc-dish__name">{{ todayDinnerDish.name || '未排菜' }}</div>
+              <div class="dro-dash-kpi__hero-metric">
+                <span class="dro-dash-kpi__hero-metric-kicker">后厨产出量：</span>
+                <span class="dro-dash-kpi__hero-metric-num-wrap">
+                  <span class="dro-dash-kpi__hero-metric-num">{{
+                    dinnerMenuDayTotalStock != null
+                      ? isPcMealShelf
+                        ? dinnerMenuDayTotalStockAnimated
+                        : dinnerMenuDayTotalStock
+                      : '—'
+                  }}</span>
+                  <small class="dro-dash-kpi__hero-metric-unit">份</small>
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
           <div class="dro-dash-kpi__metric-top">
@@ -838,7 +1052,7 @@ onMounted(() => {
               <div class="dro-dash-chain-node-header">
                 <span class="dro-dash-chain-node-label">配额去向拆解线</span>
                 <span class="dro-dash-chain-node dro-dash-chain-node--main">
-                  已售出 {{ todayDinnerSoldTotal != null ? `${todayDinnerSoldTotal}份` : '—' }}
+                  已售出 {{ shelfSoldText(todayDinnerSoldTotal, todayDinnerSoldTotalAnimated, isPcMealShelf) }}
                 </span>
               </div>
               <div class="dro-dash-stacked-bar" aria-hidden="true">
@@ -877,7 +1091,7 @@ onMounted(() => {
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />配送</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
-                    todayDinnerDelivery == null ? '—' : `${Math.trunc(Number(todayDinnerDelivery))}`
+                    shelfCountText(todayDinnerDelivery, todayDinnerDeliveryAnimated, isPcMealShelf)
                   }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
@@ -885,20 +1099,20 @@ onMounted(() => {
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
-                    todayDinnerPickup == null ? '—' : `${Math.trunc(Number(todayDinnerPickup))}`
+                    shelfCountText(todayDinnerPickup, todayDinnerPickupAnimated, isPcMealShelf)
                   }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />零售</span
                   >
-                  <span class="dro-dash-branch-pill__val">{{ todayDinnerRetail }}</span>
+                  <span class="dro-dash-branch-pill__val">{{ shelfCountText(todayDinnerRetail, todayDinnerRetailAnimated, isPcMealShelf) }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--waste" aria-hidden="true" />损耗</span
                   >
-                  <span class="dro-dash-branch-pill__val">{{ todayDinnerWasteTotal }}</span>
+                  <span class="dro-dash-branch-pill__val">{{ shelfCountText(todayDinnerWasteTotal, todayDinnerWasteAnimated, isPcMealShelf) }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
@@ -911,7 +1125,7 @@ onMounted(() => {
                         todayDinnerRemaining != null && todayDinnerRemaining <= 0,
                     }"
                     >{{
-                      todayDinnerRemaining == null ? '—' : `${todayDinnerRemaining}`
+                      shelfCountText(todayDinnerRemaining, todayDinnerRemainingAnimated, isPcMealShelf)
                     }}</span
                   >
                 </div>
@@ -938,30 +1152,28 @@ onMounted(() => {
         class="dro-dash-kpi dro-dash-kpi--tomorrow"
         :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }"
       >
-        <div class="dro-dash-kpi__head">
-          <div class="dro-dash-kpi__tags">
-            <span class="dro-dash-pill dro-dash-pill--blue"
-              >明日午餐预测 · {{ businessAnchorTomorrowMdDisplay || '—'
-              }}<template v-if="businessAnchorTomorrowWeekdayDisplay">
-                {{ businessAnchorTomorrowWeekdayDisplay }}</template
-              ></span
-            >
+        <div class="dro-pc-dish">
+          <div class="dro-pc-dish__meta">
+            <span class="dro-pc-dish__menu">本周菜单：午餐</span>
           </div>
-          <span
-            class="dro-dash-kpi__ico-badge dro-dash-kpi__ico-badge--blue"
-            role="status"
-            :title="formatSellableGateLabel(tomorrowSellableQuantity)"
-            :aria-label="formatSellableGateLabel(tomorrowSellableQuantity)"
-          >
-            <TrendingUp :size="18" aria-hidden="true" />
-          </span>
-        </div>
-        <div class="dro-dash-kpi__hero-metric">
-          <span class="dro-dash-kpi__hero-metric-kicker">后厨产出量：</span>
-          <span class="dro-dash-kpi__hero-metric-num-wrap">
-            <span class="dro-dash-kpi__hero-metric-num">{{ tomorrowDistributionMainTotal }}</span>
-            <small class="dro-dash-kpi__hero-metric-unit">份</small>
-          </span>
+          <div class="dro-pc-dish__row">
+            <div class="dro-pc-photo" :class="{ 'dro-pc-photo--empty': !tomorrowLunchDish.image }">
+              <img v-if="tomorrowLunchDish.image" :src="tomorrowLunchDish.image" :alt="tomorrowLunchDish.name || '午餐'" />
+              <span v-else>未排菜</span>
+            </div>
+            <div class="dro-pc-dish__copy">
+              <div class="dro-pc-dish__name">{{ tomorrowLunchDish.name || '未排菜' }}</div>
+              <div class="dro-dash-kpi__hero-metric">
+                <span class="dro-dash-kpi__hero-metric-kicker">后厨产出量：</span>
+                <span class="dro-dash-kpi__hero-metric-num-wrap">
+                  <span class="dro-dash-kpi__hero-metric-num">{{
+                    isPcMealShelf ? tomorrowDistributionMainTotalAnimated : tomorrowDistributionMainTotal
+                  }}</span>
+                  <small class="dro-dash-kpi__hero-metric-unit">份</small>
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
           <div class="dro-dash-kpi__metric-top">
@@ -973,7 +1185,7 @@ onMounted(() => {
               <div class="dro-dash-chain-node-header">
                 <span class="dro-dash-chain-node-label">明日排产指标线</span>
                 <span class="dro-dash-chain-node dro-dash-chain-node--main dro-dash-chain-node--main-blue">
-                  已售出 {{ cardTomorrowPrepTotal }}份
+                  已售出 {{ shelfSoldText(cardTomorrowPrepTotal, cardTomorrowPrepTotalAnimated, isPcMealShelf) }}
                 </span>
               </div>
               <div class="dro-dash-stacked-bar" aria-hidden="true">
@@ -1018,7 +1230,7 @@ onMounted(() => {
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />配送</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
-                    tomorrowPrepDelivery == null ? '—' : `${Math.trunc(Number(tomorrowPrepDelivery))}`
+                    shelfCountText(tomorrowPrepDelivery, tomorrowPrepDeliveryAnimated, isPcMealShelf)
                   }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
@@ -1026,14 +1238,14 @@ onMounted(() => {
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
-                    tomorrowPrepPickup == null ? '—' : `${Math.trunc(Number(tomorrowPrepPickup))}`
+                    shelfCountText(tomorrowPrepPickup, tomorrowPrepPickupAnimated, isPcMealShelf)
                   }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />零售</span
                   >
-                  <span class="dro-dash-branch-pill__val">{{ tomorrowSingleRetailTotalCount }}</span>
+                  <span class="dro-dash-branch-pill__val">{{ shelfCountText(tomorrowSingleRetailTotalCount, tomorrowSingleRetailAnimated, isPcMealShelf) }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
@@ -1052,7 +1264,7 @@ onMounted(() => {
                         tomorrowSellableQuantity != null && tomorrowSellableQuantity <= 0,
                     }"
                     >{{
-                      tomorrowSellableQuantity == null ? '—' : `${tomorrowSellableQuantity}`
+                      shelfCountText(tomorrowSellableQuantity, tomorrowSellableAnimated, isPcMealShelf)
                     }}</span
                   >
                 </div>
@@ -1063,14 +1275,14 @@ onMounted(() => {
         </div>
         <div class="dro-dash-kpi__stat-row dro-dash-kpi__stat-row--chips-then-yoy">
           <div class="dro-dash-chip dro-dash-chip--amber">
-            <span class="dro-dash-chip__k">明日请假</span>
+            <span class="dro-dash-chip__k">{{ isPcMealShelf ? '请假' : '明日请假' }}</span>
             <span class="dro-dash-chip__v">{{ tomorrowLeaveAnimated }} <small></small></span>
           </div>
           <div
             class="dro-dash-chip dro-dash-chip--rose"
             :class="{ 'dro-dash-chip--faded': tomorrowFirstMealNewCount === 0 }"
           >
-            <span class="dro-dash-chip__k">首餐新客</span>
+            <span class="dro-dash-chip__k">{{ isPcMealShelf ? '新客' : '首餐新客' }}</span>
             <span class="dro-dash-chip__v">{{ tomorrowFirstMealNewAnimated }} <small></small></span>
           </div>
           <div
@@ -1080,7 +1292,7 @@ onMounted(() => {
             :aria-label="`暂停配送 ${pausedDeliveryCount} `"
             title="与档案库「已暂停」筛选口径一致"
           >
-            <span class="dro-dash-chip__k">暂停配送</span>
+            <span class="dro-dash-chip__k">{{ isPcMealShelf ? '暂停' : '暂停配送' }}</span>
             <span class="dro-dash-chip__v">{{ pausedDeliveryAnimated }} <small></small></span>
           </div>
           <div
@@ -1092,7 +1304,7 @@ onMounted(() => {
             "
           >
             <div class="dro-dash-yoy-chip__left">
-              <span class="dro-dash-yoy-chip__prefix">同比上周</span>
+              <span class="dro-dash-yoy-chip__prefix">{{ isPcMealShelf ? '同比' : '同比上周' }}</span>
             </div>
             <span
               class="dro-dash-yoy-chip__val"
@@ -1109,8 +1321,7 @@ onMounted(() => {
                     }
               "
               >{{
-                tomorrowMealsWeekOverWeekCaption ||
-                  formatYoyWeekHeadsSigned(tomorrowPrepHeadsYoyDelta)
+                yoyShelfText(tomorrowMealsWeekOverWeekCaption, tomorrowPrepHeadsYoyDelta, tomorrowYoyDeltaAnimated, isPcMealShelf)
               }}</span
             >
           </div>
@@ -1121,25 +1332,30 @@ onMounted(() => {
         class="dro-dash-kpi dro-dash-kpi--tomorrow dro-dash-kpi--dinner"
         :class="{ 'dro-dash-kpi--dim': !summaryIsLiveToday }"
       >
-        <div class="dro-dash-kpi__head">
-          <div class="dro-dash-kpi__tags">
-            <span class="dro-dash-pill dro-dash-pill--blue">明日晚餐预测</span>
+        <div class="dro-pc-dish">
+          <div class="dro-pc-dish__meta">
+            <span class="dro-pc-dish__menu">本周菜单：晚餐</span>
           </div>
-          <span
-            class="dro-dash-kpi__ico-badge dro-dash-kpi__ico-badge--blue"
-            role="status"
-            :title="formatSellableGateLabel(tomorrowDinnerSellableQuantity)"
-            :aria-label="formatSellableGateLabel(tomorrowDinnerSellableQuantity)"
-          >
-            <TrendingUp :size="18" aria-hidden="true" />
-          </span>
-        </div>
-        <div class="dro-dash-kpi__hero-metric">
-          <span class="dro-dash-kpi__hero-metric-kicker">后厨产出量：</span>
-          <span class="dro-dash-kpi__hero-metric-num-wrap">
-            <span class="dro-dash-kpi__hero-metric-num">{{ tomorrowDinnerDistributionMainTotal }}</span>
-            <small class="dro-dash-kpi__hero-metric-unit">份</small>
-          </span>
+          <div class="dro-pc-dish__row">
+            <div class="dro-pc-photo" :class="{ 'dro-pc-photo--empty': !tomorrowDinnerDish.image }">
+              <img v-if="tomorrowDinnerDish.image" :src="tomorrowDinnerDish.image" :alt="tomorrowDinnerDish.name || '晚餐'" />
+              <span v-else>未排菜</span>
+            </div>
+            <div class="dro-pc-dish__copy">
+              <div class="dro-pc-dish__name">{{ tomorrowDinnerDish.name || '未排菜' }}</div>
+              <div class="dro-dash-kpi__hero-metric">
+                <span class="dro-dash-kpi__hero-metric-kicker">后厨产出量：</span>
+                <span class="dro-dash-kpi__hero-metric-num-wrap">
+                  <span class="dro-dash-kpi__hero-metric-num">{{
+                    isPcMealShelf
+                      ? tomorrowDinnerDistributionMainTotalAnimated
+                      : tomorrowDinnerDistributionMainTotal
+                  }}</span>
+                  <small class="dro-dash-kpi__hero-metric-unit">份</small>
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="dro-dash-kpi__mid dro-dash-kpi__mid--distribution-chain">
           <div class="dro-dash-kpi__metric-top">
@@ -1151,7 +1367,7 @@ onMounted(() => {
               <div class="dro-dash-chain-node-header">
                 <span class="dro-dash-chain-node-label">明日排产指标线</span>
                 <span class="dro-dash-chain-node dro-dash-chain-node--main dro-dash-chain-node--main-blue">
-                  已售出 {{ tomorrowDinnerSoldTotal != null ? `${tomorrowDinnerSoldTotal}份` : '—' }}
+                  已售出 {{ shelfSoldText(tomorrowDinnerSoldTotal, tomorrowDinnerSoldTotalAnimated, isPcMealShelf) }}
                 </span>
               </div>
               <div class="dro-dash-stacked-bar" aria-hidden="true">
@@ -1202,9 +1418,7 @@ onMounted(() => {
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--deliver" aria-hidden="true" />配送</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
-                    tomorrowDinnerDelivery == null
-                      ? '—'
-                      : `${Math.trunc(Number(tomorrowDinnerDelivery))}`
+                    shelfCountText(tomorrowDinnerDelivery, tomorrowDinnerDeliveryAnimated, isPcMealShelf)
                   }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
@@ -1212,14 +1426,14 @@ onMounted(() => {
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--pickup" aria-hidden="true" />自提</span
                   >
                   <span class="dro-dash-branch-pill__val">{{
-                    tomorrowDinnerPickup == null ? '—' : `${Math.trunc(Number(tomorrowDinnerPickup))}`
+                    shelfCountText(tomorrowDinnerPickup, tomorrowDinnerPickupAnimated, isPcMealShelf)
                   }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
                     ><span class="dro-dash-branch-dot dro-dash-branch-dot--retail" aria-hidden="true" />零售</span
                   >
-                  <span class="dro-dash-branch-pill__val">{{ tomorrowDinnerRetail }}</span>
+                  <span class="dro-dash-branch-pill__val">{{ shelfCountText(tomorrowDinnerRetail, tomorrowDinnerRetailAnimated, isPcMealShelf) }}</span>
                 </div>
                 <div class="dro-dash-branch-pill">
                   <span class="dro-dash-branch-pill__lbl"
@@ -1238,9 +1452,7 @@ onMounted(() => {
                         tomorrowDinnerSellableQuantity != null && tomorrowDinnerSellableQuantity <= 0,
                     }"
                     >{{
-                      tomorrowDinnerSellableQuantity == null
-                        ? '—'
-                        : `${tomorrowDinnerSellableQuantity}`
+                      shelfCountText(tomorrowDinnerSellableQuantity, tomorrowDinnerSellableAnimated, isPcMealShelf)
                     }}</span
                   >
                 </div>
@@ -1249,14 +1461,14 @@ onMounted(() => {
           </div>
           <div class="dro-dash-kpi__mid-spacer" aria-hidden="true" />
         </div>
-        <div class="dro-dash-kpi__stat-row dro-dash-kpi__stat-row--chips-then-yoy">
+        <div v-if="!isPcMealShelf" class="dro-dash-kpi__stat-row dro-dash-kpi__stat-row--chips-then-yoy">
           <div
             class="dro-dash-chip dro-dash-chip--blue"
             role="status"
             :aria-label="`单次零售 ${tomorrowDinnerRetail} `"
           >
             <span class="dro-dash-chip__k">单次零售</span>
-            <span class="dro-dash-chip__v">{{ tomorrowDinnerRetail }} <small></small></span>
+            <span class="dro-dash-chip__v">{{ shelfCountText(tomorrowDinnerRetail, tomorrowDinnerRetailAnimated, isPcMealShelf) }} <small></small></span>
           </div>
         </div>
       </article>
@@ -1407,7 +1619,7 @@ onMounted(() => {
 .dro-dash-day-cluster__head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 0.35rem 0.5rem;
   padding: 0 0.15rem;
   flex-shrink: 0;
@@ -3642,5 +3854,146 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
   height: 100%;
   border-radius: 999px;
   transition: width 0.45s ease;
+}
+
+/* 电脑宽屏：菜品图在菜名旁，日期切换在「今日」栏头 */
+.dro-dash-meal-shelf--pc .dro-dash-day-cluster__head {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.dro-dash-pc-day-nav {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dro-pc-dish {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-bottom: 2px;
+}
+
+.dro-pc-dish__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  min-width: 0;
+}
+
+.dro-pc-dish__menu {
+  font-size: 12px;
+  font-weight: 650;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.dro-pc-dish__row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.dro-pc-photo {
+  width: 72px;
+  height: 72px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #e8f5e9;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.7),
+    0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.dro-pc-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.dro-pc-photo--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 650;
+  color: #64748b;
+}
+
+.dro-pc-dish__name {
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #0f172a;
+}
+
+.dro-pc-dish__copy .dro-dash-kpi__hero-metric {
+  margin-top: 6px;
+}
+
+/* 手机单列：菜品图与产出量同一行，栏头日期和切换按钮不要挤掉 */
+@media (max-width: 639px) {
+  .dro-dash-pc-day-nav {
+    margin-left: auto;
+  }
+
+  .dro-pc-dish__row {
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .dro-pc-photo {
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+  }
+
+  .dro-pc-dish__copy .dro-dash-kpi__hero-metric-num {
+    font-size: 1.55rem;
+  }
+}
+
+.dro-dash-meal-shelf--pc .dro-dash-kpi__stat-row--chips-then-yoy {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dro-dash-meal-shelf--pc .dro-dash-chip,
+.dro-dash-meal-shelf--pc .dro-dash-yoy-chip {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 1px;
+}
+
+.dro-dash-meal-shelf--pc .dro-dash-chip__k,
+.dro-dash-meal-shelf--pc .dro-dash-chip__v,
+.dro-dash-meal-shelf--pc .dro-dash-yoy-chip__prefix,
+.dro-dash-meal-shelf--pc .dro-dash-yoy-chip__val,
+.dro-dash-meal-shelf--pc .dro-dash-yoy-chip__val--caption {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.dro-dash-meal-shelf--pc .dro-dash-yoy-chip__left {
+  flex: none;
+  min-width: 0;
+}
+
+.dro-dash-meal-shelf--pc .dro-dash-yoy-chip__val--caption {
+  max-width: 100%;
+  white-space: normal;
 }
 </style>

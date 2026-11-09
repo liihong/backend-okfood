@@ -378,28 +378,64 @@ function onUserMenuCommand(command) {
 /** 桌面：侧栏收起偏好（持久化；Logo 旁双箭头按钮切换） */
 const sidebarCollapsedPref = ref(false)
 
-/** 窄屏：是否与桌面一致展开侧栏文案（默认 false = 自动窄图标栏） */
-const narrowSidebarExpanded = ref(false)
+/** 窄屏：底部菜单是否打开。窄屏不留左侧图标栏。 */
+const mobileMenuOpen = ref(false)
 
 const isNarrowScreen = ref(
   typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches,
 )
+
+/** 窄屏顶栏胶囊对应的一级模块。页签短标题（如「今日营业」）不在手机顶栏展示。 */
+const MOBILE_MODULE_BY_PREFIX = [
+  { prefix: '/users', fruit: 'pomegranate', label: '会员档案' },
+  { prefix: '/card-orders', fruit: 'cherry', label: '开卡工单' },
+  { prefix: '/orders', fruit: 'banana', label: '订单管理' },
+  { prefix: '/delivery', fruit: 'pitaya', label: '配送管理' },
+  { prefix: '/regions', fruit: 'pitaya', label: '配送管理' },
+  { prefix: '/couriers', fruit: 'pitaya', label: '配送管理' },
+  { prefix: '/stats', fruit: 'pear', label: '数据统计' },
+  { prefix: '/finance', fruit: 'pear', label: '数据统计' },
+  { prefix: '/weekly-menu', fruit: 'apple', label: '菜单管理' },
+  { prefix: '/menu', fruit: 'apple', label: '菜单管理' },
+  { prefix: '/packaging', fruit: 'orange', label: '库存管理' },
+  { prefix: '/marketing', fruit: 'bayberry', label: '小程序营销' },
+  { prefix: '/system', fruit: 'mangosteen', label: '系统管理' },
+  { prefix: '/store-config', fruit: 'mangosteen', label: '系统管理' },
+  { prefix: '/dashboard', fruit: 'blueberry', label: '营业概览' },
+]
 
 let sidebarMediaQuery = null
 
 function syncNarrowScreen() {
   if (!sidebarMediaQuery) return
   const narrow = sidebarMediaQuery.matches
-  if (narrow && !isNarrowScreen.value) {
-    narrowSidebarExpanded.value = false
-  }
+  if (!narrow) mobileMenuOpen.value = false
   isNarrowScreen.value = narrow
 }
 
-/** 实际是否收起侧栏：窄屏用展开态；桌面来自用户偏好（与 localStorage 同步） */
+/** 桌面收起只剩图标；窄屏侧栏改为底部清单，始终带文字，不收成图标栏 */
 const sidebarCollapsed = computed(() =>
-  isNarrowScreen.value ? !narrowSidebarExpanded.value : sidebarCollapsedPref.value,
+  isNarrowScreen.value ? false : sidebarCollapsedPref.value,
 )
+
+const mobileModule = computed(() => {
+  const path = route.path || '/'
+  const hit = MOBILE_MODULE_BY_PREFIX.find(
+    (item) => path === item.prefix || path.startsWith(`${item.prefix}/`),
+  )
+  if (hit) return hit
+  if (isDeliveryOnly.value) return { fruit: 'pitaya', label: '配送管理' }
+  if (isSystemOnly.value) return { fruit: 'mangosteen', label: '系统管理' }
+  return { fruit: 'blueberry', label: '营业概览' }
+})
+
+function toggleMobileMenu() {
+  mobileMenuOpen.value = !mobileMenuOpen.value
+}
+
+function closeMobileMenu() {
+  mobileMenuOpen.value = false
+}
 
 /** 侧栏 el-menu 根节点：滚动时临时显示滚动条 */
 const sidebarMenuRef = ref(null)
@@ -434,10 +470,14 @@ function bindSidebarMenuScroll() {
 }
 
 function toggleSidebar() {
-  if (isNarrowScreen.value) {
-    narrowSidebarExpanded.value = !narrowSidebarExpanded.value
-  } else {
-    sidebarCollapsedPref.value = !sidebarCollapsedPref.value
+  sidebarCollapsedPref.value = !sidebarCollapsedPref.value
+}
+
+/** 窄屏点到具体页面后收起清单；展开子菜单（index 不是路径）时保持打开 */
+function onSidebarMenuSelect(index) {
+  if (!isNarrowScreen.value) return
+  if (typeof index === 'string' && index.startsWith('/')) {
+    mobileMenuOpen.value = false
   }
 }
 
@@ -493,6 +533,7 @@ watch(sidebarCollapsedPref, (v) => {
 watch(
   () => route.fullPath,
   () => {
+    mobileMenuOpen.value = false
     tabsStore.openFromRoute(route)
     /** 与大表 / 片区并列：三联页任一进入即在顶栏补全另外两个（店主、客服工作台） */
     const n = typeof route.name === 'string' ? route.name : ''
@@ -535,7 +576,14 @@ function onTabClose(tab) {
 </script>
 
 <template>
-  <div class="admin-layout" :class="{ 'admin-layout--sidebar-collapsed': sidebarCollapsed }">
+  <div
+    class="admin-layout"
+    :class="{
+      'admin-layout--sidebar-collapsed': sidebarCollapsed && !isNarrowScreen,
+      'admin-layout--narrow': isNarrowScreen,
+      'admin-layout--mobile-menu-open': isNarrowScreen && mobileMenuOpen,
+    }"
+  >
     <div class="admin-bg-mesh" aria-hidden="true" />
     <!-- 全宽通条顶栏：品牌/折叠在左，标签居中，铃铛/时钟/用户在右；侧栏仅保留菜单，顶部与之对齐 -->
     <header class="admin-top-tab-bar">
@@ -557,12 +605,26 @@ function onTabClose(tab) {
             />
             <OkfoodNavFruitIcon v-else fruit="blueberry" title="品牌占位 · 蓝莓" />
           </div>
-          <div v-show="!sidebarCollapsed" class="logo-text">
+          <div v-show="!sidebarCollapsed && !isNarrowScreen" class="logo-text">
             <h1 :title="sidebarStoreName">{{ sidebarStoreName }}</h1>
             <span>{{ portalSubtitle }}</span>
           </div>
         </div>
         <button
+          v-if="isNarrowScreen"
+          type="button"
+          class="mobile-module-trigger"
+          :class="{ 'is-open': mobileMenuOpen }"
+          :aria-expanded="mobileMenuOpen"
+          aria-haspopup="dialog"
+          @click="toggleMobileMenu"
+        >
+          <OkfoodNavFruitIcon :fruit="mobileModule.fruit" :title="mobileModule.label" />
+          <span class="mobile-module-trigger__label">{{ mobileModule.label }}</span>
+          <ChevronDown class="mobile-module-trigger__chev" :size="16" stroke-width="2.25" aria-hidden="true" />
+        </button>
+        <button
+          v-else
           type="button"
           class="sidebar-collapse-toggle"
           :aria-label="sidebarCollapsed ? '展开侧栏菜单' : '收起侧栏菜单'"
@@ -574,7 +636,7 @@ function onTabClose(tab) {
         </button>
       </div>
 
-      <nav v-if="openedTabs.length" class="admin-page-tabs" aria-label="已打开页面">
+      <nav v-if="openedTabs.length && !isNarrowScreen" class="admin-page-tabs" aria-label="已打开页面">
         <div class="admin-page-tabs__scroll custom-scrollbar admin-page-tabs__scroll--top-bar">
           <div
             v-for="tab in openedTabs"
@@ -607,7 +669,7 @@ function onTabClose(tab) {
           </div>
         </div>
       </nav>
-      <div v-else class="admin-top-tab-bar__tabs-spacer" aria-hidden="true" />
+      <div v-else-if="!isNarrowScreen" class="admin-top-tab-bar__tabs-spacer" aria-hidden="true" />
 
       <div class="admin-top-tab-bar__trailing">
         <el-popover
@@ -765,17 +827,30 @@ function onTabClose(tab) {
       </div>
     </header>
 
-    <aside class="sidebar" :class="{ 'sidebar--collapsed': sidebarCollapsed }">
+    <button
+      v-if="isNarrowScreen && mobileMenuOpen"
+      type="button"
+      class="mobile-nav-scrim"
+      aria-label="关闭菜单"
+      @click="closeMobileMenu"
+    />
+
+    <aside class="sidebar" :class="{ 'sidebar--collapsed': sidebarCollapsed && !isNarrowScreen }">
+      <div v-if="isNarrowScreen" class="mobile-nav-sheet-head">
+        <strong>去哪个模块</strong>
+        <button type="button" @click="closeMobileMenu">关闭</button>
+      </div>
       <el-menu
         ref="sidebarMenuRef"
         :key="adminKind"
         class="sidebar-menu"
         :default-active="activeMenuPath"
-        :collapse="sidebarCollapsed"
+        :collapse="sidebarCollapsed && !isNarrowScreen"
         router
         :ellipsis="false"
         popper-class="okfood-sidebar-menu-popup"
         background-color="transparent"
+        @select="onSidebarMenuSelect"
       >
         <el-menu-item v-if="showFullAdminMenus" index="/dashboard">
           <!-- 外层必须用 div：el-menu--collapse 会把 >span 设为 width:0 隐藏，连图标一起没了 -->

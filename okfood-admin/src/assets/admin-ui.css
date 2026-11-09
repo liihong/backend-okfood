@@ -295,6 +295,117 @@ html.okfood-admin-shell body {
   flex-shrink: 0;
 }
 
+/* 窄屏：顶栏模块胶囊，代替左侧图标栏 */
+.mobile-module-trigger {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 4px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 55%, transparent);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--el-text-color-primary, #1d1f21);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--el-color-primary) 18%, transparent);
+}
+
+.mobile-module-trigger .okfood-nav-icon {
+  --fruit-tile-bg: linear-gradient(155deg, rgba(255, 255, 255, 0.55) 0%, rgba(235, 240, 250, 0.35) 100%);
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: var(--fruit-tile-bg);
+}
+
+.mobile-module-trigger .okfood-nav-icon.fruit-svg-blueberry { --fruit-tile-bg: linear-gradient(145deg, rgba(195, 228, 255, 0.6), rgba(70, 130, 255, 0.4)); }
+.mobile-module-trigger .okfood-nav-icon.fruit-svg-pomegranate { --fruit-tile-bg: linear-gradient(145deg, rgba(255, 205, 210, 0.55), rgba(175, 28, 55, 0.4)); }
+.mobile-module-trigger .okfood-nav-icon.fruit-svg-cherry { --fruit-tile-bg: linear-gradient(145deg, rgba(255, 220, 245, 0.56), rgba(230, 55, 165, 0.42)); }
+.mobile-module-trigger .okfood-nav-icon.fruit-svg-banana { --fruit-tile-bg: linear-gradient(150deg, rgba(255, 250, 200, 0.68), rgba(255, 205, 55, 0.45)); }
+.mobile-module-trigger .okfood-nav-icon.fruit-svg-pitaya { --fruit-tile-bg: linear-gradient(155deg, rgba(240, 210, 255, 0.55), rgba(175, 55, 210, 0.42)); }
+.mobile-module-trigger .okfood-nav-icon.fruit-svg-pear { --fruit-tile-bg: linear-gradient(145deg, rgba(200, 255, 248, 0.58), rgba(45, 195, 175, 0.38)); }
+.mobile-module-trigger .okfood-nav-icon.fruit-svg-apple { --fruit-tile-bg: linear-gradient(145deg, rgba(210, 255, 215, 0.58), rgba(55, 175, 95, 0.38)); }
+.mobile-module-trigger .okfood-nav-icon.fruit-svg-orange { --fruit-tile-bg: linear-gradient(145deg, rgba(255, 235, 195, 0.62), rgba(255, 130, 35, 0.44)); }
+.mobile-module-trigger .okfood-nav-icon.fruit-svg-bayberry { --fruit-tile-bg: linear-gradient(155deg, rgba(255, 220, 200, 0.56), rgba(255, 95, 55, 0.44)); }
+.mobile-module-trigger .okfood-nav-icon.fruit-svg-mangosteen { --fruit-tile-bg: linear-gradient(145deg, rgba(220, 215, 255, 0.55), rgba(95, 65, 200, 0.42)); }
+
+.mobile-module-trigger .okfood-nav-icon__svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+.mobile-module-trigger__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-module-trigger__chev {
+  margin-left: auto;
+  flex: none;
+  color: var(--el-text-color-secondary, #5c6670);
+  transition: transform 0.2s ease;
+}
+
+.mobile-module-trigger.is-open {
+  background: var(--el-color-primary);
+  border-color: transparent;
+  color: #fff;
+}
+
+.mobile-module-trigger.is-open .mobile-module-trigger__chev {
+  color: #fff;
+  transform: rotate(180deg);
+}
+
+.mobile-module-trigger.is-open .okfood-nav-icon {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.mobile-nav-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  border: 0;
+  padding: 0;
+  background: rgba(40, 24, 18, 0.28);
+  cursor: pointer;
+}
+
+.mobile-nav-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 4px;
+  flex: none;
+}
+
+.mobile-nav-sheet-head strong {
+  font-size: 15px;
+}
+
+.mobile-nav-sheet-head button {
+  border: 0;
+  background: transparent;
+  color: var(--el-text-color-secondary, #5c6670);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 .logo-box {
   width: 44px;
   height: 44px;
@@ -1735,6 +1846,35 @@ html.okfood-admin-shell body {
     padding: 6px 12px 7px;
     border-radius: 0 0 var(--okfood-surface-radius) var(--okfood-surface-radius);
   }
+
+  /* 手机顶栏改为上下排。筛选区不要用 100% 高度基准，否则会折到搜索框右侧被裁切 */
+  .members-toolbar-row {
+    flex-wrap: nowrap;
+  }
+
+  .members-toolbar-filters-scroll {
+    overflow: visible;
+    width: 100%;
+    flex: 0 1 auto;
+    align-self: stretch;
+    min-width: 0;
+  }
+
+  .members-toolbar-filters-scroll .members-filter-toolbar,
+  .members-toolbar-filters-scroll .members-extra-filters {
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: 100%;
+    row-gap: 8px;
+  }
+
+  .members-toolbar-filters-scroll .members-region-select-el,
+  .members-toolbar-filters-scroll .members-region-select-el--wide {
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+    flex: 1 1 96px;
+  }
 }
 
 .members-recharge-hint {
@@ -1818,11 +1958,22 @@ html.okfood-admin-shell body {
   flex-wrap: wrap;
 }
 
+/* 标签和下拉成组，折行时整组换行，避免「片区」和选择框拆开 */
+.members-filter-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .members-filter-label {
   margin: 0;
   font-size: 13px;
   font-weight: 800;
   color: #64748b;
+  flex-shrink: 0;
 }
 
 .members-region-select {
@@ -5551,12 +5702,41 @@ html.okfood-admin-shell body {
 }
 
 @media (max-width: 900px) {
-  /* 手机：侧栏在文档流里占位。展开变宽、收起变窄，主区用剩余宽度，不再额外留一块左边距 */
-  .admin-layout > .sidebar,
-  .sidebar.sidebar--collapsed {
-    margin-left: 10px;
-    margin-right: 10px;
-    flex: 0 0 auto;
+  /* 手机：左侧菜单不占位。点顶栏模块名，从底部拉出带文字的清单。页签短标题不显示。 */
+  .admin-layout--narrow > .sidebar {
+    display: none;
+  }
+
+  .admin-layout--narrow .admin-top-tab-bar__brand {
+    flex: 1 1 auto;
+    max-width: none;
+    min-width: 0;
+  }
+
+  /* 手机顶栏只留模块名、铃铛和账号。时钟会盖住左侧模块按钮 */
+  .admin-layout--narrow .admin-header-live-clock {
+    display: none;
+  }
+
+  .admin-layout--narrow.admin-layout--mobile-menu-open .admin-top-tab-bar {
+    z-index: 160;
+  }
+
+  .admin-layout--narrow.admin-layout--mobile-menu-open > .sidebar {
+    display: flex;
+    position: fixed;
+    z-index: 150;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    top: auto;
+    width: auto;
+    height: auto;
+    max-height: min(78vh, 680px);
+    margin: 0;
+    padding: 0;
+    border-radius: 24px;
+    overflow: hidden;
   }
 
   .admin-layout > .main-body,
@@ -5567,8 +5747,8 @@ html.okfood-admin-shell body {
     flex: 1 1 0%;
     min-width: 0;
     box-sizing: border-box;
-    padding-left: 0;
-    padding-right: 10px;
+    padding-left: var(--okfood-admin-gutter);
+    padding-right: var(--okfood-admin-gutter);
   }
 
   .form-row {

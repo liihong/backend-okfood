@@ -83,6 +83,16 @@ const handleAdminLogin = async () => {
       <div class="deco-bubbles" aria-hidden="true">
         <span class="deco-bubble deco-bubble--1"></span>
         <span class="deco-bubble deco-bubble--2"></span>
+        <span class="deco-bubble deco-bubble--3"></span>
+        <span class="deco-bubble deco-bubble--4"></span>
+        <span class="deco-bubble deco-bubble--5"></span>
+        <span class="deco-bubble deco-bubble--6"></span>
+        <span class="deco-bubble deco-bubble--7"></span>
+        <span class="deco-bubble deco-bubble--8"></span>
+        <span class="deco-bubble deco-bubble--9"></span>
+        <span class="deco-bubble deco-bubble--10"></span>
+        <span class="deco-bubble deco-bubble--11"></span>
+        <span class="deco-bubble deco-bubble--12"></span>
       </div>
 
       <div class="login-stage-wrap">

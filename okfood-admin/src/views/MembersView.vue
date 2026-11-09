@@ -57,6 +57,8 @@ const membersMoreDropdownPopperOptions = {
 const isNarrowScreen = ref(
   typeof window !== 'undefined' && window.matchMedia(MOBILE_MEDIA).matches,
 )
+/** 手机筛选默认收起，只留搜索框 */
+const mobileFiltersOpen = ref(false)
 
 /** @type {MediaQueryList | null} */
 let mobileMediaQuery = null
@@ -1153,11 +1155,23 @@ onUnmounted(() => {
                 <Search :size="14" class="members-search-el-icon" aria-hidden="true" />
               </template>
             </el-input>
+            <button
+              v-if="isNarrowScreen"
+              type="button"
+              class="members-filter-toggle"
+              :class="{ 'is-open': mobileFiltersOpen }"
+              :aria-expanded="mobileFiltersOpen"
+              :aria-label="mobileFiltersOpen ? '收起筛选' : '展开筛选'"
+              @click="mobileFiltersOpen = !mobileFiltersOpen"
+            >
+              <ChevronDown :size="18" stroke-width="2.25" aria-hidden="true" />
+            </button>
           </div>
-          <div class="members-toolbar-filters-scroll">
+          <div v-show="!isNarrowScreen || mobileFiltersOpen" class="members-toolbar-filters-scroll">
             <div class="members-filter-toolbar">
               <div class="members-extra-filters" aria-label="状态、套餐、片区与会员卡状态筛选">
-                <label class="members-filter-label" for="members-validity-filter">状态</label>
+                <div class="members-filter-pair">
+                  <label class="members-filter-label" for="members-validity-filter">状态</label>
                   <el-select
                     id="members-validity-filter"
                     v-model="membersValidityFilter"
@@ -1170,6 +1184,8 @@ onUnmounted(() => {
                     <el-option label="已过期" value="expired" />
                     <el-option label="已退款" value="refunded" />
                   </el-select>
+                </div>
+                <div class="members-filter-pair">
                   <label class="members-filter-label" for="members-plan-filter">套餐</label>
                   <el-select
                     id="members-plan-filter"
@@ -1193,6 +1209,8 @@ onUnmounted(() => {
                       <el-option label="月卡" value="月卡" />
                     </template>
                   </el-select>
+                </div>
+                <div class="members-filter-pair">
                   <label class="members-filter-label" for="members-region-filter">片区</label>
                   <el-select
                     id="members-region-filter"
@@ -1212,6 +1230,8 @@ onUnmounted(() => {
                       :value="String(r.id)"
                     />
                   </el-select>
+                </div>
+                <div class="members-filter-pair">
                   <label class="members-filter-label" for="members-card-status-filter">会员卡状态</label>
                   <el-select
                     id="members-card-status-filter"
@@ -1227,11 +1247,12 @@ onUnmounted(() => {
                     <el-option label="已暂停" value="paused" />
                     <el-option label="请假中" value="leave" />
                     <el-option label="待续费" value="renew_pending" />
-                </el-select>
+                  </el-select>
+                </div>
               </div>
             </div>
           </div>
-          <div v-if="adminAccessToken" class="members-toolbar-trailing">
+          <div v-if="adminAccessToken && !isNarrowScreen" class="members-toolbar-trailing">
             <div class="members-export-actions">
               <el-button
                 type="default"
@@ -2330,38 +2351,49 @@ class="balance-triple__n" :class="{
 }
 
 @media (max-width: 768px) {
-  .members-search-el-input {
-    min-width: 0;
-  }
-
   .members-toolbar-row {
     flex-direction: column;
+    flex-wrap: nowrap;
     align-items: stretch;
     gap: 10px;
   }
 
   .members-search-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     width: 100%;
     min-width: 0;
     max-width: none;
   }
 
-  .members-toolbar-trailing {
-    width: 100%;
-    margin-left: 0;
-    justify-content: flex-end;
-  }
-
-  .members-export-actions {
-    width: 100%;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-
-  .members-export-actions .members-export-btn {
+  .members-search-el-input {
     flex: 1 1 auto;
     min-width: 0;
+  }
+
+  .members-filter-toggle {
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    background: #fff;
+    color: #64748b;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .members-filter-toggle svg {
+    transition: transform 0.2s ease;
+  }
+
+  .members-filter-toggle.is-open svg {
+    transform: rotate(180deg);
   }
 
   .members-renew-banner,
