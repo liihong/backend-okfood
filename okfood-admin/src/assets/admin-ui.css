@@ -1518,6 +1518,42 @@ html.okfood-admin-shell body {
   flex-shrink: 0;
 }
 
+/* 开卡工单顶栏：与会员档案同款白底、上圆角与下投影 */
+.table-container.table-container--card-orders-fill > .table-header.table-header--members {
+  position: relative;
+  z-index: 3;
+  padding: 10px 18px 8px;
+  background: #fff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: var(--okfood-surface-radius) var(--okfood-surface-radius) 0 0;
+  overflow: hidden;
+  box-shadow:
+    0 14px 32px rgba(15, 23, 42, 0.11),
+    0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.table-container.table-container--card-orders-fill > .members-table-host {
+  position: relative;
+  z-index: 0;
+}
+
+.table-container.table-container--card-orders-fill > .members-table-host::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 36px;
+  pointer-events: none;
+  z-index: 2;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.55) 45%,
+    rgba(255, 255, 255, 0.96) 100%
+  );
+}
+
 .table-container.table-container--card-orders-fill > .members-pagination {
   flex-shrink: 0;
 }
@@ -1545,6 +1581,60 @@ html.okfood-admin-shell body {
   align-items: center;
   gap: 10px;
   width: 100%;
+  --members-toolbar-control-h: 32px;
+}
+
+/* 会员档案 / 开卡工单共用：单层白色圆角搜索框（图标在框内左侧） */
+.members-search-wrap {
+  flex: 0 1 auto;
+  width: clamp(9.25rem, 11vw, 11rem);
+  min-width: 9.25rem;
+  max-width: 11rem;
+}
+
+.members-search-el-input {
+  width: 100%;
+}
+
+.members-search-el-input .el-input__wrapper {
+  width: 100%;
+  min-height: var(--members-toolbar-control-h);
+  height: var(--members-toolbar-control-h);
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  box-shadow: none;
+}
+
+.members-search-el-input .el-input__wrapper.is-focus {
+  border-color: rgba(var(--el-color-primary-rgb, 232, 146, 124), 0.42);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+}
+
+.members-search-el-input .el-input__inner {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.members-search-el-input .el-input__inner::placeholder {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.members-search-el-input .el-input__prefix {
+  display: inline-flex;
+  align-items: center;
+}
+
+.members-search-el-input .members-search-el-icon {
+  flex-shrink: 0;
+  color: #64748b;
+}
+
+.members-search-el-input .el-input__wrapper.is-focus .members-search-el-icon {
+  color: var(--el-color-primary);
 }
 
 .members-toolbar-search {
@@ -2846,8 +2936,9 @@ html.okfood-admin-shell body {
   color: #64748b;
 }
 
-/* 会员档案底部分页：压低高度 + 白底上浮（对齐退卡弹窗底栏立体感） */
-.table-container.table-container--members-fill > .members-pagination.members-pagination--float {
+/* 会员档案 / 开卡工单底部分页：压低高度 + 白底上浮（对齐退卡弹窗底栏立体感） */
+.table-container.table-container--members-fill > .members-pagination.members-pagination--float,
+.table-container.table-container--card-orders-fill > .members-pagination.members-pagination--float {
   flex-shrink: 0;
   position: relative;
   z-index: 3;
@@ -3214,6 +3305,18 @@ html.okfood-admin-shell body {
 .okfood-admin-dlg--wide {
   max-width: min(820px, 100%);
   max-height: min(90vh, 720px);
+}
+
+/* 新建开卡工单：加宽并限在一屏内，正文过长时只滚表单区 */
+.okfood-admin-dlg.okfood-admin-dlg--card-order-create {
+  width: min(1120px, calc(100vw - 32px));
+  max-width: min(1120px, calc(100vw - 32px));
+  max-height: calc(100vh - 24px);
+}
+
+.okfood-admin-dlg--card-order-create .okfood-admin-dlg__body {
+  padding: 8px 10px;
+  background: #f4f7f8;
 }
 
 /* 一屏展示表单：body 不滚动，仅内部列表等区域滚动 */

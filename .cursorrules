@@ -62,7 +62,7 @@ async def get_users():
 
 ## 管理端前端（okfood-admin）
 
-修改 `okfood-admin/**` 时须同时遵守 **`okfood-admin/.cursorrules`**，其中强制约定包括：
+修改 `okfood-admin/**` 时须同时遵守 **`okfood-admin/.cursorrules`** 与 **`okfood-admin/design/ADMIN-UI-DIALOG-LIST-SPEC.md`**（列表/弹窗/表头），其中强制约定包括：
 
 - 二次确认、删除操作：**`ElMessageBox.confirm`**，**禁止 `window.confirm` / `window.alert`**
 - 列表/表单/弹窗/按钮：Element Plus 组件

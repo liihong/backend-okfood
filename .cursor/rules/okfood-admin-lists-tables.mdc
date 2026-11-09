@@ -1,0 +1,29 @@
+---
+description: OK 管理端会员列表容器、表头紧凑样式与圆角 token
+globs: okfood-admin/**
+alwaysApply: false
+---
+
+# 列表与表头
+
+完整条文见 **`okfood-admin/design/ADMIN-UI-DIALOG-LIST-SPEC.md`** §4–5。
+
+## 圆角与列表壳
+
+- `--okfood-surface-radius` = `--okfood-shell-radius`（**14px**）。
+- 会员表：`table-container--members-fill` 显式圆角；`table-header--members` 白底 + 下阴影 + **上圆角与壳一致**。
+
+## 滚动
+
+- 页布局：`members-view-fill`；表格 **`members-el-table-body-scroll`** — 仅表体滚、表头固定。
+
+## 表头
+
+- 默认表：`admin-table--default` — 深绿头、字 12px/900/uppercase。
+- 会员表：**`admin-table--members` + `size="small"`**；`members-el-table-body-scroll` 下表头再压 padding，`.cell` 12px/800。
+- 列宽：手机号等定 `min-width`，避免 `.cell` ellipsis 截断（如 `td-phone` ≥132px）。
+- 长文案列：ellipsis + `el-tooltip`（参考地址列 `members-address-cell-ellipsis`）。
+
+## 分页与层次
+
+- 表体底可配合渐隐衬托分页（见 `admin-ui.css` 会员表注释）；勿破坏 `members-fill` flex 链。

@@ -3,7 +3,7 @@ defineOptions({ name: 'CardOrdersView' })
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { CreditCard, MapPin, Plus, Search, Store, UserRound, X, Zap } from 'lucide-vue-next'
+import { CreditCard, MapPin, Plus, Search, Store, UserRound, Zap } from 'lucide-vue-next'
 import {
   apiJson,
   adminAccessToken,
@@ -13,6 +13,7 @@ import {
 } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import MemberDeliveryMapPicker from '../components/MemberDeliveryMapPicker.vue'
+import OkfoodAdminDialogShell from '../components/OkfoodAdminDialogShell.vue'
 
 const route = useRoute()
 
@@ -618,6 +619,11 @@ const editTemplateDisplayLabel = computed(() => {
   return '—'
 })
 
+/** 已缴且未入账时，底栏展示「确认入账」 */
+const canConfirmCardOrderSync = computed(
+  () => editForm.value.pay_status === '已缴' && !editForm.value.applied_to_member,
+)
+
 /** 确保当前工单绑定的卡包在下拉选项中（含已下架/未开启，避免 el-select 只显示 id） */
 function ensureEditTemplateOptionVisible() {
   const cur = editForm.value.membership_template_id
@@ -690,17 +696,54 @@ async function tryOpenOrderFromRouteQuery() {
   if (row) openEditModal(row)
 }
 
+/** 会员信息副行：与会员档案一致，只展示昵称，去掉「微信」前缀 */
+function memberWechatLineText(wechatRaw) {
+  const s = String(wechatRaw ?? '').trim()
+  if (!s) return ''
+  return s.replace(/^微信\s*/u, '').trim()
+}
+
+/** 工单上的会员展示：姓名 · 昵称（手机），不含「微信」字样 */
+function cardOrderMemberFieldText(name, wechat, phone) {
+  const n = String(name || '').trim() || '—'
+  const w = memberWechatLineText(wechat)
+  const p = String(phone || '').trim()
+  const head = w ? `${n} · ${w}` : n
+  return p ? `${head}（${p}）` : head
+}
+
+/** MessageBox 文案转义（dangerouslyUseHTMLString 用） */
+function escapeMessageBoxHtml(text) {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
 const deletingId = ref(0)
 
 async function deleteCardOrder(row) {
   if (!row || !row.id) return
   const phone = (row.member_phone || '').trim()
-  const label = `#${row.id} ${phone ? phone : '会员'}`
+  const name = (row.member_name || '').trim() || '—'
+  const label = `#${row.id} · ${name} · ${phone || '—'}`
+  const deleteDetail =
+    '删除后不可恢复。若工单已缴或已同步入账，系统可能拒绝删除（以提示为准）。'
   try {
     await ElMessageBox.confirm(
-      `${label}\n\n删除后不可恢复。若工单已缴或已同步入账，系统可能拒绝删除（以提示为准）。`,
+      `<p class="okfood-message-box__subject">${escapeMessageBoxHtml(label)}</p><p class="okfood-message-box__detail">${escapeMessageBoxHtml(deleteDetail)}</p>`,
       '确定删除该开卡工单？',
-      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
+      {
+        customClass: 'okfood-message-box okfood-message-box--delete',
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'okfood-message-box__confirm--danger',
+        cancelButtonClass: 'okfood-message-box__cancel',
+        distinguishCancelAndClose: true,
+        autofocus: 'cancel',
+        dangerouslyUseHTMLString: true,
+      },
     )
   } catch {
     return
@@ -826,50 +869,64 @@ onUnmounted(() => {
 <template>
  <section class="tab-content animate-up card-orders-page card-orders-view-fill">
     <div class="table-container table-container--card-orders-fill">
-      <div class="table-header table-header--members table-header--couriers-row">
-        <div class="search-box search-box--flex">
-          <Search :size="18" />
-          <el-input v-model="searchQuery" clearable placeholder="搜索手机、姓名或微信昵称…" />
-        </div>
-        <div class="card-orders-filter-label card-orders-filter-el card-orders-created-range">
-          <span class="card-orders-filter-el-text">创建</span>
-          <el-date-picker
-            v-model="createdDateRange"
-            type="daterange"
-            value-format="YYYY-MM-DD"
-            format="YYYY-MM-DD"
-            range-separator="至"
-            start-placeholder="开始"
-            end-placeholder="结束"
-            clearable
-            teleported
-            class="card-orders-created-picker"
-          />
-        </div>
-        <div class="card-orders-filters">
-         <div class="card-orders-filter-label card-orders-filter-label--check">
-            <el-checkbox v-model="includeHistory" class="card-orders-history-el-checkbox">
-              查看历史开卡记录
-            </el-checkbox>
-            <span v-if="!includeHistory" class="card-orders-pending-hint">当前：待审批工单</span>
+      <div class="table-header table-header--members">
+        <div class="members-toolbar-row">
+          <!-- 左侧：搜索、创建日期、缴费、历史记录，间距 10px；新建按钮靠右 -->
+          <div class="card-orders-toolbar-cluster">
+            <div class="members-toolbar-search members-search-wrap">
+              <el-input
+                v-model="searchQuery"
+                clearable
+                placeholder="手机/姓名/昵称…"
+                class="members-search-el-input"
+              >
+                <template #prefix>
+                  <Search :size="14" class="members-search-el-icon" aria-hidden="true" />
+                </template>
+              </el-input>
+            </div>
+            <div class="card-orders-filter-label card-orders-filter-el card-orders-created-range">
+              <span class="card-orders-filter-el-text">创建</span>
+              <el-date-picker
+                v-model="createdDateRange"
+                type="daterange"
+                value-format="YYYY-MM-DD"
+                format="YYYY-MM-DD"
+                range-separator="至"
+                start-placeholder="开始"
+                end-placeholder="结束"
+                clearable
+                teleported
+                class="card-orders-created-picker"
+              />
+            </div>
+            <div class="card-orders-filter-label card-orders-filter-el">
+              <span class="card-orders-filter-el-text">缴费</span>
+              <el-select v-model="payFilter" placeholder="全部" clearable class="card-orders-pay-select">
+                <el-option label="全部" value="" />
+                <el-option label="未缴" value="未缴" />
+                <el-option label="已缴" value="已缴" />
+              </el-select>
+            </div>
+            <div class="card-orders-filter-label card-orders-filter-label--check">
+              <el-checkbox v-model="includeHistory" class="card-orders-history-el-checkbox">
+                查看历史开卡记录
+              </el-checkbox>
+              <span v-if="!includeHistory" class="card-orders-pending-hint">当前：待审批工单</span>
+            </div>
           </div>
-          <div class="card-orders-filter-label card-orders-filter-el">
-            <span class="card-orders-filter-el-text">缴费</span>
-            <el-select v-model="payFilter" placeholder="全部" clearable class="card-orders-pay-select">
-              <el-option label="全部" value="" />
-              <el-option label="未缴" value="未缴" />
-              <el-option label="已缴" value="已缴" />
-            </el-select>
+          <div class="members-toolbar-trailing card-orders-filters">
+            <el-button type="primary" size="small" class="card-orders-create-btn" @click="openCreateModal">
+              <Plus :size="14" aria-hidden="true" />
+              新建开卡工单
+            </el-button>
           </div>
-          <button type="button" class="btn-primary btn-primary--sm" @click="openCreateModal">
-            <Plus :size="18" /> 新建开卡工单
-          </button>
         </div>
       </div>
 
       <div ref="cardOrdersTableHostRef" class="members-table-host">
         <AdminTable
-          class="card-orders-table"
+          class="card-orders-table members-el-table-body-scroll"
           variant="members"
           size="small"
           :data="list"
@@ -888,13 +945,9 @@ onUnmounted(() => {
         </el-table-column>
        <el-table-column label="会员信息" min-width="120" class-name="td-co-name">
           <template #default="{ row }">
-            <div class="co-member-info">
-              <div class="co-member-name" :title="row.member_name || ''">{{
-                row.member_name || '—'
-              }}</div>
-              <div v-if="(row.member_wechat_name || '').trim()" class="t-sub t-wechat">
-                微信 {{ (row.member_wechat_name || '').trim() }}
-              </div>
+            <div class="t-name">{{ row.member_name || '—' }}</div>
+            <div v-if="memberWechatLineText(row.member_wechat_name)" class="t-sub t-wechat">
+              {{ memberWechatLineText(row.member_wechat_name) }}
             </div>
           </template>
         </el-table-column>
@@ -929,7 +982,13 @@ onUnmounted(() => {
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="电话" width="118" min-width="108" class-name="td-mono co-nowrap td-co-phone-col">
+        <el-table-column
+          label="电话"
+          width="132"
+          min-width="132"
+          class-name="td-mono co-nowrap td-phone td-co-phone-col"
+          label-class-name="td-phone"
+        >
           <template #default="{ row }">
             <span :title="(row.member_phone || '').trim() || undefined">{{
               (row.member_phone || '').trim() || '—'
@@ -990,7 +1049,9 @@ class="member-pill"
        <el-table-column label="操作" align="right" width="152" fixed="right" class-name="td-co-actions">
           <template #default="{ row }">
             <span class="co-row-actions">
-              <button type="button" class="btn-sm" @click="openEditModal(row)">更新</button>
+              <el-button type="primary" size="small" class="co-row-btn" @click="openEditModal(row)">
+                更新
+              </el-button>
               <button
                 type="button"
                 class="btn-sm danger"
@@ -1004,7 +1065,7 @@ class="member-pill"
         </el-table-column>
         </AdminTable>
       </div>
-      <div v-if="adminAccessToken" class="members-pagination">
+      <div v-if="adminAccessToken" class="members-pagination members-pagination--float">
         <button type="button" class="btn-sm" :disabled="page <= 1" @click="goPrev">上一页</button>
         <span class="members-page-meta">第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 条</span>
         <button type="button" class="btn-sm" :disabled="!canGoNext" @click="goNext">
@@ -1013,38 +1074,28 @@ class="member-pill"
       </div>
     </div>
 
-    <Teleport to="body">
-      <div
-        v-if="showCreateModal"
-        class="modal-overlay"
-        v-esc-close="() => (showCreateModal = false)"
-        @click.self="showCreateModal = false"
-      >
-        <div class="modal-card modal-card--card-order-create">
-        <div class="modal-header">
-          <div class="header-info">
-            <h3>新建开卡工单</h3>
-            <p>MEMBER CARD ORDER</p>
-          </div>
-          <button type="button" class="close-btn" @click="showCreateModal = false">
-            <X :size="20" />
-          </button>
-        </div>
+    <OkfoodAdminDialogShell
+      v-model:open="showCreateModal"
+      title="新建开卡工单"
+      subtitle="MEMBER CARD ORDER"
+      dlg-class="okfood-admin-dlg--card-order-create"
+      :close-disabled="createSubmitting"
+    >
         <form
-          class="modal-form modal-form--card-order modal-form--co-create-split"
+          id="co-create-form"
+          class="co-create-fit"
           @submit.prevent="submitCreate"
         >
           <!-- 左侧：会员资料 + 卡项费用 + 激活 -->
-          <div class="co-create-split-main">
-            <div class="co-create-panel">
-              <div class="co-create-panel-title co-create-panel-title--with-icon">
-                <UserRound class="co-create-panel-title-icon" :size="18" :stroke-width="2.25" aria-hidden="true" />
+          <div class="co-create-fit__main">
+            <div class="co-create-fit__panel">
+              <div class="co-create-fit__title">
+                <UserRound :size="14" :stroke-width="2.25" aria-hidden="true" />
                 会员基本资料
               </div>
               <div class="form-group open-mode-group">
                 <label>办理类型</label>
-                <el-radio-group v-model="createForm.open_mode" class="co-open-mode-radio-group">
-                  <div class="open-mode-options">
+                <el-radio-group v-model="createForm.open_mode" class="co-create-fit__chips">
                     <el-radio value="new_member" border class="co-open-mode-radio-item">
                       <div class="co-open-mode-radio-body">
                         <span class="radio-tile-title">新会员开卡</span>
@@ -1057,7 +1108,6 @@ class="member-pill"
                         <span class="radio-tile-sub">仅核对手机号；入账叠加剩余与总次数</span>
                       </div>
                     </el-radio>
-                  </div>
                 </el-radio-group>
               </div>
               <div
@@ -1134,10 +1184,10 @@ class="member-pill"
               </div>
             </div>
 
-            <div class="co-create-panel">
-              <div class="co-create-panel-title co-create-panel-title--with-icon">
-                <CreditCard class="co-create-panel-title-icon" :size="18" :stroke-width="2.25" aria-hidden="true" />
-                卡项与费用配置
+            <div class="co-create-fit__panel">
+              <div class="co-create-fit__title">
+                <CreditCard :size="14" :stroke-width="2.25" aria-hidden="true" />
+                卡项与费用
               </div>
               <div class="co-create-fees-row3">
                 <div class="form-group">
@@ -1190,14 +1240,14 @@ class="member-pill"
                 </div>
                 <div class="form-group co-create-remark-field">
                   <label>备注</label>
-                  <el-input v-model="createForm.remark" type="textarea" :rows="2" maxlength="500" placeholder="可选" />
+                  <el-input v-model="createForm.remark" maxlength="500" placeholder="可选" clearable />
                 </div>
               </div>
             </div>
 
-            <div class="co-create-panel co-create-panel--activation">
-              <div class="co-create-panel-title co-create-panel-title--with-icon">
-                <Zap class="co-create-panel-title-icon" :size="18" :stroke-width="2.25" aria-hidden="true" />
+            <div class="co-create-fit__panel">
+              <div class="co-create-fit__title">
+                <Zap :size="14" :stroke-width="2.25" aria-hidden="true" />
                 激活设置
               </div>
               <div class="co-create-activation-row">
@@ -1211,13 +1261,11 @@ class="member-pill"
                   description="该会员仍有剩余次数且未暂停，续卡仅叠加次数，不会修改档案中的起送日。"
                 />
                 <template v-else>
-                  <el-radio-group v-model="createForm.delivery_start_mode" class="co-activation-radio-group">
-                    <div
-                      class="open-mode-options open-mode-options--activation"
-                      :class="{
-                        'open-mode-options--activation-3': renewActivationOptionCount === 3,
-                      }"
-                    >
+                  <el-radio-group
+                    v-model="createForm.delivery_start_mode"
+                    class="co-create-fit__chips"
+                    :class="{ 'co-create-fit__chips--3': renewActivationOptionCount === 3 }"
+                  >
                       <el-radio
                         v-if="createForm.open_mode === 'renew' && renewCanKeepSchedule"
                         value="keep_schedule"
@@ -1245,7 +1293,6 @@ class="member-pill"
                           <span class="radio-tile-sub">已缴仍入次数与套餐；暂不写入起送日，可日后在「更新」中补日期</span>
                         </div>
                       </el-radio>
-                    </div>
                   </el-radio-group>
                   <div
                     v-if="createForm.delivery_start_mode === 'date'"
@@ -1274,31 +1321,26 @@ class="member-pill"
             </div>
           </div>
 
-          <!-- 右侧：履约方式（配送 / 自提）+ 提交 -->
-          <div class="co-create-split-side">
-            <div class="co-create-panel co-create-panel--side">
-              <div class="co-create-panel-head-row">
-                <div class="co-create-panel-title co-create-panel-title--plain co-create-panel-title--with-icon">
-                  <Store
-                    v-if="createForm.store_pickup"
-                    class="co-create-panel-title-icon"
-                    :size="18"
-                    :stroke-width="2.25"
-                    aria-hidden="true"
-                  />
-                  <MapPin
-                    v-else
-                    class="co-create-panel-title-icon"
-                    :size="18"
-                    :stroke-width="2.25"
-                    aria-hidden="true"
-                  />
-                  {{ createForm.store_pickup ? '门店自提' : '配送位置' }}
-                </div>
+          <div class="co-create-fit__side">
+            <div class="co-create-fit__panel co-create-fit__panel--side">
+              <div class="co-create-fit__title">
+                <Store
+                  v-if="createForm.store_pickup"
+                  :size="14"
+                  :stroke-width="2.25"
+                  aria-hidden="true"
+                />
+                <MapPin
+                  v-else
+                  :size="14"
+                  :stroke-width="2.25"
+                  aria-hidden="true"
+                />
+                {{ createForm.store_pickup ? '门店自提' : '配送位置' }}
               </div>
               <div class="form-group">
                 <label>履约方式</label>
-                <el-radio-group v-model="createForm.store_pickup" class="co-fulfillment-radio-group">
+                <el-radio-group v-model="createForm.store_pickup" class="co-create-fit__chips">
                   <el-radio :value="false" border>配送到家</el-radio>
                   <el-radio :value="true" border>门店自提</el-radio>
                 </el-radio-group>
@@ -1324,8 +1366,6 @@ class="member-pill"
                   <label>地图详细地址（只读）</label>
                   <el-input
                     v-model="createForm.map_location_text"
-                    type="textarea"
-                    :rows="2"
                     maxlength="500"
                     readonly
                     placeholder="选取地图坐标后自动填充"
@@ -1337,43 +1377,38 @@ class="member-pill"
                 </div>
               </template>
             </div>
-            <div class="co-create-side-footer">
-              <!-- <p class="modal-hint co-create-submit-hint">
-                缴费状态为「已缴」时，创建后将自动同步剩余次数（周卡 +{{ planDefaultTotal('周卡') }} / 月卡
-                +{{ planDefaultTotal('月卡') }} / 次卡 +{{ planDefaultTotal('次卡') }}）与套餐；仅在选择「指定起送日」时同时写入起送日并激活。选「未缴」则不入账。
-              </p> -->
-              <button type="submit" class="btn-submit-order co-create-submit-wide" :disabled="createSubmitting">
-                {{ createSubmitting ? '提交中…' : '创建开卡工单' }}
-              </button>
-            </div>
           </div>
         </form>
-        </div>
-      </div>
-    </Teleport>
+      <template #footer>
+        <p class="co-create-fit__note">已缴会写入次数；只有「指定起送日」才同时写入日期。</p>
+        <el-button
+          round
+          type="primary"
+          native-type="submit"
+          form="co-create-form"
+          :loading="createSubmitting"
+          :disabled="createSubmitting"
+        >
+          {{ createSubmitting ? '提交中…' : '创建开卡工单' }}
+        </el-button>
+      </template>
+    </OkfoodAdminDialogShell>
 
-    <Teleport to="body">
-      <div
-        v-if="showEditModal"
-        class="modal-overlay"
-        v-esc-close="() => (showEditModal = false)"
-        @click.self="showEditModal = false"
-      >
-        <div class="modal-card">
-        <div class="modal-header">
-          <div class="header-info">
-            <h3>更新工单 · #{{ editForm.id }}</h3>
-            <p>UPDATE CARD ORDER</p>
-          </div>
-          <button type="button" class="close-btn" @click="showEditModal = false">
-            <X :size="20" />
-          </button>
-        </div>
-        <form class="modal-form modal-form--card-order" @submit.prevent="() => submitEdit(false)">
+    <OkfoodAdminDialogShell
+      v-model:open="showEditModal"
+      :title="`更新工单 · #${editForm.id || ''}`"
+      subtitle="UPDATE CARD ORDER"
+      size="wide"
+      fit-content
+      dlg-class="okfood-admin-dlg--card-order-edit"
+      :close-disabled="editSubmitting"
+    >
+      <div class="co-edit-grid">
+        <div class="co-edit-col">
           <div class="form-group">
             <label>会员</label>
             <el-input
-              :model-value="`${editForm.member_name || '—'}${editForm.member_wechat_name ? ' / 微信 ' + editForm.member_wechat_name : ''}（${editForm.member_phone}）`"
+              :model-value="cardOrderMemberFieldText(editForm.member_name, editForm.member_wechat_name, editForm.member_phone)"
               type="text"
               disabled
               class="input-disabled"
@@ -1403,62 +1438,57 @@ class="member-pill"
                 :label="templateOptionLabel(t)"
               />
             </el-select>
-            <p v-if="editForm.applied_to_member" class="modal-hint">
-              已入账工单不可改卡包模版；餐段为
+            <p v-if="editForm.applied_to_member" class="co-edit-hint">
+              已入账不可改模版。餐段为
               <strong>{{ mealPeriodsLabel(editForm.meal_periods) }}</strong>
               <template v-if="editForm.template_product_label">
                 （{{ editForm.template_product_label }}）
               </template>
-              。若档案有误请在「会员管理」中修正。
+              。档案有误请在「会员管理」中修正。
             </p>
             <p
               v-else-if="!membershipTemplatesLoading && !membershipTemplates.length"
-              class="modal-hint modal-hint--warn"
+              class="co-edit-hint co-edit-hint--warn"
             >
               暂无已开启的卡包模版，请先在「会员卡管理」中创建并开启。
             </p>
-            <p v-else-if="selectedEditTemplate" class="modal-hint">
+            <p v-else-if="selectedEditTemplate" class="co-edit-hint">
               所选餐段：<strong>{{ mealPeriodsLabel(selectedEditTemplate.meal_periods) }}</strong>
               · 同步入账 {{ mealsGrantCreditLabel(selectedEditTemplate) }}
             </p>
           </div>
-          <div class="form-group open-mode-group">
+          <div class="form-group">
             <label>开始配送日</label>
-            <el-radio-group v-model="editForm.delivery_start_mode" class="co-open-mode-radio-group">
-              <div class="open-mode-options">
-                <el-radio value="date" border class="co-open-mode-radio-item">
-                  <div class="co-open-mode-radio-body">
-                    <span class="radio-tile-title">指定起送日</span>
-                    <span class="radio-tile-sub">写入或修改具体业务日</span>
-                  </div>
-                </el-radio>
-                <el-radio value="defer" border class="co-open-mode-radio-item">
-                  <div class="co-open-mode-radio-body">
-                    <span class="radio-tile-title">暂不开卡</span>
-                    <span class="radio-tile-sub">工单上不保存起送日；已入账的会员起送日以档案为准</span>
-                  </div>
-                </el-radio>
-              </div>
+            <el-radio-group v-model="editForm.delivery_start_mode" class="co-edit-start">
+              <el-radio value="date" border>
+                <span class="co-edit-chip-title">指定起送日</span>
+                <span class="co-edit-chip-sub">写入或修改业务日</span>
+              </el-radio>
+              <el-radio value="defer" border>
+                <span class="co-edit-chip-title">暂不开卡</span>
+                <span class="co-edit-chip-sub">工单不存起送日</span>
+              </el-radio>
             </el-radio-group>
-            <div
+            <el-date-picker
               v-if="editForm.delivery_start_mode === 'date'"
-              class="card-order-delivery-block"
-            >
-              <el-date-picker
-                v-model="editForm.delivery_start_date"
-                type="date"
-                value-format="YYYY-MM-DD"
-                format="YYYY-MM-DD"
-                placeholder="选择开始配送日"
-                class="card-order-date-picker"
-                :clearable="false"
-              />
-              <p v-if="editForm.applied_to_member" class="modal-hint card-order-delivery-hint">
-                已同步的工单修改起送日会同步更新会员档案。
-              </p>
-            </div>
+              v-model="editForm.delivery_start_date"
+              type="date"
+              value-format="YYYY-MM-DD"
+              format="YYYY-MM-DD"
+              placeholder="选择开始配送日"
+              class="co-edit-date"
+              :clearable="false"
+            />
+            <p v-if="editForm.delivery_start_mode === 'date' && editForm.applied_to_member" class="co-edit-hint">
+              已同步的工单改起送日，会同步会员档案。
+            </p>
+            <p v-else-if="editForm.delivery_start_mode === 'defer'" class="co-edit-hint">
+              工单上不保存起送日；已入账的会员起送日以档案为准。
+            </p>
           </div>
-          <div class="form-row">
+        </div>
+        <div class="co-edit-col">
+          <div class="co-edit-pair">
             <div class="form-group">
               <label>缴费渠道</label>
               <el-select v-model="editForm.pay_channel" class="co-edit-row-select">
@@ -1469,66 +1499,82 @@ class="member-pill"
             </div>
             <div class="form-group">
               <label>缴费状态</label>
-              <el-select v-model="editForm.pay_status" class="co-edit-row-select" :disabled="editForm.applied_to_member">
+              <el-select
+                v-model="editForm.pay_status"
+                class="co-edit-row-select"
+                :class="{ 'co-edit-pay--paid': editForm.pay_status === '已缴' }"
+                :disabled="editForm.applied_to_member"
+              >
                 <el-option label="未缴" value="未缴" />
                 <el-option label="已缴" value="已缴" />
               </el-select>
             </div>
           </div>
-          <p v-if="editForm.applied_to_member" class="modal-hint">已入账的工单不可改回「未缴」。</p>
+          <p v-if="editForm.applied_to_member" class="co-edit-hint">已入账的工单不可改回「未缴」。</p>
           <div class="form-group">
             <label>实收金额</label>
             <el-input v-model="editForm.amount_yuan" placeholder="留空可清空金额" clearable />
           </div>
           <div class="form-group">
             <label>备注</label>
-            <el-input v-model="editForm.remark" type="textarea" :rows="3" maxlength="500" />
+            <el-input v-model="editForm.remark" type="textarea" :rows="2" maxlength="500" />
           </div>
-          <p v-if="!editForm.applied_to_member" class="modal-hint">
-            「保存」仅更新工单字段；「确认入账」在核对起送日与缴费信息后将次数写入会员并激活。
-          </p>
           <p
             v-if="
               !editForm.applied_to_member &&
               editForm.created_by === 'miniprogram' &&
               editForm.pay_status === '已缴'
             "
-            class="modal-hint card-order-pending-approval-hint"
+            class="co-edit-hint co-edit-hint--warn"
           >
-            小程序自助购卡：须手动「确认入账」后才会写入会员次数并参与配送派单。
+            小程序自助购卡：须手动确认入账后才写入次数并参与派单。
           </p>
-          <div class="card-order-edit-actions">
-            <button type="submit" class="btn-submit-order" :disabled="editSubmitting">
-              {{ editSubmitting ? '保存中…' : '保存' }}
-            </button>
-            <button
-              v-if="editForm.pay_status === '已缴' && !editForm.applied_to_member"
-              type="button"
-              class="btn-submit-order btn-submit-order--sync"
-              :disabled="editSubmitting"
-              @click.prevent="submitEdit(true)"
-            >
-              {{ editSubmitting ? '处理中…' : '确认入账' }}
-            </button>
-          </div>
-        </form>
+          <p v-else-if="!editForm.applied_to_member" class="co-edit-hint">
+            「保存」只更新工单；「确认入账」核对起送日与缴费后写入会员次数并激活。
+          </p>
         </div>
       </div>
-    </Teleport>
+      <template #footer>
+        <el-button round :disabled="editSubmitting" @click="showEditModal = false">取消</el-button>
+        <el-button
+          round
+          :type="canConfirmCardOrderSync ? 'default' : 'primary'"
+          :loading="editSubmitting"
+          :disabled="editSubmitting"
+          @click="submitEdit(false)"
+        >
+          保存
+        </el-button>
+        <el-button
+          v-if="canConfirmCardOrderSync"
+          round
+          type="primary"
+          :loading="editSubmitting"
+          :disabled="editSubmitting"
+          @click="submitEdit(true)"
+        >
+          确认入账
+        </el-button>
+      </template>
+    </OkfoodAdminDialogShell>
   </section>
 </template>
 
 <style scoped>
-.search-box--flex {
-  flex: 1;
-  min-width: 220px;
-  max-width: 420px;
+/* 搜索 + 创建日期：组内间距 10px（图 1 黄框） */
+.card-orders-toolbar-cluster {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 0 0 auto;
 }
+
 .card-orders-filters {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 10px;
+  flex-wrap: nowrap;
 }
 .card-orders-filter-label {
   display: inline-flex;
@@ -2018,26 +2064,6 @@ class="member-pill"
   padding: 0.8rem;
 }
 /* 开卡工单列表：表头/行高沿用 admin-table--members；备注/创建列允许换行展示全文 */
-.co-member-info {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.co-member-name {
-  display: block;
-  font-weight: 900;
-  color: #1e293b;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  max-width: 100%;
-}
-
 .co-plan-tag {
   flex-shrink: 0;
   margin-left: 0;
@@ -2172,28 +2198,207 @@ class="member-pill"
 .card-orders-filter-el {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .card-orders-filter-el-text {
-  font-size: 13px;
-  color: var(--text-muted, #64748b);
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
 }
-.card-orders-pay-select {
-  width: 120px;
+/* EP 根节点不带本页 scope 属性，选择器必须从页面根穿透 */
+.card-orders-page :deep(.card-orders-pay-select) {
+  width: 108px;
+  --el-component-size: var(--members-toolbar-control-h, 32px);
+}
+.card-orders-page :deep(.card-orders-pay-select .el-select__wrapper) {
+  min-height: var(--members-toolbar-control-h, 32px);
+  height: var(--members-toolbar-control-h, 32px);
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
+  font-size: 12px;
+  font-weight: 600;
+}
+.card-orders-page :deep(.card-orders-pay-select .el-select__wrapper.is-focused) {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--el-color-primary) 42%, #e2e8f0) inset,
+    0 0 0 3px color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+}
+.card-orders-page :deep(.card-orders-pay-select .el-select__placeholder),
+.card-orders-page :deep(.card-orders-pay-select .el-select__selected-item) {
+  font-size: 12px;
+  font-weight: 600;
 }
 .card-orders-created-range {
   flex-shrink: 0;
+  gap: 10px;
 }
-.card-orders-created-picker {
+.card-orders-page :deep(.card-orders-created-picker.el-range-editor) {
   width: 240px;
+  max-width: 240px;
+  --el-date-editor-width: 240px;
+  --el-component-size: var(--members-toolbar-control-h, 32px);
+  min-height: var(--members-toolbar-control-h, 32px);
+  height: var(--members-toolbar-control-h, 32px);
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
 }
-.card-orders-created-picker :deep(.el-range-input) {
-  font-size: 13px;
+.card-orders-page :deep(.card-orders-created-picker.el-range-editor.is-active) {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--el-color-primary) 42%, #e2e8f0) inset,
+    0 0 0 3px color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+}
+.card-orders-page :deep(.card-orders-created-picker .el-range-input) {
+  font-size: 12px;
+  font-weight: 600;
+}
+.card-orders-page :deep(.card-orders-created-picker .el-range-separator) {
+  font-size: 12px;
+  padding: 0 4px;
+}
+.card-orders-page :deep(.card-orders-create-btn.el-button) {
+  --el-button-size: var(--members-toolbar-control-h, 32px);
+  height: var(--members-toolbar-control-h, 32px);
+  min-height: var(--members-toolbar-control-h, 32px);
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 999px;
+}
+.card-orders-page :deep(.card-orders-create-btn svg) {
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+/* 更新 / 删除同一外框尺寸，避免主题按钮与旧 btn-sm 高低不一致 */
+.card-orders-page .co-row-actions .btn-sm.danger,
+.card-orders-page :deep(.co-row-actions .co-row-btn.el-button) {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  border-radius: 999px;
 }
 .co-create-fees-select,
 .co-edit-row-select,
 .co-edit-card-kind-select {
   width: 100%;
+}
+
+/* 更新工单：双栏一屏，选项收成一行 */
+.co-edit-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 16px;
+  align-items: start;
+}
+
+.co-edit-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.co-edit-col .form-group {
+  margin-bottom: 0;
+}
+
+.co-edit-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.co-edit-start {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+}
+
+.co-edit-start :deep(.el-radio.is-bordered) {
+  height: auto;
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 10px;
+  align-items: flex-start;
+  white-space: normal;
+}
+
+.co-edit-start :deep(.el-radio__label) {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.25;
+  padding-left: 6px;
+}
+
+.co-edit-chip-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--el-text-color-primary);
+}
+
+.co-edit-chip-sub {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.co-edit-start :deep(.el-radio.is-checked) {
+  border-color: rgba(var(--el-color-primary-rgb, 232, 146, 124), 0.7);
+  background: color-mix(in srgb, var(--el-color-primary) 12%, #fff);
+}
+
+.co-edit-date {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.co-edit-date :deep(.el-input__wrapper) {
+  min-height: 32px;
+  border-radius: 10px;
+}
+
+.co-edit-hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--el-text-color-secondary);
+}
+
+.co-edit-hint--warn {
+  color: #b45309;
+  font-weight: 600;
+}
+
+.co-edit-pay--paid :deep(.el-select__wrapper) {
+  background: rgba(15, 159, 110, 0.1);
+  box-shadow: 0 0 0 1px rgba(15, 159, 110, 0.22) inset;
+}
+
+.co-edit-pay--paid :deep(.el-select__selected-item) {
+  color: #047857;
+  font-weight: 800;
+}
+
+@media (max-width: 720px) {
+  .co-edit-grid,
+  .co-edit-pair,
+  .co-edit-start {
+    grid-template-columns: 1fr;
+  }
 }
 .co-open-mode-radio-group,
 .co-activation-radio-group {
@@ -2239,20 +2444,140 @@ class="member-pill"
   margin: 0;
 }
 
-.card-order-edit-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 0.5rem;
+/* 新建开卡工单：一屏双栏，只收布局 */
+.co-create-fit {
+  display: grid;
+  grid-template-columns: minmax(0, 1.28fr) minmax(240px, 0.82fr);
+  gap: 8px;
+  align-items: start;
 }
 
-.card-order-edit-actions .btn-submit-order {
-  margin-top: 0;
+.co-create-fit__main,
+.co-create-fit__side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.co-create-fit__panel {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  padding: 8px 10px 10px;
+}
+
+.co-create-fit__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.co-create-fit__title svg {
+  color: var(--el-color-primary);
+}
+
+.co-create-fit .form-group {
+  margin-bottom: 8px;
+}
+
+.co-create-fit .form-group:last-child {
+  margin-bottom: 0;
+}
+
+.co-create-fit__chips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
   width: 100%;
 }
 
-.card-order-edit-actions .btn-submit-order--sync {
-  background: #1d4ed8;
-  box-shadow: 0 15px 30px rgba(29, 78, 216, 0.2);
+.co-create-fit__chips--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+
+.co-create-fit__chips :deep(.el-radio.is-bordered) {
+  height: auto;
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 10px;
+  align-items: flex-start;
+  white-space: normal;
+}
+
+.co-create-fit__chips :deep(.el-radio__label) {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.25;
+  white-space: normal;
+  padding-left: 6px;
+}
+
+.co-create-fit__chips :deep(.radio-tile-title) {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.co-create-fit__chips :deep(.radio-tile-sub) {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+
+.co-create-fit__chips :deep(.el-radio.is-checked) {
+  border-color: rgba(var(--el-color-primary-rgb, 232, 146, 124), 0.7);
+  background: color-mix(in srgb, var(--el-color-primary) 12%, #fff);
+}
+
+.co-create-fit .co-create-fees-row3,
+.co-create-fit .co-create-fees-row2,
+.co-create-fit .co-create-member-grid,
+.co-create-fit .co-create-renew-phone-row {
+  gap: 8px;
+}
+
+.co-create-fit .co-create-map-picker-root :deep(.mdmp-map) {
+  height: 148px;
+  min-height: 120px;
+}
+
+.co-create-fit :deep(.card-order-date-picker .el-input__wrapper) {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 10px;
+}
+
+.co-create-fit :deep(.el-alert) {
+  padding: 6px 8px;
+}
+
+.co-create-fit :deep(.el-alert__title),
+.co-create-fit :deep(.el-alert__description) {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.co-create-fit__note {
+  margin: 0 auto 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--el-text-color-secondary);
+}
+
+@media (max-width: 900px) {
+  .co-create-fit,
+  .co-create-fit .co-create-member-grid,
+  .co-create-fit .co-create-fees-row3,
+  .co-create-fit .co-create-fees-row2,
+  .co-create-fit .co-create-renew-phone-row,
+  .co-create-fit__chips,
+  .co-create-fit__chips--3 {
+    grid-template-columns: 1fr;
+  }
+}
+
 </style>
