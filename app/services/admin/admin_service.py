@@ -1714,6 +1714,7 @@ def _weekly_slots_raw(rows: list) -> list[dict]:
             "slot": w.slot,
             "dish_id": d.id,
             "name": d.name,
+            "image_url": d.image_url,
             "is_enabled": d.is_enabled,
             "category_id": d.category_id,
             "meat_category_id": d.meat_category_id,
@@ -2316,7 +2317,10 @@ def dashboard_meal_summary(
     wow_prev_anchor = date.fromordinal(anchor.toordinal() - 7)
     wow_prev_day_after = date.fromordinal(day_after.toordinal() - 7)
     mem_kw = _dashboard_membership_kw(db, store_id=sid)
-    from app.services.admin.menu_day_stock_service import weekly_menu_lunch_day_total_stock
+    from app.services.admin.menu_day_stock_service import (
+        menu_dish_name_and_image,
+        weekly_menu_lunch_day_total_stock,
+    )
 
     # 请求内共享 metrics_cache：先预热锚日/次日午餐大表，再算库存拆解，避免重复扫表
     metrics_cache: dict[date, DeliverySheetDayMetrics] = {}
@@ -2329,6 +2333,24 @@ def dashboard_meal_summary(
     day_after_tomorrow_menu_day_total_stock = weekly_menu_lunch_day_total_stock(
         db, day_after_tomorrow, store_id=sid
     )
+
+    def _menu_dish_fields(menu_date: date, period: str) -> tuple[str | None, str | None]:
+        return menu_dish_name_and_image(db, menu_date, store_id=sid, meal_period=period)
+
+    lunch_today_name, lunch_today_image = _menu_dish_fields(anchor, MealPeriod.LUNCH.value)
+    dinner_today_name, dinner_today_image = _menu_dish_fields(anchor, MealPeriod.DINNER.value)
+    lunch_tomorrow_name, lunch_tomorrow_image = _menu_dish_fields(day_after, MealPeriod.LUNCH.value)
+    dinner_tomorrow_name, dinner_tomorrow_image = _menu_dish_fields(day_after, MealPeriod.DINNER.value)
+    menu_dish_kw = {
+        "today_lunch_dish_name": lunch_today_name,
+        "today_lunch_dish_image_url": lunch_today_image,
+        "today_dinner_dish_name": dinner_today_name,
+        "today_dinner_dish_image_url": dinner_today_image,
+        "tomorrow_lunch_dish_name": lunch_tomorrow_name,
+        "tomorrow_lunch_dish_image_url": lunch_tomorrow_image,
+        "tomorrow_dinner_dish_name": dinner_tomorrow_name,
+        "tomorrow_dinner_dish_image_url": dinner_tomorrow_image,
+    }
     period_stock_kw = _dashboard_meal_period_stock_fields(
         db,
         store_id=sid,
@@ -2399,6 +2421,7 @@ def dashboard_meal_summary(
                 today_menu_day_total_stock=today_menu_day_total_stock,
                 tomorrow_menu_day_total_stock=tomorrow_menu_day_total_stock,
                 day_after_tomorrow_menu_day_total_stock=day_after_tomorrow_menu_day_total_stock,
+                **menu_dish_kw,
                 today_prep_metrics=today_metrics,
                 tomorrow_prep_metrics=tomorrow_metrics,
                 **period_stock_kw,
@@ -2452,6 +2475,7 @@ def dashboard_meal_summary(
         today_menu_day_total_stock=today_menu_day_total_stock,
         tomorrow_menu_day_total_stock=tomorrow_menu_day_total_stock,
         day_after_tomorrow_menu_day_total_stock=day_after_tomorrow_menu_day_total_stock,
+        **menu_dish_kw,
         today_prep_metrics=today_metrics,
         tomorrow_prep_metrics=tomorrow_metrics,
         **period_stock_kw,

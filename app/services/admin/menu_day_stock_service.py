@@ -76,6 +76,25 @@ def scheduled_dish_id_for_calendar_date(
     return int(slot_dish) if slot_dish is not None else None
 
 
+def menu_dish_name_and_image(
+    db: Session, menu_date: date, *, store_id: int, meal_period: str = DEFAULT_MEAL_PERIOD
+) -> tuple[str | None, str | None]:
+    """某日排期菜品的名称与图片。按日排期优先，否则周槽；无排期返回 (None, None)。"""
+    from app.models.menu_dish import MenuDish
+
+    dish_id = scheduled_dish_id_for_calendar_date(
+        db, menu_date, store_id=store_id, meal_period=meal_period
+    )
+    if dish_id is None:
+        return None, None
+    dish = db.get(MenuDish, int(dish_id))
+    if dish is None:
+        return None, None
+    name = (dish.name or "").strip() or None
+    image = (dish.image_url or "").strip() or None
+    return name, image
+
+
 def resolve_dish_for_calendar_date(
     db: Session, menu_date: date, *, store_id: int, meal_period: str = DEFAULT_MEAL_PERIOD
 ) -> MenuDish | None:

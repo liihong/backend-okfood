@@ -896,6 +896,14 @@ class DashboardMealSummaryOut(BaseModel):
         ge=0,
         description="锚定日午餐周菜单槽位「日总份数」(meal_period=lunch)；与 today_dinner_menu_day_total_stock 独立",
     )
+    today_lunch_dish_name: str | None = Field(None, description="锚定日午餐排期菜品名")
+    today_lunch_dish_image_url: str | None = Field(None, description="锚定日午餐排期菜品图")
+    today_dinner_dish_name: str | None = Field(None, description="锚定日晚餐排期菜品名")
+    today_dinner_dish_image_url: str | None = Field(None, description="锚定日晚餐排期菜品图")
+    tomorrow_lunch_dish_name: str | None = Field(None, description="锚定日次日午餐排期菜品名")
+    tomorrow_lunch_dish_image_url: str | None = Field(None, description="锚定日次日午餐排期菜品图")
+    tomorrow_dinner_dish_name: str | None = Field(None, description="锚定日次日晚餐排期菜品名")
+    tomorrow_dinner_dish_image_url: str | None = Field(None, description="锚定日次日晚餐排期菜品图")
     tomorrow_menu_day_total_stock: int | None = Field(
         None,
         ge=0,
