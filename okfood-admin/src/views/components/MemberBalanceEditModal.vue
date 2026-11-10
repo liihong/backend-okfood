@@ -20,8 +20,10 @@ const loading = ref(false)
 let loadSeq = 0
 /** 打开后拉到的最新档案，用于判断是否展示晚餐次数池 */
 const profile = ref(null)
-/** 打开时的每日份数；仅与此不同才提交 */
+/** 打开时的剩余次数与每日份数；仅与此不同才提交，避免把未改字段整单覆盖 */
 const initial = ref({
+  balance: 0,
+  dinner_balance: 0,
   daily_meal_units: 1,
   dinner_daily_meal_units: 1,
 })
@@ -30,6 +32,8 @@ const pendingUnits = ref(null)
 /** 已预约、下一配送日生效的晚餐份数；与午餐预约互不影响 */
 const pendingDinnerUnits = ref(null)
 const form = ref({
+  balance: 0,
+  dinner_balance: 0,
   daily_meal_units: 1,
   dinner_daily_meal_units: 1,
 })
@@ -37,15 +41,6 @@ const form = ref({
 const showDinnerRemain = computed(() => memberShowsDinnerRemain(profile.value || props.member))
 
 const displayMember = computed(() => profile.value || props.member)
-
-/** 剩余次数只读展示（本弹窗仅改每日份数） */
-const remainDisplay = computed(() => {
-  const row = displayMember.value
-  return {
-    lunch: normalizeBalance(row?.balance),
-    dinner: normalizeBalance(row?.dinner_balance),
-  }
-})
 
 function normalizeBalance(v) {
   return Math.max(0, Math.min(999999, Math.floor(Number(v) || 0)))
@@ -67,11 +62,17 @@ function pendingUnitsOrNull(rawPending, currentUnits) {
 function applySnapshot(row, raw) {
   const units = normalizeUnits(row?.daily_meal_units)
   const dinnerUnits = normalizeUnits(row?.dinner_daily_meal_units)
+  const balance = normalizeBalance(row?.balance)
+  const dinnerBalance = normalizeBalance(row?.dinner_balance)
   form.value = {
+    balance,
+    dinner_balance: dinnerBalance,
     daily_meal_units: units,
     dinner_daily_meal_units: dinnerUnits,
   }
   initial.value = {
+    balance,
+    dinner_balance: dinnerBalance,
     daily_meal_units: units,
     dinner_daily_meal_units: dinnerUnits,
   }
@@ -135,20 +136,28 @@ async function submit() {
   const phone = String(row?.phone || '').trim()
   if (!phone || loading.value || saving.value) return
   const unitsVal = normalizeUnits(form.value.daily_meal_units)
+  const balanceVal = normalizeBalance(form.value.balance)
   /** @type {Record<string, unknown>} */
   const payload = { phone }
   if (showDinnerRemain.value) {
-    // 晚餐份数单独提交；午餐份数仍只在 daily_meal_units 变化时提交
+    // 晚餐次数与份数单独提交；午餐字段仍只在自身变化时提交
     const dinnerUnitsVal = normalizeUnits(form.value.dinner_daily_meal_units)
     if (dinnerUnitsVal !== initial.value.dinner_daily_meal_units) {
       payload.dinner_daily_meal_units = dinnerUnitsVal
     }
+    const dinnerBalanceVal = normalizeBalance(form.value.dinner_balance)
+    if (dinnerBalanceVal !== initial.value.dinner_balance) {
+      payload.dinner_balance = dinnerBalanceVal
+    }
   }
   if (unitsVal !== initial.value.daily_meal_units) payload.daily_meal_units = unitsVal
+  if (balanceVal !== initial.value.balance) payload.balance = balanceVal
   if (Object.keys(payload).length === 1) {
-    showToast('未修改每日份数', 'error')
+    showToast('未修改剩余次数或每日份数', 'error')
     return
   }
+  const changedBalance = 'balance' in payload || 'dinner_balance' in payload
+  const changedUnits = 'daily_meal_units' in payload || 'dinner_daily_meal_units' in payload
   saving.value = true
   try {
     await apiJson(
@@ -160,7 +169,13 @@ async function submit() {
       { auth: true },
     )
     open.value = false
-    showToast('每日份数已更新', 'success')
+    const savedMsg =
+      changedBalance && changedUnits
+        ? '剩余次数与每日份数已更新'
+        : changedBalance
+          ? '剩余次数已更新'
+          : '每日份数已更新'
+    showToast(savedMsg, 'success')
     emit('saved')
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
@@ -192,21 +207,27 @@ async function submit() {
       />
     </template>
     <div v-loading="loading">
-      <div class="okfood-balance-remain-tags" role="status" aria-live="polite">
-        <span class="okfood-balance-remain-tag">
-          <span class="okfood-balance-remain-tag__label">{{
-            showDinnerRemain ? '午餐剩余' : '剩余次数'
-          }}</span>
-          <strong class="okfood-balance-remain-tag__value">{{ remainDisplay.lunch }}</strong>
-        </span>
-        <span v-if="showDinnerRemain" class="okfood-balance-remain-tag">
-          <span class="okfood-balance-remain-tag__label">晚餐剩余</span>
-          <strong class="okfood-balance-remain-tag__value">{{ remainDisplay.dinner }}</strong>
-        </span>
+      <div class="form-group">
+        <label for="member-balance-lunch">{{ showDinnerRemain ? '午餐剩余次数' : '剩余次数' }}</label>
+        <el-input-number
+          id="member-balance-lunch"
+          v-model="form.balance"
+          :min="0"
+          :max="999999"
+          :step="1"
+          :precision="0"
+          :disabled="loading || saving"
+          controls-position="right"
+          class="okfood-dlg-input-number"
+        />
+        <p class="okfood-dlg-field-hint balance-hint">
+          保存后立即覆盖该会员当前还能配送的{{ showDinnerRemain ? '午餐' : '' }}次数，差额写入次数流水。
+        </p>
       </div>
       <div class="form-group">
-        <label>{{ showDinnerRemain ? '午餐每配送日份数' : '每配送日份数' }}</label>
+        <label for="member-units-lunch">{{ showDinnerRemain ? '午餐每配送日份数' : '每配送日份数' }}</label>
         <el-input-number
+          id="member-units-lunch"
           v-model="form.daily_meal_units"
           :min="1"
           :max="50"
@@ -225,8 +246,26 @@ async function submit() {
         </p>
       </div>
       <div v-if="showDinnerRemain" class="form-group">
-        <label>晚餐每配送日份数</label>
+        <label for="member-balance-dinner">晚餐剩余次数</label>
         <el-input-number
+          id="member-balance-dinner"
+          v-model="form.dinner_balance"
+          :min="0"
+          :max="999999"
+          :step="1"
+          :precision="0"
+          :disabled="loading || saving"
+          controls-position="right"
+          class="okfood-dlg-input-number"
+        />
+        <p class="okfood-dlg-field-hint balance-hint">
+          保存后立即覆盖该会员当前还能配送的晚餐次数，差额写入晚餐次数流水。
+        </p>
+      </div>
+      <div v-if="showDinnerRemain" class="form-group">
+        <label for="member-units-dinner">晚餐每配送日份数</label>
+        <el-input-number
+          id="member-units-dinner"
           v-model="form.dinner_daily_meal_units"
           :min="1"
           :max="50"

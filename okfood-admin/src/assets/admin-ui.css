@@ -4791,42 +4791,6 @@ html.okfood-admin-shell body {
   line-height: 1.45;
 }
 
-/* 修改次数：午/晚剩余并排标签（只读） */
-.okfood-balance-remain-tags {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 14px;
-}
-
-.okfood-balance-remain-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.25;
-  border: 1px solid color-mix(in srgb, var(--el-color-primary) 28%, transparent);
-  background: color-mix(in srgb, var(--el-color-primary) 10%, #fff);
-  color: var(--el-text-color-primary);
-}
-
-.okfood-balance-remain-tag__label {
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--el-color-primary);
-}
-
-.okfood-balance-remain-tag__value {
-  font-size: 15px;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  color: var(--el-color-primary);
-}
-
 .okfood-admin-dlg__body .okfood-dlg-field-hint,
 .okfood-admin-dlg__body .balance-hint {
   margin: 6px 0 0;
