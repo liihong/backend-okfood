@@ -92,20 +92,34 @@ onMounted(() => {
 </script>
 
 <template>
-  <section v-loading="loading" class="print-settings animate-up">
-    <div v-if="!profiles.length" class="ps-empty">
+  <section v-loading="loading" class="print-settings tab-content animate-up">
+    <header class="ps-page-head">
+      <div class="ps-page-head__copy">
+        <p class="ps-kicker">系统管理</p>
+        <h1 class="ps-title">打印设置</h1>
+        <p class="ps-intro">为配送标签和商城零售标签指定打印机、模板和副本策略。应用后按当前场景出单。</p>
+      </div>
+      <div v-if="profiles.length" class="ps-page-head__actions">
+        <el-button round :loading="printing" :disabled="!currentSetting.profile_id" @click="onTestPrint">
+          测试打印
+        </el-button>
+        <el-button class="ps-apply" type="primary" round size="large" :loading="saving" @click="save">应用</el-button>
+      </div>
+    </header>
+
+    <article v-if="!profiles.length" class="ps-card ps-empty">
       <p>尚未配置打印机，请先在「打印机管理」中添加。</p>
-      <el-button type="primary" @click="router.push({ name: 'system-printers' })">去添加打印机</el-button>
-    </div>
+      <el-button type="primary" round @click="router.push({ name: 'system-printers' })">去添加打印机</el-button>
+    </article>
 
     <template v-else>
-      <el-tabs v-model="activeScene">
+      <el-tabs v-model="activeScene" class="ps-tabs">
         <el-tab-pane label="配送标签" name="delivery_sheet" />
         <el-tab-pane label="商城零售标签" name="store_retail" />
       </el-tabs>
 
       <div class="ps-layout">
-        <div class="ps-preview">
+        <article class="ps-card ps-preview">
           <p class="ps-preview__title">预览说明</p>
           <p class="ps-preview__hint">
             <template v-if="currentSetting.template_key === 'delivery_enjoy_meal'">
@@ -183,9 +197,9 @@ onMounted(() => {
               <div>李女士 ·6633</div>
             </template>
           </div>
-        </div>
+        </article>
 
-        <div class="ps-form">
+        <article class="ps-card ps-form">
           <el-form label-position="top">
             <el-form-item label="使用打印机">
               <el-select
@@ -223,19 +237,9 @@ onMounted(() => {
                 <el-radio value="per_order">按单打印（一单一张）</el-radio>
               </el-radio-group>
             </el-form-item>
-            <div class="ps-form-actions">
-              <el-button type="primary" :loading="saving" @click="save">应用</el-button>
-              <el-button
-                :loading="printing"
-                :disabled="!currentSetting.profile_id"
-                @click="onTestPrint"
-              >
-                测试打印
-              </el-button>
-            </div>
-            <p v-if="!currentSetting.profile_id" class="ps-test-hint">选择打印机后可试打一张测试页</p>
+            <p v-if="!currentSetting.profile_id" class="ps-test-hint">选择打印机后，可在右上角试打一张测试页。</p>
           </el-form>
-        </div>
+        </article>
       </div>
     </template>
   </section>
@@ -243,43 +247,117 @@ onMounted(() => {
 
 <style scoped>
 .print-settings {
-  background: #fff;
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
-  border: 1px solid #e5e7eb;
+  max-width: min(72rem, 100%);
+  color: #1d1f21;
+}
+.ps-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.25rem;
+  margin-bottom: 1rem;
+}
+.ps-page-head__copy {
+  min-width: 0;
+}
+.ps-page-head__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.65rem;
+}
+.ps-kicker {
+  margin: 0 0 0.2rem;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--el-color-primary);
+}
+.ps-title {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+.ps-intro {
+  margin: 0.45rem 0 0;
+  max-width: 46rem;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #5c6670;
+}
+.ps-apply {
+  font-weight: 800;
+}
+.ps-card {
+  padding: 1.05rem 1.15rem 1.15rem;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 14px 36px rgba(25, 45, 55, 0.06);
+  backdrop-filter: saturate(1.15) blur(14px);
+  -webkit-backdrop-filter: saturate(1.15) blur(14px);
 }
 .ps-empty {
   text-align: center;
-  padding: 2rem;
-  color: #6b7280;
+  padding: 2.4rem 1.25rem;
+  color: #5c6670;
+}
+.ps-empty p {
+  margin: 0 0 1rem;
+}
+.ps-tabs {
+  margin-bottom: 0.85rem;
+}
+.ps-tabs :deep(.el-tabs__header) {
+  margin-bottom: 0;
+}
+.ps-tabs :deep(.el-tabs__nav-wrap::after) {
+  height: 1px;
+  background: rgba(15, 23, 42, 0.06);
+}
+.ps-tabs :deep(.el-tabs__item) {
+  font-weight: 700;
 }
 .ps-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 1.5rem;
-  margin-top: 0.5rem;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: start;
 }
-@media (max-width: 768px) {
+@media (max-width: 900px) {
+  .ps-page-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
   .ps-layout {
     grid-template-columns: 1fr;
   }
 }
 .ps-preview__title {
-  font-weight: 700;
-  margin: 0 0 0.5rem;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.45rem;
 }
 .ps-preview__hint {
-  font-size: 0.8rem;
-  color: #6b7280;
-  margin: 0 0 0.75rem;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #5c6670;
+  margin: 0 0 0.85rem;
 }
 .ps-preview__box {
-  border: 2px dashed #d1d5db;
-  border-radius: 8px;
-  padding: 0.75rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  padding: 0.85rem;
   font-size: 0.85rem;
   line-height: 1.55;
   min-height: 140px;
+  background: #fff;
 }
 .ps-preview__box--waybill {
   min-height: auto;
@@ -484,30 +562,57 @@ onMounted(() => {
 .ps-template-list {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 0.5rem;
+  align-items: stretch;
+  gap: 0.55rem;
+  width: 100%;
 }
 .ps-template-item {
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
   height: auto;
+  margin-right: 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(15, 23, 42, 0.05);
   white-space: normal;
 }
+.ps-template-item :deep(.el-radio__label) {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  white-space: normal;
+  line-height: 1.4;
+}
 .ps-template-desc {
-  font-size: 0.75rem;
-  color: #6b7280;
+  font-size: 12px;
+  color: #64748b;
   font-weight: normal;
 }
-.ps-form-actions {
+.ps-form :deep(.el-form-item__label) {
+  font-weight: 700;
+  color: #334155;
+}
+.ps-form :deep(.el-input__wrapper),
+.ps-form :deep(.el-select__wrapper) {
+  min-height: 40px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
+}
+.ps-form :deep(.el-select) {
+  width: 100%;
+}
+.ps-form :deep(.el-radio-group:not(.ps-template-list)) {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
 }
 .ps-test-hint {
-  margin: 0.5rem 0 0;
-  font-size: 0.78rem;
-  color: #9ca3af;
+  margin: 0.15rem 0 0;
+  font-size: 12px;
+  color: #8b949e;
 }
 </style>

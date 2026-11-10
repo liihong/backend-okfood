@@ -1,6 +1,7 @@
 <script setup>
 defineOptions({ name: 'PrinterManageView' })
 import { ref, computed, watch, onMounted } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { Plus } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, adminStoreId, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
@@ -197,7 +198,15 @@ async function onTest(row) {
 }
 
 async function onDelete(row) {
-  if (!window.confirm(`停用打印机「${row.name}」？`)) return
+  try {
+    await ElMessageBox.confirm(`停用打印机「${row.name}」？停用后不再参与打印。`, '停用打印机', {
+      type: 'warning',
+      confirmButtonText: '停用',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
   try {
     await apiJson(
       `/api/admin/store-print/profiles/${row.id}?${storeQuery()}`,
@@ -217,17 +226,28 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="printer-manage animate-up">
-    <div class="pm-card pm-card--tip">
-      <p class="pm-tip">
-        本地标签机需安装
-        <a href="http://www.lodop.net" target="_blank" rel="noopener">C-Lodop</a>
-        与打印机驱动；云打印机须先配置下方开发者凭证，再添加 SN。
-      </p>
-    </div>
+  <section class="printer-manage tab-content animate-up">
+    <header class="pm-page-head">
+      <div class="pm-page-head__copy">
+        <p class="pm-kicker">系统管理</p>
+        <h1 class="pm-title">打印机管理</h1>
+        <p class="pm-intro">
+          本地标签机需安装
+          <a href="http://www.lodop.net" target="_blank" rel="noopener">C-Lodop</a>
+          与打印机驱动。云打印机先保存本租户开发者凭证，再添加机身 SN。
+        </p>
+      </div>
+      <el-button class="pm-add" type="primary" round size="large" @click="openCreate">
+        <Plus :size="16" class="pm-btn-icon" />
+        添加打印机
+      </el-button>
+    </header>
 
-    <div class="pm-card">
-      <h3 class="pm-card__title">云打印开发者凭证（本租户）</h3>
+    <article class="pm-card">
+      <header class="pm-card__head">
+        <span class="pm-card__title">云打印开发者凭证</span>
+        <span class="pm-card__hint">本租户 · 密钥留空不修改</span>
+      </header>
       <el-form label-position="top" class="pm-creds-form">
         <div class="pm-creds-grid">
           <el-form-item label="飞鹅 USER">
@@ -249,49 +269,57 @@ onMounted(() => {
             <el-input v-model="creds.yilian_apikey" type="password" show-password placeholder="留空则不修改" />
           </el-form-item>
         </div>
-        <el-button type="primary" :loading="savingCreds" @click="saveCreds">保存凭证</el-button>
+        <el-button type="primary" round :loading="savingCreds" @click="saveCreds">保存凭证</el-button>
       </el-form>
-    </div>
+    </article>
 
-    <div class="pm-card">
-      <div class="pm-toolbar">
-        <h3 class="pm-card__title">打印机列表</h3>
-        <el-button type="primary" @click="openCreate">
-          <Plus :size="16" class="pm-btn-icon" />
-          添加打印机
-        </el-button>
+    <article class="pm-card">
+      <header class="pm-card__head">
+        <span class="pm-card__title">打印机列表</span>
+        <span class="pm-card__hint">默认机用于未单独指定场景时出单</span>
+      </header>
+      <div class="pm-table-wrap">
+        <el-table v-loading="loading" :data="profiles" empty-text="还没有打印机">
+          <el-table-column prop="name" label="名称" min-width="120" />
+          <el-table-column prop="brand_label" label="品牌" min-width="120" />
+          <el-table-column label="纸张" width="120">
+            <template #default="{ row }">{{ row.paper_width_mm }}×{{ row.paper_height_mm }}mm</template>
+          </el-table-column>
+          <el-table-column prop="cloud_sn" label="SN / 本机名" min-width="140" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.cloud_sn || row.local_printer_name_hint || '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="默认" width="88">
+            <template #default="{ row }">
+              <el-tag v-if="row.is_default" round effect="light">默认</el-tag>
+              <span v-else class="pm-dash">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="200" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button link type="primary" @click="onTest(row)">测试</el-button>
+              <el-button link type="danger" @click="onDelete(row)">停用</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
       </div>
-      <el-table v-loading="loading" :data="profiles" stripe>
-        <el-table-column prop="name" label="名称" min-width="120" />
-        <el-table-column prop="brand_label" label="品牌" min-width="120" />
-        <el-table-column label="纸张" width="100">
-          <template #default="{ row }">{{ row.paper_width_mm }}×{{ row.paper_height_mm }}mm</template>
-        </el-table-column>
-        <el-table-column prop="cloud_sn" label="SN/本机名" min-width="120" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ row.cloud_sn || row.local_printer_name_hint || '—' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="默认" width="72">
-          <template #default="{ row }">{{ row.is_default ? '是' : '' }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button link type="primary" @click="onTest(row)">测试</el-button>
-            <el-button link type="danger" @click="onDelete(row)">停用</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+    </article>
 
-    <el-dialog v-model="dialogOpen" :title="editId ? '编辑打印机' : '添加打印机'" width="520px" destroy-on-close>
+    <el-dialog
+      v-model="dialogOpen"
+      :title="editId ? '编辑打印机' : '添加打印机'"
+      width="min(92vw, 560px)"
+      destroy-on-close
+      class="pm-dialog"
+    >
       <el-form label-position="top">
         <el-form-item label="打印机名称" required>
           <el-input v-model="form.name" maxlength="64" />
         </el-form-item>
         <el-form-item label="打印机型号">
-          <el-radio-group v-model="form.brand">
+          <el-radio-group v-model="form.brand" class="pm-brand-group">
             <el-radio v-for="b in PRINT_BRANDS" :key="b.value" :value="b.value">{{ b.label }}</el-radio>
           </el-radio-group>
         </el-form-item>
@@ -315,14 +343,14 @@ onMounted(() => {
             >
               <el-option v-for="p in localPrinters" :key="p" :label="p" :value="p" />
             </el-select>
-            <el-button :loading="loadingPrinters" @click="refreshLocalPrinters">刷新</el-button>
+            <el-button round :loading="loadingPrinters" @click="refreshLocalPrinters">刷新</el-button>
           </div>
           <p class="pm-paper-tip">
             「打印机名称」仅为后台备注；此处必须与 Windows 中显示的驱动名称完全一致，不能填型号简称（如 QR-488）。
           </p>
         </el-form-item>
         <el-form-item label="纸张规格">
-          <el-select v-model="form.paper_preset" @change="onPresetChange">
+          <el-select v-model="form.paper_preset" class="pm-select" @change="onPresetChange">
             <el-option v-for="p in PAPER_PRESETS" :key="p.value" :label="p.label" :value="p.value" />
           </el-select>
           <p v-if="form.brand === 'local_label'" class="pm-paper-tip">
@@ -337,13 +365,13 @@ onMounted(() => {
             <el-input-number v-model="form.paper_height_mm" :min="15" :max="300" />
           </el-form-item>
         </div>
-        <el-form-item label="设为默认">
+        <el-form-item label="设为默认" class="pm-switch-item">
           <el-switch v-model="form.is_default" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogOpen = false">取消</el-button>
-        <el-button type="primary" @click="saveProfile">保存</el-button>
+        <el-button round @click="dialogOpen = false">取消</el-button>
+        <el-button type="primary" round @click="saveProfile">保存</el-button>
       </template>
     </el-dialog>
   </section>
@@ -353,45 +381,96 @@ onMounted(() => {
 .printer-manage {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.9rem;
+  max-width: min(72rem, 100%);
+  color: #1d1f21;
 }
-.pm-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
-  border: 1px solid #e5e7eb;
+.pm-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.25rem;
 }
-.pm-card--tip {
-  background: #f0fdf4;
-  border-color: #bbf7d0;
+.pm-page-head__copy {
+  min-width: 0;
 }
-.pm-tip {
+.pm-kicker {
+  margin: 0 0 0.2rem;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--el-color-primary);
+}
+.pm-title {
   margin: 0;
-  font-size: 0.875rem;
-  color: #166534;
+  font-size: 1.65rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
 }
-.pm-card__title {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
+.pm-intro {
+  margin: 0.45rem 0 0;
+  max-width: 46rem;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #5c6670;
+}
+.pm-intro a {
+  color: var(--el-color-primary);
   font-weight: 700;
 }
-.pm-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-}
-.pm-toolbar .pm-card__title {
-  margin: 0;
+.pm-add {
+  flex-shrink: 0;
+  font-weight: 800;
 }
 .pm-btn-icon {
   margin-right: 4px;
-  vertical-align: middle;
+  vertical-align: -2px;
+}
+.pm-card {
+  padding: 1.05rem 1.15rem 1.15rem;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 14px 36px rgba(25, 45, 55, 0.06);
+  backdrop-filter: saturate(1.15) blur(14px);
+  -webkit-backdrop-filter: saturate(1.15) blur(14px);
+}
+.pm-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+.pm-card__title {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.pm-card__hint {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
 }
 .pm-creds-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0 1rem;
+}
+.pm-table-wrap {
+  border-radius: 16px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+.pm-dash {
+  color: #94a3b8;
 }
 .pm-size-row {
   display: flex;
@@ -399,15 +478,87 @@ onMounted(() => {
 }
 .pm-paper-tip {
   margin: 0.35rem 0 0;
-  font-size: 0.75rem;
-  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #64748b;
 }
 .pm-printer-pick {
   display: flex;
   gap: 0.5rem;
   width: 100%;
 }
-.pm-printer-pick__select {
+.pm-printer-pick__select,
+.pm-select {
   flex: 1;
+  width: 100%;
+}
+.pm-brand-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+}
+.pm-switch-item :deep(.el-form-item__content) {
+  line-height: 1;
+}
+.printer-manage :deep(.el-form-item__label) {
+  font-weight: 700;
+  color: #334155;
+}
+.printer-manage :deep(.el-input__wrapper),
+.printer-manage :deep(.el-select__wrapper) {
+  min-height: 40px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
+}
+.printer-manage :deep(.el-input__wrapper.is-focus),
+.printer-manage :deep(.el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+@media (max-width: 900px) {
+  .pm-page-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pm-creds-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+
+<style>
+.pm-dialog.el-dialog {
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(25, 45, 55, 0.12);
+}
+.pm-dialog .el-dialog__header {
+  margin-right: 0;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+.pm-dialog .el-dialog__title {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.pm-dialog .el-dialog__body {
+  padding: 16px 20px 4px;
+}
+.pm-dialog .el-dialog__footer {
+  padding: 12px 20px 16px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+.pm-dialog .el-input__wrapper,
+.pm-dialog .el-select__wrapper {
+  min-height: 40px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
+}
+.pm-dialog .el-form-item__label {
+  font-weight: 700;
+  color: #334155;
 }
 </style>

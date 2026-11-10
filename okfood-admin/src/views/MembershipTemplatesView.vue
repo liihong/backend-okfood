@@ -1,6 +1,7 @@
 <script setup>
 defineOptions({ name: 'MembershipTemplatesView' })
 import { ref, computed, onMounted } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { Camera, Info, Plus, X } from 'lucide-vue-next'
 
 /** 多行文本字数展示（与参考稿右下角计数一致） */
@@ -392,8 +393,15 @@ async function toggleActive(row) {
 }
 
 async function removeRow(row) {
-  const ok = window.confirm(`确定删除「${row.name}」？`)
-  if (!ok) return
+  try {
+    await ElMessageBox.confirm(`确定删除「${row.name}」？`, '删除确认', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
   try {
     await apiJson(`/api/admin/catalog/membership-templates/${row.id}`, { method: 'DELETE' }, { auth: true })
     showToast('已删除')
@@ -410,15 +418,18 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="mcard-page tab-content animate-up page-content-shell">
-    <div class="page-content-title-row page-content-title-row--actions-only">
-      <div class="page-content-title-actions">
-        <button type="button" class="mcard-btn-add" @click="openCreate">
-          <Plus :size="16" stroke-width="3" aria-hidden="true" />
-          新增会员卡模板
-        </button>
+  <div class="mcard-page tab-content animate-up">
+    <header class="mcard-page-head">
+      <div class="mcard-page-head__copy">
+        <p class="mcard-kicker">系统管理</p>
+        <h1 class="mcard-title">会员卡设置</h1>
+        <p class="mcard-intro">种类、标价和卡片图用于小程序展示。自助微信支付开卡仍以门店配置里的周卡、月卡金额为准。</p>
       </div>
-    </div>
+      <el-button class="mcard-add" type="primary" round size="large" @click="openCreate">
+        <Plus :size="16" stroke-width="3" aria-hidden="true" />
+        新增会员卡模板
+      </el-button>
+    </header>
 
     <!-- 提示横条 -->
     <div v-show="bannerVisible" class="mcard-alert">
@@ -847,52 +858,85 @@ onMounted(() => {
 
 <style scoped>
 .mcard-page {
-  --mcard-primary: #0d5c46;
-  --mcard-primary-hover: #0a4635;
-  --mcard-border: #eaedf1;
-  --mcard-muted: #64748b;
+  --mcard-primary: var(--el-color-primary);
+  --mcard-primary-hover: var(--el-color-primary-dark-2);
+  --mcard-border: rgba(15, 23, 42, 0.06);
+  --mcard-muted: #5c6670;
   --mcard-danger-bg: #fef2f2;
   --mcard-danger-text: #ef4444;
-  --mcard-info-bg: #f0fdf4;
-  --mcard-info-text: #166534;
-  --mcard-info-border: #bbf7d0;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 0.9rem;
+  max-width: min(80rem, 100%);
+  color: #1d1f21;
+}
+
+.mcard-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.25rem;
+}
+
+.mcard-page-head__copy {
+  min-width: 0;
+}
+
+.mcard-kicker {
+  margin: 0 0 0.2rem;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--el-color-primary);
+}
+
+.mcard-title {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.mcard-intro {
+  margin: 0.45rem 0 0;
+  max-width: 46rem;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #5c6670;
+}
+
+.mcard-add {
+  flex-shrink: 0;
+  font-weight: 800;
+}
+
+.mcard-add :deep(span) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .mcard-btn-add {
-  background: var(--mcard-primary);
-  color: #fff;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 16px;
-  font-size: 13px;
-  font-weight: 800;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 8px 16px -4px rgba(13, 92, 70, 0.25);
-  transition: all 0.3s ease;
-}
-
-.mcard-btn-add:hover {
-  background: var(--mcard-primary-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 12px 20px -4px rgba(13, 92, 70, 0.35);
+  display: none;
 }
 
 /* 提示横条 */
 .mcard-alert {
-  background: var(--mcard-info-bg);
-  border: 1px solid var(--mcard-info-border);
-  border-radius: 20px;
-  padding: 16px 24px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 22px;
+  padding: 0.9rem 1.1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 14px 36px rgba(25, 45, 55, 0.06);
+  backdrop-filter: saturate(1.15) blur(14px);
+  -webkit-backdrop-filter: saturate(1.15) blur(14px);
 }
 
 .mcard-alert-content {
@@ -901,7 +945,7 @@ onMounted(() => {
   gap: 12px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--mcard-info-text);
+  color: #5c6670;
   line-height: 1.5;
 }
 
@@ -931,11 +975,15 @@ onMounted(() => {
 
 /* 主表格外壳 */
 .mcard-main-card {
-  background: #fff;
-  border-radius: 32px;
-  border: 1px solid var(--mcard-border);
-  padding: 24px;
-  box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.05);
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  padding: 1.05rem 1.15rem 1.15rem;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 14px 36px rgba(25, 45, 55, 0.06);
+  backdrop-filter: saturate(1.15) blur(14px);
+  -webkit-backdrop-filter: saturate(1.15) blur(14px);
   overflow: hidden;
   min-height: 120px;
 }
@@ -943,6 +991,9 @@ onMounted(() => {
 .mcard-table-scroll {
   width: 100%;
   overflow-x: auto;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
 }
 
 .mcard-table {
@@ -1305,10 +1356,11 @@ onMounted(() => {
 
 /* ── 新建/编辑模版弹窗：紧凑尺寸 ── */
 .mcard-template-dialog :deep(.el-dialog) {
-  border-radius: 16px;
+  border-radius: 22px;
   overflow: hidden;
-  border: 1px solid var(--mcard-border);
-  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(25, 45, 55, 0.12);
   max-width: calc(100vw - 32px);
   max-height: 86vh;
   display: flex;
@@ -1613,21 +1665,24 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 10px 16px;
-  border-top: 1px solid var(--mcard-border);
-  background: #f8fafc;
-  border-bottom-left-radius: 16px;
-  border-bottom-right-radius: 16px;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .mcard-btn-modal {
-  padding: 7px 16px;
-  border-radius: 8px;
-  font-size: 12px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 13px;
   font-weight: 800;
   cursor: pointer;
   border: none;
-  transition: all 0.2s;
+}
+
+.mcard-btn-modal--submit {
+  background: var(--mcard-primary);
+  color: #fff;
+  box-shadow: 0 8px 16px color-mix(in srgb, var(--el-color-primary) 28%, transparent);
 }
 
 .mcard-btn-modal--cancel {
@@ -1641,12 +1696,6 @@ onMounted(() => {
   color: #0f172a;
 }
 
-.mcard-btn-modal--submit {
-  background: var(--mcard-primary);
-  color: #fff;
-  box-shadow: 0 8px 16px -4px rgba(13, 92, 70, 0.25);
-}
-
 .mcard-btn-modal--submit:hover:not(:disabled) {
   background: var(--mcard-primary-hover);
 }
@@ -1656,7 +1705,11 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
+  .mcard-page-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
   .mcard-form-grid,
   .mcard-pair {
     grid-template-columns: 1fr;

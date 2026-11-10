@@ -77,56 +77,60 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="tab-content animate-up">
-    <div class="table-container">
-      <div class="table-header">
-        <h2 class="table-title">抖音商品设置</h2>
-        <el-button type="primary" @click="openCreate">
-          <Plus :size="16" style="margin-right: 4px" />
-          新建映射
-        </el-button>
+  <section class="mkt-page tab-content animate-up">
+    <header class="mkt-page-head">
+      <div class="mkt-page-head__copy">
+        <p class="mkt-kicker">小程序营销</p>
+        <h1 class="mkt-title">抖音商品设置</h1>
+        <p class="mkt-intro">
+          把抖音来客商品 ID 和本地权益关联。用户验券成功后，按映射发放周卡、月卡、卡包、优惠券，或生成商城订单。
+        </p>
       </div>
+      <el-button type="primary" round size="large" @click="openCreate">
+        <Plus :size="16" />
+        新建映射
+      </el-button>
+    </header>
 
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="将抖音来客商品 ID 与本地权益（周卡/月卡/卡包/优惠券/商城商品）关联；用户验券成功后按映射发放或生成商城订单。"
-        class="dy-alert"
-      />
-
-      <el-table v-loading="loading" :data="list" stripe class="admin-table" empty-text="暂无映射，请点击「新建映射」">
-        <el-table-column prop="display_name" label="名称" min-width="120" />
-        <el-table-column prop="douyin_product_id" label="product_id" min-width="100" show-overflow-tooltip />
-        <el-table-column prop="douyin_sku_id" label="sku_id" min-width="100" show-overflow-tooltip />
-        <el-table-column prop="douyin_product_out_id" label="product_out_id" min-width="110" show-overflow-tooltip />
-        <el-table-column label="映射类型" width="100">
-          <template #default="{ row }">
-            <el-tag size="small" type="info">{{ GRANT_LABEL[row.grant_type] || row.grant_type }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="关联目标" width="100">
-          <template #default="{ row }">
-            {{ row.target_id != null ? `#${row.target_id}` : '—' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="88">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.is_active ? 'success' : 'info'">
-              {{ row.is_active ? '启用' : '停用' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button link type="primary" @click="toggleActive(row)">
-              {{ row.is_active ? '停用' : '启用' }}
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+    <article class="mkt-card">
+      <header class="mkt-card__head">
+        <span class="mkt-card__title">商品映射</span>
+        <span class="mkt-card__hint">停用后不再按该商品发奖</span>
+      </header>
+      <div class="mkt-table-wrap">
+        <el-table v-loading="loading" :data="list" class="admin-table" empty-text="暂无映射，请点击右上角新建">
+          <el-table-column prop="display_name" label="名称" min-width="120" />
+          <el-table-column prop="douyin_product_id" label="product_id" min-width="100" show-overflow-tooltip />
+          <el-table-column prop="douyin_sku_id" label="sku_id" min-width="100" show-overflow-tooltip />
+          <el-table-column prop="douyin_product_out_id" label="product_out_id" min-width="110" show-overflow-tooltip />
+          <el-table-column label="映射类型" width="110">
+            <template #default="{ row }">
+              <el-tag round effect="light">{{ GRANT_LABEL[row.grant_type] || row.grant_type }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="关联目标" width="100">
+            <template #default="{ row }">
+              {{ row.target_id != null ? `#${row.target_id}` : '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="96">
+            <template #default="{ row }">
+              <el-tag round effect="light" :type="row.is_active ? 'success' : 'info'">
+                {{ row.is_active ? '启用' : '停用' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="140" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button link type="primary" @click="toggleActive(row)">
+                {{ row.is_active ? '停用' : '启用' }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </article>
 
     <DouyinProductMappingFormModal
       v-model:visible="dialogVisible"
@@ -137,8 +141,3 @@ onMounted(() => {
   </section>
 </template>
 
-<style scoped>
-.dy-alert {
-  margin-bottom: 16px;
-}
-</style>

@@ -2,6 +2,7 @@
 defineOptions({ name: 'MemberCouponGrantsView' })
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessageBox } from 'element-plus'
 import { Plus, Search } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
@@ -38,6 +39,14 @@ const STATUS_LABEL = {
   used: '已使用',
   revoked: '已作废',
   expired: '已过期',
+}
+
+const STATUS_TAG = {
+  available: 'warning',
+  locked: 'info',
+  used: 'success',
+  revoked: 'info',
+  expired: 'info',
 }
 
 async function loadList({ includeSummary = true } = {}) {
@@ -176,7 +185,15 @@ function onGrantSaved() {
 
 async function revokeRow(row) {
   if (row.status !== 'available') return
-  if (!window.confirm(`确定作废优惠券 #${row.id}？`)) return
+  try {
+    await ElMessageBox.confirm(`确定作废优惠券 #${row.id}？作废后会员不能再使用。`, '作废确认', {
+      type: 'warning',
+      confirmButtonText: '作废',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
   try {
     await apiJson(
       `/api/admin/marketing/member-coupons/${row.id}/revoke?store_id=${storeId.value}`,
@@ -199,92 +216,93 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="tab-content animate-up">
-    <div class="table-container">
-      <div class="table-header">
-        <h2 class="table-title">优惠券发放记录</h2>
-        <div v-if="summary.used_count != null" class="coupon-grants-summary" aria-label="优惠券使用统计">
-          <span class="coupon-grants-summary__item">
-            已使用 <strong class="coupon-grants-summary__value coupon-grants-summary__value--used">{{ summary.used_count }}</strong> 张
-          </span>
-          <span class="coupon-grants-summary__sep">·</span>
-          <span class="coupon-grants-summary__item">
-            未使用 <strong class="coupon-grants-summary__value coupon-grants-summary__value--unused">{{ summary.unused_count }}</strong> 张
-          </span>
-        </div>
+  <section class="mkt-page tab-content animate-up">
+    <header class="mkt-page-head">
+      <div class="mkt-page-head__copy">
+        <p class="mkt-kicker">小程序营销</p>
+        <h1 class="mkt-title">优惠券发放</h1>
+        <p class="mkt-intro">按手机号查询会员已领券，或直接发放。待使用的券可以作废，已使用和已过期的记录只作查询。</p>
       </div>
+      <div v-if="summary.used_count != null" class="mkt-stats" aria-label="优惠券使用统计">
+        <span class="mkt-stat mkt-stat--used">已使用 <strong>{{ summary.used_count }}</strong> 张</span>
+        <span class="mkt-stat mkt-stat--unused">未使用 <strong>{{ summary.unused_count }}</strong> 张</span>
+      </div>
+    </header>
 
-      <div class="coupon-grants-toolbar">
-        <el-form :inline="true" class="filter-form" @submit.prevent="onSearch">
+    <article class="mkt-card">
+      <div class="mkt-toolbar">
+        <el-form :inline="true" @submit.prevent="onSearch">
           <el-form-item label="手机号">
             <el-input
               v-model="filters.member_phone"
               placeholder="会员手机号"
               clearable
               maxlength="20"
-              style="width: 160px"
+              style="width: 180px"
             />
           </el-form-item>
           <el-form-item>
-            <el-button type="primary" :loading="loading" @click="onSearch">
-              <Search :size="16" style="margin-right: 4px" />
+            <el-button type="primary" round :loading="loading" @click="onSearch">
+              <Search :size="16" />
               查询
             </el-button>
-            <el-button @click="onReset">重置</el-button>
+            <el-button round @click="onReset">重置</el-button>
           </el-form-item>
         </el-form>
-        <button type="button" class="btn-primary btn-primary--sm" @click="openGrantModal">
-          <Plus :size="16" /> 发放优惠券
-        </button>
+        <el-button type="primary" round @click="openGrantModal">
+          <Plus :size="16" />
+          发放优惠券
+        </el-button>
       </div>
 
-      <el-table
-        v-loading="loading"
-        :data="list"
-        stripe
-        class="admin-table"
-        empty-text="暂无发放记录"
-      >
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="template_name" label="券种" min-width="120" />
-        <el-table-column label="会员" min-width="140">
-          <template #default="{ row }">
-            {{ row.member_name || '—' }} / {{ row.member_phone || row.member_id }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="discount_yuan" label="面额" width="80" />
-        <el-table-column label="状态" width="90">
-          <template #default="{ row }">{{ STATUS_LABEL[row.status] || row.status }}</template>
-        </el-table-column>
-        <el-table-column prop="expires_at" label="过期时间" min-width="160" />
-        <el-table-column prop="issued_by" label="发放人" width="100" />
-        <el-table-column label="操作" width="90" fixed="right">
-          <template #default="{ row }">
-            <button
-              v-if="row.status === 'available'"
-              type="button"
-              class="btn-link"
-              @click="revokeRow(row)"
-            >
-              作废
-            </button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-if="adminAccessToken" class="coupon-grants-pagination">
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="pageSize"
-          :total="total"
-          :page-sizes="pageSizeOptions"
-          :disabled="loading"
-          layout="total, sizes, prev, pager, next, jumper"
-          background
-          @current-change="onPageChange"
-          @size-change="onPageSizeChange"
-        />
+      <div class="mkt-table-wrap">
+        <el-table v-loading="loading" :data="list" class="admin-table" empty-text="暂无发放记录">
+          <el-table-column prop="id" label="ID" width="70" />
+          <el-table-column prop="template_name" label="券种" min-width="120" />
+          <el-table-column label="会员" min-width="160">
+            <template #default="{ row }">
+              {{ row.member_name || '—' }} / {{ row.member_phone || row.member_id }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="discount_yuan" label="面额" width="80" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag round effect="light" :type="STATUS_TAG[row.status] || 'info'">
+                {{ STATUS_LABEL[row.status] || row.status }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="expires_at" label="过期时间" min-width="160" />
+          <el-table-column
+            prop="issued_by"
+            label="发放人"
+            min-width="140"
+            show-overflow-tooltip
+            class-name="mkt-cell-nowrap"
+          />
+          <el-table-column label="操作" width="90" fixed="right">
+            <template #default="{ row }">
+              <el-button v-if="row.status === 'available'" link type="danger" @click="revokeRow(row)">
+                作废
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div v-if="adminAccessToken" class="mkt-pager">
+          <el-pagination
+            v-model:current-page="page"
+            v-model:page-size="pageSize"
+            :total="total"
+            :page-sizes="pageSizeOptions"
+            :disabled="loading"
+            layout="total, sizes, prev, pager, next, jumper"
+            background
+            @current-change="onPageChange"
+            @size-change="onPageSizeChange"
+          />
+        </div>
       </div>
-    </div>
+    </article>
     <GrantCouponModal
       v-model:visible="grantVisible"
       :store-id="storeId"
@@ -296,56 +314,3 @@ onMounted(async () => {
     />
   </section>
 </template>
-
-<style scoped>
-.table-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-.coupon-grants-summary {
-  font-size: 14px;
-  color: #64748b;
-}
-.coupon-grants-summary__item strong {
-  font-weight: 700;
-}
-.coupon-grants-summary__value--used {
-  color: #16a34a;
-}
-.coupon-grants-summary__value--unused {
-  color: #d97706;
-}
-.coupon-grants-summary__sep {
-  margin: 0 8px;
-  color: #cbd5e1;
-}
-.coupon-grants-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-.filter-form {
-  margin-bottom: 0;
-  flex: 1;
-}
-.coupon-grants-pagination {
-  display: flex;
-  justify-content: flex-end;
-  padding: 1.25rem 2rem;
-  border-top: 1px solid #f8fafc;
-  background: #fafafa;
-}
-.btn-link {
-  background: none;
-  border: none;
-  color: #dc2626;
-  cursor: pointer;
-  font-size: 13px;
-}
-</style>

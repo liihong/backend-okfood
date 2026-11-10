@@ -76,44 +76,56 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="tab-content animate-up">
-    <div class="table-container">
-      <div class="table-header">
-        <h2 class="table-title">优惠券券种</h2>
-        <button type="button" class="btn-primary" @click="openCreate">
-          <Plus :size="18" /> 新建券种
-        </button>
+  <section class="mkt-page tab-content animate-up">
+    <header class="mkt-page-head">
+      <div class="mkt-page-head__copy">
+        <p class="mkt-kicker">小程序营销</p>
+        <h1 class="mkt-title">优惠券管理</h1>
+        <p class="mkt-intro">配置小程序代金券券种、面额、门槛和适用范围。下架后不再新发，已发出的券仍按原规则使用。</p>
       </div>
-      <p v-if="loading" class="hint">加载中…</p>
-      <el-table v-else :data="list" stripe class="admin-table">
-        <el-table-column prop="name" label="名称" min-width="140" />
-        <el-table-column label="业务线" width="120">
-          <template #default="{ row }">{{ BIZ_LABEL[row.biz_type] || row.biz_type }}</template>
-        </el-table-column>
-        <el-table-column prop="discount_yuan" label="面额(元)" width="90" />
-        <el-table-column prop="min_order_yuan" label="门槛(元)" width="90" />
-        <el-table-column label="已发/上限" width="100">
-          <template #default="{ row }">
-            {{ row.grants_issued }} / {{ row.max_grants != null ? row.max_grants : '∞' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="80">
-          <template #default="{ row }">
-            <span :class="row.is_active ? 'pill pill--ok' : 'pill pill--muted'">
-              {{ row.is_active ? '上架' : '下架' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
-          <template #default="{ row }">
-            <button type="button" class="btn-link" @click="openEdit(row)">编辑</button>
-            <button type="button" class="btn-link" @click="toggleActive(row)">
-              {{ row.is_active ? '下架' : '上架' }}
-            </button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+      <el-button type="primary" round size="large" @click="openCreate">
+        <Plus :size="16" />
+        新建券种
+      </el-button>
+    </header>
+
+    <article class="mkt-card">
+      <header class="mkt-card__head">
+        <span class="mkt-card__title">券种列表</span>
+        <span class="mkt-card__hint">已发数量达到上限后停止发放</span>
+      </header>
+      <div class="mkt-table-wrap">
+        <el-table v-loading="loading" :data="list" class="admin-table" empty-text="暂无券种">
+          <el-table-column prop="name" label="名称" min-width="140" />
+          <el-table-column label="业务线" width="140">
+            <template #default="{ row }">{{ BIZ_LABEL[row.biz_type] || row.biz_type }}</template>
+          </el-table-column>
+          <el-table-column prop="discount_yuan" label="面额(元)" width="100" />
+          <el-table-column prop="min_order_yuan" label="门槛(元)" width="100" />
+          <el-table-column label="已发/上限" width="110">
+            <template #default="{ row }">
+              {{ row.grants_issued }} / {{ row.max_grants != null ? row.max_grants : '∞' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="96">
+            <template #default="{ row }">
+              <el-tag round effect="light" :type="row.is_active ? 'success' : 'info'">
+                {{ row.is_active ? '上架' : '下架' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="140" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button link type="primary" @click="toggleActive(row)">
+                {{ row.is_active ? '下架' : '上架' }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </article>
+
     <CouponTemplateFormModal
       v-model:visible="dialogVisible"
       :store-id="storeId"
@@ -122,31 +134,3 @@ onMounted(() => {
     />
   </section>
 </template>
-
-<style scoped>
-.hint {
-  padding: 24px;
-  color: var(--admin-muted, #64748b);
-}
-.pill {
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 999px;
-}
-.pill--ok {
-  background: #dcfce7;
-  color: #166534;
-}
-.pill--muted {
-  background: #f1f5f9;
-  color: #64748b;
-}
-.btn-link {
-  background: none;
-  border: none;
-  color: var(--admin-primary, #0d9488);
-  cursor: pointer;
-  margin-right: 8px;
-  font-size: 13px;
-}
-</style>

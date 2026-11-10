@@ -267,25 +267,34 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="gift-coupons-page tab-content animate-up page-content-shell">
-    <el-card shadow="never" class="table-card">
-      <template #header>
-        <div class="gift-card-head">
-          <span>礼品券活动</span>
-          <el-button type="primary" @click="openCreate">
-            <Plus :size="16" />
-            新建活动
-          </el-button>
-        </div>
-      </template>
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="礼品券跟餐送给后厨看，不进小程序钱包，也不写入会员备注。发放后到配送大表打印「今日礼品券」标签才会核销。"
-        class="gift-alert"
-      />
-      <el-table v-loading="loading" :data="campaigns" stripe empty-text="暂无活动" highlight-current-row @row-click="selectCampaign">
+  <div class="mkt-page tab-content animate-up">
+    <header class="mkt-page-head">
+      <div class="mkt-page-head__copy">
+        <p class="mkt-kicker">小程序营销</p>
+        <h1 class="mkt-title">礼品券管理</h1>
+        <p class="mkt-intro">
+          按开卡入账日圈月卡、季卡发放跟餐礼品券。券给后厨看，不进小程序钱包，也不写入会员备注。配送大表打印「今日礼品券」标签后才会核销。
+        </p>
+      </div>
+      <el-button type="primary" round size="large" @click="openCreate">
+        <Plus :size="16" />
+        新建活动
+      </el-button>
+    </header>
+
+    <article class="mkt-card">
+      <header class="mkt-card__head">
+        <span class="mkt-card__title">活动列表</span>
+        <span class="mkt-card__hint">点击一行查看未核销名单</span>
+      </header>
+      <div class="mkt-table-wrap">
+        <el-table
+          v-loading="loading"
+          :data="campaigns"
+          empty-text="暂无活动"
+          highlight-current-row
+          @row-click="selectCampaign"
+        >
         <el-table-column prop="name" label="名称" min-width="160" />
         <el-table-column prop="sheet_label" label="标签文案" width="110" />
         <el-table-column label="卡型" width="100">
@@ -294,9 +303,13 @@ onMounted(() => {
         <el-table-column label="入账日" min-width="180">
           <template #default="{ row }">{{ row.credited_from }} ~ {{ row.credited_to }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" width="96">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'active' ? 'success' : row.status === 'closed' ? 'info' : 'warning'" size="small">
+            <el-tag
+              round
+              effect="light"
+              :type="row.status === 'active' ? 'success' : row.status === 'closed' ? 'info' : 'warning'"
+            >
               {{ STATUS_CAMP[row.status] || row.status }}
             </el-tag>
           </template>
@@ -315,12 +328,14 @@ onMounted(() => {
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+      </div>
+    </article>
 
-    <el-card v-if="selectedCampaign" shadow="never" class="table-card gift-ent-card">
-      <template #header>
-        <span>资格明细 · {{ selectedCampaign.name }}</span>
-      </template>
+    <article v-if="selectedCampaign" class="mkt-card">
+      <header class="mkt-card__head">
+        <span class="mkt-card__title">资格明细 · {{ selectedCampaign.name }}</span>
+        <span class="mkt-card__hint">未核销的可以作废</span>
+      </header>
       <el-form inline class="gift-ent-filters">
         <el-form-item label="状态">
           <el-select v-model="entStatus" style="width: 120px" @change="entPage = 1; loadEntitlements()">
@@ -334,7 +349,7 @@ onMounted(() => {
           <el-input v-model="entPhone" clearable placeholder="筛选" style="width: 160px" @keyup.enter="entPage = 1; loadEntitlements()" />
         </el-form-item>
         <el-form-item>
-          <el-button @click="entPage = 1; loadEntitlements()">查询</el-button>
+          <el-button round @click="entPage = 1; loadEntitlements()">查询</el-button>
         </el-form-item>
       </el-form>
       <div v-if="selectedCampaign.status === 'active'" class="gift-manual">
@@ -344,38 +359,44 @@ onMounted(() => {
           :rows="2"
           placeholder="手工补发：手机号，逗号或换行分隔"
         />
-        <el-button type="primary" :loading="manualGranting" @click="manualGrant">补发</el-button>
+        <el-button type="primary" round :loading="manualGranting" @click="manualGrant">补发</el-button>
       </div>
-      <el-table v-loading="entLoading" :data="entitlements" stripe empty-text="暂无记录">
-        <el-table-column prop="member_name" label="姓名" min-width="90" />
-        <el-table-column prop="member_phone" label="手机" min-width="120" />
-        <el-table-column label="状态" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 'granted' ? 'warning' : row.status === 'redeemed' ? 'success' : 'info'" size="small">
-              {{ STATUS_ENT[row.status] || row.status }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="granted_at" label="发放时间" min-width="160" />
-        <el-table-column prop="redeemed_delivery_date" label="核销业务日" width="120" />
-        <el-table-column label="操作" width="80" fixed="right">
-          <template #default="{ row }">
-            <el-button v-if="row.status === 'granted'" link type="danger" @click="revokeRow(row)">作废</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div class="gift-pager">
-        <el-pagination
-          v-model:current-page="entPage"
-          v-model:page-size="entPageSize"
-          :total="entTotal"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next"
-          @current-change="loadEntitlements"
-          @size-change="entPage = 1; loadEntitlements()"
-        />
+      <div class="mkt-table-wrap">
+        <el-table v-loading="entLoading" :data="entitlements" empty-text="暂无记录">
+          <el-table-column prop="member_name" label="姓名" min-width="90" />
+          <el-table-column prop="member_phone" label="手机" min-width="120" />
+          <el-table-column label="状态" width="96">
+            <template #default="{ row }">
+              <el-tag
+                round
+                effect="light"
+                :type="row.status === 'granted' ? 'warning' : row.status === 'redeemed' ? 'success' : 'info'"
+              >
+                {{ STATUS_ENT[row.status] || row.status }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="granted_at" label="发放时间" min-width="160" />
+          <el-table-column prop="redeemed_delivery_date" label="核销业务日" width="120" />
+          <el-table-column label="操作" width="80" fixed="right">
+            <template #default="{ row }">
+              <el-button v-if="row.status === 'granted'" link type="danger" @click="revokeRow(row)">作废</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="mkt-pager">
+          <el-pagination
+            v-model:current-page="entPage"
+            v-model:page-size="entPageSize"
+            :total="entTotal"
+            :page-sizes="[10, 20, 50, 100]"
+            layout="total, sizes, prev, pager, next"
+            @current-change="loadEntitlements"
+            @size-change="entPage = 1; loadEntitlements()"
+          />
+        </div>
       </div>
-    </el-card>
+    </article>
 
     <GiftCouponCampaignFormModal
       v-model:visible="formVisible"
@@ -387,8 +408,9 @@ onMounted(() => {
     <el-dialog
       v-model="previewVisible"
       :title="previewCampaign ? `圈人名单 · ${previewCampaign.name}` : '圈人名单'"
-      width="780px"
+      width="min(92vw, 780px)"
       destroy-on-close
+      class="mkt-dialog"
     >
       <p class="gift-preview-hint">
         共 <strong>{{ previewTotal }}</strong> 人。请核对姓名和手机后再发放；未出现在此名单的人不会收到礼品券。
@@ -408,10 +430,11 @@ onMounted(() => {
         <el-table-column prop="credited_on" label="入账日" width="120" />
       </el-table>
       <template #footer>
-        <el-button @click="previewVisible = false">关闭</el-button>
+        <el-button round @click="previewVisible = false">关闭</el-button>
         <el-button
           v-if="previewCampaign && previewCampaign.status !== 'closed'"
           type="primary"
+          round
           :loading="previewGranting"
           :disabled="previewLoading || previewTotal < 1"
           @click="confirmGrantFromPreview"
@@ -424,37 +447,22 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.gift-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.gift-alert {
-  margin-bottom: 12px;
-}
-.gift-ent-card {
-  margin-top: 16px;
-}
 .gift-ent-filters {
-  margin-bottom: 8px;
+  margin-bottom: 0.75rem;
 }
 .gift-manual {
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  margin-bottom: 12px;
+  margin-bottom: 0.85rem;
 }
 .gift-manual .el-textarea {
   flex: 1;
 }
-.gift-pager {
-  margin-top: 12px;
-  display: flex;
-  justify-content: flex-end;
-}
 .gift-preview-hint {
   margin: 0 0 12px;
-  color: var(--admin-muted, #64748b);
+  color: #5c6670;
   font-size: 13px;
+  line-height: 1.5;
 }
 </style>

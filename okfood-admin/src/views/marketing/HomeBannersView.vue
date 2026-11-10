@@ -3,7 +3,7 @@ defineOptions({ name: 'HomeBannersView' })
 import { ref, onMounted, computed } from 'vue'
 import { Plus, Upload } from 'lucide-vue-next'
 import { ElMessageBox } from 'element-plus'
-import { apiJson, apiForm, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
+import { apiJson, apiForm, adminAccessToken, dishImageDisplayUrl, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 
 const storeId = ref(1)
@@ -45,6 +45,42 @@ const emptyForm = () => ({
 })
 
 const form = ref(emptyForm())
+
+const sortedList = computed(() =>
+  [...list.value].sort(
+    (a, b) =>
+      (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) ||
+      (Number(a.id) || 0) - (Number(b.id) || 0),
+  ),
+)
+
+/** 小程序实际会播的顺序：只含上架，排序与列表一致 */
+const activePreview = computed(() => sortedList.value.filter((row) => row.is_active !== false))
+
+function bannerSrc(url) {
+  return dishImageDisplayUrl(url)
+}
+
+function linkTargetText(row) {
+  const type = row?.link_type || 'none'
+  const target = String(row?.link_target || '').trim()
+  if (type === 'none' || !target) return '—'
+  if (type === 'tab') return TAB_OPTIONS.find((item) => item.value === target)?.label || target
+  if (type === 'dish') {
+    const dish = dishes.value.find((item) => String(item.id) === target)
+    return dish?.name || `菜品 #${target}`
+  }
+  if (type === 'member_card') {
+    const card = membershipTemplates.value.find((item) => String(item.id) === target)
+    return card?.name || card?.kind_label || `卡包 #${target}`
+  }
+  return target
+}
+
+/** 切换跳转类型时清掉旧目标，避免菜品 id 被当成外链提交 */
+function onLinkTypeChange() {
+  form.value.link_target = ''
+}
 
 const dishOptions = computed(() =>
   (dishes.value || []).map((d) => ({
@@ -242,76 +278,108 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="tab-content animate-up">
-    <div class="table-container">
-      <div class="table-header">
-        <h2 class="table-title">首页 Banner</h2>
-        <el-button type="primary" @click="openCreate">
-          <Plus :size="16" style="margin-right: 4px" />
-          新建 Banner
-        </el-button>
+  <section class="hb-page tab-content animate-up">
+    <header class="hb-page-head">
+      <div class="hb-page-head__copy">
+        <p class="hb-kicker">小程序营销</p>
+        <h1 class="hb-title">首页 Banner</h1>
+        <p class="hb-intro">
+          配置小程序首页顶部轮播。{{ BANNER_SIZE_HINT }}。重要文案放在画面中心，避免被裁切。数字越小越靠前。
+        </p>
       </div>
+      <el-button class="hb-add" type="primary" round size="large" @click="openCreate">
+        <Plus :size="16" />
+        新建 Banner
+      </el-button>
+    </header>
 
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        :title="`小程序首页顶部轮播图。${BANNER_SIZE_HINT}；重要文案请放在画面中心，避免被裁切。`"
-        class="banner-alert"
-      />
+    <article v-if="activePreview.length" class="hb-card">
+      <header class="hb-card__head">
+        <span class="hb-card__title">小程序轮播顺序</span>
+        <span class="hb-card__hint">{{ activePreview.length }} 张上架 · 点击可编辑</span>
+      </header>
+      <div class="hb-rail">
+        <button
+          v-for="(row, index) in activePreview"
+          :key="row.id"
+          type="button"
+          class="hb-rail__item"
+          @click="openEdit(row)"
+        >
+          <img v-if="bannerSrc(row.image_url)" :src="bannerSrc(row.image_url)" alt="" />
+          <span v-else class="hb-rail__empty">无图</span>
+          <span class="hb-rail__index">{{ index + 1 }}</span>
+          <span class="hb-rail__meta">
+            <strong>{{ row.title || '未命名' }}</strong>
+            <em>{{ LINK_LABEL[row.link_type] || '不跳转' }} · {{ linkTargetText(row) }}</em>
+          </span>
+        </button>
+      </div>
+    </article>
 
-      <el-table
-        v-loading="loading"
-        :data="list"
-        stripe
-        class="admin-table"
-        empty-text="暂无 Banner，请点击「新建 Banner」"
-      >
-        <el-table-column label="图片" width="120">
-          <template #default="{ row }">
-            <img v-if="row.image_url" :src="row.image_url" alt="" class="banner-thumb" />
-            <span v-else class="muted">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="title" label="备注标题" min-width="120" show-overflow-tooltip />
-        <el-table-column label="跳转" width="120">
-          <template #default="{ row }">{{ LINK_LABEL[row.link_type] || row.link_type }}</template>
-        </el-table-column>
-        <el-table-column prop="link_target" label="跳转目标" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="sort_order" label="排序" width="80" align="center" />
-        <el-table-column label="状态" width="90" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.is_active ? 'success' : 'info'">
-              {{ row.is_active ? '上架' : '下架' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button link type="primary" @click="toggleActive(row)">
-              {{ row.is_active ? '下架' : '上架' }}
-            </el-button>
-            <el-button link type="danger" @click="removeBanner(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+    <article class="hb-card">
+      <header class="hb-card__head">
+        <span class="hb-card__title">全部 Banner</span>
+        <span class="hb-card__hint">含已下架</span>
+      </header>
+      <div class="hb-table-wrap">
+        <el-table
+          v-loading="loading"
+          :data="sortedList"
+          class="admin-table"
+          empty-text="暂无 Banner，请点击右上角新建"
+        >
+          <el-table-column label="图片" width="108">
+            <template #default="{ row }">
+              <img v-if="bannerSrc(row.image_url)" :src="bannerSrc(row.image_url)" alt="" class="hb-thumb" />
+              <span v-else class="hb-muted">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="title" label="备注标题" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.title || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="跳转" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span class="hb-link">{{ LINK_LABEL[row.link_type] || row.link_type || '不跳转' }}</span>
+              <span class="hb-link-target">{{ linkTargetText(row) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="sort_order" label="排序" width="80" align="center" />
+          <el-table-column label="状态" width="96" align="center">
+            <template #default="{ row }">
+              <el-tag round effect="light" :type="row.is_active ? 'success' : 'info'">
+                {{ row.is_active ? '上架' : '下架' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="200" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button link type="primary" @click="toggleActive(row)">
+                {{ row.is_active ? '下架' : '上架' }}
+              </el-button>
+              <el-button link type="danger" @click="removeBanner(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </article>
 
     <el-dialog
       v-model="dialogVisible"
       :title="editing ? '编辑 Banner' : '新建 Banner'"
-      width="560px"
+      width="min(92vw, 560px)"
       align-center
       destroy-on-close
+      class="hb-dialog"
     >
-      <el-form label-width="96px" class="banner-form" @submit.prevent="saveBanner">
+      <el-form label-position="top" class="hb-form" @submit.prevent="saveBanner">
         <el-form-item label="备注标题">
           <el-input v-model="form.title" placeholder="仅管理端可见" maxlength="128" clearable />
         </el-form-item>
 
         <el-form-item label="Banner 图" required>
-          <div class="upload-wrap">
+          <div class="hb-upload">
             <el-upload
               :key="photoUploadKey"
               :auto-upload="false"
@@ -320,20 +388,19 @@ onMounted(() => {
               :disabled="photoUploading"
               @change="onPhotoUploadChange"
             >
-              <div v-loading="photoUploading" class="upload-box">
-                <img v-if="form.image_url" :src="form.image_url" alt="" class="upload-preview" />
-                <div v-else class="upload-placeholder">
+              <div v-loading="photoUploading" class="hb-upload__box">
+                <img v-if="bannerSrc(form.image_url)" :src="bannerSrc(form.image_url)" alt="" class="hb-upload__preview" />
+                <div v-else class="hb-upload__placeholder">
                   <Upload :size="28" stroke-width="1.75" />
                   <span>点击上传图片</span>
                 </div>
               </div>
             </el-upload>
-            <p class="upload-tip">{{ BANNER_SIZE_HINT }}</p>
+            <p class="hb-upload__tip">{{ BANNER_SIZE_HINT }}</p>
             <el-button
               v-if="form.image_url"
               link
               type="danger"
-              size="small"
               @click="form.image_url = ''"
             >
               移除图片
@@ -342,7 +409,7 @@ onMounted(() => {
         </el-form-item>
 
         <el-form-item label="跳转类型">
-          <el-select v-model="form.link_type" style="width: 100%">
+          <el-select v-model="form.link_type" style="width: 100%" @change="onLinkTypeChange">
             <el-option value="none" label="不跳转" />
             <el-option value="dish" label="菜品详情" />
             <el-option value="tab" label="小程序 Tab 页" />
@@ -352,12 +419,7 @@ onMounted(() => {
         </el-form-item>
 
         <el-form-item v-if="form.link_type === 'dish'" label="选择菜品">
-          <el-select
-            v-model="form.link_target"
-            filterable
-            placeholder="选择菜品"
-            style="width: 100%"
-          >
+          <el-select v-model="form.link_target" filterable placeholder="选择菜品" style="width: 100%">
             <el-option
               v-for="opt in dishOptions"
               :key="opt.value"
@@ -369,12 +431,7 @@ onMounted(() => {
         </el-form-item>
 
         <el-form-item v-else-if="form.link_type === 'member_card'" label="选择卡包">
-          <el-select
-            v-model="form.link_target"
-            filterable
-            placeholder="选择卡包模版"
-            style="width: 100%"
-          >
+          <el-select v-model="form.link_target" filterable placeholder="选择卡包模版" style="width: 100%">
             <el-option
               v-for="opt in membershipTemplateOptions"
               :key="opt.value"
@@ -386,13 +443,8 @@ onMounted(() => {
         </el-form-item>
 
         <el-form-item v-else-if="form.link_type === 'tab'" label="Tab 页面">
-          <el-select v-model="form.link_target" style="width: 100%">
-            <el-option
-              v-for="opt in TAB_OPTIONS"
-              :key="opt.value"
-              :value="opt.value"
-              :label="opt.label"
-            />
+          <el-select v-model="form.link_target" placeholder="选择页面" style="width: 100%">
+            <el-option v-for="opt in TAB_OPTIONS" :key="opt.value" :value="opt.value" :label="opt.label" />
           </el-select>
         </el-form-item>
 
@@ -400,103 +452,297 @@ onMounted(() => {
           <el-input v-model="form.link_target" placeholder="https://..." clearable />
         </el-form-item>
 
-        <el-form-item label="排序">
-          <el-input-number
-            v-model="form.sort_order"
-            :min="0"
-            :max="9999"
-            controls-position="right"
-          />
-          <span class="field-hint">数字越小越靠前</span>
-        </el-form-item>
-
-        <el-form-item label="上架">
-          <el-switch v-model="form.is_active" active-text="上架" inactive-text="下架" />
-        </el-form-item>
+        <div class="hb-form__row">
+          <el-form-item label="排序">
+            <el-input-number v-model="form.sort_order" :min="0" :max="9999" controls-position="right" />
+            <p class="hb-hint">数字越小越靠前</p>
+          </el-form-item>
+          <el-form-item label="上架">
+            <el-switch v-model="form.is_active" active-text="上架" inactive-text="下架" />
+          </el-form-item>
+        </div>
       </el-form>
 
       <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="saving" @click="saveBanner">保存</el-button>
-        </div>
+        <el-button round @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" round :loading="saving" @click="saveBanner">保存</el-button>
       </template>
     </el-dialog>
   </section>
 </template>
 
 <style scoped>
-.banner-alert {
-  margin-bottom: 16px;
-}
-
-.muted {
-  color: var(--el-text-color-placeholder, #94a3b8);
-}
-
-.banner-thumb {
-  width: 64px;
-  height: 64px;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 1px solid var(--el-border-color, #e2e8f0);
-  display: block;
-}
-
-.upload-wrap {
-  width: 100%;
-}
-
-.upload-box {
-  width: 240px;
-  height: 240px;
-  border: 1px dashed var(--el-border-color, #cbd5e1);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--el-text-color-secondary, #64748b);
-  cursor: pointer;
-  overflow: hidden;
-  background: var(--el-fill-color-blank, #fff);
-  transition: border-color 0.2s;
-}
-
-.upload-box:hover {
-  border-color: var(--el-color-primary, #0d9488);
-}
-
-.upload-placeholder {
+.hb-page {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: 0.9rem;
+  max-width: min(72rem, 100%);
+  color: #1d1f21;
 }
-
-.upload-preview {
+.hb-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.25rem;
+}
+.hb-page-head__copy {
+  min-width: 0;
+}
+.hb-kicker {
+  margin: 0 0 0.2rem;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--el-color-primary);
+}
+.hb-title {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+.hb-intro {
+  margin: 0.45rem 0 0;
+  max-width: 46rem;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #5c6670;
+}
+.hb-add {
+  flex-shrink: 0;
+  font-weight: 800;
+}
+.hb-add :deep(span) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hb-card {
+  padding: 1.05rem 1.15rem 1.15rem;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 14px 36px rgba(25, 45, 55, 0.06);
+  backdrop-filter: saturate(1.15) blur(14px);
+  -webkit-backdrop-filter: saturate(1.15) blur(14px);
+}
+.hb-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+.hb-card__title {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.hb-card__hint {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
+}
+.hb-rail {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+}
+.hb-rail__item {
+  position: relative;
+  flex: 0 0 168px;
+  height: 168px;
+  padding: 0;
+  border: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #f4f6f8;
+  box-shadow: 0 8px 18px rgba(25, 45, 55, 0.08);
+}
+.hb-rail__item img,
+.hb-rail__empty {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
-
-.upload-tip {
+.hb-rail__empty {
+  display: grid;
+  place-items: center;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.hb-rail__index {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(29, 31, 33, 0.72);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 22px;
+}
+.hb-rail__meta {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 28px 10px 8px;
+  background: linear-gradient(180deg, transparent, rgba(15, 23, 42, 0.72));
+  color: #fff;
+  text-align: left;
+}
+.hb-rail__meta strong,
+.hb-rail__meta em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: normal;
+}
+.hb-rail__meta strong {
+  font-size: 13px;
+}
+.hb-rail__meta em {
+  font-size: 11px;
+  opacity: 0.86;
+}
+.hb-table-wrap {
+  border-radius: 16px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+.hb-thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 14px;
+  display: block;
+  background: #f4f6f8;
+}
+.hb-muted {
+  color: #94a3b8;
+}
+.hb-link,
+.hb-link-target {
+  display: block;
+}
+.hb-link {
+  font-weight: 700;
+}
+.hb-link-target {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #64748b;
+}
+.hb-upload__box {
+  width: 220px;
+  height: 220px;
+  border: 1px dashed color-mix(in srgb, var(--el-color-primary) 45%, #e2e8f0);
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  cursor: pointer;
+  overflow: hidden;
+  background: #fff;
+}
+.hb-upload__placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.hb-upload__preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.hb-upload__tip,
+.hb-hint {
   margin: 8px 0 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--el-text-color-secondary, #64748b);
+  color: #64748b;
 }
-
-.field-hint {
-  margin-left: 12px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary, #64748b);
+.hb-form__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
 }
+.hb-form :deep(.el-form-item__label) {
+  font-weight: 700;
+  color: #334155;
+}
+.hb-form :deep(.el-input__wrapper),
+.hb-form :deep(.el-select__wrapper) {
+  min-height: 40px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
+}
+@media (max-width: 900px) {
+  .hb-page-head,
+  .hb-form__row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+</style>
 
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
+<style>
+.hb-dialog.el-dialog {
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(25, 45, 55, 0.12);
+}
+.hb-dialog .el-dialog__header {
+  margin-right: 0;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+.hb-dialog .el-dialog__title {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.hb-dialog .el-dialog__body {
+  padding-top: 16px;
+}
+.hb-dialog .el-dialog__footer {
+  padding: 12px 20px 16px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+.hb-dialog .el-input__wrapper,
+.hb-dialog .el-select__wrapper {
+  min-height: 40px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
+}
+.hb-dialog .el-form-item__label {
+  font-weight: 700;
+  color: #334155;
 }
 </style>

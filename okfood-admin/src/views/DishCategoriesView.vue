@@ -153,72 +153,75 @@ onMounted(fetchCategories)
 </script>
 
 <template>
-  <div class="dish-categories-page tab-content animate-up page-content-shell">
-    <el-alert
-      class="page-alert"
-      type="info"
-      :closable="true"
-      show-icon
-      title="支持二级分类：一级如「肉类」「菜品分类」，二级为具体子类。菜品请归到二级分类；选一级筛选时会包含其下全部菜品。"
-    />
+  <div class="dish-categories-page tab-content animate-up">
+    <header class="dc-page-head">
+      <div class="dc-page-head__copy">
+        <p class="dc-kicker">系统管理</p>
+        <h1 class="dc-title">菜品分类</h1>
+        <p class="dc-intro">
+          支持二级分类：一级如「肉类」，二级为具体子类。菜品请归到二级分类；选一级筛选时会包含其下全部菜品。
+        </p>
+      </div>
+      <el-button class="dc-add" type="primary" round size="large" @click="openCreate()">新建一级分类</el-button>
+    </header>
 
-    <el-card shadow="never" class="table-card">
-      <template #header>
-        <div class="card-header">
-          <span class="card-header__title">菜品分类</span>
-          <el-button type="primary" @click="openCreate()">新建一级分类</el-button>
-        </div>
-      </template>
-
-      <el-table
-        v-loading="loading"
-        :data="categoryTree"
-        style="width: 100%"
-        row-key="id"
-        :tree-props="{ children: 'children' }"
-        default-expand-all
-        table-layout="auto"
-        empty-text="暂无分类，点击右上角新建"
-      >
-        <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip />
-        <el-table-column label="层级" width="72" align="center">
-          <template #default="{ row }">
-            <el-tag :type="row.parent_id == null ? 'primary' : 'info'" size="small" effect="plain">
-              {{ levelLabel(row) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="编码" min-width="130">
-          <template #default="{ row }">
-            <el-tag type="info" size="small" effect="plain">{{ row.code }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="sort_order" label="排序" width="80" align="center" />
-        <el-table-column label="启用" width="80" align="center">
-          <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
-              {{ row.is_active ? '启用' : '停用' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right" align="center">
-          <template #default="{ row }">
-            <el-button v-if="row.parent_id == null" link type="primary" @click="openCreateChild(row)">
-              添加子类
-            </el-button>
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button link type="danger" @click="removeCategory(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+    <article class="dc-card">
+      <header class="dc-card__head">
+        <span class="dc-card__title">分类列表</span>
+        <span class="dc-card__hint">一级可添加子类，编码创建后不可改</span>
+      </header>
+      <div class="dc-table-wrap">
+        <el-table
+          v-loading="loading"
+          :data="categoryTree"
+          style="width: 100%"
+          row-key="id"
+          :tree-props="{ children: 'children' }"
+          default-expand-all
+          table-layout="auto"
+          empty-text="暂无分类，点击右上角新建"
+        >
+          <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip />
+          <el-table-column label="层级" width="88" align="center">
+            <template #default="{ row }">
+              <el-tag :type="row.parent_id == null ? 'primary' : 'info'" round effect="light">
+                {{ levelLabel(row) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="编码" min-width="130">
+            <template #default="{ row }">
+              <span class="dc-code">{{ row.code }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="sort_order" label="排序" width="80" align="center" />
+          <el-table-column label="启用" width="88" align="center">
+            <template #default="{ row }">
+              <el-tag :type="row.is_active ? 'success' : 'info'" round effect="light">
+                {{ row.is_active ? '启用' : '停用' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="220" fixed="right" align="center">
+            <template #default="{ row }">
+              <el-button v-if="row.parent_id == null" link type="primary" @click="openCreateChild(row)">
+                添加子类
+              </el-button>
+              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button link type="danger" @click="removeCategory(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </article>
 
     <el-dialog
       v-model="dialogVisible"
       :title="dialogTitle"
-      width="460px"
+      width="min(92vw, 480px)"
       destroy-on-close
       :close-on-click-modal="false"
+      class="dc-dialog"
       @closed="formRef?.resetFields?.()"
     >
       <el-form
@@ -243,7 +246,7 @@ onMounted(fetchCategories)
               :disabled="editingId != null && p.id === editingId"
             />
           </el-select>
-          <p class="form-hint">仅支持二级；有子类的一级分类不可再挂到其它上级下</p>
+          <p class="dc-hint">仅支持二级；有子类的一级分类不可再挂到其它上级下</p>
         </el-form-item>
 
         <el-form-item v-if="!editingId" label="编码" prop="code">
@@ -255,8 +258,8 @@ onMounted(fetchCategories)
           />
         </el-form-item>
         <el-form-item v-else label="编码">
-          <el-tag type="info" effect="plain">{{ form.code }}</el-tag>
-          <p class="form-hint">编码创建后不可修改</p>
+          <span class="dc-code">{{ form.code }}</span>
+          <p class="dc-hint">编码创建后不可修改</p>
         </el-form-item>
 
         <el-form-item label="名称" prop="name">
@@ -279,8 +282,8 @@ onMounted(fetchCategories)
       </el-form>
 
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveCategory">保存</el-button>
+        <el-button round @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" round :loading="saving" @click="saveCategory">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -290,29 +293,145 @@ onMounted(fetchCategories)
 .dish-categories-page {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.9rem;
+  max-width: min(72rem, 100%);
+  color: #1d1f21;
 }
-.page-alert {
-  margin: 0;
-}
-.table-card :deep(.el-card__header) {
-  padding: 14px 20px;
-}
-.card-header {
+.dc-page-head {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
+  gap: 1.25rem;
 }
-.card-header__title {
+.dc-page-head__copy {
+  min-width: 0;
+}
+.dc-kicker {
+  margin: 0 0 0.2rem;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--el-color-primary);
+}
+.dc-title {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+.dc-intro {
+  margin: 0.45rem 0 0;
+  max-width: 46rem;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #5c6670;
+}
+.dc-add {
+  flex-shrink: 0;
+  font-weight: 800;
+}
+.dc-card {
+  padding: 1.05rem 1.15rem 1.15rem;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 14px 36px rgba(25, 45, 55, 0.06);
+  backdrop-filter: saturate(1.15) blur(14px);
+  -webkit-backdrop-filter: saturate(1.15) blur(14px);
+}
+.dc-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+.dc-card__title {
   font-size: 15px;
-  font-weight: 700;
-  color: #0f172a;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
-.form-hint {
+.dc-card__hint {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
+}
+.dc-table-wrap {
+  border-radius: 16px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+.dc-code {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--el-color-primary) 10%, #fff);
+  color: var(--el-color-primary-dark-2);
+}
+.dc-hint {
   margin: 6px 0 0;
   font-size: 12px;
-  color: #94a3b8;
-  line-height: 1.4;
+  color: #8b949e;
+  line-height: 1.45;
+}
+.dish-categories-page :deep(.el-form-item__label) {
+  font-weight: 700;
+  color: #334155;
+}
+.dish-categories-page :deep(.el-input__wrapper),
+.dish-categories-page :deep(.el-select__wrapper) {
+  min-height: 40px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
+}
+@media (max-width: 900px) {
+  .dc-page-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+</style>
+
+<style>
+.dc-dialog.el-dialog {
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(25, 45, 55, 0.12);
+}
+.dc-dialog .el-dialog__header {
+  margin-right: 0;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+.dc-dialog .el-dialog__title {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.dc-dialog .el-dialog__footer {
+  padding: 12px 20px 16px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+.dc-dialog .el-input__wrapper,
+.dc-dialog .el-select__wrapper {
+  min-height: 40px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
+}
+.dc-dialog .el-form-item__label {
+  font-weight: 700;
+  color: #334155;
 }
 </style>

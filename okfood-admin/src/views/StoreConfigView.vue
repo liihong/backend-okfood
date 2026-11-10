@@ -241,33 +241,52 @@ onMounted(() => {
 
 <template>
   <section class="tab-content animate-up store-config-page">
-    <p class="sc-intro">
-      门店名称、电话、Logo 与位置均在「门店基础信息」中设置。位置请用「<strong>地图选点</strong>」在弹窗内搜索或点选（GCJ-02）；保存后营业概览以门店为中心，骑手端任务按<strong>离该点直线距离</strong>由近到远排序。配送与支付相关参数保存在当前门店配置中，保存后立即生效。
-    </p>
+    <header class="sc-page-head">
+      <div class="sc-page-head__copy">
+        <p class="sc-kicker">系统管理</p>
+        <h1 class="sc-title">门店配置</h1>
+        <p class="sc-intro">
+          名称、电话、Logo 与位置在基础信息里设置。位置用「地图选点」（GCJ-02）。保存后营业概览以门店为中心，骑手任务按离该点直线距离排序。配送与核销参数保存后立即生效。
+        </p>
+      </div>
+      <el-button
+        class="sc-save"
+        type="primary"
+        round
+        size="large"
+        :loading="saving"
+        :disabled="loading"
+        @click="saveConfig"
+      >
+        {{ saving ? '保存中…' : '保存配置' }}
+      </el-button>
+    </header>
 
     <p v-if="loading" class="sc-muted">加载中…</p>
 
     <div v-else class="sc-blocks">
-      <el-card class="sc-el-card" shadow="never">
-        <template #header>
-          <span class="sc-card-title">门店基础信息</span>
-        </template>
-        <div class="sc-field">
-          <label class="sc-label" for="sc-name">门店名称</label>
-          <el-input id="sc-name" v-model="form.store_name" class="sc-input-el" maxlength="128" clearable />
-        </div>
-
-        <div class="sc-field">
-          <label class="sc-label" for="sc-contact-phone">商家电话</label>
-          <el-input
-            id="sc-contact-phone"
-            v-model="form.store_contact_phone"
-            class="sc-input-el"
-            maxlength="20"
-            clearable
-            placeholder="小程序订单详情「联系商家」将直接拨打此号码"
-          />
-          <p class="sc-hint sc-hint--tight">供餐咨询、取消订单等；留空则小程序不展示拨打能力。</p>
+      <article class="sc-card sc-card--identity">
+        <header class="sc-card__head">
+          <span class="sc-card__title">门店基础信息</span>
+          <span class="sc-card__hint">小程序展示与地图中心</span>
+        </header>
+        <div class="sc-pair">
+          <div class="sc-field">
+            <label class="sc-label" for="sc-name">门店名称</label>
+            <el-input id="sc-name" v-model="form.store_name" class="sc-input-el" maxlength="128" clearable />
+          </div>
+          <div class="sc-field">
+            <label class="sc-label" for="sc-contact-phone">商家电话</label>
+            <el-input
+              id="sc-contact-phone"
+              v-model="form.store_contact_phone"
+              class="sc-input-el"
+              maxlength="20"
+              clearable
+              placeholder="小程序订单详情「联系商家」将直接拨打此号码"
+            />
+            <p class="sc-hint sc-hint--tight">供餐咨询、取消订单等；留空则小程序不展示拨打能力。</p>
+          </div>
         </div>
 
         <div class="sc-field">
@@ -284,7 +303,7 @@ onMounted(() => {
               accept="image/*"
               @change="onLogoUploadChange"
             >
-              <el-button type="default" :disabled="logoUploading">{{
+              <el-button round :disabled="logoUploading">{{
                 logoUploading ? '上传中…' : '上传图片'
               }}</el-button>
             </el-upload>
@@ -300,23 +319,24 @@ onMounted(() => {
         <div class="sc-field sc-field--last">
           <span class="sc-label">门店位置</span>
           <p class="sc-hint sc-hint--tight">
-            使用高德地图搜索、点击或拖动标记选点（GCJ-02）。弹窗内可微调经纬度；保存设置仍须点击页面底部「保存」。
+            使用高德地图搜索、点击或拖动标记选点（GCJ-02）。弹窗内可微调经纬度；保存设置仍须点击右上角「保存配置」。
           </p>
           <div class="sc-location-bar">
             <div class="sc-location-summary">
               <span v-if="locationSummaryText" class="sc-coord-line">{{ locationSummaryText }}</span>
               <span v-else class="sc-location-empty">尚未设置坐标</span>
             </div>
-            <el-button type="primary" @click="locationDialogVisible = true">地图选点</el-button>
+            <el-button type="primary" round @click="locationDialogVisible = true">地图选点</el-button>
           </div>
         </div>
-      </el-card>
+      </article>
 
-      <el-card class="sc-el-card" shadow="never">
-        <template #header>
-          <span class="sc-card-title">配送信息管理</span>
-        </template>
-        <div class="sc-field sc-switch-row sc-switch-row--card">
+      <article class="sc-card">
+        <header class="sc-card__head">
+          <span class="sc-card__title">配送信息</span>
+          <span class="sc-card__hint">推单与骑手结算</span>
+        </header>
+        <div class="sc-field sc-switch-row">
           <div class="sc-switch-text">
             <span class="sc-label sc-label--inline">顺丰自动推单</span>
             <p class="sc-hint sc-hint--tight">
@@ -334,7 +354,7 @@ onMounted(() => {
           </div>
           <el-switch v-model="form.sf_merge_same_address_push" size="large" />
         </div>
-        <el-divider class="sc-inner-divider" content-position="left">骑手配送费（元）</el-divider>
+        <p class="sc-section-label">骑手配送费（元）</p>
         <p class="sc-hint sc-hint--card">确认送达时写入骑手待结算：首份基础价 +（份数 − 1）× 每多一份加价。</p>
         <div class="sc-coord-grid">
           <div class="sc-field sc-field--last-in-grid">
@@ -358,12 +378,13 @@ onMounted(() => {
             />
           </div>
         </div>
-      </el-card>
+      </article>
 
-      <el-card class="sc-el-card" shadow="never">
-        <template #header>
-          <span class="sc-card-title">单次点餐 / 零售 · 顺丰与 UU</span>
-        </template>
+      <article class="sc-card">
+        <header class="sc-card__head">
+          <span class="sc-card__title">零售顺丰与 UU</span>
+          <span class="sc-card__hint">单次点餐</span>
+        </header>
         <p class="sc-hint sc-hint--card">
           <strong>零售推顺丰店铺ID</strong>用于订单管理「推送到顺丰」以及配送大表「推送及时单」；开发者 ID、密钥、取件电话/地址仍使用<strong>租户对接</strong>或 .env（与智能配送大表预约/夜间推单使用的「租户顺丰店铺编号」可填不同值，例如
           <code class="sc-code">6284388701377</code>）。
@@ -420,12 +441,13 @@ onMounted(() => {
         <div class="sc-field sc-checkbox-row sc-field--last">
           <el-checkbox v-model="form.uu_clear_app_key">清除已保存的 UU AppKey</el-checkbox>
         </div>
-      </el-card>
+      </article>
 
-      <el-card class="sc-el-card" shadow="never">
-        <template #header>
-          <span class="sc-card-title">抖音团购 · 门店核销</span>
-        </template>
+      <article class="sc-card sc-card--wide">
+        <header class="sc-card__head">
+          <span class="sc-card__title">抖音团购核销</span>
+          <span class="sc-card__hint">来客门店</span>
+        </header>
         <p class="sc-hint sc-hint--card">
           填写抖音来客门店 <strong>POI ID</strong>，小程序验券时将按此门店调用抖音核销接口。开放平台
           <code class="sc-code">client_key/secret</code> 请在租户「对接配置」的 extra_json 或环境变量中配置。
@@ -453,13 +475,7 @@ onMounted(() => {
             />
           </div>
         </div>
-      </el-card>
-
-      <div class="sc-actions">
-        <button type="button" class="sc-btn-primary" :disabled="saving" @click="saveConfig">
-          {{ saving ? '保存中…' : '保存' }}
-        </button>
-      </div>
+      </article>
     </div>
 
     <el-dialog
@@ -501,7 +517,7 @@ onMounted(() => {
         </div>
       </div>
       <template #footer>
-        <el-button type="primary" @click="closeLocationDialog">完成</el-button>
+        <el-button type="primary" round @click="closeLocationDialog">完成</el-button>
       </template>
     </el-dialog>
   </section>
@@ -510,18 +526,58 @@ onMounted(() => {
 <style scoped>
 .store-config-page {
   max-width: min(72rem, 100%);
+  color: #1d1f21;
 }
+
+.sc-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.25rem;
+  margin-bottom: 1.15rem;
+}
+
+.sc-page-head__copy {
+  min-width: 0;
+}
+
+.sc-kicker {
+  margin: 0 0 0.2rem;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--el-color-primary);
+}
+
+.sc-title {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
 .sc-intro {
-  margin: 0 0 1.25rem;
+  margin: 0.45rem 0 0;
+  max-width: 46rem;
   font-size: 13px;
   line-height: 1.55;
-  color: #64748b;
+  color: #5c6670;
 }
+
+.sc-save {
+  flex-shrink: 0;
+  min-width: 7.5rem;
+  font-weight: 800;
+}
+
 .sc-code {
   font-size: 12px;
-  padding: 0.1rem 0.35rem;
-  background: #f1f5f9;
-  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--el-color-primary) 10%, #fff);
+  color: var(--el-color-primary-dark-2);
 }
 .sc-hint {
   margin: 0 0 0.75rem;
@@ -536,29 +592,64 @@ onMounted(() => {
 .sc-blocks {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
+  gap: 0.9rem;
   align-items: stretch;
 }
-.sc-el-card {
-  margin-bottom: 0;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
+
+.sc-card {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-width: 0;
+  padding: 1.05rem 1.15rem 1.15rem;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 14px 36px rgba(25, 45, 55, 0.06);
+  backdrop-filter: saturate(1.15) blur(14px);
+  -webkit-backdrop-filter: saturate(1.15) blur(14px);
 }
-.sc-el-card :deep(.el-card__header) {
-  padding: 0.85rem 1.25rem;
-  border-bottom: 1px solid #f1f5f9;
+
+.sc-card--identity,
+.sc-card--wide {
+  grid-column: 1 / -1;
 }
-.sc-card-title {
-  font-size: 0.95rem;
+
+.sc-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.sc-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.sc-card__title {
+  font-size: 15px;
   font-weight: 800;
-  color: #0f172a;
+  letter-spacing: -0.02em;
 }
-.sc-el-card :deep(.el-card__body) {
-  padding: 1.15rem 1.25rem 1.25rem;
-  flex: 1;
+
+.sc-card__hint {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
+}
+
+.sc-section-label {
+  margin: 0.35rem 0 0.35rem;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #334155;
 }
 .sc-hint--card {
   margin-top: 0;
@@ -583,7 +674,11 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-top: 0.55rem;
+  margin-top: 0.35rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(15, 23, 42, 0.05);
 }
 .sc-location-summary {
   flex: 1;
@@ -607,11 +702,6 @@ onMounted(() => {
 .sc-field--last {
   margin-bottom: 0;
 }
-.sc-switch-row--card {
-  border: none;
-  padding: 0;
-  margin-bottom: 0;
-}
 .sc-location-picker-dialog :deep(.slp-map) {
   height: min(420px, 48vh);
   min-height: 260px;
@@ -629,13 +719,14 @@ onMounted(() => {
 .sc-switch-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.85rem 0;
-  margin-bottom: 0.5rem;
-  border-top: 1px solid #f1f5f9;
-  border-bottom: 1px solid #f1f5f9;
+  padding: 0.75rem 0.85rem;
+  margin-bottom: 0.65rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.05);
 }
 .sc-switch-text {
   flex: 1;
@@ -660,6 +751,17 @@ onMounted(() => {
 .sc-input-el {
   width: 100%;
 }
+.store-config-page :deep(.el-input__wrapper),
+.store-config-page :deep(.el-select__wrapper) {
+  min-height: 40px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
+}
+.store-config-page :deep(.el-input__wrapper.is-focus),
+.store-config-page :deep(.el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
 .sc-input-el--mono :deep(.el-input__inner) {
   font-family: var(--okfood-font-number);
   font-size: 13px;
@@ -679,15 +781,16 @@ onMounted(() => {
   margin-bottom: 0.5rem;
 }
 .sc-logo-preview-wrap {
-  width: 72px;
-  height: 72px;
-  border-radius: 12px;
-  border: 1px dashed #cbd5e1;
+  width: 76px;
+  height: 76px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: #f8fafc;
+  background: linear-gradient(160deg, #fff, color-mix(in srgb, var(--el-color-primary) 14%, #fff));
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--el-color-primary) 18%, transparent);
 }
 .sc-logo-preview {
   width: 100%;
@@ -719,35 +822,43 @@ onMounted(() => {
   gap: 1rem;
 }
 @media (max-width: 640px) {
-  .sc-coord-grid {
+  .sc-coord-grid,
+  .sc-pair {
     grid-template-columns: 1fr;
   }
 }
 @media (max-width: 900px) {
+  .sc-page-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .sc-blocks {
     grid-template-columns: 1fr;
   }
+  }
+</style>
+
+<style>
+/* 地图弹窗 teleport 到 body，圆角与玻璃边单独写在非 scoped 样式里 */
+.sc-location-dialog.el-dialog {
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 48px rgba(25, 45, 55, 0.12);
 }
-.sc-actions {
-  grid-column: 1 / -1;
-  margin-top: 0.35rem;
+.sc-location-dialog .el-dialog__header {
+  margin-right: 0;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
 }
-.sc-btn-primary {
-  padding: 0.55rem 1.25rem;
-  font-size: 14px;
-  font-weight: 700;
-  color: #fff;
-  background: #0e5a44;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  font-family: inherit;
+.sc-location-dialog .el-dialog__title {
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
-.sc-btn-primary:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-.sc-btn-primary:hover:not(:disabled) {
-  background: #0c4d3a;
+.sc-location-dialog .el-dialog__footer {
+  padding: 12px 20px 16px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
 }
 </style>

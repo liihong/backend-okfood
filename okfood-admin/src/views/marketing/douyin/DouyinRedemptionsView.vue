@@ -115,111 +115,137 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="tab-content animate-up">
-    <div class="table-container">
-      <div class="table-header">
-        <h2 class="table-title">抖音核销记录</h2>
+  <section class="mkt-page tab-content animate-up">
+    <header class="mkt-page-head">
+      <div class="mkt-page-head__copy">
+        <p class="mkt-kicker">小程序营销</p>
+        <h1 class="mkt-title">核销记录查询</h1>
+        <p class="mkt-intro">查看抖音团购验券和发奖流水。可按手机号、状态和日期筛选，失败记录看备注里的原因。</p>
       </div>
+    </header>
 
-      <el-form :inline="true" class="filter-form" @submit.prevent="onSearch">
-        <el-form-item label="手机号">
-          <el-input
-            v-model="filters.member_phone"
-            placeholder="会员手机号"
-            clearable
-            maxlength="20"
-            style="width: 160px"
-          />
-        </el-form-item>
-        <el-form-item label="状态">
-          <el-select v-model="filters.status" clearable placeholder="全部" style="width: 140px">
-            <el-option label="成功" value="success" />
-            <el-option label="验券失败" value="failed" />
-            <el-option label="已核销待发奖" value="verified" />
-            <el-option label="发奖失败" value="grant_failed" />
-            <el-option label="已撤销" value="cancelled" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="开始日期">
-          <el-date-picker
-            v-model="filters.date_from"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="选择日期"
-            style="width: 150px"
-          />
-        </el-form-item>
-        <el-form-item label="结束日期">
-          <el-date-picker
-            v-model="filters.date_to"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="选择日期"
-            style="width: 150px"
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="loading" @click="onSearch">
-            <Search :size="16" style="margin-right: 4px" />
+    <article class="mkt-card">
+      <el-form class="dy-filters" @submit.prevent="onSearch">
+        <div class="dy-filters__fields">
+          <el-form-item label="手机号">
+            <el-input
+              v-model="filters.member_phone"
+              placeholder="会员手机号"
+              clearable
+              maxlength="20"
+              style="width: 160px"
+            />
+          </el-form-item>
+          <el-form-item label="状态">
+            <el-select v-model="filters.status" clearable placeholder="全部" style="width: 150px">
+              <el-option label="成功" value="success" />
+              <el-option label="验券失败" value="failed" />
+              <el-option label="已核销待发奖" value="verified" />
+              <el-option label="发奖失败" value="grant_failed" />
+              <el-option label="已撤销" value="cancelled" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="开始日期">
+            <el-date-picker
+              v-model="filters.date_from"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="选择日期"
+              style="width: 150px"
+            />
+          </el-form-item>
+          <el-form-item label="结束日期">
+            <el-date-picker
+              v-model="filters.date_to"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="选择日期"
+              style="width: 150px"
+            />
+          </el-form-item>
+        </div>
+        <div class="dy-filters__actions">
+          <el-button type="primary" round :loading="loading" @click="onSearch">
+            <Search :size="16" />
             查询
           </el-button>
-          <el-button @click="onReset">重置</el-button>
-        </el-form-item>
+          <el-button round @click="onReset">重置</el-button>
+        </div>
       </el-form>
 
-      <el-table
-        v-loading="loading"
-        :data="list"
-        stripe
-        class="admin-table"
-        empty-text="暂无核销记录"
-      >
-        <el-table-column prop="created_at" label="时间" width="180" />
-        <el-table-column prop="member_phone" label="手机号" width="120" />
-        <el-table-column prop="member_name" label="姓名" width="90" />
-        <el-table-column prop="code_masked" label="券码" width="150" />
-        <el-table-column prop="douyin_product_title" label="抖音商品" min-width="150" show-overflow-tooltip />
-        <el-table-column label="映射权益" width="130">
-          <template #default="{ row }">
-            {{ row.mapping_display_name || GRANT_LABEL[row.grant_type] || '—' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag size="small" :type="STATUS_TAG[row.status] || 'info'">
-              {{ STATUS_LABEL[row.status] || row.status }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="error_msg" label="备注" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="douyin_order_id" label="抖音订单号" min-width="140" show-overflow-tooltip />
-      </el-table>
-      <div v-if="adminAccessToken" class="douyin-redemptions-pagination">
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="pageSize"
-          :total="total"
-          :page-sizes="pageSizeOptions"
-          :disabled="loading"
-          layout="total, sizes, prev, pager, next, jumper"
-          background
-          @current-change="onPageChange"
-          @size-change="onPageSizeChange"
-        />
+      <div class="mkt-table-wrap">
+        <el-table v-loading="loading" :data="list" class="admin-table" empty-text="暂无核销记录">
+          <el-table-column prop="created_at" label="时间" width="180" />
+          <el-table-column prop="member_phone" label="手机号" width="120" />
+          <el-table-column prop="member_name" label="姓名" width="90" />
+          <el-table-column prop="code_masked" label="券码" width="150" />
+          <el-table-column prop="douyin_product_title" label="抖音商品" min-width="160" show-overflow-tooltip />
+          <el-table-column label="映射权益" min-width="180" class-name="mkt-cell-nowrap">
+            <template #default="{ row }">
+              {{ row.mapping_display_name || GRANT_LABEL[row.grant_type] || '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="120">
+            <template #default="{ row }">
+              <el-tag round effect="light" :type="STATUS_TAG[row.status] || 'info'">
+                {{ STATUS_LABEL[row.status] || row.status }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="error_msg" label="备注" min-width="140" show-overflow-tooltip />
+          <el-table-column
+            prop="douyin_order_id"
+            label="抖音订单号"
+            width="210"
+            fixed="right"
+            class-name="mkt-cell-nowrap"
+          />
+        </el-table>
+        <div v-if="adminAccessToken" class="mkt-pager">
+          <el-pagination
+            v-model:current-page="page"
+            v-model:page-size="pageSize"
+            :total="total"
+            :page-sizes="pageSizeOptions"
+            :disabled="loading"
+            layout="total, sizes, prev, pager, next, jumper"
+            background
+            @current-change="onPageChange"
+            @size-change="onPageSizeChange"
+          />
+        </div>
       </div>
-    </div>
+    </article>
   </section>
 </template>
 
 <style scoped>
-.filter-form {
-  margin-bottom: 16px;
-}
-.douyin-redemptions-pagination {
+.dy-filters {
   display: flex;
-  justify-content: flex-end;
-  padding: 1.25rem 2rem;
-  border-top: 1px solid #f8fafc;
-  background: #fafafa;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 0.85rem;
+}
+
+.dy-filters__fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dy-filters__fields :deep(.el-form-item) {
+  margin: 0;
+  width: auto;
+}
+
+.dy-filters__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
 }
 </style>
+

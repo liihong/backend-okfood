@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="primary-iris">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>门店配置 · OpenDesign 预览</title>
+  <style>
+    :root { --p: #8b7ec8; --p-dark: #7a6db8; --mesh-a: rgba(210, 200, 255, 0.55); --mesh-b: rgba(230, 215, 255, 0.45); }
+    [data-theme="primary-peach"] { --p: #e8927c; --p-dark: #dd7f68; --mesh-a: rgba(255, 200, 185, 0.55); --mesh-b: rgba(255, 225, 210, 0.45); }
+    [data-theme="primary-mojito"] { --p: #5cbf8e; --p-dark: #4ab37e; --mesh-a: rgba(190, 245, 215, 0.55); --mesh-b: rgba(215, 235, 255, 0.5); }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Plus Jakarta Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: #1d1f21;
+      background: #f7fafb;
+    }
+    .mesh { position: fixed; inset: 0; pointer-events: none; }
+    .mesh i { position: absolute; border-radius: 50%; filter: blur(60px); }
+    .mesh i:first-child { width: 420px; height: 420px; left: -80px; top: -60px; background: var(--mesh-a); }
+    .mesh i:last-child { width: 360px; height: 360px; right: -40px; bottom: -80px; background: var(--mesh-b); }
+    .bar {
+      position: sticky; top: 0; z-index: 5;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 18px;
+      background: rgba(255,255,255,.72);
+      border-bottom: 1px solid rgba(255,255,255,.8);
+      backdrop-filter: blur(14px);
+    }
+    .bar strong { font-size: 13px; }
+    .themes { display: flex; gap: 6px; }
+    .themes button {
+      border: 1px solid rgba(0,0,0,.06); background: #fff; border-radius: 999px;
+      padding: 6px 12px; font-weight: 700; cursor: pointer;
+    }
+    .themes button.on { color: #fff; background: var(--p); border-color: transparent; }
+    .page { position: relative; max-width: 1080px; margin: 0 auto; padding: 22px 18px 48px; }
+    .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+    .kicker { margin: 0 0 4px; font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--p); }
+    h1 { margin: 0; font-size: 28px; letter-spacing: -.03em; }
+    .intro { margin: 6px 0 0; max-width: 46rem; color: #5c6670; font-size: 13px; line-height: 1.55; }
+    .save {
+      border: 0; color: #fff; background: var(--p); border-radius: 999px;
+      padding: 12px 22px; font-weight: 800; cursor: pointer; box-shadow: 0 8px 18px color-mix(in srgb, var(--p) 28%, transparent);
+    }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .card {
+      padding: 16px 18px 18px; border-radius: 22px;
+      background: rgba(255,255,255,.72);
+      border: 1px solid rgba(255,255,255,.82);
+      box-shadow: 0 1px 0 rgba(255,255,255,.9) inset, 0 14px 36px rgba(25,45,55,.06);
+      backdrop-filter: blur(14px);
+    }
+    .span { grid-column: 1 / -1; }
+    .card h2 { margin: 0; font-size: 15px; }
+    .card header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid rgba(15,23,42,.06); }
+    .card header span { font-size: 12px; color: #8b949e; font-weight: 600; }
+    label { display: block; font-size: 13px; font-weight: 700; margin: 0 0 6px; }
+    input, select {
+      width: 100%; height: 40px; border-radius: 12px; border: 1px solid #e2e8f0;
+      padding: 0 12px; background: #fff; font: inherit;
+    }
+    .field { margin-bottom: 14px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .logo {
+      width: 76px; height: 76px; border-radius: 20px;
+      display: grid; place-items: center; color: #fff; font-weight: 800;
+      background: linear-gradient(160deg, var(--p), var(--p-dark));
+      box-shadow: 0 8px 18px color-mix(in srgb, var(--p) 28%, transparent);
+    }
+    .logo-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .ghost { border: 1px solid #e2e8f0; background: #fff; border-radius: 999px; padding: 8px 14px; font-weight: 700; }
+    .switch {
+      display: flex; justify-content: space-between; gap: 12px; align-items: center;
+      padding: 12px 14px; border-radius: 16px; background: rgba(255,255,255,.8); border: 1px solid rgba(15,23,42,.05); margin-bottom: 10px;
+    }
+    .switch p { margin: 4px 0 0; color: #64748b; font-size: 12px; line-height: 1.45; }
+    .knob { width: 44px; height: 26px; border-radius: 999px; background: var(--p); position: relative; flex-shrink: 0; }
+    .knob::after { content: ""; position: absolute; width: 20px; height: 20px; border-radius: 50%; background: #fff; top: 3px; right: 3px; }
+    .hint { color: #64748b; font-size: 12px; line-height: 1.45; }
+    @media (max-width: 800px) { .grid, .row2, .head { grid-template-columns: 1fr; display: flex; flex-direction: column; align-items: stretch; } .grid { display: grid; } }
+  </style>
+</head>
+<body>
+  <div class="mesh"><i></i><i></i></div>
+  <div class="bar">
+    <strong>门店配置 · 讨论预览（不进生产数据）</strong>
+    <div class="themes">
+      <button type="button" data-theme="primary-iris" class="on">雾紫</button>
+      <button type="button" data-theme="primary-peach">蜜桃珊瑚</button>
+      <button type="button" data-theme="primary-mojito">莫吉托</button>
+    </div>
+  </div>
+  <main class="page">
+    <div class="head">
+      <div>
+        <p class="kicker">系统管理</p>
+        <h1>门店配置</h1>
+        <p class="intro">名称、电话、Logo 与位置在基础信息里设置。位置用地图选点。保存后营业概览以门店为中心，配送与核销参数立即生效。</p>
+      </div>
+      <button class="save" type="button">保存配置</button>
+    </div>
+    <div class="grid">
+      <section class="card span">
+        <header><h2>门店基础信息</h2><span>小程序展示与地图中心</span></header>
+        <div class="row2">
+          <div class="field"><label>门店名称</label><input value="okfood 大学城店" /></div>
+          <div class="field"><label>商家电话</label><input value="15565251806" /></div>
+        </div>
+        <div class="field">
+          <label>门店 Logo</label>
+          <div class="logo-row"><div class="logo">ok</div><button class="ghost" type="button">上传图片</button></div>
+          <input placeholder="或直接粘贴图片 URL" />
+        </div>
+        <div class="field" style="margin:0">
+          <label>门店位置</label>
+          <div class="switch"><div><strong style="font-size:13px">经度 113.9268，纬度 35.3030</strong><p>高德选点，GCJ-02。保存仍点右上角。</p></div><button class="save" type="button">地图选点</button></div>
+        </div>
+      </section>
+      <section class="card">
+        <header><h2>配送信息</h2><span>推单与骑手结算</span></header>
+        <div class="switch"><div><strong>顺丰自动推单</strong><p>每日 08:50（上海）推送当日配送大表。零售单仍手动推。</p></div><div class="knob"></div></div>
+        <div class="switch"><div><strong>同地址合并推送</strong><p>同一地址不同会员合并为 1 单，只扣 1 份配送费。</p></div><div class="knob"></div></div>
+        <div class="row2">
+          <div class="field"><label>首份基础价</label><input value="4" /></div>
+          <div class="field"><label>每多一份加价</label><input value="1" /></div>
+        </div>
+      </section>
+      <section class="card">
+        <header><h2>零售顺丰与 UU</h2><span>单次点餐</span></header>
+        <p class="hint">零售店铺 ID 与大表推单 shop 可不同。UU 为预留字段。</p>
+        <div class="row2">
+          <div class="field"><label>零售推顺丰店铺 ID</label><input value="6284388701377" /></div>
+          <div class="field"><label>shop_type</label><select><option>留空 · 跟随租户</option><option>1 · 顺丰门店编号</option></select></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>UU AppId</label><input placeholder="预留" /></div>
+          <div class="field"><label>UU AppKey</label><input type="password" placeholder="已保存，留空不改" /></div>
+        </div>
+      </section>
+      <section class="card span">
+        <header><h2>抖音团购核销</h2><span>来客门店</span></header>
+        <div class="row2">
+          <div class="field"><label>抖音 POI ID</label><input placeholder="来客门店 POI" /></div>
+          <div class="field"><label>account_id（可选）</label><input /></div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script>
+    document.querySelectorAll('.themes button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.documentElement.dataset.theme = btn.dataset.theme
+        document.querySelectorAll('.themes button').forEach((b) => b.classList.toggle('on', b === btn))
+      })
+    })
+  </script>
+</body>
+</html>
