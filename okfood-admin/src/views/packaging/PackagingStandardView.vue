@@ -48,22 +48,20 @@ onMounted(load)
 </script>
 
 <template>
-  <div v-loading="loading">
-    <el-alert
-      title="筷子、小勺这类每份都有的东西设一次即可。午餐和晚餐会各乘各的后厨出餐份数。打包袋不要放这里。"
-      type="info"
-      show-icon
-      :closable="false"
-      class="pack-gap"
-    />
-    <PackagingLineEditor v-model="lines" :sku-options="skuOptions" />
-    <div class="pack-toolbar">
-      <el-button type="primary" :loading="saving" @click="save">保存标配</el-button>
-    </div>
-  </div>
-</template>
+  <section class="mkt-page tab-content animate-up">
+    <header class="mkt-page-head">
+      <div class="mkt-page-head__copy">
+        <p class="mkt-kicker">库存管理</p>
+        <h1 class="mkt-title">每份标配</h1>
+        <p class="mkt-intro">
+          筷子、小勺这类每份都有的东西设一次即可。午餐和晚餐会各乘各的后厨出餐份数。打包袋不要放这里。
+        </p>
+      </div>
+      <el-button type="primary" round :loading="saving" @click="save">保存标配</el-button>
+    </header>
 
-<style scoped>
-.pack-gap { margin-bottom: 12px; }
-.pack-toolbar { margin-top: 16px; }
-</style>
+    <article v-loading="loading" class="mkt-card">
+      <PackagingLineEditor v-model="lines" :sku-options="skuOptions" />
+    </article>
+  </section>
+</template>

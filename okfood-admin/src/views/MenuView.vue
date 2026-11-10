@@ -378,7 +378,14 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="tab-content animate-up menu-section">
+  <section class="mkt-page tab-content animate-up menu-section">
+    <header class="mkt-page-head">
+      <div class="mkt-page-head__copy">
+        <p class="mkt-kicker">菜单管理</p>
+        <h1 class="mkt-title">菜品管理</h1>
+        <p class="mkt-intro">按肉类分组查看菜品。搜索和分类在左侧，新建在右侧。</p>
+      </div>
+    </header>
     <div class="dish-toolbar">
       <div class="dish-toolbar-filters">
         <div class="dish-toolbar-search">
@@ -404,14 +411,14 @@ onMounted(() => {
       <div class="dish-toolbar-actions">
         <p v-if="dishesLoading" class="dish-toolbar-status">正在加载…</p>
         <p v-else class="dish-toolbar-status">共 {{ filteredDishes.length }} 道</p>
-        <button type="button" class="dish-toolbar-add-btn" @click="openDishEditorAdd">+ 新建菜品</button>
+        <el-button type="primary" round @click="openDishEditorAdd">新建菜品</el-button>
       </div>
     </div>
 
     <div v-if="dishesLoading && !dishList.length" class="dish-catalog-empty">正在加载菜品库…</div>
     <div v-else-if="!hasVisibleDishes" class="dish-catalog-empty">
       <p>暂无菜品</p>
-      <button type="button" class="dish-toolbar-add-btn" @click="openDishEditorAdd">新建第一道菜品</button>
+      <el-button type="primary" round @click="openDishEditorAdd">新建第一道菜品</el-button>
     </div>
 
     <div v-else class="dish-catalog">
@@ -489,24 +496,18 @@ onMounted(() => {
     <el-drawer
       v-model="showDishModal"
       direction="rtl"
-      size="1020px"
+      size="1080px"
       destroy-on-close
       :close-on-click-modal="true"
       class="dish-editor-drawer"
     >
       <template #header>
-        <div class="dish-editor-drawer-head">
-          <div>
-            <h3 class="menu-editor-title-h3">
-              {{ isEditingDish ? '编辑菜品' : '新建菜品' }}
-            </h3>
-            <p class="menu-editor-subtitle">DISH CATALOG · CRUD</p>
-          </div>
-        </div>
+        <h3 class="menu-editor-title-h3">
+          {{ isEditingDish ? '编辑菜品' : '新建菜品' }}
+        </h3>
       </template>
 
       <div class="dish-editor-drawer-body">
-        <!-- 左侧：大图预览 + 独立上传按钮 -->
         <aside class="dish-editor-media">
           <div
             class="dish-editor-preview"
@@ -530,10 +531,9 @@ onMounted(() => {
             <div v-else class="dish-editor-preview-placeholder">
               <Camera :size="40" stroke-width="1.75" class="menu-upload-icon" />
               <p class="menu-upload-text">
-                {{ dishPhotoUploading ? '正在上传…' : '暂无图片，可上传或右侧粘贴链接' }}
+                {{ dishPhotoUploading ? '正在上传…' : '暂无图片，可上传或在下方粘贴链接' }}
               </p>
             </div>
-            <!-- 悬停提示：点击进入 Element Plus 大图预览 -->
             <div v-if="dishForm.image_url" class="dish-editor-preview-hover" aria-hidden="true">
               <span class="dish-editor-preview-hover-text">点击查看大图</span>
             </div>
@@ -546,15 +546,11 @@ onMounted(() => {
             @change="onDishPhotoUploadChange"
           >
             <template #trigger>
-              <el-button type="primary" :loading="dishPhotoUploading" :disabled="dishPhotoUploading">
+              <el-button type="primary" round :loading="dishPhotoUploading" :disabled="dishPhotoUploading">
                 {{ dishForm.image_url ? '更换菜品图' : '上传菜品图' }}
               </el-button>
             </template>
           </el-upload>
-        </aside>
-
-        <!-- 右侧：表单 -->
-        <div class="dish-editor-form-col">
           <label class="menu-editor-label" for="dish-image-url">图片链接（可选，支持 https外链）</label>
           <el-input
             id="dish-image-url"
@@ -563,7 +559,9 @@ onMounted(() => {
             placeholder="https://… 或上传后自动填入相对路径"
             clearable
           />
+        </aside>
 
+        <div class="dish-editor-form-col">
           <label class="menu-editor-label" for="dish-name">菜品名称</label>
           <el-input
             id="dish-name"
@@ -617,6 +615,29 @@ onMounted(() => {
             </div>
           </div>
 
+          <div class="menu-editor-pair">
+            <div>
+              <label class="menu-editor-label" for="dish-spice">辣度（会员端可见）</label>
+              <el-select id="dish-spice" v-model="dishForm.spice_level" class="menu-editor-input-el" clearable placeholder="未标注">
+                <el-option label="未标注" value="" />
+                <el-option label="不辣" value="none" />
+                <el-option label="微微辣" value="mild" />
+                <el-option label="微辣" value="medium" />
+                <el-option label="较辣" value="hot" />
+              </el-select>
+            </div>
+            <div>
+              <label class="menu-editor-label" for="dish-single-price">单点价格（元，可选）</label>
+              <el-input
+                id="dish-single-price"
+                v-model="dishForm.single_order_price_yuan"
+                class="menu-editor-input-el"
+                placeholder="留空表示未定价，会员端显示「待公布」"
+                clearable
+              />
+            </div>
+          </div>
+
           <label class="menu-editor-label" for="dish-desc">配料 / 描述</label>
           <el-input
             id="dish-desc"
@@ -627,43 +648,22 @@ onMounted(() => {
             placeholder="原切鸡腿肉、秘制盐葱酱、杂粮基底、时令蔬果。"
           />
 
-          <label class="menu-editor-label" for="dish-spice">辣度（会员端可见）</label>
-          <el-select id="dish-spice" v-model="dishForm.spice_level" class="menu-editor-input-el" clearable placeholder="未标注">
-            <el-option label="未标注" value="" />
-            <el-option label="不辣" value="none" />
-            <el-option label="微微辣" value="mild" />
-            <el-option label="微辣" value="medium" />
-            <el-option label="较辣" value="hot" />
-          </el-select>
-
           <label class="menu-editor-label" for="dish-internal-sop">内部操作说明（仅后台，不对会员展示）</label>
           <el-input
             id="dish-internal-sop"
             v-model="dishForm.internal_view_sop"
             type="textarea"
             :rows="3"
-            class="menu-editor-textarea-el"
+            class="menu-editor-textarea-el dish-editor-fill"
             placeholder="备餐衔接、内部话术等；会员可见信息请写在配料/描述中。"
           />
-
-          <label class="menu-editor-label" for="dish-single-price">单点价格（元，可选）</label>
-          <el-input
-            id="dish-single-price"
-            v-model="dishForm.single_order_price_yuan"
-            class="menu-editor-input-el"
-            placeholder="留空表示未定价，会员端显示「待公布」"
-            clearable
-          />
-
         </div>
       </div>
 
       <template #footer>
         <div class="dish-editor-drawer-footer">
-          <el-button class="menu-btn-draft" @click="closeDishModal">取消</el-button>
-          <el-button type="primary" class="menu-btn-save-sync" :loading="dishModalSaving" @click="saveDish">
-            {{ dishModalSaving ? '保存中…' : '保存' }}
-          </el-button>
+          <el-button round @click="closeDishModal">取消</el-button>
+          <el-button type="primary" round :loading="dishModalSaving" @click="saveDish">保存</el-button>
         </div>
       </template>
     </el-drawer>
@@ -684,22 +684,6 @@ onMounted(() => {
   align-items: center;
   gap: 0.75rem;
   flex-shrink: 0;
-}
-.dish-toolbar-add-btn {
-  padding: 0.45rem 0.9rem;
-  border: none;
-  border-radius: 0.55rem;
-  background: #0e5a44;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
-  font-family: inherit;
-  white-space: nowrap;
-  transition: filter 0.2s;
-}
-.dish-toolbar-add-btn:hover {
-  filter: brightness(1.06);
 }
 .dish-toolbar-category {
   width: 200px;
@@ -927,66 +911,61 @@ onMounted(() => {
 
 /* 菜品编辑：左侧抽屉 + 左图右表（大图用 contain 便于看清整图） */
 /* 避免标题区被 drawer header 默认裁切（斜体/字距导致顶部露不全） */
+.dish-editor-drawer :deep(.el-drawer) {
+  border-top-left-radius: 22px;
+  border-bottom-left-radius: 22px;
+}
+
 .dish-editor-drawer :deep(.el-drawer__header) {
-  align-items: flex-start;
-  padding-top: 1.25rem;
-  padding-bottom: 1rem;
+  align-items: center;
+  margin-bottom: 0;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
   overflow: visible;
+}
+
+.dish-editor-drawer :deep(.el-drawer__footer) {
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  padding: 12px 20px 16px;
 }
 
 .dish-editor-drawer :deep(.el-drawer__body) {
   padding-top: 0.5rem;
 }
 
-.dish-editor-drawer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding-top: 0.25rem;
-}
-
-/* 抽屉内标题与副标题：行高留足，避免上行笔画被裁 */
-.dish-editor-drawer-head .menu-editor-title-h3 {
+.menu-editor-title-h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
   line-height: 1.3;
-  padding-top: 0.15em;
-}
-
-.dish-editor-drawer-head .menu-editor-subtitle {
-  line-height: 1.45;
-  margin-top: 8px;
 }
 
 .dish-editor-drawer-body {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
-  gap: 1.25rem;
+  align-items: stretch;
+  gap: 1.5rem;
   min-height: 280px;
   box-sizing: border-box;
 }
 
 .dish-editor-media {
-  /* 与表单列左右均分（抽屉总宽约 1020px） */
-  flex: 1 1 50%;
+  flex: 0 0 420px;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  /* 与标题区拉开一点距离，整体视觉略下移 */
-  margin-top: 0.75rem;
 }
 
 .dish-editor-preview {
   position: relative;
   width: 100%;
-  /* 竖构图更接近实拍菜品比例，预览区尽量撑满列宽 */
-  aspect-ratio: 3 / 4;
-  min-height: 220px;
-  max-height: min(58vh, 520px);
-  border-radius: 1.25rem;
-  border: 2px dashed #e2e8f0;
-  background: #e8eef3;
+  aspect-ratio: 1;
+  min-height: 360px;
+  max-height: 460px;
+  border-radius: 18px;
+  border: 1px dashed #e6eaee;
+  background: #f8fafc;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -1023,7 +1002,7 @@ onMounted(() => {
   padding: 0.4rem 0.85rem;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.95);
-  color: #0e5a44;
+  color: var(--el-color-primary);
   font-size: 12px;
   font-weight: 800;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
@@ -1060,11 +1039,66 @@ onMounted(() => {
 
 .dish-editor-upload-trigger :deep(.el-button) {
   width: 100%;
+  border-radius: 999px;
 }
 
 .dish-editor-form-col {
-  flex: 1 1 50%;
+  flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+}
+
+.dish-editor-form-col > .menu-editor-label {
+  margin: 18px 0 8px;
+}
+
+.dish-editor-form-col > .menu-editor-label:first-child {
+  margin-top: 0;
+}
+
+.dish-editor-form-col > .menu-editor-row,
+.dish-editor-form-col > .menu-editor-pair {
+  margin-top: 18px;
+  margin-bottom: 0;
+}
+
+.dish-editor-drawer .menu-editor-label {
+  text-transform: none;
+  letter-spacing: 0;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  padding-left: 0;
+  margin-bottom: 8px;
+}
+
+.menu-editor-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.dish-editor-fill {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+}
+
+.dish-editor-fill :deep(.el-textarea) {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.dish-editor-fill :deep(.el-textarea__inner) {
+  flex: 1;
+  height: 100% !important;
+  min-height: 120px;
 }
 
 .dish-editor-drawer-footer {
@@ -1082,6 +1116,9 @@ onMounted(() => {
     flex-basis: auto;
     max-width: none;
     width: 100%;
+  }
+  .menu-editor-pair {
+    grid-template-columns: 1fr;
   }
 }
 </style>

@@ -382,17 +382,27 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 </script>
 
 <template>
-  <div class="wmenu-page tab-content animate-up page-content-shell" v-loading="loading">
-    <div v-if="hasPreview" class="wmenu-week-tabs">
-      <el-tabs v-model="activeWeekTab" class="wmenu-week-tabs-el">
-        <el-tab-pane v-for="tab in weekTabOptions" :key="tab.key" :name="tab.key">
-          <template #label>
-            <span class="wmenu-week-tab-label">{{ tab.label }}</span>
-            <span v-if="tab.weekStart" class="wmenu-week-tab-date">起 {{ tab.weekStart }}</span>
-          </template>
-        </el-tab-pane>
-      </el-tabs>
-      <el-button type="primary" class="wmenu-prep-open" @click="prepMenuOpen = true">开菜单</el-button>
+  <section class="mkt-page wmenu-page tab-content animate-up page-content-shell" v-loading="loading">
+    <header class="mkt-page-head">
+      <div class="mkt-page-head__copy">
+        <p class="mkt-kicker">菜单管理</p>
+        <h1 class="mkt-title">本周菜单</h1>
+        <p class="mkt-intro">午餐和晚餐并排排菜。开菜单里改的份数不会写回这里。</p>
+      </div>
+      <el-button type="primary" round @click="prepMenuOpen = true">开菜单</el-button>
+    </header>
+    <div v-if="hasPreview" class="wmenu-pills">
+      <button
+        v-for="tab in weekTabOptions"
+        :key="tab.key"
+        type="button"
+        class="wmenu-pill"
+        :class="{ 'is-on': activeWeekTab === tab.key }"
+        @click="activeWeekTab = tab.key"
+      >
+        <span>{{ tab.label }}</span>
+        <small v-if="tab.weekStart">起 {{ tab.weekStart }}</small>
+      </button>
     </div>
     <PrepMenuDialog v-model="prepMenuOpen" :week-start="activeWeekStart" />
     <WeeklySlotPackagingDialog
@@ -498,7 +508,8 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                     <el-button
                       v-if="row.dish_id"
                       link
-                      :type="slotHasBoxes(row, card.mealPeriod) ? 'primary' : 'warning'"
+                      class="wmenu-box-flag"
+                      :type="slotHasBoxes(row, card.mealPeriod) ? 'primary' : 'danger'"
                       @click="openSlotPackaging(row, card.mealPeriod)"
                     >
                       {{ slotHasBoxes(row, card.mealPeriod) ? '用盒' : '未设用盒' }}
@@ -512,10 +523,13 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
         </div>
       </div>
     </div>
-  </div>
+  </section>
 </template>
 
 <style scoped>
+.wmenu-page.mkt-page {
+  max-width: none;
+}
 .wmenu-page.page-content-shell {
   /* 抵消 main-body 水平 padding，双表尽量沾满内容区宽度 */
   margin-left: -1rem;
@@ -523,6 +537,38 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   width: calc(100% + 2rem);
   box-sizing: border-box;
   padding-bottom: 0.75rem;
+}
+.wmenu-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.wmenu-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.86);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  color: #1d1f21;
+}
+.wmenu-pill small {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8b949e;
+}
+.wmenu-pill.is-on {
+  color: #fff;
+  background: var(--el-color-primary);
+  border-color: transparent;
+}
+.wmenu-pill.is-on small {
+  color: rgba(255, 255, 255, 0.82);
 }
 
 @media (max-width: 900px) {
@@ -763,14 +809,19 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 
 .wmenu-table th {
-  color: var(--wmenu-muted);
-  font-size: 11px;
+  color: #fff;
+  background: var(--el-color-primary);
+  font-size: 12px;
   font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 12px 14px;
-  border-bottom: 2px solid var(--wmenu-border);
+  padding: 10px 12px;
+  border-bottom: 0;
   white-space: nowrap;
+}
+.wmenu-table thead th:first-child {
+  border-top-left-radius: 12px;
+}
+.wmenu-table thead th:last-child {
+  border-top-right-radius: 12px;
 }
 
 .wmenu-table td {
@@ -913,13 +964,21 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 
 .wmenu-dish-cell {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 240px;
 }
 .wmenu-dish-select {
-  width: 100%;
-  min-width: 170px;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 140px;
+}
+.wmenu-box-flag {
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .wmenu-dish-select :deep(.el-select__wrapper) {

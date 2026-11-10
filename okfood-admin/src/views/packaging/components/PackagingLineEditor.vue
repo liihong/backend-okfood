@@ -39,7 +39,7 @@ function removeLine(index) {
       <span class="pack-lines__unit">每份</span>
       <el-button type="danger" link @click="removeLine(index)">移除</el-button>
     </div>
-    <el-button @click="addLine">添加耗材</el-button>
+      <el-button round @click="addLine">添加耗材</el-button>
   </div>
 </template>
 

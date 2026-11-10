@@ -54,50 +54,57 @@ onMounted(load)
 </script>
 
 <template>
-  <div v-loading="loading">
-    <el-alert
-      v-if="alerts.length"
-      :title="`低于最低库存：${alertText}`"
-      type="warning"
-      show-icon
-      :closable="false"
-      class="pack-gap"
-    />
-    <el-alert
-      v-else
-      title="未盘点的结存显示为 0，晚上不会扣。盘点或入库之后才会按后厨出餐扣减。"
-      type="info"
-      show-icon
-      :closable="false"
-      class="pack-gap"
-    />
-    <el-table :data="rows" border>
-      <el-table-column prop="name" label="名称" min-width="140" />
-      <el-table-column prop="usage_note" label="用途" min-width="100" />
-      <el-table-column prop="supplier_name" label="供应商" min-width="120" />
-      <el-table-column label="结存" width="120">
-        <template #default="{ row }">
-          <el-tag v-if="row.low" type="danger">{{ row.qty }} {{ row.unit }}</el-tag>
-          <span v-else-if="!row.initialized">0 {{ row.unit }} <el-tag size="small" type="info">未盘点</el-tag></span>
-          <span v-else>{{ row.qty }} {{ row.unit }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="最低库存" width="110">
-        <template #default="{ row }">{{ row.safety_stock == null ? '未设置' : row.safety_stock }}</template>
-      </el-table-column>
-      <el-table-column label="角色" width="120">
-        <template #default="{ row }">
-          <el-tag v-if="row.is_meal_bag" type="warning">每餐打包袋</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="100" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" :disabled="!row.is_active" @click="openIn(row)">入库</el-button>
-        </template>
-      </el-table-column>
-      <template #empty><el-empty description="还没有耗材" /></template>
-    </el-table>
-    <el-dialog v-model="dialogOpen" title="采购入库" width="420px">
+  <section class="mkt-page tab-content animate-up">
+    <header class="mkt-page-head">
+      <div class="mkt-page-head__copy">
+        <p class="mkt-kicker">库存管理</p>
+        <h1 class="mkt-title">库存结存</h1>
+        <p class="mkt-intro">未盘点的结存显示为 0，晚上不会扣。盘点或入库之后才会按后厨出餐扣减。</p>
+      </div>
+    </header>
+
+    <article class="mkt-card">
+      <el-alert
+        v-if="alerts.length"
+        :title="`低于最低库存：${alertText}`"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="pack-gap"
+      />
+      <div class="mkt-table-wrap">
+        <el-table v-loading="loading" :data="rows" class="admin-table" empty-text="还没有耗材">
+          <el-table-column prop="name" label="名称" min-width="140" />
+          <el-table-column prop="usage_note" label="用途" min-width="100" />
+          <el-table-column prop="supplier_name" label="供应商" min-width="120" />
+          <el-table-column label="结存" width="160">
+            <template #default="{ row }">
+              <el-tag v-if="row.low" type="danger" round effect="light">{{ row.qty }} {{ row.unit }}</el-tag>
+              <span v-else-if="!row.initialized">
+                0 {{ row.unit }}
+                <el-tag size="small" type="info" round effect="light">未盘点</el-tag>
+              </span>
+              <span v-else>{{ row.qty }} {{ row.unit }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="最低库存" width="110">
+            <template #default="{ row }">{{ row.safety_stock == null ? '未设置' : row.safety_stock }}</template>
+          </el-table-column>
+          <el-table-column label="角色" width="120">
+            <template #default="{ row }">
+              <el-tag v-if="row.is_meal_bag" type="warning" round effect="light">每餐打包袋</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" :disabled="!row.is_active" @click="openIn(row)">入库</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </article>
+
+    <el-dialog v-model="dialogOpen" title="采购入库" width="420px" align-center class="mkt-dialog">
       <el-form label-width="80px">
         <el-form-item label="数量">
           <el-input-number v-model="form.qty" :min="1" :step="1" :precision="0" />
@@ -107,11 +114,11 @@ onMounted(load)
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogOpen = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveIn">确认入库</el-button>
+        <el-button round @click="dialogOpen = false">取消</el-button>
+        <el-button type="primary" round :loading="saving" @click="saveIn">确认入库</el-button>
       </template>
     </el-dialog>
-  </div>
+  </section>
 </template>
 
 <style scoped>

@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="primary-iris">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>订单三页 · 讨论预览</title>
+  <style>
+    :root { --p: #8b7ec8; --p-dark: #7a6db8; --mesh-a: rgba(210, 200, 255, 0.55); --mesh-b: rgba(230, 215, 255, 0.45); }
+    [data-theme="primary-peach"] { --p: #e8927c; --p-dark: #dd7f68; --mesh-a: rgba(255, 200, 185, 0.55); --mesh-b: rgba(255, 225, 210, 0.45); }
+    [data-theme="primary-mojito"] { --p: #5cbf8e; --p-dark: #4ab37e; --mesh-a: rgba(190, 245, 215, 0.55); --mesh-b: rgba(215, 235, 255, 0.5); }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Plus Jakarta Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: #1d1f21;
+      background: #f7fafb;
+    }
+    .mesh { position: fixed; inset: 0; pointer-events: none; }
+    .mesh i { position: absolute; border-radius: 50%; filter: blur(60px); }
+    .mesh i:first-child { width: 420px; height: 420px; left: -80px; top: -60px; background: var(--mesh-a); }
+    .mesh i:last-child { width: 360px; height: 360px; right: -40px; bottom: -80px; background: var(--mesh-b); }
+    .bar {
+      position: sticky; top: 0; z-index: 5;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 10px 18px;
+      background: rgba(255,255,255,.72);
+      border-bottom: 1px solid rgba(255,255,255,.8);
+      backdrop-filter: blur(14px);
+    }
+    .bar strong { font-size: 13px; }
+    .themes, .scenes { display: flex; gap: 6px; flex-wrap: wrap; }
+    .themes button, .scenes button {
+      border: 1px solid rgba(0,0,0,.06); background: #fff; border-radius: 999px;
+      padding: 6px 12px; font-weight: 700; cursor: pointer; font: inherit;
+    }
+    .themes button.on, .scenes button.on { color: #fff; background: var(--p); border-color: transparent; }
+    .page { position: relative; max-width: 1180px; margin: 0 auto; padding: 18px 18px 48px; }
+    .note {
+      margin: 0 0 14px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(255,255,255,.72);
+      border: 1px solid rgba(255,255,255,.82);
+      color: #5c6670;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+    .kicker { margin: 0 0 4px; font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--p); }
+    h1 { margin: 0; font-size: 28px; letter-spacing: -.03em; }
+    .intro { margin: 6px 0 0; max-width: 46rem; color: #5c6670; font-size: 13px; line-height: 1.55; }
+    .tools {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      margin-bottom: 10px;
+    }
+    .tools__left, .tools__right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    input, select {
+      height: 40px; border-radius: 12px; border: 1px solid #e2e8f0;
+      padding: 0 12px; background: #fff; font: inherit;
+    }
+    .search { width: min(320px, 46vw); }
+    .ghost, .primary {
+      height: 40px; border-radius: 999px; padding: 0 16px; font-weight: 800; cursor: pointer; font: inherit;
+    }
+    .ghost { border: 1px solid #e2e8f0; background: #fff; }
+    .primary { border: 0; color: #fff; background: var(--p); }
+    .card {
+      padding: 14px 14px 10px; border-radius: 22px;
+      background: rgba(255,255,255,.72);
+      border: 1px solid rgba(255,255,255,.82);
+      box-shadow: 0 1px 0 rgba(255,255,255,.9) inset, 0 14px 36px rgba(25,45,55,.06);
+    }
+    .status-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    .actions button { height: 32px; border-radius: 999px; padding: 0 12px; font: inherit; font-weight: 700; cursor: pointer; }
+    .actions .primary { height: 32px; }
+    .actions .ghost { height: 32px; }
+    .actions button:disabled { opacity: .45; cursor: not-allowed; }
+    .pills { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 10px; }
+    .pills button {
+      border: 1px solid rgba(15,23,42,.06); background: rgba(255,255,255,.86);
+      border-radius: 999px; padding: 7px 12px; font: inherit; font-weight: 700; cursor: pointer;
+    }
+    .pills button.on { color: #fff; background: var(--p); border-color: transparent; }
+    .pills em { font-style: normal; opacity: .72; margin-left: 4px; font-variant-numeric: tabular-nums; }
+    .batch {
+      display: none; align-items: center; gap: 8px; margin: 0 0 10px;
+      padding: 8px 10px; border-radius: 16px; background: color-mix(in srgb, var(--p) 10%, #fff);
+    }
+    .batch.show { display: flex; }
+    .batch span { font-size: 13px; font-weight: 800; margin-right: 4px; }
+    .batch button { height: 32px; border-radius: 999px; border: 0; background: #fff; padding: 0 12px; font: inherit; font-weight: 700; cursor: pointer; }
+    .stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .stat {
+      padding: 6px 10px; border-radius: 999px; background: #fff;
+      border: 1px solid rgba(15,23,42,.06); font-size: 12px; font-weight: 700; color: #334155;
+    }
+    .stat b { font-variant-numeric: tabular-nums; }
+    .table-wrap { border-radius: 16px; overflow: auto; background: #fff; border: 1px solid rgba(15,23,42,.06); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; font-size: 12px; color: #fff; background: var(--p); padding: 10px 12px; white-space: nowrap; }
+    td { padding: 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; white-space: nowrap; }
+    .tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 800; }
+    .tag--ok { background: #ecfdf3; color: #15803d; }
+    .tag--wait { background: #fff7ed; color: #c2410c; }
+    .tag--go { background: #eef2ff; color: #4338ca; }
+    .tag--muted { background: #f1f5f9; color: #64748b; }
+    .more { border: 1px solid color-mix(in srgb, var(--p) 35%, #fff); background: #fff; color: var(--p); border-radius: 999px; padding: 4px 10px; font: inherit; font-weight: 700; cursor: pointer; }
+    .menu {
+      position: fixed; z-index: 20; min-width: 148px;
+      padding: 6px; border-radius: 14px; background: #fff;
+      border: 1px solid rgba(15,23,42,.06);
+      box-shadow: 0 16px 40px rgba(25,45,55,.14);
+    }
+    .menu button {
+      display: block; width: 100%; text-align: left; border: 0; background: transparent;
+      border-radius: 8px; padding: 8px 10px; font: inherit; font-weight: 700; cursor: pointer;
+    }
+    .menu button:hover { background: color-mix(in srgb, var(--p) 10%, #fff); }
+    .menu button.danger { color: #dc2626; }
+    .mask {
+      position: fixed; inset: 0; z-index: 30; display: none;
+      align-items: center; justify-content: center; background: rgba(15,23,42,.35);
+    }
+    .mask.show { display: flex; }
+    .dlg {
+      width: min(920px, calc(100vw - 32px)); max-height: calc(100vh - 48px);
+      border-radius: 22px; background: #fff;
+      box-shadow: 0 18px 48px rgba(25,45,55,.16);
+      display: flex; flex-direction: column;
+    }
+    .dlg header, .dlg footer { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; }
+    .dlg header { border-bottom: 1px solid rgba(15,23,42,.06); font-weight: 800; }
+    .dlg footer { justify-content: flex-end; gap: 8px; border-top: 1px solid rgba(15,23,42,.06); }
+    .dlg .body { padding: 16px 18px 8px; font-size: 14px; overflow: auto; }
+    .dlg h3 { margin: 0; font-size: 16px; }
+    .dlg p { margin: 0 0 12px; color: #5c6670; }
+    .choice { display: flex; gap: 18px; margin-bottom: 14px; }
+    .field-label { font-weight: 800; margin-bottom: 8px; }
+    .addr-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .addr-row select {
+      flex: 1; height: 36px; border-radius: 10px; border: 1px solid #e7c7b8;
+      padding: 0 10px; font: inherit; background: #fff;
+    }
+    .linkish { border: 0; background: transparent; color: var(--p); font: inherit; font-weight: 700; cursor: pointer; }
+    .warn { color: #c2410c; font-weight: 700; }
+    .subhint { color: #5c6670; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+    .pill-muted { border: 1px solid #e6eaee; border-radius: 999px; padding: 2px 8px; color: #5c6670; font-size: 12px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid-addr { display: grid; grid-template-columns: 1.4fr .8fr; gap: 12px; }
+    label.stack { display: flex; flex-direction: column; gap: 6px; font-weight: 700; font-size: 13px; }
+    label.stack input, label.stack textarea, .map-box {
+      font: inherit; font-weight: 500; border: 1px solid #e6eaee; border-radius: 10px;
+      padding: 8px 10px; background: #f8fafc; color: #1d1f21;
+    }
+    .map-box { min-height: 92px; color: #5c6670; line-height: 1.5; }
+    @media (max-width: 720px) { .grid2, .grid-addr { grid-template-columns: 1fr; } }
+    .pager { display: flex; justify-content: flex-end; gap: 8px; align-items: center; padding: 10px 4px 2px; color: #64748b; font-size: 12px; }
+    .empty { padding: 36px 12px; text-align: center; color: #8b949e; }
+    @media (max-width: 800px) { .head, .tools, .status-row, .bar { flex-direction: column; align-items: stretch; } }
+  </style>
+</head>
+<body>
+  <div class="mesh"><i></i><i></i></div>
+  <div class="bar">
+    <strong>订单三页 · 讨论预览（不改正式代码）</strong>
+    <div class="scenes">
+      <button type="button" data-scene="mall" class="on">商城订单</button>
+      <button type="button" data-scene="retail">零售订单</button>
+      <button type="button" data-scene="card">卡包订单</button>
+    </div>
+    <div class="themes">
+      <button type="button" data-theme="primary-iris" class="on">雾紫</button>
+      <button type="button" data-theme="primary-peach">蜜桃珊瑚</button>
+      <button type="button" data-theme="primary-mojito">莫吉托</button>
+    </div>
+  </div>
+  <main class="page">
+    <p class="note">
+      建议三页共用同一套壳：上面是日期和搜索，状态胶囊靠左并带数量。手动建单、批量推送到顺丰、批量打印标签、清空选择仍固定在状态右侧。表格保持白底。接口和「更多」里的动作都不改。
+    </p>
+    <div class="head">
+      <div>
+        <p class="kicker">订单管理</p>
+        <h1 id="title">商城订单</h1>
+        <p class="intro" id="intro">按履约阶段处理商城单。先接单，再推顺丰或门店自送，标签从这里打。</p>
+      </div>
+      <button class="ghost" id="toggleSel" type="button">模拟已选 2 笔</button>
+    </div>
+    <div class="tools">
+      <div class="tools__left">
+        <input id="date" type="date" value="2026-11-10" hidden />
+        <input class="search" placeholder="手机前缀或会员姓名…" />
+      </div>
+      <div class="tools__right">
+        <button class="ghost" type="button">刷新</button>
+        <button class="primary" id="sync" type="button">同步订单状态</button>
+      </div>
+    </div>
+    <section class="card">
+      <div class="stats" id="stats" hidden></div>
+      <div class="status-row">
+        <div class="pills" id="pills"></div>
+        <div class="actions" id="actions"></div>
+      </div>
+      <div class="table-wrap" id="table"></div>
+      <div class="pager">共 <b id="total">3</b> 条 · 20 条/页 · 上一页 1 下一页</div>
+    </section>
+  </main>
+  <div class="mask" id="mask">
+    <div class="dlg" role="dialog" aria-labelledby="dlgTitle">
+      <header>
+        <h3 id="dlgTitle">修改订单 · 配送/自提与收货地址</h3>
+        <button class="ghost" type="button" id="dlgClose" style="height:32px">关闭</button>
+      </header>
+      <div class="body">
+        <p id="dlgOrder">订单 #268 · 轻断食果蔬汁 · 果蔬汁1日体验 · 王 15893808153</p>
+        <div class="field-label">履约方式</div>
+        <div class="choice">
+          <label><input type="radio" name="fulfill" value="home" id="fulfillHome" /> 配送到家</label>
+          <label><input type="radio" name="fulfill" value="pickup" id="fulfillPickup" checked /> 门店自提</label>
+        </div>
+        <div id="pickupNote">
+          <p>门店自提无需维护收货地址。</p>
+        </div>
+        <div id="homeAddr" hidden>
+          <div class="field-label">收货地址</div>
+          <div class="addr-row" id="existingAddr">
+            <select>
+              <option>选择已有商城收货地址</option>
+              <option>王 · 大学城区域 河南省新乡市红旗区 松江小区 9号楼2单元2楼202</option>
+              <option>王 · 未分配 河南省新乡市牧野区 河南省精神卫生中心-综合病房楼 9楼心身医学一科医生办公室</option>
+            </select>
+            <button class="linkish" type="button" id="newAddr">登记新地址</button>
+          </div>
+          <div id="newAddrForm" hidden>
+            <button class="linkish" type="button" id="useExisting">选用已有地址</button>
+            <p class="warn">正在登记新的商城收货地址：下方地图选点即可，保存后只用于果蔬汁/月饼，不会改写会员送餐地址。</p>
+            <p class="subhint">果蔬汁/月饼收货地址与会员送餐地址分开管理。下方为新建商城地址，保存后只绑定本单。</p>
+            <div class="meta">
+              <span>会员</span><b>王</b><span>15893808153</span>
+              <span>经纬度 GCJ-02</span><span class="pill-muted">未选点</span>
+            </div>
+            <div class="grid2">
+              <label class="stack">收件人<input value="王" /></label>
+              <label class="stack">联系电话<input value="15893808153" /></label>
+            </div>
+            <label class="stack" style="margin-top:12px">地图选点（GCJ-02）
+              <div class="map-box">未配置 VITE_AMAP_KEY，无法使用地图选点；请在环境变量中配置 Key 与安全码后再录入配送位置（坐标由选点自动提交保存）。</div>
+            </label>
+            <div class="grid-addr" style="margin-top:12px">
+              <label class="stack">收货位置主文案（map_location_text）
+                <textarea rows="2" readonly placeholder="地图选点后自动填入，可与门牌拼成完整地址"></textarea>
+              </label>
+              <label class="stack">门牌（楼栋 / 单元 / 室号）
+                <textarea rows="2" placeholder="例如：3 号楼 1202"></textarea>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <footer>
+        <button class="ghost" type="button" id="dlgCancel">取消</button>
+        <button class="primary" type="button" id="dlgSave">保存</button>
+      </footer>
+    </div>
+  </div>
+  <script>
+    const scenes = {
+      mall: {
+        title: '商城订单',
+        intro: '按履约阶段处理商城单。先接单，再推顺丰或门店自送，标签从这里打。',
+        date: false,
+        sync: true,
+        stats: null,
+        pills: [['待接单', 3], ['待发货', 0], ['配送中', 0], ['已完成', 12], ['退单/售后', 0]],
+        actions: [
+          { label: '手动建单', kind: 'primary' },
+          { label: '批量推送到顺丰', kind: 'primary', needSel: true },
+          { label: '批量打印标签', kind: 'ghost', needSel: true },
+          { label: '清空选择', kind: 'ghost', needSel: true },
+        ],
+        headers: ['', '序号', '订单号', '下单时间', '会员', '商品', '数量', '金额', '支付', '状态', '配送', '备注', '操作'],
+        rows: [
+          ['#268', '10-08 15:37', '王 15893806153', '1日体验', '×1', '0.00', '已支付', '待接单', '门店自提', '锻炼果蔬汁'],
+          ['#267', '10-08 15:37', '王 15893806153', '1日体验', '×1', '0.00', '已支付', '待接单', '门店自提', '锻炼果蔬汁'],
+          ['#265', '10-08 14:58', '王 15893806153', '1日体验', '×1', '0.00', '已支付', '待接单', '门店自提', '锻炼果蔬汁'],
+        ],
+        total: 3,
+      },
+      retail: {
+        title: '零售订单',
+        intro: '按供餐日看单次点餐。待发货才能推单，待自提在门店核销。',
+        date: true,
+        sync: true,
+        stats: [['汇总', 8], ['待发货', 0], ['待自提', 0], ['已取消', 0], ['占用库存', '7 份']],
+        pills: [['待发货', 0], ['待自提', 0], ['配送中', 0], ['已完成', 6], ['售后', 0]],
+        actions: [
+          { label: '手动建单', kind: 'primary' },
+          { label: '批量完成', kind: 'primary', needSel: true },
+          { label: '批量取消', kind: 'ghost', needSel: true },
+          { label: '批量打印标签', kind: 'ghost', needSel: true },
+          { label: '清空选择', kind: 'ghost', needSel: true },
+        ],
+        headers: ['序号', '下单时间', '会员', '餐品', '份数', '供餐日', '金额', '支付', '订单状态', '配送/自提', '操作'],
+        rows: [],
+        total: 0,
+        empty: '该供餐日暂无零售订单',
+      },
+      card: {
+        title: '卡包订单',
+        intro: '看开卡缴费和是否已入账。配送方式只说明这张卡以后怎么送。',
+        date: true,
+        sync: false,
+        stats: null,
+        pills: [['全部', 5], ['已支付', 5], ['未支付', 0], ['已取消', 0]],
+        actions: [],
+        headers: ['序号', '订单号', '下单时间', '会员', '商品', '卡型', '金额', '渠道', '缴费', '入账', '配送', '操作'],
+        rows: [
+          ['OMC3314', '11-10 16:58', '小美 18527518463', '双十一特价周餐卡', '周卡', '168.00', '微信', '已缴', '已同步', '卡包无需配送'],
+          ['—', '11-10 15:08', '李先生 13333377765', '双十一特价周餐卡', '周卡', '168.00', '微信', '已缴', '已同步', '卡包无需配送'],
+          ['OMC3312', '11-10 13:02', '博 18836001130', '一周午餐六次卡', '季卡', '178.00', '微信', '已缴', '已同步', '卡包无需配送'],
+        ],
+        total: 5,
+      },
+    }
+
+    const pillsEl = document.getElementById('pills')
+    const tableEl = document.getElementById('table')
+    const actionsEl = document.getElementById('actions')
+    const statsEl = document.getElementById('stats')
+    let sceneKey = 'mall'
+    let selected = false
+
+    function tag(text) {
+      const map = { '已支付': 'ok', '已缴': 'ok', '已同步': 'ok', '待接单': 'wait', '待发货': 'wait', '配送中': 'go', '门店自提': 'muted', '卡包无需配送': 'muted', '微信': 'go' }
+      return `<span class="tag tag--${map[text] || 'muted'}">${text}</span>`
+    }
+
+    function render() {
+      const s = scenes[sceneKey]
+      document.getElementById('title').textContent = s.title
+      document.getElementById('intro').textContent = s.intro
+      document.getElementById('date').hidden = !s.date
+      document.getElementById('sync').hidden = !s.sync
+      document.getElementById('total').textContent = s.total
+      pillsEl.innerHTML = s.pills.map(([name, n], i) =>
+        `<button type="button" class="${i === 0 ? 'on' : ''}">${name}<em>${n}</em></button>`
+      ).join('')
+      if (s.stats) {
+        statsEl.hidden = false
+        statsEl.innerHTML = s.stats.map(([k, v]) => `<span class="stat">${k} <b>${v}</b></span>`).join('')
+      } else statsEl.hidden = true
+      actionsEl.innerHTML = (s.actions || []).map((act) =>
+        `<button type="button" class="${act.kind}">${act.label}</button>`
+      ).join('')
+      if (!s.rows.length) {
+        tableEl.innerHTML = `<div class="empty">${s.empty}</div>`
+        return
+      }
+      const head = s.headers.map((h) => `<th>${h}</th>`).join('')
+      const body = s.rows.map((row, idx) => {
+        const cells = row.map((cell) => `<td>${['已支付','已缴','已同步','待接单','待发货','配送中','门店自提','卡包无需配送','微信'].includes(cell) ? tag(cell) : cell}</td>`).join('')
+        const check = sceneKey === 'card' ? '' : '<td><input type="checkbox" /></td>'
+        const more = sceneKey === 'mall'
+          ? `<button class="more" type="button" data-order="${row[0]}">更多</button>`
+          : `<button class="more" type="button">更多</button>`
+        return `<tr>${check}<td>${idx + 1}</td>${cells}<td>${more}</td></tr>`
+      }).join('')
+      tableEl.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
+      if (sceneKey === 'mall') bindMoreMenus()
+    }
+
+    const MORE_ITEMS = ['修改', '接单', '取消接单', '推送到顺丰', '完成', '门店自配送', '取消', '退款', '编辑备注', '打印标签']
+    let menuEl = null
+
+    function closeMenu() {
+      if (menuEl) menuEl.remove()
+      menuEl = null
+    }
+
+    function bindMoreMenus() {
+      tableEl.querySelectorAll('.more[data-order]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation()
+          closeMenu()
+          const rect = btn.getBoundingClientRect()
+          menuEl = document.createElement('div')
+          menuEl.className = 'menu'
+          menuEl.innerHTML = MORE_ITEMS.map((name) =>
+            `<button type="button" class="${name === '取消' || name === '退款' ? 'danger' : ''}" data-act="${name}">${name}</button>`
+          ).join('')
+          document.body.appendChild(menuEl)
+          const top = Math.min(rect.bottom + 6, window.innerHeight - menuEl.offsetHeight - 8)
+          menuEl.style.top = `${top}px`
+          menuEl.style.left = `${Math.max(8, rect.right - menuEl.offsetWidth)}px`
+          menuEl.querySelector('[data-act="修改"]').addEventListener('click', () => {
+            document.getElementById('dlgOrder').textContent = `订单 ${btn.dataset.order} · 轻断食果蔬汁 · 果蔬汁1日体验 · 王 15893808153`
+            document.getElementById('fulfillHome').checked = true
+            document.getElementById('existingAddr').hidden = false
+            document.getElementById('newAddrForm').hidden = true
+            syncFulfill()
+            document.getElementById('mask').classList.add('show')
+            closeMenu()
+          })
+          menuEl.querySelectorAll('button:not([data-act="修改"])').forEach((item) => {
+            item.addEventListener('click', closeMenu)
+          })
+        })
+      })
+    }
+
+    document.addEventListener('click', (event) => {
+      if (menuEl && !menuEl.contains(event.target)) closeMenu()
+    })
+    function closeDlg() { document.getElementById('mask').classList.remove('show') }
+    document.getElementById('dlgClose').addEventListener('click', closeDlg)
+    document.getElementById('dlgCancel').addEventListener('click', closeDlg)
+    document.getElementById('dlgSave').addEventListener('click', closeDlg)
+
+    function syncFulfill() {
+      const home = document.getElementById('fulfillHome').checked
+      document.getElementById('pickupNote').hidden = home
+      document.getElementById('homeAddr').hidden = !home
+    }
+    document.getElementById('fulfillHome').addEventListener('change', syncFulfill)
+    document.getElementById('fulfillPickup').addEventListener('change', syncFulfill)
+    document.getElementById('newAddr').addEventListener('click', () => {
+      document.getElementById('existingAddr').hidden = true
+      document.getElementById('newAddrForm').hidden = false
+    })
+    document.getElementById('useExisting').addEventListener('click', () => {
+      document.getElementById('newAddrForm').hidden = true
+      document.getElementById('existingAddr').hidden = false
+    })
+
+    document.querySelectorAll('.scenes button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        sceneKey = btn.dataset.scene
+        document.querySelectorAll('.scenes button').forEach((b) => b.classList.toggle('on', b === btn))
+        render()
+      })
+    })
+    document.querySelectorAll('.themes button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.documentElement.dataset.theme = btn.dataset.theme
+        document.querySelectorAll('.themes button').forEach((b) => b.classList.toggle('on', b === btn))
+      })
+    })
+    document.getElementById('toggleSel').addEventListener('click', () => {
+      selected = !selected
+      render()
+    })
+    render()
+  </script>
+</body>
+</html>

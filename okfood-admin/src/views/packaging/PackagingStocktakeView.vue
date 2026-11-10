@@ -42,9 +42,16 @@ async function save() {
   }
   try {
     await ElMessageBox.confirm(
-      '实盘会改写结存。22 点之后再改的日总份不会回写当天扣库，差额留在这次校对里。',
+      '<p class="okfood-message-box__detail">实盘会改写结存。22 点之后再改的日总份不会回写当天扣库，差额留在这次校对里。</p>',
       '保存校对',
-      { type: 'warning', confirmButtonText: '保存', cancelButtonText: '取消' },
+      {
+        customClass: 'okfood-message-box',
+        confirmButtonText: '保存',
+        cancelButtonText: '取消',
+        cancelButtonClass: 'okfood-message-box__cancel',
+        distinguishCancelAndClose: true,
+        dangerouslyUseHTMLString: true,
+      },
     )
   } catch {
     return
@@ -65,34 +72,36 @@ onMounted(load)
 </script>
 
 <template>
-  <div v-loading="loading">
-    <el-alert
-      title="每周把仓库里的实数填在右边。没填的行不会改。第一次填写会当作期初，之后晚上才会扣这个品。"
-      type="info"
-      show-icon
-      :closable="false"
-      class="pack-gap"
-    />
-    <div class="pack-toolbar">
-      <el-button type="primary" :loading="saving" @click="save">保存校对</el-button>
-    </div>
-    <el-table :data="rows" border>
-      <el-table-column prop="name" label="名称" min-width="140" />
-      <el-table-column prop="supplier_name" label="供应商" min-width="120" />
-      <el-table-column label="系统结存" width="120">
-        <template #default="{ row }">{{ row.initialized ? row.qty : '未期初' }}</template>
-      </el-table-column>
-      <el-table-column label="实盘" width="180">
-        <template #default="{ row }">
-          <el-input v-model="row.actual_text" placeholder="不填则不改" style="width: 140px" />
-        </template>
-      </el-table-column>
-      <template #empty><el-empty description="还没有耗材" /></template>
-    </el-table>
-  </div>
-</template>
+  <section class="mkt-page tab-content animate-up">
+    <header class="mkt-page-head">
+      <div class="mkt-page-head__copy">
+        <p class="mkt-kicker">库存管理</p>
+        <h1 class="mkt-title">库存校对</h1>
+        <p class="mkt-intro">
+          每周把仓库里的实数填在右边。没填的行不会改。第一次填写会当作期初，之后晚上才会扣这个品。
+        </p>
+      </div>
+      <el-button type="primary" round :loading="saving" @click="save">保存校对</el-button>
+    </header>
 
-<style scoped>
-.pack-gap { margin-bottom: 12px; }
-.pack-toolbar { margin-bottom: 12px; }
-</style>
+    <article class="mkt-card">
+      <div class="mkt-table-wrap">
+        <el-table v-loading="loading" :data="rows" class="admin-table" empty-text="还没有耗材">
+          <el-table-column prop="name" label="名称" min-width="140" />
+          <el-table-column prop="supplier_name" label="供应商" min-width="120" />
+          <el-table-column label="系统结存" width="120">
+            <template #default="{ row }">
+              <el-tag v-if="!row.initialized" type="info" round effect="light">未期初</el-tag>
+              <span v-else>{{ row.qty }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="实盘" width="180">
+            <template #default="{ row }">
+              <el-input v-model="row.actual_text" placeholder="不填则不改" style="width: 140px" />
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </article>
+  </section>
+</template>
