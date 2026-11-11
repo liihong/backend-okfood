@@ -704,7 +704,7 @@ class AdminMemberPatchIn(BaseModel):
     membership_template_id: int | None = Field(
         None,
         ge=1,
-        description="本店会员卡模版 id；提交则按模版写入套餐标签，并同步最近已入账工单的模版与餐段快照",
+        description="本店会员卡模版 id（含已下架）；提交则按模版写入套餐标签，并同步最近已入账工单的模版与餐段快照",
     )
     balance: int | None = Field(
         None,

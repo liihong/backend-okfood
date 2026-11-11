@@ -43,27 +43,37 @@ function planTypeFromTemplate(tpl) {
  * @param {Array<Record<string, unknown>>} templates
  * @param {Record<string, unknown> | null | undefined} member
  */
+/** 多张卡文案相同时不猜第一张，避免把「午餐包月」错绑成「一周午餐」 */
+function uniqueTemplateId(hits) {
+  if (!Array.isArray(hits) || hits.length !== 1 || hits[0]?.id == null) return null
+  return Number(hits[0].id)
+}
+
 function matchMemberTemplate(templates, member) {
   const list = Array.isArray(templates) ? templates : []
   if (!list.length || !member) return null
   const planBase = String(member.planBase || member.plan_type || '').trim()
   const display = normalizePlanLabel(member.plan)
   const scope = mealScopeLabelFromPeriods(member.entitled_meal_periods)
-  // 仅精确匹配，避免把「月卡 · 全餐」错配成租户另一张「月卡 · 午餐」
-  const byDisplay = display
-    ? list.find((t) => normalizePlanLabel(membershipTemplatePlanLabel(t)) === display)
-    : null
-  if (byDisplay?.id != null) return Number(byDisplay.id)
-  const exact = list.find((t) => {
-    const kl = String(t.kind_label || '').trim()
-    return kl === planBase && mealScopeLabelFromPeriods(t.meal_periods) === scope
-  })
-  if (exact?.id != null) return Number(exact.id)
-  const byPlanAndScope = list.find((t) => {
-    return planTypeFromTemplate(t) === planBase && mealScopeLabelFromPeriods(t.meal_periods) === scope
-  })
-  if (byPlanAndScope?.id != null) return Number(byPlanAndScope.id)
-  return null
+  // 仅精确且唯一匹配，避免把「月卡 · 全餐」错配成另一张「月卡 · 午餐」
+  if (display) {
+    const byDisplay = uniqueTemplateId(
+      list.filter((t) => normalizePlanLabel(membershipTemplatePlanLabel(t)) === display),
+    )
+    if (byDisplay != null) return byDisplay
+  }
+  const exact = uniqueTemplateId(
+    list.filter((t) => {
+      const kl = String(t.kind_label || '').trim()
+      return kl === planBase && mealScopeLabelFromPeriods(t.meal_periods) === scope
+    }),
+  )
+  if (exact != null) return exact
+  return uniqueTemplateId(
+    list.filter(
+      (t) => planTypeFromTemplate(t) === planBase && mealScopeLabelFromPeriods(t.meal_periods) === scope,
+    ),
+  )
 }
 
 const open = defineModel('open', { type: Boolean, default: false })
@@ -93,7 +103,7 @@ const editInitialDeliveryRegionId = ref('')
 const editInitialDinnerPaused = ref(false)
 const editInitialDinnerDeliverOn = ref('')
 const profileLoading = ref(false)
-/** 当前租户已开启的会员卡模版（套餐类型下拉） */
+/** 本店会员卡管理中的卡（含已下架），下拉按卡逐条列出，不再按餐段收成「午餐/晚餐」 */
 const membershipTemplates = ref([])
 const membershipTemplatesLoading = ref(false)
 const editForm = ref({
@@ -133,18 +143,23 @@ const autoAreaHintText = computed(() =>
     : '仅勾选后保存才会按已有坐标重算片区；不改片区则不提交，避免动到地址。',
 )
 
-/** 当前租户已开启卡包 → 套餐下拉选项（按展示文案去重） */
+/** 会员卡管理里关掉上架的卡；档案仍可指定，小程序开卡不行 */
+function templateIsOffShelf(tpl) {
+  return tpl?.is_active === false || tpl?.is_active === 0
+}
+
+/** 下拉只显示会员卡管理里的种类简称，不拼卡片全名和餐段 */
+function templateSelectLabel(tpl) {
+  return String(tpl?.kind_label || '').trim() || String(tpl?.name || '').trim() || '会员卡'
+}
+
+/** 会员卡管理中的每一张卡 → 下拉一项（含已下架，便于指定全餐） */
 const planOptions = computed(() => {
-  const seen = new Set()
   const opts = []
   for (const t of membershipTemplates.value) {
     const id = Number(t?.id)
     if (!Number.isFinite(id) || id <= 0) continue
-    const label = membershipTemplatePlanLabel(t)
-    const labelKey = normalizePlanLabel(label)
-    if (seen.has(labelKey)) continue
-    seen.add(labelKey)
-    opts.push({ id, label, planType: planTypeFromTemplate(t) })
+    opts.push({ id, label: templateSelectLabel(t), planType: planTypeFromTemplate(t) })
   }
   const selected = editForm.value.membership_template_id
   if (selected === CURRENT_PLAN_VALUE) {
@@ -164,15 +179,26 @@ const planOptions = computed(() => {
   return opts
 })
 
+/** 选中已下架卡时说明：档案仍按其餐段更新，小程序开卡不受影响 */
+const selectedShelfHint = computed(() => {
+  const id = editForm.value.membership_template_id
+  if (id == null || id === CURRENT_PLAN_VALUE) return ''
+  const tpl = membershipTemplates.value.find((t) => Number(t.id) === Number(id))
+  if (!tpl || !templateIsOffShelf(tpl)) return ''
+  const scope = mealScopeLabelFromPeriods(tpl.meal_periods)
+  return `这张卡已在会员卡管理下架，保存后仍按「${scope}」更新该会员的餐段，不改剩余次数。`
+})
+
 watch(planOptions, (opts) => {
   if (editForm.value.membership_template_id !== CURRENT_PLAN_VALUE) return
   const currentLabel =
     (props.member?.plan && String(props.member.plan).trim()) ||
     String(editForm.value.plan_type || '').trim()
   const currentNorm = normalizePlanLabel(currentLabel)
-  const hit = opts.find(
+  const hits = opts.filter(
     (o) => o.id !== CURRENT_PLAN_VALUE && normalizePlanLabel(o.label) === currentNorm,
   )
+  const hit = hits.length === 1 ? hits[0] : null
   if (hit) {
     editForm.value.membership_template_id = hit.id
     // 打开时自动对上卡包，初始值一并对齐，避免未改下拉却误提交
@@ -185,11 +211,7 @@ watch(planOptions, (opts) => {
 async function loadMembershipTemplates() {
   membershipTemplatesLoading.value = true
   try {
-    const data = await apiJson(
-      '/api/admin/catalog/membership-templates?active_only=true',
-      {},
-      { auth: true },
-    )
+    const data = await apiJson('/api/admin/catalog/membership-templates', {}, { auth: true })
     membershipTemplates.value = Array.isArray(data) ? data : []
   } catch (e) {
     membershipTemplates.value = []
@@ -482,12 +504,14 @@ async function submitEditMember() {
               v-model="editForm.membership_template_id"
               class="okfood-mem-edit-input"
               :loading="membershipTemplatesLoading"
+              filterable
+              :fit-input-width="false"
               :placeholder="
                 membershipTemplatesLoading
                   ? '加载本店会员卡…'
                   : planOptions.length
                     ? '请选择本店会员卡'
-                    : '暂无已开启的会员卡'
+                    : '暂无会员卡'
               "
             >
               <el-option
@@ -497,13 +521,16 @@ async function submitEditMember() {
                 :value="opt.id"
               />
             </el-select>
+            <p v-if="selectedShelfHint" class="okfood-mem-edit-hint-soft">
+              {{ selectedShelfHint }}
+            </p>
           </div>
         </div>
         <p
           v-if="!membershipTemplatesLoading && !membershipTemplates.length"
           class="okfood-mem-edit-hint-soft okfood-mem-edit-hint-soft--full"
         >
-          暂无已开启的卡包，请先在「会员卡管理」中创建并开启。
+          暂无会员卡，请先在「会员卡管理」中创建。
         </p>
       </section>
 

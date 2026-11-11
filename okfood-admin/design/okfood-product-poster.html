@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1080" />
+  <title>OK Fine 超级管家 · 产品海报</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: #1c1917;
+      min-height: 100%;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      padding: 0;
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .poster {
+      width: 1080px;
+      height: 1920px;
+      background:
+        radial-gradient(900px 520px at 100% -8%, rgba(232, 146, 124, 0.45), transparent 60%),
+        radial-gradient(700px 480px at -10% 18%, rgba(92, 191, 142, 0.22), transparent 55%),
+        linear-gradient(180deg, #fffaf6 0%, #fff7f2 42%, #f4efe8 100%);
+      color: #1c2b26;
+      position: relative;
+      overflow: hidden;
+      padding: 72px 72px 0;
+    }
+    .poster::before {
+      content: "";
+      position: absolute;
+      right: -120px;
+      top: 180px;
+      width: 420px;
+      height: 420px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(232, 146, 124, 0.35);
+    }
+    .poster::after {
+      content: "";
+      position: absolute;
+      right: -40px;
+      top: 260px;
+      width: 260px;
+      height: 260px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 40% 40%, #f3c1b2, #e8927c 70%);
+      opacity: 0.9;
+    }
+
+    .brand {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .mark {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      background: #1f3d32;
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-size: 22px;
+      letter-spacing: -0.04em;
+    }
+    .logo-name {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+    }
+    .logo-sub {
+      margin-top: 2px;
+      font-size: 18px;
+      color: #6b625b;
+      letter-spacing: 0.18em;
+    }
+    .chip {
+      position: relative;
+      z-index: 2;
+      font-size: 18px;
+      letter-spacing: 0.14em;
+      color: #9a4e3c;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(232, 146, 124, 0.45);
+      padding: 10px 18px;
+      border-radius: 999px;
+    }
+
+    .hero {
+      position: relative;
+      z-index: 2;
+      margin-top: 78px;
+      max-width: 760px;
+    }
+    .kicker {
+      font-size: 22px;
+      letter-spacing: 0.28em;
+      color: #c45c45;
+      font-weight: 700;
+    }
+    h1 {
+      margin-top: 22px;
+      font-size: 86px;
+      line-height: 1.08;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+    h1 em {
+      font-style: normal;
+      color: #c45c45;
+    }
+    .lead {
+      margin-top: 28px;
+      font-size: 30px;
+      line-height: 1.55;
+      color: #3d4a45;
+      max-width: 720px;
+    }
+
+    .section-label {
+      position: relative;
+      z-index: 2;
+      margin-top: 64px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    .section-label strong {
+      font-size: 28px;
+      letter-spacing: 0.16em;
+    }
+    .section-label span {
+      font-size: 18px;
+      color: #7a716a;
+      letter-spacing: 0.08em;
+    }
+
+    .grid {
+      position: relative;
+      z-index: 2;
+      margin-top: 28px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    .card {
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(31, 61, 50, 0.08);
+      border-radius: 28px;
+      padding: 28px 28px 26px;
+      min-height: 228px;
+      box-shadow: 0 10px 30px rgba(60, 40, 30, 0.04);
+    }
+    .card .no {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      color: #e8927c;
+    }
+    .card h2 {
+      margin-top: 12px;
+      font-size: 36px;
+      line-height: 1.2;
+      font-weight: 800;
+    }
+    .card p {
+      margin-top: 12px;
+      font-size: 22px;
+      line-height: 1.45;
+      color: #4e5854;
+    }
+
+    .flow {
+      position: relative;
+      z-index: 2;
+      margin-top: 22px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .flow i {
+      font-style: normal;
+      background: #1f3d32;
+      color: #f6fff8;
+      border-radius: 999px;
+      padding: 10px 18px;
+      font-size: 20px;
+      letter-spacing: 0.04em;
+    }
+
+    .price {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 600px;
+      background:
+        radial-gradient(500px 220px at 90% 0%, rgba(232, 146, 124, 0.35), transparent 70%),
+        #17352c;
+      color: #f7f3ee;
+      padding: 48px 72px 40px;
+      display: flex;
+      flex-direction: column;
+    }
+    .price-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .price-kicker {
+      font-size: 22px;
+      letter-spacing: 0.32em;
+      color: #f0b5a4;
+      font-weight: 700;
+    }
+    .price-note {
+      font-size: 20px;
+      color: rgba(247, 243, 238, 0.72);
+      text-align: right;
+      line-height: 1.45;
+    }
+    .nums {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 28px;
+      align-items: end;
+    }
+    .num-block .label {
+      font-size: 26px;
+      letter-spacing: 0.18em;
+      color: rgba(247, 243, 238, 0.78);
+    }
+    .num-block .value {
+      margin-top: 4px;
+      font-size: 132px;
+      line-height: 0.9;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      font-variant-numeric: tabular-nums;
+    }
+    .num-block .value small {
+      font-size: 36px;
+      letter-spacing: 0.08em;
+      margin-left: 8px;
+      font-weight: 700;
+    }
+    .num-block.renew .value {
+      font-size: 108px;
+      color: #f3c7bb;
+    }
+    .fineprint {
+      margin-top: auto;
+      padding-top: 22px;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 20px;
+      color: rgba(247, 243, 238, 0.78);
+      letter-spacing: 0.04em;
+    }
+    .fineprint b {
+      color: #fff;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <article class="poster">
+    <header class="brand">
+      <div class="logo">
+        <div class="mark">OK</div>
+        <div>
+          <div class="logo-name">OK FINE</div>
+          <div class="logo-sub">超级管家</div>
+        </div>
+      </div>
+      <div class="chip">健康餐订阅配送系统</div>
+    </header>
+
+    <section class="hero">
+      <div class="kicker">给还在用表格送餐的店</div>
+      <h1>会员、备餐、配送<br />今天就能<em>对上。</em></h1>
+      <p class="lead">专为健康餐、轻食订阅店。开卡、点餐、明天送谁、顺丰和骑手，收进同一套系统，不再对微信、对 Excel。</p>
+    </section>
+
+    <div class="section-label">
+      <strong>我们解决的问题</strong>
+      <span>门店每天真正卡住的四件事</span>
+    </div>
+
+    <section class="grid">
+      <article class="card">
+        <div class="no">01</div>
+        <h2>次数对不上</h2>
+        <p>请假、暂停、每天扣几次、还剩多少次，系统自动记。次数不多，提醒续费。</p>
+      </article>
+      <article class="card">
+        <div class="no">02</div>
+        <h2>明天不知道送谁</h2>
+        <p>午餐、晚餐、几份、送到哪个片区，一张配送大表当天看清。备餐和派单按表走。</p>
+      </article>
+      <article class="card">
+        <div class="no">03</div>
+        <h2>钱和单是两张皮</h2>
+        <p>开卡、单次点餐、微信支付、退款，跟会员档案记在一起。月底对实收有据可查。</p>
+      </article>
+      <article class="card">
+        <div class="no">04</div>
+        <h2>餐送出去就失联</h2>
+        <p>顺丰同城可推单，也支持门店骑手和到店自提。送到，才算完成。</p>
+      </article>
+    </section>
+
+    <div class="flow">
+      <i>会员小程序</i>
+      <i>管理后台</i>
+      <i>配送员端</i>
+      <i>周菜单</i>
+      <i>多门店</i>
+      <i>抖音团购核销</i>
+    </div>
+
+    <footer class="price">
+      <div class="price-top">
+        <div class="price-kicker">现在活动价</div>
+        <div class="price-note">系统使用费<br />按年开通</div>
+      </div>
+      <div class="nums">
+        <div class="num-block">
+          <div class="label">首年</div>
+          <div class="value">4980<small>元</small></div>
+        </div>
+        <div class="num-block renew">
+          <div class="label">之后每年</div>
+          <div class="value">980<small>元</small></div>
+        </div>
+      </div>
+      <div class="fineprint">
+        <span>含 <b>会员小程序 + 管理后台 + 配送员端</b></span>
+        <span>OK FINE · 健康餐按天送到位</span>
+      </div>
+    </footer>
+  </article>
+</body>
+</html>
