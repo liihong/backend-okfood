@@ -2067,8 +2067,8 @@ def admin_patch_member_profile(
                 or int(tpl.tenant_id) != int(m.tenant_id)
             ):
                 raise HTTPException(status_code=404, detail="会员卡模版不存在")
-            if not tpl.is_active:
-                raise HTTPException(status_code=400, detail="该卡包模版未开启或已下架")
+            # 档案纠正按会员卡管理里的卡指定餐段，含已下架卡（如全餐卡停售仍要改回午+晚）。
+            # 小程序开卡、开卡工单仍拒绝未开启模版，不在这里放行。
             plan_tpl_apply = apply_admin_membership_template(db, m, tpl, operator=admin_op)
             db.flush()
         elif plan_type is not None:
