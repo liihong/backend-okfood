@@ -3,523 +3,346 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>后厨出餐看板 · 讨论预览</title>
+  <title>后厨出餐 · 电视看板</title>
+  <!--
+    电视一屏。成品图在中间，左边总出餐量，右边这一餐的每份净重。
+    毛玻璃只用在顶栏和照片外框。临时可售、特殊餐、赠品、筷子小勺不在这屏。
+  -->
   <style>
     :root {
-      --p: #e8927c;
+      --canvas: #f7f6f3;
       --ink: #1d1f21;
       --muted: #5c6670;
-      --line: rgba(15, 23, 42, 0.08);
-      --ok: #15803d;
-      --ok-bg: #ecfdf3;
-      --warn: #c2410c;
-      --warn-bg: #fff7ed;
-      --bad: #b91c1c;
-      --bad-bg: #fef2f2;
+      --faint: #8b949e;
+      --line: rgba(29, 31, 33, 0.08);
+      --accent: #e8927c;
+      --accent-deep: #9a4e3c;
+      --sans: "PingFang SC", "Hiragino Sans GB", "SF Pro Text", "Plus Jakarta Sans", system-ui, sans-serif;
     }
     * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
     body {
-      margin: 0;
-      min-height: 100vh;
       color: var(--ink);
-      background: #f6f3ef;
-      font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(520px 420px at -8% -10%, rgba(243, 193, 178, 0.55), transparent 70%),
+        radial-gradient(480px 380px at 108% 18%, rgba(214, 228, 240, 0.7), transparent 70%),
+        var(--canvas);
+      font-family: var(--sans);
+      letter-spacing: -0.01em;
+      -webkit-font-smoothing: antialiased;
     }
-    button { font: inherit; cursor: pointer; }
-    .mesh { position: fixed; inset: 0; pointer-events: none; }
-    .mesh i { position: absolute; border-radius: 50%; filter: blur(70px); }
-    .mesh i:first-child { width: 480px; height: 480px; left: -120px; top: -80px; background: rgba(255, 196, 170, 0.55); }
-    .mesh i:last-child { width: 420px; height: 420px; right: -80px; bottom: -100px; background: rgba(255, 228, 196, 0.7); }
+    button { font: inherit; color: inherit; cursor: pointer; }
 
-    .bar {
-      position: sticky; top: 0; z-index: 20;
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 10px 18px;
-      background: rgba(255,255,255,.78);
-      border-bottom: 1px solid rgba(255,255,255,.9);
-      backdrop-filter: blur(14px);
+    .review {
+      height: 40px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px;
+      background: rgba(255, 255, 255, 0.72);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(16px) saturate(1.2);
     }
-    .bar strong { font-size: 13px; white-space: nowrap; }
-    .bar-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-    .bar button {
-      border: 1px solid rgba(0,0,0,.06);
-      background: #fff;
-      border-radius: 999px;
-      padding: 6px 12px;
-      font-weight: 700;
+    .review p { margin: 0; font-size: 12px; color: var(--muted); }
+    .review strong { color: var(--ink); font-weight: 700; }
+    .meals { display: flex; gap: 6px; }
+    .meals button {
+      height: 26px; padding: 0 12px; border-radius: 999px;
+      border: 1px solid var(--line); background: #fff; font-size: 12px; font-weight: 700;
     }
-    .bar button.on { color: #fff; background: var(--p); border-color: transparent; }
-
-    .page { position: relative; max-width: 1280px; margin: 0 auto; padding: 16px 16px 40px; }
-
-    .note {
-      margin: 0 0 12px;
-      padding: 12px 14px;
-      border-radius: 16px;
-      background: rgba(255,255,255,.78);
-      border: 1px solid rgba(255,255,255,.9);
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.6;
-    }
-    .note b { color: var(--ink); }
-    .gaps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .gap {
-      font-size: 12px; font-weight: 700; color: #9a3412;
-      background: #fff7ed; border: 1px solid #fed7aa; border-radius: 999px; padding: 3px 8px;
-    }
+    .meals button.on { color: #fff; background: var(--accent); border-color: transparent; }
 
     .board {
-      border-radius: 24px;
-      background: rgba(255,255,255,.86);
-      border: 1px solid rgba(255,255,255,.95);
-      box-shadow: 0 18px 40px rgba(80, 48, 28, 0.06);
-      padding: 16px;
+      height: calc(100vh - 40px);
+      width: min(calc(100vw - 20px), calc((100vh - 40px) * 16 / 9));
+      margin: 0 auto;
+      padding: 12px 0 14px;
+      display: grid;
+      grid-template-columns: 1fr 0.86fr 1.08fr;
+      grid-template-rows: 72px minmax(0, 1fr);
+      gap: 14px;
     }
-    body[data-meal="dinner"] .board { background: rgba(255,255,255,.9); }
 
-    .head {
-      display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
-      margin-bottom: 12px;
+    .mast {
+      grid-column: 1 / -1;
+      display: flex; align-items: center; justify-content: space-between; gap: 20px;
+      padding: 0 22px; border-radius: 20px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 10px 28px rgba(29, 31, 33, 0.05);
+      backdrop-filter: blur(18px) saturate(1.25);
     }
-    .kicker { margin: 0 0 2px; font-size: 12px; font-weight: 800; letter-spacing: .12em; color: var(--p); }
-    h1 { margin: 0; font-size: 28px; letter-spacing: -.03em; line-height: 1.15; }
-    .sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
-    .head-side { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-    .meals { display: flex; padding: 4px; border-radius: 999px; background: #f3eee9; }
-    .meals button {
-      border: 0; background: transparent; border-radius: 999px; padding: 8px 16px; font-weight: 800;
+    .day { margin: 0; font-size: 13px; font-weight: 650; color: var(--muted); }
+    .dishline { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+    .dishline h1 {
+      margin: 0; font-size: clamp(26px, 2.2vw, 34px); line-height: 1.05; font-weight: 680; letter-spacing: -0.03em;
     }
-    .meals button.on { background: var(--p); color: #fff; }
     .clock {
-      min-width: 92px; text-align: right;
+      margin: 0; font-size: clamp(30px, 2.6vw, 42px); line-height: 1; font-weight: 650;
+      letter-spacing: -0.04em; font-variant-numeric: tabular-nums;
     }
-    .clock b { display: block; font-size: 22px; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
-    .clock span { font-size: 12px; color: var(--muted); font-weight: 700; }
 
+    .panel {
+      min-height: 0; display: flex; flex-direction: column;
+      border-radius: 24px; background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 16px 40px rgba(29, 31, 33, 0.06);
+      overflow: hidden;
+    }
+    .panel-h {
+      display: flex; align-items: center; gap: 8px;
+      padding: 16px 18px 0; font-size: 15px; font-weight: 750;
+    }
+    .panel-h i { width: 9px; height: 9px; border-radius: 3px; background: var(--accent); flex: none; }
+    .panel-h .sub { margin-left: auto; font-size: 12px; font-weight: 650; color: var(--faint); }
+
+    .center { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
     .hero {
-      display: grid;
-      grid-template-columns: 220px 1fr 280px;
-      gap: 12px;
-      margin-bottom: 12px;
+      flex: 1; min-height: 0;
+      display: flex; flex-direction: column;
+      padding: 10px;
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.48);
+      border: 1px solid rgba(255, 255, 255, 0.82);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 18px 40px rgba(29, 31, 33, 0.07);
+      backdrop-filter: blur(16px) saturate(1.2);
     }
-    .card {
+    .frame { position: relative; flex: 1; min-height: 0; border-radius: 20px; overflow: hidden; background: #efeae4; }
+    .frame img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
+    .kicker {
+      position: absolute; top: 12px; left: 12px;
+      padding: 6px 12px; border-radius: 999px;
+      background: rgba(255, 255, 255, 0.88); color: var(--ink);
+      font-size: 13px; font-weight: 750;
+      backdrop-filter: blur(10px);
+    }
+    .drink {
+      flex: none;
+      display: flex; align-items: center; gap: 12px;
+      padding: 16px 18px; border-radius: 20px;
       background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 14px;
+      box-shadow: 0 16px 40px rgba(29, 31, 33, 0.06);
     }
-    .portions { display: flex; flex-direction: column; justify-content: space-between; }
-    .portions .label { font-size: 13px; font-weight: 800; color: var(--muted); }
-    .count {
-      margin: 6px 0 0;
-      font-size: 72px; line-height: .9; letter-spacing: -.05em; font-weight: 800;
-      font-variant-numeric: tabular-nums;
+    .drink .k { font-size: 13px; font-weight: 750; color: #1d4f73; }
+    .drink strong { font-size: clamp(22px, 1.8vw, 28px); font-weight: 720; letter-spacing: -0.03em; }
+    .drink .tag { margin-left: auto; }
+    .packs {
+      flex: none;
+      padding: 12px 12px 12px; border-radius: 20px; background: #fff;
+      box-shadow: 0 16px 40px rgba(29, 31, 33, 0.06);
     }
-    .count small { font-size: 18px; margin-left: 4px; letter-spacing: 0; }
-    .deadline { margin-top: 10px; font-size: 13px; font-weight: 800; color: var(--warn); }
-    .splits { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-    .split {
-      font-size: 12px; font-weight: 800; padding: 4px 8px; border-radius: 999px; background: #f4f6f8; color: #334155;
+    .packs .k {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 8px; font-size: 13px; font-weight: 750;
     }
-    .progress { margin-top: 12px; }
-    .progress .row { display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; color: var(--muted); }
-    .barline { height: 8px; border-radius: 999px; background: #f1ece7; margin-top: 6px; overflow: hidden; }
-    .barline i { display: block; height: 100%; width: 0; background: var(--p); border-radius: inherit; }
+    .packs .k i { width: 9px; height: 9px; border-radius: 3px; background: var(--accent); }
+    .packs .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .packs .row.one { grid-template-columns: 1fr; }
+    .packs article {
+      min-width: 0; padding: 10px 12px; border-radius: 14px; background: #f7f6f3;
+    }
+    .packs .role { display: block; font-size: 12px; font-weight: 650; color: var(--muted); }
+    .packs b {
+      display: block; margin-top: 2px;
+      font-size: clamp(20px, 1.6vw, 26px); font-weight: 720; letter-spacing: -0.03em;
+    }
+    .packs .n { display: block; margin-top: 2px; font-size: 13px; font-weight: 650; color: var(--faint); font-variant-numeric: tabular-nums; }
 
-    .dish { display: grid; grid-template-columns: 168px 1fr; gap: 12px; align-items: center; }
-    .plate {
-      width: 168px; height: 168px; border-radius: 22px; overflow: hidden;
-      background: #f7f1ea;
+    .qty { padding: 16px 16px 14px; gap: 10px; }
+    .qty .panel-h { padding: 0; }
+    .qty .total { display: flex; align-items: baseline; gap: 8px; }
+    .qty .total b {
+      font-size: clamp(64px, 5.6vw, 92px); line-height: 0.84; font-weight: 720;
+      letter-spacing: -0.055em; font-variant-numeric: tabular-nums;
     }
-    .plate svg { width: 100%; height: 100%; display: block; }
-    .dish h2 { margin: 0; font-size: 26px; letter-spacing: -.03em; line-height: 1.2; }
-    .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-    .pill {
-      display: inline-flex; align-items: center; height: 24px; padding: 0 8px;
-      border-radius: 999px; font-size: 12px; font-weight: 800;
-      background: #f4f6f8; color: #334155;
+    .qty .total small { font-size: 16px; font-weight: 650; color: var(--muted); }
+    .splits {
+      flex: 1; min-height: 0;
+      display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px;
     }
-    .pill.hot { background: #fff1f2; color: #be123c; }
-    .pill.mild { background: #fff7ed; color: #c2410c; }
-    .pill.none { background: #ecfdf3; color: #15803d; }
-    .sop { margin: 0; padding-left: 18px; color: #334155; font-size: 13.5px; line-height: 1.55; }
-    .sop li + li { margin-top: 2px; }
+    .splits article {
+      min-height: 0;
+      display: flex; flex-direction: column; justify-content: center;
+      padding: 12px 16px; border-radius: 16px; background: #f7f6f3;
+    }
+    .splits span { font-size: 14px; font-weight: 650; color: var(--muted); }
+    .splits b {
+      margin-top: 4px;
+      font-size: clamp(36px, 3.2vw, 52px); line-height: 1; font-weight: 720;
+      letter-spacing: -0.04em; font-variant-numeric: tabular-nums;
+    }
+    .flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .flow span {
+      padding: 10px 6px; border-radius: 14px; background: #f7f6f3;
+      font-size: 14px; font-weight: 750; text-align: center;
+    }
+    .flow em { display: block; font-style: normal; font-size: 11px; font-weight: 700; color: var(--accent-deep); }
 
-    .added {
-      position: relative;
+    .meal ul {
+      flex: 1; min-height: 0;
+      display: grid; grid-template-columns: 1fr; grid-auto-rows: 1fr;
+      margin: 12px 14px 0; padding: 0; list-style: none; gap: 8px;
     }
-    body.show-added .added {
-      outline: 1.5px dashed rgba(232, 146, 124, .9);
-      outline-offset: 2px;
+    .meal ul.cols { grid-template-columns: 1fr 1fr; gap: 8px; }
+    .meal li {
+      min-height: 0;
+      display: flex; align-items: center; gap: 8px;
+      padding: 0 14px; border-radius: 16px; background: #f7f6f3;
     }
-    .badge {
-      display: none;
-      margin-left: 6px;
-      font-size: 10px; font-weight: 800; color: #9a3412;
-      background: #ffedd5; border-radius: 999px; padding: 1px 5px; vertical-align: 2px;
+    .meal .name { font-size: clamp(16px, 1.25vw, 22px); font-weight: 720; }
+    .meal ul.cols .name { font-size: clamp(15px, 1.1vw, 18px); }
+    .meal b {
+      margin-left: auto; font-size: clamp(26px, 2.2vw, 40px); font-weight: 720;
+      letter-spacing: -0.04em; font-variant-numeric: tabular-nums;
     }
-    body.show-added .badge { display: inline-flex; }
+    .meal ul.cols b { font-size: clamp(22px, 1.7vw, 30px); }
+    .meal small { width: 1.6em; font-size: 14px; font-weight: 650; color: var(--muted); }
+    .hint { margin: 10px 16px 14px; font-size: 13px; line-height: 1.45; color: var(--muted); }
 
-    .grid { display: grid; grid-template-columns: 1.35fr .9fr; gap: 12px; }
-    .section-title {
-      display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
-      margin: 0 0 10px;
+    .tag {
+      display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px;
+      background: #f3f1ee; color: #5c6670;
+      font-style: normal; font-size: 12px; font-weight: 750; white-space: nowrap;
     }
-    .section-title h3 { margin: 0; font-size: 16px; }
-    .section-title span { font-size: 12px; color: var(--muted); font-weight: 700; }
-
-    .line {
-      display: grid;
-      grid-template-columns: 52px 1fr auto;
-      gap: 10px;
-      align-items: center;
-      padding: 10px 0;
-      border-top: 1px solid #f1f5f9;
-    }
-    .line:first-of-type { border-top: 0; padding-top: 0; }
-    .role {
-      height: 28px; border-radius: 8px;
-      display: grid; place-items: center;
-      font-size: 12px; font-weight: 800; color: #fff;
-    }
-    .role.staple { background: #d4a017; }
-    .role.main { background: #e07a5f; }
-    .role.side { background: #5cbf8e; }
-    .role.sauce { background: #c47a3a; }
-    .role.soup { background: #6f8fbf; }
-    .role.drink { background: #7c6bb5; }
-    .line b { display: block; font-size: 16px; }
-    .line em { font-style: normal; color: var(--muted); font-size: 12.5px; font-weight: 700; }
-    .qty { text-align: right; }
-    .qty strong { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
-    .qty span { font-size: 12px; color: var(--muted); font-weight: 700; }
-
-    .pack { display: flex; justify-content: space-between; gap: 8px; padding: 9px 0; border-top: 1px solid #f1f5f9; }
-    .pack:first-of-type { border-top: 0; }
-    .pack b { font-size: 15px; }
-    .pack .where { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 700; }
-    .state { font-size: 12px; font-weight: 800; border-radius: 999px; padding: 3px 8px; height: fit-content; white-space: nowrap; }
-    .state.ok { background: var(--ok-bg); color: var(--ok); }
-    .state.warn { background: var(--warn-bg); color: var(--warn); }
-    .state.bad { background: var(--bad-bg); color: var(--bad); }
-    .group-label {
-      margin: 8px 0 0; font-size: 11px; font-weight: 800; letter-spacing: .08em; color: var(--muted);
-    }
-
-    .foot {
-      display: grid;
-      grid-template-columns: 1.4fr .8fr;
-      gap: 12px;
-      margin-top: 12px;
-    }
-    .ex { display: flex; flex-wrap: wrap; gap: 8px; }
-    .ex i {
-      font-style: normal; font-weight: 800; font-size: 13px;
-      background: #fff7ed; color: #9a3412; border-radius: 12px; padding: 8px 10px;
-    }
-    .hold {
-      background: #f8fafc;
-    }
-    .hold b { font-size: 15px; }
-    .hold p { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
-
-    .ask {
-      margin-top: 12px;
-      padding: 12px 14px;
-      border-radius: 16px;
-      background: rgba(255,255,255,.78);
-      border: 1px solid rgba(255,255,255,.9);
-    }
-    .ask h3 { margin: 0 0 8px; font-size: 14px; }
-    .ask ol { margin: 0; padding-left: 18px; color: #334155; font-size: 13px; line-height: 1.6; }
-
-    @media (max-width: 980px) {
-      .hero, .grid, .foot, .dish { grid-template-columns: 1fr; }
-      .head { flex-direction: column; align-items: stretch; }
-      .count { font-size: 56px; }
-    }
+    .tag.ok { background: #e7f6ee; color: #1f8a5b; }
+    .tag.mild { background: #fff1ea; color: #9a4e3c; }
+    .tag.base { background: #fff; color: var(--accent-deep); }
+    .tag.cold { background: #d7e7f4; color: #1d4f73; }
   </style>
 </head>
-<body class="show-added" data-meal="lunch">
-  <div class="mesh"><i></i><i></i></div>
-  <div class="bar">
-    <strong>后厨出餐看板 · 讨论预览（不改正式代码）</strong>
-    <div class="bar-actions">
-      <button type="button" id="toggleAdded" class="on">标出我补的项</button>
+<body>
+  <div class="review">
+    <p><strong>后厨出餐</strong> · 成品在中间，两边是出餐量和每份净重。</p>
+    <div class="meals" id="meals">
+      <button type="button" data-meal="lunch" class="on">午餐</button>
+      <button type="button" data-meal="dinner">晚餐</button>
     </div>
   </div>
-  <main class="page">
-    <p class="note">
-      这张给厨师早上装盒看，字大、份数大，按<b>今天这一餐</b>算，不做成后台表格。
-      你提的菜名、菜品图、主菜、配菜、赠饮、打包盒、筷子、勺子都在。
-      虚线是我补上的：主食、料汁、汤要和配菜分开，因为进的盒子不一样；耗材按当天份数乘出来，并看库存够不够；手套先按后厨自用，不按份发给顾客。
-      <span class="gaps">
-        <span class="gap">主食</span>
-        <span class="gap">料汁单独小杯</span>
-        <span class="gap">汤和汤碗</span>
-        <span class="gap">当天总份 / 配送自提零售</span>
-        <span class="gap">截止时间</span>
-        <span class="gap">装了多少</span>
-        <span class="gap">例外份</span>
-        <span class="gap">耗材够不够</span>
-        <span class="gap">留样 1 份</span>
-        <span class="gap">辣度</span>
-        <span class="gap">摆盘顺序</span>
-      </span>
-    </p>
-
-    <section class="board" id="board"></section>
-
-    <section class="ask">
-      <h3>先定这 6 件事，再写进系统</h3>
-      <ol>
-        <li>手套是后厨装盒自己用，还是每份餐里都要放一双给顾客？现在库存品类叫「一次性手套」，按份去乘会多领很多。</li>
-        <li>主食、料汁、汤，要不要从配菜里拆开？开菜单里的配菜是备料毛重，看板上要的是装进盒子的净重，两套数不要混。</li>
-        <li>例外份（不要酱、少盐、补送）上不上墙？姓名标签是后厨贴，还是配送贴？默认这张看板只做出标准份和例外份数，不出现会员姓名。</li>
-        <li>要不要「已装多少」？纯看单就只展示；要打卡的话，后厨每装完一箱点一次。</li>
-        <li>午餐早上装、晚餐下午装，是同一块看板切餐段，还是晚餐另开一屏？</li>
-        <li>打包袋、保温袋按每餐一只已经在库存里。冷餐要不要保温袋，热汤会不会压坏盒子，这顿菜要单独写一句。</li>
-      </ol>
-    </section>
-  </main>
+  <main class="board" id="board"></main>
   <script>
     const meals = {
       lunch: {
         label: "午餐",
         date: "11月11日 周三",
-        deadline: "10:30 前装完，交给配送",
-        portions: 128,
-        packed: 42,
-        splits: [
-          ["配送", 96],
-          ["自提", 18],
-          ["零售", 8],
-          ["例外", 6],
+        photo: "meal-preview-lunch-today.jpg",
+        dish: "照烧鸡块饭",
+        spice: "不辣",
+        portions: 130,
+        splits: [["配送", 102], ["自提", 18], ["销售", 8], ["剩余", 2]],
+        drink: { name: "柠檬气泡", temp: "冷" },
+        packs: [["900圆", "餐盒"], ["赠饮瓶", "装随餐饮"]],
+        items: [
+          ["藜麦饭", "120", "克", "打底"],
+          ["鸡块", "120", "克", ""],
+          ["胡萝卜", "40", "克", ""],
+          ["西兰花", "80", "克", ""],
+          ["南瓜", "50", "克", ""],
+          ["玉米", "30", "克", ""],
+          ["番茄", "40", "克", ""],
+          ["香菇", "25", "克", ""],
+          ["木耳", "20", "克", ""],
+          ["鸡蛋", "50", "克", ""],
         ],
-        dish: "香煎鸡胸藜麦碗",
-        spice: "微辣",
-        spiceClass: "mild",
-        meat: "鸡胸",
-        hold: "热菜热饭，酱汁不要提前淋。汤单独盖严，不要压在盒子上。",
-        sop: [
-          "鸡胸切斜片，铺在藜麦饭上方，对上左边的图。",
-          "酱汁装 200 圆小杯，侧放，不要浇在菜上。",
-          "汤盖按紧再进袋。筷子和小勺放袋侧。",
-        ],
-        plate: "chicken",
-        lines: [
-          ["staple", "主食", "藜麦饭", "每份 150 克", "进 900 圆垫底", "150g"],
-          ["main", "主菜", "香煎鸡胸", "每份 120 克，斜片铺面", "铺在饭上", "120g"],
-          ["side", "配菜", "西兰花、烤彩椒", "80 克 + 40 克", "围在鸡胸两侧", "两样"],
-          ["sauce", "料汁", "黑椒汁", "每份 1 小杯，约 25 克", "200 圆，不要提前淋", "×1", true],
-          ["soup", "汤", "南瓜浓汤", "每份 180 毫升", "小汤碗，盖紧", "180ml", true],
-          ["drink", "赠饮", "柠檬气泡", "每份 1 瓶，冷藏现取", "不进热盒，放袋侧", "×1"],
-        ],
-        customerPack: [
-          ["900 圆", "主菜盒", "128 个", "ok", "够"],
-          ["小汤", "汤", "128 个", "ok", "够"],
-          ["200 圆", "料汁", "128 个", "ok", "够"],
-          ["筷子", "随餐", "128 双", "ok", "够"],
-          ["小勺", "随餐", "128 个", "ok", "够"],
-          ["打包袋", "每餐一只", "128 个", "ok", "够"],
-          ["赠饮瓶", "冷饮", "128 个", "bad", "差 38"],
-        ],
-        kitchenPack: [
-          ["一次性手套", "后厨自用，不进顾客袋", "约 48 只", "ok", "够"],
-        ],
-        exceptions: ["不要酱 2 份", "少盐 2 份", "补送昨日漏餐 2 份"],
-        sample: "留样 1 份：鸡胸 + 配菜 + 酱，写上 11/11 午餐，冷藏 48 小时。不计入 128 份。",
       },
       dinner: {
         label: "晚餐",
         date: "11月11日 周三",
-        deadline: "16:00 前装完",
+        photo: "meal-preview-dinner-today.jpg",
+        dish: "黑椒牛柳藜麦碗",
+        spice: "微辣",
         portions: 86,
-        packed: 0,
-        splits: [
-          ["配送", 70],
-          ["自提", 10],
-          ["零售", 4],
-          ["例外", 2],
+        splits: [["配送", 72], ["自提", 10], ["销售", 4], ["剩余", 0]],
+        drink: null,
+        packs: [["900圆", "餐盒"]],
+        items: [
+          ["紫薯", "120", "克", "打底"],
+          ["彩椒", "40", "克", ""],
+          ["菜心", "50", "克", ""],
+          ["牛柳", "140", "克", ""],
         ],
-        dish: "番茄牛腩饭",
-        spice: "不辣",
-        spiceClass: "none",
-        meat: "牛腩",
-        hold: "牛腩带汤汁，用 1000 方，盖严再套袋。这顿没有赠饮。",
-        sop: [
-          "米饭先铺平，牛腩连汤汁盖在饭上，对上左边的图。",
-          "汤汁多，盒子要盖严，不要再另加汤碗。",
-          "这顿不放赠饮，袋子里不要空出饮料位。",
-        ],
-        plate: "beef",
-        lines: [
-          ["staple", "主食", "米饭", "每份 180 克", "进 1000 方垫底", "180g"],
-          ["main", "主菜", "番茄牛腩", "每份 160 克，带汤汁", "盖在饭上", "160g"],
-          ["side", "配菜", "土豆、西兰花", "60 克 + 50 克", "和牛腩同盒", "两样"],
-          ["sauce", "料汁", "无单独料汁", "汤汁已在牛腩里", "不要再加小杯", "—", true],
-          ["soup", "汤", "不另配汤", "避免和牛腩汤汁重复", "不拿小汤碗", "—", true],
-          ["drink", "赠饮", "今晚没有", "不要拿赠饮瓶", "袋子不留饮料位", "×0"],
-        ],
-        customerPack: [
-          ["1000 方", "主盒", "86 个", "ok", "够"],
-          ["筷子", "随餐", "86 双", "ok", "够"],
-          ["小勺", "随餐", "86 个", "warn", "刚够"],
-          ["打包袋", "每餐一只", "86 个", "ok", "够"],
-          ["保温袋", "热食", "86 个", "warn", "未盘点"],
-        ],
-        kitchenPack: [
-          ["一次性手套", "后厨自用，不进顾客袋", "约 30 只", "ok", "够"],
-        ],
-        exceptions: ["不要香菜 1 份", "少汁 1 份"],
-        sample: "留样 1 份：牛腩 + 米饭，写上 11/11 晚餐，冷藏 48 小时。不计入 86 份。",
       },
     }
 
-    const plates = {
-      chicken: `
-        <svg viewBox="0 0 168 168" xmlns="http://www.w3.org/2000/svg">
-          <rect width="168" height="168" fill="#f6efe6"/>
-          <circle cx="84" cy="86" r="62" fill="#fff" stroke="#eadfce" stroke-width="8"/>
-          <ellipse cx="84" cy="92" rx="40" ry="22" fill="#e7d3a1"/>
-          <path d="M58 78c8-16 22-22 36-16 6 12-2 24-14 30-14 4-26-2-22-14z" fill="#e7b089"/>
-          <path d="M70 74c6-8 16-8 22-2" fill="none" stroke="#c4845a" stroke-width="3"/>
-          <circle cx="58" cy="104" r="10" fill="#6fbf73"/>
-          <circle cx="112" cy="100" r="9" fill="#ef8b6a"/>
-          <circle cx="104" cy="116" r="6" fill="#f2c14e"/>
-          <circle cx="78" cy="64" r="7" fill="#d9a441"/>
-        </svg>`,
-      beef: `
-        <svg viewBox="0 0 168 168" xmlns="http://www.w3.org/2000/svg">
-          <rect width="168" height="168" fill="#f7efe8"/>
-          <circle cx="84" cy="86" r="62" fill="#fff" stroke="#eadfce" stroke-width="8"/>
-          <ellipse cx="84" cy="98" rx="42" ry="20" fill="#f3f0ea"/>
-          <path d="M52 86c10 18 54 22 66 2 2-16-8-28-24-26-10 8-18 6-24 0-8-6-16 6-18 24z" fill="#c4513a"/>
-          <circle cx="70" cy="84" r="5" fill="#e7b23a"/>
-          <circle cx="96" cy="90" r="4" fill="#6fbf73"/>
-          <circle cx="108" cy="78" r="6" fill="#e07a5f"/>
-        </svg>`,
+    let mealKey = "lunch"
+
+    function tag(text, kind) {
+      return `<em class="tag ${kind}">${text}</em>`
     }
 
-    const addedRoles = new Set(["staple", "sauce", "soup"])
-
-    function render(key) {
-      const meal = meals[key]
-      document.body.dataset.meal = key
-      const pct = meal.portions ? Math.round((meal.packed / meal.portions) * 100) : 0
-      const lines = meal.lines.map((row) => {
-        const added = addedRoles.has(row[0])
-        return `
-          <div class="line ${added ? "added" : ""}">
-            <div class="role ${row[0]}">${row[1]}</div>
-            <div>
-              <b>${row[2]}${added ? '<span class="badge">补</span>' : ""}</b>
-              <em>${row[3]} · ${row[4]}</em>
-            </div>
-            <div class="qty"><strong>${row[5]}</strong><span>单份</span></div>
-          </div>`
-      }).join("")
-      const packs = (rows) => rows.map((row) => `
-        <div class="pack">
-          <div><b>${row[0]}</b><span class="where">${row[1]} · 今天 ${row[2]}</span></div>
-          <span class="state ${row[3]}">${row[4]}</span>
-        </div>`).join("")
-      document.getElementById("board").innerHTML = `
-        <header class="head">
-          <div>
-            <p class="kicker">后厨出餐</p>
-            <h1>${meal.date} · ${meal.label}</h1>
-            <p class="sub">按后厨出餐份数装，包好没卖掉的也要装。标准份和例外份分开，不要混进同一摞。</p>
-          </div>
-          <div class="head-side">
-            <div class="meals">
-              <button type="button" data-meal="lunch" class="${key === "lunch" ? "on" : ""}">午餐</button>
-              <button type="button" data-meal="dinner" class="${key === "dinner" ? "on" : ""}">晚餐</button>
-            </div>
-            <div class="clock"><b id="clock">--:--</b><span>现在</span></div>
-          </div>
-        </header>
-        <section class="hero">
-          <article class="card portions added">
-            <div class="label">今天要装<span class="badge">补</span></div>
-            <p class="count">${meal.portions}<small>份</small></p>
-            <div class="deadline">${meal.deadline}</div>
-            <div class="splits">
-              ${meal.splits.map((item) => `<span class="split">${item[0]} ${item[1]}</span>`).join("")}
-            </div>
-            <div class="progress added">
-              <div class="row"><span>已装 ${meal.packed}</span><span>还差 ${meal.portions - meal.packed}</span></div>
-              <div class="barline"><i style="width:${pct}%"></i></div>
-            </div>
-          </article>
-          <article class="card dish">
-            <div class="plate">${plates[meal.plate]}</div>
-            <div>
-              <h2>${meal.dish}</h2>
-              <div class="meta">
-                <span class="pill ${meal.spiceClass}">${meal.spice}</span>
-                <span class="pill">${meal.meat}</span>
-                <span class="pill added">对图装盒<span class="badge">补</span></span>
-              </div>
-              <ul class="sop">
-                ${meal.sop.map((item) => `<li>${item}</li>`).join("")}
-              </ul>
-            </div>
-          </article>
-          <article class="card hold added">
-            <b>这顿怎么拿<span class="badge">补</span></b>
-            <p>${meal.hold}</p>
-          </article>
-        </section>
-        <section class="grid">
-          <article class="card">
-            <div class="section-title">
-              <h3>装进盒子里的</h3>
-              <span>单份净重，不是备料毛重</span>
-            </div>
-            ${lines}
-          </article>
-          <article class="card">
-            <div class="section-title">
-              <h3>今天要领的耗材</h3>
-              <span>份数 × 单份用量</span>
-            </div>
-            <p class="group-label">随餐，进顾客袋</p>
-            ${packs(meal.customerPack)}
-            <p class="group-label added">后厨自用<span class="badge">补</span></p>
-            ${packs(meal.kitchenPack)}
-          </article>
-        </section>
-        <section class="foot">
-          <article class="card added">
-            <div class="section-title"><h3>例外份，单独装<span class="badge">补</span></h3><span>不写会员姓名</span></div>
-            <div class="ex">${meal.exceptions.map((item) => `<i>${item}</i>`).join("")}</div>
-          </article>
-          <article class="card hold added">
-            <b>留样<span class="badge">补</span></b>
-            <p>${meal.sample}</p>
-          </article>
-        </section>`
-      document.querySelectorAll("[data-meal]").forEach((button) => {
-        button.onclick = () => render(button.dataset.meal)
+    function render() {
+      const meal = meals[mealKey]
+      document.querySelectorAll("#meals button").forEach((button) => {
+        button.classList.toggle("on", button.dataset.meal === mealKey)
+        button.onclick = () => {
+          mealKey = button.dataset.meal
+          render()
+        }
       })
+      const spiceKind = meal.spice === "微辣" ? "mild" : "ok"
+      const drink = meal.drink
+        ? `<section class="drink"><span class="k">随餐饮</span><strong>${meal.drink.name}</strong>${tag(meal.drink.temp, "cold")}</section>`
+        : ""
+      document.getElementById("board").innerHTML = `
+        <header class="mast">
+          <div>
+            <p class="day">${meal.date} · ${meal.label}</p>
+            <div class="dishline"><h1>${meal.dish}</h1>${tag(meal.spice, spiceKind)}</div>
+          </div>
+          <p class="clock" id="clock">--:--:--</p>
+        </header>
+        <section class="panel qty">
+          <div class="panel-h"><i></i>总出餐量<span class="sub">按这个数摆盒</span></div>
+          <div class="total"><b>${meal.portions}</b><small>份</small></div>
+          <div class="splits">
+            ${meal.splits.map((item) => `<article><span>${item[0]}</span><b>${item[1]}</b></article>`).join("")}
+          </div>
+          <div class="flow">
+            <span><em>1</em>摆盒</span>
+            <span><em>2</em>装入</span>
+            <span><em>3</em>扣盖装袋</span>
+          </div>
+        </section>
+        <div class="center">
+          <section class="hero">
+            <div class="frame">
+              <img src="${meal.photo}" alt="${meal.dish}" />
+              <span class="kicker">成品</span>
+            </div>
+          </section>
+          ${drink}
+          <section class="packs">
+            <div class="k"><i></i>打包配材</div>
+            <div class="row ${meal.packs.length > 1 ? "" : "one"}">
+              ${meal.packs.map((item) => `<article><span class="role">${item[1]}</span><b>${item[0]}</b><span class="n">× ${meal.portions}</span></article>`).join("")}
+            </div>
+          </section>
+        </div>
+        <section class="panel meal">
+          <div class="panel-h"><i></i>这一餐<span class="sub">每份净重</span></div>
+          <ul class="${meal.items.length > 5 ? "cols" : ""}">
+            ${meal.items.map((row) => `
+              <li>
+                <span class="name">${row[0]}</span>
+                ${row[3] ? tag(row[3], "base") : ""}
+                <b>${row[1]}</b><small>${row[2]}</small>
+              </li>
+            `).join("")}
+          </ul>
+          <p class="hint">净重是一份的量。放几个对着这个数自己看，先熟的先放，摆完和中间的图对上。</p>
+        </section>`
+      tick()
+    }
+
+    function pad(value) {
+      return String(value).padStart(2, "0")
     }
 
     function tick() {
-      const node = document.getElementById("clock")
-      if (!node) return
+      const clock = document.getElementById("clock")
+      if (!clock) return
       const now = new Date()
-      node.textContent = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+      clock.textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
     }
 
-    document.getElementById("toggleAdded").onclick = (event) => {
-      document.body.classList.toggle("show-added")
-      event.currentTarget.classList.toggle("on")
-    }
-    render("lunch")
-    tick()
-    setInterval(tick, 10000)
+    render()
+    setInterval(tick, 1000)
   </script>
 </body>
 </html>

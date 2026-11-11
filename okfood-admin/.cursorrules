@@ -13,9 +13,10 @@
 
 会员「更多」操作、修改会员弹窗、会员列表与表头等 **布局与交互硬规范** 见：
 
-- **`design/ADMIN-UI-DIALOG-LIST-SPEC.md`**（真源说明 + 自检清单）
-- 场景预览：`design/okfood-admin-members-actions-preview.html`
+- **`design/ADMIN-UI-DIALOG-LIST-SPEC.md`**（弹窗、列表，以及 §9 页面级版式）
 - Cursor 规则：仓库根目录 `.cursor/rules/okfood-admin-dialogs-members.mdc`、`.cursor/rules/okfood-admin-lists-tables.mdc`
+
+页面级硬约束（2026-11-11，细则见规范 §9）：列表页撑满且只滚列表；左右卡片等高；重点数字用 `StatRollNumber`，数字与单位同一基线；日期切换放进对应卡片；表头 hover 不变色；新建商品用右侧抽屉；已落地页面不要再往 `design/` 堆预览 HTML。
 
 改造弹窗时 **须用 `OkfoodAdminDialogShell`**，禁止回退深绿全屏 `modal-overlay`；样式优先 `admin-ui.css` 中的 `okfood-admin-dlg--*` / `okfood-mem-edit-*` / `admin-table--members`。
 

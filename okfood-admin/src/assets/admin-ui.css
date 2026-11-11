@@ -995,7 +995,12 @@ html.okfood-admin-shell body {
   color: var(--el-text-color-primary);
 }
 
-/* 用户菜单：「主题色」为分组标题，三套主题为同面板内缩进三级项（无侧向子浮层） */
+/* 用户菜单：「主题色」为分组标题，各套主题为同面板内缩进三级项（无侧向子浮层） */
+.okfood-user-account-dropdown .el-dropdown-menu {
+  max-height: min(72vh, 440px);
+  overflow-y: auto;
+}
+
 .okfood-user-account-dropdown .okfood-user-menu-theme-group-label {
   opacity: 1 !important;
   cursor: default !important;
@@ -1021,7 +1026,16 @@ html.okfood-admin-shell body {
 }
 
 .okfood-user-account-dropdown .okfood-user-menu-theme-sublink {
-  padding: 5px 12px 5px 28px !important;
+  padding: 5px 12px 5px 22px !important;
+}
+
+.okfood-user-account-dropdown .okfood-user-menu-theme-swatch {
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.12);
 }
 
 .okfood-user-account-dropdown .okfood-user-menu-footer-link {
@@ -1163,16 +1177,14 @@ html.okfood-admin-shell body {
   opacity: 1;
 }
 
-/* 配送大表：Teleport 工具条挂载点（接替原 header 内 #delivery-header-toolbar） */
+/* 配送大表：Teleport 工具条挂载点。必须限宽，否则内部 nowrap 按钮会把整行撑出主区 */
 .admin-delivery-toolbar-host {
   width: 100%;
+  max-width: 100%;
   min-width: 0;
-  display: flex;
-  justify-content: flex-start;
-  align-items: center;
+  display: block;
   margin-bottom: 0.75rem;
-  overflow-x: auto;
-  overflow-y: visible;
+  overflow: visible;
 }
 
 .top-header {
@@ -2293,8 +2305,9 @@ html.okfood-admin-shell body {
 }
 
 .admin-table--delivery.el-table {
-  /* 列 min-width 合计约 700px+，避免窄主栏把前几列压成一条 */
-  min-width: 720px;
+  /* 跟卡片同宽。列最小宽度合计约 800px，再窄才出现表内横滚 */
+  width: 100%;
+  min-width: 0;
   --el-table-border-color: transparent;
   --el-table-header-bg-color: #f8fafc;
 }
@@ -2302,27 +2315,68 @@ html.okfood-admin-shell body {
   display: none;
 }
 .admin-table--delivery.el-table .el-table__header th.el-table__cell {
-  padding: 1rem 0.85rem;
+  padding: 10px 12px;
   text-align: left;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #94a3b8;
-  background: #f8fafc !important;
-  border-bottom: 1px solid #f1f5f9 !important;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #5c6670 !important;
+  background: #f7f8f9 !important;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06) !important;
+}
+.admin-table--delivery.el-table .el-table__header th.el-table__cell:hover {
+  color: #5c6670 !important;
+  background: #f7f8f9 !important;
+}
+.admin-table--delivery.el-table .el-table__header-wrapper {
+  position: sticky;
+  top: 0;
+  z-index: 4;
 }
 .admin-table--delivery.el-table .el-table__body td.el-table__cell {
-  padding: 1rem 0.85rem;
-  border-bottom: 1px solid #f1f5f9;
+  padding: 14px 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
   vertical-align: top;
+  font-size: 13px;
 }
 .admin-table--delivery.el-table .el-table__body tr:hover > td.el-table__cell {
-  background: rgba(248, 250, 252, 0.65) !important;
+  background: #fbfcfd !important;
+}
+.admin-table--delivery.el-table tr.delivery-row--picked > td.el-table__cell {
+  background: color-mix(in srgb, var(--el-color-primary) 8%, #fff) !important;
+}
+.admin-table--delivery.el-table tr.delivery-row--done:not(.delivery-row--area-warn):not(.delivery-row--sf-fail) > td.el-table__cell,
+.admin-table--delivery.el-table tr.delivery-row--partial:not(.delivery-row--area-warn):not(.delivery-row--sf-fail) > td.el-table__cell {
+  background: transparent;
+  border-bottom-color: rgba(15, 23, 42, 0.06);
+}
+.admin-table--delivery.el-table .el-table__cell.col-sel {
+  vertical-align: middle;
 }
 .admin-table--delivery.el-table .el-table__cell.col-sel .cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
   overflow: visible;
+}
+.admin-table--delivery.el-table .el-checkbox {
+  height: auto;
+  --el-checkbox-input-width: 15px;
+  --el-checkbox-input-height: 15px;
+  --el-checkbox-border-radius: 4px;
+  --el-checkbox-checked-bg-color: var(--el-color-primary);
+  --el-checkbox-checked-input-border-color: var(--el-color-primary);
+  --el-checkbox-checked-icon-color: #fff;
+  --el-checkbox-input-border-color-hover: var(--el-color-primary);
+}
+.admin-table--delivery.el-table .el-checkbox__inner {
+  border-color: rgba(15, 23, 42, 0.18);
+}
+.admin-table--delivery.el-table .el-checkbox__input.is-indeterminate .el-checkbox__inner::before {
+  top: 50%;
+  margin-top: -1px;
 }
 .admin-table--delivery.el-table tr.delivery-row--area-warn > td.el-table__cell {
   background: #fffbeb;
@@ -2332,15 +2386,7 @@ html.okfood-admin-shell body {
   background: #fef2f2;
   border-bottom-color: #fecaca;
 }
-.admin-table--delivery.el-table tr.delivery-row--done:not(.delivery-row--area-warn):not(.delivery-row--sf-fail) > td.el-table__cell {
-  background: #f7fdf9;
-  border-bottom-color: #ecfdf5;
-}
-.admin-table--delivery.el-table tr.delivery-row--partial:not(.delivery-row--area-warn):not(.delivery-row--sf-fail) > td.el-table__cell {
-  background: #fafafa;
-  border-bottom-color: #f1f5f9;
-}
-/* 序号、餐数列：保证最小宽度，且不让 Element Plus .cell 的省略样式裁掉徽章 */
+/* 序号、餐数列：保证最小宽度，且不让 Element Plus .cell 的省略样式裁掉数字 */
 .admin-table--delivery.el-table .el-table__cell.col-idx {
   min-width: 56px;
 }
@@ -3447,6 +3493,39 @@ html.okfood-admin-shell body {
 .okfood-admin-dlg--card-order-create .okfood-admin-dlg__body {
   padding: 8px 10px;
   background: #f4f7f8;
+}
+
+/* 顺丰核对弹窗：宽表，一屏内只滚表格（见 design/ADMIN-UI-DIALOG-LIST-SPEC.md §9.6） */
+.okfood-admin-dlg.okfood-admin-dlg--sf-push {
+  width: min(1360px, calc(100vw - 28px));
+  max-width: min(1360px, calc(100vw - 28px));
+  max-height: calc(100vh - 24px);
+}
+
+.okfood-admin-dlg--sf-push .okfood-admin-dlg__title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.okfood-admin-dlg--sf-push .okfood-admin-dlg__sub {
+  max-width: 46rem;
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.okfood-admin-dlg--sf-push .okfood-admin-dlg__body {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px 8px;
+  background: #fff;
+}
+
+.okfood-admin-dlg--sf-push .okfood-admin-dlg__foot {
+  align-items: center;
 }
 
 /* 一屏展示表单：body 不滚动，仅内部列表等区域滚动 */

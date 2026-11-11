@@ -56,15 +56,22 @@ import OkfoodNavFruitIcon from '../components/OkfoodNavFruitIcon.vue'
 
 /** 桌面侧栏收起状态本地持久化键 */
 const SIDEBAR_COLLAPSED_KEY = 'okfood-admin-sidebar-collapsed'
-/** 三套主色（蜜桃珊瑚为无记录时默认），与 design 预览、`element-plus-okfood-theme.css` 中 html[data-admin-theme] 对齐 */
+/** 十套主色（蜜桃珊瑚为无记录时默认），与 `element-plus-okfood-theme.css` 中 html[data-admin-theme] 对齐 */
 const ADMIN_THEME_STORAGE_KEY = 'okfood-admin-primary-theme'
-const ADMIN_THEME_VALID = ['primary-peach', 'primary-mojito', 'primary-iris']
 /** 用户菜单内「主题色」三级项（与 localStorage / data-admin-theme 同步） */
 const ADMIN_THEME_MENU_OPTIONS = [
-  { value: 'primary-peach', label: '蜜桃珊瑚' },
-  { value: 'primary-mojito', label: '莫吉托' },
-  { value: 'primary-iris', label: '雾紫' },
+  { value: 'primary-peach', label: '蜜桃珊瑚', swatch: '#e8927c' },
+  { value: 'primary-mojito', label: '莫吉托', swatch: '#5cbf8e' },
+  { value: 'primary-iris', label: '雾紫', swatch: '#8b7ec8' },
+  { value: 'primary-sky', label: '晴空蓝', swatch: '#5aa3d4' },
+  { value: 'primary-lagoon', label: '海盐青', swatch: '#3eb5b0' },
+  { value: 'primary-apricot', label: '暖杏', swatch: '#e6a04a' },
+  { value: 'primary-berry', label: '莓果', swatch: '#d45d7e' },
+  { value: 'primary-caramel', label: '焦糖', swatch: '#c48952' },
+  { value: 'primary-indigo', label: '靛蓝', swatch: '#6b7cd4' },
+  { value: 'primary-sakura', label: '樱粉', swatch: '#e489b4' },
 ]
+const ADMIN_THEME_VALID = ADMIN_THEME_MENU_OPTIONS.map((opt) => opt.value)
 
 const activeAdminTheme = ref('primary-peach')
 
@@ -361,14 +368,10 @@ function applyAdminTheme(theme) {
 }
 
 function onUserMenuCommand(command) {
-  if (command === 'primary-peach' || command === 'primary-mojito' || command === 'primary-iris') {
-    applyAdminTheme(command)
-    const labels = {
-      'primary-peach': '蜜桃珊瑚',
-      'primary-mojito': '莫吉托',
-      'primary-iris': '雾紫',
-    }
-    showToast(`已切换主题：${labels[command] || command}`, 'success')
+  const theme = ADMIN_THEME_MENU_OPTIONS.find((opt) => opt.value === command)
+  if (theme) {
+    applyAdminTheme(theme.value)
+    showToast(`已切换主题：${theme.label}`, 'success')
     return
   }
   if (command === 'logout') {
@@ -816,6 +819,7 @@ function onTabClose(tab) {
                 class="okfood-user-menu-theme-sublink"
                 :class="{ 'okfood-user-menu-theme-sublink--active': activeAdminTheme === opt.value }"
               >
+                <span class="okfood-user-menu-theme-swatch" :style="{ background: opt.swatch }" aria-hidden="true" />
                 {{ opt.label }}
               </el-dropdown-item>
               <el-dropdown-item command="logout" divided class="okfood-user-menu-footer-link">

@@ -14,7 +14,18 @@ import { escClose } from './directives/escClose.js'
 /** 与 layouts/AdminLayout 一致：首屏即挂上 data-admin-theme，避免无属性时主题变量不生效 */
 const ADMIN_THEME_STORAGE_KEY = 'okfood-admin-primary-theme'
 const PREVIEW_THEME_LEGACY_KEY = 'okfood-admin-ios-glass-primary-theme'
-const ADMIN_THEME_VALID = new Set(['primary-peach', 'primary-mojito', 'primary-iris'])
+const ADMIN_THEME_VALID = new Set([
+  'primary-peach',
+  'primary-mojito',
+  'primary-iris',
+  'primary-sky',
+  'primary-lagoon',
+  'primary-apricot',
+  'primary-berry',
+  'primary-caramel',
+  'primary-indigo',
+  'primary-sakura',
+])
 
 function readInitialAdminTheme() {
   try {

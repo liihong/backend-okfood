@@ -1,5 +1,5 @@
 /*
-  Element Plus 主题：三套主色（蜜桃珊瑚 / 莫吉托 / 雾紫默认）
+  Element Plus 主题：十套主色（蜜桃珊瑚为默认，其余为备选）
   由 document.documentElement[data-admin-theme] 切换；见 src/main.js、layouts/AdminLayout.vue
 */
 :root {
@@ -176,6 +176,237 @@ html:not([data-admin-theme]) {
   --okfood-sidebar-child-hover-bg: rgba(139, 126, 200, 0.06);
 }
 
+/* —— 晴空蓝 —— */
+html[data-admin-theme='primary-sky'] {
+  --el-color-primary: #5aa3d4;
+  --el-color-primary-rgb: 90, 163, 212;
+  --el-color-primary-light-3: #8bbee0;
+  --el-color-primary-light-5: #acd1e9;
+  --el-color-primary-light-7: #cde3f2;
+  --el-color-primary-light-8: #deecf6;
+  --el-color-primary-light-9: #eef5fa;
+  --el-color-primary-dark-2: #4882a9;
+
+  --el-bg-color-page: #f7fafb;
+  --el-fill-color-light: #f1f5f9;
+  --el-fill-color-lighter: #f8fafc;
+
+  --okfood-el-table-header-bg: #3d6e90;
+  --okfood-el-table-header-bg-hover: #36617f;
+  --okfood-el-table-header-text: rgba(255, 255, 255, 0.95);
+  --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
+
+  --okfood-bg-mesh-a: rgba(186, 220, 255, 0.48);
+  --okfood-bg-mesh-b: rgba(210, 230, 255, 0.44);
+  --okfood-sidebar-glass-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(255, 255, 255, 0.42) inset,
+    0 14px 38px rgba(25, 45, 55, 0.08),
+    0 6px 18px rgba(90, 163, 212, 0.14);
+  --okfood-sidebar-menu-active-bg: rgba(90, 163, 212, 0.14);
+  --okfood-sidebar-menu-hover-bg: rgba(90, 163, 212, 0.08);
+  --okfood-sidebar-child-active-bg: rgba(90, 163, 212, 0.1);
+  --okfood-sidebar-child-hover-bg: rgba(90, 163, 212, 0.06);
+}
+
+/* —— 海盐青 —— */
+html[data-admin-theme='primary-lagoon'] {
+  --el-color-primary: #3eb5b0;
+  --el-color-primary-rgb: 62, 181, 176;
+  --el-color-primary-light-3: #77cbc7;
+  --el-color-primary-light-5: #9edad7;
+  --el-color-primary-light-7: #c5e8e7;
+  --el-color-primary-light-8: #d8f0ef;
+  --el-color-primary-light-9: #ebf7f7;
+  --el-color-primary-dark-2: #31908c;
+
+  --el-bg-color-page: #f7fafb;
+  --el-fill-color-light: #f1f5f9;
+  --el-fill-color-lighter: #f8fafc;
+
+  --okfood-el-table-header-bg: #2a7b77;
+  --okfood-el-table-header-bg-hover: #256c69;
+  --okfood-el-table-header-text: rgba(255, 255, 255, 0.95);
+  --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
+
+  --okfood-bg-mesh-a: rgba(170, 240, 230, 0.48);
+  --okfood-bg-mesh-b: rgba(200, 235, 245, 0.44);
+  --okfood-sidebar-glass-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(255, 255, 255, 0.42) inset,
+    0 14px 38px rgba(25, 45, 55, 0.08),
+    0 6px 18px rgba(62, 181, 176, 0.14);
+  --okfood-sidebar-menu-active-bg: rgba(62, 181, 176, 0.14);
+  --okfood-sidebar-menu-hover-bg: rgba(62, 181, 176, 0.08);
+  --okfood-sidebar-child-active-bg: rgba(62, 181, 176, 0.1);
+  --okfood-sidebar-child-hover-bg: rgba(62, 181, 176, 0.06);
+}
+
+/* —— 暖杏 —— */
+html[data-admin-theme='primary-apricot'] {
+  --el-color-primary: #e6a04a;
+  --el-color-primary-rgb: 230, 160, 74;
+  --el-color-primary-light-3: #edbc80;
+  --el-color-primary-light-5: #f2cfa4;
+  --el-color-primary-light-7: #f7e2c8;
+  --el-color-primary-light-8: #faecda;
+  --el-color-primary-light-9: #fcf5ec;
+  --el-color-primary-dark-2: #b8803b;
+
+  --el-bg-color-page: #f7fafb;
+  --el-fill-color-light: #f1f5f9;
+  --el-fill-color-lighter: #f8fafc;
+
+  --okfood-el-table-header-bg: #9c6c32;
+  --okfood-el-table-header-bg-hover: #8a602c;
+  --okfood-el-table-header-text: rgba(255, 255, 255, 0.95);
+  --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
+
+  --okfood-bg-mesh-a: rgba(255, 214, 160, 0.5);
+  --okfood-bg-mesh-b: rgba(255, 230, 200, 0.44);
+  --okfood-sidebar-glass-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(255, 255, 255, 0.42) inset,
+    0 14px 38px rgba(25, 45, 55, 0.08),
+    0 6px 18px rgba(230, 160, 74, 0.16);
+  --okfood-sidebar-menu-active-bg: rgba(230, 160, 74, 0.14);
+  --okfood-sidebar-menu-hover-bg: rgba(230, 160, 74, 0.08);
+  --okfood-sidebar-child-active-bg: rgba(230, 160, 74, 0.1);
+  --okfood-sidebar-child-hover-bg: rgba(230, 160, 74, 0.06);
+}
+
+/* —— 莓果 —— */
+html[data-admin-theme='primary-berry'] {
+  --el-color-primary: #d45d7e;
+  --el-color-primary-rgb: 212, 93, 126;
+  --el-color-primary-light-3: #e08da4;
+  --el-color-primary-light-5: #e9aebe;
+  --el-color-primary-light-7: #f2ced8;
+  --el-color-primary-light-8: #f6dee5;
+  --el-color-primary-light-9: #faeef2;
+  --el-color-primary-dark-2: #a94a64;
+
+  --el-bg-color-page: #f7fafb;
+  --el-fill-color-light: #f1f5f9;
+  --el-fill-color-lighter: #f8fafc;
+
+  --okfood-el-table-header-bg: #903f55;
+  --okfood-el-table-header-bg-hover: #7f374b;
+  --okfood-el-table-header-text: rgba(255, 255, 255, 0.95);
+  --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
+
+  --okfood-bg-mesh-a: rgba(255, 190, 210, 0.46);
+  --okfood-bg-mesh-b: rgba(255, 215, 225, 0.42);
+  --okfood-sidebar-glass-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(255, 255, 255, 0.42) inset,
+    0 14px 38px rgba(25, 45, 55, 0.08),
+    0 6px 18px rgba(212, 93, 126, 0.14);
+  --okfood-sidebar-menu-active-bg: rgba(212, 93, 126, 0.14);
+  --okfood-sidebar-menu-hover-bg: rgba(212, 93, 126, 0.08);
+  --okfood-sidebar-child-active-bg: rgba(212, 93, 126, 0.1);
+  --okfood-sidebar-child-hover-bg: rgba(212, 93, 126, 0.06);
+}
+
+/* —— 焦糖 —— */
+html[data-admin-theme='primary-caramel'] {
+  --el-color-primary: #c48952;
+  --el-color-primary-rgb: 196, 137, 82;
+  --el-color-primary-light-3: #d5ac85;
+  --el-color-primary-light-5: #e1c4a8;
+  --el-color-primary-light-7: #eddbcb;
+  --el-color-primary-light-8: #f3e7dc;
+  --el-color-primary-light-9: #f9f3ed;
+  --el-color-primary-dark-2: #9c6d41;
+
+  --el-bg-color-page: #f7fafb;
+  --el-fill-color-light: #f1f5f9;
+  --el-fill-color-lighter: #f8fafc;
+
+  --okfood-el-table-header-bg: #855d37;
+  --okfood-el-table-header-bg-hover: #755231;
+  --okfood-el-table-header-text: rgba(255, 255, 255, 0.95);
+  --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
+
+  --okfood-bg-mesh-a: rgba(240, 205, 165, 0.48);
+  --okfood-bg-mesh-b: rgba(245, 225, 200, 0.42);
+  --okfood-sidebar-glass-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(255, 255, 255, 0.42) inset,
+    0 14px 38px rgba(25, 45, 55, 0.08),
+    0 6px 18px rgba(196, 137, 82, 0.16);
+  --okfood-sidebar-menu-active-bg: rgba(196, 137, 82, 0.14);
+  --okfood-sidebar-menu-hover-bg: rgba(196, 137, 82, 0.08);
+  --okfood-sidebar-child-active-bg: rgba(196, 137, 82, 0.1);
+  --okfood-sidebar-child-hover-bg: rgba(196, 137, 82, 0.06);
+}
+
+/* —— 靛蓝 —— */
+html[data-admin-theme='primary-indigo'] {
+  --el-color-primary: #6b7cd4;
+  --el-color-primary-rgb: 107, 124, 212;
+  --el-color-primary-light-3: #97a3e0;
+  --el-color-primary-light-5: #b5bde9;
+  --el-color-primary-light-7: #d2d7f2;
+  --el-color-primary-light-8: #e1e4f6;
+  --el-color-primary-light-9: #f0f1fa;
+  --el-color-primary-dark-2: #5563a9;
+
+  --el-bg-color-page: #f7fafb;
+  --el-fill-color-light: #f1f5f9;
+  --el-fill-color-lighter: #f8fafc;
+
+  --okfood-el-table-header-bg: #485490;
+  --okfood-el-table-header-bg-hover: #404a7f;
+  --okfood-el-table-header-text: rgba(255, 255, 255, 0.95);
+  --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
+
+  --okfood-bg-mesh-a: rgba(190, 200, 255, 0.46);
+  --okfood-bg-mesh-b: rgba(215, 220, 255, 0.42);
+  --okfood-sidebar-glass-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(255, 255, 255, 0.42) inset,
+    0 14px 38px rgba(25, 45, 55, 0.08),
+    0 6px 18px rgba(107, 124, 212, 0.16);
+  --okfood-sidebar-menu-active-bg: rgba(107, 124, 212, 0.14);
+  --okfood-sidebar-menu-hover-bg: rgba(107, 124, 212, 0.08);
+  --okfood-sidebar-child-active-bg: rgba(107, 124, 212, 0.1);
+  --okfood-sidebar-child-hover-bg: rgba(107, 124, 212, 0.06);
+}
+
+/* —— 樱粉 —— */
+html[data-admin-theme='primary-sakura'] {
+  --el-color-primary: #e489b4;
+  --el-color-primary-rgb: 228, 137, 180;
+  --el-color-primary-light-3: #ecacca;
+  --el-color-primary-light-5: #f1c4d9;
+  --el-color-primary-light-7: #f6dbe8;
+  --el-color-primary-light-8: #f9e7f0;
+  --el-color-primary-light-9: #fcf3f7;
+  --el-color-primary-dark-2: #b66d90;
+
+  --el-bg-color-page: #f7fafb;
+  --el-fill-color-light: #f1f5f9;
+  --el-fill-color-lighter: #f8fafc;
+
+  --okfood-el-table-header-bg: #9b5d7a;
+  --okfood-el-table-header-bg-hover: #88526c;
+  --okfood-el-table-header-text: rgba(255, 255, 255, 0.95);
+  --okfood-el-table-header-divider: rgba(255, 255, 255, 0.14);
+
+  --okfood-bg-mesh-a: rgba(255, 200, 225, 0.48);
+  --okfood-bg-mesh-b: rgba(255, 220, 235, 0.42);
+  --okfood-sidebar-glass-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(255, 255, 255, 0.42) inset,
+    0 14px 38px rgba(25, 45, 55, 0.08),
+    0 6px 18px rgba(228, 137, 180, 0.16);
+  --okfood-sidebar-menu-active-bg: rgba(228, 137, 180, 0.14);
+  --okfood-sidebar-menu-hover-bg: rgba(228, 137, 180, 0.08);
+  --okfood-sidebar-child-active-bg: rgba(228, 137, 180, 0.1);
+  --okfood-sidebar-child-hover-bg: rgba(228, 137, 180, 0.06);
+}
+
 /* --- 侧栏 el-menu：与主色同谱的深色底 + 实色选中条 --- */
 .admin-layout .sidebar .sidebar-menu.el-menu {
   flex: 1;
@@ -190,9 +421,16 @@ html:not([data-admin-theme]) {
   /* 默认隐藏滚动条，滚动中由 .is-scrolling 显示（见 AdminLayout） */
   scrollbar-width: none;
   scrollbar-color: rgba(15, 23, 42, 0.15) transparent;
-  --el-menu-hover-bg-color: var(--okfood-sidebar-menu-hover-bg);
+  /* 覆盖 EP 用 background-color="transparent" 算出的固定灰 hover，改跟当前主题浅底 */
+  --el-menu-hover-bg-color: var(--okfood-sidebar-child-hover-bg) !important;
   --el-menu-hover-text-color: var(--okfood-sidebar-text);
   --el-menu-active-color: var(--el-color-primary);
+}
+
+/* 一级项 / 父级标题 hover：与子菜单（图中浅底）同一主题色，选中项保持 active 底 */
+.admin-layout .sidebar .sidebar-menu > .el-menu-item:not(.is-active):hover,
+.admin-layout .sidebar .sidebar-menu > .el-sub-menu > .el-sub-menu__title:hover {
+  background-color: var(--okfood-sidebar-child-hover-bg) !important;
 }
 
 .admin-layout .sidebar .sidebar-menu.el-menu::-webkit-scrollbar {
@@ -425,7 +663,7 @@ html:not([data-admin-theme]) {
   --el-menu-hover-text-color: var(--el-color-primary);
   --el-menu-active-color: var(--el-color-primary);
   --el-menu-bg-color: #ffffff;
-  --el-menu-hover-bg-color: #f1f5f9;
+  --el-menu-hover-bg-color: var(--okfood-sidebar-child-hover-bg);
 }
 
 .okfood-sidebar-menu-popup .el-menu-item {
@@ -434,7 +672,7 @@ html:not([data-admin-theme]) {
 
 .okfood-sidebar-menu-popup .el-menu-item:hover {
   color: var(--el-color-primary) !important;
-  background-color: #f1f5f9 !important;
+  background-color: var(--okfood-sidebar-child-hover-bg) !important;
 }
 
 .okfood-sidebar-menu-popup .el-menu-item.is-active {

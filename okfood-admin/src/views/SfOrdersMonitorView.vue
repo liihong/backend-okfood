@@ -1,6 +1,6 @@
 <script setup>
 defineOptions({ name: 'SfOrdersMonitorView' })
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { RefreshCw } from 'lucide-vue-next'
@@ -178,6 +178,51 @@ function onTextFilterChange() {
   void fetchList()
 }
 
+const meterKicker = computed(() => {
+  const date = (deliveryDate.value || '').trim() || '全部日期'
+  return `${activeCategoryLabel.value} · ${date}`
+})
+
+const meterStats = computed(() => {
+  const s = pushStats.value
+  if (!s) {
+    return { total: '—', sheet: '—', retail: '—', success: '—', failed: '—', cancelled: '—' }
+  }
+  return {
+    total: statText(s.total),
+    sheet: statText(s.delivery_sheet?.total),
+    retail: statText(s.single_meal_retail?.total),
+    success: statText(s.success),
+    failed: statText(s.failed),
+    cancelled: statText(s.cancelled != null ? s.cancelled : 0),
+  }
+})
+
+/** 汇总数字不含手机、运单、回调筛选；点进去时清掉这三项，列表才对得上格子里的数 */
+function clearMeterTextFilters() {
+  orderStatusFilter.value = ''
+  memberPhoneFilter.value = ''
+  sfOrderIdFilter.value = ''
+}
+
+function onMeterKind(kind) {
+  if (loading.value || statsLoading.value) return
+  const same = pushKindFilter.value === kind && !createStatusFilter.value
+  pushKindFilter.value = same ? '' : kind
+  createStatusFilter.value = ''
+  clearMeterTextFilters()
+  page.value = 1
+  void refreshMonitor()
+}
+
+function onMeterCreate(status) {
+  if (loading.value || statsLoading.value) return
+  createStatusFilter.value = createStatusFilter.value === status ? '' : status
+  clearMeterTextFilters()
+  page.value = 1
+  void refreshMonitor()
+}
+
 function onPageSizeChange() {
   page.value = 1
   void fetchList()
@@ -293,11 +338,51 @@ function sfOrderStatusLabel(code) {
   return '未识别'
 }
 
-function sfCallbackKindLabel(kind) {
+/** 回调类型拆成中文和原始 kind，表格里分两行，避免和运单号一样被折断 */
+function callbackKindParts(kind) {
   const k = String(kind || '').trim()
-  if (!k) return '—'
+  if (!k) return { label: '—', code: '' }
   const zh = SF_CALLBACK_KIND_ZH[k]
-  return zh ? `${zh}（${k}）` : k
+  return zh ? { label: zh, code: k } : { label: k, code: '' }
+}
+
+function formatMonitorTime(raw) {
+  if (!raw) return '—'
+  return String(raw).replace('T', ' ').slice(0, 19)
+}
+
+/** 订单类别胶囊色：零售 / 午餐大表 / 晚餐大表 */
+function pushKindTone(row) {
+  const k = String(row?.push_kind || '').trim()
+  if (k === 'single_meal_retail') return 'retail'
+  if (k === 'dinner_delivery_sheet') return 'dinner'
+  if (k === 'delivery_sheet' || k === '') return 'lunch'
+  return 'muted'
+}
+
+function sfCreateTone(row) {
+  const label = String(row?.sf_create_status_label || '')
+  if (label.includes('取消')) return 'muted'
+  const code = row?.error_code
+  if (code === 0 || code === '0') return 'ok'
+  if (code === undefined || code === null) return 'muted'
+  return 'rose'
+}
+
+function callbackTone(code) {
+  if (code === undefined || code === null || code === '') return 'muted'
+  const n = Number(code)
+  if (Number.isNaN(n)) return 'muted'
+  if (n === 17) return 'done'
+  if (n === 10 || n === 12 || n === 15) return 'go'
+  if (n === 2 || n === 22 || n === 31 || n === 91) return 'rose'
+  return 'muted'
+}
+
+function statText(raw) {
+  if (raw == null || raw === '') return '—'
+  const n = Number(raw)
+  return Number.isFinite(n) ? String(n) : '—'
 }
 
 /** 监控列表：系统会员姓名 / 手机（到家已按会员拆单；历史同址合并单仍可能一人以上） */
@@ -481,6 +566,19 @@ async function onApplyFulfillmentSf(row) {
 
 const route = useRoute()
 
+/** 包裹表格，用来量剩余高度；只让表体滚，表头和底部分页留在视口里 */
+const sfTableHostRef = ref(null)
+const sfTableScrollHeight = ref(400)
+/** @type {ResizeObserver | null} */
+let sfTableResizeObserver = null
+
+function updateSfTableHeight() {
+  const el = sfTableHostRef.value
+  if (!el) return
+  const h = Math.floor(el.getBoundingClientRect().height)
+  if (h >= 160) sfTableScrollHeight.value = h
+}
+
 onMounted(() => {
   const qDate = String(route.query.delivery_date || '').trim()
   if (/^\d{4}-\d{2}-\d{2}$/.test(qDate)) {
@@ -491,168 +589,250 @@ onMounted(() => {
     createStatusFilter.value = 'fail'
   }
   void refreshMonitor()
+  void nextTick(() => {
+    updateSfTableHeight()
+    sfTableResizeObserver = new ResizeObserver(() => {
+      updateSfTableHeight()
+    })
+    if (sfTableHostRef.value) sfTableResizeObserver.observe(sfTableHostRef.value)
+  })
+})
+
+onUnmounted(() => {
+  sfTableResizeObserver?.disconnect()
+  sfTableResizeObserver = null
 })
 </script>
 
 <template>
-  <section class="tab-content animate-up sf-orders-monitor">
-    <div class="table-container">
-      <div class="sf-monitor-toolbar">
-        <p class="sf-monitor-hint">
-          顺丰侧「订单完成」回调或配送状态中<strong>妥投完单 (17)</strong>通过后，系统将按停靠点对订阅会员<strong>标记送达并扣次数</strong>（与配送大表「标记送达」一致）；单点餐仅更新履约状态。
+  <section class="tab-content animate-up sf-orders-monitor page-content-shell members-view-fill">
+    <header class="sf-head">
+      <div>
+        <p class="sf-crumb">配送管理 / <b>顺丰订单监控</b></p>
+        <h2 class="sf-head__title">顺丰订单监控</h2>
+        <p class="sf-head__sub">
+          顺丰「订单完成」或妥投完单（17）通过后，按停靠点给订阅会员标记送达并扣次数；单次零售只更新履约状态。
         </p>
-        <p v-if="pushStats" class="sf-monitor-stats">
-          <strong>{{ activeCategoryLabel }} · 业务日 {{ pushStats.delivery_date }}</strong>：共 {{ pushStats.total }} 单（大表
-          {{ pushStats.delivery_sheet?.total ?? 0 }} · 单次零售
-          {{ pushStats.single_meal_retail?.total ?? 0 }}）· 成功 {{ pushStats.success }} · 失败
-          {{ pushStats.failed }} · 取消 {{ pushStats.cancelled != null ? pushStats.cancelled : 0 }}
-        </p>
-        <div class="sf-monitor-filters">
-          <label class="sf-monitor-field">
-            <span>业务日</span>
-            <el-date-picker
-              v-model="deliveryDate"
-              type="date"
-              value-format="YYYY-MM-DD"
-              placeholder="全部日期"
-              :clearable="true"
-              :disabled="loading"
-              class="sf-monitor-date"
-              @change="onDateChange"
-            />
-          </label>
-          <label class="sf-monitor-field">
-            <span>订单类别</span>
-            <el-select
-              v-model="pushKindFilter"
-              placeholder="全部类别"
-              :disabled="loading"
-              clearable
-              class="sf-monitor-select-category"
-              @change="onPushKindChange"
-            >
-              <el-option
-                v-for="opt in pushKindOptions"
-                :key="opt.value === '' ? '_pk_all' : opt.value"
-                :label="opt.label"
-                :value="opt.value"
-              />
-            </el-select>
-          </label>
-          <label class="sf-monitor-field">
-            <span>创单状态</span>
-            <el-select
-              v-model="createStatusFilter"
-              placeholder="全部创单"
-              :disabled="loading"
-              clearable
-              class="sf-monitor-select-narrow"
-              @change="onCreateStatusChange"
-            >
-              <el-option
-                v-for="opt in createStatusOptions"
-                :key="opt.value === '' ? '_c_all' : opt.value"
-                :label="opt.label"
-                :value="opt.value"
-              />
-            </el-select>
-          </label>
-          <label class="sf-monitor-field">
-            <span>会员手机</span>
-            <el-input
-              v-model="memberPhoneFilter"
-              clearable
-              placeholder="后几位或完整号"
-              :disabled="loading"
-              class="sf-monitor-input-phone"
-              @change="onTextFilterChange"
-            />
-          </label>
-          <label class="sf-monitor-field">
-            <span>顺丰单号</span>
-            <el-input
-              v-model="sfOrderIdFilter"
-              clearable
-              placeholder="运单号包含"
-              :disabled="loading"
-              class="sf-monitor-input-sf"
-              @change="onTextFilterChange"
-            />
-          </label>
-          <label class="sf-monitor-field">
-            <span>回调订单状态</span>
-            <el-select
-              v-model="orderStatusFilter"
-              placeholder="全部回调"
-              :disabled="loading"
-              clearable
-              filterable
-              class="sf-monitor-status"
-              @change="onOrderStatusChange"
-            >
-              <el-option
-                v-for="opt in orderStatusOptions"
-                :key="opt.value === '' ? '_all' : opt.value"
-                :label="opt.label"
-                :value="opt.value"
-              />
-            </el-select>
-          </label>
-          <el-button plain class="sf-monitor-refresh" :loading="loading" @click="refreshMonitor">
-            <span class="sf-monitor-refresh-inner">
-              <RefreshCw v-if="!loading" :size="16" stroke-width="2" />
-              刷新
-            </span>
-          </el-button>
-          <el-button
-            type="primary"
-            plain
-            :loading="exporting"
-            :disabled="loading || !(deliveryDate || '').trim()"
-            @click="exportExcel"
+      </div>
+      <div class="sf-head__actions">
+        <button type="button" class="sf-refresh" :disabled="loading || statsLoading" @click="refreshMonitor">
+          <RefreshCw :size="15" stroke-width="2" :class="{ 'sf-refresh__spin': loading || statsLoading }" />
+          刷新
+        </button>
+        <button
+          type="button"
+          class="sf-export"
+          :disabled="exporting || loading || !(deliveryDate || '').trim()"
+          @click="exportExcel"
+        >
+          {{ exporting ? '导出中…' : '导出 Excel' }}
+        </button>
+      </div>
+    </header>
+
+    <section class="sf-meter" aria-label="业务日汇总">
+      <div class="sf-meter__main">
+        <span>{{ meterKicker }}</span>
+        <strong>{{ meterStats.total }}<em> 单</em></strong>
+      </div>
+      <button
+        type="button"
+        class="sf-cell"
+        :class="{ 'is-on': pushKindFilter === 'delivery_sheet' && !createStatusFilter }"
+        :disabled="loading || statsLoading"
+        @click="onMeterKind('delivery_sheet')"
+      >
+        <small>大表</small>
+        <b>{{ meterStats.sheet }}</b>
+      </button>
+      <button
+        type="button"
+        class="sf-cell"
+        :class="{ 'is-on': pushKindFilter === 'single_meal_retail' && !createStatusFilter }"
+        :disabled="loading || statsLoading"
+        @click="onMeterKind('single_meal_retail')"
+      >
+        <small>单次零售</small>
+        <b>{{ meterStats.retail }}</b>
+      </button>
+      <button
+        type="button"
+        class="sf-cell sf-cell--ok"
+        :class="{ 'is-on': createStatusFilter === 'ok' }"
+        :disabled="loading || statsLoading"
+        @click="onMeterCreate('ok')"
+      >
+        <small>创单成功</small>
+        <b>{{ meterStats.success }}</b>
+      </button>
+      <button
+        type="button"
+        class="sf-cell sf-cell--rose"
+        :class="{ 'is-on': createStatusFilter === 'fail' }"
+        :disabled="loading || statsLoading"
+        @click="onMeterCreate('fail')"
+      >
+        <small>创单失败</small>
+        <b>{{ meterStats.failed }}</b>
+      </button>
+      <button
+        type="button"
+        class="sf-cell"
+        :class="{ 'is-on': createStatusFilter === 'cancelled' }"
+        :disabled="loading || statsLoading"
+        @click="onMeterCreate('cancelled')"
+      >
+        <small>已取消</small>
+        <b>{{ meterStats.cancelled }}</b>
+      </button>
+    </section>
+
+    <section class="sf-card table-container table-container--members-fill" aria-label="推单列表">
+      <div class="sf-filters">
+        <label class="sf-field sf-field--date">
+          <span>业务日</span>
+          <el-date-picker
+            v-model="deliveryDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="全部日期"
+            :clearable="true"
+            :disabled="loading"
+            @change="onDateChange"
+          />
+        </label>
+        <label class="sf-field sf-field--cat">
+          <span>订单类别</span>
+          <el-select
+            v-model="pushKindFilter"
+            placeholder="全部类别"
+            :disabled="loading"
+            clearable
+            @change="onPushKindChange"
           >
-            导出 Excel
-          </el-button>
-        </div>
+            <el-option
+              v-for="opt in pushKindOptions"
+              :key="opt.value === '' ? '_pk_all' : opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </label>
+        <label class="sf-field sf-field--create">
+          <span>创单状态</span>
+          <el-select
+            v-model="createStatusFilter"
+            placeholder="全部创单"
+            :disabled="loading"
+            clearable
+            @change="onCreateStatusChange"
+          >
+            <el-option
+              v-for="opt in createStatusOptions"
+              :key="opt.value === '' ? '_c_all' : opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </label>
+        <label class="sf-field sf-field--phone">
+          <span>会员手机</span>
+          <el-input
+            v-model="memberPhoneFilter"
+            clearable
+            placeholder="后几位或完整号"
+            :disabled="loading"
+            @change="onTextFilterChange"
+          />
+        </label>
+        <label class="sf-field sf-field--sf">
+          <span>顺丰单号</span>
+          <el-input
+            v-model="sfOrderIdFilter"
+            clearable
+            placeholder="运单号包含"
+            :disabled="loading"
+            @change="onTextFilterChange"
+          />
+        </label>
+        <label class="sf-field sf-field--cb">
+          <span>回调订单状态</span>
+          <el-select
+            v-model="orderStatusFilter"
+            placeholder="全部回调状态"
+            :disabled="loading"
+            clearable
+            filterable
+            @change="onOrderStatusChange"
+          >
+            <el-option
+              v-for="opt in orderStatusOptions"
+              :key="opt.value === '' ? '_all' : opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </label>
       </div>
 
-      <AdminTable variant="members" :data="items" :loading="loading" row-key="id" empty-text="暂无推单记录">
-        <el-table-column type="index" :index="tableRowIndex" label="序号" width="100" align="center" />
-        <el-table-column prop="delivery_date" label="业务日" width="150" />
-        <el-table-column label="订单类别" width="112" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.push_kind_label || row.push_kind || '—' }}</template>
+      <div ref="sfTableHostRef" class="members-table-host sf-table-host">
+      <AdminTable
+        class="sf-table members-el-table-body-scroll"
+        variant="default"
+        :stripe="false"
+        :border="false"
+        :height="sfTableScrollHeight"
+        :data="items"
+        :loading="loading"
+        row-key="id"
+        empty-text="暂无推单记录"
+      >
+        <el-table-column type="index" :index="tableRowIndex" label="序号" width="64" align="center" class-name="sf-num" />
+        <el-table-column prop="delivery_date" label="业务日" width="118" class-name="sf-day" />
+        <el-table-column label="订单类别" width="108">
+          <template #default="{ row }">
+            <span class="sf-cat" :class="`sf-cat--${pushKindTone(row)}`">{{ row.push_kind_label || row.push_kind || '—' }}</span>
+          </template>
         </el-table-column>
-        <el-table-column label="顺丰单号" min-width="120" class-name="td-mono">
+        <el-table-column label="顺丰单号" min-width="156" class-name="sf-mono">
           <template #default="{ row }">{{ row.sf_order_id || '—' }}</template>
         </el-table-column>
-        <el-table-column label="会员姓名" min-width="132" show-overflow-tooltip>
+        <el-table-column label="会员姓名" min-width="96" show-overflow-tooltip>
           <template #default="{ row }">{{ formatMemberNames(row) }}</template>
         </el-table-column>
-        <el-table-column label="会员手机" min-width="132" class-name="td-mono" show-overflow-tooltip>
+        <el-table-column label="会员手机" min-width="132" class-name="sf-mono" show-overflow-tooltip>
           <template #default="{ row }">{{ formatMemberPhones(row) }}</template>
         </el-table-column>
-        <el-table-column label="创单状态" width="120">
-          <template #default="{ row }">{{ sfStatusLabel(row) }}</template>
-        </el-table-column>
-        <el-table-column label="回调订单状态" min-width="200">
-          <template #default="{ row }">{{ sfOrderStatusLabel(row.sf_callback_order_status) }}</template>
-        </el-table-column>
-        <el-table-column label="最近回调类型" min-width="200">
-          <template #default="{ row }">{{ sfCallbackKindLabel(row.last_callback_kind) }}</template>
-        </el-table-column>
-        <el-table-column label="最近回调时间" width="168">
-          <template #default="{ row }">{{ row.last_callback_at ? row.last_callback_at.replace('T', ' ').slice(0, 19) : '—' }}</template>
-        </el-table-column>
-        <el-table-column label="创单时间" width="168">
-          <template #default="{ row }">{{ row.created_at ? row.created_at.replace('T', ' ').slice(0, 19) : '—' }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="创单状态" width="112">
           <template #default="{ row }">
-            <div class="sf-monitor-ops">
+            <span class="sf-dot" :class="`sf-dot--${sfCreateTone(row)}`"><i></i>{{ sfStatusLabel(row) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="回调订单状态" min-width="188">
+          <template #default="{ row }">
+            <span class="sf-st" :class="`sf-st--${callbackTone(row.sf_callback_order_status)}`">{{ sfOrderStatusLabel(row.sf_callback_order_status) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="最近回调类型" min-width="148">
+          <template #default="{ row }">
+            <span class="sf-kind">
+              <span>{{ callbackKindParts(row.last_callback_kind).label }}</span>
+              <code v-if="callbackKindParts(row.last_callback_kind).code">{{ callbackKindParts(row.last_callback_kind).code }}</code>
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="最近回调时间" width="168" class-name="sf-mono">
+          <template #default="{ row }">{{ formatMonitorTime(row.last_callback_at) }}</template>
+        </el-table-column>
+        <el-table-column label="创单时间" width="168" class-name="sf-mono">
+          <template #default="{ row }">{{ formatMonitorTime(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right" class-name="sf-ops-col">
+          <template #default="{ row }">
+            <div class="sf-ops">
               <el-button
                 v-if="canApplyFulfillmentSfRow(row)"
-                type="success"
-                plain
+                class="sf-act sf-act--ok"
                 size="small"
                 :loading="fulfillBusyId === row.id"
                 :disabled="loading"
@@ -662,8 +842,7 @@ onMounted(() => {
               </el-button>
               <el-button
                 v-if="canRedispatchSfRow(row)"
-                type="primary"
-                plain
+                class="sf-act sf-act--retry"
                 size="small"
                 :loading="retryBusyId === row.id"
                 :disabled="loading"
@@ -673,8 +852,7 @@ onMounted(() => {
               </el-button>
               <el-button
                 v-else-if="canRetrySfRow(row)"
-                type="primary"
-                plain
+                class="sf-act sf-act--retry"
                 size="small"
                 :loading="retryBusyId === row.id"
                 :disabled="loading"
@@ -682,225 +860,533 @@ onMounted(() => {
               >
                 重试推单
               </el-button>
-              <el-button v-if="canCancelSfRow(row)" type="danger" plain size="small" :loading="cancelBusyId === row.id"
-                :disabled="loading" @click="onCancelSf(row)">
+              <el-button
+                v-if="canCancelSfRow(row)"
+                class="sf-act sf-act--stop"
+                size="small"
+                :loading="cancelBusyId === row.id"
+                :disabled="loading"
+                @click="onCancelSf(row)"
+              >
                 取消配送
               </el-button>
               <span
                 v-if="!canApplyFulfillmentSfRow(row) && !canRetrySfRow(row) && !canRedispatchSfRow(row) && !canCancelSfRow(row)"
-                class="sf-monitor-op-muted"
+                class="sf-op-muted"
               >—</span>
             </div>
           </template>
         </el-table-column>
       </AdminTable>
+      </div>
 
-      <div class="sf-monitor-pager">
-        <el-button plain size="small" :disabled="loading || page <= 1 || total <= 0" @click="goPrev">
+      <div v-if="adminAccessToken" class="members-pagination members-pagination--float">
+        <button type="button" class="btn-sm" :disabled="loading || page <= 1 || total <= 0" @click="goPrev">
           上一页
-        </el-button>
-        <span class="sf-monitor-page-meta">
-          <label class="sf-pager-pagesize-field">
-            <span class="sf-pager-pagesize-label">每页</span>
-            <el-select
-              v-model="pageSize"
-              class="sf-pager-size-select"
-              :disabled="loading"
-              @change="onPageSizeChange"
-            >
+        </button>
+        <span class="members-page-meta">
+          <label class="sf-pager__size">
+            每页
+            <el-select v-model="pageSize" :disabled="loading" aria-label="每页条数" @change="onPageSizeChange">
               <el-option v-for="n in pageSizeOptions" :key="n" :label="`${n} 条`" :value="n" />
             </el-select>
           </label>
-          <span class="sf-pager-sep">·</span>
-          <span>第 <strong class="sf-pager-em">{{ page }}</strong> / {{ totalPages }} 页</span>
-          <span class="sf-pager-sep">·</span>
-          <span>本页 <strong class="sf-pager-em">{{ items.length }}</strong> 条</span>
-          <span class="sf-pager-sep">·</span>
-          <span class="sf-pager-total">合计 <strong class="sf-pager-em">{{ total }}</strong> 条</span>
+          第 {{ page }} / {{ totalPages }} 页 · 本页 {{ items.length }} 条 · 共 {{ total }} 条
         </span>
-        <el-button plain size="small" :disabled="loading || page >= totalPages || total <= 0" @click="goNext">
+        <button type="button" class="btn-sm" :disabled="loading || page >= totalPages || total <= 0" @click="goNext">
           下一页
-        </el-button>
+        </button>
       </div>
-    </div>
+    </section>
   </section>
 </template>
 
 <style scoped>
-.sf-monitor-toolbar {
+.sf-orders-monitor.page-content-shell {
+  /* 吃满主视区，页本身不滚；只滚表体 */
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.sf-orders-monitor {
+  --sf-ink: #1d1f21;
+  --sf-muted: #5c6670;
+  --sf-faint: #8b949e;
+  --sf-line: rgba(15, 23, 42, 0.06);
+  --sf-ok: #1f8a5b;
+  --sf-rose: #c45c66;
+  --sf-rose-ink: #a33b45;
+  --sf-go: #9a6232;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  color: var(--sf-ink);
 }
-.sf-monitor-hint {
-  margin: 0;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
-  line-height: 1.55;
+
+.sf-head,
+.sf-meter,
+.sf-filters {
+  flex-shrink: 0;
 }
-.sf-monitor-hint code {
+
+.sf-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 2px 0;
+}
+
+.sf-crumb {
+  margin: 0 0 6px;
   font-size: 12px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.25);
+  color: var(--sf-faint);
 }
-.sf-monitor-stats {
+
+.sf-crumb b {
+  color: var(--el-color-primary-dark-2);
+  font-weight: 700;
+}
+
+.sf-head__title {
   margin: 0;
+  font-size: 28px;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+
+.sf-head__sub {
+  margin: 6px 0 0;
+  max-width: 44rem;
+  color: var(--sf-muted);
   font-size: 13px;
   line-height: 1.5;
-  color: #0f172a;
-  padding: 10px 14px;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
 }
 
-.sf-monitor-stats :deep(strong) {
-  color: #0f172a;
-  font-weight: 600;
-}
-
-.sf-monitor-stats-sub {
-  margin-left: 6px;
-  font-size: 12px;
-  color: #475569;
-}
-.sf-monitor-filters {
+.sf-head__actions {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  /* 浅色工具条：标签与控件文字对比度 */
-  --sf-filter-fg: #0f172a;
-  --sf-filter-muted: #64748b;
-  --sf-filter-border: #cbd5e1;
-  --sf-filter-bg: #ffffff;
-}
-.sf-monitor-field {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  font-size: 13px;
-}
-.sf-monitor-field > span:first-of-type {
   flex-shrink: 0;
-  color: #334155;
-  font-weight: 500;
 }
-.sf-monitor-filters :deep(.el-input__wrapper),
-.sf-monitor-filters :deep(.el-select__wrapper) {
-  background-color: var(--sf-filter-bg);
-  box-shadow: 0 0 0 1px var(--sf-filter-border) inset;
+
+.sf-refresh,
+.sf-export,
+.sf-cell {
+  font: inherit;
+  cursor: pointer;
 }
-.sf-monitor-filters :deep(.el-input__inner),
-.sf-monitor-filters :deep(.el-select__selected-item),
-.sf-monitor-filters :deep(.el-select__input),
-.sf-monitor-filters :deep(.el-select__placeholder) {
-  color: var(--sf-filter-fg);
+
+.sf-refresh,
+.sf-export {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
 }
-.sf-monitor-filters :deep(.el-input__inner::placeholder),
-.sf-monitor-filters :deep(.el-select__placeholder.is-transparent) {
-  color: var(--sf-filter-muted);
+
+.sf-refresh {
+  border: 1px solid var(--sf-line);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--sf-ink);
 }
-.sf-monitor-select-narrow {
-  width: 132px;
+
+.sf-refresh:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--el-color-primary) 45%, #fff);
+  color: var(--el-color-primary-dark-2);
 }
-.sf-monitor-select-category {
-  width: 148px;
+
+.sf-refresh:disabled,
+.sf-export:disabled,
+.sf-cell:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
-.sf-monitor-input-phone {
-  width: 168px;
+
+.sf-refresh__spin {
+  animation: sf-spin 0.8s linear infinite;
 }
-.sf-monitor-input-sf {
-  width: 148px;
+
+@keyframes sf-spin {
+  to { transform: rotate(-360deg); }
 }
-.sf-monitor-date {
-  width: 160px;
+
+.sf-export {
+  border: 0;
+  color: #fff;
+  background: var(--el-color-primary);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--el-color-primary) 32%, transparent);
 }
-.sf-monitor-status {
-  width: 240px;
+
+.sf-export:hover:not(:disabled) {
+  background: var(--el-color-primary-dark-2);
 }
-.sf-monitor-refresh-inner {
+
+.sf-meter {
+  display: grid;
+  grid-template-columns: 220px repeat(5, minmax(0, 1fr));
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 30px rgba(25, 45, 55, 0.05);
+  overflow: hidden;
+}
+
+.sf-meter__main {
+  padding: 16px 18px 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), color-mix(in srgb, var(--el-color-primary) 16%, #fff));
+}
+
+.sf-meter__main span,
+.sf-cell small {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sf-muted);
+}
+
+.sf-meter__main strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 40px;
+  line-height: 0.95;
+  letter-spacing: -0.045em;
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-meter__main em {
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--sf-muted);
+}
+
+.sf-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 16px 14px 14px;
+  border: 0;
+  border-left: 1px solid var(--sf-line);
+  background: transparent;
+  text-align: left;
+  color: inherit;
+}
+
+.sf-cell:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--el-color-primary) 7%, #fff);
+}
+
+.sf-cell.is-on {
+  background: color-mix(in srgb, var(--el-color-primary) 12%, #fff);
+}
+
+.sf-cell b {
+  font-size: 26px;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.sf-cell--ok b { color: var(--sf-ok); }
+.sf-cell--rose b { color: var(--sf-rose); }
+
+.sf-card.table-container.table-container--members-fill {
+  background: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 24px;
+  box-shadow: 0 10px 30px rgba(25, 45, 55, 0.05);
+}
+
+.sf-table-host {
+  min-height: 0;
+}
+
+.sf-card.table-container--members-fill > .members-pagination.members-pagination--float {
+  border-radius: 0 0 24px 24px;
+}
+
+.sf-card .members-page-meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sf-pager__size {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  margin-right: 8px;
+  font-weight: 650;
+  color: var(--sf-ink);
 }
-.sf-monitor-pager {
+
+.sf-pager__size :deep(.el-select) {
+  width: 88px;
+}
+
+.sf-pager__size :deep(.el-select__wrapper) {
+  min-height: 28px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08) inset;
+}
+
+.sf-filters {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px 14px;
-  margin-top: 12px;
-  padding: 10px 12px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #334155;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
+  gap: 10px 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--sf-line);
 }
-.sf-monitor-pager :deep(strong) {
-  color: #0f172a;
+
+.sf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
-.sf-monitor-page-meta {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px 10px;
-  text-align: right;
-  flex: 1 1 280px;
-  min-width: min(100%, 360px);
-}
-.sf-pager-pagesize-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  cursor: pointer;
-}
-.sf-pager-pagesize-label {
-  flex-shrink: 0;
-  font-weight: 600;
-  color: #0f172a;
-  font-size: 13px;
-}
-.sf-pager-size-select {
-  width: 108px;
-}
-.sf-monitor-pager :deep(.sf-pager-size-select .el-select__wrapper),
-.sf-monitor-pager :deep(.sf-pager-size-select .el-input__wrapper) {
-  background-color: #ffffff;
-  box-shadow: 0 0 0 1px #cbd5e1 inset;
-}
-.sf-monitor-pager :deep(.sf-pager-size-select .el-select__selected-item),
-.sf-monitor-pager :deep(.sf-pager-size-select .el-select__placeholder) {
-  color: #0f172a;
-  font-weight: 500;
-}
-.sf-pager-em {
+
+.sf-field > span {
+  font-size: 12px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--sf-muted);
 }
-.sf-pager-sep {
-  opacity: 0.55;
-  user-select: none;
-  color: #94a3b8;
+
+.sf-field--date { width: 158px; }
+.sf-field--cat { width: 140px; }
+.sf-field--create { width: 176px; }
+.sf-field--phone,
+.sf-field--sf { width: 168px; }
+.sf-field--cb { width: 220px; }
+
+.sf-field :deep(.el-date-editor),
+.sf-field :deep(.el-select),
+.sf-field :deep(.el-input) {
+  width: 100%;
 }
-.sf-pager-total {
-  font-weight: 600;
-  color: #0f172a;
+
+.sf-field :deep(.el-input__wrapper),
+.sf-field :deep(.el-select__wrapper) {
+  min-height: 36px;
+  border-radius: 12px;
+  background: #fbfcfd;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08) inset;
 }
-.sf-monitor-op-muted {
+
+.sf-field :deep(.el-input__inner),
+.sf-field :deep(.el-select__placeholder),
+.sf-field :deep(.el-select__selected-item) {
+  color: var(--sf-ink);
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.42);
 }
-.sf-monitor-ops {
+
+/* 全站表头是主色实底白字；这一页按讨论稿改回浅底，方便对单 */
+.sf-orders-monitor :deep(.sf-table.el-table) {
+  --el-table-border-color: transparent;
+  --el-table-header-bg-color: #f6f8f9;
+  --el-table-tr-bg-color: #fff;
+  --el-table-row-hover-bg-color: #fbfcfd;
+  background: #fff;
+}
+
+.sf-orders-monitor :deep(.sf-table.el-table thead th.el-table__cell),
+.sf-orders-monitor :deep(.sf-table.el-table .el-table__header-wrapper th.el-table__cell),
+.sf-orders-monitor :deep(.sf-table.el-table .el-table__fixed-header-wrapper th.el-table__cell) {
+  background: #f6f8f9 !important;
+  color: var(--sf-muted) !important;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  border-bottom-color: var(--sf-line) !important;
+}
+
+.sf-orders-monitor :deep(.sf-table.el-table .el-table__header-wrapper th.el-table__cell:hover),
+.sf-orders-monitor :deep(.sf-table.el-table .el-table__fixed-header-wrapper th.el-table__cell:hover) {
+  background: #f6f8f9 !important;
+}
+
+.sf-orders-monitor :deep(.sf-table.admin-table--default.el-table .el-table__header th.el-table__cell),
+.sf-orders-monitor :deep(.sf-table.admin-table--default.el-table .el-table__body td.el-table__cell) {
+  padding: 10px 0;
+}
+
+.sf-orders-monitor :deep(.sf-table .el-table__body td.el-table__cell) {
+  border-bottom: 1px solid #f1f4f6;
+  vertical-align: middle;
+}
+
+.sf-orders-monitor :deep(.sf-table .el-table__body tr:hover > td.el-table__cell) {
+  background: #fbfcfd !important;
+}
+
+.sf-orders-monitor :deep(.sf-table .cell) {
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.sf-orders-monitor :deep(.sf-table .sf-num) {
+  color: var(--sf-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-orders-monitor :deep(.sf-table .sf-day) {
+  color: var(--sf-muted);
+}
+
+.sf-orders-monitor :deep(.sf-table .sf-mono) {
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-orders-monitor :deep(.sf-table td.sf-ops-col),
+.sf-orders-monitor :deep(.sf-table th.sf-ops-col) {
+  background: #fff;
+}
+
+.sf-orders-monitor :deep(.sf-table .el-table__body tr:hover > td.sf-ops-col) {
+  background: #fbfcfd !important;
+}
+
+.sf-cat,
+.sf-st,
+.sf-dot {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sf-cat--retail { color: var(--el-color-primary-dark-2); background: color-mix(in srgb, var(--el-color-primary) 16%, #fff); }
+.sf-cat--lunch { color: #1f7a4d; background: #e7f6ee; }
+.sf-cat--dinner { color: #5346a0; background: #f1eef8; }
+.sf-cat--muted { color: var(--sf-muted); background: #f4f6f8; }
+
+.sf-dot {
+  padding: 0;
+  background: transparent;
+  font-weight: 650;
+  gap: 6px;
+}
+
+.sf-dot i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sf-faint);
+}
+
+.sf-dot--ok i {
+  background: var(--sf-ok);
+  box-shadow: 0 0 0 3px rgba(31, 138, 91, 0.12);
+}
+
+.sf-dot--rose { color: var(--sf-rose-ink); }
+.sf-dot--rose i { background: var(--sf-rose); }
+.sf-dot--muted { color: var(--sf-muted); }
+
+.sf-st--done { color: var(--sf-ok); background: #eef8f3; }
+.sf-st--go { color: var(--sf-go); background: #fbf3ea; }
+.sf-st--rose { color: var(--sf-rose-ink); background: #fdf2f3; }
+.sf-st--muted { color: var(--sf-muted); background: #f4f6f8; }
+
+.sf-kind {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.sf-kind code {
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  color: var(--sf-faint);
+}
+
+.sf-ops {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
+}
+
+.sf-orders-monitor :deep(.sf-act.el-button) {
+  height: 28px;
+  margin: 0;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sf-orders-monitor :deep(.sf-act--ok.el-button) {
+  color: #1f7a4d;
+  background: #eef8f3;
+  border-color: #d7efe4;
+}
+
+.sf-orders-monitor :deep(.sf-act--ok.el-button:hover) {
+  color: #1f7a4d;
+  background: #e3f5eb;
+  border-color: #d7efe4;
+}
+
+.sf-orders-monitor :deep(.sf-act--stop.el-button) {
+  color: var(--sf-rose-ink);
+  background: #fdf2f3;
+  border-color: #f3d5d8;
+}
+
+.sf-orders-monitor :deep(.sf-act--stop.el-button:hover) {
+  color: var(--sf-rose-ink);
+  background: #fbe6e8;
+  border-color: #f3d5d8;
+}
+
+.sf-orders-monitor :deep(.sf-act--retry.el-button) {
+  color: var(--el-color-primary-dark-2);
+  background: color-mix(in srgb, var(--el-color-primary) 14%, #fff);
+  border-color: color-mix(in srgb, var(--el-color-primary) 28%, #fff);
+}
+
+.sf-op-muted {
+  font-size: 13px;
+  color: var(--sf-faint);
+}
+
+@media (max-width: 1100px) {
+  .sf-meter { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sf-meter__main { grid-column: 1 / -1; }
+  .sf-cell { border-top: 1px solid var(--sf-line); }
+}
+
+@media (max-width: 720px) {
+  .sf-head { flex-direction: column; align-items: flex-start; }
+  .sf-meter { grid-template-columns: 1fr 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sf-refresh__spin { animation: none; }
 }
 </style>

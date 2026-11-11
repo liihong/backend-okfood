@@ -1,7 +1,7 @@
 # OK 轻食后台 · 视觉方向讨论稿（iOS 毛玻璃 + 轻质感图标）
 
-> 状态：讨论稿，未定稿。与上一份「偏深绿、偏运营扁平」稿并列，供对比选定主方向。  
-> 关联预览：`design/okfood-admin-theme-preview-ios-glass.html`（浏览器打开可看色与毛玻璃层级；**页顶下拉可一键切换 3 套主色**：蜜桃珊瑚（**定稿默认**）/ 莫吉托 / 雾紫，`body` 上为 `data-theme="primary-peach"`、`primary-mojito` 或 `primary-iris`，选择会记在本地。色值表见 `COLOR-PRIMARY-CANDIDATES.md`）。**顶栏面包屑 + 侧栏一级展开与子页**为静态演示（`#hash` 路由），**消息通知、本地时间、当前用户**同在**顶栏右侧**一排（与参考深色稿信息区类似）。**右侧「编辑菜品」抽屉**预览为加宽版（约 `min(92vw, 820px)`），左侧主图列约 **46%** 宽、`object-fit: contain`，便于不打开放大也能看清图；正式可用 `ElDrawer` 的 `size` 与此一致。
+> 状态：壳层与色板已定稿（默认蜜桃珊瑚，可切莫吉托 / 雾紫）。色值见 `COLOR-PRIMARY-CANDIDATES.md`，落地见 `IOS-GLASS-IMPLEMENTATION.md`。页面级版式见 `ADMIN-UI-DIALOG-LIST-SPEC.md` §9。静态主题预览页已从仓库移除。  
+> 顶栏右侧是通知、时间和当前用户。编辑菜品用右侧抽屉，约 `min(92vw, 820px)`，主图列约 46% 宽、`object-fit: contain`。
 
 ---
 

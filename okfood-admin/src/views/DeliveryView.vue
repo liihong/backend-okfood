@@ -25,6 +25,7 @@ import { useAnimatedInteger } from '../composables/useAnimatedInteger.js'
 import { useStorePrint } from '../composables/useStorePrint.js'
 import { buildDeliveryLabelItems, missingRegionCodesForStops } from '../utils/print/deliveryLabelAdapter.js'
 import GiftCouponTodayDialog from './delivery/GiftCouponTodayDialog.vue'
+import OkfoodAdminDialogShell from '../components/OkfoodAdminDialogShell.vue'
 
 const { submitPrintJob, printing: printLoading, resolveScene } = useStorePrint()
 
@@ -247,6 +248,30 @@ const sfPreviewScopeHint = computed(() => {
   return a ? `片区「${a}」` : '全部片区'
 })
 
+/** 核对弹窗标题：及时单与同城预约是两个入口，不在弹窗里再切换 */
+const sfDialogTitle = computed(() => (sfPushModeIsInstant.value ? '推送及时单' : '顺丰同城创单'))
+const sfDialogSubtitle = computed(() =>
+  sfPushModeIsInstant.value
+    ? '将全部按立即推单创单，使用门店「零售推顺丰店铺ID」。适合当日部分停靠点补推，创单失败或已取消的记录可覆盖重推。'
+    : '先核对停靠点，再推到顺丰。取消勾选则该行不推。',
+)
+/** 本次会提交的停靠点：已推过的行勾选框是禁用的 */
+const sfPickedCount = computed(
+  () => (sfPreview.value.rows || []).filter((row) => row.selected && !row.already_pushed).length,
+)
+const sfPickupPhoneLabel = computed(() => {
+  const phones = [
+    ...new Set(
+      (sfPreview.value.rows || [])
+        .map((row) => String(row.pickup_phone || '').trim())
+        .filter(Boolean),
+    ),
+  ]
+  if (!phones.length) return '—'
+  if (phones.length === 1) return phones[0]
+  return `${phones.length} 个号码`
+})
+
 /** 当前选中的路由分组片区（与 group.area 一致） */
 const activeRegionTab = ref('')
 
@@ -295,29 +320,12 @@ const homeDeliveryStopCount = computed(() => {
   return n
 })
 
-/** 大表停靠点合计份数（与列表「餐」汇总一致：后厨需出） */
-const sheetKitchenMealTotal = computed(() =>
-  flatStops.value.reduce((s, x) => s + (Number(x.meal_count) || 0), 0)
-)
-
 /** 到家合计份数（待送达 + 已送达），与接口根字段一致 */
 const sheetHomeMealTotal = computed(
   () =>
     (Number(sheetToday.value.home_pending_meal_total) || 0) +
     (Number(sheetToday.value.home_delivered_meal_total) || 0),
 )
-
-/** 列表行汇总：各停靠点已履约餐数，用于顶部履约进度条 */
-const sheetDeliveredMealCount = computed(() =>
-  flatStops.value.reduce((s, x) => s + (Number(x.delivered_meal_count) || 0), 0),
-)
-
-/** 0–100，已履约份数 / 后厨需出总份数 */
-const sheetFulfillmentProgressPct = computed(() => {
-  const t = sheetKitchenMealTotal.value
-  if (!t) return 0
-  return Math.min(100, Math.round((sheetDeliveredMealCount.value / t) * 100))
-})
 
 const displayHomeMealTotal = useAnimatedInteger(() => sheetHomeMealTotal.value, { duration: 820 })
 const displayPickupMealTotal = useAnimatedInteger(
@@ -368,6 +376,9 @@ function deliveryStopRowClassName({ row }) {
     classes.push('delivery-row--sf-fail')
   }
   const g = selectedGroup.value
+  if (selectedDeliveryStops.value.some((stop) => deliveryStopRowKey(stop) === deliveryStopRowKey(row))) {
+    classes.push('delivery-row--picked')
+  }
   if (g?.area === '门店自提') return classes.join(' ')
   const pending = row.pending_meal_count
   const delivered = row.delivered_meal_count
@@ -862,9 +873,17 @@ function applySfSelectAll(val) {
   }
 }
 
+/** 行内取消勾选后，工具条「全选」跟着当前筛选结果走 */
+function syncSfSelectAllFromRows() {
+  const rows = sfModalFilteredRows.value.filter((row) => !row.already_pushed)
+  sfSelectAll.value = rows.length > 0 && rows.every((row) => row.selected)
+}
+
 function sfPreviewRowClassName({ row }) {
-  if (row.recv_lng == null || row.recv_lat == null) return 'sf-row--no-coords'
-  return ''
+  const names = []
+  if (row.selected && !row.already_pushed) names.push('sf-row--on')
+  if (row.recv_lng == null || row.recv_lat == null) names.push('sf-row--no-coords')
+  return names.join(' ')
 }
 
 async function loadSfPreviewData() {
@@ -1031,6 +1050,7 @@ async function reinstatePhoneToSheet() {
       <!-- Teleport 到 layout 后主卡 .delivery-view 不是祖先，须在卡片上重复定义 --dv-* 变量，否则会丢底色/主色 -->
       <div class="delivery-header-toolbar-card no-print">
         <div class="delivery-top-toolbar">
+        <div class="delivery-top-toolbar__filters">
         <label class="delivery-field delivery-field--toolbar">
           <span class="delivery-field-label">配送业务日</span>
           <div class="delivery-biz-day-row">
@@ -1090,6 +1110,8 @@ async function reinstatePhoneToSheet() {
             </button>
           </div>
         </label>
+        </div>
+        <div class="delivery-top-toolbar__actions">
         <button
           type="button"
           class="delivery-btn delivery-btn--outline"
@@ -1174,61 +1196,36 @@ async function reinstatePhoneToSheet() {
           推送及时单
         </button>
         </div>
+        </div>
       </div>
     </Teleport>
 
     <div class="delivery-page no-print">
-      <!-- 左侧：今日需备单量；右侧：片区快速过滤（独立卡片，Tab 过多时横向滚动） -->
+      <!-- 左侧：今日需备单量（毛玻璃主卡）；右侧：片区点选 -->
       <div class="delivery-stats-and-areas">
         <div class="delivery-hero-card delivery-hero-card--stats-left">
           <aside class="delivery-stats-panel" aria-label="今日需备单量">
-            <div class="delivery-stats-panel__head">
-              <span class="delivery-stats-panel__label">今日需备单量</span>
+            <div class="delivery-stats-panel__glow" aria-hidden="true" />
+            <div class="delivery-stats-panel__body delivery-stats-line">
               <span
                 v-if="deliveryQueryIsTodayShanghai"
                 class="delivery-stats-panel__badge"
               >今日实时</span>
-            </div>
-            <div class="delivery-stats-panel__body">
-              <ul class="delivery-stats-lines" role="list">
-                <li class="delivery-stats-lines__row">
-                  <span class="delivery-stats-lines__label">配送单</span>
-                  <span class="delivery-stats-lines__colon">：</span>
-                  <span class="delivery-stats-lines__num delivery-stats-lines__num--home">{{
-                    displayHomeMealTotal
-                  }}</span>
-                  <span class="delivery-stats-lines__suffix">份</span>
-                </li>
-                <li class="delivery-stats-lines__row">
-                  <span class="delivery-stats-lines__label">自提单</span>
-                  <span class="delivery-stats-lines__colon">：</span>
-                  <span class="delivery-stats-lines__num delivery-stats-lines__num--pickup">{{
-                    displayPickupMealTotal
-                  }}</span>
-                  <span class="delivery-stats-lines__suffix">份</span>
-                </li>
-                <li class="delivery-stats-lines__row">
-                  <span class="delivery-stats-lines__label">配送点</span>
-                  <span class="delivery-stats-lines__colon">：</span>
-                  <span class="delivery-stats-lines__num delivery-stats-lines__num--stores">{{
-                    displayStopCount
-                  }}</span>
-                  <span class="delivery-stats-lines__suffix">个</span>
-                </li>
-              </ul>
-            </div>
-            <div
-              class="delivery-stats-progress"
-              role="progressbar"
-              :aria-valuenow="sheetFulfillmentProgressPct"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              :aria-label="`履约进度 ${sheetFulfillmentProgressPct}%`"
-            >
-              <div
-                class="delivery-stats-progress__fill"
-                :style="{ width: `${sheetFulfillmentProgressPct}%` }"
-              />
+              <p class="delivery-stats-panel__kicker">今日需备单量</p>
+              <div class="delivery-stats-metric">
+                <strong>{{ displayHomeMealTotal }}</strong>
+                <span>份</span>
+              </div>
+              <div class="delivery-stats-follow" aria-label="自提单">
+                <span class="delivery-stats-follow__label">自提单</span>
+                <b>{{ displayPickupMealTotal }}</b>
+                <em>份</em>
+              </div>
+              <div class="delivery-stats-follow" aria-label="配送点">
+                <span class="delivery-stats-follow__label">配送点</span>
+                <b>{{ displayStopCount }}</b>
+                <em>个</em>
+              </div>
             </div>
           </aside>
         </div>
@@ -1237,7 +1234,10 @@ async function reinstatePhoneToSheet() {
           v-if="!loading && sheetToday.groups?.length"
           class="delivery-areas-card delivery-areas-card--beside-stats"
         >
-          <span class="delivery-areas-card__title">片区快速过滤</span>
+          <div class="delivery-areas-card__head">
+            <span class="delivery-areas-card__title">片区快速过滤</span>
+            <span class="delivery-areas-card__count">{{ sheetToday.groups.length }} 个片区</span>
+          </div>
           <div class="delivery-tablist-scroll custom-scrollbar" role="tablist" aria-label="配送片区">
             <button
               v-for="group in sheetToday.groups"
@@ -1253,20 +1253,26 @@ async function reinstatePhoneToSheet() {
               @click="activeRegionTab = group.area"
             >
               <span class="delivery-region-tab__label">{{ group.area }}</span>
-              <span class="delivery-region-tab__meta">{{ groupTabMetaLine(group) }}</span>
+              <span class="delivery-region-tab__meta">
+                <template v-if="group.area === '门店自提'">{{ groupTabMetaLine(group) }}</template>
+                <template v-else>
+                  {{ group.meal_total ?? 0 }}份 · {{ group.stop_count ?? 0 }}点 ·
+                  <em>待{{ group.pending_meal_total ?? group.meal_total ?? 0 }}</em>
+                </template>
+              </span>
             </button>
           </div>
         </div>
       </div>
     </div>
 
-    <el-dialog
-      v-model="sfDialogOpen"
-      :title="sfPushModeIsInstant ? '推送及时单：核对后提交' : '顺丰同城创单：核对后提交'"
-      width="min(1200px, 96vw)"
-      class="sf-dialog"
-      destroy-on-close
-      :close-on-press-escape="true"
+    <OkfoodAdminDialogShell
+      v-model:open="sfDialogOpen"
+      :title="sfDialogTitle"
+      :subtitle="sfDialogSubtitle"
+      dlg-class="okfood-admin-dlg--sf-push"
+      :close-disabled="sfPushSubmitting"
+      :close-on-backdrop="!sfPushSubmitting"
     >
       <p v-if="!sfLoading && !sfDialogConfigured" class="sf-warn">
         <template v-if="sfPushModeIsInstant">
@@ -1277,14 +1283,36 @@ async function reinstatePhoneToSheet() {
           <code>SF_PICKUP_PHONE</code>、<code>SF_PICKUP_ADDRESS</code>（取货电话与取货地址）。
         </template>
       </p>
-      <p v-if="sfPushModeIsInstant && !sfLoading && sfDialogConfigured" class="sf-hint sf-hint--instant">
-        将全部按<strong>立即推单</strong>创单，使用门店「零售推顺丰店铺ID」；适合当日部分停靠点补推，创单失败或已取消的记录可覆盖重推。
-      </p>
       <p v-if="sfLoading" class="members-loading">加载推单清单…</p>
       <template v-else>
         <p v-if="!sfPushModeIsInstant && sfBizDayPast" class="sf-warn sf-warn--muted">
           当前业务日早于今日：期望送达已按今日起算，日历不可选今日之前；预约时间须晚于当前时刻。
         </p>
+        <div class="sf-ctx" aria-label="本次推单范围">
+          <div class="sf-ctx__item">
+            <span class="sf-ctx__k">业务日</span>
+            <b class="sf-ctx__v">{{ sfPreview.delivery_date || deliveryDateQuery || '—' }}</b>
+          </div>
+          <div class="sf-ctx__item">
+            <span class="sf-ctx__k">范围</span>
+            <b class="sf-ctx__v">{{ sfPreviewScopeHint }}</b>
+          </div>
+          <div class="sf-ctx__item">
+            <span class="sf-ctx__k">取货电话</span>
+            <b class="sf-ctx__v sf-ctx__v--phone">{{ sfPickupPhoneLabel }}</b>
+          </div>
+          <div class="sf-ctx__item">
+            <span class="sf-ctx__k">停靠点</span>
+            <b class="sf-ctx__v">
+              {{ sfModalFilteredRows.length }}
+              <em v-if="sfModalFilterActive">/ {{ (sfPreview.rows || []).length }}</em>
+            </b>
+          </div>
+          <div class="sf-ctx__item">
+            <span class="sf-ctx__k">已勾选</span>
+            <b class="sf-ctx__v">{{ sfPickedCount }}</b>
+          </div>
+        </div>
         <div class="sf-bar">
           <div class="sf-bar__left">
             <label class="sf-check-all">
@@ -1297,16 +1325,9 @@ async function reinstatePhoneToSheet() {
                 加载全部片区
               </el-checkbox>
             </label>
-            <span class="sf-hint"
-              >业务日 <strong>{{ sfPreview.delivery_date || deliveryDateQuery }}</strong> · 范围
-              <strong>{{ sfPreviewScopeHint }}</strong> · 共 {{ sfModalFilteredRows.length }} 个停靠点<span
-                v-if="sfModalFilterActive"
-                >（全量 {{ (sfPreview.rows || []).length }}）</span
-              >；取消勾选则该行不推。</span
-            >
           </div>
-          <div class="sf-bar__right">
-            <span class="sf-bar__filter-label">收货手机筛选</span>
+          <label class="sf-search">
+            <span>收货手机</span>
             <el-input
               v-model="sfModalPhoneFilter"
               clearable
@@ -1316,22 +1337,24 @@ async function reinstatePhoneToSheet() {
               class="sf-bar__filter-input"
               @keydown.stop
             />
-          </div>
+          </label>
         </div>
         <div class="sf-table-wrap">
           <el-table
             v-if="(sfPreview.rows || []).length && sfModalFilteredRows.length"
             :data="sfModalFilteredRows"
-            border
             size="small"
-            stripe
             class="sf-table"
-            max-height="420"
+            max-height="480"
             :row-class-name="sfPreviewRowClassName"
           >
             <el-table-column width="48" label="选" align="center" fixed>
               <template #default="{ row }">
-                <el-checkbox v-model="row.selected" :disabled="row.already_pushed" />
+                <el-checkbox
+                  v-model="row.selected"
+                  :disabled="row.already_pushed"
+                  @change="syncSfSelectAllFromRows"
+                />
               </template>
             </el-table-column>
             <el-table-column prop="group_area" label="片区" min-width="88" show-overflow-tooltip />
@@ -1399,7 +1422,11 @@ async function reinstatePhoneToSheet() {
             </el-table-column>
             <el-table-column min-width="120" label="备注" show-overflow-tooltip>
               <template #default="{ row }">
-                <el-input v-model="row.remark" size="small" />
+                <el-input
+                  v-model="row.remark"
+                  size="small"
+                  :class="{ 'sf-remark--has': String(row.remark || '').trim() }"
+                />
               </template>
             </el-table-column>
             <el-table-column width="88" label="专人" align="center">
@@ -1450,36 +1477,51 @@ async function reinstatePhoneToSheet() {
         </div>
       </template>
       <template #footer>
-        <el-button :disabled="sfLoading" @click="sfDialogOpen = false">取消</el-button>
-        <el-button
-          type="primary"
-          :loading="sfPushSubmitting"
-          :disabled="sfLoading || !(sfPreview.rows || []).length"
-          @click="submitSfPush"
-        >
-          {{ sfPushModeIsInstant ? '确认推送到及时单' : '确认推送到顺丰' }}
-        </el-button>
+        <div class="sf-foot">
+          <p>取消勾选则该行不推。当前将提交 <b>{{ sfPickedCount }}</b> 个停靠点。</p>
+          <div class="sf-foot__actions">
+            <el-button round :disabled="sfLoading || sfPushSubmitting" @click="sfDialogOpen = false">取消</el-button>
+            <el-button
+              round
+              type="primary"
+              :loading="sfPushSubmitting"
+              :disabled="sfLoading || !(sfPreview.rows || []).length"
+              @click="submitSfPush"
+            >
+              {{ sfPushModeIsInstant ? '确认推送到及时单' : '确认推送到顺丰' }}
+            </el-button>
+          </div>
+        </div>
       </template>
-    </el-dialog>
+    </OkfoodAdminDialogShell>
 
     <p v-if="loading" class="members-loading no-print">加载中…</p>
 
     <template v-else>
       <div class="delivery-main delivery-page delivery-page--table no-print">
-        <el-tabs
-          v-model="sheetView"
-          class="delivery-sheet-view-tabs no-print"
-          @tab-change="fetchSheet"
-        >
-          <el-tab-pane label="午餐配送" :name="SHEET_VIEW_LUNCH" />
-          <el-tab-pane label="晚餐配送" :name="SHEET_VIEW_DINNER" />
-          <el-tab-pane label="午晚餐会员" :name="SHEET_VIEW_LUNCH_DINNER" />
-        </el-tabs>
-        <p v-if="sheetView === SHEET_VIEW_LUNCH_DINNER" class="delivery-sheet-view-hint">
-          双餐段会员运维视图；推顺丰请在「午餐」或「晚餐」Tab 分别推单。
-        </p>
-        <section class="delivery-day-block">
-          <p v-if="!sheetToday.groups?.length" class="members-loading">
+        <section class="delivery-table-card">
+          <header class="delivery-table-card__head">
+            <div>
+              <h3 class="delivery-table-card__title">
+                <MapPin :size="18" stroke-width="2" class="inline-icon" aria-hidden="true" />
+                配送列表（{{ sheetViewLabel }}）
+                <span class="delivery-table-card__date">{{ sheetToday.delivery_date }}</span>
+              </h3>
+            </div>
+            <el-tabs
+              v-model="sheetView"
+              class="delivery-sheet-view-tabs"
+              @tab-change="fetchSheet"
+            >
+              <el-tab-pane label="午餐配送" :name="SHEET_VIEW_LUNCH" />
+              <el-tab-pane label="晚餐配送" :name="SHEET_VIEW_DINNER" />
+              <el-tab-pane label="午晚餐会员" :name="SHEET_VIEW_LUNCH_DINNER" />
+            </el-tabs>
+          </header>
+          <p v-if="sheetView === SHEET_VIEW_LUNCH_DINNER" class="delivery-sheet-view-hint">
+            双餐段会员运维视图；推顺丰请在「午餐」或「晚餐」分别推单。
+          </p>
+          <p v-if="!sheetToday.groups?.length" class="members-loading delivery-sheet-empty">
             <template v-if="sheetToday.is_subscription_delivery_day === false">
               该日非订阅配送业务日：普通周日、国家法定节假日及国务院调休放假日不生成大表，份数不计入该日（调休补班周日除外）。请选择其它业务日，或在「营业概览」核对备餐人数是否为 0。
             </template>
@@ -1503,15 +1545,10 @@ async function reinstatePhoneToSheet() {
           </p>
           <div v-else class="delivery-region-tabs">
             <div v-if="selectedGroup" role="tabpanel" :aria-label="selectedGroup.area" class="delivery-tabpanel">
-              <div class="delivery-table-card">
-                <header class="delivery-table-card__head">
-                  <h3 class="delivery-table-card__title">
-                    <MapPin :size="18" stroke-width="2" class="inline-icon" aria-hidden="true" />
-                    配送列表（{{ sheetViewLabel }}）
-                    <span class="delivery-table-card__date">{{ sheetToday.delivery_date }}</span>
-                  </h3>
-                </header>
-                <div class="delivery-batch-bar">
+                <div
+                  class="delivery-batch-bar"
+                  :class="{ 'delivery-batch-bar--on': selectedDeliveryStops.length }"
+                >
                   <div class="delivery-batch-bar__left">
                     <div class="delivery-batch-bar__left-top">
                       <span class="delivery-batch-bar__pulse" aria-hidden="true" />
@@ -1577,6 +1614,7 @@ async function reinstatePhoneToSheet() {
                   ref="deliveryTableRef"
                   variant="delivery"
                   size="small"
+                  height="100%"
                   :border="false"
                   :data="selectedGroup.stops"
                   :row-key="deliveryStopRowKey"
@@ -1587,9 +1625,8 @@ async function reinstatePhoneToSheet() {
                 >
                   <el-table-column
                     type="selection"
-                    width="48"
+                    width="44"
                     align="center"
-                    fixed
                     class-name="col-sel"
                     :selectable="selectableDeliveryStop"
                   />
@@ -1605,13 +1642,14 @@ async function reinstatePhoneToSheet() {
                         <span
                           v-if="st.pending_meal_count != null"
                           class="meal-pill-sub"
+                          :class="{ 'meal-pill-sub--wait': Number(st.pending_meal_count) > 0 }"
                         >
                           待{{ st.pending_meal_count }} · 已{{ st.delivered_meal_count }}
                         </span>
                       </div>
                     </template>
                   </el-table-column>
-                  <el-table-column label="收餐目的地 / 区域" min-width="220" class-name="col-addr">
+                  <el-table-column label="收餐目的地 / 区域" min-width="200" class-name="col-addr">
                     <template #default="{ row: st }">
                       <div class="delivery-addr-cell">
                         <div class="delivery-addr-cell__main">{{ st.address_line }}</div>
@@ -1630,7 +1668,7 @@ async function reinstatePhoneToSheet() {
                       </div>
                     </template>
                   </el-table-column>
-                  <el-table-column label="联系人信息" min-width="200" class-name="col-contact">
+                  <el-table-column label="联系人信息" min-width="160" class-name="col-contact">
                     <template #default="{ row: st }">
                       <div
                         v-for="(m, mi) in st.members"
@@ -1651,13 +1689,13 @@ async function reinstatePhoneToSheet() {
                       </div>
                     </template>
                   </el-table-column>
-                  <el-table-column label="配餐说明 / 备注" min-width="140" class-name="col-rmk">
+                  <el-table-column label="配餐说明 / 备注" min-width="96" class-name="col-rmk">
                     <template #default="{ row: st }">
                       <span v-if="st.remarks_combined" class="delivery-remark-chip">{{ st.remarks_combined }}</span>
                       <span v-else class="delivery-empty-rmk">无备注说明</span>
                     </template>
                   </el-table-column>
-                  <el-table-column label="状态操作" width="128" min-width="108" class-name="col-actions" fixed="right">
+                  <el-table-column label="状态操作" width="132" min-width="118" class-name="col-actions" fixed="right">
                     <template #default="{ row: st }">
                       <div
                         v-for="(m, mi) in st.members"
@@ -1685,7 +1723,6 @@ async function reinstatePhoneToSheet() {
                   </el-table-column>
                 </AdminTable>
                 </div>
-              </div>
             </div>
           </div>
         </section>
@@ -1703,27 +1740,39 @@ async function reinstatePhoneToSheet() {
 <style scoped>
 /* 智能配送大表：控制台 + 单量看板 + 浅表头表格（与 2026 控制台稿对齐） */
 .delivery-view {
-  --dv-green: #1a5344;
-  --dv-green-hover: #133e33;
-  --dv-line: rgba(226, 232, 240, 0.65);
+  --dv-green: var(--el-color-primary);
+  --dv-green-hover: var(--el-color-primary-dark-2);
+  --dv-ink: var(--el-color-primary-dark-2);
+  --dv-line: rgba(15, 23, 42, 0.06);
+  --dv-ok: #1f8a5b;
+  flex: 1 1 0%;
   min-width: 0;
+  min-height: 0;
   max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
 }
 
 /* 顶栏 Teleport 挂载点不在 .delivery-view 内，须自带变量与白底卡片，否则按钮主色丢失、整体「没底色」 */
 .delivery-header-toolbar-card {
-  --dv-green: #1a5344;
-  --dv-green-hover: #133e33;
-  --dv-line: rgba(226, 232, 240, 0.65);
+  --dv-green: var(--el-color-primary);
+  --dv-green-hover: var(--el-color-primary-dark-2);
+  --dv-ink: var(--el-color-primary-dark-2);
+  --dv-line: rgba(15, 23, 42, 0.06);
   box-sizing: border-box;
-  /* 与主内容区同宽、左对齐；避免 max-content 导致整块缩在右侧 */
   width: 100%;
   max-width: 100%;
-  padding: 0.55rem 0.75rem;
-  background: #fff;
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  border-radius: 0.875rem;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.07);
+  min-width: 0;
+  /* 按卡片实际宽度换行，不按视口：侧栏占宽时主区更窄 */
+  container-type: inline-size;
+  container-name: delivery-toolbar;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(25, 45, 55, 0.05);
 }
 .delivery-header-toolbar-card :deep(.el-input__wrapper) {
   box-sizing: border-box;
@@ -1734,21 +1783,21 @@ async function reinstatePhoneToSheet() {
 .delivery-header-toolbar-card .delivery-btn--sf {
   color: #fff;
   background: var(--dv-green);
-  border: 1px solid rgba(26, 83, 68, 0.35);
-  box-shadow: 0 2px 8px rgba(26, 83, 68, 0.2);
+  border: 0;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--dv-green) 32%, transparent);
 }
 .delivery-header-toolbar-card .delivery-btn--sf:hover:not(:disabled) {
   background: var(--dv-green-hover);
   color: #fff;
 }
 .delivery-header-toolbar-card .delivery-btn--sf-instant {
-  color: #fff;
-  background: #c2410c;
-  border: 1px solid rgba(154, 52, 18, 0.35);
-  box-shadow: 0 2px 8px rgba(194, 65, 12, 0.22);
+  color: #f7f6f3;
+  background: #1d1f21;
+  border: 0;
+  box-shadow: none;
 }
 .delivery-header-toolbar-card .delivery-btn--sf-instant:hover:not(:disabled) {
-  background: #9a3412;
+  background: #33363a;
   color: #fff;
 }
 
@@ -1760,43 +1809,244 @@ async function reinstatePhoneToSheet() {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  flex: 0 0 auto;
 }
 .delivery-page--table {
-  margin-top: 0.35rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 0;
+  overflow: hidden;
 }
 
 .delivery-hero-card {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 1.5rem;
-  padding: 1.5rem;
-  background: #fff;
-  border: 1px solid var(--dv-line);
-  border-radius: 32px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  height: 100%;
   min-width: 0;
+  padding: 22px 22px 18px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 248, 244, 0.88));
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 18px 40px color-mix(in srgb, var(--dv-green) 16%, transparent);
+  backdrop-filter: blur(16px) saturate(1.25);
 }
 
-/* 左侧备单量卡片 + 右侧片区卡片同一行；窄屏自动换行 */
+/* 备单量与片区同一行，高度随这一行内容 */
 .delivery-stats-and-areas {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
   align-items: stretch;
-  gap: 1rem;
   min-width: 0;
   width: 100%;
 }
 
 .delivery-hero-card--stats-left {
-  flex: 0 1 auto;
-  min-width: 0;
-  padding: 1.1rem 1.35rem;
+  padding: 0;
 }
 
-/* 顶栏工具条：从左向右排满一行，窄屏允许换行仍顶左 */
+.delivery-stats-panel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 10px 16px;
+}
+.delivery-stats-panel__glow {
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  right: -50px;
+  top: -60px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--dv-green) 28%, transparent);
+  filter: blur(28px);
+  pointer-events: none;
+}
+.delivery-stats-panel__body {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+.delivery-stats-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.delivery-stats-panel__badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dv-green) 16%, #fff);
+  color: var(--dv-ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+.delivery-stats-panel__kicker {
+  margin: 0;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #5c6670;
+  white-space: nowrap;
+}
+.delivery-stats-metric {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 0;
+  flex-shrink: 0;
+}
+.delivery-stats-metric strong {
+  font-size: 36px;
+  line-height: 1;
+  letter-spacing: -0.045em;
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+}
+.delivery-stats-metric span {
+  font-size: 13px;
+  color: #5c6670;
+  font-weight: 700;
+}
+.delivery-stats-follow {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+}
+.delivery-stats-follow__label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #5c6670;
+  white-space: nowrap;
+}
+.delivery-stats-follow b {
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 700;
+  color: #1d1f21;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+.delivery-stats-follow em {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+  color: #8b949e;
+}
+.delivery-areas-card {
+  height: 100%;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 24px;
+  box-shadow: 0 10px 30px rgba(25, 45, 55, 0.05);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.delivery-areas-card--beside-stats {
+  min-width: 0;
+  max-width: 100%;
+}
+.delivery-areas-card__head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 0;
+}
+.delivery-areas-card__title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #1d1f21;
+  white-space: nowrap;
+}
+.delivery-areas-card__count {
+  font-size: 12px;
+  color: #8b949e;
+}
+.delivery-tablist-scroll {
+  flex: 1;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.delivery-region-tab {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: #f6f8f9;
+  color: #1d1f21;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.delivery-region-tab:hover {
+  background: #fff;
+  border-color: var(--dv-line);
+}
+.delivery-region-tab--active {
+  background: color-mix(in srgb, var(--dv-green) 14%, #fff);
+  border-color: color-mix(in srgb, var(--dv-green) 42%, #fff);
+  color: var(--dv-ink);
+  box-shadow: none;
+}
+.delivery-region-tab--warn:not(.delivery-region-tab--active) {
+  border-color: #fdba74;
+  background: #fffbeb;
+}
+.delivery-region-tab__label {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.delivery-region-tab__meta {
+  font-size: 11px;
+  font-weight: 650;
+  color: #8b949e;
+  font-variant-numeric: tabular-nums;
+}
+.delivery-region-tab__meta em {
+  font-style: normal;
+  color: var(--dv-ink);
+  font-weight: 800;
+}
+.delivery-region-tab--active .delivery-region-tab__meta {
+  color: #8b949e;
+}
+
+
+/* 顶栏：宽屏筛选与操作同一行顶左；卡片放不下时整组换到下一行，不再把按钮挤出主区 */
 .delivery-top-toolbar {
   display: flex;
   flex-direction: row;
@@ -1807,6 +2057,30 @@ async function reinstatePhoneToSheet() {
   width: 100%;
   min-width: 0;
 }
+.delivery-top-toolbar__filters,
+.delivery-top-toolbar__actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.delivery-top-toolbar__filters {
+  flex: 1 1 auto;
+}
+.delivery-top-toolbar__actions {
+  flex: 0 1 auto;
+}
+/* 约 1520px 起一行放不下日期、搜索和全部操作按钮 */
+@container delivery-toolbar (max-width: 1520px) {
+  .delivery-top-toolbar__filters,
+  .delivery-top-toolbar__actions {
+    flex: 1 1 100%;
+  }
+}
 .delivery-top-toolbar .delivery-btn {
   flex: 0 0 auto;
   white-space: nowrap;
@@ -1815,10 +2089,13 @@ async function reinstatePhoneToSheet() {
 .delivery-field--toolbar {
   display: flex;
   flex-direction: row;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.45rem;
-  flex: 0 0 auto;
+  /* 日期组按内容宽，避免把中间空白撑开、把搜索顶到行尾 */
+  flex: 0 1 auto;
+  min-width: min(100%, 22rem);
+  max-width: 100%;
 }
 .delivery-field--toolbar-grow {
   flex: 1 1 18rem;
@@ -1853,9 +2130,10 @@ async function reinstatePhoneToSheet() {
   flex-shrink: 0;
 }
 .delivery-btn--day-step {
-  padding: 0.42rem 0.55rem;
-  font-size: 0.6875rem;
-  border-radius: 0.6rem;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 999px;
 }
 
 .delivery-field--toolbar :deep(.delivery-el-date--toolbar) {
@@ -1892,8 +2170,8 @@ async function reinstatePhoneToSheet() {
 }
 .delivery-search-row--toolbar :deep(.delivery-el-phone--toolbar) {
   flex: 1 1 auto;
-  /* 约可完整展示 11 位手机号 + 左右图标与内边距（tabular 数字下约 ≥12rem） */
-  min-width: 12.75rem;
+  /* 宽度交给外层 field，避免输入框最小宽度把整行顶出卡片 */
+  min-width: 0;
   width: 0;
 }
 
@@ -1911,17 +2189,18 @@ async function reinstatePhoneToSheet() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
-  padding: 0.55rem 1.1rem;
-  border-radius: 0.75rem;
-  font-size: 0.75rem;
-  font-weight: 800;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
   cursor: pointer;
-  border: none;
-  transition:
-    background 0.15s,
-    color 0.15s,
-    box-shadow 0.15s;
+  border: 1px solid var(--dv-line);
+  background: #fff;
+  color: #1d1f21;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .delivery-btn:disabled {
   opacity: 0.45;
@@ -1929,255 +2208,41 @@ async function reinstatePhoneToSheet() {
 }
 .delivery-btn--outline {
   background: #fff;
-  color: #334155;
-  border: 1px solid rgba(226, 232, 240, 0.85);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  color: #1d1f21;
+  border: 1px solid var(--dv-line);
 }
 .delivery-btn--outline:hover:not(:disabled) {
-  background: #f8fafc;
+  border-color: color-mix(in srgb, var(--dv-green) 40%, #fff);
+  color: var(--dv-ink);
 }
-.delivery-btn--secondary {
-  background: var(--dv-green);
-  color: #fff;
-  box-shadow: 0 4px 14px rgba(26, 83, 68, 0.18);
-}
-.delivery-btn--secondary:hover:not(:disabled) {
-  background: var(--dv-green-hover);
-}
-.delivery-btn--primary {
-  background: #059669;
-  color: #fff;
-}
-.delivery-btn--primary:hover:not(:disabled) {
-  background: #047857;
-}
-
+.delivery-btn--secondary,
+.delivery-btn--primary,
 .delivery-btn--sf {
   background: var(--dv-green);
   color: #fff;
-  box-shadow: 0 4px 14px rgba(26, 83, 68, 0.22);
+  border-color: transparent;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--dv-green) 32%, transparent);
 }
+.delivery-btn--secondary:hover:not(:disabled),
+.delivery-btn--primary:hover:not(:disabled),
 .delivery-btn--sf:hover:not(:disabled) {
   background: var(--dv-green-hover);
   color: #fff;
 }
-
-.delivery-stats-panel {
-  flex: 1;
-  min-width: min(100%, 17rem);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 0.55rem;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-}
-.delivery-stats-panel__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-.delivery-stats-panel__label {
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: #64748b;
-}
-.delivery-stats-panel__badge {
-  font-size: 11px;
-  font-weight: 900;
-  padding: 0.15rem 0.55rem;
-  border-radius: 999px;
-  background: #ecfdf5;
-  color: #047857;
-  border: 1px solid #d1fae5;
-}
-.delivery-stats-panel__body {
-  display: block;
-  padding: 0.15rem 0 0;
+.delivery-btn--primary:disabled {
+  opacity: 1;
+  color: #8b949e;
+  background: #e7ebed;
+  box-shadow: none;
 }
 
-.delivery-stats-lines {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.delivery-stats-lines__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  font-size: 0.9375rem;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.delivery-stats-lines__label {
-  color: #475569;
-  font-weight: 800;
-  min-width: 3.25rem;
-}
-
-.delivery-stats-lines__colon {
-  color: #94a3b8;
-  font-weight: 700;
-  margin-right: 0.15rem;
-}
-
-.delivery-stats-lines__num {
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  font-size: 1.0625rem;
-}
-
-.delivery-stats-lines__num--home {
-  color: #0369a1;
-}
-
-.delivery-stats-lines__num--pickup {
-  color: #b45309;
-}
-
-.delivery-stats-lines__num--stores {
-  color: #4338ca;
-}
-
-.delivery-stats-lines__suffix {
-  margin-left: 0.15rem;
-  font-size: 0.875rem;
-  font-weight: 750;
-  color: #64748b;
-}
-
-.delivery-stats-progress {
-  width: 100%;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(226, 232, 240, 0.65);
-  overflow: hidden;
-}
-.delivery-stats-progress__fill {
-  height: 100%;
-  background: var(--dv-green);
-  border-radius: inherit;
-  transition: width 0.35s ease;
-}
-
-.delivery-areas-card {
-  padding: 1.1rem 1.25rem;
-  background: #fff;
-  border: 1px solid var(--dv-line);
-  border-radius: 32px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  min-width: 0;
-}
-.delivery-areas-card--beside-stats {
-  flex: 1 1 17rem;
-  min-width: 0;
-  max-width: 100%;
-  justify-content: center;
-}
-.delivery-areas-card--beside-stats .delivery-tablist-scroll {
-  flex: 1 1 auto;
-  min-height: 2.85rem;
-  align-items: center;
-}
-
-.delivery-areas-card__title {
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: #64748b;
-}
-.delivery-tablist-scroll {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  overflow-x: auto;
-  padding-bottom: 0.15rem;
-  -webkit-overflow-scrolling: touch;
-}
-.custom-scrollbar::-webkit-scrollbar {
-  height: 6px;
-  width: 6px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 10px;
-}
-
-.delivery-region-tab {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 0.08rem;
-  flex-shrink: 0;
-  border: 1px solid transparent;
-  background: #f8fafc;
-  color: #475569;
-  font: inherit;
-  padding: 0.55rem 0.9rem;
-  border-radius: 1rem;
-  cursor: pointer;
-  text-align: left;
-  transition:
-    background 0.2s,
-    color 0.2s,
-    border-color 0.2s,
-    box-shadow 0.2s;
-}
-.delivery-region-tab:hover {
-  background: #f1f5f9;
-}
-.delivery-region-tab--active {
-  background: var(--dv-green);
-  color: #fff;
-  border-color: var(--dv-green);
-  box-shadow: 0 4px 12px rgba(26, 83, 68, 0.15);
-}
-.delivery-region-tab--active .delivery-region-tab__meta {
-  color: rgba(209, 250, 229, 0.95);
-}
-.delivery-region-tab--warn:not(.delivery-region-tab--active) {
-  border-color: #fdba74;
-  background: #fffbeb;
-}
-.delivery-region-tab--warn.delivery-region-tab--active {
-  box-shadow:
-    0 0 0 2px #fff,
-    0 0 0 4px #fb923c;
-}
-.delivery-region-tab__label {
-  font-size: 0.875rem;
-  font-weight: 900;
-  line-height: 1.15;
-  word-break: break-all;
-}
-.delivery-region-tab__meta {
-  font-size: 11px;
-  font-weight: 700;
-  color: #94a3b8;
-}
 
 .delivery-main {
   display: flex;
   flex-direction: column;
   gap: 0;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .delivery-day-block {
   padding-top: 0;
@@ -2186,37 +2251,103 @@ async function reinstatePhoneToSheet() {
 .delivery-region-tabs {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 0;
 }
 .delivery-tabpanel {
   min-width: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .delivery-table-card {
-  background: #fff;
-  border: 1px solid var(--dv-line);
-  border-radius: 32px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 24px;
+  box-shadow: 0 10px 30px rgba(25, 45, 55, 0.05);
   overflow: hidden;
   min-width: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .delivery-table-card__head {
-  padding: 1rem 1.35rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-shrink: 0;
+  padding: 16px 18px 12px;
 }
 .delivery-table-card__title {
   margin: 0;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.5rem;
-  font-size: 1rem;
-  font-weight: 900;
-  color: #0f172a;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #1d1f21;
 }
 .delivery-table-card__date {
-  font-size: 0.8rem;
-  font-weight: 800;
-  color: #94a3b8;
+  margin: 0 0 0 2px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #8b949e;
+  font-variant-numeric: tabular-nums;
+}
+.delivery-sheet-view-tabs {
+  flex-shrink: 0;
+}
+.delivery-sheet-view-tabs :deep(.el-tabs__header) {
+  margin: 0;
+}
+.delivery-sheet-view-tabs :deep(.el-tabs__content) {
+  display: none;
+}
+.delivery-sheet-view-tabs :deep(.el-tabs__nav-wrap::after),
+.delivery-sheet-view-tabs :deep(.el-tabs__active-bar) {
+  display: none;
+}
+.delivery-sheet-view-tabs :deep(.el-tabs__nav) {
+  display: flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: #f3f5f6;
+}
+.delivery-sheet-view-tabs :deep(.el-tabs__item) {
+  height: 30px;
+  padding: 0 14px !important;
+  border-radius: 999px;
+  line-height: 30px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #5c6670;
+}
+.delivery-sheet-view-tabs :deep(.el-tabs__item.is-active) {
+  color: #fff;
+  background: var(--dv-green);
+}
+.delivery-sheet-view-hint {
+  margin: 0 18px 12px;
+  padding: 8px 12px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--dv-green) 10%, #fff);
+  color: var(--dv-ink);
+  font-size: 12px;
+  font-weight: 650;
+}
+.delivery-sheet-empty {
+  margin: 0 18px 18px;
+  padding: 28px 16px;
+  border-radius: 16px;
+  background: #f6f8f9;
+  text-align: center;
 }
 
 .delivery-batch-bar {
@@ -2224,16 +2355,19 @@ async function reinstatePhoneToSheet() {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.6rem 0.85rem;
-  margin: 0.75rem 1.35rem 0;
-  padding: 0.8rem 1rem;
-  background: #ecfdf5;
-  border: 1px solid #d1fae5;
-  border-radius: 1rem;
-  box-shadow: 0 1px 2px rgba(16, 185, 129, 0.06);
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #065f46;
+  flex-shrink: 0;
+  gap: 10px 12px;
+  margin: 0 12px 12px;
+  padding: 10px 12px;
+  background: #f6f8f9;
+  border: 0;
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #5c6670;
+}
+.delivery-batch-bar--on {
+  background: color-mix(in srgb, var(--dv-green) 10%, #fff);
 }
 .delivery-batch-bar__left {
   display: flex;
@@ -2253,34 +2387,22 @@ async function reinstatePhoneToSheet() {
   align-items: center;
   gap: 0.4rem;
   padding: 0.2rem 0 0;
-  font-size: 0.72rem;
-  font-weight: 800;
-  color: #047857;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--dv-ink);
   line-height: 1.2;
 }
 .delivery-batch-bar__busy-ico {
   flex-shrink: 0;
-  color: #059669;
+  color: var(--dv-green);
 }
 .delivery-batch-bar__pulse {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #10b981;
+  background: var(--dv-ok);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--dv-ok) 18%, transparent);
   flex-shrink: 0;
-  animation: dv-pulse 1.8s ease-in-out infinite;
-}
-@keyframes dv-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-.delivery-batch-bar__hint strong {
-  color: #064e3b;
 }
 .delivery-batch-bar__right {
   display: flex;
@@ -2289,13 +2411,14 @@ async function reinstatePhoneToSheet() {
   justify-content: flex-end;
   gap: 0.6rem 1rem;
 }
-.delivery-batch-bar__count {
-  color: #64748b;
-  font-size: 0.75rem;
-}
+.delivery-batch-bar__hint strong,
 .delivery-batch-bar__count strong {
-  color: #0f172a;
-  font-weight: 900;
+  color: #1d1f21;
+  font-variant-numeric: tabular-nums;
+}
+.delivery-batch-bar__count {
+  color: #5c6670;
+  font-size: 13px;
 }
 .delivery-batch-bar__actions {
   display: flex;
@@ -2316,27 +2439,34 @@ async function reinstatePhoneToSheet() {
 }
 
 .group-card__table-scroll {
-  padding: 0.75rem 0 0;
-  overflow-x: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 1.15rem 12px;
+  overflow: hidden;
   max-width: 100%;
+  display: flex;
+  flex-direction: column;
 }
 .group-card__table-scroll :deep(.admin-table--delivery.el-table) {
-  margin: 0 1.15rem 1rem;
+  margin: 0;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .delivery-addr-cell__main {
-  font-weight: 800;
-  font-size: 0.875rem;
-  color: #0f172a;
-  line-height: 1.35;
+  font-weight: 650;
+  font-size: 13px;
+  color: #1d1f21;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
 }
 .delivery-addr-cell__sub {
-  margin-top: 0.25rem;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #94a3b8;
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #8b949e;
 }
 
 .contact-line__head {
@@ -2346,16 +2476,23 @@ async function reinstatePhoneToSheet() {
   gap: 0.35rem;
 }
 
+.group-card__table-scroll :deep(.el-table__cell.col-rmk .cell) {
+  white-space: normal;
+  word-break: break-word;
+}
 .delivery-remark-chip {
   display: inline-block;
-  padding: 0.35rem 0.75rem;
-  border-radius: 0.75rem;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1.35;
-  background: #fffbeb;
-  color: #92400e;
-  border: 1px solid #fde68a;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 8px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+  white-space: normal;
+  word-break: break-word;
+  background: color-mix(in srgb, var(--dv-green) 14%, #fff);
+  color: var(--dv-ink);
 }
 .delivery-empty-rmk {
   font-size: 0.75rem;
@@ -2385,70 +2522,119 @@ async function reinstatePhoneToSheet() {
 .sf-warn code {
   font-size: 0.75rem;
 }
+.sf-ctx {
+  display: grid;
+  grid-template-columns: 1.1fr 1.3fr 1.2fr 0.9fr 0.8fr;
+  margin-bottom: 12px;
+  border-radius: 18px;
+  background: #f7f9fa;
+  overflow: hidden;
+}
+.sf-ctx__item {
+  min-width: 0;
+  padding: 12px 14px;
+}
+.sf-ctx__item + .sf-ctx__item {
+  box-shadow: inset 1px 0 0 rgba(15, 23, 42, 0.05);
+}
+.sf-ctx__k {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: #5c6670;
+}
+.sf-ctx__v {
+  display: block;
+  margin-top: 3px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: #1d1f21;
+}
+.sf-ctx__v em {
+  font-style: normal;
+  font-weight: 650;
+  color: var(--el-color-primary-dark-2);
+}
+.sf-ctx__v--phone {
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-size: 14px;
+  letter-spacing: -0.02em;
+}
 .sf-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem 1rem;
-  margin-bottom: 0.75rem;
-  font-size: 0.85rem;
+  gap: 8px 12px;
+  margin-bottom: 12px;
 }
 .sf-bar__left {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem 1rem;
+  gap: 8px;
   min-width: 0;
-}
-.sf-bar__right {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex: 0 0 auto;
-}
-.sf-bar__filter-label {
-  white-space: nowrap;
-  color: #64748b;
-  font-size: 0.82rem;
-}
-.sf-bar__filter-input {
-  width: 11rem !important;
-  max-width: 40vw;
 }
 .sf-check-all {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
   cursor: pointer;
   user-select: none;
+  font-size: 13px;
+  font-weight: 700;
 }
 .sf-check-all--muted {
-  color: #64748b;
-  font-size: 0.82rem;
+  color: #5c6670;
+  font-weight: 650;
 }
-.sf-hint {
-  color: #64748b;
+.sf-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 4px 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #fbfcfd;
 }
-.sf-hint--instant {
-  margin: 0 0 0.75rem;
-  padding: 0.55rem 0.75rem;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  border-radius: 8px;
-  color: #9a3412;
-  font-size: 0.85rem;
+.sf-search > span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #5c6670;
+  white-space: nowrap;
+}
+.sf-bar__filter-input {
+  width: 148px !important;
+}
+.sf-search :deep(.el-input__wrapper) {
+  background: transparent;
+  box-shadow: none !important;
 }
 .sf-instant-yes {
-  color: #c2410c;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--el-color-primary) 16%, #fff);
+  color: var(--el-color-primary-dark-2);
+  font-size: 12px;
   font-weight: 700;
 }
 .sf-table-wrap {
   width: 100%;
-  overflow-x: auto;
+  min-height: 0;
+  overflow: auto;
 }
 .sf-table {
-  min-width: 900px;
+  min-width: 1180px;
 }
 .sf-num {
   width: 100% !important;
@@ -2456,18 +2642,91 @@ async function reinstatePhoneToSheet() {
 :deep(.sf-dt) {
   width: 100%;
 }
+:deep(.sf-table.el-table) {
+  --el-table-border-color: #f1f4f6;
+  --el-table-header-bg-color: #f6f8f9;
+}
+:deep(.sf-table th.el-table__cell) {
+  background: #f6f8f9 !important;
+  color: #5c6670;
+  font-size: 12px;
+  font-weight: 700;
+}
+:deep(.sf-table .el-table__body td.el-table__cell) {
+  background: #fff;
+}
+:deep(.sf-table .el-input__wrapper),
+:deep(.sf-table .el-input-number .el-input__wrapper) {
+  border-radius: 10px;
+  background: #fbfcfd;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08) inset;
+}
+:deep(.sf-table .sf-remark--has .el-input__wrapper) {
+  background: color-mix(in srgb, var(--el-color-primary) 14%, #fff);
+  box-shadow: none;
+}
+:deep(.sf-table .sf-remark--has .el-input__inner) {
+  color: var(--el-color-primary-dark-2);
+  font-weight: 650;
+}
+:deep(.sf-table .sf-row--on > td.el-table__cell) {
+  background: color-mix(in srgb, var(--el-color-primary) 9%, #fff) !important;
+}
+:deep(.sf-table .el-table__body tr:hover > td.el-table__cell) {
+  background: #fbfcfd !important;
+}
+:deep(.sf-table .sf-row--on:hover > td.el-table__cell) {
+  background: color-mix(in srgb, var(--el-color-primary) 12%, #fff) !important;
+}
 .sf-bad {
-  color: #dc2626;
+  color: #c45c66;
   font-weight: 700;
 }
 :deep(.sf-table .sf-row--no-coords > td.el-table__cell) {
-  background: #fef2f2;
+  background: #fdf2f3 !important;
 }
 .sf-empty {
   margin: 0;
-  padding: 1rem;
-  color: #64748b;
-  font-size: 0.9rem;
+  padding: 28px 16px;
+  border-radius: 16px;
+  background: #f6f8f9;
+  color: #5c6670;
+  font-size: 13px;
+  text-align: center;
+}
+.sf-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+.sf-foot p {
+  margin: 0;
+  font-size: 13px;
+  color: #5c6670;
+}
+.sf-foot b {
+  color: #1d1f21;
+  font-variant-numeric: tabular-nums;
+}
+.sf-foot__actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+@media (max-width: 980px) {
+  .sf-ctx {
+    grid-template-columns: 1fr 1fr;
+  }
+  .sf-ctx__item + .sf-ctx__item {
+    box-shadow: none;
+    border-top: 1px solid rgba(15, 23, 42, 0.05);
+  }
+  .sf-foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 .spin {
@@ -2486,7 +2745,7 @@ async function reinstatePhoneToSheet() {
 }
 
 .col-contact {
-  min-width: 10rem;
+  min-width: 0;
 }
 .contact-line {
   margin-bottom: 0.35rem;
@@ -2496,18 +2755,70 @@ async function reinstatePhoneToSheet() {
   margin-bottom: 0;
 }
 
+.t-idx {
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+  color: #8b949e;
+  font-variant-numeric: tabular-nums;
+}
+.t-name { font-weight: 700; color: #1d1f21; }
+.t-sub {
+  display: block;
+  margin-top: 3px;
+  color: #5c6670;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
 .meal-pill {
+  display: block;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: #1d1f21;
+  background: none;
+  line-height: 1;
+}
+.meal-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.meal-pill-sub {
+  font-size: 12px;
+  font-weight: 650;
+  color: #8b949e;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.meal-pill-sub--wait {
+  color: var(--dv-ink);
+  font-weight: 700;
+}
+.delivery-status-tag {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  font-weight: 900;
-  font-size: 0.875rem;
-  color: var(--dv-green);
-  background: #ecfdf5;
-  border-radius: 50%;
-  box-sizing: border-box;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.delivery-status-tag--done {
+  background: #e7f6ee;
+  color: var(--dv-ok);
+}
+.delivery-status-tag--pending {
+  background: color-mix(in srgb, var(--dv-green) 16%, #fff);
+  color: var(--dv-ink);
+  border: 0;
+}
+.delivery-status-tag--pickup {
+  background: #eef2ff;
+  color: #3730a3;
 }
 
 .t-contact {
@@ -2551,40 +2862,25 @@ async function reinstatePhoneToSheet() {
   line-height: 1.35;
 }
 
-.delivery-status-tag {
-  display: inline-block;
-  margin-right: 0;
-  font-size: 8px;
-  font-weight: 900;
-  padding: 2px 6px;
-  border-radius: 4px;
-  vertical-align: middle;
-}
-.delivery-status-tag--done {
-  background: #d1fae5;
-  color: #065f46;
-}
-.delivery-status-tag--pending {
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fde68a;
-}
-.delivery-status-tag--pickup {
-  background: #e0e7ff;
-  color: #3730a3;
-}
-
-.meal-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.12rem;
-}
-.meal-pill-sub {
-  font-size: 0.65rem;
-  font-weight: 700;
-  color: #059669;
-  white-space: nowrap;
+@media (max-width: 980px) {
+  .delivery-view {
+    height: auto;
+    overflow: auto;
+  }
+  .delivery-page--table {
+    flex: none;
+    min-height: 480px;
+    overflow: hidden;
+  }
+  .delivery-stats-and-areas,
+  .delivery-table-card__head,
+  .delivery-stats-line,
+  .delivery-areas-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .delivery-stats-metric strong { font-size: 36px; }
 }
 </style>
 
@@ -2606,6 +2902,12 @@ async function reinstatePhoneToSheet() {
   .no-print {
     display: none !important;
   }
+  .delivery-view,
+  .delivery-page--table,
+  .group-card__table-scroll {
+    height: auto !important;
+    overflow: visible !important;
+  }
 }
 
 .delivery-action-line {
@@ -2618,19 +2920,22 @@ async function reinstatePhoneToSheet() {
   margin-bottom: 0;
 }
 .btn-delivery-mark {
-  display: inline-block;
-  padding: 0.35rem 1rem;
-  border-radius: 0.75rem;
-  font-size: 0.75rem;
-  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
   cursor: pointer;
-  border: none;
-  background: #059669;
   color: #fff;
-  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.2);
+  background: var(--el-color-primary);
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--el-color-primary) 28%, transparent);
 }
 .btn-delivery-mark:hover:not(:disabled) {
-  background: #047857;
+  background: var(--el-color-primary-dark-2);
   color: #fff;
 }
 .btn-delivery-mark:disabled {
@@ -2638,12 +2943,13 @@ async function reinstatePhoneToSheet() {
   cursor: not-allowed;
 }
 .delivery-action-done {
-  display: inline-block;
-  font-size: 0.75rem;
-  font-weight: 800;
-  color: #64748b;
-  background: #f1f5f9;
-  padding: 0.35rem 0.75rem;
-  border-radius: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1f8a5b;
+  background: transparent;
+  padding: 0;
 }
 </style>

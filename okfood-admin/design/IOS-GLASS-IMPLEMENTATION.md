@@ -68,7 +68,8 @@
 |------|------|
 | 2025-11-06 | 初版：壳层 + Dashboard Phase 1 边界与 EP 约束 |
 | 2025-11-06 | 侧栏对齐预览：浅色毛玻璃、水果图标组件、画布 mesh |
-| 2026-03-22 | 登录页定稿落地：`LoginView.vue` + `src/assets/login-glass.css`（本地头图、手机上图下文 / PC 左图右表单）；讨论稿 `design/okfood-admin-login-preview-opendesign.html` |
+| 2026-03-22 | 登录页定稿落地：`LoginView.vue` + `src/assets/login-glass.css`（本地头图、手机上图下文 / PC 左图右表单） |
+| 2026-11-11 | 页面级版式（只滚列表、数字滚动与对齐、抽屉、后厨看板）写入 `ADMIN-UI-DIALOG-LIST-SPEC.md` §9。已落地页面的预览 HTML 不再保留 |
 
 **登录页：** 样式真源为 `login-glass.css`；旧 `admin-ui.css` 中 `.login-page` 已移除。首访默认主题与壳层一致为 `primary-peach`（`main.js`）。
 

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted, onActivated, nextTick, watch } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { MapPin, Trash2, Plus, Save, X } from 'lucide-vue-next'
 
 /** 新乡市城区中心（GCJ-02）；门店未配置经纬度时兜底 */
@@ -581,7 +582,18 @@ async function saveRegion() {
 }
 
 async function deleteRegion(r) {
-  if (!confirm(`确定删除区域「${r.name}」？`)) return
+  try {
+    await ElMessageBox.confirm(`确定删除区域「${r.name}」？`, '删除确认', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      customClass: 'okfood-message-box okfood-message-box--delete',
+      confirmButtonClass: 'okfood-message-box__confirm--danger',
+      cancelButtonClass: 'okfood-message-box__cancel',
+    })
+  } catch {
+    return
+  }
   try {
     await props.apiRequest(`/api/admin/delivery-regions/${r.id}`, { method: 'DELETE' })
     showToast('已删除')
@@ -683,9 +695,12 @@ onUnmounted(() => {
         <!-- 内联编辑区：与列表、地图同屏，避免右侧全屏抽屉遮挡与层级问题 -->
         <div v-if="formDrawerOpen" ref="inlineFormEl" class="regions-inline-form">
           <div class="regions-inline-form-head">
-            <h4>{{ editingId == null ? '保存新区域' : '编辑配送区域' }}</h4>
+            <div class="regions-inline-form-copy">
+              <h4>{{ editingId == null ? '保存新区域' : '编辑配送区域' }}</h4>
+              <p>名称、编码和主责配送员</p>
+            </div>
             <button type="button" class="btn-icon" title="收起编辑区" @click="closeFormDrawer">
-              <X :size="18" />
+              <X :size="16" />
             </button>
           </div>
           <div class="regions-form">
@@ -696,7 +711,7 @@ onUnmounted(() => {
               </label>
               <label class="field">
                 <span>编码（可选）</span>
-                <el-input v-model="formCode" placeholder="短码，如 ZX（配送标签备餐号前缀）" clearable />
+                <el-input v-model="formCode" placeholder="短码，如 ZX（备餐号前缀）" clearable />
               </label>
             </div>
             <div class="form-row-2">
@@ -705,6 +720,7 @@ onUnmounted(() => {
                 <el-input-number v-model="formPriority" :min="0" :step="1" controls-position="right" class="regions-prio-num" />
               </label>
               <label class="field field-check field-check--el">
+                <span>状态</span>
                 <el-checkbox v-model="formActive">启用</el-checkbox>
               </label>
             </div>
@@ -716,7 +732,7 @@ onUnmounted(() => {
                     :model-value="selectedCourierIds.includes(c.courier_id)"
                     @change="toggleCourier(c.courier_id)"
                   />
-                  <span>{{ c.courier_id }}{{ c.name ? ` · ${c.name}` : '' }}</span>
+                  <span class="courier-pick-name">{{ c.courier_id }}{{ c.name ? ` · ${c.name}` : '' }}</span>
                   <el-radio v-if="selectedCourierIds.includes(c.courier_id)" :value="c.courier_id">
                     主责
                   </el-radio>
@@ -725,12 +741,14 @@ onUnmounted(() => {
               <p v-if="!couriers.length" class="regions-muted">暂无配送员数据，请先在后台创建配送员账号</p>
             </div>
             <div class="form-actions">
-              <button type="button" class="btn-secondary" @click="startDrawPolygon">
-                <MapPin :size="16" /> {{ editingId == null ? '重新绘制' : '重绘多边形' }}
-              </button>
-              <button type="button" class="btn-primary" :disabled="saving" @click="saveRegion">
-                <Save :size="16" /> {{ editingId == null ? '创建' : '保存' }}
-              </button>
+              <el-button round @click="startDrawPolygon">
+                <MapPin :size="15" />
+                {{ editingId == null ? '重新绘制' : '重绘多边形' }}
+              </el-button>
+              <el-button type="primary" round :loading="saving" @click="saveRegion">
+                <Save :size="15" />
+                {{ editingId == null ? '创建' : '保存' }}
+              </el-button>
             </div>
           </div>
         </div>
@@ -952,22 +970,36 @@ onUnmounted(() => {
 }
 .regions-inline-form {
   flex-shrink: 0;
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid #e2e8f0;
+  margin-top: 0.85rem;
+  padding: 0.9rem 0.85rem 0.95rem;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--el-color-primary) 7%, #fff);
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 18%, #fff);
 }
 .regions-inline-form-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+.regions-inline-form-copy {
+  min-width: 0;
 }
 .regions-inline-form-head h4 {
   margin: 0;
-  font-size: 0.9375rem;
-  font-weight: 900;
-  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #1d1f21;
+}
+.regions-inline-form-copy p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
 }
 .regions-side-footnote {
   flex-shrink: 0;
@@ -996,39 +1028,38 @@ onUnmounted(() => {
 .field span {
   display: block;
   font-size: 12px;
-  font-weight: 900;
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: #5c6670;
   margin-bottom: 6px;
 }
-.field input[type='text'],
-.field input[type='number'] {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 10px 12px;
+.regions-form :deep(.el-input__wrapper),
+.regions-form :deep(.el-input-number .el-input__wrapper) {
   border-radius: 12px;
-  border: 2px solid #e2e8f0;
-  font-weight: 700;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08) inset;
+}
+.regions-form :deep(.el-input__wrapper.is-focus),
+.regions-form :deep(.el-input-number .el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
 }
 .field-check {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
   gap: 8px;
-  padding-top: 1.5rem;
+  min-height: 100%;
 }
 .field-check span {
   margin: 0;
- text-transform: none;
-  font-size: 14px;
-  color: #334155;
 }
 .courier-pick {
   max-height: 160px;
   overflow: auto;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgba(15, 23, 42, 0.06);
   border-radius: 12px;
-  padding: 8px;
+  padding: 6px 10px;
+  background: #fff;
 }
 .courier-pick-row {
   display: grid;
@@ -1036,41 +1067,35 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  padding: 4px 0;
+  font-weight: 650;
+  color: #1d1f21;
+  padding: 5px 0;
+}
+.field .courier-pick-name {
+  display: block;
+  margin-bottom: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 650;
+  color: #1d1f21;
 }
 .form-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 1rem;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 0.9rem;
 }
-.btn-primary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 18px;
-  border-radius: 12px;
-  border: none;
-  background: #0e5a44;
-  color: #fff;
-  font-weight: 900;
-  cursor: pointer;
+.form-actions :deep(.el-button) {
+  height: 36px;
+  padding: 0 14px;
+  font-weight: 700;
 }
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.btn-secondary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 18px;
-  border-radius: 12px;
-  border: 2px solid #0e5a44;
-  background: #fff;
-  color: #0e5a44;
-  font-weight: 800;
-  cursor: pointer;
+.form-actions :deep(.el-button svg) {
+  margin-right: 4px;
 }
 .btn-icon {
   border: none;
@@ -1094,7 +1119,14 @@ onUnmounted(() => {
 }
 .regions-form .field-check--el {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+.regions-inline-form .btn-icon {
+  color: #5c6670;
+  background: #fff;
+  border-radius: 999px;
 }
 .courier-pick-radio-group {
   display: flex;
