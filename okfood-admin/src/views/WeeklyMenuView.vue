@@ -1,7 +1,7 @@
 <script setup>
 defineOptions({ name: 'WeeklyMenuView' })
 import { computed, onMounted, ref } from 'vue'
-import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
+import { apiJson, adminAccessToken, dishImageDisplayUrl, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import PrepMenuDialog from './prep/PrepMenuDialog.vue'
 import WeeklySlotPackagingDialog from './packaging/WeeklySlotPackagingDialog.vue'
@@ -26,13 +26,29 @@ const dishOptions = computed(() =>
         ? `¥${String(d.single_order_price_yuan).trim()}`
         : ''
     const priceHint = priceStr ? `（${priceStr}）` : '（未定价，会员端显示待公布）'
+    const name = d.is_enabled === false ? `${d.name}（已停用）` : d.name
     return {
       value: d.id,
-      label: d.is_enabled === false ? `${d.name}（已停用）` : `${d.name}${priceHint}`,
+      name,
+      price: priceStr,
+      image: dishImageDisplayUrl(d.image_url),
+      label: `${name}${priceHint}`,
       disabled: d.is_enabled === false,
     }
   }),
 )
+
+/** 已选菜品：收起状态下按 id 取小图和菜名 */
+const dishOptionById = computed(() =>
+  Object.fromEntries(dishOptions.value.map((opt) => [opt.value, opt])),
+)
+
+/** 图片地址失效时收成灰块，避免裂图把下拉撑乱 */
+function onDishThumbError(event) {
+  const img = event.target
+  if (!(img instanceof HTMLImageElement)) return
+  img.removeAttribute('src')
+}
 
 function slotsToRows(slotList, weekStartIso) {
   const bySlot = Object.fromEntries((slotList || []).map((s) => [s.slot, s]))
@@ -44,10 +60,8 @@ function slotsToRows(slotList, weekStartIso) {
     name: bySlot[slot]?.name ?? '',
     single_order_price_yuan: bySlot[slot]?.single_order_price_yuan ?? null,
     total_stock: bySlot[slot]?.total_stock ?? null,
-    subscription_meals_for_day: bySlot[slot]?.subscription_meals_for_day ?? null,
     single_retail_paid_portions: bySlot[slot]?.single_retail_paid_portions ?? null,
     single_stock_remaining: bySlot[slot]?.single_stock_remaining ?? null,
-    waste_total: bySlot[slot]?.waste_total ?? null,
   }))
 }
 
@@ -92,14 +106,50 @@ function rowsForPreview(preview, weekKey = 'this') {
 const lunchRows = computed(() => rowsForPreview(previewLunch.value, activeWeekTab.value))
 const dinnerRows = computed(() => rowsForPreview(previewDinner.value, activeWeekTab.value))
 
-/** 当前 Tab 对应的 week_start（用于卡片日期徽章） */
+/** 当前 Tab 对应的 week_start（用于卡片日期徽章、开菜单） */
 const activeWeekStart = computed(() => {
   const p = previewLunch.value || previewDinner.value
   if (!p) return ''
   return activeWeekTab.value === 'next' ? p.next_week_start || '' : p.this_week_start || ''
 })
 
-/** 顶栏 Tab 选项（含起止日期提示） */
+/**
+ * 周一起始的 ISO 日期，按本地日历解析，避免时区把日期挤到前一天。
+ * @param {string} iso
+ * @returns {Date | null}
+ */
+function parseWeekStart(iso) {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '').trim())
+  if (!matched) return null
+  return new Date(Number(matched[1]), Number(matched[2]) - 1, Number(matched[3]))
+}
+
+/**
+ * 供餐周固定周一到周日，结尾是起始日加 6 天。
+ * @param {string} weekStart
+ * @returns {{ start: Date, end: Date } | null}
+ */
+function weekRange(weekStart) {
+  const start = parseWeekStart(weekStart)
+  if (!start) return null
+  const end = new Date(start.getTime())
+  end.setDate(end.getDate() + 6)
+  return { start, end }
+}
+
+/** @param {Date} date */
+function formatMonthDay(date) {
+  return `${date.getMonth() + 1}月${date.getDate()}日`
+}
+
+/** 卡片标题行：11月9日 - 11月15日 */
+function weekCardRangeText(weekStart) {
+  const range = weekRange(weekStart)
+  if (!range) return ''
+  return `${formatMonthDay(range.start)} - ${formatMonthDay(range.end)}`
+}
+
+/** 顶栏只显示本周 / 下周，日期放在卡片标题右侧 */
 const weekTabOptions = computed(() => {
   const p = previewLunch.value || previewDinner.value
   return [
@@ -107,6 +157,9 @@ const weekTabOptions = computed(() => {
     { key: /** @type {WeekTabKey} */ ('next'), label: '下周菜单', weekStart: p?.next_week_start || '' },
   ]
 })
+
+/** 午餐 / 晚餐卡片标题右侧的起止日期 */
+const activeWeekRangeShort = computed(() => weekCardRangeText(activeWeekStart.value))
 
 /** @param {{ weekStart: string, slot: number }} row @param {'lunch'|'dinner'} mealPeriod */
 function totalStockKey(row, mealPeriod) {
@@ -158,13 +211,6 @@ function remainingBadgeClass(row, mealPeriod) {
   return 'wmenu-remain--ok'
 }
 
-function deliverDisplay(row) {
-  if (!row.dish_id) return '—'
-  const v = row.subscription_meals_for_day
-  if (v == null || v === '') return '—'
-  return String(v)
-}
-
 /** 单次零售（已支付）份数展示 */
 function singleRetailDisplay(row) {
   if (!row.dish_id) return '—'
@@ -186,7 +232,8 @@ function singleRetailBadgeClass(row) {
 async function fetchDishes() {
   if (!adminAccessToken.value) return
   try {
-    const data = await apiJson('/api/admin/dishes?lite=1', {}, { auth: true })
+    // 不用 lite：当前接口的精简列表不带图片地址，下拉缩略图需要 image_url
+    const data = await apiJson('/api/admin/dishes', {}, { auth: true })
     dishes.value = Array.isArray(data) ? data : []
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
@@ -400,8 +447,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
         :class="{ 'is-on': activeWeekTab === tab.key }"
         @click="activeWeekTab = tab.key"
       >
-        <span>{{ tab.label }}</span>
-        <small v-if="tab.weekStart">起 {{ tab.weekStart }}</small>
+        <span class="wmenu-pill__text">{{ tab.label }}</span>
       </button>
     </div>
     <PrepMenuDialog v-model="prepMenuOpen" :week-start="activeWeekStart" />
@@ -419,8 +465,8 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
           <div class="wmenu-week-card-header">
             <h3 class="wmenu-week-title">{{ card.title }}</h3>
             <div class="wmenu-week-header-actions">
-              <div class="wmenu-date-badge">
-                起：<span>{{ activeWeekStart }}</span>
+              <div v-if="activeWeekRangeShort" class="wmenu-date-badge">
+                {{ activeWeekRangeShort }}
               </div>
             </div>
           </div>
@@ -432,8 +478,6 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                   <th>单点价</th>
                   <th>日总份数</th>
                   <th>单次零售</th>
-                  <th>应配送</th>
-                  <th>损耗</th>
                   <th>剩余</th>
                   <th>菜品</th>
                 </tr>
@@ -477,10 +521,6 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                     </span>
                   </td>
                   <td>
-                    <span class="wmenu-deliver-badge">{{ deliverDisplay(row) }}</span>
-                  </td>
-                  <td>{{ row.waste_total != null ? row.waste_total : '—' }}</td>
-                  <td>
                     <span class="wmenu-remain-badge" :class="remainingBadgeClass(row, card.mealPeriod)">
                       {{ remainingDisplay(row, card.mealPeriod) }}
                     </span>
@@ -493,17 +533,45 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                       clearable
                       placeholder="选择菜品"
                       class="wmenu-dish-select"
+                      popper-class="wmenu-dish-popper"
+                      :fit-input-width="false"
                       :loading="savingSlot === `${card.mealPeriod}-${row.weekStart}-${row.slot}`"
                       :disabled="isRowBusy(row, card.mealPeriod)"
                       @update:model-value="(v) => onDishChange(row, v, card.mealPeriod)"
                     >
+                      <template #label="{ value }">
+                        <span class="wmenu-dish-picked">
+                          <img
+                            v-if="dishOptionById[value]?.image"
+                            :src="dishOptionById[value].image"
+                            alt=""
+                            class="wmenu-dish-picked__img"
+                            @error="onDishThumbError"
+                          />
+                          <span v-else class="wmenu-dish-picked__img wmenu-dish-picked__img--empty" />
+                          <span class="wmenu-dish-picked__name">{{ dishOptionById[value]?.name || '' }}</span>
+                        </span>
+                      </template>
                       <el-option
                         v-for="opt in dishOptions"
                         :key="opt.value"
                         :label="opt.label"
                         :value="opt.value"
                         :disabled="opt.disabled"
-                      />
+                      >
+                        <div class="wmenu-dish-opt">
+                          <img
+                            v-if="opt.image"
+                            :src="opt.image"
+                            alt=""
+                            class="wmenu-dish-opt__img"
+                            @error="onDishThumbError"
+                          />
+                          <span v-else class="wmenu-dish-opt__img wmenu-dish-opt__img--empty" />
+                          <span class="wmenu-dish-opt__name">{{ opt.name }}</span>
+                          <span v-if="opt.price" class="wmenu-dish-opt__price">{{ opt.price }}</span>
+                        </div>
+                      </el-option>
                     </el-select>
                     <el-button
                       v-if="row.dish_id"
@@ -531,23 +599,24 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   max-width: none;
 }
 .wmenu-page.page-content-shell {
-  /* 抵消 main-body 水平 padding，双表尽量沾满内容区宽度 */
-  margin-left: -1rem;
-  margin-right: -1rem;
-  width: calc(100% + 2rem);
+  /* 保持在主内容滚动区内。负边距会超出 overflow 裁切，标题左侧和右侧「开菜单」会被挡住 */
+  margin-left: 0;
+  margin-right: 0;
+  width: 100%;
   box-sizing: border-box;
   padding-bottom: 0.75rem;
 }
 .wmenu-pills {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 10px;
+  overflow-x: auto;
 }
 .wmenu-pill {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  flex: 0 0 auto;
   border: 1px solid rgba(15, 23, 42, 0.06);
   background: rgba(255, 255, 255, 0.86);
   border-radius: 999px;
@@ -556,27 +625,15 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   font-weight: 700;
   cursor: pointer;
   color: #1d1f21;
+  white-space: nowrap;
 }
-.wmenu-pill small {
-  font-size: 11px;
-  font-weight: 600;
-  color: #8b949e;
+.wmenu-pill__text {
+  white-space: nowrap;
 }
 .wmenu-pill.is-on {
   color: #fff;
   background: var(--el-color-primary);
   border-color: transparent;
-}
-.wmenu-pill.is-on small {
-  color: rgba(255, 255, 255, 0.82);
-}
-
-@media (max-width: 900px) {
-  .wmenu-page.page-content-shell {
-    margin-left: 0;
-    margin-right: 0;
-    width: 100%;
-  }
 }
 
 .wmenu-week-tabs {
@@ -737,7 +794,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--wmenu-border);
 }
@@ -747,6 +804,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   font-size: 16px;
   font-weight: 800;
   color: #0f172a;
+  white-space: nowrap;
 }
 
 .wmenu-week-header-actions {
@@ -825,12 +883,18 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 
 .wmenu-table td {
-  padding: 14px;
+  padding: 14px 10px;
   font-size: 13px;
   font-weight: 600;
   border-bottom: 1px solid var(--wmenu-border);
   vertical-align: middle;
   color: #0f172a;
+}
+
+.wmenu-table th:nth-child(2),
+.wmenu-table td:nth-child(2) {
+  white-space: nowrap;
+  width: 1%;
 }
 
 .wmenu-table tbody tr:hover {
@@ -857,6 +921,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   font-family: var(--okfood-font-number);
   font-size: 13.5px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .wmenu-price--missing {
@@ -864,16 +929,20 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 
 .wmenu-total-input {
-  width: 84px;
-  padding: 8px 12px;
-  border-radius: 10px;
+  width: 72px;
+  padding: 4px 6px;
+  border-radius: 8px;
   border: 1px solid var(--wmenu-border);
   background: #f8fafc;
   text-align: center;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.2;
   outline: none;
   transition: all 0.2s;
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 .wmenu-total-input:focus {
@@ -882,9 +951,15 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   box-shadow: 0 0 0 3px rgba(13, 92, 70, 0.06);
 }
 
+.wmenu-total-input::-webkit-outer-spin-button,
+.wmenu-total-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .wmenu-total-input::placeholder {
   color: #cbd5e1;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .wmenu-total-input:disabled {
@@ -893,18 +968,6 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 
 .wmenu-dash {
   color: var(--wmenu-muted);
-}
-
-.wmenu-deliver-badge {
-  background: #f1f5f9;
-  color: #0f172a;
-  font-family: var(--okfood-font-number);
-  font-weight: 700;
-  padding: 6px 12px;
-  border-radius: 8px;
-  display: inline-block;
-  min-width: 44px;
-  text-align: center;
 }
 
 .wmenu-retail-badge {
@@ -982,14 +1045,14 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 
 .wmenu-dish-select :deep(.el-select__wrapper) {
-  padding: 10px 14px;
+  padding: 6px 12px;
   border-radius: 12px;
   border: 1px solid var(--wmenu-border);
   background: #f8fafc;
   font-size: 12.5px;
   font-weight: 700;
   box-shadow: none;
-  min-height: 40px;
+  min-height: 36px;
 }
 
 .wmenu-dish-select :deep(.el-select__wrapper.is-focused) {
@@ -1003,4 +1066,90 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   font-weight: 700;
 }
 
+.wmenu-dish-select :deep(.el-select__selected-item) {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+}
+
+/* 收起：22px 小图 + 菜名，不把表格行撑高 */
+.wmenu-dish-picked {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.wmenu-dish-picked__img {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  object-fit: cover;
+  flex: 0 0 auto;
+  background: #f1f5f9;
+}
+
+.wmenu-dish-picked__img--empty {
+  display: inline-block;
+}
+
+.wmenu-dish-picked__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 下拉项在本组件模板里，缩略图样式可以留在 scoped */
+.wmenu-dish-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wmenu-dish-opt__img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex: 0 0 auto;
+  background: #f1f5f9;
+}
+
+.wmenu-dish-opt__img--empty {
+  display: inline-block;
+}
+
+.wmenu-dish-opt__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.wmenu-dish-opt__price {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: #8b949e;
+  font-family: var(--okfood-font-number);
+}
+
+</style>
+
+<style>
+/* 下拉挂到 body，行高和宽度写在这里，避免 28px 小图被默认 34px 行高裁切 */
+.wmenu-dish-popper.el-popper {
+  min-width: 280px;
+}
+
+.wmenu-dish-popper .el-select-dropdown__item {
+  height: auto;
+  line-height: 1.2;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
 </style>

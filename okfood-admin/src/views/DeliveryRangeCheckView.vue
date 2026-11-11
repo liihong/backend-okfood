@@ -62,8 +62,21 @@ const pinSummary = computed(() => {
   return `${r.in_region ? '在服务范围内 — ' : '不在片区内 — '}${dist}`
 })
 
-const resultIdleText =
-  '输入关键字并点击「立即核验」，或在右侧地图上单击选点；结论与「配送区域管理」启用多边形一致，与第三方承运无关。'
+const resultIdleText = '输入地址后点「立即核验」，或直接在地图上选点。'
+
+const resultTag = computed(() => {
+  const r = lastResult.value
+  if (!r) return { type: 'info', text: '待核验' }
+  if (!coordsResolvedSafe.value) {
+    return {
+      type: 'warning',
+      text: r.geocode_failed ? '无法定位' : '未得到坐标',
+    }
+  }
+  return inRangeComputed.value
+    ? { type: 'success', text: '可配送' }
+    : { type: 'danger', text: '不可配送' }
+})
 
 /** 未取得坐标或无结果时用中性底色 */
 const resultTone = computed(() => {
@@ -535,51 +548,58 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="delivery-range-check tab-content animate-up page-content-shell">
-    <div class="checker-layout">
-      <div class="checker-sidebar">
-        <div class="sidebar-header">
-          <h2 class="sidebar-header__title">客服配送资质检验</h2>
-          <p class="sidebar-header__sub">CUSTOMER SERVICE · DELIVERY RANGE（与门店配置片区一致）</p>
-        </div>
+  <section class="mkt-page drc-page tab-content animate-up page-content-shell">
+    <header class="mkt-page-head">
+      <div class="mkt-page-head__copy">
+        <p class="mkt-kicker">配送管理</p>
+        <h1 class="mkt-title">配送资质检验</h1>
+        <p class="mkt-intro">
+          输入小区或地标，或在地图上点选。结论只看「配送区域管理」里启用的片区，与承运方无关。
+        </p>
+      </div>
+    </header>
 
-        <div class="search-container">
-          <span class="search-label">录入意向配送地址 / 小区名</span>
-          <p v-if="amapKey" class="drc-ac-hint">已启用高德关键字联想：输入后选择下拉中的小区或地标即可自动核验。</p>
-          <div class="input-group">
-            <input
+    <div class="drc-workspace">
+      <aside class="mkt-card drc-panel">
+        <header class="mkt-card__head">
+          <span class="mkt-card__title">地址核验</span>
+          <span class="mkt-card__hint">关键字或地图选点</span>
+        </header>
+
+        <div class="drc-search">
+          <label class="drc-label" :for="ADDRESS_AUTOCOMPLETE_INPUT_ID">意向配送地址</label>
+          <p v-if="amapKey" class="drc-hint">输入后从联想里选择小区或地标，会自动核验。</p>
+          <div class="drc-search-row">
+            <el-input
               :id="ADDRESS_AUTOCOMPLETE_INPUT_ID"
               v-model="addressInput"
-              type="text"
-              class="form-control-input form-control-input--ac"
               placeholder="示例：市人民医院、大桥…"
+              clearable
               autocomplete="off"
               spellcheck="false"
               @keydown.enter.prevent="onVerifyClick"
-            >
-            <button type="button" class="btn-check" :disabled="checking" @click="onVerifyClick">
-              {{ checking ? '核验中…' : '立即核验' }}
-            </button>
+            />
+            <el-button type="primary" round :loading="checking" @click="onVerifyClick">立即核验</el-button>
           </div>
-          <p v-if="!amapKey" class="drc-warn-text">
-            未配置高德 Key，仅能使用关键字核验；建议在 .env.local 填写 <code>VITE_AMAP_KEY</code> 以显示沙盘地图。
-          </p>
+          <el-alert
+            v-if="!amapKey"
+            class="drc-alert"
+            type="warning"
+            :closable="false"
+            show-icon
+            title="未配置高德 Key"
+            description="只能按关键字核验。在 .env.local 填写 VITE_AMAP_KEY 后可显示地图和地址联想。"
+          />
         </div>
 
-        <div class="result-panel" :class="resultTone">
-          <div class="result-header">
-            <span
-              class="status-dot"
-              :class="
-                lastResult ? (coordsResolvedSafe ? (inRangeComputed ? 'ok' : 'bad') : '') : ''
-              "
-            />
-            <span v-if="!lastResult">待核验</span>
-            <span v-else-if="!coordsResolvedSafe">{{ lastResult.geocode_failed ? '无法定位' : '未得到坐标' }}</span>
-            <span v-else-if="inRangeComputed">可配送（在启用片区内）</span>
-            <span v-else>不可配送（未命中任一启用片区）</span>
+        <div class="drc-result" :class="resultTone">
+          <div class="drc-result__head">
+            <el-tag round effect="light" :type="resultTag.type">{{ resultTag.text }}</el-tag>
+            <span v-if="inRangeComputed && lastResult?.region_name" class="drc-result__region">
+              {{ lastResult.region_name }}
+            </span>
           </div>
-          <div class="result-details">
+          <div class="drc-result__body">
             <template v-if="!lastResult">
               {{ resultIdleText }}
             </template>
@@ -603,327 +623,237 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="script-card">
-          <div class="script-card-header">
-            <span
-              class="script-card-tag"
-              :class="lastResult && coordsResolvedSafe ? (inRangeComputed ? 'in-range' : 'out-range') : ''"
-            >推荐沟通话术</span>
-            <button type="button" class="btn-copy" title="一键复制" @click="onCopyScript">
+        <div class="drc-script">
+          <div class="drc-script__head">
+            <span class="drc-script__label">推荐沟通话术</span>
+            <el-button round class="drc-copy" @click="onCopyScript">
               <Copy :size="14" stroke-width="2.2" aria-hidden="true" />
-              一键复制
-            </button>
+              复制话术
+            </el-button>
           </div>
-          <p class="script-text-p">{{ scriptText }}</p>
+          <p class="drc-script__text">{{ scriptText }}</p>
         </div>
 
-        <div class="guidelines-section">
-          <span class="guidelines-title">客服作业标准及要求</span>
-          <ul class="guidelines-list">
-            <li class="guideline-item">
-              <span class="chk">✓</span>
+        <div class="drc-notes">
+          <span class="drc-notes__title">作业要求</span>
+          <ul class="drc-notes__list">
+            <li>
+              <span class="drc-notes__mark" aria-hidden="true">✓</span>
               <span><strong>精确定位：</strong>优先引导客户在地图上选点核对，谨防重名小区导致编码偏差。</span>
             </li>
-            <li class="guideline-item">
-              <span class="chk">✓</span>
+            <li>
+              <span class="drc-notes__mark" aria-hidden="true">✓</span>
               <span><strong>判定口径：</strong>仅依据「配送区域管理」启用多边形；与第三方承运无关。</span>
             </li>
-            <li class="guideline-item">
-              <span class="chk">✓</span>
+            <li>
+              <span class="drc-notes__mark" aria-hidden="true">✓</span>
               <span><strong>开卡留痕：</strong>保存变更前核对会员手机号、备注是否与开卡工单一致。</span>
             </li>
           </ul>
         </div>
-      </div>
+      </aside>
 
-      <div class="map-section">
-        <div class="sidebar-header">
-          <h2 class="sidebar-header__title">高德 GCJ-02 交互判定沙盘</h2>
-          <p class="sidebar-header__sub">{{ pinSummary }}</p>
+      <section class="mkt-card drc-map-card">
+        <header class="mkt-card__head">
+          <span class="mkt-card__title">判定沙盘</span>
+          <span class="mkt-card__hint">{{ pinSummary }}</span>
+        </header>
+        <div class="drc-map-surface">
+          <div v-show="mapLoading" class="drc-map-cover">地图加载中…</div>
+          <div ref="mapEl" class="drc-map-mount" aria-label="高德地图选点核验" />
         </div>
-        <div class="map-surface">
-          <div v-show="mapLoading" class="map-cover">地图加载中…</div>
-          <div ref="mapEl" class="map-mount" aria-label="高德地图选点核验" />
-        </div>
-      </div>
+      </section>
     </div>
   </section>
 </template>
 
 <style scoped>
-/**
- * 与 AdminLayout `.main-body__router-host` flex 链配合纵向撑满主视区；
- * 全局 `.page-content-shell` 在本页收紧底部留白。双栏圆角等与「配送区域管理」对齐。
- */
-.delivery-range-check {
-  --drc-green: #0d5c46;
-  --drc-green-hover: #0a4635;
-  --drc-muted: #64748b;
-  --drc-border: #e2e8f0;
-  --in-bg: #ecfdf5;
-  --in-border: #a7f3d0;
-  --in-text: #065f46;
-  --out-bg: #fff5f5;
-  --out-border: #fecaca;
-  --out-text: #991b1b;
+/* 全高双栏：页头与玻璃卡沿用 mkt-page，地图区吃满剩余视口 */
+.drc-page.mkt-page {
+  max-width: none;
   width: 100%;
-  min-width: 0;
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  gap: 0.85rem;
 }
 
-.delivery-range-check.page-content-shell {
+.drc-page.page-content-shell {
   padding-bottom: 0;
 }
 
-.checker-layout {
+.drc-workspace {
   display: grid;
-  grid-template-columns: minmax(280px, 340px) 1fr;
-  gap: 1.25rem;
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  gap: 0.9rem;
   align-items: stretch;
   flex: 1;
   min-height: 0;
 }
 
-.checker-sidebar {
-  background: #fff;
-  border-radius: 1.25rem;
-  border: 1px solid var(--drc-border);
-  padding: 1rem;
+.drc-panel {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  overflow-y: auto;
-  max-height: none;
+  gap: 0.85rem;
   min-height: 0;
+  overflow: auto;
 }
 
-.sidebar-header__title {
-  font-size: 1.125rem;
-  font-weight: 800;
-  color: #0f172a;
-  margin: 0;
+.drc-panel > .mkt-card__head,
+.drc-map-card > .mkt-card__head {
+  margin-bottom: 0;
 }
 
-.sidebar-header__sub {
-  font-size: 0.68rem;
-  color: var(--drc-muted);
-  font-weight: 600;
-  margin: 4px 0 0;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.search-container {
+.drc-search {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0.4rem;
 }
 
-.search-label {
-  font-size: 0.7rem;
-  font-weight: 800;
-  color: var(--drc-muted);
-  letter-spacing: 0.04em;
-}
-
-.drc-ac-hint {
-  margin: 0;
-  font-size: 0.74rem;
-  font-weight: 600;
-  color: #64748b;
-  line-height: 1.45;
-}
-
-.input-group {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.form-control-input {
-  flex: 1;
-  min-width: 140px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--drc-border);
-  font-size: 0.86rem;
-  font-weight: 600;
-  background: #f8fafc;
-  outline: none;
-}
-
-.form-control-input:focus {
-  border-color: var(--drc-green);
-  background: #fff;
-  box-shadow: 0 0 0 3px rgb(13 92 70 / 0.06);
-}
-
-.btn-check {
-  background: var(--drc-green);
-  color: #fff;
-  border: none;
-  padding: 0 22px;
-  border-radius: 12px;
-  font-size: 0.82rem;
-  font-weight: 800;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.btn-check:hover:not(:disabled) {
-  background: var(--drc-green-hover);
-}
-
-.btn-check:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-.drc-warn-text {
-  font-size: 0.75rem;
-  color: #92400e;
-  margin: 0;
-}
-
-.drc-warn-text code {
-  font-size: 0.72rem;
-}
-
-.result-panel {
-  border-radius: 18px;
-  padding: 16px;
-  border: 1px solid transparent;
-  transition: border-color 0.2s, background 0.2s;
-}
-
-.result-panel.neutral {
-  background: #f8fafc;
-  border-color: var(--drc-border);
+.drc-label {
+  font-size: 13px;
+  font-weight: 700;
   color: #334155;
 }
 
-.result-panel.in-range {
-  background: var(--in-bg);
-  border-color: var(--in-border);
-  color: var(--in-text);
+.drc-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #64748b;
 }
 
-.result-panel.out-range {
-  background: var(--out-bg);
-  border-color: var(--out-border);
-  color: var(--out-text);
-}
-
-.result-header {
+.drc-search-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.9rem;
-  font-weight: 900;
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #94a3b8;
+.drc-search-row :deep(.el-input) {
+  flex: 1;
+  min-width: 0;
 }
 
-.status-dot.ok {
-  background: #10b981;
+.drc-search-row :deep(.el-input__wrapper) {
+  min-height: 40px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
 }
 
-.status-dot.bad {
-  background: #ef4444;
+.drc-search-row :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
 }
 
-.result-details {
-  font-size: 0.8rem;
-  line-height: 1.55;
+.drc-search-row :deep(.el-button) {
+  height: 40px;
+  padding: 0 18px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.drc-alert {
+  margin-top: 0.35rem;
+  border-radius: 14px;
+}
+
+.drc-result {
+  border-radius: 16px;
+  padding: 14px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(15, 23, 42, 0.06);
+  color: #334155;
+}
+
+.drc-result.in-range {
+  background: #ecfdf5;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.drc-result.out-range {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.drc-result__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.drc-result__region {
+  font-size: 12px;
+  font-weight: 700;
+  color: inherit;
+}
+
+.drc-result__body {
   margin-top: 8px;
-  opacity: 0.95;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
-.script-card {
-  background: #f8fafc;
-  border: 1px solid var(--drc-border);
-  border-radius: 18px;
-  padding: 16px;
+.drc-result__body p {
+  margin: 0;
+}
+
+.drc-script {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
 }
 
-.script-card-header {
+.drc-script__head {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.script-card-tag {
-  font-size: 0.68rem;
+.drc-script__label {
+  font-size: 13px;
   font-weight: 800;
-  padding: 4px 10px;
-  border-radius: 8px;
-  background: #e2e8f0;
-  color: #475569;
+  color: #1d1f21;
 }
 
-.script-card-tag.in-range {
-  background: var(--in-bg);
-  color: var(--in-text);
-}
-
-.script-card-tag.out-range {
-  background: var(--out-bg);
-  color: var(--out-text);
-}
-
-.btn-copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: #fff;
-  border: 1px solid var(--drc-border);
-  color: #0f172a;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 0.72rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.btn-copy:hover {
-  background: #f1f5f9;
-}
-
-.script-text-p {
-  font-size: 0.86rem;
+.drc-copy {
   font-weight: 700;
-  color: #0f172a;
-  line-height: 1.6;
+}
+
+.drc-copy :deep(svg) {
+  margin-right: 4px;
+}
+
+.drc-script__text {
   margin: 0;
-  font-style: italic;
+  padding-left: 10px;
+  border-left: 3px solid color-mix(in srgb, var(--el-color-primary) 55%, #fff);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.6;
+  color: #1d1f21;
 }
 
-.guidelines-section {
-  border-top: 1px dashed var(--drc-border);
-  padding-top: 16px;
+.drc-notes {
   margin-top: auto;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
 }
 
-.guidelines-title {
-  font-size: 0.7rem;
+.drc-notes__title {
+  font-size: 12px;
   font-weight: 800;
-  color: var(--drc-muted);
-  letter-spacing: 0.04em;
+  color: #8b949e;
 }
 
-.guidelines-list {
+.drc-notes__list {
   list-style: none;
   margin: 10px 0 0;
   padding: 0;
@@ -932,80 +862,101 @@ onUnmounted(() => {
   gap: 10px;
 }
 
-.guideline-item {
+.drc-notes__list li {
   display: flex;
   gap: 8px;
-  font-size: 0.78rem;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--drc-muted);
-  line-height: 1.45;
+  line-height: 1.5;
+  color: #5c6670;
 }
 
-.chk {
-  color: var(--drc-green);
+.drc-notes__list strong {
+  color: #334155;
+  font-weight: 800;
+}
+
+.drc-notes__mark {
   flex-shrink: 0;
-  font-weight: 900;
+  color: var(--el-color-primary);
+  font-weight: 800;
 }
 
-.map-section {
-  /* 与 DeliveryRegionsPanel `.regions-main` + `.regions-map` 一致：右侧不叠双层白底卡片 */
+.drc-map-card {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  background: transparent;
-  border: none;
-  padding: 0;
   gap: 0.75rem;
+  min-width: 0;
+  min-height: 0;
 }
 
-.map-surface {
+.drc-map-card .mkt-card__hint {
+  max-width: 62%;
+  text-align: right;
+  line-height: 1.4;
+}
+
+.drc-map-surface {
   position: relative;
   flex: 1;
   width: 100%;
   min-height: 280px;
-  border-radius: 1.25rem;
-  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
   background: #f1f5f9;
   overflow: hidden;
 }
 
-.map-mount {
+.drc-map-mount {
   width: 100%;
   height: 100%;
   min-height: 280px;
 }
 
-.map-cover {
+.drc-map-cover {
   position: absolute;
   inset: 0;
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(248 250 252 / 0.85);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(8px);
   font-weight: 700;
-  font-size: 0.85rem;
-  color: #475569;
+  font-size: 13px;
+  color: #5c6670;
 }
 
 @media (max-width: 900px) {
-  .checker-layout {
+  .drc-workspace {
     grid-template-columns: 1fr;
-    flex: 1;
-    min-height: 0;
   }
-  .checker-sidebar {
-    max-height: none;
+
+  .drc-panel {
+    overflow: visible;
   }
-  .map-section {
-    min-height: 0;
-    flex: 1;
+
+  .drc-map-card .mkt-card__head {
+    flex-direction: column;
+    align-items: flex-start;
   }
-  .map-surface {
-    min-height: 320px;
-    flex: 1;
+
+  .drc-map-card .mkt-card__hint {
+    max-width: none;
+    text-align: left;
+  }
+
+  .drc-map-surface,
+  .drc-map-mount {
+    min-height: 360px;
+  }
+
+  .drc-search-row {
+    flex-wrap: wrap;
+  }
+
+  .drc-search-row :deep(.el-button) {
+    width: 100%;
   }
 }
 </style>

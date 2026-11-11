@@ -3166,27 +3166,6 @@ html.okfood-admin-shell body {
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
-.dish-toolbar-search {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.75rem;
-  padding: 0.5rem 1rem;
-  flex: 1;
-  min-width: 200px;
-  max-width: 380px;
-  color: #64748b;
-}
-.dish-toolbar-search input {
-  border: none;
-  outline: none;
-  flex: 1;
-  font-size: 13px;
-  font-family: inherit;
-  min-width: 0;
-}
 .dish-toolbar-status {
   margin: 0;
   font-size: 12px;

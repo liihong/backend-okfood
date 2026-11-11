@@ -1,10 +1,11 @@
 <script setup>
 defineOptions({ name: 'FinanceView' })
-import { computed, nextTick, onActivated, onMounted, ref } from 'vue'
+import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue'
 import { CreditCard } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 import RetailSkuRevenueDialog from './components/RetailSkuRevenueDialog.vue'
+import StatRollNumber from '../components/StatRollNumber.vue'
 
 const loading = ref(false)
 /** 递增以强制 KPI 网格重挂载，保证 keep-alive 切回时入场动画可重播 */
@@ -48,20 +49,16 @@ function safeNum(v) {
   return Number.isFinite(n) ? n : 0
 }
 
-/** 徽章：N 笔已收 */
-function badgeLine(count) {
-  return `${count} 笔已收`
+/** 退卡金额为 0 时不显示负号、不用警示色 */
+function refundAmountNumber(amountText) {
+  if (amountText === '—' || amountText == null || amountText === '') return 0
+  const n = Number(String(amountText).replace(/,/g, ''))
+  return Number.isFinite(n) ? n : 0
 }
 
-/** 拆账网格：笔数列 */
-function countUnitText(count, unit) {
-  return `${count} ${unit}`
-}
-
-/** 拆账网格：金额列（¥ 与数字同字号） */
-function amountColText(amountText, { refund = false } = {}) {
-  if (amountText === '—') return '—'
-  return refund ? `-¥${amountText}` : `¥${amountText}`
+/** 拆账行：退卡且金额为 0 */
+function refundIsQuiet(row) {
+  return Boolean(row?.refund) && refundAmountNumber(row.amount) === 0
 }
 
 /**
@@ -77,6 +74,7 @@ function breakdownRows(kpi) {
       count: kpi.cardParentCount,
       unit: '笔',
       amount: kpi.cardParentAmt,
+      amountRaw: kpi.cardParentAmtRaw,
     },
     {
       key: 'week',
@@ -85,6 +83,7 @@ function breakdownRows(kpi) {
       count: kpi.weekCount,
       unit: '张',
       amount: kpi.weekAmt,
+      amountRaw: kpi.weekAmtRaw,
       indent: true,
     },
     {
@@ -94,6 +93,7 @@ function breakdownRows(kpi) {
       count: kpi.monthCount,
       unit: '张',
       amount: kpi.monthAmt,
+      amountRaw: kpi.monthAmtRaw,
       indent: true,
     },
     {
@@ -103,6 +103,7 @@ function breakdownRows(kpi) {
       count: kpi.smCount,
       unit: '笔',
       amount: kpi.smAmt,
+      amountRaw: kpi.smAmtRaw,
     },
     {
       key: 'mall',
@@ -111,6 +112,7 @@ function breakdownRows(kpi) {
       count: kpi.mallCount,
       unit: '笔',
       amount: kpi.mallAmt,
+      amountRaw: kpi.mallAmtRaw,
     },
     {
       key: 'refund',
@@ -119,21 +121,22 @@ function breakdownRows(kpi) {
       count: kpi.refundCount,
       unit: '笔',
       amount: kpi.refundAmt,
+      amountRaw: kpi.refundAmtRaw,
       refund: true,
       divider: true,
     },
   ]
 }
 
-/** 拆账行圆点样式 */
-function breakdownDotClass(dot, onPrimary) {
+/** 拆账行圆点样式（随主色，不随卡片反白） */
+function breakdownDotClass(dot) {
   const map = {
-    card: onPrimary ? 'finance-breakdown-dot--card-on-primary' : 'finance-breakdown-dot--card-green',
+    card: 'finance-breakdown-dot--card',
     week: 'finance-breakdown-dot--week',
     month: 'finance-breakdown-dot--month',
     meal: 'finance-breakdown-dot--meal',
     mall: 'finance-breakdown-dot--mall',
-    refund: 'finance-breakdown-dot--refund-hot',
+    refund: 'finance-breakdown-dot--refund',
   }
   return `finance-breakdown-dot ${map[dot] || ''}`
 }
@@ -156,25 +159,33 @@ function ratioPct(w) {
 function buildKpi(w) {
   if (!w) {
     return {
+      ready: false,
       totalText: '—',
+      totalRaw: null,
       grossText: '—',
       netText: '—',
-      count: 0,
-      weekCount: 0,
+      count: null,
+      weekCount: null,
       weekAmt: '—',
-      monthCount: 0,
+      weekAmtRaw: null,
+      monthCount: null,
       monthAmt: '—',
-      cardParentCount: 0,
+      monthAmtRaw: null,
+      cardParentCount: null,
       cardParentAmt: '—',
-      smCount: 0,
+      cardParentAmtRaw: null,
+      smCount: null,
       smAmt: '—',
-      mallCount: 0,
+      smAmtRaw: null,
+      mallCount: null,
       mallAmt: '—',
-      refundCount: 0,
+      mallAmtRaw: null,
+      refundCount: null,
       refundAmt: '—',
-      cardPct: 0,
-      mealPct: 0,
-      mallPct: 0,
+      refundAmtRaw: null,
+      cardPct: null,
+      mealPct: null,
+      mallPct: null,
     }
   }
   const { cardPct, mealPct, mallPct } = ratioPct(w)
@@ -183,23 +194,32 @@ function buildKpi(w) {
   const monthCount = w.card_orders_monthly?.count ?? 0
   const weekAmtRaw = safeNum(w.card_orders_weekly?.amount_yuan)
   const monthAmtRaw = safeNum(w.card_orders_monthly?.amount_yuan)
+  const netNum = Number(netRaw)
   return {
+    ready: true,
     totalText: fmtYuan(netRaw),
+    totalRaw: Number.isFinite(netNum) ? netNum : null,
     grossText: fmtYuan(w.total_amount_yuan),
     netText: fmtYuan(netRaw),
     count: w.total_count ?? 0,
     weekCount,
     weekAmt: fmtYuan(weekAmtRaw),
+    weekAmtRaw,
     monthCount,
     monthAmt: fmtYuan(monthAmtRaw),
+    monthAmtRaw,
     cardParentCount: weekCount + monthCount,
     cardParentAmt: fmtYuan(weekAmtRaw + monthAmtRaw),
+    cardParentAmtRaw: weekAmtRaw + monthAmtRaw,
     smCount: w.single_meal_orders?.count ?? 0,
     smAmt: fmtYuan(w.single_meal_orders?.amount_yuan),
+    smAmtRaw: safeNum(w.single_meal_orders?.amount_yuan),
     mallCount: w.store_retail_orders?.count ?? 0,
     mallAmt: fmtYuan(w.store_retail_orders?.amount_yuan),
+    mallAmtRaw: safeNum(w.store_retail_orders?.amount_yuan),
     refundCount: w.membership_refunds?.count ?? 0,
     refundAmt: fmtYuan(w.membership_refunds?.amount_yuan),
+    refundAmtRaw: safeNum(w.membership_refunds?.amount_yuan),
     cardPct,
     mealPct,
     mallPct,
@@ -254,14 +274,11 @@ const canGoNextDay = computed(() => {
   if (!selectedDay.value || !currentShanghaiToday.value) return false
   return selectedDay.value < currentShanghaiToday.value
 })
-const todayCardTitle = computed(() => {
-  if (isSelectedToday.value) return '今日净收入 / TODAY'
-  return `${formatDayLabel(selectedDay.value)}净收入 / DAY`
-})
+const todayHeading = computed(() => (selectedDay.value ? formatDayLabel(selectedDay.value) : '—'))
 const cardOrdersDetailTitle = computed(() => {
-  if (isSelectedToday.value) return '今日开卡收款明细'
+  if (isSelectedToday.value) return '今日开卡收款'
   const day = selectedDay.value
-  return day ? `${formatDayLabel(day)} 开卡收款明细` : '开卡收款明细'
+  return day ? `${formatDayLabel(day)}开卡收款` : '开卡收款'
 })
 const cardOrdersEmptyText = computed(() => {
   if (isSelectedToday.value) return '今日暂无已缴开卡记录'
@@ -271,19 +288,21 @@ const currentCalendarMonth = computed(() => String(summary.value?.shanghai_calen
 const monthKpi = computed(() => buildKpi(monthWindow.value ?? summary.value?.this_month))
 const cumulativeKpi = computed(() => buildKpi(summary.value?.cumulative))
 const monthCardBusy = computed(() => loading.value || monthLoading.value)
-const isSelectedCurrentMonth = computed(
-  () =>
-    Boolean(selectedMonth.value && currentCalendarMonth.value) &&
-    selectedMonth.value === currentCalendarMonth.value,
-)
-/** 月份卡片标题：选中当月显示「本月」，否则显示「YYYY年M月」 */
-const monthCardTitle = computed(() => {
-  if (isSelectedCurrentMonth.value) return '本月净收入 / MONTH'
-  const ym = selectedMonth.value
-  if (!/^\d{4}-\d{2}$/.test(ym)) return '月度净收入 / MONTH'
-  const [y, m] = ym.split('-')
-  return `${y}年${Number(m)}月净收入 / MONTH`
+/** 每张卡数据落地后 +1，卡上数字从 0 再滚一遍 */
+const dayRollKey = ref(0)
+const monthRollKey = ref(0)
+const cumulativeRollKey = ref(0)
+watch(todayCardBusy, (busy) => {
+  if (!busy && todayKpi.value.ready) dayRollKey.value += 1
 })
+watch(monthCardBusy, (busy) => {
+  if (!busy && monthKpi.value.ready) monthRollKey.value += 1
+})
+watch(loading, (busy) => {
+  if (!busy && cumulativeKpi.value.ready) cumulativeRollKey.value += 1
+})
+/** 月份卡片标题：YYYY年M月 */
+const monthHeading = computed(() => (selectedMonth.value ? formatMonthLabel(selectedMonth.value) : '—'))
 
 /** YYYY-MM 展示为「2026年6月」 */
 function formatMonthLabel(ym) {
@@ -456,61 +475,65 @@ onActivated(() => {
 </script>
 
 <template>
-  <section class="finance-page tab-content animate-up page-content-shell">
-    <!-- 三张 KPI 卡片：今日 / 本月 / 累计（对齐财务中心参考稿） -->
+  <section class="finance-page tab-content animate-up page-content-shell members-view-fill">
+    <!-- 三张 KPI：今日毛玻璃强调，本月与累计白底 -->
     <section
       :key="statsAnimKey"
       class="finance-stats-grid finance-stats-grid--animate"
       aria-label="收入概览"
     >
-      <article
-        class="finance-stat-card finance-stat-card--primary"
-        style="--finance-card-delay: 0ms"
-      >
-        <div class="finance-stat-header finance-stat-header--today">
-          <div class="finance-stat-header-main">
-            <span class="finance-stat-title">{{ todayCardTitle }}</span>
-            <nav class="finance-day-nav" aria-label="切换业务日">
-              <button
-                type="button"
-                class="finance-day-nav-btn"
-                :disabled="todayCardBusy"
-                @click="shiftDay(-1)"
-              >
-                上一日
-              </button>
-              <button
-                type="button"
-                class="finance-day-nav-btn"
-                :disabled="todayCardBusy || !canGoNextDay"
-                @click="shiftDay(1)"
-              >
-                下一日
-              </button>
-            </nav>
+      <article class="finance-stat-card finance-stat-card--today" style="--finance-card-delay: 0ms">
+        <div class="finance-stat-top">
+          <div class="finance-stat-title">
+            <p class="finance-eyebrow">日净收入</p>
+            <div class="finance-stat-title-row">
+              <h2 class="finance-card-heading">{{ todayHeading }}</h2>
+              <nav class="finance-day-nav" aria-label="切换业务日">
+                <button type="button" class="finance-day-nav-btn" :disabled="todayCardBusy" @click="shiftDay(-1)">
+                  上一日
+                </button>
+                <button
+                  type="button"
+                  class="finance-day-nav-btn"
+                  :disabled="todayCardBusy || !canGoNextDay"
+                  @click="shiftDay(1)"
+                >
+                  下一日
+                </button>
+              </nav>
+            </div>
           </div>
-          <span class="finance-interval-badge finance-interval-badge--light">
-            <span class="finance-metric finance-metric--badge finance-metric--on-primary">
-              {{ todayCardBusy ? '…' : badgeLine(todayKpi.count) }}
+          <span class="finance-interval-badge">
+            <span class="finance-metric finance-metric--badge">
+              <template v-if="todayCardBusy || !todayKpi.ready">…</template>
+              <template v-else>
+                <StatRollNumber :value="todayKpi.count" :replay-key="dayRollKey" /> 笔已收
+              </template>
             </span>
           </span>
         </div>
-        <p class="finance-stat-value finance-stat-value--light">
+        <p class="finance-stat-value">
           <span class="finance-hero-amount">
             <span class="finance-hero-currency">¥</span>
             <span class="finance-metric finance-metric--hero-num">
-              {{ todayCardBusy ? '…' : todayKpi.totalText }}
+              <template v-if="todayCardBusy || todayKpi.totalRaw == null">…</template>
+              <StatRollNumber v-else :value="todayKpi.totalRaw" :digits="2" :replay-key="dayRollKey" />
             </span>
           </span>
         </p>
-        <div class="finance-ratio-bar finance-ratio-bar--on-primary">
-          <div class="finance-ratio-seg finance-ratio-seg--card" :style="{ width: todayKpi.cardPct + '%' }" />
-          <div class="finance-ratio-seg finance-ratio-seg--meal" :style="{ width: todayKpi.mealPct + '%' }" />
-          <div class="finance-ratio-seg finance-ratio-seg--mall" :style="{ width: todayKpi.mallPct + '%' }" />
+        <div class="finance-ratio-bar" aria-hidden="true">
+          <div class="finance-ratio-seg finance-ratio-seg--card" :style="{ width: (todayKpi.cardPct ?? 0) + '%' }" />
+          <div class="finance-ratio-seg finance-ratio-seg--meal" :style="{ width: (todayKpi.mealPct ?? 0) + '%' }" />
+          <div class="finance-ratio-seg finance-ratio-seg--mall" :style="{ width: (todayKpi.mallPct ?? 0) + '%' }" />
         </div>
-        <div class="finance-breakdown-grid finance-breakdown-grid--on-primary">
+        <ul class="finance-ratio-legend">
+          <li><i class="finance-swatch finance-swatch--card" />开卡 <b><template v-if="todayCardBusy || todayKpi.cardPct == null">…</template><StatRollNumber v-else :value="todayKpi.cardPct" suffix="%" :replay-key="dayRollKey" /></b></li>
+          <li><i class="finance-swatch finance-swatch--meal" />点餐 <b><template v-if="todayCardBusy || todayKpi.mealPct == null">…</template><StatRollNumber v-else :value="todayKpi.mealPct" suffix="%" :replay-key="dayRollKey" /></b></li>
+          <li><i class="finance-swatch finance-swatch--mall" />商城 <b><template v-if="todayCardBusy || todayKpi.mallPct == null">…</template><StatRollNumber v-else :value="todayKpi.mallPct" suffix="%" :replay-key="dayRollKey" /></b></li>
+        </ul>
+        <div class="finance-breakdown-grid">
           <template v-for="row in breakdownRows(todayKpi)" :key="`${selectedDay}-${row.key}`">
-            <div v-if="row.divider" class="finance-breakdown-divider finance-breakdown-divider--on-primary" />
+            <div v-if="row.divider" class="finance-breakdown-divider" />
             <span
               class="finance-breakdown-label"
               :class="{
@@ -523,51 +546,70 @@ onActivated(() => {
               @click="row.key === 'mall' && openMallSku('day')"
               @keydown.enter="row.key === 'mall' && openMallSku('day')"
             >
-              <i :class="breakdownDotClass(row.dot, true)" />{{ row.label }}
+              <i :class="breakdownDotClass(row.dot)" />{{ row.label }}
+              <em v-if="row.key === 'mall'" class="finance-sku-mark">SKU</em>
             </span>
             <span
-              class="finance-metric finance-breakdown-count finance-metric--on-primary"
+              class="finance-metric finance-breakdown-count"
               :class="{
-                'finance-metric--refund-warn': row.refund,
+                'finance-metric--refund-danger': row.refund && !refundIsQuiet(row),
+                'finance-metric--quiet': refundIsQuiet(row),
                 'finance-breakdown--clickable': row.key === 'mall',
               }"
               @click="row.key === 'mall' && openMallSku('day')"
             >
-              {{ todayCardBusy ? '…' : countUnitText(row.count, row.unit) }}
+              {{ todayCardBusy || row.count == null ? '…' : '' }}
+              <template v-if="!(todayCardBusy || row.count == null)">
+                <StatRollNumber :value="row.count" :replay-key="dayRollKey" /> {{ row.unit }}
+              </template>
             </span>
             <span
-              class="finance-metric finance-breakdown-amt finance-metric--on-primary"
+              class="finance-metric finance-breakdown-amt"
               :class="{
-                'finance-metric--refund-warn': row.refund,
+                'finance-metric--refund-danger': row.refund && !refundIsQuiet(row),
+                'finance-metric--quiet': refundIsQuiet(row),
                 'finance-breakdown--clickable': row.key === 'mall',
               }"
               @click="row.key === 'mall' && openMallSku('day')"
             >
-              {{ todayCardBusy ? '…' : amountColText(row.amount, { refund: row.refund }) }}
+              <template v-if="todayCardBusy || row.amountRaw == null">…</template>
+              <template v-else>
+                {{ row.refund && !refundIsQuiet(row) ? '-' : '' }}¥<StatRollNumber
+                  :value="row.amountRaw"
+                  :digits="2"
+                  :replay-key="dayRollKey"
+                />
+              </template>
             </span>
           </template>
         </div>
       </article>
 
-      <article class="finance-stat-card finance-stat-card--month" style="--finance-card-delay: 90ms">
-        <div class="finance-stat-header finance-stat-header--month">
-          <div class="finance-stat-header-main">
-            <span class="finance-stat-title finance-stat-title--muted">{{ monthCardTitle }}</span>
-            <label class="finance-month-picker" :title="`查看${formatMonthLabel(selectedMonth)}已收`">
-              <span class="finance-month-picker-label">月份</span>
-              <input
-                v-model="selectedMonth"
-                type="month"
-                class="finance-month-picker-input"
-                :max="currentCalendarMonth || undefined"
-                :disabled="monthCardBusy || !currentCalendarMonth"
-                @change="onMonthPickerChange"
-              />
-            </label>
+      <article class="finance-stat-card" style="--finance-card-delay: 90ms">
+        <div class="finance-stat-top">
+          <div class="finance-stat-title">
+            <p class="finance-eyebrow">月净收入</p>
+            <div class="finance-stat-title-row">
+              <h2 class="finance-card-heading">{{ monthHeading }}</h2>
+              <label class="finance-month-picker" :title="`查看${formatMonthLabel(selectedMonth)}已收`">
+                <input
+                  v-model="selectedMonth"
+                  type="month"
+                  class="finance-month-picker-input"
+                  aria-label="月份"
+                  :max="currentCalendarMonth || undefined"
+                  :disabled="monthCardBusy || !currentCalendarMonth"
+                  @change="onMonthPickerChange"
+                />
+              </label>
+            </div>
           </div>
           <span class="finance-interval-badge">
             <span class="finance-metric finance-metric--badge">
-              {{ monthCardBusy ? '…' : badgeLine(monthKpi.count) }}
+              <template v-if="monthCardBusy || !monthKpi.ready">…</template>
+              <template v-else>
+                <StatRollNumber :value="monthKpi.count" :replay-key="monthRollKey" /> 笔已收
+              </template>
             </span>
           </span>
         </div>
@@ -575,20 +617,26 @@ onActivated(() => {
           <span class="finance-hero-amount">
             <span class="finance-hero-currency">¥</span>
             <span class="finance-metric finance-metric--hero-num">
-              {{ monthCardBusy ? '…' : monthKpi.totalText }}
+              <template v-if="monthCardBusy || monthKpi.totalRaw == null">…</template>
+              <StatRollNumber v-else :value="monthKpi.totalRaw" :digits="2" :replay-key="monthRollKey" />
             </span>
           </span>
         </p>
-        <div class="finance-ratio-bar">
-          <div class="finance-ratio-seg finance-ratio-seg--card-green" :style="{ width: monthKpi.cardPct + '%' }" />
-          <div class="finance-ratio-seg finance-ratio-seg--meal" :style="{ width: monthKpi.mealPct + '%' }" />
-          <div class="finance-ratio-seg finance-ratio-seg--mall" :style="{ width: monthKpi.mallPct + '%' }" />
+        <div class="finance-ratio-bar" aria-hidden="true">
+          <div class="finance-ratio-seg finance-ratio-seg--card" :style="{ width: (monthKpi.cardPct ?? 0) + '%' }" />
+          <div class="finance-ratio-seg finance-ratio-seg--meal" :style="{ width: (monthKpi.mealPct ?? 0) + '%' }" />
+          <div class="finance-ratio-seg finance-ratio-seg--mall" :style="{ width: (monthKpi.mallPct ?? 0) + '%' }" />
         </div>
+        <ul class="finance-ratio-legend">
+          <li><i class="finance-swatch finance-swatch--card" />开卡 <b><template v-if="monthCardBusy || monthKpi.cardPct == null">…</template><StatRollNumber v-else :value="monthKpi.cardPct" suffix="%" :replay-key="monthRollKey" /></b></li>
+          <li><i class="finance-swatch finance-swatch--meal" />点餐 <b><template v-if="monthCardBusy || monthKpi.mealPct == null">…</template><StatRollNumber v-else :value="monthKpi.mealPct" suffix="%" :replay-key="monthRollKey" /></b></li>
+          <li><i class="finance-swatch finance-swatch--mall" />商城 <b><template v-if="monthCardBusy || monthKpi.mallPct == null">…</template><StatRollNumber v-else :value="monthKpi.mallPct" suffix="%" :replay-key="monthRollKey" /></b></li>
+        </ul>
         <div class="finance-breakdown-grid">
           <template v-for="row in breakdownRows(monthKpi)" :key="`${selectedMonth}-${row.key}`">
             <div v-if="row.divider" class="finance-breakdown-divider" />
             <span
-              class="finance-breakdown-label finance-breakdown-label--muted"
+              class="finance-breakdown-label"
               :class="{
                 'finance-breakdown-label--indent': row.indent,
                 'finance-breakdown--clickable': row.key === 'mall',
@@ -599,35 +647,57 @@ onActivated(() => {
               @click="row.key === 'mall' && openMallSku('month')"
               @keydown.enter="row.key === 'mall' && openMallSku('month')"
             >
-              <i :class="breakdownDotClass(row.dot, false)" />{{ row.label }}
+              <i :class="breakdownDotClass(row.dot)" />{{ row.label }}
+              <em v-if="row.key === 'mall'" class="finance-sku-mark">SKU</em>
             </span>
             <span
               class="finance-metric finance-breakdown-count"
-              :class="{ 'finance-breakdown--clickable': row.key === 'mall' }"
-              @click="row.key === 'mall' && openMallSku('month')"
-            >
-              {{ monthCardBusy ? '…' : countUnitText(row.count, row.unit) }}
-            </span>
-            <span
-              class="finance-metric finance-breakdown-amt"
               :class="{
-                'finance-metric--refund-danger': row.refund,
+                'finance-metric--refund-danger': row.refund && !refundIsQuiet(row),
+                'finance-metric--quiet': refundIsQuiet(row),
                 'finance-breakdown--clickable': row.key === 'mall',
               }"
               @click="row.key === 'mall' && openMallSku('month')"
             >
-              {{ monthCardBusy ? '…' : amountColText(row.amount, { refund: row.refund }) }}
+              {{ monthCardBusy || row.count == null ? '…' : '' }}
+              <template v-if="!(monthCardBusy || row.count == null)">
+                <StatRollNumber :value="row.count" :replay-key="monthRollKey" /> {{ row.unit }}
+              </template>
+            </span>
+            <span
+              class="finance-metric finance-breakdown-amt"
+              :class="{
+                'finance-metric--refund-danger': row.refund && !refundIsQuiet(row),
+                'finance-metric--quiet': refundIsQuiet(row),
+                'finance-breakdown--clickable': row.key === 'mall',
+              }"
+              @click="row.key === 'mall' && openMallSku('month')"
+            >
+              <template v-if="monthCardBusy || row.amountRaw == null">…</template>
+              <template v-else>
+                {{ row.refund && !refundIsQuiet(row) ? '-' : '' }}¥<StatRollNumber
+                  :value="row.amountRaw"
+                  :digits="2"
+                  :replay-key="monthRollKey"
+                />
+              </template>
             </span>
           </template>
         </div>
       </article>
 
       <article class="finance-stat-card" style="--finance-card-delay: 180ms">
-        <div class="finance-stat-header">
-          <span class="finance-stat-title finance-stat-title--muted">累计净收入 / ALL TIME</span>
+        <div class="finance-stat-top">
+          <div>
+            <p class="finance-eyebrow">累计净收入</p>
+            <h2 class="finance-card-heading">全部已入账</h2>
+          </div>
           <span class="finance-interval-badge">
             <span class="finance-metric finance-metric--badge">
-              {{ loading ? '…' : badgeLine(cumulativeKpi.count) }}
+              <template v-if="loading || !cumulativeKpi.ready">…</template>
+              <template v-else>
+                <StatRollNumber :value="cumulativeKpi.count" :replay-key="cumulativeRollKey" /> 笔已收
+              </template>
             </span>
           </span>
         </div>
@@ -635,20 +705,26 @@ onActivated(() => {
           <span class="finance-hero-amount">
             <span class="finance-hero-currency">¥</span>
             <span class="finance-metric finance-metric--hero-num">
-              {{ loading ? '…' : cumulativeKpi.totalText }}
+              <template v-if="loading || cumulativeKpi.totalRaw == null">…</template>
+              <StatRollNumber v-else :value="cumulativeKpi.totalRaw" :digits="2" :replay-key="cumulativeRollKey" />
             </span>
           </span>
         </p>
-        <div class="finance-ratio-bar">
-          <div class="finance-ratio-seg finance-ratio-seg--card-green" :style="{ width: cumulativeKpi.cardPct + '%' }" />
-          <div class="finance-ratio-seg finance-ratio-seg--meal" :style="{ width: cumulativeKpi.mealPct + '%' }" />
-          <div class="finance-ratio-seg finance-ratio-seg--mall" :style="{ width: cumulativeKpi.mallPct + '%' }" />
+        <div class="finance-ratio-bar" aria-hidden="true">
+          <div class="finance-ratio-seg finance-ratio-seg--card" :style="{ width: (cumulativeKpi.cardPct ?? 0) + '%' }" />
+          <div class="finance-ratio-seg finance-ratio-seg--meal" :style="{ width: (cumulativeKpi.mealPct ?? 0) + '%' }" />
+          <div class="finance-ratio-seg finance-ratio-seg--mall" :style="{ width: (cumulativeKpi.mallPct ?? 0) + '%' }" />
         </div>
+        <ul class="finance-ratio-legend">
+          <li><i class="finance-swatch finance-swatch--card" />开卡 <b><template v-if="loading || cumulativeKpi.cardPct == null">…</template><StatRollNumber v-else :value="cumulativeKpi.cardPct" suffix="%" :replay-key="cumulativeRollKey" /></b></li>
+          <li><i class="finance-swatch finance-swatch--meal" />点餐 <b><template v-if="loading || cumulativeKpi.mealPct == null">…</template><StatRollNumber v-else :value="cumulativeKpi.mealPct" suffix="%" :replay-key="cumulativeRollKey" /></b></li>
+          <li><i class="finance-swatch finance-swatch--mall" />商城 <b><template v-if="loading || cumulativeKpi.mallPct == null">…</template><StatRollNumber v-else :value="cumulativeKpi.mallPct" suffix="%" :replay-key="cumulativeRollKey" /></b></li>
+        </ul>
         <div class="finance-breakdown-grid">
           <template v-for="row in breakdownRows(cumulativeKpi)" :key="row.key">
             <div v-if="row.divider" class="finance-breakdown-divider" />
             <span
-              class="finance-breakdown-label finance-breakdown-label--muted"
+              class="finance-breakdown-label"
               :class="{
                 'finance-breakdown-label--indent': row.indent,
                 'finance-breakdown--clickable': row.key === 'mall',
@@ -659,37 +735,54 @@ onActivated(() => {
               @click="row.key === 'mall' && openMallSku('cumulative')"
               @keydown.enter="row.key === 'mall' && openMallSku('cumulative')"
             >
-              <i :class="breakdownDotClass(row.dot, false)" />{{ row.label }}
+              <i :class="breakdownDotClass(row.dot)" />{{ row.label }}
+              <em v-if="row.key === 'mall'" class="finance-sku-mark">SKU</em>
             </span>
             <span
               class="finance-metric finance-breakdown-count"
-              :class="{ 'finance-breakdown--clickable': row.key === 'mall' }"
-              @click="row.key === 'mall' && openMallSku('cumulative')"
-            >
-              {{ loading ? '…' : countUnitText(row.count, row.unit) }}
-            </span>
-            <span
-              class="finance-metric finance-breakdown-amt"
               :class="{
-                'finance-metric--refund-danger': row.refund,
+                'finance-metric--refund-danger': row.refund && !refundIsQuiet(row),
+                'finance-metric--quiet': refundIsQuiet(row),
                 'finance-breakdown--clickable': row.key === 'mall',
               }"
               @click="row.key === 'mall' && openMallSku('cumulative')"
             >
-              {{ loading ? '…' : amountColText(row.amount, { refund: row.refund }) }}
+              {{ loading || row.count == null ? '…' : '' }}
+              <template v-if="!(loading || row.count == null)">
+                <StatRollNumber :value="row.count" :replay-key="cumulativeRollKey" /> {{ row.unit }}
+              </template>
+            </span>
+            <span
+              class="finance-metric finance-breakdown-amt"
+              :class="{
+                'finance-metric--refund-danger': row.refund && !refundIsQuiet(row),
+                'finance-metric--quiet': refundIsQuiet(row),
+                'finance-breakdown--clickable': row.key === 'mall',
+              }"
+              @click="row.key === 'mall' && openMallSku('cumulative')"
+            >
+              <template v-if="loading || row.amountRaw == null">…</template>
+              <template v-else>
+                {{ row.refund && !refundIsQuiet(row) ? '-' : '' }}¥<StatRollNumber
+                  :value="row.amountRaw"
+                  :digits="2"
+                  :replay-key="cumulativeRollKey"
+                />
+              </template>
             </span>
           </template>
         </div>
       </article>
     </section>
 
-    <!-- 今日开卡收款明细：表头固定在标题下方，仅明细行区域滚动 -->
+    <!-- 开卡收款明细：表头固定，仅明细行滚动 -->
     <section class="finance-detail-section">
       <div class="finance-detail-head">
         <h3 class="finance-detail-title">
-          <CreditCard :size="18" aria-hidden="true" />
+          <CreditCard :size="16" aria-hidden="true" />
           {{ cardOrdersDetailTitle }}
         </h3>
+        <p class="finance-detail-note">与上方「日」同一天</p>
       </div>
 
       <p v-if="todayCardBusy && !todayPaidCardItems.length" class="finance-detail-empty">载入中…</p>
@@ -701,7 +794,7 @@ onActivated(() => {
             <tr>
               <th class="finance-detail-th finance-detail-th--time">交易时间</th>
               <th class="finance-detail-th finance-detail-th--kind">交易种类</th>
-              <th class="finance-detail-th finance-detail-th--amt">实收/轧减金额 (元)</th>
+              <th class="finance-detail-th finance-detail-th--amt">实收 / 轧减（元）</th>
             </tr>
           </thead>
           <tbody>
@@ -711,7 +804,7 @@ onActivated(() => {
                 <span v-if="row.card_kind" :class="cardKindPillClass(row.card_kind)">{{ row.card_kind }}</span>
                 <span v-else class="finance-detail-muted">—</span>
               </td>
-              <td class="finance-detail-amt">¥ {{ fmtYuan(row.amount_yuan) }}</td>
+              <td class="finance-detail-amt">¥{{ fmtYuan(row.amount_yuan) }}</td>
             </tr>
           </tbody>
         </table>
@@ -729,49 +822,38 @@ onActivated(() => {
 
 <style scoped>
 .finance-page.page-content-shell {
-  /* 抵消 main-body 左右 padding，报表区尽量沾满主内容宽度 */
+  /* 抵消 main-body 左右 padding，报表区沾满主内容宽度后再留出内边距 */
   margin-left: -1rem;
   margin-right: -1rem;
   width: calc(100% + 2rem);
   box-sizing: border-box;
-  padding-bottom: 0.75rem;
+  /* 吃满主视区，底边与左侧菜单底对齐；去掉壳层自带的底部留白 */
+  padding-bottom: 0;
+  overflow: hidden;
 }
 
 .finance-page {
-  --finance-primary: #0d5c46;
-  --finance-card-dark: #093f30;
-  --finance-meal: #3b82f6;
-  --finance-mall: #8b5cf6;
-  --finance-week: #10b981;
-  --finance-week-bg: #ecfdf5;
-  --finance-week-text: #0369a1;
-  --finance-month-bg: #eff6ff;
-  --finance-month-text: #4338ca;
-  --finance-once-bg: #fffbeb;
-  --finance-once-text: #c2410c;
-  --finance-refund: #ef4444;
-  --finance-refund-bg: #fef2f2;
-  --finance-refund-text: #dc2626;
-  --finance-refund-warn: #ffaa00;
-  --finance-border: #eaedf1;
-  --finance-muted: #64748b;
-  --finance-text-main: #0f172a;
+  --finance-p: var(--el-color-primary, #8b7ec8);
+  --finance-text: #1d1f21;
+  --finance-muted: #5c6670;
+  --finance-quiet: #8b949e;
+  --finance-refund: #c4544a;
+  --finance-line: rgba(15, 23, 42, 0.06);
+  /* 构成三色跟主题走，但往深色压，避免浅主色下点餐/商城发白看不清 */
+  --finance-tone-card: color-mix(in srgb, var(--finance-p) 86%, #1a120e);
+  --finance-tone-meal: color-mix(in srgb, var(--finance-p) 62%, #1a3044);
+  --finance-tone-mall: color-mix(in srgb, var(--finance-p) 34%, #12161c);
   --finance-sans: var(--okfood-font-sans);
-  font-family: var(--finance-sans);
-  /* 金额/笔数/时间与明细表一致，统一高质感数字体 */
   --finance-mono: var(--okfood-font-number);
-  --finance-metric-size: 14px;
-  --finance-metric-weight: 700;
-  --finance-hero-size: 40px;
+  --finance-metric-size: 13px;
+  --finance-metric-weight: 750;
+  font-family: var(--finance-sans);
+  color: var(--finance-text);
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
-/**
- * 所有金额/笔数字符串统一排版（整段渲染，¥ 与数字同字号）
- * 拆账行、徽章、副标题共用 metric 字号；仅顶部净收入用 hero 字号。
- */
 .finance-metric {
   font-family: var(--finance-mono);
   font-size: var(--finance-metric-size);
@@ -782,50 +864,54 @@ onActivated(() => {
   white-space: nowrap;
 }
 
-/* 主金额：¥ 与数字分列，统一间距 */
 .finance-hero-amount {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.28em;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+  color: var(--finance-text);
 }
 
-.finance-hero-currency,
-.finance-metric--hero-num {
+.finance-hero-currency {
+  margin-right: 0.12em;
   font-family: var(--finance-mono);
-  font-size: var(--finance-hero-size);
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  line-height: 1.08;
+  font-size: 0.62em;
+  font-weight: 700;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
-.finance-stat-value--light .finance-hero-currency,
-.finance-stat-value--light .finance-metric--hero-num {
-  color: #fff;
+.finance-metric--hero-num {
+  font-size: 1em;
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 1.05;
 }
 
 .finance-metric--badge {
-  font-size: var(--finance-metric-size);
-  font-weight: var(--finance-metric-weight);
-}
-
-.finance-metric--on-primary {
-  color: #fff;
-}
-
-.finance-metric--refund-warn {
-  color: var(--finance-refund-warn);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .finance-metric--refund-danger {
   color: var(--finance-refund);
 }
 
-/* 三张 KPI 复合卡片；左右留白与主内容区内边距对齐（抵消父级负 margin 拉满后的贴边感） */
+.finance-metric--quiet {
+  color: var(--finance-quiet);
+}
+
 .finance-stats-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
+  flex-shrink: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
   padding-left: 1rem;
   padding-right: 1rem;
   box-sizing: border-box;
@@ -838,7 +924,6 @@ onActivated(() => {
     width: 100%;
   }
 
-  /* 小屏已无负边距拉满时，不必再向内缩一档，否则会与 main-body padding 双重留白 */
   .finance-stats-grid {
     padding-left: 0;
     padding-right: 0;
@@ -854,21 +939,33 @@ onActivated(() => {
   .finance-stats-grid {
     grid-template-columns: 1fr;
   }
+
+  .finance-hero-amount {
+    font-size: 32px;
+  }
 }
 
 .finance-stat-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 330px;
-  padding: 28px;
-  border-radius: 28px;
-  border: 1px solid var(--finance-border);
+  min-width: 0;
+  padding: 18px 18px 16px;
+  border-radius: 22px;
+  border: 1px solid var(--finance-line);
   background: #fff;
-  box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.04);
-  transition:
-    transform 0.3s ease,
-    box-shadow 0.3s ease;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 12px 32px rgba(25, 45, 55, 0.05);
+}
+
+.finance-stat-card--today {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--finance-p) 16%, transparent), transparent 46%),
+    rgba(255, 255, 255, 0.78);
+  border-color: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(14px) saturate(1.25);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 18px 40px color-mix(in srgb, var(--finance-p) 16%, transparent);
 }
 
 .finance-stats-grid--animate .finance-stat-card {
@@ -887,65 +984,96 @@ onActivated(() => {
   }
 }
 
-.finance-stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(148, 163, 184, 0.08);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .finance-stats-grid--animate .finance-stat-card {
     animation: none;
   }
-
-  .finance-stat-card:hover {
-    transform: none;
-  }
 }
 
-.finance-stat-card--primary {
-  background-color: var(--finance-card-dark);
-  border: none;
-  color: #fff;
-  box-shadow: 0 10px 30px -10px rgba(9, 63, 48, 0.3);
+.finance-stat-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 10px;
 }
 
-.finance-stat-header {
+.finance-stat-title {
+  min-width: 0;
+}
+
+.finance-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--finance-muted);
+}
+
+.finance-card-heading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--finance-text);
+}
+
+.finance-stat-title-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 0.75rem;
-  z-index: 2;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 3px;
 }
 
-.finance-stat-header--today,
-.finance-stat-header--month {
+.finance-interval-badge {
+  align-self: start;
+  flex-shrink: 0;
+  display: inline-flex;
   align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--finance-muted);
 }
 
-/* 今日卡：上一日 / 下一日 */
+.finance-interval-badge .finance-metric--badge {
+  color: inherit;
+}
+
+/* 滚动数字和「笔已收」同一中线，避免位数不同把徽章撑偏 */
+.finance-interval-badge :deep(.stat-roll),
+.finance-breakdown-count :deep(.stat-roll),
+.finance-breakdown-amt :deep(.stat-roll),
+.finance-ratio-legend :deep(.stat-roll),
+.finance-hero-amount :deep(.stat-roll) {
+  vertical-align: baseline;
+  height: 1em;
+}
+
 .finance-day-nav {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
+.finance-day-nav-btn,
+.finance-month-picker {
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--finance-text);
+}
+
 .finance-day-nav-btn {
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background-color: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 11px;
-  font-weight: 800;
-  padding: 4px 10px;
-  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
   cursor: pointer;
-  transition:
-    background-color 0.2s ease,
-    border-color 0.2s ease;
 }
 
 .finance-day-nav-btn:hover:not(:disabled) {
-  background-color: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.35);
+  border-color: color-mix(in srgb, var(--finance-p) 45%, #fff);
 }
 
 .finance-day-nav-btn:disabled {
@@ -953,47 +1081,37 @@ onActivated(() => {
   cursor: not-allowed;
 }
 
-/* 标题与月份选择同一顶栏横排 */
-.finance-stat-header-main {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  min-width: 0;
-  flex: 1;
-}
-
-/* 本月卡片：月份选择（原生 month，与参考稿胶囊风格一致） */
 .finance-month-picker {
   display: inline-flex;
+  flex: none;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border-radius: 8px;
-  background-color: #f8fafc;
-  border: 1px solid var(--finance-border);
+  height: 30px;
+  padding: 0 10px 0 12px;
   cursor: pointer;
-}
-
-.finance-month-picker-label {
-  font-size: 10px;
-  font-weight: 800;
-  color: var(--finance-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  position: relative;
+  z-index: 1;
 }
 
 .finance-month-picker-input {
   border: none;
   background: transparent;
   font-family: var(--finance-mono);
-  font-size: var(--finance-metric-size);
-  font-weight: var(--finance-metric-weight);
-  color: #0f172a;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--finance-text);
   outline: none;
   cursor: pointer;
   padding: 0;
-  min-width: 6.5rem;
+  /* 中文「2026年11月」加右侧日历图标，避免被金额行挡住 */
+  width: 9.4rem;
+  min-width: 9.4rem;
+  height: 28px;
+  line-height: 28px;
+}
+
+.finance-month-picker-input::-webkit-calendar-picker-indicator {
+  margin-left: 4px;
+  cursor: pointer;
 }
 
 .finance-month-picker-input:disabled {
@@ -1002,57 +1120,21 @@ onActivated(() => {
 }
 
 .finance-month-picker:focus-within {
-  border-color: var(--finance-primary);
-  box-shadow: 0 0 0 2px rgba(13, 92, 70, 0.12);
-}
-
-.finance-stat-title {
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  opacity: 0.7;
-}
-
-.finance-stat-title--muted {
-  color: var(--finance-muted);
-  opacity: 1;
-}
-
-.finance-interval-badge {
-  flex-shrink: 0;
-  background-color: #f1f5f9;
-  color: var(--finance-muted);
-  padding: 4px 10px;
-  border-radius: 8px;
-}
-
-.finance-interval-badge .finance-metric--badge {
-  color: inherit;
-}
-
-.finance-interval-badge--light {
-  background-color: rgba(255, 255, 255, 0.15);
-  color: #fff;
+  border-color: color-mix(in srgb, var(--finance-p) 55%, #fff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--finance-p) 16%, transparent);
 }
 
 .finance-stat-value {
-  margin: 15px 0;
-  color: #0f172a;
+  margin: 12px 0 10px;
 }
 
 .finance-ratio-bar {
-  height: 6px;
-  width: 100%;
-  border-radius: 3px;
-  margin-bottom: 20px;
   display: flex;
+  height: 8px;
+  width: 100%;
   overflow: hidden;
-  background-color: #f1f5f9;
-}
-
-.finance-ratio-bar--on-primary {
-  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.05);
 }
 
 .finance-ratio-seg {
@@ -1062,53 +1144,85 @@ onActivated(() => {
 }
 
 .finance-ratio-seg--card {
-  background-color: #fff;
-}
-
-.finance-ratio-seg--card-green {
-  background-color: var(--finance-primary);
+  background: var(--finance-tone-card);
 }
 
 .finance-ratio-seg--meal {
-  background-color: var(--finance-meal);
+  background: var(--finance-tone-meal);
 }
 
 .finance-ratio-seg--mall {
-  background-color: var(--finance-mall);
+  background: var(--finance-tone-mall);
 }
 
-/**
- * 拆账三列网格：标签 | 笔数 | 金额
- * 列宽与行列间距固定，保证各卡、各行数字纵向对齐。
- */
+.finance-ratio-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--finance-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.finance-ratio-legend b {
+  color: var(--finance-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: 1px;
+}
+
+.finance-swatch--card {
+  background: var(--finance-tone-card);
+}
+
+.finance-swatch--meal {
+  background: var(--finance-tone-meal);
+}
+
+.finance-swatch--mall {
+  background: var(--finance-tone-mall);
+}
+
 .finance-breakdown-grid {
-  --finance-grid-row-gap: 10px;
-  --finance-grid-col-gap: 12px;
-  --finance-grid-count-col: 4.5rem;
-  --finance-grid-amt-col: 9.75rem;
   display: grid;
-  margin-top: auto;
-  padding-top: 14px;
-  border-top: 1px dashed var(--finance-border);
-  grid-template-columns: minmax(0, 1fr) var(--finance-grid-count-col) var(--finance-grid-amt-col);
-  column-gap: var(--finance-grid-col-gap);
-  row-gap: var(--finance-grid-row-gap);
-  align-items: center;
-}
-
-.finance-breakdown-grid--on-primary {
-  border-top-color: rgba(255, 255, 255, 0.08);
+  grid-template-columns: minmax(0, 1fr) 4.8rem 9.2rem;
+  column-gap: 8px;
+  row-gap: 8px;
+  align-items: baseline;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(15, 23, 42, 0.05);
+  font-size: 13px;
 }
 
 .finance-breakdown-divider {
   grid-column: 1 / -1;
-  height: 0;
-  margin-top: 2px;
-  border-top: 1px dashed var(--finance-border);
+  height: 1px;
+  background: var(--finance-line);
 }
 
-.finance-breakdown-divider--on-primary {
-  border-top-color: rgba(255, 255, 255, 0.08);
+.finance-breakdown-label {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  font-weight: 750;
+  color: var(--finance-text);
+}
+
+.finance-breakdown-label--indent {
+  padding-left: 16px;
+  color: var(--finance-muted);
+  font-weight: 650;
 }
 
 .finance-breakdown-count,
@@ -1118,33 +1232,57 @@ onActivated(() => {
 }
 
 .finance-breakdown-count {
-  min-width: var(--finance-grid-count-col);
-}
-
-.finance-breakdown-amt {
-  min-width: var(--finance-grid-amt-col);
-}
-
-.finance-breakdown-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.finance-breakdown-label--muted {
   color: var(--finance-muted);
 }
 
-.finance-breakdown-label--indent {
-  padding-left: 14px;
+.finance-breakdown-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.finance-breakdown-dot--card {
+  background: var(--finance-p);
+}
+
+.finance-breakdown-dot--week {
+  background: #5cbf8e;
+}
+
+.finance-breakdown-dot--month {
+  background: #8b7ec8;
+}
+
+.finance-breakdown-dot--meal {
+  background: color-mix(in srgb, var(--finance-p) 70%, #7aa2c4);
+}
+
+.finance-breakdown-dot--mall {
+  background: #9aa6b2;
+}
+
+.finance-breakdown-dot--refund {
+  background: #d07a74;
 }
 
 .finance-breakdown--clickable {
   cursor: pointer;
+}
+
+.finance-breakdown-label.finance-breakdown--clickable {
+  color: color-mix(in srgb, var(--finance-p) 78%, #3d3558);
+}
+
+.finance-sku-mark {
+  margin-left: 6px;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  opacity: 0.8;
 }
 
 .finance-breakdown--clickable:hover {
@@ -1152,132 +1290,87 @@ onActivated(() => {
   text-underline-offset: 3px;
 }
 
-.finance-breakdown-grid--on-primary .finance-breakdown-label--indent {
-  opacity: 0.75;
-}
-
-.finance-breakdown-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.finance-breakdown-dot--week {
-  background-color: var(--finance-week);
-}
-
-.finance-breakdown-dot--month {
-  background-color: var(--finance-meal);
-}
-
-.finance-breakdown-dot--card-on-primary {
-  background-color: #fff;
-}
-
-.finance-breakdown-dot--card-green {
-  background-color: var(--finance-primary);
-}
-
-.finance-breakdown-dot--meal {
-  background-color: var(--finance-meal);
-}
-
-.finance-breakdown-dot--mall {
-  background-color: var(--finance-mall);
-}
-
-.finance-breakdown-dot--refund-hot {
-  background-color: #ff3b30;
-}
-
-/* 开卡收款明细列表（字体/字号对齐参考稿 finance-table） */
 .finance-detail-section {
-  background: #fff;
-  border-radius: 28px;
-  border: 1px solid var(--finance-border);
-  padding: 24px 28px;
-  box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.04);
+  flex: 1 1 0%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   margin-left: 1rem;
   margin-right: 1rem;
+  padding: 6px 8px 8px;
+  border-radius: 22px;
+  border: 1px solid var(--finance-line);
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(25, 45, 55, 0.04);
   box-sizing: border-box;
-  font-family: var(--finance-sans);
 }
 
 .finance-detail-head {
-  margin-bottom: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px 8px;
 }
 
 .finance-detail-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 900;
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--finance-text-main);
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--finance-text);
+}
+
+.finance-detail-title :deep(svg) {
+  color: var(--finance-p);
+}
+
+.finance-detail-note {
+  margin: 0;
+  color: var(--finance-quiet);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .finance-detail-empty {
+  flex: 1 1 0%;
+  min-height: 0;
   margin: 0;
-  padding: 2rem 0;
+  padding: 2rem 12px;
   text-align: center;
   font-weight: 700;
-  color: #94a3b8;
+  color: var(--finance-quiet);
   font-size: 13px;
 }
 
 .finance-detail-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--finance-border);
-  border-radius: 16px;
-  background: #fff;
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .finance-detail-table {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
-  font-family: var(--finance-sans);
-}
-
-/**
- * 仅 tbody 区域纵向滚动，表头不随列表滚动（display:block 分块表格常见写法）
- */
-.finance-detail-table--body-scroll thead,
-.finance-detail-table--body-scroll tbody tr {
-  display: table;
-  width: 100%;
-  table-layout: fixed;
-}
-
-.finance-detail-table--body-scroll tbody {
-  display: block;
-  max-height: min(54vh, 520px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-}
-
-.finance-detail-table--body-scroll thead {
-  box-shadow: 0 1px 0 var(--finance-border);
 }
 
 .finance-detail-th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 12px 10px;
   font-size: 12px;
   font-weight: 800;
   color: var(--finance-muted);
-  text-transform: none;
-  letter-spacing: 0;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--finance-border);
-  background-color: #f8fafc;
+  background: #fff;
+  border-bottom: 1px solid var(--finance-line);
   vertical-align: bottom;
-}
-
-.finance-detail-table--body-scroll thead .finance-detail-th {
-  border-bottom: none;
 }
 
 .finance-detail-th--time {
@@ -1295,48 +1388,34 @@ onActivated(() => {
   text-align: right;
 }
 
-.finance-detail-table tbody tr {
-  transition: background-color 0.2s ease;
-}
-
 .finance-detail-table tbody tr:hover {
-  background-color: #f8fafc;
+  background: #f8fafc;
 }
 
 .finance-detail-table td {
-  padding: 14px 16px;
+  padding: 12px;
   font-size: 13px;
-  font-weight: 600;
-  font-family: var(--finance-sans);
-  border-bottom: 1px solid var(--finance-border);
-  color: var(--finance-text-main);
+  font-weight: 650;
+  border-bottom: 1px solid #f3f5f7;
+  color: #3d4650;
 }
 
-.finance-detail-table td:first-child {
-  text-align: left;
+.finance-detail-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 .finance-detail-datetime {
   white-space: nowrap;
-}
-
-.finance-detail-table td:nth-child(2) {
-  /* 与表头「交易种类」同一左缘；胶囊左对齐不占满整格居中 */
-  text-align: left;
-  vertical-align: middle;
-}
-
-.finance-detail-table td:nth-child(2) .finance-detail-muted {
-  display: inline-block;
+  font-variant-numeric: tabular-nums;
 }
 
 .finance-detail-amt {
   text-align: right;
   font-family: var(--finance-mono);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
-  color: var(--finance-text-main);
+  color: var(--finance-text);
 }
 
 .finance-detail-muted {
@@ -1344,37 +1423,34 @@ onActivated(() => {
 }
 
 .finance-pill {
-  display: inline-block;
-  padding: 3px 8px;
-  border-radius: 6px;
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
   font-weight: 800;
-  font-family: var(--finance-sans);
-  line-height: 1.35;
-}
-
-.finance-pill--count {
-  background-color: var(--finance-once-bg);
-  color: var(--finance-once-text);
+  line-height: 1;
 }
 
 .finance-pill--week {
-  background-color: var(--finance-week-bg);
-  color: var(--finance-week-text);
+  background: #e7f6ee;
+  color: #1c7a4a;
 }
 
 .finance-pill--month {
-  background-color: var(--finance-month-bg);
-  color: var(--finance-month-text);
+  background: #eef0fb;
+  color: #5347a0;
 }
 
-.finance-pill--once {
-  background-color: var(--finance-once-bg);
-  color: var(--finance-once-text);
+.finance-pill--once,
+.finance-pill--count {
+  background: #fff4e8;
+  color: #b8611a;
 }
 
 .finance-pill--refund {
-  background-color: var(--finance-refund-bg);
-  color: var(--finance-refund-text);
+  background: #fdecec;
+  color: var(--finance-refund);
 }
 </style>

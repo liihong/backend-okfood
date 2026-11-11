@@ -2242,7 +2242,7 @@ def dishes(
     ] = None,
     lite: Annotated[
         bool,
-        Query(description="精简列表：不返回 description/image_url/internal_view_sop，下拉选菜等场景更快"),
+        Query(description="精简列表：不返回 description/internal_view_sop，仍返回 image_url 供下拉缩略图"),
     ] = False,
 ):
     """菜品库列表，排期时可从中选 `dish_id`。"""

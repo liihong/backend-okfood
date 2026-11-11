@@ -1,13 +1,15 @@
 <script setup>
 defineOptions({ name: 'RetailCatalogView' })
 import { ref, computed, onMounted, onActivated } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { LayoutGrid, List, Plus } from 'lucide-vue-next'
+import RetailSpuEditView from './retail/RetailSpuEditView.vue'
 import { apiJson, adminAccessToken, handleAdminLogout, dishImageDisplayUrl } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
 
-const router = useRouter()
+/** 商品抽屉：null 为新建，数字为编辑中的 SPU */
+const spuDrawerOpen = ref(false)
+const editingSpuId = ref(/** @type {number | null} */ (null))
 const storeId = ref(1)
 const categories = ref([])
 const spus = ref([])
@@ -164,18 +166,13 @@ async function removeCategory(row) {
 }
 
 function openSpuCreate() {
-  router.push({
-    name: 'menu-retail-spu-new',
-    query: { store_id: String(storeId.value || 1) },
-  })
+  editingSpuId.value = null
+  spuDrawerOpen.value = true
 }
 
 function openSpuEdit(row) {
-  router.push({
-    name: 'menu-retail-spu-edit',
-    params: { spuId: String(row.id) },
-    query: { store_id: String(storeId.value || 1) },
-  })
+  editingSpuId.value = Number(row.id)
+  spuDrawerOpen.value = true
 }
 
 async function removeSpu(row) {
@@ -287,7 +284,7 @@ onActivated(() => {
 
       <div class="retail-main-card" v-loading="loadingSpu">
         <el-table :data="spus" border stripe empty-text="暂无商品">
-          <el-table-column label="封面" width="72" align="center">
+          <el-table-column label="封面" width="108" align="center" class-name="retail-cover-col">
             <template #default="{ row }">
               <img
                 v-if="row.cover_image_url"
@@ -323,6 +320,13 @@ onActivated(() => {
         </el-table>
       </div>
     </section>
+
+    <RetailSpuEditView
+      v-model="spuDrawerOpen"
+      :store-id="storeId"
+      :spu-id="editingSpuId"
+      @saved="fetchSpus"
+    />
 
     <!-- 分类弹窗 -->
     <el-dialog v-model="catDialog" title="商品分类" width="420px" destroy-on-close>
@@ -383,15 +387,21 @@ onActivated(() => {
   padding: 12px;
 }
 .retail-thumb {
-  width: 48px;
-  height: 48px;
+  width: 72px;
+  height: 72px;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 10px;
+  display: block;
+  margin: 0 auto;
+}
+.retail-main-card :deep(.retail-cover-col .cell) {
+  line-height: 0;
+  overflow: visible;
 }
 .retail-juice--placeholder {
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
   margin: 0 auto;
 }
 .retail-juice--orange {

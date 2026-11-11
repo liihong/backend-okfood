@@ -280,17 +280,19 @@ onMounted(() => {
 <template>
   <section class="hb-page tab-content animate-up">
     <header class="hb-page-head">
-      <div class="hb-page-head__copy">
-        <p class="hb-kicker">小程序营销</p>
-        <h1 class="hb-title">首页 Banner</h1>
-        <p class="hb-intro">
-          配置小程序首页顶部轮播。{{ BANNER_SIZE_HINT }}。重要文案放在画面中心，避免被裁切。数字越小越靠前。
-        </p>
+      <div class="hb-page-head__bar">
+        <div class="hb-page-head__copy">
+          <p class="hb-kicker">小程序营销</p>
+          <h1 class="hb-title">首页 Banner</h1>
+        </div>
+        <el-button class="hb-add" type="primary" round size="large" @click="openCreate">
+          <Plus :size="16" />
+          新建 Banner
+        </el-button>
       </div>
-      <el-button class="hb-add" type="primary" round size="large" @click="openCreate">
-        <Plus :size="16" />
-        新建 Banner
-      </el-button>
+      <p class="hb-intro">
+        配置小程序首页顶部轮播。{{ BANNER_SIZE_HINT }}。重要文案放在画面中心，避免被裁切。数字越小越靠前。
+      </p>
     </header>
 
     <article v-if="activePreview.length" class="hb-card">
@@ -481,6 +483,11 @@ onMounted(() => {
 }
 .hb-page-head {
   display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.hb-page-head__bar {
+  display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 1.25rem;
@@ -504,11 +511,11 @@ onMounted(() => {
   line-height: 1.15;
 }
 .hb-intro {
-  margin: 0.45rem 0 0;
-  max-width: 46rem;
+  margin: 0;
   font-size: 13px;
   line-height: 1.55;
   color: #5c6670;
+  white-space: nowrap;
 }
 .hb-add {
   flex-shrink: 0;
@@ -701,11 +708,14 @@ onMounted(() => {
   box-shadow: 0 0 0 1px #e2e8f0 inset;
 }
 @media (max-width: 900px) {
-  .hb-page-head,
+  .hb-page-head__bar,
   .hb-form__row {
     display: flex;
     flex-direction: column;
     align-items: stretch;
+  }
+  .hb-intro {
+    white-space: normal;
   }
 }
 </style>

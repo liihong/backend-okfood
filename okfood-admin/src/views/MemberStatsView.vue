@@ -1,22 +1,10 @@
 <script setup>
 defineOptions({ name: 'MemberStatsView' })
-import { computed, onActivated, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, provide, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   RefreshCw,
-  Users,
-  TrendingUp,
   Bell,
-  Ticket,
-  PieChart,
-  UserCheck,
-  Clock,
-  RotateCcw,
-  Activity,
-  TrendingDown,
-  CalendarDays,
-  CalendarRange,
-  Repeat,
   ChevronRight,
   UserMinus,
   ClipboardList,
@@ -24,22 +12,26 @@ import {
   CalendarOff,
   Package,
   MapPinOff,
-  Sparkles,
   ArrowUpRight,
   UtensilsCrossed,
 } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../admin/core.js'
 import { showToast } from '../composables/useToast.js'
-import { useAnimatedInteger } from '../composables/useAnimatedInteger.js'
+import StatRollNumber from '../components/StatRollNumber.vue'
 
 const router = useRouter()
 const loading = ref(false)
+/** 每次统计加载成功后 +1，页面上的数字重新滚动 */
+const rollToken = ref(0)
+provide('memberStatsRollToken', rollToken)
 /** @type {import('vue').Ref<Record<string, unknown> | null>} */
 const analytics = ref(null)
 
-function safeNum(v) {
-  const n = Number(v)
-  return Number.isFinite(n) ? n : 0
+/** 统计数字；没有值时交给滚动组件显示占位 */
+function metric(raw) {
+  if (raw == null || raw === '') return null
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
 }
 
 function fmtPct(raw) {
@@ -49,102 +41,78 @@ function fmtPct(raw) {
   return `${n.toFixed(2)}%`
 }
 
-function fmtCount(raw) {
-  if (loading.value) return '…'
-  if (raw == null || raw === '') return '—'
+/** 占比条宽度，限制在 0–100 */
+function barWidth(raw) {
   const n = Number(raw)
-  return Number.isFinite(n) ? String(Math.trunc(n)) : '—'
+  if (!Number.isFinite(n)) return '0%'
+  return `${Math.min(100, Math.max(0, n))}%`
 }
-
-/** SVG 圆环进度：pct 0–100 */
-function ringDashOffset(pct) {
-  const r = 34
-  const c = 2 * Math.PI * r
-  const p = Math.min(100, Math.max(0, Number(pct) || 0))
-  return c * (1 - p / 100)
-}
-
-const totalAnimated = useAnimatedInteger(() => safeNum(analytics.value?.total), { duration: 640 })
-const activeAnimated = useAnimatedInteger(() => safeNum(analytics.value?.active), { duration: 640 })
-const expiredAnimated = useAnimatedInteger(() => safeNum(analytics.value?.expired), { duration: 640 })
-const refundedAnimated = useAnimatedInteger(() => safeNum(analytics.value?.refunded), { duration: 640 })
-
-const weeklyActiveAnimated = useAnimatedInteger(
-  () => safeNum(analytics.value?.weekly?.active),
-  { duration: 640 },
-)
-const monthlyActiveAnimated = useAnimatedInteger(
-  () => safeNum(analytics.value?.monthly?.active),
-  { duration: 640 },
-)
-const renewPendingAnimated = useAnimatedInteger(
-  () => safeNum(analytics.value?.renew_pending?.count),
-  { duration: 640 },
-)
-const unconsumedMealsAnimated = useAnimatedInteger(
-  () => safeNum(analytics.value?.unconsumed_meals?.total),
-  { duration: 640 },
-)
 
 const renewPendingThreshold = computed(() => {
   const t = Number(analytics.value?.renew_pending?.threshold)
   return Number.isFinite(t) && t >= 1 ? Math.trunc(t) : 2
 })
 
-/** 档案总览 KPI 卡片配置（含图标与色调） */
+/** 档案总览：一条六格，颜色只落在生效与退款 */
 const kpiCards = computed(() => [
   {
     key: 'total',
     label: '总户数',
     hint: '周/月卡档案库',
-    icon: Users,
     tone: 'neutral',
-    value: loading.value ? '…' : String(totalAnimated.value),
+    amount: metric(analytics.value?.total),
+    digits: 0,
+    suffix: '',
     link: { path: '/users' },
   },
   {
     key: 'active',
     label: '生效中',
     hint: '剩余次数 > 0',
-    icon: UserCheck,
-    tone: 'active',
-    value: loading.value ? '…' : String(activeAnimated.value),
+    tone: 'ok',
+    amount: metric(analytics.value?.active),
+    digits: 0,
+    suffix: '',
     link: { path: '/users', query: { validity: 'active' } },
   },
   {
     key: 'expired',
     label: '已过期',
     hint: '次数用尽未退卡',
-    icon: Clock,
-    tone: 'muted',
-    value: loading.value ? '…' : String(expiredAnimated.value),
+    tone: 'neutral',
+    amount: metric(analytics.value?.expired),
+    digits: 0,
+    suffix: '',
     link: { path: '/users', query: { validity: 'expired' } },
   },
   {
     key: 'refunded',
     label: '已退款',
     hint: '已办理退卡退款',
-    icon: RotateCcw,
-    tone: 'danger',
-    value: loading.value ? '…' : String(refundedAnimated.value),
+    tone: 'rose',
+    amount: metric(analytics.value?.refunded),
+    digits: 0,
+    suffix: '',
     link: { path: '/users', query: { validity: 'refunded' } },
   },
   {
     key: 'active_rate',
     label: '活跃率',
     hint: '生效中 / 总户数',
-    icon: Activity,
-    tone: 'primary',
-    value: loading.value ? '…' : fmtPct(analytics.value?.active_rate_percent),
+    tone: 'neutral',
+    amount: metric(analytics.value?.active_rate_percent),
+    digits: 2,
+    suffix: '%',
     link: null,
   },
   {
     key: 'refund_rate',
     label: '退款率',
     hint: '已退款 / 总户数',
-    icon: TrendingDown,
-    tone: 'danger',
-    value: loading.value ? '…' : fmtPct(analytics.value?.refund_rate_percent),
+    tone: 'rose',
+    amount: metric(analytics.value?.refund_rate_percent),
+    digits: 2,
+    suffix: '%',
     link: null,
   },
 ])
@@ -218,6 +186,7 @@ async function loadAnalytics() {
   loading.value = true
   try {
     analytics.value = await apiJson('/api/admin/users/analytics', {}, { auth: true })
+    rollToken.value += 1
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -260,15 +229,10 @@ onActivated(() => {
 <template>
   <section class="member-stats-page tab-content animate-up page-content-shell">
     <header class="member-stats-head">
-      <div class="member-stats-head__main">
-        <div class="member-stats-head__title-row">
-          <span class="member-stats-head__icon" aria-hidden="true">
-            <PieChart :size="22" stroke-width="2.25" />
-          </span>
-          <h2 class="member-stats-head__title">会员运营分析</h2>
-        </div>
+      <div>
+        <p class="member-stats-crumb">数据统计 / <b>会员统计</b></p>
+        <h2 class="member-stats-head__title">会员运营分析</h2>
         <p class="member-stats-head__sub">
-          <Sparkles :size="14" stroke-width="2" class="member-stats-head__sub-icon" aria-hidden="true" />
           周/月卡档案库总览、套餐结构、续卡率与运营状态分布（与会员档案库统计口径一致）
         </p>
       </div>
@@ -279,1131 +243,878 @@ onActivated(() => {
         aria-label="刷新会员统计"
         @click="loadAnalytics"
       >
-        <RefreshCw :size="18" stroke-width="2" :class="{ 'member-stats-refresh__spin': loading }" />
+        <RefreshCw :size="15" stroke-width="2" :class="{ 'member-stats-refresh__spin': loading }" />
         刷新
       </button>
     </header>
 
-    <!-- 第一行：待续费 + 周/月卡占比 + 续卡率 -->
-    <div class="member-stats-insight-row">
-      <section class="member-stats-renew-hero member-stats-insight-card" aria-label="待续费会员">
-        <div class="member-stats-renew-hero__deco" aria-hidden="true">
-          <Bell :size="48" stroke-width="1.75" />
-        </div>
-        <div class="member-stats-renew-hero__main">
-          <div class="member-stats-renew-hero__badge">
-            <Bell :size="15" stroke-width="2.25" />
-            <span>待续费提醒</span>
+    <!-- 待续费是唯一强调卡；占比与续卡率并进一张白卡 -->
+    <div class="member-stats-top">
+      <section class="member-stats-hero" aria-label="待续费会员">
+        <div class="member-stats-hero__glow" aria-hidden="true"></div>
+        <div class="member-stats-hero__body">
+          <span class="member-stats-badge">
+            <Bell :size="14" stroke-width="2.2" />
+            待续费提醒
+          </span>
+          <div class="member-stats-hero__metric">
+            <strong><StatRollNumber :value="metric(analytics?.renew_pending?.count)" /></strong>
+            <span class="member-stats-hero__unit">户</span>
           </div>
-          <div class="member-stats-renew-hero__metric">
-            <strong class="member-stats-renew-hero__count">{{
-              loading ? '…' : renewPendingAnimated
-            }}</strong>
-            <span class="member-stats-renew-hero__unit">户</span>
-          </div>
-          <p class="member-stats-renew-hero__desc">
+          <p class="member-stats-hero__desc">
             剩余 ≤ {{ renewPendingThreshold }} 次，占生效会员
-            {{ loading ? '…' : fmtPct(analytics?.renew_pending?.share_of_active_percent) }}
+            <StatRollNumber
+              :value="metric(analytics?.renew_pending?.share_of_active_percent)"
+              :digits="2"
+              suffix="%"
+            />
           </p>
-          <ul class="member-stats-renew-hero__breakdown">
+          <ul class="member-stats-hero__splits">
             <li>
-              <span class="member-stats-renew-hero__chip-icon member-stats-renew-hero__chip-icon--one" aria-hidden="true">1</span>
-              剩余 1 次：<strong>{{ fmtCount(analytics?.renew_pending?.balance_1_count) }}</strong> 户
+              剩余 1 次
+              <b><StatRollNumber :value="metric(analytics?.renew_pending?.balance_1_count)" /> 户</b>
             </li>
             <li>
-              <span class="member-stats-renew-hero__chip-icon" aria-hidden="true">{{ renewPendingThreshold }}</span>
-              剩余 {{ renewPendingThreshold }} 次：<strong>{{
-                fmtCount(analytics?.renew_pending?.balance_threshold_count)
-              }}</strong>
-              户
+              剩余 {{ renewPendingThreshold }} 次
+              <b><StatRollNumber :value="metric(analytics?.renew_pending?.balance_threshold_count)" /> 户</b>
             </li>
           </ul>
         </div>
-        <div class="member-stats-renew-hero__actions">
-          <button type="button" class="member-stats-renew-btn member-stats-renew-btn--primary" @click="goRenewPendingMembers">
-            <Users :size="16" stroke-width="2" />
+        <div class="member-stats-hero__actions">
+          <button type="button" class="member-stats-btn member-stats-btn--primary" @click="goRenewPendingMembers">
             查看待续费会员
-            <ChevronRight :size="16" stroke-width="2.25" class="member-stats-renew-btn__chev" />
+            <ChevronRight :size="15" stroke-width="2.4" />
           </button>
           <button
             type="button"
-            class="member-stats-renew-btn member-stats-renew-btn--secondary"
+            class="member-stats-btn member-stats-btn--ghost"
             :disabled="loading || !(Number(analytics?.renew_pending?.count) > 0)"
             @click="goGrantCouponsForRenewPending"
           >
-            <Ticket :size="16" stroke-width="2" />
             批量发券
           </button>
         </div>
       </section>
 
-      <section class="member-stats-panel member-stats-insight-card" aria-label="生效会员套餐结构">
-        <div class="member-stats-panel__head">
-          <span class="member-stats-panel__head-icon member-stats-panel__head-icon--green" aria-hidden="true">
-            <Users :size="18" stroke-width="2.25" />
-          </span>
-          <h3>生效 · 周/月卡占比</h3>
+      <article class="member-stats-panel member-stats-structure" aria-label="生效结构与续卡率">
+        <div class="member-stats-structure__col">
+          <p class="member-stats-kicker">生效中 <StatRollNumber :value="metric(analytics?.active)" /> 户</p>
+          <h3>周 / 月卡占比</h3>
+          <div class="member-stats-mix">
+            <div
+              class="member-stats-mix__bar"
+              role="img"
+              :aria-label="`周卡 ${fmtPct(analytics?.active_weekly_share_percent)}，月卡 ${fmtPct(analytics?.active_monthly_share_percent)}`"
+            >
+              <span class="member-stats-mix__week" :style="{ width: barWidth(analytics?.active_weekly_share_percent) }"></span>
+              <span class="member-stats-mix__month" :style="{ width: barWidth(analytics?.active_monthly_share_percent) }"></span>
+            </div>
+            <div class="member-stats-mix__cols">
+              <p>
+                <span class="member-stats-mix__label"><i class="member-stats-dot member-stats-dot--week"></i>周卡</span>
+                <strong><StatRollNumber :value="metric(analytics?.active_weekly_share_percent)" :digits="2" suffix="%" /></strong>
+                <em>
+                  <StatRollNumber :value="metric(analytics?.weekly?.active)" /> 户
+                  · 过期 <StatRollNumber :value="metric(analytics?.weekly?.expired)" /> 户
+                </em>
+              </p>
+              <p>
+                <span class="member-stats-mix__label"><i class="member-stats-dot member-stats-dot--month"></i>月卡</span>
+                <strong><StatRollNumber :value="metric(analytics?.active_monthly_share_percent)" :digits="2" suffix="%" /></strong>
+                <em>
+                  <StatRollNumber :value="metric(analytics?.monthly?.active)" /> 户
+                  · 过期 <StatRollNumber :value="metric(analytics?.monthly?.expired)" /> 户
+                </em>
+              </p>
+            </div>
+          </div>
         </div>
-        <div class="member-stats-ring-row">
-          <figure class="member-stats-ring">
-            <div class="member-stats-ring__tag member-stats-ring__tag--week">
-              <CalendarDays :size="14" stroke-width="2.25" />
-              周卡
-            </div>
-            <div class="member-stats-ring__wrap">
-              <svg viewBox="0 0 80 80" class="member-stats-ring__svg" aria-hidden="true">
-                <circle cx="40" cy="40" r="34" fill="none" stroke="#e2e8f0" stroke-width="8" />
-                <circle
-                  cx="40"
-                  cy="40"
-                  r="34"
-                  fill="none"
-                  stroke="#10b981"
-                  stroke-width="8"
-                  stroke-linecap="round"
-                  :stroke-dasharray="213.628"
-                  :stroke-dashoffset="ringDashOffset(analytics?.active_weekly_share_percent)"
-                  class="member-stats-ring__progress member-stats-ring__progress--week"
-                />
-              </svg>
-              <span class="member-stats-ring__pct">{{
-                loading ? '…' : fmtPct(analytics?.active_weekly_share_percent)
-              }}</span>
-            </div>
-            <figcaption class="member-stats-ring__cap">
-              <strong>周卡 {{ loading ? '…' : weeklyActiveAnimated }} 户</strong>
-              <span>过期 {{ fmtCount(analytics?.weekly?.expired) }} 户</span>
-            </figcaption>
-          </figure>
-          <figure class="member-stats-ring">
-            <div class="member-stats-ring__tag member-stats-ring__tag--month">
-              <CalendarRange :size="14" stroke-width="2.25" />
-              月卡
-            </div>
-            <div class="member-stats-ring__wrap">
-              <svg viewBox="0 0 80 80" class="member-stats-ring__svg" aria-hidden="true">
-                <circle cx="40" cy="40" r="34" fill="none" stroke="#e2e8f0" stroke-width="8" />
-                <circle
-                  cx="40"
-                  cy="40"
-                  r="34"
-                  fill="none"
-                  stroke="#3b82f6"
-                  stroke-width="8"
-                  stroke-linecap="round"
-                  :stroke-dasharray="213.628"
-                  :stroke-dashoffset="ringDashOffset(analytics?.active_monthly_share_percent)"
-                  class="member-stats-ring__progress member-stats-ring__progress--month"
-                />
-              </svg>
-              <span class="member-stats-ring__pct">{{
-                loading ? '…' : fmtPct(analytics?.active_monthly_share_percent)
-              }}</span>
-            </div>
-            <figcaption class="member-stats-ring__cap">
-              <strong>月卡 {{ loading ? '…' : monthlyActiveAnimated }} 户</strong>
-              <span>过期 {{ fmtCount(analytics?.monthly?.expired) }} 户</span>
-            </figcaption>
-          </figure>
-        </div>
-      </section>
-
-      <section class="member-stats-panel member-stats-insight-card" aria-label="续卡率">
-        <div class="member-stats-panel__head">
-          <span class="member-stats-panel__head-icon member-stats-panel__head-icon--primary" aria-hidden="true">
-            <TrendingUp :size="18" stroke-width="2.25" />
-          </span>
+        <div class="member-stats-structure__col">
+          <p class="member-stats-kicker">曾有过入账会员</p>
           <h3>续卡率</h3>
-        </div>
-        <p class="member-stats-panel__note">
-          <Repeat :size="13" stroke-width="2" class="member-stats-panel__note-icon" aria-hidden="true" />
-          含提前续卡；分母为曾有过入账会员。
-        </p>
-        <div class="member-stats-reorder-grid member-stats-reorder-grid--stack">
-          <div class="member-stats-reorder member-stats-reorder--week">
-            <span class="member-stats-reorder__icon member-stats-reorder__icon--week" aria-hidden="true">
-              <CalendarDays :size="16" stroke-width="2.25" />
-            </span>
-            <span class="member-stats-reorder__label">周卡续卡率</span>
-            <strong class="member-stats-reorder__pct">{{
-              loading ? '…' : fmtPct(analytics?.weekly_reorder?.rate_percent)
-            }}</strong>
-            <span class="member-stats-reorder__detail">
-              {{ fmtCount(analytics?.weekly_reorder?.reorder_members) }} /
-              {{ fmtCount(analytics?.weekly_reorder?.base_members) }} 户
-            </span>
-          </div>
-          <div class="member-stats-reorder member-stats-reorder--month">
-            <span class="member-stats-reorder__icon member-stats-reorder__icon--month" aria-hidden="true">
-              <CalendarRange :size="16" stroke-width="2.25" />
-            </span>
-            <span class="member-stats-reorder__label">月卡续卡率</span>
-            <strong class="member-stats-reorder__pct">{{
-              loading ? '…' : fmtPct(analytics?.monthly_reorder?.rate_percent)
-            }}</strong>
-            <span class="member-stats-reorder__detail">
-              {{ fmtCount(analytics?.monthly_reorder?.reorder_members) }} /
-              {{ fmtCount(analytics?.monthly_reorder?.base_members) }} 户
-            </span>
+          <p class="member-stats-note">含提前续卡。分母为曾有过入账会员。</p>
+          <div class="member-stats-reorder">
+            <div class="member-stats-reorder__row">
+              <span>周卡</span>
+              <strong><StatRollNumber :value="metric(analytics?.weekly_reorder?.rate_percent)" :digits="2" suffix="%" /></strong>
+              <em>
+                <StatRollNumber :value="metric(analytics?.weekly_reorder?.reorder_members)" />
+                /
+                <StatRollNumber :value="metric(analytics?.weekly_reorder?.base_members)" />
+                户
+              </em>
+              <div class="member-stats-track" aria-hidden="true">
+                <i :style="{ width: barWidth(analytics?.weekly_reorder?.rate_percent) }"></i>
+              </div>
+            </div>
+            <div class="member-stats-reorder__row">
+              <span>月卡</span>
+              <strong><StatRollNumber :value="metric(analytics?.monthly_reorder?.rate_percent)" :digits="2" suffix="%" /></strong>
+              <em>
+                <StatRollNumber :value="metric(analytics?.monthly_reorder?.reorder_members)" />
+                /
+                <StatRollNumber :value="metric(analytics?.monthly_reorder?.base_members)" />
+                户
+              </em>
+              <div class="member-stats-track" aria-hidden="true">
+                <i :style="{ width: barWidth(analytics?.monthly_reorder?.rate_percent) }"></i>
+              </div>
+            </div>
           </div>
         </div>
-      </section>
+      </article>
     </div>
 
-    <section class="member-stats-kpi-grid" aria-label="会员档案总览">
-      <article
+    <section class="member-stats-panel member-stats-archive" aria-label="会员档案总览">
+      <component
+        :is="card.link ? 'button' : 'div'"
         v-for="card in kpiCards"
         :key="card.key"
         class="member-stats-kpi"
-        :class="[
-          `member-stats-kpi--${card.tone}`,
-          { 'member-stats-kpi--clickable': Boolean(card.link) },
-        ]"
-        :role="card.link ? 'button' : undefined"
-        :tabindex="card.link ? 0 : undefined"
+        :class="[`member-stats-kpi--${card.tone}`, { 'member-stats-kpi--link': Boolean(card.link) }]"
+        :type="card.link ? 'button' : undefined"
         @click="card.link && goMembers(card.link)"
-        @keydown.enter="card.link && goMembers(card.link)"
       >
-        <div class="member-stats-kpi__top">
-          <span class="member-stats-kpi__icon" :class="`member-stats-kpi__icon--${card.tone}`" aria-hidden="true">
-            <component :is="card.icon" :size="18" stroke-width="2.25" />
-          </span>
-          <ArrowUpRight
-            v-if="card.link"
-            :size="14"
-            stroke-width="2.25"
-            class="member-stats-kpi__jump"
-            aria-hidden="true"
-          />
-        </div>
-        <span class="member-stats-kpi__label">{{ card.label }}</span>
-        <strong class="member-stats-kpi__value">{{ card.value }}</strong>
-        <span class="member-stats-kpi__hint">{{ card.hint }}</span>
-      </article>
+        <span class="member-stats-kpi__label">
+          {{ card.label }}
+          <ArrowUpRight v-if="card.link" :size="13" stroke-width="2.2" aria-hidden="true" />
+        </span>
+        <strong>
+          <StatRollNumber :value="card.amount" :digits="card.digits" :suffix="card.suffix" />
+        </strong>
+        <small>{{ card.hint }}</small>
+      </component>
     </section>
 
-    <section class="member-stats-panel member-stats-panel--ops" aria-label="运营状态分布">
-      <div class="member-stats-panel__head">
-        <span class="member-stats-panel__head-icon member-stats-panel__head-icon--slate" aria-hidden="true">
-          <Activity :size="18" stroke-width="2.25" />
-        </span>
-        <h3>运营状态分布</h3>
-      </div>
-      <div class="member-stats-ops-summary-row">
-        <div class="member-stats-ops-summary" aria-label="未消费餐次汇总">
-          <span class="member-stats-ops-summary__icon" aria-hidden="true">
-            <UtensilsCrossed :size="18" stroke-width="2.25" />
-          </span>
-          <div class="member-stats-ops-summary__main">
-            <span class="member-stats-ops-summary__label">未消费餐次总数</span>
-            <strong class="member-stats-ops-summary__value">
-              {{ loading ? '…' : `${unconsumedMealsAnimated} 次` }}
-            </strong>
+    <section class="member-stats-panel member-stats-ops" aria-label="运营状态分布">
+      <div class="member-stats-ops__head">
+        <div class="member-stats-ops__title">
+          <div class="member-stats-ops__name">
+            <span class="member-stats-meals__icon" aria-hidden="true">
+              <UtensilsCrossed :size="15" stroke-width="2" />
+            </span>
+            <h3>运营状态分布</h3>
           </div>
-          <p class="member-stats-ops-summary__hint">
-            午餐 {{ fmtCount(analytics?.unconsumed_meals?.lunch_total) }} 次
-            · 晚餐 {{ fmtCount(analytics?.unconsumed_meals?.dinner_total) }} 次
-          </p>
+          <div class="member-stats-meals" aria-label="未消费餐次汇总">
+            <span class="member-stats-meals__item">
+              <span class="member-stats-meals__label">未消费餐次</span>
+              <strong class="member-stats-meals__figure">
+                <StatRollNumber :value="metric(analytics?.unconsumed_meals?.total)" />
+                <small>次</small>
+              </strong>
+            </span>
+            <span class="member-stats-meals__item">
+              <span class="member-stats-meals__label">午餐</span>
+              <strong class="member-stats-meals__figure member-stats-meals__figure--lunch">
+                <StatRollNumber :value="metric(analytics?.unconsumed_meals?.lunch_total)" />
+                <small>次</small>
+              </strong>
+            </span>
+            <span class="member-stats-meals__item">
+              <span class="member-stats-meals__label">晚餐</span>
+              <strong class="member-stats-meals__figure member-stats-meals__figure--dinner">
+                <StatRollNumber :value="metric(analytics?.unconsumed_meals?.dinner_total)" />
+                <small>次</small>
+              </strong>
+            </span>
+          </div>
         </div>
       </div>
-      <ul class="member-stats-ops-list">
-        <li v-for="row in operationalRows" :key="row.key">
-          <button
-            type="button"
-            class="member-stats-ops-item"
-            :class="{ 'member-stats-ops-item--highlight': row.highlight }"
-            @click="goMembers(row.link)"
-          >
-            <span
-              class="member-stats-ops-item__icon"
-              :class="`member-stats-ops-item__icon--${row.tone}`"
-              aria-hidden="true"
-            >
-              <component :is="row.icon" :size="16" stroke-width="2.25" />
-            </span>
-            <span class="member-stats-ops-item__label">{{ row.label }}</span>
-            <strong class="member-stats-ops-item__count">{{ fmtCount(row.count) }}</strong>
-            <ChevronRight :size="16" stroke-width="2.25" class="member-stats-ops-item__arrow" aria-hidden="true" />
-          </button>
-        </li>
-      </ul>
+      <div class="member-stats-ops__grid">
+        <button
+          v-for="row in operationalRows"
+          :key="row.key"
+          type="button"
+          class="member-stats-op"
+          :class="{
+            'member-stats-op--hot': row.highlight,
+            'member-stats-op--rose': row.tone === 'rose',
+          }"
+          @click="goMembers(row.link)"
+        >
+          <span class="member-stats-op__icon" aria-hidden="true">
+            <component :is="row.icon" :size="15" stroke-width="2" />
+          </span>
+          <span class="member-stats-op__name">{{ row.label }}</span>
+          <strong class="member-stats-op__count"><StatRollNumber :value="metric(row.count)" /></strong>
+        </button>
+      </div>
     </section>
   </section>
 </template>
 
 <style scoped>
 .member-stats-page {
-  --ms-primary: #0d5c46;
-  --ms-border: #eaedf1;
-  --ms-muted: #64748b;
-  --ms-text: #0f172a;
-  --ms-active: #10b981;
-  --ms-danger: #ef4444;
+  --ms-ink: #1d1f21;
+  --ms-muted: #5c6670;
+  --ms-faint: #8b949e;
+  --ms-line: rgba(15, 23, 42, 0.06);
+  --ms-ok: #1f8a5b;
+  --ms-rose: #c45c66;
+  --ms-month: #7e93a8;
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  font-family: var(--okfood-font-sans);
+  gap: 16px;
+  /* 与讨论稿同宽。宽屏主区里若拉满，占比条、六格和状态格会被扯开 */
+  width: min(1200px, 100%);
+  max-width: 1200px;
+  align-self: flex-start;
   padding-bottom: 1.5rem;
+  color: var(--ms-ink);
+  font-family: var(--okfood-font-sans);
 }
 
 .member-stats-head {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 1rem 1.5rem;
-  padding: 0 1rem;
-}
-
-.member-stats-insight-row {
-  display: grid;
-  grid-template-columns: 1.05fr 1fr 0.95fr;
   gap: 16px;
-  padding: 0 1rem;
-  align-items: stretch;
+  padding: 2px 2px 0;
 }
 
-@media (max-width: 1180px) {
-  .member-stats-insight-row {
-    grid-template-columns: 1fr;
-  }
-}
-
-.member-stats-insight-card {
-  min-width: 0;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.member-stats-insight-card.member-stats-panel {
-  margin: 0;
-}
-
-.member-stats-renew-hero {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 1rem;
-  margin: 0;
-  padding: 1.35rem 1.5rem;
-  border-radius: 24px;
-  border: 1px solid #fde68a;
-  background: linear-gradient(135deg, #fffbeb 0%, #fff 55%);
-  box-shadow: 0 8px 28px rgba(245, 158, 11, 0.08);
-  overflow: hidden;
-  min-height: 100%;
-}
-
-.member-stats-renew-hero__deco {
-  position: absolute;
-  right: 0.75rem;
-  top: 0.75rem;
-  transform: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 72px;
-  height: 72px;
-  border-radius: 20px;
-  background: rgba(254, 243, 199, 0.55);
-  color: rgba(245, 158, 11, 0.28);
-  pointer-events: none;
-}
-
-.member-stats-renew-hero__main {
-  position: relative;
-  z-index: 1;
-  flex: 1 1 auto;
-  min-width: 0;
-  padding-right: 4.5rem;
-}
-
-@media (max-width: 1180px) {
-  .member-stats-renew-hero__main {
-    padding-right: 0;
-  }
-}
-
-.member-stats-renew-hero__badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.25rem 0.65rem;
-  border-radius: 999px;
-  background: #fef3c7;
-  color: #b45309;
+.member-stats-crumb {
+  margin: 0 0 6px;
   font-size: 12px;
-  font-weight: 800;
-  margin-bottom: 0.65rem;
+  color: var(--ms-faint);
 }
 
-.member-stats-renew-hero__metric {
-  display: flex;
-  align-items: baseline;
-  gap: 0.25rem;
-  margin-bottom: 0.35rem;
-}
-
-.member-stats-renew-hero__count {
-  font-family: var(--okfood-font-number);
-  font-size: 2.35rem;
-  font-weight: 900;
-  line-height: 1;
-  color: #b45309;
-  font-variant-numeric: tabular-nums;
-}
-
-.member-stats-renew-hero__unit {
-  font-size: 1rem;
-  font-weight: 800;
-  color: #92400e;
-}
-
-.member-stats-renew-hero__desc {
-  margin: 0 0 0.65rem;
-  font-size: 12px;
-  color: var(--ms-muted);
-  line-height: 1.5;
-  max-width: none;
-}
-
-.member-stats-renew-hero__breakdown {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1.25rem;
-  font-size: 12px;
-  color: var(--ms-muted);
-}
-
-.member-stats-renew-hero__breakdown li {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.member-stats-renew-hero__chip-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.35rem;
-  height: 1.35rem;
-  padding: 0 0.25rem;
-  border-radius: 8px;
-  background: #fef3c7;
-  color: #b45309;
-  font-family: var(--okfood-font-number);
-  font-size: 11px;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.member-stats-renew-hero__chip-icon--one {
-  background: #ffedd5;
-  color: #c2410c;
-}
-
-.member-stats-renew-hero__breakdown strong {
-  font-family: var(--okfood-font-number);
-  color: #b45309;
-  font-weight: 900;
-}
-
-.member-stats-renew-hero__actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-  flex-shrink: 0;
-  position: relative;
-  z-index: 1;
-  width: 100%;
-}
-
-.member-stats-renew-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  width: 100%;
-  min-width: 0;
-  padding: 0.65rem 1.125rem;
-  border-radius: 14px;
-  font-size: 13px;
-  font-weight: 800;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-
-.member-stats-panel.member-stats-insight-card {
-  padding: 1.35rem 1.5rem;
-  display: flex;
-  flex-direction: column;
-}
-
-.member-stats-panel.member-stats-insight-card .member-stats-panel__head {
-  margin-bottom: 1rem;
-}
-
-.member-stats-panel.member-stats-insight-card .member-stats-ring-row {
-  flex: 1 1 auto;
-  align-items: center;
-}
-
-.member-stats-panel.member-stats-insight-card .member-stats-panel__note {
-  margin-bottom: 0.75rem;
-}
-
-/* 续卡率卡片内：窄列时由下方更高优先级规则自动折行 */
-.member-stats-reorder-grid--stack {
-  flex: 1 1 auto;
-  align-content: start;
-}
-
-.member-stats-renew-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.member-stats-renew-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.member-stats-renew-btn--primary {
-  background: #f59e0b;
-  color: #fff;
-  border-color: #d97706;
-}
-
-.member-stats-renew-btn--secondary {
-  background: #fff;
-  color: #b45309;
-  border-color: #fde68a;
-}
-
-.member-stats-renew-btn__chev {
-  opacity: 0.85;
-  margin-left: auto;
-}
-
-.member-stats-head__title-row {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  margin-bottom: 0.35rem;
-}
-
-.member-stats-head__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 14px;
-  background: rgba(13, 92, 70, 0.1);
-  color: var(--ms-primary);
-  flex-shrink: 0;
+.member-stats-crumb b {
+  color: var(--el-color-primary-dark-2);
+  font-weight: 700;
 }
 
 .member-stats-head__title {
   margin: 0;
-  font-size: 1.35rem;
-  font-weight: 800;
-  color: var(--ms-text);
-  letter-spacing: -0.02em;
+  font-size: 28px;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  font-weight: 700;
 }
 
 .member-stats-head__sub {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.35rem;
-  margin: 0;
-  font-size: 13px;
+  margin: 6px 0 0;
+  max-width: 40rem;
   color: var(--ms-muted);
+  font-size: 13px;
   line-height: 1.5;
-  max-width: 42rem;
-}
-
-.member-stats-head__sub-icon {
-  flex-shrink: 0;
-  margin-top: 0.15rem;
-  color: #94a3b8;
 }
 
 .member-stats-refresh {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 1rem;
-  border-radius: 12px;
-  border: 1px solid var(--ms-border);
-  background: #fff;
-  color: var(--ms-text);
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--ms-line);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ms-ink);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.2s ease;
 }
 
 .member-stats-refresh:hover:not(:disabled) {
-  background: #f8fafc;
+  border-color: color-mix(in srgb, var(--el-color-primary) 45%, #fff);
+  color: var(--el-color-primary-dark-2);
 }
 
 .member-stats-refresh:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
 .member-stats-refresh__spin {
-  animation: member-stats-spin 0.85s linear infinite;
+  animation: member-stats-spin 0.8s linear infinite;
 }
 
 @keyframes member-stats-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
-.member-stats-kpi-grid {
+.member-stats-top {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   gap: 16px;
-  padding: 0 1rem;
+  align-items: stretch;
 }
 
-@media (max-width: 1200px) {
-  .member-stats-kpi-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (max-width: 640px) {
-  .member-stats-kpi-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-.member-stats-kpi {
+.member-stats-hero {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 1.125rem 1.25rem;
-  border-radius: 20px;
-  border: 1px solid var(--ms-border);
-  background: #fff;
-  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.03);
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 22px 18px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.62), color-mix(in srgb, var(--el-color-primary-light-9) 88%, #fff));
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 18px 40px color-mix(in srgb, var(--el-color-primary) 16%, transparent);
 }
 
-.member-stats-kpi__top {
+.member-stats-hero__glow {
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  right: -50px;
+  top: -60px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--el-color-primary) 28%, transparent);
+  filter: blur(28px);
+  pointer-events: none;
+}
+
+.member-stats-hero__body,
+.member-stats-hero__actions {
+  position: relative;
+  z-index: 1;
+}
+
+.member-stats-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--el-color-primary) 16%, #fff);
+  color: var(--el-color-primary-dark-2);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.member-stats-hero__metric {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.member-stats-hero__metric strong {
+  font-size: 80px;
+  line-height: 1;
+  letter-spacing: -0.045em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.member-stats-hero__unit {
+  font-size: 14px;
+  color: var(--ms-muted);
+  font-weight: 600;
+}
+
+.member-stats-hero__desc {
+  margin: 10px 0 0;
+  color: var(--ms-muted);
+  font-size: 13px;
+}
+
+.member-stats-hero__splits {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.member-stats-hero__splits li {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  color: var(--ms-muted);
+}
+
+.member-stats-hero__splits b {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.15rem;
+  gap: 3px;
+  margin-top: 2px;
+  color: var(--ms-ink);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
 }
 
-.member-stats-kpi__icon {
+.member-stats-hero__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.member-stats-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  flex-shrink: 0;
-}
-
-.member-stats-kpi__icon--neutral {
-  background: #f1f5f9;
-  color: #475569;
-}
-
-.member-stats-kpi__icon--active {
-  background: #ecfdf5;
-  color: #059669;
-}
-
-.member-stats-kpi__icon--muted {
-  background: #f8fafc;
-  color: #94a3b8;
-}
-
-.member-stats-kpi__icon--danger {
-  background: #fef2f2;
-  color: #ef4444;
-}
-
-.member-stats-kpi__icon--primary {
-  background: rgba(13, 92, 70, 0.1);
-  color: var(--ms-primary);
-}
-
-.member-stats-kpi__jump {
-  color: #cbd5e1;
-  flex-shrink: 0;
-  transition: color 0.2s ease, transform 0.2s ease;
-}
-
-.member-stats-kpi--clickable:hover .member-stats-kpi__jump {
-  color: var(--ms-primary);
-  transform: translate(1px, -1px);
-}
-
-.member-stats-kpi--clickable {
+  gap: 6px;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
   cursor: pointer;
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
 }
 
-.member-stats-kpi--clickable:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+.member-stats-btn--primary {
+  flex: 1;
+  border: 0;
+  color: #fff;
+  background: var(--el-color-primary);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--el-color-primary) 32%, transparent);
 }
 
-.member-stats-kpi__label {
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--ms-muted);
-  letter-spacing: 0.04em;
+.member-stats-btn--primary:hover {
+  background: var(--el-color-primary-dark-2);
 }
 
-.member-stats-kpi__value {
-  font-family: var(--okfood-font-number);
-  font-size: 1.75rem;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-  color: var(--ms-text);
+.member-stats-btn--ghost {
+  border: 1px solid var(--ms-line);
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--ms-ink);
 }
 
-.member-stats-kpi--active .member-stats-kpi__value {
-  color: var(--ms-active);
+.member-stats-btn--ghost:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--el-color-primary) 40%, #fff);
 }
 
-.member-stats-kpi--primary .member-stats-kpi__value {
-  color: var(--ms-primary);
-}
-
-.member-stats-kpi--danger .member-stats-kpi__value {
-  color: var(--ms-danger);
-}
-
-.member-stats-kpi--muted .member-stats-kpi__value {
-  color: #94a3b8;
-}
-
-.member-stats-kpi__hint {
-  font-size: 11px;
-  color: #94a3b8;
+.member-stats-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .member-stats-panel {
-  padding: 1.5rem 1.75rem;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.9);
   border-radius: 24px;
-  border: 1px solid var(--ms-border);
-  background: #fff;
-  box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.04);
+  box-shadow: 0 10px 30px rgba(25, 45, 55, 0.05);
 }
 
-.member-stats-panel__head {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  margin-bottom: 1.25rem;
-}
-
-.member-stats-panel__head-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  flex-shrink: 0;
-}
-
-.member-stats-panel__head-icon--green {
-  background: #ecfdf5;
-  color: #059669;
-}
-
-.member-stats-panel__head-icon--primary {
-  background: rgba(13, 92, 70, 0.1);
-  color: var(--ms-primary);
-}
-
-.member-stats-panel__head-icon--slate {
-  background: #f1f5f9;
-  color: #64748b;
-}
-
-.member-stats-panel__head h3 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 800;
-  color: var(--ms-text);
-}
-
-.member-stats-panel__note {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.35rem;
-  margin: -0.5rem 0 1rem;
-  font-size: 12px;
-  color: var(--ms-muted);
-  line-height: 1.5;
-}
-
-.member-stats-panel__note-icon {
-  flex-shrink: 0;
-  margin-top: 0.1rem;
-  color: #94a3b8;
-}
-
-.member-stats-ring-row {
-  display: flex;
-  justify-content: space-around;
-  gap: 1.5rem;
-  padding: 0.75rem 0.5rem;
-  background: #fafbfc;
-  border: 1px solid var(--ms-border);
-  border-radius: 20px;
-}
-
-.member-stats-ring {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.65rem;
+.member-stats-structure {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
   min-width: 0;
 }
 
-.member-stats-ring__tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.03em;
+.member-stats-structure__col {
+  min-width: 0;
+  padding: 20px 22px 18px;
 }
 
-.member-stats-ring__tag--week {
-  background: #ecfdf5;
-  color: #059669;
+.member-stats-structure__col + .member-stats-structure__col {
+  border-left: 1px solid var(--ms-line);
 }
 
-.member-stats-ring__tag--month {
-  background: #eff6ff;
-  color: #2563eb;
+.member-stats-kicker {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ms-faint);
 }
 
-.member-stats-ring__wrap {
-  position: relative;
-  width: 96px;
-  height: 96px;
-}
-
-.member-stats-ring__svg {
-  width: 96px;
-  height: 96px;
-  transform: rotate(-90deg);
-}
-
-.member-stats-ring__progress {
-  transition: stroke-dashoffset 0.55s ease;
-}
-
-.member-stats-ring__progress--week {
-  filter: drop-shadow(0 2px 4px rgba(16, 185, 129, 0.25));
-}
-
-.member-stats-ring__progress--month {
-  filter: drop-shadow(0 2px 4px rgba(59, 130, 246, 0.25));
-}
-
-.member-stats-ring__pct {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--okfood-font-number);
+.member-stats-structure h3,
+.member-stats-ops h3 {
+  margin: 4px 0 0;
   font-size: 16px;
-  font-weight: 900;
-  color: var(--ms-text);
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+
+.member-stats-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--ms-faint);
+  line-height: 1.45;
+}
+
+.member-stats-mix {
+  margin-top: 18px;
+}
+
+.member-stats-mix__bar {
+  display: flex;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #eef2f4;
+}
+
+.member-stats-mix__week,
+.member-stats-mix__month {
+  transition: width 0.78s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.member-stats-mix__week {
+  background: var(--el-color-primary);
+}
+
+.member-stats-mix__month {
+  background: var(--ms-month);
+}
+
+.member-stats-mix__cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.member-stats-mix__cols p {
+  margin: 0;
+}
+
+.member-stats-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 1px;
+}
+
+.member-stats-dot--week { background: var(--el-color-primary); }
+.member-stats-dot--month { background: var(--ms-month); }
+
+.member-stats-mix__label {
+  font-size: 12px;
+  color: var(--ms-muted);
+  font-weight: 700;
+}
+
+.member-stats-mix__cols strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 26px;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
 
-.member-stats-ring__cap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.2rem;
-  text-align: center;
-}
-
-.member-stats-ring__cap strong {
-  font-size: 13px;
-  font-weight: 800;
-  color: var(--ms-text);
-}
-
-.member-stats-ring__cap span {
-  font-size: 11px;
-  color: var(--ms-muted);
-}
-
-.member-stats-reorder-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-}
-
-/* 提高优先级，避免被上方基础两列样式覆盖 */
-.member-stats-reorder-grid.member-stats-reorder-grid--stack {
-  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+.member-stats-mix__cols em,
+.member-stats-reorder__row em {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--ms-faint);
 }
 
 .member-stats-reorder {
-  position: relative;
+  margin-top: 16px;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 1.125rem 1.25rem 1.125rem 3.25rem;
-  border-radius: 16px;
-  background: #f8fafc;
-  border: 1px solid var(--ms-border);
+  gap: 14px;
 }
 
-.member-stats-reorder--week {
-  background: linear-gradient(135deg, #f0fdf4 0%, #f8fafc 100%);
-}
-
-.member-stats-reorder--month {
-  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
-}
-
-.member-stats-reorder__icon {
-  position: absolute;
-  left: 1rem;
-  top: 1.125rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-}
-
-.member-stats-reorder__icon--week {
-  background: #dcfce7;
-  color: #059669;
-}
-
-.member-stats-reorder__icon--month {
-  background: #dbeafe;
-  color: #2563eb;
-}
-
-.member-stats-reorder__label {
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--ms-muted);
-}
-
-.member-stats-reorder__pct {
-  font-family: var(--okfood-font-number);
-  font-size: 1.75rem;
-  font-weight: 900;
-  color: var(--ms-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.member-stats-reorder__detail {
-  font-size: 12px;
-  color: var(--ms-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.member-stats-panel--ops {
-  margin: 0 1rem;
-}
-
-.member-stats-ops-summary-row {
-  margin-bottom: 1rem;
-}
-
-.member-stats-ops-summary {
+.member-stats-reorder__row {
   display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-  gap: 0.35rem 0.85rem;
-  align-items: center;
-  padding: 1rem 1.125rem;
-  border-radius: 16px;
-  border: 1px solid #bbf7d0;
-  background: linear-gradient(135deg, #f0fdf4 0%, #fafbfc 100%);
-}
-
-.member-stats-ops-summary__icon {
-  grid-row: 1 / span 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: #dcfce7;
-  color: #059669;
-}
-
-.member-stats-ops-summary__main {
-  display: flex;
-  flex-wrap: wrap;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
   align-items: baseline;
-  gap: 0.5rem 1rem;
 }
 
-.member-stats-ops-summary__label {
+.member-stats-reorder__row > span {
   font-size: 13px;
-  font-weight: 700;
-  color: var(--ms-text);
+  color: var(--ms-muted);
+  font-weight: 650;
 }
 
-.member-stats-ops-summary__value {
-  font-family: var(--okfood-font-number);
-  font-size: 1.5rem;
-  font-weight: 900;
-  color: var(--ms-primary);
+.member-stats-reorder__row > strong {
+  font-size: 22px;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
 
-.member-stats-ops-summary__hint {
-  grid-column: 2;
-  margin: 0;
+.member-stats-reorder__row em {
+  grid-column: 1 / -1;
+}
+
+.member-stats-track {
+  grid-column: 1 / -1;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: #e4eaee;
+  overflow: hidden;
+}
+
+.member-stats-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--el-color-primary);
+  transition: width 0.78s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.member-stats-archive {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.member-stats-kpi {
+  padding: 16px 16px 14px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--ms-line);
+  color: inherit;
+}
+
+.member-stats-kpi:last-child {
+  border-right: 0;
+}
+
+.member-stats-kpi--link {
+  cursor: pointer;
+}
+
+.member-stats-kpi--link:hover {
+  background: color-mix(in srgb, var(--el-color-primary) 7%, #fff);
+}
+
+.member-stats-kpi__label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 12px;
   color: var(--ms-muted);
-  line-height: 1.5;
-  font-variant-numeric: tabular-nums;
-}
-
-.member-stats-ops-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 12px;
-}
-
-@media (max-width: 1200px) {
-  .member-stats-ops-list {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (max-width: 960px) {
-  .member-stats-ops-list {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-.member-stats-ops-item {
-  width: 100%;
-  display: grid;
-  grid-template-columns: auto 1fr auto auto;
-  align-items: center;
-  gap: 0.65rem;
-  padding: 0.875rem 1rem;
-  border-radius: 16px;
-  border: 1px solid var(--ms-border);
-  background: #fafbfc;
-  cursor: pointer;
-  text-align: left;
-  transition:
-    background 0.2s ease,
-    border-color 0.2s ease,
-    transform 0.2s ease;
-}
-
-.member-stats-ops-item:hover {
-  background: #f1f5f9;
-  transform: translateY(-1px);
-}
-
-.member-stats-ops-item__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  flex-shrink: 0;
-}
-
-.member-stats-ops-item__icon--amber {
-  background: #fef3c7;
-  color: #d97706;
-}
-
-.member-stats-ops-item__icon--slate {
-  background: #f1f5f9;
-  color: #64748b;
-}
-
-.member-stats-ops-item__icon--blue {
-  background: #dbeafe;
-  color: #2563eb;
-}
-
-.member-stats-ops-item__icon--green {
-  background: #dcfce7;
-  color: #059669;
-}
-
-.member-stats-ops-item__icon--rose {
-  background: #ffe4e6;
-  color: #e11d48;
-}
-
-.member-stats-ops-item--highlight {
-  border-color: #fde68a;
-  background: #fffbeb;
-}
-
-.member-stats-ops-item--highlight:hover {
-  background: #fef3c7;
-}
-
-.member-stats-ops-item__label {
-  font-size: 13px;
   font-weight: 700;
-  color: var(--ms-text);
 }
 
-.member-stats-ops-item__count {
-  font-family: var(--okfood-font-number);
-  font-size: 1.25rem;
-  font-weight: 900;
-  color: var(--ms-primary);
+.member-stats-kpi__label svg {
+  color: var(--ms-faint);
+}
+
+.member-stats-kpi strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 28px;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.member-stats-kpi--ok strong { color: var(--ms-ok); }
+.member-stats-kpi--rose strong { color: var(--ms-rose); }
+
+.member-stats-kpi small {
+  display: block;
+  margin-top: 4px;
+  color: var(--ms-faint);
+  font-size: 12px;
+}
+
+.member-stats-ops {
+  padding: 18px 18px 14px;
+}
+
+.member-stats-ops__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 4px 14px;
+}
+
+.member-stats-ops__title {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+.member-stats-ops__title h3 {
+  margin: 0;
+}
+
+.member-stats-ops__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.member-stats-meals {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 22px;
+  min-width: 0;
+  color: var(--ms-muted);
+  text-align: left;
+}
+
+.member-stats-meals__icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 1px;
+  flex: none;
+  border-radius: 9px;
+  background: #f6f8f9;
+  color: var(--ms-muted);
+}
+
+.member-stats-meals__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.member-stats-meals__label {
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--ms-muted);
+}
+
+.member-stats-meals__figure {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--el-color-primary-dark-2);
+}
+
+.member-stats-meals__figure--lunch {
+  color: var(--ms-ok);
+}
+
+.member-stats-meals__figure--dinner {
+  color: #6a78c4;
+}
+
+.member-stats-meals__figure small {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ms-muted);
+}
+
+.member-stats-ops__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.member-stats-op {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 108px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid transparent;
+  background: #f6f8f9;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.member-stats-op:hover {
+  background: #fff;
+  border-color: var(--ms-line);
+  box-shadow: 0 8px 20px rgba(25, 45, 55, 0.05);
+}
+
+.member-stats-op--hot {
+  background: color-mix(in srgb, var(--el-color-primary) 12%, #fff);
+}
+
+.member-stats-op--hot:hover {
+  border-color: color-mix(in srgb, var(--el-color-primary) 35%, #fff);
+}
+
+.member-stats-op__icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--ms-muted);
+}
+
+.member-stats-op--hot .member-stats-op__icon {
+  color: var(--el-color-primary-dark-2);
+}
+
+.member-stats-op--rose .member-stats-op__icon,
+.member-stats-op--rose .member-stats-op__count {
+  color: var(--ms-rose);
+}
+
+.member-stats-op__name {
+  font-size: 12px;
+  color: var(--ms-muted);
+  font-weight: 700;
+}
+
+.member-stats-op__count {
+  margin-top: auto;
+  font-size: 22px;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
 
-.member-stats-ops-item__arrow {
-  color: #94a3b8;
-  flex-shrink: 0;
-  transition: color 0.2s ease, transform 0.2s ease;
+@media (max-width: 1180px) {
+  .member-stats-top,
+  .member-stats-structure,
+  .member-stats-archive {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .member-stats-structure__col + .member-stats-structure__col {
+    border-left: 0;
+    border-top: 1px solid var(--ms-line);
+  }
+
+  .member-stats-kpi {
+    border-bottom: 1px solid var(--ms-line);
+  }
+
+  .member-stats-ops__grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .member-stats-ops__head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .member-stats-meals {
+    min-width: 0;
+  }
 }
 
-.member-stats-ops-item:hover .member-stats-ops-item__arrow {
-  color: var(--ms-primary);
-  transform: translateX(2px);
+@media (max-width: 720px) {
+  .member-stats-head,
+  .member-stats-hero__actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .member-stats-top,
+  .member-stats-archive,
+  .member-stats-ops__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .member-stats-meals {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .member-stats-hero__metric strong {
+    font-size: 64px;
+  }
 }
 </style>
+

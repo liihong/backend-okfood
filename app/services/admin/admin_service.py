@@ -1313,7 +1313,8 @@ def _dish_admin_out_from_row(
         id=row.id,
         name=row.name,
         description=None if lite else row.description,
-        image_url=None if lite else row.image_url,
+        # 图片只是短地址，下拉选菜要用来做小缩略图，精简列表也带上
+        image_url=row.image_url,
         is_enabled=row.is_enabled,
         category_id=row.category_id,
         meat_category_id=row.meat_category_id,
@@ -1445,9 +1446,10 @@ def list_dishes_admin(
         MenuDish.single_order_price_yuan,
         MenuDish.spice_level,
         MenuDish.created_at,
+        MenuDish.image_url,
     ]
     if not lite:
-        load_cols.extend([MenuDish.description, MenuDish.image_url])
+        load_cols.append(MenuDish.description)
     stmt = (
         select(MenuDish)
         .options(load_only(*load_cols))

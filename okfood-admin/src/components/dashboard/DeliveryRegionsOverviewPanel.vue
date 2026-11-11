@@ -839,7 +839,18 @@ onMounted(() => {
           </div>
           <div class="dro-pc-dish__row">
             <div class="dro-pc-photo" :class="{ 'dro-pc-photo--empty': !todayLunchDish.image }">
-              <img v-if="todayLunchDish.image" :src="todayLunchDish.image" :alt="todayLunchDish.name || '午餐'" />
+              <el-image
+                v-if="todayLunchDish.image"
+                class="dro-pc-photo__img"
+                :src="todayLunchDish.image"
+                :preview-src-list="[todayLunchDish.image]"
+                :alt="todayLunchDish.name || '午餐'"
+                :title="todayLunchDish.name ? `查看大图：${todayLunchDish.name}` : '查看大图'"
+                fit="cover"
+                preview-teleported
+                hide-on-click-modal
+                :z-index="4000"
+              />
               <span v-else>未排菜</span>
             </div>
             <div class="dro-pc-dish__copy">
@@ -1017,7 +1028,18 @@ onMounted(() => {
           </div>
           <div class="dro-pc-dish__row">
             <div class="dro-pc-photo" :class="{ 'dro-pc-photo--empty': !todayDinnerDish.image }">
-              <img v-if="todayDinnerDish.image" :src="todayDinnerDish.image" :alt="todayDinnerDish.name || '晚餐'" />
+              <el-image
+                v-if="todayDinnerDish.image"
+                class="dro-pc-photo__img"
+                :src="todayDinnerDish.image"
+                :preview-src-list="[todayDinnerDish.image]"
+                :alt="todayDinnerDish.name || '晚餐'"
+                :title="todayDinnerDish.name ? `查看大图：${todayDinnerDish.name}` : '查看大图'"
+                fit="cover"
+                preview-teleported
+                hide-on-click-modal
+                :z-index="4000"
+              />
               <span v-else>未排菜</span>
             </div>
             <div class="dro-pc-dish__copy">
@@ -1158,7 +1180,18 @@ onMounted(() => {
           </div>
           <div class="dro-pc-dish__row">
             <div class="dro-pc-photo" :class="{ 'dro-pc-photo--empty': !tomorrowLunchDish.image }">
-              <img v-if="tomorrowLunchDish.image" :src="tomorrowLunchDish.image" :alt="tomorrowLunchDish.name || '午餐'" />
+              <el-image
+                v-if="tomorrowLunchDish.image"
+                class="dro-pc-photo__img"
+                :src="tomorrowLunchDish.image"
+                :preview-src-list="[tomorrowLunchDish.image]"
+                :alt="tomorrowLunchDish.name || '午餐'"
+                :title="tomorrowLunchDish.name ? `查看大图：${tomorrowLunchDish.name}` : '查看大图'"
+                fit="cover"
+                preview-teleported
+                hide-on-click-modal
+                :z-index="4000"
+              />
               <span v-else>未排菜</span>
             </div>
             <div class="dro-pc-dish__copy">
@@ -1338,7 +1371,18 @@ onMounted(() => {
           </div>
           <div class="dro-pc-dish__row">
             <div class="dro-pc-photo" :class="{ 'dro-pc-photo--empty': !tomorrowDinnerDish.image }">
-              <img v-if="tomorrowDinnerDish.image" :src="tomorrowDinnerDish.image" :alt="tomorrowDinnerDish.name || '晚餐'" />
+              <el-image
+                v-if="tomorrowDinnerDish.image"
+                class="dro-pc-photo__img"
+                :src="tomorrowDinnerDish.image"
+                :preview-src-list="[tomorrowDinnerDish.image]"
+                :alt="tomorrowDinnerDish.name || '晚餐'"
+                :title="tomorrowDinnerDish.name ? `查看大图：${tomorrowDinnerDish.name}` : '查看大图'"
+                fit="cover"
+                preview-teleported
+                hide-on-click-modal
+                :z-index="4000"
+              />
               <span v-else>未排菜</span>
             </div>
             <div class="dro-pc-dish__copy">
@@ -3912,11 +3956,21 @@ button.dro-dash-kpi__ico-badge--action:focus-visible {
     0 4px 12px rgba(15, 23, 42, 0.08);
 }
 
-.dro-pc-photo img {
+.dro-pc-photo img,
+.dro-pc-photo__img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.dro-pc-photo__img {
+  cursor: zoom-in;
+}
+
+.dro-pc-photo__img :deep(.el-image__inner) {
+  width: 100%;
+  height: 100%;
 }
 
 .dro-pc-photo--empty {

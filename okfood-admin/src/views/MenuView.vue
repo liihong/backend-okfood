@@ -383,37 +383,39 @@ onMounted(() => {
       <div class="mkt-page-head__copy">
         <p class="mkt-kicker">菜单管理</p>
         <h1 class="mkt-title">菜品管理</h1>
-        <p class="mkt-intro">按肉类分组查看菜品。搜索和分类在左侧，新建在右侧。</p>
+        <p class="mkt-intro">按肉类分组查看菜品。</p>
       </div>
-    </header>
-    <div class="dish-toolbar">
-      <div class="dish-toolbar-filters">
-        <div class="dish-toolbar-search">
-          <Search :size="18" />
+      <div class="dish-toolbar">
+        <div class="dish-toolbar-filters">
           <el-input
             v-model="dishSearchQuery"
-            type="search"
             clearable
             placeholder="按菜品名称筛选…"
-            class="dish-toolbar-search-input"
+            class="dish-search"
+          >
+            <template #prefix>
+              <Search :size="16" stroke-width="2.25" class="dish-search__icon" aria-hidden="true" />
+            </template>
+          </el-input>
+          <el-cascader
+            v-model="dishCategoryFilter"
+            :options="dishFilterCascaderOptions"
+            :props="{ emitPath: false, checkStrictly: true }"
+            clearable
+            placeholder="全部分类"
+            class="dish-toolbar-category"
+            @change="fetchDishes"
           />
         </div>
-        <el-cascader
-          v-model="dishCategoryFilter"
-          :options="dishFilterCascaderOptions"
-          :props="{ emitPath: false, checkStrictly: true }"
-          clearable
-          placeholder="全部分类"
-          class="dish-toolbar-category"
-          @change="fetchDishes"
-        />
+        <div class="dish-toolbar-actions">
+          <p v-if="dishesLoading" class="dish-toolbar-status">正在加载…</p>
+          <p v-else class="dish-toolbar-status">
+            共 <strong class="dish-toolbar-count">{{ filteredDishes.length }}</strong> 道
+          </p>
+          <el-button type="primary" round class="dish-toolbar-create" @click="openDishEditorAdd">新建菜品</el-button>
+        </div>
       </div>
-      <div class="dish-toolbar-actions">
-        <p v-if="dishesLoading" class="dish-toolbar-status">正在加载…</p>
-        <p v-else class="dish-toolbar-status">共 {{ filteredDishes.length }} 道</p>
-        <el-button type="primary" round @click="openDishEditorAdd">新建菜品</el-button>
-      </div>
-    </div>
+    </header>
 
     <div v-if="dishesLoading && !dishList.length" class="dish-catalog-empty">正在加载菜品库…</div>
     <div v-else-if="!hasVisibleDishes" class="dish-catalog-empty">
@@ -671,12 +673,26 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.menu-section > .mkt-page-head {
+  align-items: center;
+}
+
+.menu-section > .mkt-page-head .dish-toolbar {
+  flex: 1;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 0;
+  min-width: 0;
+  gap: 0.75rem;
+}
+
 .dish-toolbar-filters {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.75rem;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
 }
 .dish-toolbar-actions {
@@ -685,13 +701,92 @@ onMounted(() => {
   gap: 0.75rem;
   flex-shrink: 0;
 }
-.dish-toolbar-category {
-  width: 200px;
-  min-width: 160px;
+.dish-toolbar-status {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.2rem;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: #5c6670;
+  white-space: nowrap;
 }
-.dish-toolbar-search-input {
-  flex: 1;
-  min-width: 0;
+.dish-toolbar-count {
+  font-size: 1.45rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--el-color-primary);
+}
+.dish-toolbar-create.el-button {
+  height: 32px;
+  padding: 0 16px;
+  font-weight: 700;
+}
+/* 与登录页玻璃字段同一套：单层白底、16px 圆角、发丝边，图标在框内 */
+.dish-search {
+  flex: 0 1 280px;
+  width: 280px;
+  max-width: 320px;
+  min-width: 180px;
+}
+.dish-toolbar-category {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 168px;
+  width: 168px;
+  height: 32px;
+}
+.dish-search :deep(.el-input),
+.dish-toolbar-category :deep(.el-input) {
+  height: 32px;
+  line-height: 32px;
+}
+.dish-search :deep(.el-input__wrapper),
+.dish-toolbar-category :deep(.el-input__wrapper) {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 2px rgba(25, 45, 55, 0.04);
+  box-sizing: border-box;
+}
+.dish-search :deep(.el-input__wrapper) {
+  padding-left: 12px;
+}
+.dish-search :deep(.el-input__wrapper:hover),
+.dish-toolbar-category :deep(.el-input__wrapper:hover) {
+  box-shadow: 0 1px 2px rgba(25, 45, 55, 0.07);
+}
+.dish-search :deep(.el-input__wrapper.is-focus),
+.dish-toolbar-category :deep(.el-input__wrapper.is-focus) {
+  border-color: rgba(var(--el-color-primary-rgb, 232, 146, 124), 0.45);
+  box-shadow: 0 0 0 3px rgba(var(--el-color-primary-rgb, 232, 146, 124), 0.14);
+}
+.dish-search :deep(.el-input__inner),
+.dish-toolbar-category :deep(.el-input__inner) {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1f21;
+}
+.dish-search :deep(.el-input__inner::placeholder),
+.dish-toolbar-category :deep(.el-input__inner::placeholder) {
+  color: #8b949e;
+  font-weight: 500;
+}
+.dish-search :deep(.el-input__prefix) {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+}
+.dish-search__icon {
+  flex-shrink: 0;
+  color: #8b949e;
+}
+.dish-search :deep(.el-input__wrapper.is-focus) .dish-search__icon {
+  color: var(--el-color-primary);
 }
 
 .dish-catalog {
