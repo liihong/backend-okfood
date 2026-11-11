@@ -16,6 +16,7 @@ alwaysApply: false
 ## 滚动
 
 - 页布局：`members-view-fill`；表格 **`members-el-table-body-scroll`** — 仅表体滚、表头固定。
+- 其它列表页同样只滚表体。页头、左右卡片等高、数字对齐见规范 **§9**。
 
 ## 表头
 

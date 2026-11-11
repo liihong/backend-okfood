@@ -10,7 +10,8 @@ alwaysApply: false
 
 ## 工作流
 
-- 先在 `okfood-admin/design/*-preview.html` 定稿，再迁 Vue；**逻辑/接口字段不改**，只换壳与 `admin-ui.css`。
+- 约束以 **`ADMIN-UI-DIALOG-LIST-SPEC.md`** 为准，直接改 Vue。**逻辑/接口字段不改**，只换壳与 `admin-ui.css`。
+- 不要为了改样式再新建 `design/*-preview.html`。规范里已经写过的页面，预览稿落地后就删。
 - 禁止新建深绿 `modal-overlay` 顶栏弹窗；统一 **`OkfoodAdminDialogShell`**（`Teleport` body）+ **`MemberOperationContext`**。
 
 ## 弹窗壳
@@ -27,6 +28,6 @@ alwaysApply: false
 - 选项行顺序：**门店自提 → 暂停配送 → 暂停晚餐 → 周六不参与 → 强制加入大表**（按钮靠右）。
 - 小屏 `(max-height:780px)|(max-width:680px)`：藏 subtitle、收紧间距；晚餐长文改 tooltip。
 
-## 讨论稿同步
+## 改正式组件时
 
-改正式 `MemberEditModal` / 弹窗样式时，同步更新 `okfood-admin-members-actions-preview.html` 对应 panel 与 CSS 类名映射。
+改 `MemberEditModal` 或弹窗样式时，只改正式组件和 `admin-ui.css`。预览稿不在仓库里，不要加回来。
