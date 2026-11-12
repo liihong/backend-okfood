@@ -1,6 +1,6 @@
 <script setup>
 import { ChevronDown, Plus } from 'lucide-vue-next'
-import { onMounted, onUnmounted, ref } from 'vue'
+import { nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import AdminTable from '../../../components/AdminTable.vue'
 import RetailManualOrderDialog from './RetailManualOrderDialog.vue'
 import { RETAIL_DELIVERY_TABS } from '../constants.js'
@@ -64,14 +64,40 @@ function syncNarrowScreen() {
   isNarrowScreen.value = mobileMediaQuery.matches
 }
 
+/** 表体可用高度；工具栏、筛选和表头留在外面 */
+const tableHostRef = ref(null)
+const tableScrollHeight = ref(360)
+/** @type {ResizeObserver | null} */
+let tableResizeObserver = null
+
+function updateTableHeight() {
+  const el = tableHostRef.value
+  if (!el || isNarrowScreen.value) return
+  const height = Math.floor(el.getBoundingClientRect().height)
+  if (height >= 160) tableScrollHeight.value = height
+}
+
 onMounted(() => {
   if (typeof window === 'undefined') return
   mobileMediaQuery = window.matchMedia(MOBILE_MEDIA)
   syncNarrowScreen()
   mobileMediaQuery.addEventListener('change', syncNarrowScreen)
+  tableResizeObserver = new ResizeObserver(() => updateTableHeight())
+  if (tableHostRef.value) tableResizeObserver.observe(tableHostRef.value)
+  void nextTick(() => updateTableHeight())
+})
+
+onActivated(() => {
+  void nextTick(() => updateTableHeight())
+})
+
+watch(isNarrowScreen, () => {
+  void nextTick(() => updateTableHeight())
 })
 
 onUnmounted(() => {
+  tableResizeObserver?.disconnect()
+  tableResizeObserver = null
   mobileMediaQuery?.removeEventListener('change', syncNarrowScreen)
 })
 
@@ -144,12 +170,15 @@ function onRetailMobileSelectChange(row, checked) {
       </div>
     </div>
 
-    <!-- 桌面：表格 -->
+    <div ref="tableHostRef" class="retail-orders-tab__table-host">
+    <!-- 桌面：表格，高度交给表体内部滚动 -->
     <AdminTable
       v-if="!isNarrowScreen"
       ref="retailTableRef"
+      class="members-el-table-body-scroll"
       variant="members"
       size="small"
+      :height="tableScrollHeight"
       :data="retailItems"
       :loading="loading && activeTab === 'retail'"
       row-key="id"
@@ -389,6 +418,7 @@ function onRetailMobileSelectChange(row, checked) {
           </el-dropdown>
         </footer>
       </article>
+    </div>
     </div>
 
     <RetailManualOrderDialog v-model="manualOrderOpen" @success="onManualOrderSuccess" />

@@ -4,7 +4,7 @@
  * 写入当前供餐日、默认已支付占 1 份库存，配送到家单可推送顺丰
  */
 import { computed, ref, watch } from 'vue'
-import { apiJson, adminAccessToken } from '../../../admin/core.js'
+import { apiJson, adminAccessToken, dishImageDisplayUrl } from '../../../admin/core.js'
 import { showToast } from '../../../composables/useToast.js'
 import { formatIsoDateZh, formatMemberAddressOption } from '../utils/orderFormatters.js'
 import MemberDeliveryMapPicker from '../../../components/MemberDeliveryMapPicker.vue'
@@ -80,6 +80,8 @@ const addrCoordDisplay = computed(() => {
 
 const selectedDish = computed(() => dishByPeriod.value[mealPeriod.value] || null)
 
+const dishImageUrl = computed(() => dishImageDisplayUrl(selectedDish.value?.image_url))
+
 const availablePeriods = computed(() => {
   const out = []
   if (dishByPeriod.value.lunch) out.push({ value: 'lunch', label: '午餐' })
@@ -96,6 +98,18 @@ const canSubmit = computed(() => {
 })
 
 const deliveryDateLabel = computed(() => formatIsoDateZh(props.deliveryDate))
+
+const amountPlaceholder = computed(() => {
+  const price = selectedDish.value?.single_order_price_yuan
+  if (price == null || price === '') return '留空按单点价'
+  return `留空按 ¥${price}`
+})
+
+const stockShort = computed(() => {
+  const dish = selectedDish.value
+  if (!dish || dish.single_stock_remaining == null) return false
+  return Number(dish.single_stock_remaining) < Number(form.value.quantity || 1)
+})
 
 function startRegisterAddress() {
   addrRegistering.value = true
@@ -363,91 +377,137 @@ async function submitManualOrder() {
 <template>
   <el-dialog
     v-model="visible"
-    title="手动建单"
-    :width="!form.store_pickup ? '920px' : '640px'"
-    class="single-manual-order-dialog"
-    destroy-on-close
+    width="820px"
     align-center
+    append-to-body
+    destroy-on-close
+    class="single-manual-order-dialog"
     :close-on-click-modal="!submitting"
     :close-on-press-escape="!submitting"
     @closed="onDialogClosed"
   >
-    <p class="single-manual-order-hint">
-      给单次体验用户登记零售订单，将进入供餐日
-      <strong>{{ deliveryDateLabel }}</strong>
-      列表，默认已支付并占用库存，配送到家单可推送顺丰。
-    </p>
+    <template #header>
+      <div class="single-manual-drawer-head">
+        <strong>手动建单</strong>
+        <span>{{ deliveryDateLabel }}</span>
+      </div>
+    </template>
 
-    <el-form label-position="top" size="default" class="single-manual-order-form">
-      <el-row :gutter="12">
-        <el-col :span="12">
-          <el-form-item label="手机号" required>
-            <el-input
-              v-model="phone"
-              maxlength="20"
-              clearable
-              placeholder="11 位手机号"
-              @input="scheduleMemberPreview"
+    <el-form label-position="top" size="small" class="single-manual-order-form">
+      <div class="single-manual-drawer-body" :class="{ 'is-pickup': form.store_pickup }">
+        <section class="single-manual-card single-manual-card--order">
+          <div class="single-manual-grid">
+            <el-form-item label="手机号" required>
+              <el-input
+                v-model="phone"
+                maxlength="20"
+                clearable
+                placeholder="11 位手机号"
+                @input="scheduleMemberPreview"
+              />
+            </el-form-item>
+            <el-form-item label="姓名">
+              <el-input
+                v-model="name"
+                maxlength="100"
+                clearable
+                :placeholder="memberPreview ? '可留空' : '新用户必填'"
+              />
+            </el-form-item>
+          </div>
+          <p v-if="memberPreviewLoading" class="single-manual-order-member-tip">正在查询会员…</p>
+          <p v-else-if="memberPreview" class="single-manual-order-member-tip single-manual-order-member-tip--ok">
+            已匹配 {{ memberPreview.name || '—' }} · {{ memberPreview.phone }}
+          </p>
+          <p v-else-if="phone.trim().length >= 5" class="single-manual-order-member-tip">
+            未找到会员，填写姓名后创建体验用户
+          </p>
+
+          <div
+            v-loading="dishesLoading"
+            class="single-manual-dish-block"
+            element-loading-text="加载餐品"
+          >
+            <el-image
+              v-if="dishImageUrl && !dishesLoading"
+              class="single-manual-dish-img"
+              :src="dishImageUrl"
+              :preview-src-list="[dishImageUrl]"
+              fit="cover"
+              preview-teleported
+              hide-on-click-modal
             />
+            <div v-else-if="!dishesLoading" class="single-manual-dish-img single-manual-dish-img--empty" />
+            <div class="single-manual-dish-copy">
+              <div class="single-manual-dish-head">
+                <span class="single-manual-k">当日餐品</span>
+                <el-radio-group v-if="availablePeriods.length > 1 && !dishesLoading" v-model="mealPeriod" size="small">
+                  <el-radio-button v-for="p in availablePeriods" :key="p.value" :value="p.value">
+                    {{ p.label }}
+                  </el-radio-button>
+                </el-radio-group>
+              </div>
+              <template v-if="!dishesLoading && selectedDish">
+                <p class="single-manual-dish">{{ selectedDish.name || '餐品' }}</p>
+                <p
+                  v-if="selectedDish.single_order_price_yuan != null || selectedDish.single_stock_remaining != null"
+                  class="single-manual-dish-meta"
+                >
+                  <span v-if="selectedDish.single_order_price_yuan != null">
+                    ¥{{ selectedDish.single_order_price_yuan }}
+                  </span>
+                  <span v-if="selectedDish.single_stock_remaining != null">
+                    剩 {{ selectedDish.single_stock_remaining }} 份
+                  </span>
+                </p>
+              </template>
+              <p v-else-if="!dishesLoading" class="single-manual-order-tip is-warn">该日未排餐</p>
+              <p v-if="stockShort" class="single-manual-order-tip is-warn">库存不足，无法建单</p>
+            </div>
+          </div>
+
+          <div class="single-manual-grid single-manual-grid--qty">
+            <el-form-item label="份数">
+              <el-input-number v-model="form.quantity" :min="1" :max="50" />
+            </el-form-item>
+            <el-form-item label="履约">
+              <el-radio-group v-model="form.store_pickup">
+                <el-radio :value="false">配送到家</el-radio>
+                <el-radio :value="true">门店自提</el-radio>
+              </el-radio-group>
+            </el-form-item>
+          </div>
+
+          <div class="single-manual-grid">
+            <el-form-item label="支付渠道">
+              <el-select v-model="form.pay_channel">
+                <el-option label="线下" value="线下" />
+                <el-option label="微信" value="微信" />
+                <el-option label="抖音" value="抖音" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="支付状态">
+              <el-select v-model="form.pay_status">
+                <el-option label="已支付" value="已支付" />
+                <el-option label="未支付" value="未支付" />
+              </el-select>
+            </el-form-item>
+          </div>
+          <el-form-item label="实收金额（元）">
+            <el-input v-model="form.amount_yuan" clearable :placeholder="amountPlaceholder" />
           </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="姓名">
-            <el-input
-              v-model="name"
-              maxlength="100"
-              clearable
-              :placeholder="memberPreview ? '已匹配会员，可留空' : '新用户必填'"
-            />
-          </el-form-item>
-        </el-col>
-      </el-row>
+        </section>
 
-      <p v-if="memberPreviewLoading" class="single-manual-order-member-tip">正在查询会员…</p>
-      <p v-else-if="memberPreview" class="single-manual-order-member-tip single-manual-order-member-tip--ok">
-        已匹配：{{ memberPreview.name || '—' }} · {{ memberPreview.phone }}
-      </p>
-      <p v-else-if="phone.trim().length >= 5" class="single-manual-order-member-tip">
-        未找到会员，填写姓名后将自动创建体验用户
-      </p>
-
-      <el-form-item label="当日餐品" required>
-        <el-radio-group v-if="availablePeriods.length > 1" v-model="mealPeriod" class="single-manual-period">
-          <el-radio v-for="p in availablePeriods" :key="p.value" :value="p.value">{{ p.label }}</el-radio>
-        </el-radio-group>
-        <p v-if="dishesLoading" class="single-manual-order-tip">正在加载当日排期…</p>
-        <p v-else-if="selectedDish" class="single-manual-dish">
-          {{ selectedDish.name || '餐品' }}
-          <span v-if="selectedDish.single_order_price_yuan != null">
-            · ¥{{ selectedDish.single_order_price_yuan }}
-          </span>
-          <span v-if="selectedDish.single_stock_remaining != null">
-            · 剩余 {{ selectedDish.single_stock_remaining }} 份
-          </span>
-        </p>
-        <p
-          v-if="selectedDish && selectedDish.single_stock_remaining != null && Number(selectedDish.single_stock_remaining) < Number(form.quantity || 1)"
-          class="single-manual-order-tip"
-        >
-          当日剩余库存不足，无法建单。
-        </p>
-        <p v-else class="single-manual-order-tip">该供餐日未排餐品，请先在「本周菜单」排期。</p>
-      </el-form-item>
-
-      <el-form-item label="份数">
-        <el-input-number v-model="form.quantity" :min="1" :max="50" />
-        <p class="single-manual-order-tip">默认 1 份，提交后占用等量当日库存。</p>
-      </el-form-item>
-
-      <el-form-item label="履约方式">
-        <el-radio-group v-model="form.store_pickup">
-          <el-radio :value="false">配送到家</el-radio>
-          <el-radio :value="true">门店自提</el-radio>
-        </el-radio-group>
-      </el-form-item>
-
-      <el-form-item v-if="!form.store_pickup" label="收货地址" required>
-        <div class="single-manual-addr-toolbar">
+        <section v-if="!form.store_pickup" class="single-manual-card single-manual-card--addr">
+          <div class="single-manual-addr-toolbar">
+            <span class="single-manual-k">收货地址</span>
+            <el-button v-if="!addrRegistering" type="primary" link @click="startRegisterAddress">
+              登记新地址
+            </el-button>
+            <el-button v-else-if="memberAddresses.length" link @click="useExistingAddress">
+              选用已有地址
+            </el-button>
+          </div>
           <el-select
             v-if="!addrRegistering && memberAddresses.length"
             v-model="form.member_address_id"
@@ -463,98 +523,50 @@ async function submitManualOrder() {
               :value="Number(a.id)"
             />
           </el-select>
-          <el-button v-if="!addrRegistering" type="primary" link @click="startRegisterAddress">
-            登记新地址
-          </el-button>
-          <el-button v-else-if="memberAddresses.length" link @click="useExistingAddress">
-            选用已有地址
-          </el-button>
-        </div>
-        <p v-if="!addrRegistering && memberAddresses.length" class="single-manual-order-tip">
-          可改选该会员已有送餐地址，或点「登记新地址」当场录入。
-        </p>
-        <template v-if="addrRegistering">
-          <p class="single-manual-order-tip">当场登记送餐地址，保存后绑定本单。</p>
-          <el-row :gutter="12">
-            <el-col :span="12">
+          <template v-if="addrRegistering">
+            <div class="single-manual-grid">
               <el-form-item label="收件人" required>
-                <el-input v-model="addrDraft.contact_name" maxlength="100" clearable placeholder="收件人姓名" />
+                <el-input v-model="addrDraft.contact_name" maxlength="100" clearable placeholder="姓名" />
               </el-form-item>
-            </el-col>
-            <el-col :span="12">
               <el-form-item label="联系电话" required>
                 <el-input v-model="addrDraft.contact_phone" maxlength="20" clearable placeholder="手机号" />
               </el-form-item>
-            </el-col>
-          </el-row>
-          <p class="single-manual-order-coord">经纬度 GCJ-02：{{ addrCoordDisplay }}</p>
-          <div class="single-manual-map-wrap">
-            <MemberDeliveryMapPicker
-              :key="'single-manual-amap'"
-              v-model:lng-str="addrDraft.lngStr"
-              v-model:lat-str="addrDraft.latStr"
-              v-model:map-location-text="addrDraft.map_location_text"
-              search-input-id="single-manual-amap-search"
-              @warn="onAddrMapWarn"
-            />
-          </div>
-          <el-form-item label="收货位置主文案">
-            <el-input
-              v-model="addrDraft.map_location_text"
-              type="textarea"
-              readonly
-              :autosize="{ minRows: 2, maxRows: 4 }"
-              maxlength="500"
-              show-word-limit
-              placeholder="地图选点后自动填入"
-            />
-          </el-form-item>
-          <el-form-item label="门牌（楼栋 / 单元 / 室号）">
-            <el-input
-              v-model="addrDraft.door_detail"
-              maxlength="500"
-              clearable
-              placeholder="例如：3 号楼 1202"
-            />
-          </el-form-item>
-          <el-form-item label="地址备注">
-            <el-input v-model="addrDraft.remarks" maxlength="500" clearable placeholder="可留空" />
-          </el-form-item>
-        </template>
-      </el-form-item>
-
-      <el-row :gutter="12">
-        <el-col :span="12">
-          <el-form-item label="支付渠道">
-            <el-select v-model="form.pay_channel">
-              <el-option label="线下" value="线下" />
-              <el-option label="微信" value="微信" />
-              <el-option label="抖音" value="抖音" />
-            </el-select>
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="支付状态">
-            <el-select v-model="form.pay_status">
-              <el-option label="已支付（待发货）" value="已支付" />
-              <el-option label="未支付" value="未支付" />
-            </el-select>
-          </el-form-item>
-        </el-col>
-      </el-row>
-
-      <el-form-item label="实收金额（元）">
-        <el-input v-model="form.amount_yuan" clearable placeholder="留空则按单点价自动计算" />
-        <p v-if="selectedDish && !form.amount_yuan" class="single-manual-order-tip">
-          参考售价：¥{{ selectedDish.single_order_price_yuan ?? '—' }}
-          {{ form.store_pickup ? '（自提减配送费）' : '' }}
-        </p>
-      </el-form-item>
+            </div>
+            <p class="single-manual-order-coord">GCJ-02 {{ addrCoordDisplay }}</p>
+            <div class="single-manual-map-wrap">
+              <MemberDeliveryMapPicker
+                :key="'single-manual-amap'"
+                v-model:lng-str="addrDraft.lngStr"
+                v-model:lat-str="addrDraft.latStr"
+                v-model:map-location-text="addrDraft.map_location_text"
+                search-input-id="single-manual-amap-search"
+                @warn="onAddrMapWarn"
+              />
+            </div>
+            <el-form-item label="收货位置">
+              <el-input
+                v-model="addrDraft.map_location_text"
+                readonly
+                maxlength="500"
+                placeholder="地图选点后自动填入"
+              />
+            </el-form-item>
+            <div class="single-manual-grid">
+              <el-form-item label="门牌">
+                <el-input v-model="addrDraft.door_detail" maxlength="500" clearable placeholder="楼栋 / 室号" />
+              </el-form-item>
+              <el-form-item label="地址备注">
+                <el-input v-model="addrDraft.remarks" maxlength="500" clearable placeholder="可留空" />
+              </el-form-item>
+            </div>
+          </template>
+        </section>
+      </div>
     </el-form>
 
     <template #footer>
-      <el-button :disabled="submitting" @click="visible = false">关闭</el-button>
-      <el-button type="primary" :loading="submitting" :disabled="!canSubmit" @click="submitManualOrder">
+      <el-button round :disabled="submitting" @click="visible = false">取消</el-button>
+      <el-button type="primary" round :loading="submitting" :disabled="!canSubmit" @click="submitManualOrder">
         创建订单
       </el-button>
     </template>
@@ -562,79 +574,270 @@ async function submitManualOrder() {
 </template>
 
 <style scoped>
-.single-manual-order-hint {
-  margin: 0 0 12px;
-  color: var(--el-text-color-secondary);
+.single-manual-drawer-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.single-manual-drawer-head strong {
+  font-size: 16px;
+  font-weight: 800;
+  color: #1d1f21;
+}
+
+.single-manual-drawer-head span {
   font-size: 13px;
-  line-height: 1.5;
+  font-weight: 700;
+  color: var(--el-color-primary-dark-2, #c75f48);
+  white-space: nowrap;
 }
 
 .single-manual-order-form {
-  margin-top: 4px;
+  min-height: 0;
 }
 
-.single-manual-period {
-  display: block;
+.single-manual-drawer-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.single-manual-drawer-body.is-pickup {
+  grid-template-columns: minmax(0, 420px);
+}
+
+.single-manual-card {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+}
+
+.single-manual-card--order {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.single-manual-card--order :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.single-manual-card--addr {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.single-manual-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
+}
+
+.single-manual-grid--qty {
+  align-items: end;
+}
+
+.single-manual-order-form :deep(.el-form-item) {
   margin-bottom: 8px;
+}
+
+.single-manual-order-form :deep(.el-form-item__label) {
+  margin-bottom: 2px;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #64748b;
+}
+
+.single-manual-order-form :deep(.el-select),
+.single-manual-order-form :deep(.el-input-number) {
+  width: 100%;
+}
+
+.single-manual-k {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.single-manual-dish-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  min-height: 88px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.single-manual-dish-img {
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.single-manual-dish-img--empty {
+  background: #e2e8f0;
+}
+
+.single-manual-dish-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.single-manual-dish-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
 .single-manual-dish {
   margin: 0;
-  font-size: 14px;
-  color: var(--el-text-color-primary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #1d1f21;
+}
+
+.single-manual-dish-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #be123c;
 }
 
 .single-manual-order-select {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
+  margin-bottom: 8px;
 }
 
 .single-manual-addr-toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  margin-bottom: 8px;
-  width: 100%;
-}
-
-.single-manual-addr-toolbar .single-manual-order-select {
-  flex: 1;
-}
-
-:deep(.el-dialog__body) {
-  max-height: min(78vh, 720px);
-  overflow-y: auto;
+  margin-bottom: 6px;
 }
 
 .single-manual-map-wrap {
-  width: 100%;
-  min-height: 244px;
-  margin: 8px 0 12px;
+  height: 168px;
+  margin: 0 0 8px;
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
 }
 
+.single-manual-map-wrap :deep(.mdmp) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.single-manual-map-wrap :deep(.mdmp-search) {
+  margin-bottom: 6px;
+}
+
+.single-manual-map-wrap :deep(.mdmp-map) {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+.single-manual-map-wrap :deep(.mdmp-search-btn) {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--el-color-primary);
+}
+
 .single-manual-order-coord {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  font-weight: 600;
+  color: #64748b;
 }
 
 .single-manual-order-member-tip {
-  margin: -4px 0 12px;
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #64748b;
 }
 
 .single-manual-order-member-tip--ok {
-  color: var(--el-color-success);
+  color: #047857;
 }
 
 .single-manual-order-tip {
-  margin: 6px 0 0;
+  margin: 0;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  font-weight: 600;
+  color: #64748b;
+}
+
+.single-manual-order-tip.is-warn {
+  margin-top: 4px;
+  color: #c2410c;
+}
+
+@media (max-width: 860px) {
+  .single-manual-drawer-body,
+  .single-manual-drawer-body.is-pickup {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+}
+</style>
+
+<style>
+/* 弹窗挂到 body，随内容增高，居中，不铺满视口 */
+.single-manual-order-dialog.el-dialog,
+.el-overlay .single-manual-order-dialog.el-dialog {
+  border-radius: 16px;
+  padding: 0;
+  background: #f7fafb;
+  max-width: calc(100vw - 32px);
+}
+
+.single-manual-order-dialog .el-dialog__header,
+.el-overlay .single-manual-order-dialog .el-dialog__header {
+  margin: 0;
+  padding: 14px 18px 12px;
+  background: #fff;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 16px 16px 0 0;
+}
+
+.single-manual-order-dialog .el-dialog__body,
+.el-overlay .single-manual-order-dialog .el-dialog__body {
+  padding: 12px 14px;
+  background: #f7fafb;
+}
+
+.single-manual-order-dialog .el-dialog__footer,
+.el-overlay .single-manual-order-dialog .el-dialog__footer {
+  padding: 10px 16px 14px;
+  background: #fff;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 0 0 16px 16px;
 }
 </style>

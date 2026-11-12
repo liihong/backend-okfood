@@ -7,6 +7,15 @@ import { useStorePrint } from '../../../composables/useStorePrint.js'
 import { mallOrderToLabelItem, singleMealOrderToLabelItem } from '../../../utils/print/retailLabelAdapter.js'
 import { toastSfPushBatchOutcome, toastSfPushError } from '../../../utils/sfPushMessages.js'
 import { todayShanghaiStr } from '../utils/orderFormatters.js'
+
+/** MessageBox 文案转义 */
+function escapeMessageBoxHtml(text) {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
 import { mallPayFilterApiValue, resolveSingleOrderMemberDisplayName } from '../utils/orderDisplay.js'
 import {
   canAcceptRetailOrder,
@@ -56,7 +65,8 @@ export function useOrdersManage(orderKind = 'single') {
   const retailItems = ref([])
   const retailTotal = ref(0)
   const page = ref(1)
-  const pageSize = ref(20)
+  /** 商城、卡包按约定一页 10 条，零售订单仍是 20 */
+  const pageSize = ref(orderKind === 'single' ? 20 : 10)
 
   /** @type {import('vue').Ref<Array<Record<string, unknown>>>} */
   const courierOptions = ref([])
@@ -120,32 +130,24 @@ export function useOrdersManage(orderKind = 'single') {
     const row = t.row
     const amt = row.amount_yuan
     const amountStr = amt != null && amt !== '' ? String(amt) : '—'
-    if (t.kind === 'single') {
-      return {
-        orderType: '零售订单',
-        orderId: row.id,
-        amountStr,
-        sub: '全额退回支付用户微信零钱',
-        tip: '退款成功后订单状态将变为「已退款」，操作不可撤销。',
-      }
-    }
-    if (t.kind === 'retail') {
-      return {
-        orderType: '商城订单',
-        orderId: row.id,
-        amountStr,
-        sub: '全额退回支付用户微信零钱',
-        tip: '退款成功后订单状态将变为「已退款」，操作不可撤销。',
-      }
-    }
-    return {
-      orderType: '卡包订单',
+    const memberName = String(row.member_name || '').trim()
+    const memberPhone = String(row.member_phone || '').trim()
+    const memberLine = [memberName, memberPhone].filter(Boolean).join(' · ')
+    const base = {
       orderId: row.id,
       amountStr,
-      sub: '全额退回支付用户微信零钱',
+      memberLine,
+      sub: '退回微信零钱',
+      tip: '退款后变为已退款，不可撤销。',
+    }
+    if (t.kind === 'single') return { ...base, orderType: '零售订单' }
+    if (t.kind === 'retail') return { ...base, orderType: '商城订单' }
+    return {
+      ...base,
+      orderType: '卡包订单',
       tip: row.applied_to_member
-        ? '该单已同步入账：退款时将先扣回对应餐次再发起微信原路退款，请确认会员剩余次数足够。'
-        : '退款成功后订单状态将变为「已退款」，操作不可撤销。',
+        ? '已入账。退款会先扣回餐次，请确认剩余次数够。'
+        : base.tip,
     }
   })
 
@@ -1470,9 +1472,16 @@ export function useOrdersManage(orderKind = 'single') {
       const d0 = String(orderDate.value || '').trim() || todayShanghaiStr()
       try {
         await ElMessageBox.confirm(
-          `将 ${d0} 供餐日单次点餐中，顺丰监控已为「妥投」或「取消/撤单」但未回写系统的订单，同步为「已完成」或「顺丰取消」。是否继续？`,
+          `<p class="okfood-message-box__subject">同步 ${escapeMessageBoxHtml(d0)} 未回写的顺丰状态？</p><p class="okfood-message-box__detail">妥投改为已完成，取消或撤单改为顺丰取消。</p>`,
           '同步订单状态',
-          { type: 'info', confirmButtonText: '开始同步', cancelButtonText: '取消' },
+          {
+            customClass: 'okfood-message-box',
+            confirmButtonText: '开始同步',
+            cancelButtonText: '取消',
+            cancelButtonClass: 'okfood-message-box__cancel',
+            distinguishCancelAndClose: true,
+            dangerouslyUseHTMLString: true,
+          },
         )
       } catch {
         return
@@ -1507,9 +1516,16 @@ export function useOrdersManage(orderKind = 'single') {
 
     try {
       await ElMessageBox.confirm(
-        '将商城订单中，顺丰监控已回调（取货/妥投/取消）但未回写系统的订单，同步为「配送中」「已完成」或「顺丰取消」。是否继续？',
+        '<p class="okfood-message-box__subject">同步未回写的商城顺丰状态？</p><p class="okfood-message-box__detail">取货改为配送中，妥投改为已完成，取消改为顺丰取消。</p>',
         '同步订单状态',
-        { type: 'info', confirmButtonText: '开始同步', cancelButtonText: '取消' },
+        {
+          customClass: 'okfood-message-box',
+          confirmButtonText: '开始同步',
+          cancelButtonText: '取消',
+          cancelButtonClass: 'okfood-message-box__cancel',
+          distinguishCancelAndClose: true,
+          dangerouslyUseHTMLString: true,
+        },
       )
     } catch {
       return

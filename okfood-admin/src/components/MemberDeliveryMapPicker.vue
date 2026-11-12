@@ -151,6 +151,22 @@ function bindMarkerDragEnd(m) {
   })
 }
 
+/** 高德联想要绑在原生 input 上；el-input 的 id 有时落在外层 */
+function nativeSearchInput() {
+  const el = document.getElementById(props.searchInputId)
+  if (!el) return null
+  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return el
+  return el.querySelector('input, textarea')
+}
+
+function coordsOf(loc) {
+  if (!loc) return null
+  const lng = typeof loc.getLng === 'function' ? Number(loc.getLng()) : Number(loc.lng)
+  const lat = typeof loc.getLat === 'function' ? Number(loc.getLat()) : Number(loc.lat)
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null
+  return { lng, lat }
+}
+
 function syncMarkerFromProps() {
   if (!map) return
   const AMap = window.AMap
@@ -232,18 +248,25 @@ async function initMap() {
   }
 
   placeSearch = new AMap.PlaceSearch({
-    city: '新乡',
+    city: '新乡市',
     citylimit: false,
     pageSize: 10,
     pageIndex: 1,
+    extensions: 'all',
   })
 
   await nextTick()
-  if (document.getElementById(props.searchInputId)) {
+  let inputEl = nativeSearchInput()
+  if (!inputEl) {
+    await nextTick()
+    inputEl = nativeSearchInput()
+  }
+  if (inputEl) {
     autoComplete = new AMap.AutoComplete({
-      input: props.searchInputId,
-      city: '新乡',
+      input: inputEl,
+      city: '新乡市',
       citylimit: false,
+      datatype: 'all',
     })
     autoComplete.on('select', (e) => {
       const poi = e?.poi
@@ -252,8 +275,8 @@ async function initMap() {
       const showInInput = String(poi.name || txt || '').trim()
       if (showInInput) {
         searchKeyword.value = showInInput
-        const el = document.getElementById(props.searchInputId)
-        if (el && 'value' in el) el.value = showInInput
+        const el = nativeSearchInput()
+        if (el) el.value = showInInput
       }
       let plng
       let plat
@@ -280,8 +303,8 @@ async function initMap() {
               const inputLabel = String(p1.name || label || '').trim()
               if (inputLabel) {
                 searchKeyword.value = inputLabel
-                const el = document.getElementById(props.searchInputId)
-                if (el && 'value' in el) el.value = inputLabel
+                const el = nativeSearchInput()
+                if (el) el.value = inputLabel
               }
               finishSearchPick(x, y, label)
               return
@@ -326,8 +349,8 @@ function finishSearchPick(lng, lat, mapText) {
   if (mapText != null && String(mapText).trim()) {
     const disp = String(mapText).trim()
     searchKeyword.value = disp
-    const el = document.getElementById(props.searchInputId)
-    if (el && 'value' in el) el.value = disp
+    const el = nativeSearchInput()
+    if (el) el.value = disp
   }
   applyPick(lng, lat, mapText || null)
   const AMap = window.AMap
@@ -342,34 +365,97 @@ function finishSearchPick(lng, lat, mapText) {
   map.setZoom(16)
 }
 
+function rememberSearchLabel(label) {
+  const inputLabel = String(label || '').trim()
+  if (!inputLabel) return ''
+  searchKeyword.value = inputLabel
+  const el = nativeSearchInput()
+  if (el) el.value = inputLabel
+  return inputLabel
+}
+
+function warnSearchMiss() {
+  emit('warn', '未搜索到地点，请换关键词或直接在地图上点击')
+}
+
+/** 关键字搜不到时，用输入提示做模糊匹配 */
+function searchByTips(kw) {
+  if (!autoComplete || typeof autoComplete.search !== 'function') {
+    searchByGeocode(kw)
+    return
+  }
+  autoComplete.search(kw, (status, result) => {
+    const tips = status === 'complete' && Array.isArray(result?.tips) ? result.tips : []
+    const tip = tips.find((row) => row && (row.location || row.id))
+    if (!tip) {
+      searchByGeocode(kw)
+      return
+    }
+    const pos = coordsOf(tip.location)
+    if (pos) {
+      const label = rememberSearchLabel(tip.name || tip.address || kw)
+      finishSearchPick(pos.lng, pos.lat, label || kw)
+      return
+    }
+    if (tip.id && placeSearch && typeof placeSearch.getDetails === 'function') {
+      placeSearch.getDetails(tip.id, (detailStatus, detail) => {
+        const poi = detailStatus === 'complete' ? detail?.poiList?.pois?.[0] : null
+        const detailPos = coordsOf(poi?.location)
+        if (detailPos) {
+          const label = rememberSearchLabel(poi?.name || tip.name || kw)
+          finishSearchPick(detailPos.lng, detailPos.lat, label || kw)
+          return
+        }
+        searchByGeocode(kw)
+      })
+      return
+    }
+    searchByGeocode(kw)
+  })
+}
+
+/** 地名地理编码：支持「新一街」「小学」这类不完整关键词 */
+function searchByGeocode(kw) {
+  if (!geocoder || typeof geocoder.getLocation !== 'function') {
+    warnSearchMiss()
+    return
+  }
+  const query = kw.includes('新乡') ? kw : `新乡市${kw}`
+  const accept = (status, result, allowRetry) => {
+    const geo = status === 'complete' ? result?.geocodes?.[0] : null
+    const pos = coordsOf(geo?.location)
+    if (pos) {
+      const label = rememberSearchLabel(geo.formattedAddress || kw)
+      finishSearchPick(pos.lng, pos.lat, label || kw)
+      return
+    }
+    if (allowRetry && query !== kw) {
+      geocoder.getLocation(kw, (status2, result2) => accept(status2, result2, false))
+      return
+    }
+    warnSearchMiss()
+  }
+  geocoder.getLocation(query, (status, result) => accept(status, result, true))
+}
+
 function runKeywordSearch() {
-  const el = document.getElementById(props.searchInputId)
-  const fromDom = el && 'value' in el ? String(el.value || '').trim() : ''
+  const el = nativeSearchInput()
+  const fromDom = el ? String(el.value || '').trim() : ''
   const kw = fromDom || String(searchKeyword.value || '').trim()
-  if (!kw || !placeSearch) {
+  if (!kw) return
+  if (!placeSearch) {
+    searchByTips(kw)
     return
   }
   placeSearch.search(kw, (status, result) => {
-    if (status !== 'complete' || !result?.poiList?.pois?.length) {
-      emit('warn', '未搜索到地点，请换关键词或直接在地图上点击')
+    const poi = status === 'complete' ? result?.poiList?.pois?.[0] : null
+    const pos = coordsOf(poi?.location)
+    if (pos) {
+      const label = rememberSearchLabel(poi.name || poiToLocationSuffix(poi) || kw)
+      finishSearchPick(pos.lng, pos.lat, label || kw)
       return
     }
-    const p0 = result.poiList.pois[0]
-    const loc = p0?.location
-    if (!loc) {
-      emit('warn', '未解析到坐标，请直接在地图上点击选点')
-      return
-    }
-    const lng = typeof loc.getLng === 'function' ? loc.getLng() : loc.lng
-    const lat = typeof loc.getLat === 'function' ? loc.getLat() : loc.lat
-    const suffix = poiToLocationSuffix(p0)
-    const inputLabel = String(p0.name || suffix || '').trim()
-    if (inputLabel) {
-      searchKeyword.value = inputLabel
-      const el = document.getElementById(props.searchInputId)
-      if (el && 'value' in el) el.value = inputLabel
-    }
-    finishSearchPick(lng, lat, suffix)
+    searchByTips(kw)
   })
 }
 

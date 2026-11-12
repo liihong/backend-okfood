@@ -1,7 +1,8 @@
 <script setup>
 import { ChevronDown, Plus } from 'lucide-vue-next'
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import AdminTable from '../../../components/AdminTable.vue'
+import StatRollNumber from '../../../components/StatRollNumber.vue'
 import SingleMealManualOrderDialog from './SingleMealManualOrderDialog.vue'
 import {
   isMemberCardPaidSingleMeal,
@@ -57,7 +58,6 @@ const {
   clearSingleSelection,
   singleRowActionLoading,
   onSingleRowMoreCommand,
-  onPrintSingleMealOrder,
   onBatchPrintSingleMealOrders,
   retailPrintLoading,
   fetchActive,
@@ -65,6 +65,44 @@ const {
 } = useOrdersManageInject()
 
 const manualOrderOpen = ref(false)
+/** 汇总数字重播：数据更新或 keep-alive 切回时 +1 */
+const statsRollKey = ref(0)
+
+const summaryStats = computed(() => {
+  const summary = singleOrderBucketSummary.value
+  if (!summary) return []
+  return [
+    { key: 'paid', label: '已支付', value: summary.paid, tone: 'paid' },
+    { key: 'ship', label: '待发货', value: summary.pending_ship, tone: 'ship' },
+    { key: 'pickup', label: '待自提', value: summary.pending_pickup, tone: 'pickup' },
+    { key: 'unpaid', label: '未支付', value: summary.unpaid, tone: 'unpaid' },
+    { key: 'cancelled', label: '已取消', value: summary.cancelled, tone: 'cancelled' },
+    {
+      key: 'stock',
+      label: '占用库存',
+      value: summary.retail_inventory_portions,
+      tone: 'stock',
+      unit: '份',
+    },
+  ]
+})
+
+/** 占用库存口径：悬停可见，不铺在汇总行里 */
+const stockHint = computed(() => {
+  const summary = singleOrderBucketSummary.value
+  if (!summary) return ''
+  return `已支付未取消 ${summary.paid_portions} 份 + 待支付 ${summary.pending_unpaid_portions} 份`
+})
+
+watch(singleOrderBucketSummary, () => {
+  statsRollKey.value += 1
+})
+
+/** 表体可用高度；只滚表格，页头和分页留在外面 */
+const tableHostRef = ref(null)
+const tableScrollHeight = ref(360)
+/** @type {ResizeObserver | null} */
+let tableResizeObserver = null
 
 function onManualOrderSuccess(data) {
   page.value = 1
@@ -93,14 +131,35 @@ function syncNarrowScreen() {
   isNarrowScreen.value = mobileMediaQuery.matches
 }
 
+function updateTableHeight() {
+  const el = tableHostRef.value
+  if (!el || isNarrowScreen.value) return
+  const height = Math.floor(el.getBoundingClientRect().height)
+  if (height >= 160) tableScrollHeight.value = height
+}
+
 onMounted(() => {
   if (typeof window === 'undefined') return
   mobileMediaQuery = window.matchMedia(MOBILE_MEDIA)
   syncNarrowScreen()
   mobileMediaQuery.addEventListener('change', syncNarrowScreen)
+  tableResizeObserver = new ResizeObserver(() => updateTableHeight())
+  if (tableHostRef.value) tableResizeObserver.observe(tableHostRef.value)
+  void nextTick(() => updateTableHeight())
+})
+
+onActivated(() => {
+  statsRollKey.value += 1
+  void nextTick(() => updateTableHeight())
+})
+
+watch(isNarrowScreen, () => {
+  void nextTick(() => updateTableHeight())
 })
 
 onUnmounted(() => {
+  tableResizeObserver?.disconnect()
+  tableResizeObserver = null
   mobileMediaQuery?.removeEventListener('change', syncNarrowScreen)
 })
 
@@ -126,49 +185,39 @@ function onSingleMobileSelectChange(row, checked) {
 
 <template>
   <div class="single-orders-tab">
-    <p
-      v-if="singleOrderBucketSummary"
-      class="orders-manage-stats-line single-orders-tab__summary"
+    <div
+      v-if="summaryStats.length"
+      class="single-orders-stats"
       role="status"
       aria-live="polite"
     >
-      <span class="orders-manage-stats-line__label">汇总</span>
-      已支付
-      <strong class="orders-manage-stats-line__num orders-manage-stats-line__num--paid">{{
-        singleOrderBucketSummary.paid
-      }}</strong>
-      <span class="orders-manage-stats-line__sep">·</span>
-      待发货
-      <strong class="orders-manage-stats-line__num orders-manage-stats-line__num--pending">{{
-        singleOrderBucketSummary.pending_ship
-      }}</strong>
-      <span class="orders-manage-stats-line__sep">·</span>
-      待自提
-      <strong class="orders-manage-stats-line__num orders-manage-stats-line__num--pending">{{
-        singleOrderBucketSummary.pending_pickup
-      }}</strong>
-      <span class="orders-manage-stats-line__sep">·</span>
-      未支付
-      <strong class="orders-manage-stats-line__num orders-manage-stats-line__num--unpaid">{{
-        singleOrderBucketSummary.unpaid
-      }}</strong>
-      <span class="orders-manage-stats-line__sep">·</span>
-      已取消
-      <strong class="orders-manage-stats-line__num orders-manage-stats-line__num--cancelled">{{
-        singleOrderBucketSummary.cancelled
-      }}</strong>
-      <span class="orders-manage-stats-line__sep">·</span>
-      占用库存
-      <strong class="orders-manage-stats-line__num">{{
-        singleOrderBucketSummary.retail_inventory_portions
-      }}</strong>
-      份
-      <span class="orders-manage-stats-line__hint"
-        >（供餐日全天概览，不受发货 Tab 影响；占用库存=已支付未取消
-        {{ singleOrderBucketSummary.paid_portions }} 份 + 待支付
-        {{ singleOrderBucketSummary.pending_unpaid_portions }} 份，已取消不计入）</span
+      <span
+        v-for="item in summaryStats"
+        :key="item.key"
+        class="single-orders-stat"
+        :class="`single-orders-stat--${item.tone}`"
       >
-    </p>
+        <span class="single-orders-stat__label">{{ item.label }}</span>
+        <el-tooltip
+          v-if="item.key === 'stock'"
+          :content="stockHint"
+          placement="top"
+          :show-after="300"
+        >
+          <strong class="single-orders-stat__num" :class="`single-orders-stat__num--${item.tone}`">
+            <StatRollNumber :value="item.value" :replay-key="statsRollKey" />
+            <span v-if="item.unit" class="single-orders-stat__unit">{{ item.unit }}</span>
+          </strong>
+        </el-tooltip>
+        <strong
+          v-else
+          class="single-orders-stat__num"
+          :class="`single-orders-stat__num--${item.tone}`"
+        >
+          <StatRollNumber :value="item.value" :replay-key="statsRollKey" />
+        </strong>
+      </span>
+    </div>
 
     <div class="orders-manage-tab-bar single-orders-tab-bar single-orders-tab__filter-bar orders-tab-bar--inline">
       <el-tabs
@@ -247,12 +296,15 @@ function onSingleMobileSelectChange(row, checked) {
       </div>
     </div>
 
-    <!-- 桌面：表格 -->
+    <div ref="tableHostRef" class="single-orders-tab__table-host">
+    <!-- 桌面：表格，高度交给表体内部滚动 -->
     <AdminTable
       v-if="!isNarrowScreen"
       ref="singleTableRef"
+      class="members-el-table-body-scroll"
       variant="members"
       size="small"
+      :height="tableScrollHeight"
       :data="singleItems"
       :loading="loading && activeTab === 'single'"
       row-key="id"
@@ -337,18 +389,23 @@ function onSingleMobileSelectChange(row, checked) {
         label="配送/自提"
         header-align="left"
         align="left"
-        min-width="480"
-        :show-overflow-tooltip="false"
+        min-width="160"
         class-name="orders-single-addr-col"
       >
         <template #default="{ row }">
-          <div class="orders-addr-text">
-            <template v-if="row.store_pickup">门店自提</template>
-            <template v-else>{{ singleOrderDeliveryAddressTextOnly(row) }}</template>
-          </div>
+          <el-tooltip
+            :content="row.store_pickup ? '门店自提' : singleOrderDeliveryAddressTextOnly(row)"
+            placement="top"
+            :show-after="400"
+            :disabled="!!row.store_pickup"
+          >
+            <span class="orders-addr-ellipsis">{{
+              row.store_pickup ? '门店自提' : singleOrderDeliveryAddressTextOnly(row)
+            }}</span>
+          </el-tooltip>
         </template>
       </el-table-column>
-      <el-table-column label="地址备注" min-width="140" show-overflow-tooltip class-name="td-remarks">
+      <el-table-column label="地址备注" min-width="96" show-overflow-tooltip class-name="td-remarks">
         <template #default="{ row }">
           <template v-if="row.store_pickup">—</template>
           <template v-else>{{ (row.address_remarks || '').trim() || '—' }}</template>
@@ -529,6 +586,7 @@ function onSingleMobileSelectChange(row, checked) {
           </el-dropdown>
         </footer>
       </article>
+    </div>
     </div>
 
     <SingleMealManualOrderDialog

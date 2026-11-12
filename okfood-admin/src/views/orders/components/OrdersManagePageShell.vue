@@ -1,5 +1,5 @@
 <script setup>
-import { provide } from 'vue'
+import { computed, provide } from 'vue'
 import { ORDERS_MANAGE_KEY } from '../constants.js'
 import { useOrdersManage } from '../composables/useOrdersManage.js'
 import OrdersManageToolbar from './OrdersManageToolbar.vue'
@@ -22,14 +22,26 @@ const props = defineProps({
 
 const ordersManage = useOrdersManage(props.orderKind)
 provide(ORDERS_MANAGE_KEY, ordersManage)
+
+/** 订单列表铺满主区：工具栏和表头不动，只滚表体 */
+const fillLayout = computed(
+  () => props.orderKind === 'single' || props.orderKind === 'retail' || props.orderKind === 'mall',
+)
 </script>
 
 <template>
-  <section class="tab-content animate-up orders-manage-page">
-    <div class="table-container">
+  <!-- 零售订单撑满主区：页头、汇总、分页固定，只滚表体 -->
+  <section
+    class="tab-content animate-up orders-manage-page"
+    :class="{ 'members-view-fill': fillLayout }"
+  >
+    <div
+      class="table-container"
+      :class="{ 'table-container--members-fill': fillLayout }"
+    >
       <OrdersManageToolbar />
       <slot />
-      <OrdersPagination />
+      <OrdersPagination :float-bar="fillLayout" />
     </div>
 
     <OrdersRefundDialog />

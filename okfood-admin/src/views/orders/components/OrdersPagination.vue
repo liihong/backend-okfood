@@ -1,6 +1,11 @@
 <script setup>
 import { useOrdersManageInject } from '../composables/useOrdersManageInject.js'
 
+defineProps({
+  /** 贴在铺满卡片底部，页头与分页不随表体滚动 */
+  floatBar: { type: Boolean, default: false },
+})
+
 const {
   adminAccessToken,
   page,
@@ -13,8 +18,12 @@ const {
 </script>
 
 <template>
-  <div v-if="adminAccessToken" class="members-pagination">
-    <div class="orders-page-size">
+  <div
+    v-if="adminAccessToken"
+    class="members-pagination"
+    :class="{ 'members-pagination--float': floatBar }"
+  >
+    <div v-if="!floatBar" class="orders-page-size">
       <span>每页</span>
       <el-select v-model="pageSize" class="orders-page-size-select">
         <el-option :value="10" label="10" />

@@ -163,6 +163,7 @@ class StoreRetailSkuOut(BaseModel):
     stock_remaining: int | None = Field(None, description="剩余可售；空=不限")
     spu_title: str | None = None
     display_title: str | None = None
+    cover_image_url: str | None = None
 
 
 class StoreRetailSkuCreateIn(BaseModel):

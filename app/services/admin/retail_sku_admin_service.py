@@ -18,7 +18,7 @@ from app.models.store_retail_product import StoreRetailProduct
 from app.models.store_retail_spu import StoreRetailSpu
 from app.schemas.catalog_admin import StoreRetailSkuCreateIn, StoreRetailSkuPatchIn, StoreRetailSkuUpsertIn
 from app.services.admin.retail_catalog_serialize import sku_admin_dump
-from app.services.retail.retail_display import retail_sku_display_title
+from app.services.retail.retail_display import retail_gallery_cover, retail_sku_display_title
 from app.services.retail.retail_stock_service import get_retail_stock_snapshots
 
 
@@ -135,6 +135,8 @@ def list_retail_skus(
             dump["display_title"] = retail_sku_display_title(
                 spu_title=spu.title, spec_label=r.spec_label
             )
+            # 下拉选项展示封面，取所属商品轮播首图
+            dump["cover_image_url"] = retail_gallery_cover(spu.gallery_urls)
         out.append(dump)
     return out
 

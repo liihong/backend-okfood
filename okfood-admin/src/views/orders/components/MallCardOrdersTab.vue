@@ -1,5 +1,6 @@
 <script setup>
 import { ChevronDown } from 'lucide-vue-next'
+import { nextTick, onActivated, onMounted, onUnmounted, ref } from 'vue'
 import AdminTable from '../../../components/AdminTable.vue'
 import { MALL_PAY_TABS } from '../constants.js'
 import { orderCreatedAtParts } from '../utils/orderFormatters.js'
@@ -17,11 +18,40 @@ const {
   refundLoadingId,
   onMallRowMoreCommand,
 } = useOrdersManageInject()
+
+/** 表体可用高度；工具栏、筛选和表头留在外面 */
+const tableHostRef = ref(null)
+const tableScrollHeight = ref(360)
+/** @type {ResizeObserver | null} */
+let tableResizeObserver = null
+
+function updateTableHeight() {
+  const el = tableHostRef.value
+  if (!el) return
+  const height = Math.floor(el.getBoundingClientRect().height)
+  if (height >= 160) tableScrollHeight.value = height
+}
+
+onMounted(() => {
+  tableResizeObserver = new ResizeObserver(() => updateTableHeight())
+  if (tableHostRef.value) tableResizeObserver.observe(tableHostRef.value)
+  void nextTick(() => updateTableHeight())
+})
+
+onActivated(() => {
+  void nextTick(() => updateTableHeight())
+})
+
+onUnmounted(() => {
+  tableResizeObserver?.disconnect()
+  tableResizeObserver = null
+})
 </script>
 
 <template>
-  <div class="orders-manage-tab-bar">
-    <el-tabs v-model="mallPayFilter" class="orders-pay-tabs">
+  <div class="mall-orders-tab">
+  <div class="orders-manage-tab-bar mall-orders-tab__filter-bar orders-tab-bar--inline">
+    <el-tabs v-model="mallPayFilter" class="orders-pay-tabs orders-tab-bar__tabs">
       <el-tab-pane
         v-for="tab in MALL_PAY_TABS"
         :key="tab.value"
@@ -30,9 +60,12 @@ const {
       />
     </el-tabs>
   </div>
+  <div ref="tableHostRef" class="mall-orders-tab__table-host">
   <AdminTable
+    class="members-el-table-body-scroll"
     variant="members"
     size="small"
+    :height="tableScrollHeight"
     :data="mallItems"
     :loading="loading && activeTab === 'mall'"
     row-key="id"
@@ -158,4 +191,6 @@ const {
       </template>
     </el-table-column>
   </AdminTable>
+  </div>
+  </div>
 </template>

@@ -776,7 +776,20 @@ html.okfood-admin-shell body {
   font-size: 13px;
   line-height: 1.55;
   color: #475569;
-  white-space: pre-line;
+}
+
+.admin-system-notifications-item__line {
+  display: block;
+}
+
+.admin-system-notifications-item__line strong {
+  font-weight: 800;
+  color: #1e293b;
+}
+
+/* 高德输入提示挂在 body，须高于会员地址等弹窗，否则模糊搜索列表被挡住 */
+.amap-sug-result {
+  z-index: 6000 !important;
 }
 
 .admin-system-notifications-item__failures {

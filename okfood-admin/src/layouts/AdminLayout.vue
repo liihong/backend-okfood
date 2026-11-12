@@ -135,6 +135,15 @@ const notificationBadgeText = computed(() => {
   return n > 9 ? '9+' : String(n)
 })
 
+/** 系统消息正文按行拆开，字段名（用户、手机号、下单时间等）单独加粗 */
+function notificationMessageLines(message) {
+  return String(message || '').split('\n').map((line) => {
+    const matched = line.match(/^([\u4e00-\u9fffA-Za-z0-9]{1,8})：(.*)$/)
+    if (!matched) return { label: '', text: line }
+    return { label: matched[1], text: matched[2] }
+  })
+}
+
 async function onAcknowledgeNotification(item) {
   const ok = await acknowledgeNotification(item?.id)
   if (ok) {
@@ -724,11 +733,19 @@ function onTabClose(tab) {
                   :class="{ 'admin-system-notifications-item__title--action': item.kind === KIND_PENDING_MEAL_UNITS }"
                   @click="item.kind === KIND_PENDING_MEAL_UNITS && openPendingMealUnitsDialog(item)"
                 >{{ item.title }}</p>
-                <p
+                <div
                   class="admin-system-notifications-item__message"
                   :class="{ 'admin-system-notifications-item__message--action': item.kind === KIND_PENDING_MEAL_UNITS }"
                   @click="item.kind === KIND_PENDING_MEAL_UNITS && openPendingMealUnitsDialog(item)"
-                >{{ item.message }}</p>
+                >
+                  <span
+                    v-for="(line, lineIdx) in notificationMessageLines(item.message)"
+                    :key="`${item.id}-line-${lineIdx}`"
+                    class="admin-system-notifications-item__line"
+                  >
+                    <strong v-if="line.label">{{ line.label }}：</strong>{{ line.label ? line.text : (line.text || '\u00a0') }}
+                  </span>
+                </div>
                 <ul
                   v-if="Array.isArray(item.failure_details) && item.failure_details.length"
                   class="admin-system-notifications-item__failures"

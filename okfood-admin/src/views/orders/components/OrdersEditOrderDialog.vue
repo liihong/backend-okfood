@@ -26,188 +26,338 @@ const {
 <template>
   <el-dialog
     v-model="editOpen"
-    :title="'修改订单 · 配送/自提与收货地址'"
-    width="920px"
+    width="820px"
     class="orders-edit-order-dialog"
     destroy-on-close
     align-center
+    append-to-body
     :close-on-click-modal="!editSaving"
     :close-on-press-escape="!editSaving"
     @closed="onEditDialogClosed"
   >
-    <template v-if="editOrder">
-      <p class="orders-edit-hint">
-        订单 #{{ editOrder.id }}
-        <template v-if="editOrder.product_title"> · {{ editOrder.product_title }}</template>
-        · {{ editDialogMemberDisplayName }}
-        {{ (editOrder.member_phone || '').trim() }}
-      </p>
-      <div class="orders-edit-field">
-        <span class="orders-edit-label">履约方式</span>
-        <el-radio-group v-model="editForm.store_pickup">
-          <el-radio :value="false">配送到家</el-radio>
-          <el-radio :value="true">门店自提</el-radio>
-        </el-radio-group>
+    <template #header>
+      <div class="orders-edit-head">
+        <strong>修改订单</strong>
+        <span v-if="editOrder">
+          #{{ editOrder.id }} · {{ editDialogMemberDisplayName }}
+          {{ (editOrder.member_phone || '').trim() }}
+        </span>
       </div>
-      <div v-if="!editForm.store_pickup" class="orders-edit-field">
-        <span class="orders-edit-label">收货地址</span>
-        <div class="orders-edit-addr-toolbar">
-          <el-select
-            v-if="editMemberAddresses.length && !(editKind === 'retail' && editAddrDraft && editAddrDraft.id == null)"
-            v-model="editForm.member_address_id"
-            filterable
-            :placeholder="
-              editKind === 'retail'
-                ? '选择已有商城收货地址'
-                : '选择会员配送地址（可切换该会员名下其它地址）'
-            "
-            class="orders-edit-select"
-            :loading="editAddrLoading"
-          >
-            <el-option
-              v-for="a in editMemberAddresses"
-              :key="a.id"
-              :label="formatMemberAddressOption(a)"
-              :value="Number(a.id)"
-            />
-          </el-select>
-          <el-button
-            v-if="editKind === 'retail' && !(editAddrDraft && editAddrDraft.id == null)"
-            type="primary"
-            link
-            @click="startNewRetailAddress"
-          >
-            登记新地址
-          </el-button>
-          <el-button
-            v-else-if="editKind === 'retail' && editMemberAddresses.length"
-            link
-            @click="useExistingRetailAddress"
-          >
-            选用已有地址
-          </el-button>
-        </div>
-        <p v-if="editKind === 'retail' && editAddrDraft && editAddrDraft.id == null" class="orders-edit-tip">
-          正在登记新的商城收货地址：下方地图选点即可，保存后只用于果蔬汁/月饼，不会改写会员送餐地址。
-        </p>
-        <p v-else-if="!editAddrLoading && !editMemberAddresses.length" class="orders-edit-tip">
-          {{
-            editKind === 'retail'
-              ? '请在下方用地图选点登记收货地址。'
-              : '该会员暂无配送地址，请先在会员档案「地址」中新建后再来绑定订单。'
-          }}
-        </p>
-      </div>
+    </template>
 
-      <template v-if="!editForm.store_pickup && editAddrDraft">
-        <div class="orders-edit-addr-sep" />
-        <p class="orders-edit-subhint">
-          <template v-if="editKind === 'retail'">
-            果蔬汁/月饼收货地址与会员送餐地址分开管理。
-            <template v-if="editAddrDraft && editAddrDraft.id == null">
-              下方为新建商城地址，保存后只绑定本单。
-            </template>
-            <template v-else>
-              若下列仍是送餐地址，保存时会<strong>复制为商城地址</strong>，不会改写会员默认送餐地址。
-            </template>
+    <el-form
+      v-if="editOrder"
+      v-loading="editAddrLoading"
+      element-loading-text="加载地址"
+      label-position="top"
+      size="small"
+      class="orders-edit-form"
+    >
+      <div class="orders-edit-body" :class="{ 'is-pickup': editForm.store_pickup }">
+        <section class="orders-edit-card orders-edit-card--main">
+          <el-form-item label="履约">
+            <el-radio-group v-model="editForm.store_pickup">
+              <el-radio :value="false">配送到家</el-radio>
+              <el-radio :value="true">门店自提</el-radio>
+            </el-radio-group>
+          </el-form-item>
+
+          <template v-if="!editForm.store_pickup">
+            <div class="orders-edit-addr-toolbar">
+              <span class="orders-edit-k">收货地址</span>
+              <el-button
+                v-if="editKind === 'retail' && !(editAddrDraft && editAddrDraft.id == null)"
+                type="primary"
+                link
+                @click="startNewRetailAddress"
+              >
+                登记新地址
+              </el-button>
+              <el-button
+                v-else-if="editKind === 'retail' && editMemberAddresses.length"
+                link
+                @click="useExistingRetailAddress"
+              >
+                选用已有地址
+              </el-button>
+            </div>
+            <el-select
+              v-if="editMemberAddresses.length && !(editKind === 'retail' && editAddrDraft && editAddrDraft.id == null)"
+              v-model="editForm.member_address_id"
+              filterable
+              :placeholder="editKind === 'retail' ? '选择已有商城地址' : '选择配送地址'"
+              class="orders-edit-select"
+              :loading="editAddrLoading"
+            >
+              <el-option
+                v-for="a in editMemberAddresses"
+                :key="a.id"
+                :label="formatMemberAddressOption(a)"
+                :value="Number(a.id)"
+              />
+            </el-select>
+            <p v-if="editKind === 'retail' && editAddrDraft && editAddrDraft.id == null" class="orders-edit-tip">
+              保存后只绑定本单，不改送餐地址。
+            </p>
+            <p v-else-if="!editAddrLoading && !editMemberAddresses.length" class="orders-edit-tip">
+              {{ editKind === 'retail' ? '请用地图选点。' : '请先在会员档案新建配送地址。' }}
+            </p>
           </template>
-          <template v-else>
-            以下与「会员档案 · 地址管理」一致：可修正收件人、电话、地图选点与门牌；
-            <strong>保存时先写入会员地址</strong>（全店订单凡引用本条地址一并更新），再更新本订单绑定与配送摘要。
-          </template>
-        </p>
-        <div class="orders-edit-first-row">
-          <el-space wrap :size="8" alignment="center">
-            <span class="orders-edit-k">会员</span>
-            <el-text truncated class="orders-edit-inline-name">{{ editDialogMemberDisplayName }}</el-text>
-            <el-text type="info" truncated>{{ (editOrder.member_phone || '').trim() }}</el-text>
-            <el-divider direction="vertical" />
-            <span class="orders-edit-k">经纬度 GCJ-02</span>
-            <el-tag size="small" type="info" effect="plain">{{ editHeadCoordDisplay }}</el-tag>
-          </el-space>
-        </div>
-        <el-form label-position="top" size="small" class="orders-edit-addr-form">
-          <el-row :gutter="12">
-            <el-col :xs="24" :sm="12">
+
+          <template v-if="!editForm.store_pickup && editAddrDraft">
+            <div class="orders-edit-grid">
               <el-form-item label="收件人">
                 <el-input
                   v-model="editAddrDraft.contact_name"
                   maxlength="100"
                   clearable
-                  placeholder="收件人姓名"
+                  placeholder="姓名"
                 />
               </el-form-item>
-            </el-col>
-            <el-col :xs="24" :sm="12">
               <el-form-item label="联系电话">
                 <el-input v-model="editAddrDraft.contact_phone" maxlength="20" clearable placeholder="手机号" />
               </el-form-item>
-            </el-col>
-          </el-row>
-          <el-form-item label="地图选点（GCJ-02）">
-            <div class="orders-edit-map-wrap">
-              <MemberDeliveryMapPicker
-                :key="'orders-edit-ma-' + (editAddrDraft.id != null ? editAddrDraft.id : 'new')"
-                v-model:lng-str="editAddrDraft.lngStr"
-                v-model:lat-str="editAddrDraft.latStr"
-                v-model:map-location-text="editAddrDraft.map_location_text"
-                :search-input-id="'orders-edit-amap-' + (editAddrDraft.id != null ? editAddrDraft.id : 'new')"
-                @warn="onEditAddrMapWarn"
-              />
             </div>
-          </el-form-item>
-          <el-row :gutter="12">
-            <el-col :xs="24" :sm="14">
-              <el-form-item label="收货位置主文案（map_location_text）">
-                <el-input
-                  v-model="editAddrDraft.map_location_text"
-                  type="textarea"
-                  readonly
-                  :autosize="{ minRows: 2, maxRows: 4 }"
-                  maxlength="500"
-                  show-word-limit
-                  placeholder="地图选点后自动填入，可与门牌拼成完整地址"
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :xs="24" :sm="10">
-              <el-form-item label="门牌（楼栋 / 单元 / 室号）">
-                <el-input
-                  v-model="editAddrDraft.door_detail"
-                  type="textarea"
-                  :autosize="{ minRows: 2, maxRows: 3 }"
-                  maxlength="500"
-                  placeholder="例如：3 号楼 1202"
-                />
-              </el-form-item>
-            </el-col>
-          </el-row>
-          <el-form-item label="地址备注">
+            <el-form-item label="地址备注">
+              <el-input v-model="editAddrDraft.remarks" maxlength="500" clearable placeholder="可留空" />
+            </el-form-item>
+            <el-checkbox v-model="editAddrAlsoDefault" class="orders-edit-check">
+              {{ editKind === 'retail' ? '设为默认商城地址' : '设为默认配送地址' }}
+            </el-checkbox>
+            <p class="orders-edit-coord">GCJ-02 {{ editHeadCoordDisplay }}</p>
+            <p class="orders-edit-tip orders-edit-tip--muted">
+              {{
+                editKind === 'retail'
+                  ? '不改会员送餐地址。'
+                  : '保存会写回会员地址，引用本条的订单一起更新。'
+              }}
+            </p>
+          </template>
+          <p v-else-if="editForm.store_pickup" class="orders-edit-tip orders-edit-tip--muted">门店自提，无需地址</p>
+        </section>
+
+        <section v-if="!editForm.store_pickup && editAddrDraft" class="orders-edit-card orders-edit-card--map">
+          <div class="orders-edit-map-wrap">
+            <MemberDeliveryMapPicker
+              :key="'orders-edit-ma-' + (editAddrDraft.id != null ? editAddrDraft.id : 'new')"
+              v-model:lng-str="editAddrDraft.lngStr"
+              v-model:lat-str="editAddrDraft.latStr"
+              v-model:map-location-text="editAddrDraft.map_location_text"
+              :search-input-id="'orders-edit-amap-' + (editAddrDraft.id != null ? editAddrDraft.id : 'new')"
+              @warn="onEditAddrMapWarn"
+            />
+          </div>
+          <el-form-item label="收货位置">
             <el-input
-              v-model="editAddrDraft.remarks"
-              type="textarea"
-              :autosize="{ minRows: 1, maxRows: 3 }"
+              v-model="editAddrDraft.map_location_text"
+              readonly
               maxlength="500"
-              placeholder="忌口等，可留空"
+              placeholder="地图选点后自动填入"
             />
           </el-form-item>
-          <el-form-item>
-            <el-checkbox v-model="editAddrAlsoDefault">{{
-              editKind === 'retail'
-                ? '同时设为该用户默认商城收货地址（不影响会员送餐地址）'
-                : '同时将本条设为该会员默认配送地址'
-            }}</el-checkbox>
+          <el-form-item label="门牌">
+            <el-input v-model="editAddrDraft.door_detail" maxlength="500" clearable placeholder="楼栋 / 室号" />
           </el-form-item>
-        </el-form>
-      </template>
+        </section>
+      </div>
+    </el-form>
 
-      <p v-else-if="editForm.store_pickup" class="orders-edit-tip orders-edit-tip--muted">
-        门店自提无需维护收货地址。
-      </p>
-    </template>
     <template #footer>
-      <el-button :disabled="editSaving" @click="editOpen = false">取消</el-button>
-      <el-button type="primary" :loading="editSaving" @click="submitEditOrder">保存</el-button>
+      <el-button round :disabled="editSaving" @click="editOpen = false">取消</el-button>
+      <el-button type="primary" round :loading="editSaving" @click="submitEditOrder">保存</el-button>
     </template>
   </el-dialog>
 </template>
+
+<style scoped>
+.orders-edit-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.orders-edit-head strong {
+  font-size: 16px;
+  font-weight: 800;
+  color: #1d1f21;
+}
+
+.orders-edit-head span {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--el-color-primary-dark-2, #c75f48);
+  white-space: nowrap;
+}
+
+.orders-edit-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.orders-edit-body.is-pickup {
+  grid-template-columns: minmax(0, 420px);
+}
+
+.orders-edit-card {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+}
+
+.orders-edit-card--main {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.orders-edit-card--main :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.orders-edit-card--map {
+  display: flex;
+  flex-direction: column;
+}
+
+.orders-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
+}
+
+.orders-edit-form :deep(.el-form-item) {
+  margin-bottom: 8px;
+}
+
+.orders-edit-form :deep(.el-form-item__label) {
+  margin-bottom: 2px;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #64748b;
+}
+
+.orders-edit-form :deep(.el-select) {
+  width: 100%;
+}
+
+.orders-edit-k {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.orders-edit-addr-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.orders-edit-select {
+  width: 100%;
+}
+
+.orders-edit-map-wrap {
+  height: 220px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.orders-edit-map-wrap :deep(.mdmp) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.orders-edit-map-wrap :deep(.mdmp-search) {
+  margin-bottom: 6px;
+}
+
+.orders-edit-map-wrap :deep(.mdmp-map) {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+.orders-edit-map-wrap :deep(.mdmp-search-btn) {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--el-color-primary);
+}
+
+.orders-edit-coord {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.orders-edit-check {
+  height: auto;
+  white-space: normal;
+}
+
+.orders-edit-tip {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #c2410c;
+}
+
+.orders-edit-tip--muted {
+  color: #64748b;
+}
+
+@media (max-width: 860px) {
+  .orders-edit-body,
+  .orders-edit-body.is-pickup {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+
+<style>
+.orders-edit-order-dialog.el-dialog,
+.el-overlay .orders-edit-order-dialog.el-dialog {
+  border-radius: 16px;
+  padding: 0;
+  background: #f7fafb;
+  max-width: calc(100vw - 32px);
+}
+
+.orders-edit-order-dialog .el-dialog__header,
+.el-overlay .orders-edit-order-dialog .el-dialog__header {
+  margin: 0;
+  padding: 14px 18px 12px;
+  background: #fff;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 16px 16px 0 0;
+}
+
+.orders-edit-order-dialog .el-dialog__body,
+.el-overlay .orders-edit-order-dialog .el-dialog__body {
+  padding: 12px 14px;
+  background: #f7fafb;
+}
+
+.orders-edit-order-dialog .el-dialog__footer,
+.el-overlay .orders-edit-order-dialog .el-dialog__footer {
+  padding: 10px 16px 14px;
+  background: #fff;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 0 0 16px 16px;
+}
+</style>

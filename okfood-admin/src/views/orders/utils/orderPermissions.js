@@ -61,9 +61,9 @@ export function isSingleRowSelectable(row) {
   return canDispatchActions(row) || canCancelOrder(row) || canMarkOrderComplete(row)
 }
 
-/** 商城订单：是否可勾选（批量推顺丰，不含门店自提） */
+/** 商城订单：当前页都可勾选。批量推顺丰仍只提交待发货且非自提的订单。 */
 export function isRetailRowSelectable(row) {
-  return canDispatchActions(row) && !row.store_pickup
+  return Boolean(row && row.id != null)
 }
 
 export function canRefundWechatSingle(row) {

@@ -82,6 +82,18 @@
   font-weight: 700;
 }
 
+.okfood-message-box .el-message-box__btns .el-button--primary:not(.okfood-message-box__confirm--danger) {
+  border: none;
+  background: var(--el-color-primary);
+  color: #fff;
+}
+
+.okfood-message-box .el-message-box__btns .el-button--primary:not(.okfood-message-box__confirm--danger):hover,
+.okfood-message-box .el-message-box__btns .el-button--primary:not(.okfood-message-box__confirm--danger):focus {
+  background: var(--el-color-primary-dark-2, #dd7f68);
+  color: #fff;
+}
+
 .okfood-message-box .okfood-message-box__cancel {
   border: 1px solid color-mix(in srgb, var(--el-color-primary) 32%, #e2e8f0);
   background: #fff;

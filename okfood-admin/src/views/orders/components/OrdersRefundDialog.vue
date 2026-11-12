@@ -1,5 +1,4 @@
 <script setup>
-import { AlertTriangle } from 'lucide-vue-next'
 import { useOrdersManageInject } from '../composables/useOrdersManageInject.js'
 
 const {
@@ -14,53 +13,144 @@ const {
 <template>
   <el-dialog
     v-model="refundOpen"
-    width="440px"
+    width="420px"
     class="orders-refund-dialog"
-    destroy-on-close
+    append-to-body
     align-center
+    destroy-on-close
     :close-on-click-modal="!refundLoadingId"
     :close-on-press-escape="!refundLoadingId"
     @closed="onRefundDialogClosed"
   >
     <template #header>
-      <div class="orders-refund-header">
-        <span class="orders-refund-header-icon" aria-hidden="true">
-          <AlertTriangle :size="20" :stroke-width="2.25" />
-        </span>
-        <span class="orders-refund-header-title">微信原路退款</span>
+      <div class="orders-refund-head">
+        <strong>微信原路退款</strong>
+        <span v-if="refundDialogMeta">#{{ refundDialogMeta.orderId }} · {{ refundDialogMeta.orderType }}</span>
       </div>
     </template>
     <div v-if="refundDialogMeta" class="orders-refund-body">
-      <p class="orders-refund-lead">请确认以下退款信息后再提交</p>
-      <dl class="orders-refund-card">
-        <div class="orders-refund-row">
-          <dt>订单类型</dt>
-          <dd>{{ refundDialogMeta.orderType }}</dd>
-        </div>
-        <div class="orders-refund-row">
-          <dt>订单编号</dt>
-          <dd>#{{ refundDialogMeta.orderId }}</dd>
-        </div>
-        <div class="orders-refund-row orders-refund-row--amount">
-          <dt>退款金额</dt>
-          <dd>
-            <span class="orders-refund-amount">¥ {{ refundDialogMeta.amountStr }}</span>
-            <span class="orders-refund-amount-sub">{{ refundDialogMeta.sub }}</span>
-          </dd>
-        </div>
-      </dl>
-      <p class="orders-refund-tip">
-        <AlertTriangle :size="14" :stroke-width="2.25" class="orders-refund-tip-icon" aria-hidden="true" />
-        <span>{{ refundDialogMeta.tip }}</span>
-      </p>
+      <section class="orders-refund-card">
+        <p class="orders-refund-k">退款金额</p>
+        <p class="orders-refund-amount">¥{{ refundDialogMeta.amountStr }}</p>
+        <p class="orders-refund-sub">{{ refundDialogMeta.sub }}</p>
+        <p v-if="refundDialogMeta.memberLine" class="orders-refund-member">{{ refundDialogMeta.memberLine }}</p>
+      </section>
+      <p class="orders-refund-tip">{{ refundDialogMeta.tip }}</p>
     </div>
     <template #footer>
-      <div class="orders-refund-footer">
-        <el-button :disabled="!!refundLoadingId" @click="refundOpen = false">取消</el-button>
-        <el-button type="danger" :loading="!!refundLoadingId" @click="submitRefundWechat">
-          确定退款
-        </el-button>
-      </div>
+      <el-button round :disabled="!!refundLoadingId" @click="refundOpen = false">取消</el-button>
+      <el-button type="danger" round :loading="!!refundLoadingId" @click="submitRefundWechat">
+        确定退款
+      </el-button>
     </template>
   </el-dialog>
 </template>
+
+<style scoped>
+.orders-refund-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding-right: 28px;
+}
+
+.orders-refund-head strong {
+  font-size: 16px;
+  font-weight: 800;
+  color: #1d1f21;
+}
+
+.orders-refund-head span {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--el-color-primary-dark-2, #c75f48);
+  white-space: nowrap;
+}
+
+.orders-refund-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.orders-refund-card {
+  padding: 16px 14px 14px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  text-align: center;
+}
+
+.orders-refund-k {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.orders-refund-amount {
+  margin: 4px 0 0;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: #be123c;
+  font-variant-numeric: tabular-nums;
+}
+
+.orders-refund-sub,
+.orders-refund-member {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.orders-refund-member {
+  margin-top: 8px;
+  color: #1d1f21;
+}
+
+.orders-refund-tip {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: #c2410c;
+  text-align: center;
+}
+</style>
+
+<style>
+.orders-refund-dialog.el-dialog,
+.el-overlay .orders-refund-dialog.el-dialog {
+  border-radius: 16px;
+  padding: 0;
+  background: #f7fafb;
+  max-width: calc(100vw - 32px);
+}
+
+.orders-refund-dialog .el-dialog__header,
+.el-overlay .orders-refund-dialog .el-dialog__header {
+  margin: 0;
+  padding: 14px 18px 12px;
+  background: #fff;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 16px 16px 0 0;
+}
+
+.orders-refund-dialog .el-dialog__body,
+.el-overlay .orders-refund-dialog .el-dialog__body {
+  padding: 12px 14px;
+  background: #f7fafb;
+}
+
+.orders-refund-dialog .el-dialog__footer,
+.el-overlay .orders-refund-dialog .el-dialog__footer {
+  padding: 10px 16px 14px;
+  background: #fff;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 0 0 16px 16px;
+}
+</style>
