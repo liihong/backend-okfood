@@ -112,7 +112,7 @@ def footer(c, page, total=4):
     c.line(48, 36, W - 48, 36)
     c.setFillColor(SOFT)
     c.setFont("Sans", 8.5)
-    c.drawString(48, 22, "真实店面。姓名、电话、地址做了遮挡。")
+    c.drawString(48, 22, "一家正在用的店。姓名、电话、地址做了遮挡。")
     c.drawRightString(W - 48, 22, f"{page}  /  {total}")
 
 

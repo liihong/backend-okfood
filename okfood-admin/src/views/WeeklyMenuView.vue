@@ -357,6 +357,7 @@ async function onDishChange(row, dishId, mealPeriod, opts = {}) {
 
 /**
  * 给这一天这一餐配随餐饮。不改菜品。
+ * 保存请求返回并写回当前格之后再提示，不再整页重拉周菜单。
  * @param {Record<string, unknown> & { weekStart: string, slot: number, dish_id?: unknown }} row
  * @param {unknown} drinkId
  * @param {'lunch'|'dinner'} mealPeriod
@@ -367,6 +368,7 @@ async function onDrinkChange(row, drinkId, mealPeriod) {
     return
   }
   const key = `${mealPeriod}-${row.weekStart}-${row.slot}`
+  const nextId = drinkId == null || drinkId === '' ? null : Number(drinkId)
   savingSlot.value = key
   try {
     await apiJson(
@@ -378,19 +380,32 @@ async function onDrinkChange(row, drinkId, mealPeriod) {
           slot: row.slot,
           dish_id: Number(row.dish_id),
           meal_period: mealPeriod,
-          paired_drink_id: drinkId == null || drinkId === '' ? null : Number(drinkId),
+          paired_drink_id: nextId,
         }),
       },
       { auth: true },
     )
+    applySlotDrink(row, mealPeriod, nextId)
     showToast('随餐饮已保存', 'success')
-    await loadPreview()
   } catch (e) {
     showToast(e instanceof Error ? e.message : '保存随餐饮失败', 'error')
-    await loadPreview()
   } finally {
     savingSlot.value = null
   }
+}
+
+/** 把刚保存的饮品写回当前周的这一格，避免再请求整周库存。 */
+function applySlotDrink(row, mealPeriod, drinkId) {
+  const preview = mealPeriod === 'dinner' ? previewDinner : previewLunch
+  const data = preview.value
+  if (!data) return
+  const listKey = activeWeekTab.value === 'next' ? 'next_week' : 'this_week'
+  const list = Array.isArray(data[listKey]) ? data[listKey] : []
+  const slot = list.find((item) => Number(item.slot) === Number(row.slot))
+  if (!slot) return
+  const opt = drinkOptions.value.find((item) => item.value === drinkId)
+  slot.paired_drink_id = drinkId
+  slot.paired_drink_name = drinkId == null ? '' : opt?.label || ''
 }
 
 /**
@@ -676,7 +691,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                 clearable
                 placeholder="选择饮品"
                 class="wmenu-drink-select"
-                :loading="drinksLoading"
+                :loading="isRowBusy(meal.row, meal.mealPeriod)"
                 :disabled="isRowBusy(meal.row, meal.mealPeriod)"
                 @update:model-value="(v) => onDrinkChange(meal.row, v, meal.mealPeriod)"
               >
