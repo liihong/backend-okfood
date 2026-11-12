@@ -600,7 +600,7 @@ function onTabClose(tab) {
     <!-- 全宽通条顶栏：品牌/折叠在左，标签居中，铃铛/时钟/用户在右；侧栏仅保留菜单，顶部与之对齐 -->
     <header class="admin-top-tab-bar">
       <div class="admin-top-tab-bar__brand">
-        <div class="admin-top-tab-bar__brand-lockup">
+        <div v-if="!isNarrowScreen && !sidebarCollapsed" class="admin-top-tab-bar__brand-lockup">
           <div
             class="logo-box"
             :class="{

@@ -940,6 +940,12 @@ onUnmounted(() => {
   padding: 2px 2px 0;
 }
 
+@media (max-width: 900px) {
+  .sf-crumb {
+    display: none;
+  }
+}
+
 .sf-crumb {
   margin: 0 0 6px;
   font-size: 12px;

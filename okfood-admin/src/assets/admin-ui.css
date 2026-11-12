@@ -260,21 +260,23 @@ html.okfood-admin-shell body {
   margin-left: 0;
 }
 
-/* 顶栏内：品牌区 + 折叠（与侧栏顶部菜单起点对齐，不再占用侧栏高度） */
+/* 顶栏品牌区与侧栏同宽，折叠钮右沿贴齐菜单右沿 */
 .admin-top-tab-bar__brand {
   display: flex;
   align-items: center;
-  /* 左侧：logo+店名；右侧：折叠；中间缝 = 顶栏上下 padding（8px） */
   gap: 8px;
   flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 250px;
   min-width: 0;
-  max-width: min(320px, 34vw);
+  max-width: 250px;
 }
 
 .admin-top-tab-bar__brand-lockup {
   display: inline-flex;
   align-items: center;
   gap: var(--okfood-admin-gutter);
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -291,8 +293,20 @@ html.okfood-admin-shell body {
 }
 
 .admin-top-tab-bar__brand .sidebar-collapse-toggle {
-  margin-left: 0;
+  margin-left: auto;
   flex-shrink: 0;
+}
+
+/* 收起后只留箭头，宽度与图标栏一致并居中；页签因此从主内容左沿开始 */
+.admin-layout--sidebar-collapsed:not(.admin-layout--narrow) .admin-top-tab-bar__brand {
+  width: 64px;
+  max-width: 64px;
+  justify-content: center;
+  gap: 0;
+}
+
+.admin-layout--sidebar-collapsed:not(.admin-layout--narrow) .admin-top-tab-bar__brand .sidebar-collapse-toggle {
+  margin-left: 0;
 }
 
 /* 窄屏：顶栏模块胶囊，代替左侧图标栏 */
@@ -5744,8 +5758,16 @@ html.okfood-admin-shell body {
 
   .admin-layout--narrow .admin-top-tab-bar__brand {
     flex: 1 1 auto;
+    width: auto;
     max-width: none;
     min-width: 0;
+    gap: 0;
+  }
+
+  /* 手机不留 logo，模块名左沿与下方内容卡左沿同一条 gutter */
+  .admin-layout--narrow .mobile-module-trigger {
+    flex: 0 1 auto;
+    margin-right: auto;
   }
 
   /* 手机顶栏只留模块名、铃铛和账号。时钟会盖住左侧模块按钮 */
