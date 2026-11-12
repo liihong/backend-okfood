@@ -63,7 +63,7 @@ def remove_drink(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """删除饮品。仍被菜品配餐饮引用时拒绝删除。"""
+    """删除饮品。仍被本周菜单或菜品引用时拒绝删除。"""
     sid = _store_id(db, admin_username, store_id)
     svc.delete_drink(db, drink_id, store_id=sid)
     return success(msg="饮品已删除")

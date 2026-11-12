@@ -160,7 +160,7 @@ async function deleteDrink(row) {
   if (!row?.id) return
   try {
     await ElMessageBox.confirm(
-      `确定删除「${row.name}」？仍被菜品配餐饮选用的饮品不能删除。`,
+      `确定删除「${row.name}」？仍被本周菜单随餐饮选用的饮品不能删除。`,
       '删除确认',
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
     )
@@ -197,7 +197,7 @@ onMounted(() => {
       <div class="mkt-page-head__copy">
         <p class="mkt-kicker">菜单管理</p>
         <h1 class="mkt-title">饮品管理</h1>
-        <p class="mkt-intro">随餐饮在这里维护。菜品编辑里的配餐饮只从这份饮品库里选。</p>
+        <p class="mkt-intro">随餐饮在这里维护。本周菜单每天的午晚餐从这份饮品库里选。</p>
       </div>
       <div class="dish-toolbar">
         <div class="dish-toolbar-filters">

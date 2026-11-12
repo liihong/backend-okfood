@@ -51,11 +51,6 @@ function dishTypeLabel(d) {
   return cat?.name || '未知'
 }
 
-function drinkOptionLabel(drink) {
-  const name = String(drink?.name || '').trim() || `饮品 #${drink?.id}`
-  return drink?.is_enabled === false ? `${name}（已停用）` : name
-}
-
 const UNCategorized_MEAT_KEY = '__none__'
 
 const dishesByMeatGroup = computed(() => {
@@ -104,33 +99,11 @@ const dishForm = reactive({
   is_enabled: true,
   meat_category_id: null,
   dish_type_category_id: null,
-  paired_drink_id: null,
-  paired_drink_name: '',
   spice_level: '',
   internal_view_sop: '',
 })
 
-const drinkOptions = ref([])
-const drinkOptionsLoading = ref(false)
-
-/** 启用中的饮品，再加上当前已选、列表里暂时没有的那一项 */
-const drinkSelectOptions = computed(() => {
-  const options = drinkOptions.value
-    .filter((drink) => drink.is_enabled !== false)
-    .map((drink) => ({
-      id: Number(drink.id),
-      label: drinkOptionLabel(drink),
-    }))
-  const currentId = dishForm.paired_drink_id
-  if (currentId != null && !options.some((item) => item.id === Number(currentId))) {
-    const fallback = String(dishForm.paired_drink_name || '').trim()
-    options.unshift({
-      id: Number(currentId),
-      label: fallback || `饮品 #${currentId}`,
-    })
-  }
-  return options
-})
+const dishPhotoUploading = ref(false)
 
 const SPICE_ADMIN_LABELS = {
   '': '未标注',
@@ -152,7 +125,6 @@ function dishLastUsedLabel(row) {
   if (raw == null || String(raw).trim() === '') return '从未使用'
   return `上次 ${String(raw).trim()}`
 }
-const dishPhotoUploading = ref(false)
 
 /** 菜品编辑预览图 URL（与会员端展示一致，用于大图预览） */
 const dishEditorPreviewDisplayUrl = computed(() => {
@@ -217,8 +189,6 @@ function resetDishForm() {
   dishForm.is_enabled = true
   dishForm.meat_category_id = null
   dishForm.dish_type_category_id = null
-  dishForm.paired_drink_id = null
-  dishForm.paired_drink_name = ''
   dishForm.spice_level = ''
   dishForm.internal_view_sop = ''
 }
@@ -242,10 +212,6 @@ const openDishEditorEdit = async (row) => {
   dishForm.is_enabled = row.is_enabled !== false
   dishForm.meat_category_id = row.meat_category_id != null ? row.meat_category_id : null
   dishForm.dish_type_category_id = row.dish_type_category_id != null ? row.dish_type_category_id : null
-  dishForm.paired_drink_id =
-    row.paired_drink_id != null ? Number(row.paired_drink_id) : null
-  dishForm.paired_drink_name =
-    row.paired_drink_name != null ? String(row.paired_drink_name) : ''
   dishForm.spice_level = row.spice_level != null ? String(row.spice_level).trim().toLowerCase() : ''
   dishForm.internal_view_sop = ''
   showDishModal.value = true
@@ -269,10 +235,6 @@ const openDishEditorEdit = async (row) => {
       if (detail.dish_type_category_id != null) {
         dishForm.dish_type_category_id = detail.dish_type_category_id
       }
-      dishForm.paired_drink_id =
-        detail.paired_drink_id != null ? Number(detail.paired_drink_id) : null
-      dishForm.paired_drink_name =
-        detail.paired_drink_name != null ? String(detail.paired_drink_name) : ''
     }
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
@@ -338,10 +300,6 @@ async function saveDish() {
     dishForm.dish_type_category_id === '' || dishForm.dish_type_category_id == null
       ? null
       : parseInt(String(dishForm.dish_type_category_id), 10)
-  const pairedDrinkId =
-    dishForm.paired_drink_id === '' || dishForm.paired_drink_id == null
-      ? null
-      : parseInt(String(dishForm.paired_drink_id), 10)
   const priceStr = String(dishForm.single_order_price_yuan ?? '').trim()
   let single_order_price_yuan = null
   if (priceStr !== '') {
@@ -360,7 +318,6 @@ async function saveDish() {
     is_enabled: Boolean(dishForm.is_enabled),
     meat_category_id: Number.isFinite(meatCategoryId) ? meatCategoryId : null,
     dish_type_category_id: Number.isFinite(dishTypeCategoryId) ? dishTypeCategoryId : null,
-    paired_drink_id: Number.isFinite(pairedDrinkId) ? pairedDrinkId : null,
     single_order_price_yuan,
     spice_level: spiceRaw === '' ? null : spiceRaw,
     internal_view_sop: (dishForm.internal_view_sop || '').trim() || null,
@@ -415,29 +372,8 @@ async function deleteDish(row) {
   }
 }
 
-async function fetchDrinkOptions() {
-  if (!adminAccessToken.value) return
-  drinkOptionsLoading.value = true
-  try {
-    const data = await apiJson('/api/admin/drinks', {}, { auth: true })
-    drinkOptions.value = Array.isArray(data) ? data : []
-  } catch (e) {
-    const status = e && typeof e.status === 'number' ? e.status : 0
-    if (status === 401) {
-      alert('登录已过期，请重新登录')
-      handleAdminLogout()
-      return
-    }
-    drinkOptions.value = []
-    showToast(e instanceof Error ? e.message : '加载配餐饮失败', 'error')
-  } finally {
-    drinkOptionsLoading.value = false
-  }
-}
-
 onMounted(() => {
   void fetchCategoriesForDishes()
-  void fetchDrinkOptions()
   void fetchDishes()
 })
 </script>
@@ -670,25 +606,6 @@ onMounted(() => {
                   :key="c.id"
                   :label="c.name"
                   :value="c.id"
-                />
-              </el-select>
-            </div>
-            <div class="menu-editor-field menu-editor-field-grow">
-              <label class="menu-editor-label" for="dish-paired-drink">配餐饮</label>
-              <el-select
-                id="dish-paired-drink"
-                v-model="dishForm.paired_drink_id"
-                class="menu-editor-input-el"
-                clearable
-                filterable
-                :loading="drinkOptionsLoading"
-                placeholder="从饮品管理选择，可留空"
-              >
-                <el-option
-                  v-for="item in drinkSelectOptions"
-                  :key="item.id"
-                  :label="item.label"
-                  :value="item.id"
                 />
               </el-select>
             </div>

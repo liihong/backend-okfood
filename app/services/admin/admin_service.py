@@ -25,6 +25,7 @@ from app.models.member_meal_period_state import MemberMealPeriodState
 from app.models.member_card_order import MemberCardOrder
 from app.models.member_operation_log import MemberOperationLog
 from app.models.menu_dish import MenuDish
+from app.models.menu_drink import MenuDrink
 from app.models.menu_schedule import MenuSchedule
 from app.models.product_category import ProductCategory
 from app.models.single_meal_order import SingleMealOrder
@@ -1395,6 +1396,7 @@ def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminO
         field_label="菜品分类",
     )
     paired_drink_id = assert_store_drink(db, drink_id=body.paired_drink_id, store_id=sid)
+    touch_drink = "paired_drink_id" in body.model_fields_set
     if body.id is not None:
         row = db.get(MenuDish, body.id)
         if not row:
@@ -1408,7 +1410,8 @@ def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminO
         row.category_id = None
         row.meat_category_id = meat_category_id
         row.dish_type_category_id = dish_type_category_id
-        row.paired_drink_id = paired_drink_id
+        if touch_drink:
+            row.paired_drink_id = paired_drink_id
         row.single_order_price_yuan = body.single_order_price_yuan
         row.spice_level = body.spice_level
         row.internal_view_sop = body.internal_view_sop
@@ -1744,8 +1747,10 @@ def _weekly_slots_raw(rows: list) -> list[dict]:
             "dish_type_category_id": d.dish_type_category_id,
             "single_order_price_yuan": _dish_price_yuan_str(d.single_order_price_yuan),
             "total_stock": int(w.total_stock) if w.total_stock is not None else None,
+            "paired_drink_id": int(w.paired_drink_id) if w.paired_drink_id is not None else None,
+            "paired_drink_name": drink.name if drink is not None else None,
         }
-        for w, d in rows
+        for w, d, drink in rows
     ]
 
 
@@ -1782,8 +1787,9 @@ def _weekly_slots_payload(db: Session, anchor: date, store_id: int, *, meal_peri
     sid = int(store_id)
     period = normalize_meal_period(meal_period)
     rows = db.execute(
-        select(WeeklyMenuSlot, MenuDish)
+        select(WeeklyMenuSlot, MenuDish, MenuDrink)
         .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
+        .outerjoin(MenuDrink, WeeklyMenuSlot.paired_drink_id == MenuDrink.id)
         .where(
             WeeklyMenuSlot.week_start == anchor,
             WeeklyMenuSlot.store_id == sid,
@@ -1826,8 +1832,9 @@ def _weekly_dual_preview(
         db, this_dates, store_id=sid, meal_period=period, metrics_cache=metrics_cache
     )
     rows = db.execute(
-        select(WeeklyMenuSlot, MenuDish)
+        select(WeeklyMenuSlot, MenuDish, MenuDrink)
         .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
+        .outerjoin(MenuDrink, WeeklyMenuSlot.paired_drink_id == MenuDrink.id)
         .where(
             WeeklyMenuSlot.store_id == sid,
             WeeklyMenuSlot.week_start.in_(anchors),
@@ -1836,8 +1843,8 @@ def _weekly_dual_preview(
         .order_by(WeeklyMenuSlot.week_start, WeeklyMenuSlot.slot)
     ).all()
     by_anchor: dict[date, list] = {this_a: [], next_a: []}
-    for w, d in rows:
-        by_anchor.setdefault(w.week_start, []).append((w, d))
+    for w, d, drink in rows:
+        by_anchor.setdefault(w.week_start, []).append((w, d, drink))
     return {
         "this_week": weekly_slot_stock_extras(
             db,
@@ -1948,7 +1955,12 @@ def assign_weekly_menu_slot(db: Session, body: WeeklySlotAssignIn, *, store_id: 
             )
             db.add(created)
             db.flush()
+            row = created
             slot_id = int(created.id)
+        if "paired_drink_id" in body.model_fields_set:
+            row.paired_drink_id = assert_store_drink(
+                db, drink_id=body.paired_drink_id, store_id=sid
+            )
         db.commit()
     except IntegrityError:
         db.rollback()

@@ -132,6 +132,11 @@ class WeeklySlotAssignIn(BaseModel):
     week_start: date = Field(..., description="该周任意一天，服务端归一为周一")
     slot: int = Field(..., ge=1, le=7, description="1=周一 … 7=周日")
     dish_id: int | None = Field(None, ge=1)
+    paired_drink_id: int | None = Field(
+        default=None,
+        ge=1,
+        description="随餐饮：饮品库 id。不传表示不改；传 null 表示这一餐不配饮",
+    )
     meal_period: str = Field(
         "lunch",
         description="lunch=午餐槽；dinner=晚餐槽（写入时必填且不可混用）",

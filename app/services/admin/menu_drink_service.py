@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.menu_dish import MenuDish
 from app.models.menu_drink import MenuDrink
+from app.models.weekly_menu_slot import WeeklyMenuSlot
 from app.schemas.menu_drink import DrinkAdminOut, DrinkUpsertIn
 
 
@@ -84,12 +85,17 @@ def delete_drink(db: Session, drink_id: int, *, store_id: int) -> None:
     row = db.get(MenuDrink, int(drink_id))
     if row is None or int(row.store_id) != sid:
         raise HTTPException(status_code=404, detail="饮品不存在")
-    used = db.scalar(
+    used_on_dish = db.scalar(
         select(func.count())
         .select_from(MenuDish)
         .where(MenuDish.store_id == sid, MenuDish.paired_drink_id == int(row.id))
     )
-    if used:
-        raise HTTPException(status_code=400, detail="仍有菜品配了这款饮品，请先在菜品里改掉再删除")
+    used_on_slot = db.scalar(
+        select(func.count())
+        .select_from(WeeklyMenuSlot)
+        .where(WeeklyMenuSlot.store_id == sid, WeeklyMenuSlot.paired_drink_id == int(row.id))
+    )
+    if used_on_dish or used_on_slot:
+        raise HTTPException(status_code=400, detail="仍有本周菜单或菜品在用这款饮品，请先改掉再删除")
     db.delete(row)
     db.commit()

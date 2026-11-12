@@ -27,6 +27,9 @@ class WeeklyMenuSlot(Base):
         String(16), nullable=False, default="lunch", comment="lunch=午餐；dinner=晚餐"
     )
     dish_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("menu_dish.id", onupdate="CASCADE"), nullable=False)
+    paired_drink_id: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, comment="随餐饮，menu_drink.id，可空"
+    )
     total_stock: Mapped[int | None] = mapped_column(
         Integer, nullable=True, default=None, comment="日总份(含订阅与单次)；NULL=未配置(单次卡不可售)"
     )

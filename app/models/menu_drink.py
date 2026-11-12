@@ -8,7 +8,7 @@ from app.core.timeutil import beijing_now_naive
 
 
 class MenuDrink(Base):
-    """随餐饮饮品库。和零售果蔬汁无关，只给菜品的配餐饮选用。"""
+    """随餐饮饮品库。和零售果蔬汁无关，本周菜单按每天的午餐、晚餐选用。"""
 
     __tablename__ = "menu_drink"
 

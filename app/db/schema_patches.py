@@ -224,7 +224,7 @@ def ensure_menu_drink_schema(engine: Engine) -> None:
                         "CONSTRAINT `fk_menu_drink_store` FOREIGN KEY (`store_id`) "
                         "REFERENCES `stores` (`id`) ON UPDATE CASCADE"
                         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci "
-                        "COMMENT='随餐饮饮品，供菜品配餐饮选用'"
+                        "COMMENT='随餐饮饮品，供本周菜单按每天餐次选用'"
                     )
                 )
         logger.info("已创建 menu_drink")
@@ -234,21 +234,41 @@ def ensure_menu_drink_schema(engine: Engine) -> None:
         return
     cols = {c["name"] for c in insp.get_columns("menu_dish")}
     if "paired_drink_id" in cols:
+        pass
+    else:
+        with engine.begin() as conn:
+            if dialect == "sqlite":
+                conn.execute(text("ALTER TABLE menu_dish ADD COLUMN paired_drink_id BIGINT"))
+            else:
+                after = " AFTER `dish_type_category_id`" if "dish_type_category_id" in cols else ""
+                conn.execute(
+                    text(
+                        "ALTER TABLE `menu_dish` "
+                        "ADD COLUMN `paired_drink_id` BIGINT NULL "
+                        "COMMENT '配餐饮，menu_drink.id，可空'"
+                        f"{after}"
+                    )
+                )
+        logger.info("已为 menu_dish 补 paired_drink_id 列")
+
+    insp = inspect(engine)
+    if "weekly_menu_slot" not in insp.get_table_names():
+        return
+    slot_cols = {c["name"] for c in insp.get_columns("weekly_menu_slot")}
+    if "paired_drink_id" in slot_cols:
         return
     with engine.begin() as conn:
         if dialect == "sqlite":
-            conn.execute(text("ALTER TABLE menu_dish ADD COLUMN paired_drink_id BIGINT"))
+            conn.execute(text("ALTER TABLE weekly_menu_slot ADD COLUMN paired_drink_id BIGINT"))
         else:
-            after = " AFTER `dish_type_category_id`" if "dish_type_category_id" in cols else ""
             conn.execute(
                 text(
-                    "ALTER TABLE `menu_dish` "
+                    "ALTER TABLE `weekly_menu_slot` "
                     "ADD COLUMN `paired_drink_id` BIGINT NULL "
-                    "COMMENT '配餐饮，menu_drink.id，可空'"
-                    f"{after}"
+                    "COMMENT '随餐饮，menu_drink.id，按每天餐次设置，可空'"
                 )
             )
-    logger.info("已为 menu_dish 补 paired_drink_id 列")
+    logger.info("已为 weekly_menu_slot 补 paired_drink_id 列")
 
 
 def ensure_prep_menu_schema(engine: Engine) -> None:
