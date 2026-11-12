@@ -15,6 +15,10 @@ const current = ref(null)
 const lines = ref([])
 
 const skuOptions = computed(() => skus.value.filter((item) => !item.is_meal_bag))
+const fixedBagName = computed(() => {
+  const bag = skus.value.find((item) => item.is_meal_bag)
+  return bag?.name || '打包袋'
+})
 
 async function load() {
   loading.value = true
@@ -57,8 +61,9 @@ async function save() {
 }
 
 function boxText(row) {
-  if (!row.lines?.length) return '未设置'
-  return row.lines.map((line) => `${line.sku_name}×${line.qty_per_portion}`).join('、')
+  const head = `${fixedBagName.value}×1`
+  if (!row.lines?.length) return `${head}，盒子未设置`
+  return [head, ...row.lines.map((line) => `${line.sku_name}×${line.qty_per_portion}`)].join('、')
 }
 
 onMounted(load)
@@ -89,8 +94,7 @@ onMounted(load)
           </el-table-column>
           <el-table-column label="默认用盒" min-width="240">
             <template #default="{ row }">
-              <el-tag v-if="!row.lines?.length" type="warning" round effect="light">未设置</el-tag>
-              <span v-else>{{ boxText(row) }}</span>
+              <span>{{ boxText(row) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="100" fixed="right">
@@ -109,7 +113,7 @@ onMounted(load)
       align-center
       class="mkt-dialog"
     >
-      <PackagingLineEditor v-model="lines" :sku-options="skuOptions" />
+      <PackagingLineEditor v-model="lines" :sku-options="skuOptions" :fixed-bag-name="fixedBagName" />
       <template #footer>
         <el-button round @click="dialogOpen = false">取消</el-button>
         <el-button type="primary" round :loading="saving" @click="save">保存</el-button>

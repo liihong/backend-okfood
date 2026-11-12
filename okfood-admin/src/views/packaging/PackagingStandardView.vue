@@ -11,6 +11,10 @@ const saving = ref(false)
 const skus = ref([])
 const lines = ref([])
 const skuOptions = computed(() => skus.value.filter((item) => !item.is_meal_bag))
+const fixedBagName = computed(() => {
+  const bag = skus.value.find((item) => item.is_meal_bag)
+  return bag?.name || '打包袋'
+})
 
 async function load() {
   loading.value = true
@@ -54,14 +58,14 @@ onMounted(load)
         <p class="mkt-kicker">库存管理</p>
         <h1 class="mkt-title">每份标配</h1>
         <p class="mkt-intro">
-          筷子、小勺这类每份都有的东西设一次即可。午餐和晚餐会各乘各的后厨出餐份数。打包袋不要放这里。
+          筷子、小勺这类每份都有的东西设一次即可。午餐和晚餐会各乘各的后厨出餐份数。第一行的打包袋按每餐自动扣，不能在这里改。
         </p>
       </div>
       <el-button type="primary" round :loading="saving" @click="save">保存标配</el-button>
     </header>
 
     <article v-loading="loading" class="mkt-card">
-      <PackagingLineEditor v-model="lines" :sku-options="skuOptions" />
+      <PackagingLineEditor v-model="lines" :sku-options="skuOptions" :fixed-bag-name="fixedBagName" />
     </article>
   </section>
 </template>

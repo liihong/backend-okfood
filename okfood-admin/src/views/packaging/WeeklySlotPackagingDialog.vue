@@ -24,6 +24,10 @@ const saving = ref(false)
 const skus = ref([])
 const lines = ref([])
 const skuOptions = computed(() => skus.value.filter((item) => !item.is_meal_bag))
+const fixedBagName = computed(() => {
+  const bag = skus.value.find((item) => item.is_meal_bag)
+  return bag?.name || '打包袋'
+})
 const title = computed(() => {
   const meal = props.mealPeriod === 'dinner' ? '晚餐' : '午餐'
   return `${meal}用盒${props.dishName ? ` · ${props.dishName}` : ''}`
@@ -97,7 +101,7 @@ async function save() {
         :closable="false"
         class="pack-gap"
       />
-      <PackagingLineEditor v-model="lines" :sku-options="skuOptions" />
+      <PackagingLineEditor v-model="lines" :sku-options="skuOptions" :fixed-bag-name="fixedBagName" />
     </div>
     <template #footer>
       <el-button @click="emit('update:modelValue', false)">取消</el-button>
