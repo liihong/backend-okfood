@@ -119,6 +119,39 @@ def ensure_members_pause_effective_date_schema(engine: Engine) -> None:
     logger.info("已为 members 补 pause_effective_date 列")
 
 
+def ensure_members_lunch_delivery_paused_schema(engine: Engine) -> None:
+    """为 members 补「只暂停午餐」列，已存在则跳过。默认否，旧会员午餐日程不变。"""
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    if "members" not in tables:
+        return
+    cols = {c["name"] for c in insp.get_columns("members")}
+    if "lunch_delivery_paused" in cols:
+        return
+    dialect = engine.dialect.name
+    with engine.begin() as conn:
+        if dialect == "sqlite":
+            conn.execute(
+                text(
+                    "ALTER TABLE members "
+                    "ADD COLUMN lunch_delivery_paused BOOLEAN NOT NULL DEFAULT 0"
+                )
+            )
+        else:
+            after = ""
+            if "skip_subscription_saturday" in cols:
+                after = " AFTER `skip_subscription_saturday`"
+            conn.execute(
+                text(
+                    "ALTER TABLE `members` "
+                    "ADD COLUMN `lunch_delivery_paused` TINYINT(1) NOT NULL DEFAULT 0 "
+                    "COMMENT '只暂停午餐日程，不影响晚餐、请假和整体暂停配送'"
+                    f"{after}"
+                )
+            )
+    logger.info("已为 members 补 lunch_delivery_paused 列")
+
+
 def ensure_dinner_gift_schema(engine: Engine) -> None:
     """补晚餐暂停/指定配送日，以及会员卡赠送晚餐、赠送果蔬汁列。已存在则跳过。"""
     insp = inspect(engine)

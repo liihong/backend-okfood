@@ -102,6 +102,8 @@ const editInitialDeliveryRegionId = ref('')
 /** 打开时的晚餐暂停和指定日，只在有变化时提交，避免改姓名时误改晚餐日程 */
 const editInitialDinnerPaused = ref(false)
 const editInitialDinnerDeliverOn = ref('')
+/** 打开时的午餐暂停，只在有变化时提交，避免改姓名时误改午餐日程 */
+const editInitialLunchPaused = ref(false)
 const profileLoading = ref(false)
 /** 本店会员卡管理中的卡（含已下架），下拉按卡逐条列出，不再按餐段收成「午餐/晚餐」 */
 const membershipTemplates = ref([])
@@ -117,6 +119,7 @@ const editForm = ref({
   store_pickup: false,
   skip_subscription_saturday: false,
   delivery_deferred: false,
+  lunch_delivery_paused: false,
   dinner_delivery_paused: false,
   dinner_deliver_on: '',
   delivery_region_id: '',
@@ -246,6 +249,7 @@ function fillFormFromMember(u) {
   editInitialDeliveryRegionId.value = dr
   editInitialDinnerPaused.value = u.dinner_delivery_paused === true
   editInitialDinnerDeliverOn.value = typeof u.dinner_deliver_on === 'string' ? u.dinner_deliver_on.slice(0, 10) : ''
+  editInitialLunchPaused.value = u.lunch_delivery_paused === true
   editForm.value = {
     phone: u.phone,
     name: u.name || '',
@@ -260,6 +264,7 @@ function fillFormFromMember(u) {
     store_pickup: u.store_pickup === true,
     skip_subscription_saturday: u.skip_subscription_saturday === true,
     delivery_deferred: u.delivery_deferred === true,
+    lunch_delivery_paused: u.lunch_delivery_paused === true,
     dinner_delivery_paused: u.dinner_delivery_paused === true,
     dinner_deliver_on:
       typeof u.dinner_deliver_on === 'string' && u.dinner_deliver_on.trim()
@@ -342,6 +347,16 @@ function showDinnerScheduleFor(u) {
 
 const showDinnerSchedule = computed(() => showDinnerScheduleFor(props.member))
 
+/** 是否展示暂停午餐（有午餐权益或午餐余次） */
+function showLunchPauseFor(u) {
+  if (!u) return false
+  const periods = Array.isArray(u.entitled_meal_periods) ? u.entitled_meal_periods : []
+  if (periods.includes('lunch')) return true
+  return (Number(u.balance) || 0) > 0
+}
+
+const showLunchPause = computed(() => showLunchPauseFor(props.member))
+
 /** 从会员档案推断餐段（纯晚餐卡默认 dinner，否则 lunch） */
 function resolveMemberMealPeriod(u) {
   const periods = Array.isArray(u?.entitled_meal_periods) ? u.entitled_meal_periods : []
@@ -397,6 +412,10 @@ async function submitEditMember() {
       store_pickup: isStorePickup,
       skip_subscription_saturday: editForm.value.skip_subscription_saturday === true,
       delivery_deferred: editForm.value.delivery_deferred === true,
+    }
+    // 午餐暂停只在勾选变化时提交。不改上面的整体暂停，也不改晚餐。
+    if (showLunchPause.value && editForm.value.lunch_delivery_paused !== editInitialLunchPaused.value) {
+      payload.lunch_delivery_paused = editForm.value.lunch_delivery_paused === true
     }
     // 晚餐暂停和指定配送日分开提交。只改日期不会把暂停勾上，也不改上面的整体暂停。
     if (showDinnerSchedule.value) {
@@ -635,6 +654,13 @@ async function submitEditMember() {
             class="okfood-mem-edit-chk-el okfood-mem-edit-chk-el--red"
           >
             暂停配送
+          </el-checkbox>
+          <el-checkbox
+            v-if="showLunchPause"
+            v-model="editForm.lunch_delivery_paused"
+            class="okfood-mem-edit-chk-el okfood-mem-edit-chk-el--red"
+          >
+            暂停午餐
           </el-checkbox>
           <el-checkbox
             v-if="showDinnerSchedule"

@@ -61,6 +61,7 @@
 
 - 晚餐区显示：`showDinnerScheduleFor(member)` — `entitled_meal_periods` 含 `dinner`、或 `dinner_balance>0`、或已暂停晚餐、或已填 `dinner_deliver_on` 任一即 true。  
 - 晚餐暂停与 `dinner_deliver_on` **分开提交**；指定日期 **不自动** 勾暂停晚餐。  
+- 午餐暂停：有午餐权益或午餐余次才显示。只提交变化。不改 `delivery_deferred`，不影响晚餐与请假。  
 - 余额 / 每日份数 / 地址 **不在本弹窗提交**（分别在「修改次数」「地址」）。
 
 ### 3.2 布局规范（2026-03 定稿）
@@ -75,7 +76,7 @@
    - 片区下拉占满本列宽度。  
    - 晚餐长说明：桌面 `okfood-mem-edit-dinner-hint--desk`；小屏隐藏，标签旁 **ⓘ tooltip**（文案常量与正式一致）。  
 3. **选项行**（`okfood-mem-edit-chk-band--one-row`）  
-   - 顺序：**门店自提 → 暂停配送 → 暂停晚餐（若有）→ 周六不参与 → 强制加入当天配送大表**（按钮 `margin-left: auto`）。  
+   - 顺序：**门店自提 → 暂停配送 → 暂停午餐（若有）→ 暂停晚餐（若有）→ 周六不参与 → 强制加入当天配送大表**（按钮 `margin-left: auto`）。  
 4. **备注**：`textarea` 默认 `minRows: 1`，`maxlength 500` + `show-word-limit`。
 
 ### 3.3 小屏紧凑（`max-height: 780px` 或 `max-width: 680px`）

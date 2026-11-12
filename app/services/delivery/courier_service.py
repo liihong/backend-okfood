@@ -34,6 +34,7 @@ from app.services.member.member_address_service import (
     load_default_address_map,
 )
 from app.services.member.member_delivery_state_service import sql_not_blocked_by_pause_on_date
+from app.services.meal_period.lunch_pause import sql_lunch_not_paused
 from app.services.member.member_service import effective_daily_meal_units, sql_effective_daily_meal_units_column
 from app.services.order.single_meal_order_service import list_courier_single_order_tasks
 
@@ -217,6 +218,7 @@ def post_push_first_day_whitelist_member_ids(
         not_(_home_delivery_absent_clause(delivery_date)),
         Member.delivery_start_date == delivery_date,
         _member_not_skip_subscription_saturday(delivery_date),
+        sql_lunch_not_paused(),
         _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
     )
     if delivery_region_id is not None:
@@ -282,6 +284,7 @@ def eligible_members_for_delivery(
             Member.store_pickup.is_(False),
             not_(absent),
             started,
+            sql_lunch_not_paused(),
             _member_not_skip_subscription_saturday(delivery_date),
             _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
         )
@@ -354,6 +357,7 @@ def _member_subscription_schedule_where(
         Member.deleted_at.is_(None),
         Member.is_active.is_(True),
         sql_not_blocked_by_pause_on_date(delivery_date),
+        sql_lunch_not_paused(),
         not_(absent),
         started,
         _member_not_skip_subscription_saturday(delivery_date),
@@ -603,6 +607,7 @@ def eligible_members_for_store_pickup(
             Member.store_pickup.is_(True),
             not_(absent),
             started,
+            sql_lunch_not_paused(),
             _member_not_skip_subscription_saturday(delivery_date),
             _member_scope_clause(tenant_id=tenant_id, store_id=store_id),
         )

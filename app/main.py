@@ -19,6 +19,7 @@ from app.db.schema_patches import (
     apply_address_usage_data_backfill,
     ensure_member_address_usage_schema,
     ensure_members_pause_effective_date_schema,
+    ensure_members_lunch_delivery_paused_schema,
     ensure_dinner_gift_schema,
     ensure_menu_drink_schema,
     ensure_prep_menu_schema,
@@ -109,6 +110,10 @@ async def lifespan(app: FastAPI):
         ensure_members_pause_effective_date_schema(engine)
     except Exception:
         logger.warning("会员暂停生效日列补丁失败（不影响启动）", exc_info=True)
+    try:
+        ensure_members_lunch_delivery_paused_schema(engine)
+    except Exception:
+        logger.warning("会员午餐暂停列补丁失败（不影响启动）", exc_info=True)
     try:
         ensure_dinner_gift_schema(engine)
     except Exception:
