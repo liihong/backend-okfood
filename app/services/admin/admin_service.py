@@ -29,6 +29,7 @@ from app.models.menu_schedule import MenuSchedule
 from app.models.product_category import ProductCategory
 from app.models.single_meal_order import SingleMealOrder
 from app.models.weekly_menu_slot import WeeklyMenuSlot
+from app.services.admin.menu_drink_service import assert_store_drink, drink_name_map
 from app.utils.sql_like import escape_like_fragment
 from app.schemas.admin import (
     CategoryAdminOut,
@@ -1308,6 +1309,7 @@ def _dish_admin_out_from_row(
     include_sop: bool = True,
     lite: bool = False,
     last_used_date: date | None = None,
+    paired_drink_name: str | None = None,
 ) -> DishAdminOut:
     return DishAdminOut(
         id=row.id,
@@ -1319,6 +1321,8 @@ def _dish_admin_out_from_row(
         category_id=row.category_id,
         meat_category_id=row.meat_category_id,
         dish_type_category_id=row.dish_type_category_id,
+        paired_drink_id=row.paired_drink_id,
+        paired_drink_name=paired_drink_name,
         single_order_price_yuan=_dish_price_yuan_str(row.single_order_price_yuan),
         spice_level=_dish_spice_level_out(row.spice_level),
         internal_view_sop=row.internal_view_sop if include_sop else None,
@@ -1332,7 +1336,10 @@ def get_dish_admin(db: Session, dish_id: int, *, store_id: int) -> DishAdminOut:
     row = db.get(MenuDish, dish_id)
     if not row or int(row.store_id) != sid:
         raise HTTPException(status_code=404, detail="菜品不存在")
-    return _dish_admin_out_from_row(row, include_sop=True)
+    drink_name = None
+    if row.paired_drink_id is not None:
+        drink_name = drink_name_map(db, {int(row.paired_drink_id)}).get(int(row.paired_drink_id))
+    return _dish_admin_out_from_row(row, include_sop=True, paired_drink_name=drink_name)
 
 
 def _validate_dish_leaf_category(
@@ -1387,6 +1394,7 @@ def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminO
         parent_code="dish_type",
         field_label="菜品分类",
     )
+    paired_drink_id = assert_store_drink(db, drink_id=body.paired_drink_id, store_id=sid)
     if body.id is not None:
         row = db.get(MenuDish, body.id)
         if not row:
@@ -1400,6 +1408,7 @@ def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminO
         row.category_id = None
         row.meat_category_id = meat_category_id
         row.dish_type_category_id = dish_type_category_id
+        row.paired_drink_id = paired_drink_id
         row.single_order_price_yuan = body.single_order_price_yuan
         row.spice_level = body.spice_level
         row.internal_view_sop = body.internal_view_sop
@@ -1413,6 +1422,7 @@ def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminO
             category_id=None,
             meat_category_id=meat_category_id,
             dish_type_category_id=dish_type_category_id,
+            paired_drink_id=paired_drink_id,
             single_order_price_yuan=body.single_order_price_yuan,
             spice_level=body.spice_level,
             internal_view_sop=body.internal_view_sop,
@@ -1423,7 +1433,10 @@ def upsert_dish(db: Session, body: DishUpsertIn, *, store_id: int) -> DishAdminO
     db.refresh(row)
     if is_new_dish:
         _attach_default_packaging_utensils(db, store_id=sid, dish_id=int(row.id))
-    return _dish_admin_out_from_row(row, include_sop=True)
+    drink_name = None
+    if row.paired_drink_id is not None:
+        drink_name = drink_name_map(db, {int(row.paired_drink_id)}).get(int(row.paired_drink_id))
+    return _dish_admin_out_from_row(row, include_sop=True, paired_drink_name=drink_name)
 
 
 def list_dishes_admin(
@@ -1443,6 +1456,7 @@ def list_dishes_admin(
         MenuDish.category_id,
         MenuDish.meat_category_id,
         MenuDish.dish_type_category_id,
+        MenuDish.paired_drink_id,
         MenuDish.single_order_price_yuan,
         MenuDish.spice_level,
         MenuDish.created_at,
@@ -1472,6 +1486,10 @@ def list_dishes_admin(
                 or_(MenuDish.meat_category_id.in_(ids), MenuDish.dish_type_category_id.in_(ids))
             )
     rows = db.scalars(stmt).all()
+    drink_titles: dict[int, str] = {}
+    if not lite and rows:
+        drink_ids = {int(r.paired_drink_id) for r in rows if r.paired_drink_id is not None}
+        drink_titles = drink_name_map(db, drink_ids)
     last_used_map: dict[int, date | None] = {}
     if not lite and rows:
         last_used_map = _dish_last_used_dates_batch(
@@ -1485,6 +1503,9 @@ def list_dishes_admin(
             include_sop=False,
             lite=lite,
             last_used_date=last_used_map.get(int(r.id)),
+            paired_drink_name=(
+                drink_titles.get(int(r.paired_drink_id)) if r.paired_drink_id is not None else None
+            ),
         )
         for r in rows
     ]

@@ -185,6 +185,72 @@ def ensure_dinner_gift_schema(engine: Engine) -> None:
     logger.info("已检查晚餐暂停与开卡赠送列")
 
 
+def ensure_menu_drink_schema(engine: Engine) -> None:
+    """随餐饮饮品表，以及菜品上的配餐饮列。已存在则跳过。"""
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    dialect = engine.dialect.name
+    if "menu_drink" not in tables:
+        with engine.begin() as conn:
+            if dialect == "sqlite":
+                conn.execute(
+                    text(
+                        "CREATE TABLE IF NOT EXISTS menu_drink ("
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                        "store_id BIGINT NOT NULL, "
+                        "name VARCHAR(200) NOT NULL, "
+                        "description VARCHAR(1000), "
+                        "image_url TEXT, "
+                        "is_enabled BOOLEAN NOT NULL DEFAULT 1, "
+                        "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                        "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                        ")"
+                    )
+                )
+            else:
+                conn.execute(
+                    text(
+                        "CREATE TABLE IF NOT EXISTS `menu_drink` ("
+                        "`id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
+                        "`store_id` BIGINT UNSIGNED NOT NULL, "
+                        "`name` VARCHAR(200) NOT NULL COMMENT '饮品名称', "
+                        "`description` VARCHAR(1000) NULL COMMENT '随餐说明', "
+                        "`image_url` TEXT NULL, "
+                        "`is_enabled` TINYINT(1) NOT NULL DEFAULT 1, "
+                        "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                        "`updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
+                        "PRIMARY KEY (`id`), "
+                        "KEY `idx_menu_drink_store` (`store_id`), "
+                        "CONSTRAINT `fk_menu_drink_store` FOREIGN KEY (`store_id`) "
+                        "REFERENCES `stores` (`id`) ON UPDATE CASCADE"
+                        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci "
+                        "COMMENT='随餐饮饮品，供菜品配餐饮选用'"
+                    )
+                )
+        logger.info("已创建 menu_drink")
+
+    insp = inspect(engine)
+    if "menu_dish" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("menu_dish")}
+    if "paired_drink_id" in cols:
+        return
+    with engine.begin() as conn:
+        if dialect == "sqlite":
+            conn.execute(text("ALTER TABLE menu_dish ADD COLUMN paired_drink_id BIGINT"))
+        else:
+            after = " AFTER `dish_type_category_id`" if "dish_type_category_id" in cols else ""
+            conn.execute(
+                text(
+                    "ALTER TABLE `menu_dish` "
+                    "ADD COLUMN `paired_drink_id` BIGINT NULL "
+                    "COMMENT '配餐饮，menu_drink.id，可空'"
+                    f"{after}"
+                )
+            )
+    logger.info("已为 menu_dish 补 paired_drink_id 列")
+
+
 def ensure_prep_menu_schema(engine: Engine) -> None:
     """开菜单食材与菜品配菜行。表已存在则跳过，不改旧表。"""
     insp = inspect(engine)

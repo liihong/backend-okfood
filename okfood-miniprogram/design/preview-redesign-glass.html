@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OK饭 · 新结构 + Liquid Glass</title>
+  <style>
+    :root {
+      --ink: #1d1f21;
+      --muted: #5c6670;
+      --line: rgba(255, 255, 255, 0.72);
+      --glass: rgba(255, 255, 255, 0.62);
+      --glass-strong: rgba(255, 255, 255, 0.78);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      min-height: 100vh;
+      padding: 48px 24px 64px;
+      background:
+        radial-gradient(900px 420px at 15% -10%, rgba(255, 214, 196, 0.55), transparent 60%),
+        radial-gradient(800px 480px at 90% 0%, rgba(198, 214, 255, 0.45), transparent 55%),
+        #f4f1ee;
+      font-family: "PingFang SC", "SF Pro Text", "Helvetica Neue", sans-serif;
+      color: var(--ink);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+    }
+    .lead {
+      margin: 0 0 28px;
+      max-width: 640px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .row {
+      display: flex;
+      gap: 28px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .phone {
+      width: 320px;
+      height: 692px;
+      padding: 12px;
+      border-radius: 36px;
+      background: #111;
+      box-shadow: 0 24px 60px rgba(30, 24, 20, 0.18);
+    }
+    .screen {
+      position: relative;
+      height: 100%;
+      overflow: hidden;
+      border-radius: 28px;
+      background: #f7fafb;
+    }
+    .photo {
+      height: 280px;
+      background:
+        radial-gradient(120px 80px at 30% 40%, #f3e2c4, transparent 70%),
+        radial-gradient(140px 90px at 68% 46%, #d9654a, transparent 72%),
+        radial-gradient(160px 100px at 50% 70%, #6f8f45, transparent 70%),
+        linear-gradient(160deg, #f6efe4, #e7d3bc);
+    }
+    .photo.noodle {
+      height: 250px;
+      margin: 0 16px;
+      border-radius: 12px;
+      background:
+        radial-gradient(90px 60px at 40% 45%, #f2d48a, transparent 70%),
+        radial-gradient(110px 70px at 62% 55%, #c4553a, transparent 72%),
+        radial-gradient(130px 80px at 48% 62%, #3d6b3a, transparent 70%),
+        linear-gradient(180deg, #f8f1e6, #e6d2b8);
+    }
+    .glass {
+      background: var(--glass);
+      -webkit-backdrop-filter: blur(18px) saturate(1.4);
+      backdrop-filter: blur(18px) saturate(1.4);
+      border: 1px solid var(--line);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.85),
+        0 10px 28px rgba(30, 24, 20, 0.06);
+    }
+    .sheet {
+      position: relative;
+      z-index: 1;
+      margin: -36px 16px 0;
+      padding: 16px 16px 14px;
+      border-radius: 12px;
+    }
+    .date { margin: 0; color: var(--muted); font-size: 12px; }
+    .name {
+      margin: 6px 0 0;
+      font-size: 22px;
+      line-height: 1.25;
+      letter-spacing: -0.03em;
+      font-weight: 650;
+    }
+    .meta { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+    .week {
+      display: flex;
+      gap: 8px;
+      margin: 14px 16px 0;
+      padding: 10px;
+      border-radius: 12px;
+    }
+    .day { flex: 1; text-align: center; }
+    .swatch {
+      height: 36px;
+      border-radius: 8px;
+      background:
+        linear-gradient(160deg, rgba(255,255,255,0.35), transparent 40%),
+        linear-gradient(180deg, #e7a23a, #6a8f42);
+    }
+    .day span { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }
+    .day.on span { color: var(--ink); font-weight: 650; text-decoration: underline; text-underline-offset: 3px; }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 18px 8px;
+      font-size: 15px;
+      font-weight: 650;
+    }
+    .top em { font-style: normal; font-weight: 500; color: var(--muted); }
+    .pad { padding: 8px 18px 0; }
+    h2 { margin: 8px 0 12px; font-size: 32px; letter-spacing: -0.04em; }
+    .days { display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
+    .days b { color: var(--ink); font-weight: 650; text-decoration: underline; text-underline-offset: 4px; }
+    .meals { display: flex; gap: 16px; margin: 12px 0 14px; font-size: 14px; color: var(--muted); }
+    .meals b { color: var(--ink); font-weight: 650; text-decoration: underline; text-underline-offset: 4px; }
+    .dish { margin: 12px 18px 0; font-size: 18px; font-weight: 650; }
+    .bar {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 78px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px 10px 16px;
+      border-radius: 12px;
+    }
+    .price { font-size: 20px; font-weight: 650; }
+    button {
+      height: 36px;
+      padding: 0 18px;
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.45);
+      font: inherit;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .mine-title { margin: 18px 18px 0; font-size: 34px; letter-spacing: -0.04em; }
+    .hero {
+      margin: 14px 16px 0;
+      padding: 18px 16px 16px;
+      border-radius: 16px;
+      color: #143024;
+      background:
+        linear-gradient(165deg, rgba(255, 255, 255, 0.28), transparent 42%),
+        linear-gradient(145deg, #d7efd4 0%, #7dbe86 55%, #3e8f62 100%);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+    }
+    .hero em {
+      display: inline-block;
+      margin: 0;
+      padding: 2px 8px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.45);
+      font-style: normal;
+      font-size: 12px;
+    }
+    .hero strong {
+      display: block;
+      margin-top: 10px;
+      font-size: 40px;
+      line-height: 1;
+      letter-spacing: -0.04em;
+      font-weight: 650;
+    }
+    .hero p { margin: 8px 0 0; font-size: 13px; }
+    .hero button {
+      margin-top: 14px;
+      background: rgba(255, 255, 255, 0.72);
+    }
+    .next {
+      margin: 12px 16px 0;
+      padding: 14px 16px 16px;
+      border-radius: 16px;
+    }
+    .next b { display: block; margin-top: 6px; font-size: 18px; }
+    .quiet { margin: 14px 18px; color: var(--muted); font-size: 12px; }
+    /* 悬浮胶囊：左右留空，选中项是一块更白的底 */
+    .tab {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 14px;
+      display: flex;
+      padding: 6px;
+      border-radius: 999px;
+    }
+    .tab span {
+      flex: 1;
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+      padding: 6px 0;
+      border-radius: 999px;
+    }
+    .tab i { display: none; }
+    .tab .on {
+      color: var(--ink);
+      font-weight: 650;
+      background: rgba(255, 255, 255, 0.72);
+    }
+  </style>
+</head>
+<body>
+  <h1>新结构，玻璃只做层</h1>
+  <p class="lead">排版是一天一餐，不再往下堆白卡片。玻璃是约六成白、背后模糊、顶上一条高光。字保持深色。在微信安卓上模糊会退回同位置的白底。</p>
+  <div class="row">
+    <div class="phone">
+      <div class="screen">
+        <div class="photo"></div>
+        <section class="sheet glass">
+          <p class="date">11月12日 周四 午餐</p>
+          <p class="name">爆炒三鲜配杂粮饭</p>
+          <p class="meta">微辣 · ¥30</p>
+          <p class="meta">晚餐月卡 · 还剩 24 次</p>
+        </section>
+        <div class="week glass">
+          <div class="day"><i class="swatch"></i><span>周一</span></div>
+          <div class="day"><i class="swatch"></i><span>周二</span></div>
+          <div class="day"><i class="swatch"></i><span>周三</span></div>
+          <div class="day on"><i class="swatch"></i><span>周四</span></div>
+          <div class="day"><i class="swatch"></i><span>周五</span></div>
+        </div>
+        <div class="top" style="position:absolute;top:0;left:0;right:0">OK饭<em>会员</em></div>
+        <nav class="tab glass"><span class="on"><i></i>首页</span><span><i></i>点单</span><span><i></i>订单</span><span><i></i>我的</span></nav>
+      </div>
+    </div>
+
+    <div class="phone">
+      <div class="screen">
+        <div class="pad">
+          <h2>本周</h2>
+          <div class="days"><span>周一</span><span>周二</span><span>周三</span><b>周四</b><span>周五</span></div>
+          <div class="meals"><b>午餐</b><span>晚餐</span></div>
+        </div>
+        <div class="photo noodle"></div>
+        <p class="dish">福鼎肉滑配饭</p>
+        <p class="meta" style="margin:6px 18px 0">配料：花刀鱿鱼 花甲 虾仁</p>
+        <div class="bar glass">
+          <span class="price">¥30</span>
+          <button type="button">加入</button>
+        </div>
+        <nav class="tab glass"><span><i></i>首页</span><span class="on"><i></i>点单</span><span><i></i>订单</span><span><i></i>我的</span></nav>
+      </div>
+    </div>
+
+    <div class="phone">
+      <div class="screen">
+        <h2 class="mine-title">我的</h2>
+        <article class="hero">
+          <em>周卡会员</em>
+          <strong>6 次午餐</strong>
+          <p>暂停配送 · 186****9306</p>
+          <p>建业·壹号城邦 20号楼</p>
+          <button type="button">恢复配送</button>
+        </article>
+        <article class="next glass">
+          <p class="date">下一顿 · 11月13日 周五</p>
+          <b>滑蛋蟹柳照烧鸡腿饭</b>
+          <p class="meta">午餐 · 配送到家</p>
+        </article>
+        <p class="quiet">订单 · 地址 · 请假 · 券</p>
+        <nav class="tab glass"><span><i></i>首页</span><span><i></i>点单</span><span><i></i>订单</span><span class="on"><i></i>我的</span></nav>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

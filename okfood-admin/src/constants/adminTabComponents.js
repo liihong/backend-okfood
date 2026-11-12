@@ -26,6 +26,7 @@ export const ADMIN_TAB_COMPONENT_NAMES = {
   'stats-finance': 'FinanceView',
   finance: 'FinanceView',
   menu: 'MenuView',
+  'menu-drinks': 'DrinksView',
   'weekly-menu': 'WeeklyMenuView',
   'packaging-skus': 'PackagingSkuView',
   'packaging-dish-boxes': 'PackagingDishRecipeView',

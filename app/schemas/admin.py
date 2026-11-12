@@ -56,6 +56,11 @@ class DishUpsertIn(BaseModel):
     category_id: int | None = Field(default=None, description="已废弃，请使用 meat_category_id / dish_type_category_id")
     meat_category_id: int | None = Field(default=None, description="肉类二级分类，可空")
     dish_type_category_id: int | None = Field(default=None, description="菜品分类二级分类，可空")
+    paired_drink_id: int | None = Field(
+        default=None,
+        ge=1,
+        description="配餐饮：饮品库 id，可空表示这一餐不配饮",
+    )
     single_order_price_yuan: Decimal | None = Field(
         None,
         ge=0,
@@ -80,6 +85,8 @@ class DishAdminOut(BaseModel):
     category_id: int | None = None
     meat_category_id: int | None = None
     dish_type_category_id: int | None = None
+    paired_drink_id: int | None = None
+    paired_drink_name: str | None = Field(None, description="配餐饮名称，只读")
     single_order_price_yuan: str | None = Field(None, description="单点售价(元)，字符串保留两位小数")
     spice_level: DishSpiceLevelCode | None = None
     internal_view_sop: str | None = None

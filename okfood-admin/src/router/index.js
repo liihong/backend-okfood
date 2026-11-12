@@ -17,6 +17,7 @@ const CouriersView = () => import('../views/CouriersView.vue')
 const FinanceView = () => import('../views/FinanceView.vue')
 const MemberStatsView = () => import('../views/MemberStatsView.vue')
 const MenuView = () => import('../views/MenuView.vue')
+const DrinksView = () => import('../views/DrinksView.vue')
 const WeeklyMenuView = () => import('../views/WeeklyMenuView.vue')
 const CardOrdersView = () => import('../views/CardOrdersView.vue')
 const SingleMealOrdersView = () => import('../views/orders/single-meal/SingleMealOrdersView.vue')
@@ -215,6 +216,12 @@ const router = createRouter({
           name: 'menu',
           component: MenuView,
           meta: { title: '菜品管理', fullAdminOnly: true },
+        },
+        {
+          path: 'menu/drinks',
+          name: 'menu-drinks',
+          component: DrinksView,
+          meta: { title: '饮品管理', fullAdminOnly: true },
         },
         {
           path: 'weekly-menu',

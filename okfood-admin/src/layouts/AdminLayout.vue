@@ -5,6 +5,7 @@ import { ElMessageBox } from 'element-plus'
 import {
   Users,
   Utensils,
+  GlassWater,
   BarChart3,
   MapPin,
   DollarSign,
@@ -307,6 +308,7 @@ const TAB_ROUTE_ICONS = {
   'stats-finance': DollarSign,
   finance: DollarSign,
   menu: Utensils,
+  'menu-drinks': GlassWater,
   'weekly-menu': Utensils,
   'packaging-skus': Warehouse,
   'packaging-dish-boxes': Warehouse,
@@ -936,6 +938,7 @@ function onTabClose(tab) {
             </div>
           </template>
           <el-menu-item index="/menu">菜品管理</el-menu-item>
+          <el-menu-item index="/menu/drinks">饮品管理</el-menu-item>
           <el-menu-item index="/weekly-menu">本周菜单</el-menu-item>
           <el-menu-item index="/menu/retail-catalog">普通商品管理</el-menu-item>
         </el-sub-menu>
