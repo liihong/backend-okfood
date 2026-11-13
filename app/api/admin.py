@@ -1995,6 +1995,8 @@ def member_profile_patch(
         dinner_delivery_paused=body.dinner_delivery_paused,
         set_dinner_deliver_on="dinner_deliver_on" in fs,
         dinner_deliver_on=body.dinner_deliver_on,
+        set_lunch_delivery_paused="lunch_delivery_paused" in fs,
+        lunch_delivery_paused=body.lunch_delivery_paused,
         set_delivery_start_date="delivery_start_date" in fs,
         delivery_start_date=body.delivery_start_date,
         set_store_pickup="store_pickup" in fs,

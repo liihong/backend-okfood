@@ -239,7 +239,10 @@ def job_expire_stale_unpaid_miniprogram_card_orders() -> None:
 def job_sf_nightly_auto_push() -> None:
     """
     每日 08:50（上海）：对启用「顺丰自动推单」的门店，自动推送当日业务日配送大表（订阅合并）停靠点至顺丰。
-    单次零售订单不在此任务内，须订单管理手动推单。
+
+    主租户（默认租户 1）同时把任务开始前已经下单的当日零售单推到及时单账号，并标为配送中。
+    及时单账号是门店「零售推顺丰店铺ID」，与大表预约用的租户顺丰店铺分开。
+    本趟开始之后新下的零售单，以及其它租户的零售单，仍在订单管理手动推单。
     """
     from app.services.delivery.sf_same_city_service import run_sf_nightly_auto_push_for_all_stores
 

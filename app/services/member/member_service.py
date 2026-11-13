@@ -1705,6 +1705,10 @@ def admin_patch_member_profile(
 
     dinner_deliver_on: date | None = None,
 
+    set_lunch_delivery_paused: bool = False,
+
+    lunch_delivery_paused: bool | None = None,
+
     set_delivery_start_date: bool = False,
 
     delivery_start_date: date | None = None,
@@ -1756,6 +1760,8 @@ def admin_patch_member_profile(
         and not set_dinner_delivery_paused
 
         and not set_dinner_deliver_on
+
+        and not set_lunch_delivery_paused
 
         and not set_delivery_start_date
 
@@ -2075,7 +2081,19 @@ def admin_patch_member_profile(
             m.plan_type = plan_type.value
 
     from app.services.meal_period.dinner_pause import apply_admin_dinner_schedule_update
-    from app.services.member.member_operation_log_service import OP_ADMIN_UPDATE_DINNER_SCHEDULE
+    from app.services.member.member_operation_log_service import (
+        OP_ADMIN_UPDATE_DINNER_SCHEDULE,
+        OP_ADMIN_UPDATE_LUNCH_PAUSE,
+    )
+
+    # 只改午餐暂停这一列。不写整体暂停，不改激活、请假和晚餐日程。
+    lunch_pause_summary: str | None = None
+    if set_lunch_delivery_paused and lunch_delivery_paused is not None:
+        next_lunch_paused = bool(lunch_delivery_paused)
+        if bool(getattr(m, "lunch_delivery_paused", False)) != next_lunch_paused:
+            m.lunch_delivery_paused = next_lunch_paused
+            lunch_pause_summary = "暂停午餐" if next_lunch_paused else "取消暂停午餐"
+            db.add(m)
 
     dinner_schedule_summary = apply_admin_dinner_schedule_update(
         db,
@@ -2130,6 +2148,9 @@ def admin_patch_member_profile(
             source="admin",
             operator=admin_op,
         )
+
+    if lunch_pause_summary:
+        _admin_log(OP_ADMIN_UPDATE_LUNCH_PAUSE, lunch_pause_summary)
 
     if dinner_schedule_summary:
         _admin_log(

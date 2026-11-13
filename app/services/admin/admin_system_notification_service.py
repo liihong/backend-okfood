@@ -402,13 +402,21 @@ def upsert_sf_nightly_push_notification(
     failed: int,
     skip_reason: str | None = None,
     failure_details: list[str] | None = None,
+    appendix: str | None = None,
 ) -> AdminSystemNotification:
-    """顺丰 08:50 自动推单结束后写入/更新当日门店摘要（同店同日仅一条）。"""
+    """
+    顺丰 08:50 自动推单结束后写入/更新当日门店摘要（同店同日仅一条）。
+
+    ``appendix`` 写在摘要下一行，用于主租户零售单推及时单的结果，不改大表的成功/失败计数。
+    """
     kind = KIND_SF_NIGHTLY_PUSH
     title = f"顺丰自动推单 · {business_date.isoformat()}"
     summary = _sf_nightly_push_message(
         total=total, success=success, failed=failed, skip_reason=skip_reason
     )
+    extra = (appendix or "").strip()
+    if extra:
+        summary = f"{summary}\n{extra}"
     message = compose_sf_push_notification_message(summary, failure_details)
     row = db.scalar(
         select(AdminSystemNotification).where(
