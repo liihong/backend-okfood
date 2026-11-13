@@ -233,7 +233,7 @@ class StoreConfigOut(BaseModel):
     )
     sf_nightly_auto_push_enabled: bool = Field(
         False,
-        description="每日 08:50（上海）自动向顺丰推送当日业务日配送大表（订阅合并）订单；单次零售须手动推单",
+        description="每日 08:50（上海）自动向顺丰推送当日业务日配送大表（订阅合并）订单。主租户同时把当时已下单的当日零售单推到及时单账号并标为配送中；此后新下的零售单及其它租户零售单仍手动推",
     )
     sf_merge_same_address_push: bool = Field(
         False,
@@ -1831,7 +1831,7 @@ class PlatformStoreOut(BaseModel):
     leave_deadline_time: str = Field("", description="HH:MM:SS")
     sf_nightly_auto_push_enabled: bool = Field(
         False,
-        description="是否启用每日 08:50 自动顺丰推单（当日业务日配送大表；单次零售手动）",
+        description="是否启用每日 08:50 自动顺丰推单（当日配送大表；主租户当时已下单的零售单推及时单并标配送中，此后新单手动）",
     )
     created_at: str
 
@@ -1846,7 +1846,7 @@ class PlatformStoreCreateIn(BaseModel):
     is_active: bool = True
     sf_nightly_auto_push_enabled: bool = Field(
         False,
-        description="启用后系统于每日 08:50（上海）自动推送当日配送大表订单至顺丰；单次零售请在订单管理手动推单",
+        description="启用后系统于每日 08:50（上海）自动推送当日配送大表。主租户还会把当时已下单的当日零售单推到及时单账号并标为配送中；此后新下的零售单仍手动推",
     )
 
 

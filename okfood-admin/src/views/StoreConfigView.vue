@@ -340,7 +340,7 @@ onMounted(() => {
           <div class="sc-switch-text">
             <span class="sc-label sc-label--inline">顺丰自动推单</span>
             <p class="sc-hint sc-hint--tight">
-              开启后系统于每日<strong>08:50（上海时间）</strong>自动将<strong>当日</strong>智能配送大表（订阅合并）订单推送至顺丰同城；<strong>单次零售订单</strong>请在订单管理页面手动推单。关闭后不执行定时任务，请在配送大表<strong>手动推单</strong>。
+              开启后系统于每日<strong>08:50（上海时间）</strong>自动将<strong>当日</strong>智能配送大表（订阅合并）订单推送至顺丰同城。主租户还会把当时已经下单、供餐日为当天的零售订单推到<strong>及时单账号</strong>（零售推顺丰店铺），并标为配送中；这次推单之后新下的零售订单，请在订单管理手动推单。关闭后不执行定时任务，请在配送大表<strong>手动推单</strong>。
             </p>
           </div>
           <el-switch v-model="form.sf_nightly_auto_push_enabled" size="large" />

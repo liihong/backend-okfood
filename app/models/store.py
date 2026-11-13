@@ -35,7 +35,9 @@ class Store(Base):
     member_card_week_list_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     member_card_month_list_price_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    # 每日 08:50（上海）自动向顺丰推送「当日」配送大表（订阅合并）订单；单次零售须订单管理手动推单
+    # 每日 08:50（上海）自动向顺丰推送「当日」配送大表（订阅合并）订单。
+    # 主租户（默认租户 1）还会把任务开始前已支付、供餐日为当天的零售单推到及时单账号
+    # （本表 sf_retail_push_shop_id），成功后标为配送中。此后新下的零售单，以及其它租户的零售单，仍手动推。
     sf_nightly_auto_push_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # 同地址不同会员推顺丰：False=一名会员一单（默认，不改现网）；True=同址合并为一单、扣一份配送费
     sf_merge_same_address_push: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

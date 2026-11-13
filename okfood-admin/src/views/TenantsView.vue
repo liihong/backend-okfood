@@ -945,7 +945,7 @@ onMounted(async () => {
         <el-form-item label="顺丰自动推单">
           <div class="store-nightly-wrap">
             <el-switch v-model="storeForm.sf_nightly_auto_push_enabled" />
-            <span class="store-nightly-hint">每日 08:50（上海）自动推送<strong>当日</strong>智能配送大表（订阅合并）订单；单次零售请在订单管理手动推单。关闭后仅能在配送大表手动推单</span>
+            <span class="store-nightly-hint">每日 08:50（上海）自动推送<strong>当日</strong>智能配送大表（订阅合并）订单。租户 1 还会把当时已下单的当日零售单推到及时单账号并标为配送中；此后新下的零售单仍手动推。关闭后仅能在配送大表手动推单</span>
           </div>
         </el-form-item>
       </el-form>

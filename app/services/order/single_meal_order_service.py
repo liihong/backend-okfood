@@ -4,7 +4,7 @@ from typing import Any
 
 import logging
 import secrets
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -225,12 +225,43 @@ _SF_TERMINAL_CANCEL_STATUSES = (2, 22)
 _SF_TERMINAL_DELIVERED_STATUS = 17
 _SF_ORDER_STATUS_PICKED_UP = 15  # 顺丰：配送员已取货，配送中
 _FULFILLMENT_SF_AWAITING_PICKUP = "sf_awaiting_pickup"
+# 写在顺丰推单 request_snapshot 上。
+# 08:50 主租户自动推及时单成功后会把零售单标成「配送中」；履约同步看到此键后，
+# 顺丰尚未取货也不要改回「待取货」。订单管理手动推单不写此键。
+MORNING_AUTO_IN_DELIVERY_SNAPSHOT_KEY = "morning_auto_in_delivery"
 _SF_CANCEL_CALLBACK_KINDS = frozenset({"cancel_by_sf", "rider_cancel"})
 
 
 def single_meal_fulfillment_allows_dispatch(fs: str | None) -> bool:
     """管理端可发起配送（顺丰/UU/门店自配送）：待发货，或顺丰侧已取消待重推。"""
     return str(fs or "").strip().lower() in ("pending", "sf_cancelled")
+
+
+def keep_morning_auto_retail_in_delivery(
+    prev_fulfillment: str | None,
+    request_snapshot: dict | None,
+    sf_order_status: int | None,
+) -> bool:
+    """
+    08:50 自动推及时单是故意把零售单标成配送中的。
+
+    顺丰还没取货（无回调状态，或 order_status < 15）时保持配送中，不要改回待取货。
+    已取货、妥投、取消不走这个判断，仍由原回调处理。
+    没有 ``morning_auto_in_delivery`` 标记的单（含手动推单）保持原逻辑。
+    """
+    if str(prev_fulfillment or "").strip().lower() != "accepted":
+        return False
+    if not isinstance(request_snapshot, dict):
+        return False
+    if not request_snapshot.get(MORNING_AUTO_IN_DELIVERY_SNAPSHOT_KEY):
+        return False
+    if sf_order_status is None:
+        return True
+    try:
+        n = int(sf_order_status)
+    except (TypeError, ValueError):
+        return True
+    return n < _SF_ORDER_STATUS_PICKED_UP
 
 
 def normalize_store_pickup_fulfillment_after_sf_cancel(row: SingleMealOrder) -> bool:
@@ -429,8 +460,11 @@ def _apply_sf_monitor_status_to_retail_order_no_commit(
         after = str(o.fulfillment_status or "").strip().lower()
         return "updated_cancel" if after == "sf_cancelled" else "skipped_sf_cancel"
 
-    # 已推顺丰、回调尚未到取货：纠正误标为「配送中」的历史单
+    # 已推顺丰、回调尚未到取货：纠正误标为「配送中」的历史单。
+    # 08:50 主租户自动推及时单是业务上要求直接标配送中，未取货前不要改回去。
     if n is None or n < _SF_ORDER_STATUS_PICKED_UP:
+        if keep_morning_auto_retail_in_delivery(prev_f, pus.request_snapshot, n):
+            return "already_accepted"
         if prev_f == "accepted":
             o.fulfillment_status = _FULFILLMENT_SF_AWAITING_PICKUP
             return "updated_awaiting_pickup"
@@ -2495,6 +2529,122 @@ def bulk_admin_cancel_single_meal_orders(
         except ValueError as e:
             results.append({"order_id": int(oid), "ok": False, "message": str(e)})
     return {"results": results}
+
+
+def list_morning_auto_instant_retail_order_ids(
+    db: Session,
+    *,
+    store_id: int,
+    delivery_date: date,
+    created_before: datetime,
+) -> list[int]:
+    """
+    圈出 08:50 自动推单开始前、已经可以推及时单的当日零售单。
+
+    只含单次零售（``single_meal_orders``，管理端「零售订单」），不含商城订单。
+    同时满足才入选：
+    - 本门店，供餐日为当天
+    - 已支付、配送到家（非自提）、履约状态为待发货 ``pending``
+    - ``created_at`` 不晚于本趟任务开始时刻
+
+    不入选、留给订单管理手动处理的：
+    - 任务开始之后新下的单
+    - 当时还没支付的单
+    - 自提、已推过、顺丰取消待重推、已在配送中或已完成的单
+    """
+    rows = db.scalars(
+        select(SingleMealOrder.id)
+        .where(
+            SingleMealOrder.store_id == int(store_id),
+            SingleMealOrder.delivery_date == delivery_date,
+            SingleMealOrder.pay_status == "已支付",
+            SingleMealOrder.store_pickup.is_(False),
+            SingleMealOrder.fulfillment_status == "pending",
+            SingleMealOrder.created_at <= created_before,
+        )
+        .order_by(SingleMealOrder.id.asc())
+    ).all()
+    return [int(x) for x in rows]
+
+
+def mark_single_meal_in_delivery_after_morning_auto_push(db: Session, order_id: int) -> None:
+    """
+    及时单创单成功后，把这笔零售单从「待取货」改成「配送中」。
+
+    只改刚刚被推成 ``sf_awaiting_pickup`` 的已支付到家单，不覆盖已完成/已取消。
+    同时在关联推单快照写入 ``morning_auto_in_delivery``，避免履约同步把状态改回待取货。
+    手动推单不调用本函数，仍保持待取货，等顺丰取货回调再进配送中。
+    """
+    row = db.get(SingleMealOrder, int(order_id))
+    if row is None:
+        return
+    if (row.pay_status or "").strip() != "已支付":
+        return
+    if bool(getattr(row, "store_pickup", False)):
+        return
+    prev = str(row.fulfillment_status or "").strip().lower()
+    if prev != _FULFILLMENT_SF_AWAITING_PICKUP:
+        return
+    row.fulfillment_status = "accepted"
+    pus: SfSameCityPush | None = None
+    if row.sf_same_city_push_id is not None:
+        pus = db.get(SfSameCityPush, int(row.sf_same_city_push_id))
+    if pus is not None:
+        # 换成新 dict，JSON 列才会把标记写进库
+        snap = dict(pus.request_snapshot) if isinstance(pus.request_snapshot, dict) else {}
+        snap[MORNING_AUTO_IN_DELIVERY_SNAPSHOT_KEY] = True
+        pus.request_snapshot = snap
+        db.add(pus)
+    else:
+        # 没有快照标记时，履约同步会把「尚未取货」的配送中改回待取货
+        logger.warning(
+            "08:50 零售单已改配送中，但没有关联推单快照 order_id=%s",
+            int(order_id),
+        )
+    db.add(row)
+    db.commit()
+
+
+def push_morning_auto_retail_orders_to_instant_shop(
+    *,
+    order_ids: list[int],
+    store_id: int,
+) -> dict[str, Any]:
+    """
+    把已经圈定的零售单推到门店及时单账号，成功后标为配送中。
+
+    及时单账号即门店「零售推顺丰店铺ID」（``sf_retail_push_shop_id``），
+    与 08:50 配送大表使用的租户顺丰店铺不是同一个号。创单过程与订单管理手动推顺丰相同。
+    只推传入的订单号，不会再查库扩名单，因此任务开始后新下的单不会被卷进来。
+    创单失败的订单保持待发货，可在订单管理手动重推。
+    """
+    from app.db.session import SessionLocal
+    from app.services.delivery.sf_same_city_service import (
+        push_single_meal_retail_to_sf_bulk_item,
+        run_retail_sf_bulk_in_waves,
+    )
+
+    oids = [int(x) for x in order_ids]
+    out = run_retail_sf_bulk_in_waves(
+        oids,
+        push_one=lambda oid: push_single_meal_retail_to_sf_bulk_item(
+            order_id=int(oid), store_id=int(store_id)
+        ),
+    )
+    # 创单成功时本地先写成待取货；这里再改成配送中。改状态失败要让摘要记为失败，方便人工核对。
+    for item in list(out.get("results") or []):
+        if not item.get("ok"):
+            continue
+        sdb = SessionLocal()
+        try:
+            mark_single_meal_in_delivery_after_morning_auto_push(sdb, int(item["order_id"]))
+        except Exception:
+            logger.exception("08:50 零售单改配送中失败 order_id=%s", item.get("order_id"))
+            item["ok"] = False
+            item["message"] = "已提交顺丰，但本地未改成配送中，请在订单管理核对"
+        finally:
+            sdb.close()
+    return out
 
 
 def bulk_push_single_meal_retail_to_sf(
