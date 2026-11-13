@@ -620,6 +620,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                 {{ slotHasBoxes(meal.row, meal.mealPeriod) ? '用盒' : '未设用盒' }}
               </el-button>
             </div>
+            <div class="wmenu-meal__body">
             <div class="wmenu-dish-cell">
                       <el-select
                         :model-value="meal.row.dish_id"
@@ -668,9 +669,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                         </el-option>
                       </el-select>
                     </div>
-            <div class="wmenu-meal__foot">
-              <label class="wmenu-stock">
-                <span>份数</span>
+            <label class="wmenu-stock">
                 <input
                   v-if="meal.row.dish_id"
                   type="number"
@@ -689,7 +688,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                 :model-value="meal.row.paired_drink_id"
                 filterable
                 clearable
-                placeholder="选择饮品"
+                placeholder="随餐饮"
                 class="wmenu-drink-select"
                 :loading="isRowBusy(meal.row, meal.mealPeriod)"
                 :disabled="isRowBusy(meal.row, meal.mealPeriod)"
@@ -946,18 +945,33 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   color: var(--wmenu-muted);
 }
 
-.wmenu-meal__foot {
-  display: flex;
-  align-items: center;
+.wmenu-meal__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(108px, 0.9fr);
+  grid-template-rows: auto auto;
   gap: 8px;
+  align-items: stretch;
+}
+
+.wmenu-meal__body .wmenu-dish-cell {
+  grid-row: 1 / span 2;
+  width: 100%;
+  max-width: 100%;
+  align-self: stretch;
+}
+
+.wmenu-meal__body .wmenu-stock,
+.wmenu-meal__body .wmenu-drink-select,
+.wmenu-meal__body > .wmenu-dash {
+  width: 100%;
   min-width: 0;
 }
 
 .wmenu-stock {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
-  flex: 0 0 auto;
+  box-sizing: border-box;
   font-size: 12px;
   font-weight: 700;
   color: #64748b;
@@ -976,8 +990,8 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   .wmenu-meal__stats {
     margin-left: 0;
   }
-  .wmenu-meal__foot {
-    flex-wrap: wrap;
+  .wmenu-meal__body {
+    grid-template-columns: minmax(0, 1fr) minmax(96px, 0.85fr);
   }
 }
 
@@ -1176,7 +1190,9 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 
 .wmenu-total-input {
-  width: 72px;
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 4px 6px;
   border-radius: 8px;
   border: 1px solid var(--wmenu-border);
@@ -1275,18 +1291,17 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 .wmenu-dish-cell {
   display: flex;
   flex-direction: row;
-  align-items: center;
-  min-width: 0;
+  align-items: stretch;
   width: 100%;
-}
-.wmenu-dish-select {
-  width: 100%;
-  min-width: 0;
   max-width: 100%;
+  min-width: 0;
 }
-.wmenu-drink-select {
-  flex: 1 1 140px;
-  width: auto;
+.wmenu-meal .wmenu-dish-select.el-select {
+  width: 100%;
+  height: 100%;
+}
+.wmenu-meal .wmenu-drink-select.el-select {
+  width: 100%;
   min-width: 0;
   max-width: 100%;
 }
@@ -1322,25 +1337,32 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   font-weight: 700;
 }
 
+.wmenu-dish-select :deep(.el-select__wrapper) {
+  height: 100%;
+  min-height: 76px;
+  padding: 6px 10px;
+}
+
 .wmenu-dish-select :deep(.el-select__selected-item) {
   display: flex;
   align-items: center;
   max-width: 100%;
+  line-height: 1;
 }
 
-/* 收起：22px 小图 + 菜名，不把表格行撑高 */
+/* 卡片里的菜品图比下拉项大，方便认菜 */
 .wmenu-dish-picked {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   max-width: 100%;
 }
 
 .wmenu-dish-picked__img {
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
   object-fit: cover;
   flex: 0 0 auto;
   background: #f1f5f9;
