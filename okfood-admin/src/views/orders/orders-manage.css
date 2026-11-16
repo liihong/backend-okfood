@@ -289,6 +289,29 @@
   background: #eff6ff;
   border: 1px solid #bfdbfe;
 }
+.orders-cell-pill--meal-lunch {
+  font-weight: 800;
+  color: #c2410c;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+}
+.orders-cell-pill--meal-dinner {
+  font-weight: 800;
+  color: #5b21b6;
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+}
+.single-orders-stats__period {
+  flex: 0 0 auto;
+  height: 32px;
+}
+.single-orders-stats__period .el-radio-button__inner {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 30px;
+}
 .orders-cell-pill--date {
   font-size: 11px;
   font-weight: 700;
@@ -367,6 +390,7 @@
 .orders-manage-page td.orders-dish-col .cell,
 .orders-manage-page td.orders-qty-col .cell,
 .orders-manage-page td.orders-meal-date-col .cell,
+.orders-manage-page td.orders-meal-period-col .cell,
 .orders-manage-page td.orders-amount-col .cell,
 .orders-manage-page td.orders-trade-no-col .cell,
 .orders-manage-page td.orders-order-id-col .cell {
@@ -588,6 +612,9 @@
   gap: 0.3rem;
 }
 .retail-order-card__meal-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   font-weight: 600;
   color: #94a3b8;

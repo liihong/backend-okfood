@@ -1524,6 +1524,10 @@ def admin_orders_daily_single_meals(
             description="发货 Tab：pending_ship=待发货；pending_pickup=待自提；in_delivery=配送中；delivered=已完成；after_sale=售后（含未支付）",
         ),
     ] = None,
+    meal_period: Annotated[
+        str | None,
+        Query(description="餐段：lunch=午餐；dinner=晚餐；留空=全部"),
+    ] = None,
     page: int = 1,
     page_size: int = 20,
     include_summary: Annotated[
@@ -1544,6 +1548,7 @@ def admin_orders_daily_single_meals(
         pay_status=pay_status,
         delivery_phase=delivery_phase,
         fulfillment_phase=fulfillment_phase,
+        meal_period=meal_period,
         page=page,
         page_size=page_size,
     )
@@ -1554,6 +1559,7 @@ def admin_orders_daily_single_meals(
             store_id=store_id,
             delivery_day=day,
             q=q,
+            meal_period=meal_period,
         )
     return page_response(
         items=[dump_model(i) for i in items],

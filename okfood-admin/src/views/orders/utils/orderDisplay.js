@@ -24,6 +24,19 @@ export function singleOrderStatusLabelZh(row) {
   return SINGLE_ORDER_STATUS_ZH[k] ?? String(s).trim()
 }
 
+/** 零售订单餐段：午餐 / 晚餐。缺省按午餐，与后端默认一致。 */
+export function singleMealPeriodLabel(row) {
+  const p = String(row?.meal_period || 'lunch').trim().toLowerCase()
+  return p === 'dinner' ? '晚餐' : '午餐'
+}
+
+export function singleMealPeriodClass(row) {
+  const p = String(row?.meal_period || 'lunch').trim().toLowerCase()
+  return p === 'dinner'
+    ? 'orders-cell-pill orders-cell-pill--meal-dinner'
+    : 'orders-cell-pill orders-cell-pill--meal-lunch'
+}
+
 export function singlePayClass(s) {
   if (s === '已支付') return 'member-pill member-pill--emerald'
   if (s === '已退款') return 'member-pill member-pill--rose'

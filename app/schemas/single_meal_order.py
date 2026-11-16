@@ -42,6 +42,7 @@ class SingleMealOrderOut(BaseModel):
     store_pickup: bool = False
     quantity: int = 1
     delivery_date: date
+    meal_period: str = Field("lunch", description="lunch=午餐；dinner=晚餐")
     routing_area: str
     amount_yuan: str
     original_amount_yuan: str | None = Field(None, description="未用券时为 null")

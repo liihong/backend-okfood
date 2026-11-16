@@ -2493,6 +2493,8 @@ class="member-pill"
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   width: 100%;
+  /* 覆盖 Element Plus radio-group 的 align-items:center，同行卡片拉成一样高 */
+  align-items: stretch;
 }
 
 .co-create-fit__chips--3 {
@@ -2500,12 +2502,13 @@ class="member-pill"
 }
 
 .co-create-fit__chips :deep(.el-radio.is-bordered) {
-  height: auto;
+  height: 100%;
   margin: 0;
   padding: 6px 8px;
   border-radius: 10px;
   align-items: flex-start;
   white-space: normal;
+  box-sizing: border-box;
 }
 
 .co-create-fit__chips :deep(.el-radio__label) {

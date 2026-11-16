@@ -32,6 +32,7 @@ const {
       <section class="orders-refund-card">
         <p class="orders-refund-k">退款金额</p>
         <p class="orders-refund-amount">¥{{ refundDialogMeta.amountStr }}</p>
+        <p v-if="refundDialogMeta.mealLine" class="orders-refund-meal">退的是{{ refundDialogMeta.mealLine }}</p>
         <p class="orders-refund-sub">{{ refundDialogMeta.sub }}</p>
         <p v-if="refundDialogMeta.memberLine" class="orders-refund-member">{{ refundDialogMeta.memberLine }}</p>
       </section>
@@ -99,6 +100,12 @@ const {
   font-variant-numeric: tabular-nums;
 }
 
+.orders-refund-meal {
+  margin: 8px 0 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: #9a3412;
+}
 .orders-refund-sub,
 .orders-refund-member {
   margin: 4px 0 0;

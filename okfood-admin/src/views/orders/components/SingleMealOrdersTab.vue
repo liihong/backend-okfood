@@ -25,6 +25,8 @@ import {
 } from '../utils/orderPermissions.js'
 import {
   resolveSingleOrderMemberDisplayName,
+  singleMealPeriodClass,
+  singleMealPeriodLabel,
   singleOrderStatusClass,
   singleOrderStatusLabelZh,
   singlePayClass,
@@ -35,6 +37,7 @@ const MOBILE_MEDIA = '(max-width: 768px)'
 
 const {
   singleFulfillmentFilter,
+  singleMealPeriodFilter,
   singleItems,
   singleOrderBucketSummary,
   loading,
@@ -164,6 +167,13 @@ onUnmounted(() => {
   mobileMediaQuery?.removeEventListener('change', syncNarrowScreen)
 })
 
+const singleListEmptyText = computed(() => {
+  const p = String(singleMealPeriodFilter.value || '')
+  if (p === 'lunch') return '该供餐日暂无午餐订单'
+  if (p === 'dinner') return '该供餐日暂无晚餐订单'
+  return '该供餐日暂无零售订单'
+})
+
 function singleRowIndex(index) {
   return (page.value - 1) * pageSize.value + index + 1
 }
@@ -186,12 +196,15 @@ function onSingleMobileSelectChange(row, checked) {
 
 <template>
   <div class="single-orders-tab">
-    <div
-      v-if="summaryStats.length"
-      class="single-orders-stats"
-      role="status"
-      aria-live="polite"
-    >
+    <div class="single-orders-stats" role="status" aria-live="polite">
+      <el-radio-group
+        v-model="singleMealPeriodFilter"
+        class="single-orders-stats__period"
+      >
+        <el-radio-button value="">全部</el-radio-button>
+        <el-radio-button value="lunch">午餐</el-radio-button>
+        <el-radio-button value="dinner">晚餐</el-radio-button>
+      </el-radio-group>
       <span
         v-for="item in summaryStats"
         :key="item.key"
@@ -319,7 +332,7 @@ function onSingleMobileSelectChange(row, checked) {
       :data="singleItems"
       :loading="loading && activeTab === 'single'"
       row-key="id"
-      empty-text="该供餐日暂无零售订单"
+      :empty-text="singleListEmptyText"
       @selection-change="onSingleSelectionChange"
     >
       <el-table-column type="selection" width="42" :selectable="isSingleRowSelectable" />
@@ -374,6 +387,11 @@ function onSingleMobileSelectChange(row, checked) {
           <span class="orders-cell-pill orders-cell-pill--date">{{
             formatIsoDateZh(row.delivery_date)
           }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="餐段" width="88" align="center" class-name="co-nowrap orders-meal-period-col">
+        <template #default="{ row }">
+          <span :class="singleMealPeriodClass(row)">{{ singleMealPeriodLabel(row) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="金额" width="116" align="center" class-name="td-mono orders-amount-col co-nowrap">
@@ -494,7 +512,7 @@ function onSingleMobileSelectChange(row, checked) {
         v-if="!singleItems.length && !(loading && activeTab === 'single')"
         class="retail-orders-mobile-empty"
       >
-        该供餐日暂无零售订单
+        {{ singleListEmptyText }}
       </p>
       <article v-for="row in singleItems" :key="row.id" class="retail-order-card">
         <header class="retail-order-card__head">
@@ -518,9 +536,10 @@ function onSingleMobileSelectChange(row, checked) {
         <section class="retail-order-card__goods">
           <div class="retail-order-card__goods-info">
             <span class="orders-cell-pill orders-cell-pill--dish">{{ row.dish_title || '—' }}</span>
-            <span class="retail-order-card__meal-date"
-              >供餐 {{ formatIsoDateZh(row.delivery_date) }}</span
-            >
+            <span class="retail-order-card__meal-date">
+              <span :class="singleMealPeriodClass(row)">{{ singleMealPeriodLabel(row) }}</span>
+              供餐 {{ formatIsoDateZh(row.delivery_date) }}
+            </span>
           </div>
           <div class="retail-order-card__goods-meta">
             <span

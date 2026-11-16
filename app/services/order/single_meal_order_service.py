@@ -1053,6 +1053,9 @@ def _single_meal_order_row_to_out(
             address_summary = _single_meal_address_summary(row, order_address=addr, region_name_map=nm)
         else:
             address_summary = (row.routing_area or "").strip() or "—"
+    # 未写餐段的历史单按午餐展示
+    raw_period = (getattr(row, "meal_period", None) or "lunch").strip().lower()
+    meal_period = raw_period if raw_period in ("lunch", "dinner") else "lunch"
     return SingleMealOrderOut(
         id=int(row.id),
         out_trade_no=str(row.out_trade_no or ""),
@@ -1062,6 +1065,7 @@ def _single_meal_order_row_to_out(
         store_pickup=bool(row.store_pickup),
         quantity=int(row.quantity or 1),
         delivery_date=row.delivery_date,
+        meal_period=meal_period,
         routing_area=str(row.routing_area or ""),
         amount_yuan=_format_amount_yuan(Decimal(row.amount_yuan)),
         original_amount_yuan=(
@@ -1139,15 +1143,22 @@ def _admin_store_single_meal_scope_filters_for_delivery_day(
     delivery_day: date,
     q: str | None,
     delivery_phase: str | None,
+    meal_period: str | None = None,
 ) -> list:
     """单次点餐：供餐日列表/统计的公共范围（不含发货 Tab / 支付 Tab 对应条件）。
 
     ``delivery_phase``：``awaiting``=待配送（pending/accepted）；``delivered``=已送达；留空=不按阶段过滤。
+    ``meal_period``：``lunch`` / ``dinner``；留空=午晚都看。
     """
     filters: list = [
         SingleMealOrder.store_id == int(store_id),
         SingleMealOrder.delivery_date == delivery_day,
     ]
+    period = (meal_period or "").strip().lower()
+    if period:
+        from app.services.meal_period.normalize import normalize_meal_period
+
+        filters.append(SingleMealOrder.meal_period == normalize_meal_period(period))
     dp = (delivery_phase or "").strip().lower()
     if dp == "awaiting":
         filters.append(
@@ -1204,8 +1215,9 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
     delivery_day: date,
     q: str | None = None,
     delivery_phase: str | None = None,
+    meal_period: str | None = None,
 ) -> dict[str, int]:
-    """订单管理：供餐日全天各状态笔数概览（与供餐日、搜索一致；不受发货 Tab 影响）。
+    """订单管理：供餐日各状态笔数概览（与供餐日、搜索、餐段一致；不受发货 Tab 影响）。
 
     - ``pending_ship``：已支付、配送到家且履约 pending。
     - ``pending_pickup``：已支付、门店自提且履约 pending。
@@ -1219,6 +1231,7 @@ def summarize_admin_store_single_meal_orders_by_delivery_day(
         delivery_day=delivery_day,
         q=q,
         delivery_phase=None,
+        meal_period=meal_period,
     )
 
     paid_cond = SingleMealOrder.pay_status == "已支付"
@@ -1297,12 +1310,14 @@ def list_admin_store_single_meal_orders_by_delivery_day(
     pay_status: str | None = None,
     delivery_phase: str | None = None,
     fulfillment_phase: str | None = None,
+    meal_period: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[AdminSingleMealOrderListOut], int]:
     """管理端：按供餐日筛选单次点餐订单（``delivery_date``）。
 
     ``fulfillment_phase``：发货 Tab（``pending_ship`` / ``pending_pickup`` / ``in_delivery`` / ``delivered`` / ``after_sale``）。
+    ``meal_period``：``lunch`` / ``dinner``；留空=午晚都看。
     旧版 ``pay_status`` / ``delivery_phase`` 仍兼容，但 ``fulfillment_phase`` 优先。
     """
     page = max(1, page)
@@ -1316,6 +1331,7 @@ def list_admin_store_single_meal_orders_by_delivery_day(
             delivery_day=delivery_day,
             q=q,
             delivery_phase=None if use_fulfillment_tab else delivery_phase,
+            meal_period=meal_period,
         )
     )
     if use_fulfillment_tab:

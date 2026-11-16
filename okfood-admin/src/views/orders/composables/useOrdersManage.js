@@ -16,7 +16,11 @@ function escapeMessageBoxHtml(text) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
 }
-import { mallPayFilterApiValue, resolveSingleOrderMemberDisplayName } from '../utils/orderDisplay.js'
+import {
+  mallPayFilterApiValue,
+  resolveSingleOrderMemberDisplayName,
+  singleMealPeriodLabel,
+} from '../utils/orderDisplay.js'
 import {
   canAcceptRetailOrder,
   canRevokeAcceptRetailOrder,
@@ -50,6 +54,8 @@ export function useOrdersManage(orderKind = 'single') {
   const route = useRoute()
   const searchQuery = ref('')
   const singleFulfillmentFilter = ref('pending_ship')
+  /** 零售订单餐段：空=全部，lunch / dinner */
+  const singleMealPeriodFilter = ref('')
   const mallPayFilter = ref('all')
   const retailDeliveryFilter = ref('awaiting_accept')
 
@@ -140,7 +146,16 @@ export function useOrdersManage(orderKind = 'single') {
       sub: '退回微信零钱',
       tip: '退款后变为已退款，不可撤销。',
     }
-    if (t.kind === 'single') return { ...base, orderType: '零售订单' }
+    if (t.kind === 'single') {
+      const meal = singleMealPeriodLabel(row)
+      return {
+        ...base,
+        orderType: '零售订单',
+        mealLine: meal,
+        sub: `退回微信零钱 · ${meal}`,
+        tip: `本次退的是${meal}。退款后变为已退款，不可撤销。`,
+      }
+    }
     if (t.kind === 'retail') return { ...base, orderType: '商城订单' }
     return {
       ...base,
@@ -1163,12 +1178,13 @@ export function useOrdersManage(orderKind = 'single') {
       return
     }
     const isPaid = row.pay_status === '已支付'
+    const meal = singleMealPeriodLabel(row)
     try {
       await ElMessageBox.confirm(
         isPaid
-          ? `确定取消订单 #${row.id}？已支付订单取消后不退款，若已推顺丰将同步请求取消配送。`
-          : `确定取消未支付订单 #${row.id}？`,
-        '取消订单',
+          ? `确定取消${meal}订单 #${row.id}？已支付订单取消后不退款，若已推顺丰将同步请求取消配送。`
+          : `确定取消未支付的${meal}订单 #${row.id}？`,
+        `取消${meal}订单`,
         { type: 'warning', confirmButtonText: '确定取消', cancelButtonText: '返回' },
       )
     } catch {
@@ -1285,8 +1301,17 @@ export function useOrdersManage(orderKind = 'single') {
       return
     }
     try {
+      const mealHint = rows
+        .reduce((acc, row) => {
+          const meal = singleMealPeriodLabel(row)
+          acc[meal] = (acc[meal] || 0) + 1
+          return acc
+        }, {})
+      const mealText = Object.entries(mealHint)
+        .map(([meal, count]) => `${meal} ${count} 笔`)
+        .join('、')
       await ElMessageBox.confirm(
-        `确定取消选中的 ${rows.length} 笔订单？已支付订单取消后不退款；已推顺丰的将尝试同步取消配送。`,
+        `确定取消选中的 ${rows.length} 笔订单（${mealText}）？已支付订单取消后不退款；已推顺丰的将尝试同步取消配送。`,
         '批量取消订单',
         { type: 'warning', confirmButtonText: '确定取消', cancelButtonText: '返回' },
       )
@@ -1348,6 +1373,8 @@ export function useOrdersManage(orderKind = 'single') {
       ) {
         q.set('fulfillment_phase', fp)
       }
+      const mp = String(singleMealPeriodFilter.value || '').trim()
+      if (mp === 'lunch' || mp === 'dinner') q.set('meal_period', mp)
       const data = await apiJson(`/api/admin/orders/daily/single-meals?${q.toString()}`, {}, { auth: true })
       singleItems.value = Array.isArray(data.items) ? data.items : []
       singleTotal.value = Number(data.total) || 0
@@ -1488,7 +1515,7 @@ export function useOrdersManage(orderKind = 'single') {
   /** 商城订单不按下单日过滤，切换日期不触发零售列表刷新 */
   const listFilterDeps = computed(() => {
     if (orderKind === 'single') {
-      return [orderDate.value, singleFulfillmentFilter.value, pageSize.value]
+      return [orderDate.value, singleFulfillmentFilter.value, singleMealPeriodFilter.value, pageSize.value]
     }
     if (orderKind === 'retail') {
       return [retailDeliveryFilter.value, pageSize.value]
@@ -1616,6 +1643,7 @@ export function useOrdersManage(orderKind = 'single') {
     orderDate,
     searchQuery,
     singleFulfillmentFilter,
+    singleMealPeriodFilter,
     mallPayFilter,
     retailDeliveryFilter,
     dateFilterLabel,
