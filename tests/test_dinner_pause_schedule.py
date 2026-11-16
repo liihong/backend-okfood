@@ -55,3 +55,14 @@ def test_paused_dinner_only_on_chosen_date() -> None:
         dinner_deliver_on=other,
         delivery_date=day,
     )
+
+
+def test_dinner_counts_without_card_period_still_schedule() -> None:
+    """午餐卡只加晚餐次数、没有暂停：不看工单有没有晚餐，每天可进。"""
+    day = date(2026, 10, 21)
+    assert dinner_schedule_allows_delivery(
+        entitled=False,
+        dinner_delivery_paused=False,
+        dinner_deliver_on=None,
+        delivery_date=day,
+    )

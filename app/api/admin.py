@@ -536,7 +536,7 @@ def delivery_sheet(
         Query(description="是否附带顶栏会员统计；配送页可传 false 加速加载"),
     ] = True,
 ):
-    """午餐配送大表（默认）：纯晚餐卡会员不会出现。"""
+    """午餐配送大表：按午餐剩余次数和午餐日程，不按开卡工单餐段排除。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     area_key = (area or "").strip() or None
     phone_key = (phone or "").strip() or None
@@ -590,7 +590,7 @@ def delivery_sheet_dinner(
         Query(description="是否附带顶栏会员统计；配送页可传 false 加速加载"),
     ] = True,
 ):
-    """晚餐配送大表：仅含持有晚餐餐段卡的会员。"""
+    """晚餐配送大表：按晚餐剩余次数、暂停和请假。暂停的赠送晚餐仅指定配送日出现。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     area_key = (area or "").strip() or None
     phone_key = (phone or "").strip() or None
@@ -619,7 +619,7 @@ def delivery_sheet_lunch_dinner(
         Query(description="是否附带顶栏会员统计；配送页可传 false 加速加载"),
     ] = True,
 ):
-    """午晚餐双餐段会员运维视图（推顺丰仍分午餐/晚餐两次推单）。"""
+    """午晚餐运维视图：午餐、晚餐剩余次数都够的会员。推顺丰仍分午餐、晚餐两次。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     area_key = (area or "").strip() or None
     phone_key = (phone or "").strip() or None

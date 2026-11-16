@@ -279,6 +279,11 @@ export function useOrdersManage(orderKind = 'single') {
     }
   }
 
+  /** 正在当场登记一条新地址（还没有 id） */
+  function isDraftingNewAddress() {
+    return !!(editAddrDraft.value && editAddrDraft.value.id == null)
+  }
+
   function syncEditAddrDraftFromSelection() {
     if (!editOpen.value || editForm.value.store_pickup) {
       editAddrDraft.value = null
@@ -287,18 +292,14 @@ export function useOrdersManage(orderKind = 'single') {
     const id = editForm.value.member_address_id
     const list = editMemberAddresses.value
     if (!id || !Array.isArray(list) || !list.length) {
-      // 商城订单正在「登记新地址」时不要把空白草稿清掉
-      if (editKind.value === 'retail' && editAddrDraft.value && editAddrDraft.value.id == null) {
-        return
-      }
+      // 正在「登记新地址」时不要把空白草稿清掉
+      if (isDraftingNewAddress()) return
       editAddrDraft.value = null
       return
     }
     const a = list.find((x) => Number(x.id) === Number(id))
     if (!a) {
-      if (editKind.value === 'retail' && editAddrDraft.value && editAddrDraft.value.id == null) {
-        return
-      }
+      if (isDraftingNewAddress()) return
       editAddrDraft.value = null
       return
     }
@@ -309,7 +310,9 @@ export function useOrdersManage(orderKind = 'single') {
     const row = editOrder.value
     const nameHint = String(row?.member_name || row?.recipient_contact_name || '').trim()
     const phoneHint = String(row?.member_phone || '').trim()
-    editAddrAlsoDefault.value = true
+    const hasExisting = Array.isArray(editMemberAddresses.value) && editMemberAddresses.value.length > 0
+    // 商城沿用原逻辑，默认勾上。单次点餐已有送餐地址时不抢默认；没有地址时勾上。
+    editAddrAlsoDefault.value = editKind.value === 'retail' ? true : !hasExisting
     editAddrDraft.value = {
       id: null,
       contact_name: nameHint,
@@ -321,6 +324,29 @@ export function useOrdersManage(orderKind = 'single') {
       latStr: '',
     }
     editForm.value.member_address_id = null
+  }
+
+  /**
+   * 切到配送到家：有已存地址就选默认；没有就打开空白表单。
+   * 新客体验往往没有送餐地址，不必先去会员档案建一条。
+   */
+  function ensureDeliveryAddressReady() {
+    if (!editOpen.value || editForm.value.store_pickup) return
+    if (isDraftingNewAddress()) return
+    syncEditAddrDraftFromSelection()
+    if (editAddrDraft.value) return
+    const list = editMemberAddresses.value
+    if (Array.isArray(list) && list.length) {
+      const def = list.find((x) => x.is_default) || list[0]
+      const id = Number(def.id)
+      if (Number(editForm.value.member_address_id) !== id) {
+        editForm.value.member_address_id = id
+        return
+      }
+      pickEditAddressDraft(def)
+      return
+    }
+    if (!editAddrLoading.value) startNewRetailAddress()
   }
 
   /** 改址弹窗：从「登记新地址」回到选用已有地址 */
@@ -346,8 +372,11 @@ export function useOrdersManage(orderKind = 'single') {
   watch(
     () => editForm.value.store_pickup,
     (pickup) => {
-      if (pickup) editAddrDraft.value = null
-      else if (editOpen.value) syncEditAddrDraftFromSelection()
+      if (pickup) {
+        editAddrDraft.value = null
+        return
+      }
+      ensureDeliveryAddressReady()
     },
   )
 
@@ -372,10 +401,7 @@ export function useOrdersManage(orderKind = 'single') {
     }
     editOpen.value = true
     void loadMemberAddressesForEdit(row.member_id, kind).then(() => {
-      syncEditAddrDraftFromSelection()
-      if (kind === 'retail' && !editForm.value.store_pickup && !editAddrDraft.value) {
-        startNewRetailAddress()
-      }
+      ensureDeliveryAddressReady()
     })
   }
 
@@ -384,16 +410,19 @@ export function useOrdersManage(orderKind = 'single') {
     if (!row) return
     const pickup = !!editForm.value.store_pickup
     const addrId = editForm.value.member_address_id
-    const creatingRetailAddr =
-      !pickup && editKind.value === 'retail' && editAddrDraft.value && editAddrDraft.value.id == null
-    if (!pickup && !creatingRetailAddr && (!addrId || Number(addrId) <= 0)) {
-      showToast('配送到家须选择收货地址', 'error')
+    const creatingNewAddr = !pickup && isDraftingNewAddress()
+    if (!pickup && !creatingNewAddr && (!addrId || Number(addrId) <= 0)) {
+      showToast('配送到家须选择或登记收货地址', 'error')
       return
     }
     const mid = Number(row.member_id)
+    if (!pickup && (!Number.isFinite(mid) || mid <= 0)) {
+      showToast('该订单没有会员，无法保存收货地址', 'error')
+      return
+    }
     if (!pickup) {
       const ed = editAddrDraft.value
-      if (!ed || (!creatingRetailAddr && Number(ed.id) !== Number(addrId))) {
+      if (!ed || (!creatingNewAddr && Number(ed.id) !== Number(addrId))) {
         showToast('地址明细未加载或与所选地址不一致，请稍候或重新打开', 'error')
         return
       }
@@ -412,7 +441,7 @@ export function useOrdersManage(orderKind = 'single') {
         showToast('请通过地图搜索/选点填写收货位置主文案，或直接在主文案里填写', 'error')
         return
       }
-      if (creatingRetailAddr) {
+      if (creatingNewAddr) {
         const lng = Number(String(ed.lngStr ?? '').trim())
         const lat = Number(String(ed.latStr ?? '').trim())
         if (!Number.isFinite(lng) || !Number.isFinite(lat) || (lng === 0 && lat === 0)) {
@@ -446,9 +475,10 @@ export function useOrdersManage(orderKind = 'single') {
         )
         const selectedUsage = String(selected?.usage || '').trim().toLowerCase()
         const isRetailEdit = editKind.value === 'retail'
-        // 当场登记、或从送餐地址复制：一律新建 retail 地址，不改写会员送餐档案
-        if (creatingRetailAddr || (isRetailEdit && selectedUsage !== 'retail')) {
-          patchBody.usage = 'retail'
+        // 商城：当场登记，或从送餐地址复制，一律新建 retail，不改写送餐档案
+        // 单次点餐：没有送餐地址时当场新建 meal 地址，再绑到本单
+        if (creatingNewAddr || (isRetailEdit && selectedUsage !== 'retail')) {
+          patchBody.usage = isRetailEdit ? 'retail' : 'meal'
           const created = await apiJson(
             `/api/admin/users/${mid}/addresses`,
             { method: 'POST', body: JSON.stringify(patchBody) },
@@ -456,7 +486,7 @@ export function useOrdersManage(orderKind = 'single') {
           )
           const newId = Number(created?.id)
           if (!Number.isFinite(newId) || newId <= 0) {
-            showToast('创建商城收货地址失败', 'error')
+            showToast(isRetailEdit ? '创建商城收货地址失败' : '创建送餐地址失败', 'error')
             return
           }
           editForm.value.member_address_id = newId

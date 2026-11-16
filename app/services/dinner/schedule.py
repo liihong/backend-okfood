@@ -8,10 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.core.delivery_calendar import is_subscription_delivery_day
 from app.core.timeutil import today_shanghai
-from app.models.enums import DeliverySheetView, MealPeriod
+from app.models.enums import MealPeriod
 from app.models.member import Member
 from app.models.member_meal_period_state import MemberMealPeriodState
-from app.services.meal_period.card_eligibility import member_entitled_for_sheet
 from app.services.meal_period.dinner_pause import dinner_schedule_allows_delivery
 from app.services.meal_period.leave import is_dinner_absent_on_delivery_date
 from app.services.meal_period.units import dinner_daily_meal_units_from_state
@@ -27,6 +26,7 @@ def member_on_dinner_delivery_schedule(
     """
     会员在指定业务日是否应计入晚餐配送大表（到家）。
     仅读晚餐池；午餐 members 表请假/余额不影响本判定。
+    不看开卡工单有没有晚餐：晚餐剩余次数够、且未暂停（指定配送日除外）即可。
     晚餐暂停、指定配送日也只在这里生效，不改变午餐日程。
     """
     if not is_subscription_delivery_day(delivery_date):
@@ -45,10 +45,9 @@ def member_on_dinner_delivery_schedule(
         MemberMealPeriodState,
         {"member_id": int(member.id), "meal_period": MealPeriod.DINNER.value},
     )
-    entitled = member_entitled_for_sheet(db, int(member.id), DeliverySheetView.DINNER.value)
-    # 与晚餐大表同一口径：赠送晚餐无资格时，仅指定配送日命中才算在晚餐日程上
+    # 与晚餐大表同一口径：不看工单餐段。暂停时仅指定配送日命中才进晚餐日程。
     if not dinner_schedule_allows_delivery(
-        entitled=entitled,
+        entitled=False,
         dinner_delivery_paused=bool(row.dinner_delivery_paused) if row is not None else False,
         dinner_deliver_on=row.dinner_deliver_on if row is not None else None,
         delivery_date=delivery_date,

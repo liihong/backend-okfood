@@ -24,14 +24,14 @@ def dinner_schedule_allows_delivery(
 ) -> bool:
     """这一天是否进入晚餐配送名单。
 
-    指定配送日等于履约日：进这一天。赠送晚餐没有晚餐资格，靠这一条进单。
-    其他日子：必须已有晚餐资格，且没有勾选暂停晚餐。
-    未暂停的正式晚餐/全餐仍按原规则每天进单，指定日期不会把他们收成只送一天。
+    指定配送日等于履约日：进这一天。开卡赠送晚餐默认暂停，仍靠这一条送当天。
+    其他日子：不看开卡工单有没有晚餐。午餐卡只加了晚餐次数、且没有暂停，也可以每天排。
+    勾了暂停晚餐则不进。未暂停的会员不会被指定日期收成只送一天。
+    ``entitled`` 只保留给旧调用，不再作为门槛。次数够不够由调用方看晚餐余额。
     """
+    del entitled
     if dinner_deliver_on is not None and dinner_deliver_on == delivery_date:
         return True
-    if not entitled:
-        return False
     if dinner_delivery_paused:
         return False
     return True

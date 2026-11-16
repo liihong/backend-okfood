@@ -66,7 +66,7 @@ const {
             <div class="orders-edit-addr-toolbar">
               <span class="orders-edit-k">收货地址</span>
               <el-button
-                v-if="editKind === 'retail' && !(editAddrDraft && editAddrDraft.id == null)"
+                v-if="!(editAddrDraft && editAddrDraft.id == null)"
                 type="primary"
                 link
                 @click="startNewRetailAddress"
@@ -74,7 +74,7 @@ const {
                 登记新地址
               </el-button>
               <el-button
-                v-else-if="editKind === 'retail' && editMemberAddresses.length"
+                v-else-if="editMemberAddresses.length"
                 link
                 @click="useExistingRetailAddress"
               >
@@ -82,7 +82,7 @@ const {
               </el-button>
             </div>
             <el-select
-              v-if="editMemberAddresses.length && !(editKind === 'retail' && editAddrDraft && editAddrDraft.id == null)"
+              v-if="editMemberAddresses.length && !(editAddrDraft && editAddrDraft.id == null)"
               v-model="editForm.member_address_id"
               filterable
               :placeholder="editKind === 'retail' ? '选择已有商城地址' : '选择配送地址'"
@@ -96,11 +96,15 @@ const {
                 :value="Number(a.id)"
               />
             </el-select>
-            <p v-if="editKind === 'retail' && editAddrDraft && editAddrDraft.id == null" class="orders-edit-tip">
-              保存后只绑定本单，不改送餐地址。
+            <p v-if="editAddrDraft && editAddrDraft.id == null" class="orders-edit-tip">
+              {{
+                editKind === 'retail'
+                  ? '保存后只绑定本单，不改送餐地址。'
+                  : '保存后绑定本单，并记入该会员的送餐地址。'
+              }}
             </p>
             <p v-else-if="!editAddrLoading && !editMemberAddresses.length" class="orders-edit-tip">
-              {{ editKind === 'retail' ? '请用地图选点。' : '请先在会员档案新建配送地址。' }}
+              请用地图选点。
             </p>
           </template>
 
@@ -129,7 +133,9 @@ const {
               {{
                 editKind === 'retail'
                   ? '不改会员送餐地址。'
-                  : '保存会写回会员地址，引用本条的订单一起更新。'
+                  : editAddrDraft.id == null
+                    ? '新地址记到该会员名下，本单改用这条。'
+                    : '保存会写回会员地址，引用本条的订单一起更新。'
               }}
             </p>
           </template>
