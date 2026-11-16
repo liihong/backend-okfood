@@ -9,7 +9,7 @@ from app.db.base import Base
 
 
 class MemberMembershipRefund(Base):
-    """会员退卡退款：按剩余次数 × 单次单价退实收，写入财务扣减。"""
+    """会员退卡退款：按最近一次开卡实付计算应退，写入财务扣减。"""
 
     __tablename__ = "member_membership_refunds"
 

@@ -966,7 +966,7 @@ async function onMemberMealCompensationSaved() {
   await fetchMembers()
 }
 
-/** --- 退卡退款：按剩余次数 × 菜单单价计算应退（不按开卡实收） --- */
+/** --- 退卡退款：按最近一次仍有效开卡的实付计算应退 --- */
 const showRefundModal = ref(false)
 const refundTarget = ref(null)
 const refundPreview = ref(null)
@@ -979,6 +979,14 @@ function fmtRefundYuan(v) {
   const n = Number(v)
   if (!Number.isFinite(n)) return '—'
   return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+/** 已消费口径：最近一次仍有效开卡入账之后。没有锚点时不写日期。 */
+function refundConsumedChipLabel(preview) {
+  const raw = String(preview?.latest_card_credited_at || '').trim()
+  const matched = raw.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (matched) return `${matched[1]} 开卡后已消费`
+  return '本卡已消费'
 }
 
 /** 用户操作时间：后端 updated_at（ISO），展示为 YYYY-MM-DD HH:mm */
@@ -1034,7 +1042,7 @@ async function submitMemberRefund() {
   }
   try {
     await ElMessageBox.confirm(
-      `${u.name || '—'} · ${u.phone || ''}\n\n已消费 ${p.meals_consumed} 次，退剩余 ${p.meals_remaining} 次 × ¥ ${fmtRefundYuan(p.unit_price_yuan)}\n应退 ¥ ${fmtRefundYuan(amt)}`,
+      `${u.name || '—'} · ${u.phone || ''}\n\n${refundConsumedChipLabel(p)} ${p.meals_consumed} 次\n本卡实付 ¥ ${fmtRefundYuan(p.card_paid_yuan)}\n应退 ¥ ${fmtRefundYuan(amt)}`,
       '确认退卡退款',
       {
         type: 'warning',
@@ -1837,7 +1845,7 @@ class="balance-triple__n" :class="{
     <OkfoodAdminDialogShell
       v-model:open="showRefundModal"
       title="退卡退款"
-      subtitle="按剩余次数 × 菜单单价计算应退"
+      subtitle="按最近一次开卡实付计算；没吃则退全额"
       size="wide"
       dlg-class="okfood-admin-dlg--refund-fit"
       :close-disabled="refundSubmitting"
@@ -1855,14 +1863,14 @@ class="balance-triple__n" :class="{
         <div class="okfood-refund-summary-v2">
           <div class="okfood-refund-summary-v2__chips">
             <span class="okfood-refund-summary-v2__chip"
-              >已消费 <strong>{{ refundPreview.meals_consumed }}</strong> 次</span
+              >{{ refundConsumedChipLabel(refundPreview) }}
+              <strong>{{ refundPreview.meals_consumed }}</strong> 次</span
             >
             <span class="okfood-refund-summary-v2__chip"
               >可退 <strong>{{ refundPreview.meals_remaining }}</strong> 次</span
             >
             <span class="okfood-refund-summary-v2__chip">
-              累计 <strong>{{ refundPreview.meal_quota_total }}</strong> 次 · 单价 ¥
-              {{ fmtRefundYuan(refundPreview.unit_price_yuan) }}
+              本卡实付 ¥ <strong>{{ fmtRefundYuan(refundPreview.card_paid_yuan) }}</strong>
             </span>
           </div>
           <div class="okfood-refund-summary-v2__amount">
@@ -1875,13 +1883,13 @@ class="balance-triple__n" :class="{
         <div class="okfood-dlg-hint-block okfood-refund-hint-static">
           <span class="okfood-dlg-hint-block__label">退款与财务说明</span>
           <p class="okfood-dlg-hint-block__text">
-            确认后将清零剩余次数、暂停配送并写入财务扣减；请在线下或微信侧按应退金额退款给用户。不按开卡实收计算，避免渠道重复退款。
+            已消费只统计最近一次仍有效开卡之后的配送。没吃过则退该工单实付全额；吃过则按已吃份数占本卡次数的比例从实付扣除，不按菜单单价。确认后将清零剩余次数、暂停配送并写入财务扣减；请在线下或微信侧按应退金额退款给用户。
           </p>
         </div>
         <div
           v-if="Array.isArray(refundPreview.consumption_items) && refundPreview.consumption_items.length"
           class="okfood-refund-body-scroll"
-          aria-label="已消费明细列表"
+          aria-label="本卡开卡后消费明细"
         >
           <ul
             class="members-refund-consumption-list members-refund-consumption-list--refund-detail"

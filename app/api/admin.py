@@ -2194,7 +2194,7 @@ def admin_member_membership_refund_preview(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """会员档案：退卡退款预览（剩余次数 × 菜单单价 = 应退金额）。"""
+    """会员档案：退卡退款预览（最近一次开卡实付；没吃退全额）。"""
     _, _, sid = require_member_in_admin_store(
         db, admin_username=admin_username, member_id=int(member_id), store_id=store_id
     )
