@@ -2652,18 +2652,22 @@ def bulk_push_single_meal_retail_to_sf(
     *,
     order_ids: list[int],
     store_id: int,
+    dispatch_mode: str = "instant",
 ) -> dict[str, Any]:
+    """批量推零售单。``dispatch_mode``：instant=及时单店铺，relay=接驳单（配送大表店铺）。"""
     from app.services.delivery.sf_same_city_service import (
+        normalize_single_meal_sf_dispatch_mode,
         push_single_meal_retail_to_sf_bulk_item,
         run_retail_sf_bulk_in_waves,
     )
 
     _ = db
+    mode = normalize_single_meal_sf_dispatch_mode(dispatch_mode)
     oids = [int(x) for x in order_ids]
     return run_retail_sf_bulk_in_waves(
         oids,
         push_one=lambda oid: push_single_meal_retail_to_sf_bulk_item(
-            order_id=int(oid), store_id=int(store_id)
+            order_id=int(oid), store_id=int(store_id), dispatch_mode=mode
         ),
     )
 

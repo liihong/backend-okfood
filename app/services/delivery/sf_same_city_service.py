@@ -2822,6 +2822,46 @@ def push_sf_same_city_instant(
     return push_sf_same_city(db, forced_body, store_id=store_id, use_instant_shop=True)
 
 
+# 零售单推顺丰的两种运力。及时单走门店零售店铺；接驳单走租户对接店铺（与配送大表同一账号）。
+SF_RETAIL_DISPATCH_INSTANT = "instant"
+SF_RETAIL_DISPATCH_RELAY = "relay"
+
+
+def normalize_single_meal_sf_dispatch_mode(raw: str | None) -> str:
+    """把接口入参收成 instant / relay。空值按及时单。"""
+    mode = (raw or SF_RETAIL_DISPATCH_INSTANT).strip().lower()
+    if mode == SF_RETAIL_DISPATCH_INSTANT:
+        return SF_RETAIL_DISPATCH_INSTANT
+    if mode == SF_RETAIL_DISPATCH_RELAY:
+        return SF_RETAIL_DISPATCH_RELAY
+    raise ValueError("推单类型仅支持及时单（instant）或接驳单（relay）")
+
+
+def apply_single_meal_sf_dispatch_account(gset: Any, store: Any, *, dispatch_mode: str) -> str:
+    """按推单类型改写顺丰店铺，并返回规范化后的类型。
+
+    及时单：覆盖为门店「零售推顺丰店铺ID」。
+    接驳单：保留租户对接里的顺丰店铺，与配送大表创单用同一个号；不改用及时单店铺。
+    两边都是立即创单（is_appoint=0），运力差别由顺丰在对应店铺上开通的产品决定。
+    """
+    mode = normalize_single_meal_sf_dispatch_mode(dispatch_mode)
+    if mode == SF_RETAIL_DISPATCH_INSTANT:
+        retail_shop = (getattr(store, "sf_retail_push_shop_id", None) or "").strip()
+        if not retail_shop:
+            raise ValueError(
+                "请先在「门店设置」填写「零售推顺丰店铺ID」（及时单账号；与配送大表接驳店铺区分）"
+            )
+        gset.SF_OPEN_SHOP_ID = retail_shop
+        shop_type = getattr(store, "sf_retail_push_shop_type", None)
+        if shop_type is not None:
+            gset.SF_OPEN_SHOP_TYPE = int(shop_type)
+        return mode
+    sheet_shop = str(getattr(gset, "SF_OPEN_SHOP_ID", None) or "").strip()
+    if not sheet_shop:
+        raise ValueError("请先在「租户对接」填写顺丰店铺编号（接驳单与配送大表共用该店铺）")
+    return mode
+
+
 @dataclass
 class _PreparedSingleMealRetailSfPush:
     """单次零售推顺丰：校验与报文准备结果（HTTP 前释放 DB 连接时使用）。"""
@@ -2839,10 +2879,15 @@ class _PreparedSingleMealRetailSfPush:
     fs: str
     dev_id: int
     app_key: str
+    dispatch_mode: str
 
 
 def _prepare_single_meal_retail_sf_push(
-    db: Session, *, order_id: int, store_id: int
+    db: Session,
+    *,
+    order_id: int,
+    store_id: int,
+    dispatch_mode: str = SF_RETAIL_DISPATCH_INSTANT,
 ) -> _PreparedSingleMealRetailSfPush:
     """单次零售推顺丰：校验并构建报文（含按需高德），不持锁、不发起 HTTP。"""
     from app.services.order.single_meal_order_service import single_meal_fulfillment_allows_dispatch
@@ -2864,12 +2909,6 @@ def _prepare_single_meal_retail_sf_push(
     st_row = db.get(Store, int(store_id))
     if not st_row:
         raise ValueError("门店不存在")
-    retail_shop = (getattr(st_row, "sf_retail_push_shop_id", None) or "").strip()
-    if not retail_shop:
-        raise ValueError(
-            "请先在「门店设置」填写「零售推顺丰店铺ID」（与智能配送大表使用的顺丰店铺编号区分）"
-        )
-
     tid = int(st_row.tenant_id)
     gset = merged_sf_integration_namespace(db, tid)
     if not gset.SF_OPEN_DEV_ID or not (gset.SF_OPEN_SECRET or "").strip():
@@ -2878,9 +2917,7 @@ def _prepare_single_meal_retail_sf_push(
         raise ValueError("请配置顺丰取件电话与取件地址（租户对接或 .env）")
 
     gset = copy(gset)
-    gset.SF_OPEN_SHOP_ID = retail_shop
-    if getattr(st_row, "sf_retail_push_shop_type", None) is not None:
-        gset.SF_OPEN_SHOP_TYPE = int(st_row.sf_retail_push_shop_type)
+    mode = apply_single_meal_sf_dispatch_account(gset, st_row, dispatch_mode=dispatch_mode)
 
     addr = db.get(MemberAddress, int(order.member_address_id))
     if not addr:
@@ -2970,6 +3007,8 @@ def _prepare_single_meal_retail_sf_push(
         gset=gset,
         fulfillment_single_meal_order_ids=[int(order.id)],
     )
+    # 落库区分本次是及时单还是接驳单，便于事后核对走了哪个店铺
+    snap_db["sf_dispatch_mode"] = mode
 
     failed_push_by_stop = _failed_push_id_by_stop(
         db,
@@ -2994,6 +3033,7 @@ def _prepare_single_meal_retail_sf_push(
         fs=fs,
         dev_id=int(gset.SF_OPEN_DEV_ID),
         app_key=(gset.SF_OPEN_SECRET or "").strip(),
+        dispatch_mode=mode,
     )
 
 
@@ -3080,10 +3120,11 @@ def _finalize_single_meal_retail_sf_push_after_http(
         if order is not None:
             db.add(order)
         db.commit()
+        kind_label = "接驳单" if prep.dispatch_mode == SF_RETAIL_DISPATCH_RELAY else "及时单"
         msg = (
-            "已重新提交顺丰（单次零售，独立顺丰店铺）"
+            f"已重新提交顺丰{kind_label}"
             if prep.fs == "sf_cancelled"
-            else "已提交顺丰（单次零售，独立顺丰店铺）"
+            else f"已提交顺丰{kind_label}"
         )
         return SfSameCityPushItemResult(
             stop_id=prep.stop_id,
@@ -3093,17 +3134,27 @@ def _finalize_single_meal_retail_sf_push_after_http(
         )
 
 
-def push_single_meal_retail_to_sf_bulk_item(*, order_id: int, store_id: int) -> dict[str, Any]:
+def push_single_meal_retail_to_sf_bulk_item(
+    *,
+    order_id: int,
+    store_id: int,
+    dispatch_mode: str = SF_RETAIL_DISPATCH_INSTANT,
+) -> dict[str, Any]:
     """
     批量推单次零售：准备 → 释放 DB → HTTP → 短连接落库。
-    避免长时间占用连接池。
+    避免长时间占用连接池。``dispatch_mode`` 为 instant（及时单）或 relay（接驳单）。
     """
     from app.db.session import SessionLocal
 
     sdb = SessionLocal()
     try:
         try:
-            prep = _prepare_single_meal_retail_sf_push(sdb, order_id=int(order_id), store_id=int(store_id))
+            prep = _prepare_single_meal_retail_sf_push(
+                sdb,
+                order_id=int(order_id),
+                store_id=int(store_id),
+                dispatch_mode=dispatch_mode,
+            )
         except ValueError as e:
             return {"order_id": int(order_id), "ok": False, "message": str(e)}
     finally:
@@ -3212,14 +3263,26 @@ def run_retail_sf_bulk_in_waves(
     return out
 
 
-def push_single_meal_retail_to_sf(db: Session, *, order_id: int, store_id: int) -> SfSameCityPushItemResult:
+def push_single_meal_retail_to_sf(
+    db: Session,
+    *,
+    order_id: int,
+    store_id: int,
+    dispatch_mode: str = SF_RETAIL_DISPATCH_INSTANT,
+) -> SfSameCityPushItemResult:
     """
     订单管理：单次点餐直推顺丰 ``createorder``。
 
-    使用门店上单独配置的 ``sf_retail_push_shop_id``（及可选 shop_type），
-    与租户对接里用于智能配送大表推单的顺丰店铺编号互不干扰；dev_id/secret/取件信息仍走租户合并配置。
+    ``dispatch_mode=instant`` 使用门店「零售推顺丰店铺ID」（及时单）。
+    ``dispatch_mode=relay`` 使用租户对接顺丰店铺（接驳单，与配送大表同一账号）。
+    dev_id/secret/取件信息两种都走租户合并配置。
     """
-    prep = _prepare_single_meal_retail_sf_push(db, order_id=int(order_id), store_id=int(store_id))
+    prep = _prepare_single_meal_retail_sf_push(
+        db,
+        order_id=int(order_id),
+        store_id=int(store_id),
+        dispatch_mode=dispatch_mode,
+    )
     sf_res: dict[str, Any] | None = None
     sf_err: SfOpenApiError | None = None
     other_err: Exception | None = None

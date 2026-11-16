@@ -44,6 +44,7 @@ const {
   singleTableRef,
   selectedSingleRows,
   batchDispatchLoading,
+  batchSfDispatchMode,
   batchMarkCompleteLoading,
   batchCancelLoading,
   batchActionBusy,
@@ -242,11 +243,21 @@ function onSingleMobileSelectChange(row, checked) {
         <el-button
           type="primary"
           size="small"
-          :loading="batchDispatchLoading"
+          :loading="batchDispatchLoading && batchSfDispatchMode === 'instant'"
           :disabled="!selectedDispatchableRows.length || batchActionBusy"
-          @click="onBatchPushSfRetail"
+          @click="onBatchPushSfRetail('instant')"
         >
-          推送顺丰
+          推送及时单
+        </el-button>
+        <el-button
+          type="primary"
+          size="small"
+          plain
+          :loading="batchDispatchLoading && batchSfDispatchMode === 'relay'"
+          :disabled="!selectedDispatchableRows.length || batchActionBusy"
+          @click="onBatchPushSfRetail('relay')"
+        >
+          推送接驳单
         </el-button>
         <el-button
           type="primary"
@@ -440,7 +451,13 @@ function onSingleMobileSelectChange(row, checked) {
                   divided
                   :disabled="!canDispatchActions(row) || row.store_pickup"
                 >
-                  {{ isSfCancelledRedispatch(row) ? '重新推送到顺丰' : '推送到顺丰' }}
+                  {{ isSfCancelledRedispatch(row) ? '重新推送及时单' : '推送及时单' }}
+                </el-dropdown-item>
+                <el-dropdown-item
+                  command="sf-relay"
+                  :disabled="!canDispatchActions(row) || row.store_pickup"
+                >
+                  {{ isSfCancelledRedispatch(row) ? '重新推送接驳单' : '推送接驳单' }}
                 </el-dropdown-item>
                 <el-dropdown-item command="uu" :disabled="!canDispatchActions(row)">
                   推送到 UU
@@ -561,7 +578,13 @@ function onSingleMobileSelectChange(row, checked) {
                   divided
                   :disabled="!canDispatchActions(row) || row.store_pickup"
                 >
-                  {{ isSfCancelledRedispatch(row) ? '重新推送到顺丰' : '推送到顺丰' }}
+                  {{ isSfCancelledRedispatch(row) ? '重新推送及时单' : '推送及时单' }}
+                </el-dropdown-item>
+                <el-dropdown-item
+                  command="sf-relay"
+                  :disabled="!canDispatchActions(row) || row.store_pickup"
+                >
+                  {{ isSfCancelledRedispatch(row) ? '重新推送接驳单' : '推送接驳单' }}
                 </el-dropdown-item>
                 <el-dropdown-item command="uu" :disabled="!canDispatchActions(row)">
                   推送到 UU

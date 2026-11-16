@@ -41,7 +41,8 @@ class Store(Base):
     sf_nightly_auto_push_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # 同地址不同会员推顺丰：False=一名会员一单（默认，不改现网）；True=同址合并为一单、扣一份配送费
     sf_merge_same_address_push: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # 订单管理「推顺丰」(单次点餐) 与配送大表「推送及时单」：createorder 使用此处 shop_id，与租户对接中的顺丰店铺（大表预约/夜间推单）可不同
+    # 订单管理「推送及时单」与配送大表「推送及时单」：createorder 使用此处 shop_id。
+    # 「推送接驳单」不用这个号，改走租户对接里的顺丰店铺（与配送大表同一账号）。
     sf_retail_push_shop_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sf_retail_push_shop_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # UU 跑腿开放平台参数（预留，尚未对接发单接口）

@@ -46,6 +46,7 @@ from app.schemas.admin import (
     TenantPayConfigPatchIn,
     SingleMealAssignCourierIn,
     SingleMealOrderIdsIn,
+    SingleMealSfBatchDispatchIn,
     SingleMealBatchAssignCourierIn,
     SingleMealCancelIn,
     SingleMealBatchCancelIn,
@@ -1651,17 +1652,24 @@ def admin_orders_daily_mall_card_orders(
 
 @router.post("/orders/single-meals/batch-dispatch/sf-retail", response_model=None)
 def admin_single_meal_batch_dispatch_sf_retail(
-    body: SingleMealOrderIdsIn,
+    body: SingleMealSfBatchDispatchIn,
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
-    """单次点餐：批量推送到顺丰（逐单调用 createorder，部分失败不影响其它订单）。"""
+    """单次点餐：批量推送到顺丰。dispatch_mode=instant 走及时单店铺，relay 走接驳单（配送大表店铺）。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    out = bulk_push_single_meal_retail_to_sf(
-        db, order_ids=[int(x) for x in body.order_ids], store_id=store_id
-    )
-    return success(data=out, msg="批量推顺丰处理完成")
+    try:
+        out = bulk_push_single_meal_retail_to_sf(
+            db,
+            order_ids=[int(x) for x in body.order_ids],
+            store_id=store_id,
+            dispatch_mode=body.dispatch_mode,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    kind = "接驳单" if body.dispatch_mode == "relay" else "及时单"
+    return success(data=out, msg=f"批量推送{kind}处理完成")
 
 
 @router.post("/orders/single-meals/batch-dispatch/store-courier", response_model=None)
@@ -1731,15 +1739,27 @@ def admin_single_meal_dispatch_sf_retail(
     db: SessionDep,
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+    dispatch_mode: Annotated[
+        str,
+        Query(description="instant=及时单（零售店铺）；relay=接驳单（配送大表店铺）"),
+    ] = "instant",
 ):
     """
-    单次点餐：使用门店「零售推顺丰店铺ID」调用顺丰创单（与智能配送大表推单所用租户 shop 独立）。
+    单次点餐推顺丰。
+
+    instant：门店「零售推顺丰店铺ID」，立即创单。
+    relay：租户对接顺丰店铺，与配送大表同一账号，立即创单。
     成功记录仍写入 ``sf_same_city_pushes``，stop_id 形如 ``retail-smo-{订单id}``，监控页可查。
     """
     tid, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     _ = tid
     try:
-        r = push_single_meal_retail_to_sf(db, order_id=int(order_id), store_id=store_id)
+        r = push_single_meal_retail_to_sf(
+            db,
+            order_id=int(order_id),
+            store_id=store_id,
+            dispatch_mode=dispatch_mode,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return success(data=dump_model(r), msg="处理完成")

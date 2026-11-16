@@ -374,6 +374,13 @@ class SingleMealOrderIdsIn(BaseModel):
     order_ids: list[int] = Field(..., min_length=1, max_length=100)
 
 
+class SingleMealSfBatchDispatchIn(BaseModel):
+    """单次点餐：批量推顺丰。instant=及时单店铺，relay=接驳单（配送大表店铺）。"""
+
+    order_ids: list[int] = Field(..., min_length=1, max_length=100)
+    dispatch_mode: Literal["instant", "relay"] = "instant"
+
+
 class SingleMealBatchAssignCourierIn(BaseModel):
     """单次点餐：批量门店自配送指派。"""
 
