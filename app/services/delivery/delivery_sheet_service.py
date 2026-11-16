@@ -52,7 +52,7 @@ from app.services.member.member_service import (
     sql_prep_preview_daily_meal_units_column,
 )
 from app.models.enums import DeliverySheetView, MealPeriod
-from app.services.meal_period.card_eligibility import filter_member_groups_for_sheet_view
+from app.services.dinner.eligibility import filter_member_groups_with_dinner_counts
 from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
 
 
@@ -1618,9 +1618,8 @@ def _merge_extra_delivered_for_sheet_view(
     午餐视图补回后不再按餐段过滤：无工单快照、扣次后余额为 0 的纯午餐会员
     仍须留在当日午餐大表，否则已送达记录会从统计里消失。
 
-    午晚餐视图补回后必须再滤一次双餐段：纯午餐会员今日午餐已送达时，
-    extra_delivered 会把他们当成「名单外已送达」重新塞进 already_home 之外，
-    从而污染午晚餐 Tab。
+    午晚餐视图补回后必须再按晚餐次数滤一次：纯午餐会员今日午餐已送达时，
+    extra_delivered 会把他们重新塞进名单，没有晚餐次数的人不能留在午晚餐 Tab。
     """
     ex_h, ex_dh, ex_pu, ex_pud = extra_delivered_ineligible_subscribers(
         db,
@@ -1639,8 +1638,8 @@ def _merge_extra_delivered_for_sheet_view(
         pu_members.append(m)
         pu_defaults[m.id] = ex_pud.get(int(m.id))
     if (view or "").strip().lower() == DeliverySheetView.LUNCH_DINNER.value:
-        members, pu_members = filter_member_groups_for_sheet_view(
-            db, DeliverySheetView.LUNCH_DINNER.value, members, pu_members
+        members, pu_members = filter_member_groups_with_dinner_counts(
+            db, delivery_date, members, pu_members
         )
     return members, pu_members
 
@@ -1662,8 +1661,9 @@ def build_delivery_sheet(
     include_member_stats: bool = True,
 ) -> DeliverySheetOut:
     """
-    配送大表。sheet_view：lunch（默认，与原 /delivery-sheet 一致）/ dinner / lunch_dinner。
-    纯晚餐卡会员仅出现在 dinner 视图，不会出现在 lunch 视图。
+    配送大表。sheet_view：lunch（默认）/ dinner / lunch_dinner。
+    午餐、晚餐是否进表看该餐剩余次数和暂停、请假，不看开卡工单餐段。
+    午晚餐视图是两餐次数都够的运维名单，不单独推顺丰。
     """
     view = (sheet_view or DeliverySheetView.LUNCH.value).strip().lower()
     if view == DeliverySheetView.DINNER.value:
@@ -1734,13 +1734,10 @@ def build_delivery_sheet(
         pu_members, pu_defaults = eligible_members_for_store_pickup(
             db, delivery_date=d, store_id=sid, tenant_id=tid
         )
-        if view == DeliverySheetView.LUNCH.value:
-            members, pu_members = filter_member_groups_for_sheet_view(
-                db, DeliverySheetView.LUNCH.value, members, pu_members
-            )
-        elif view == DeliverySheetView.LUNCH_DINNER.value:
-            members, pu_members = filter_member_groups_for_sheet_view(
-                db, DeliverySheetView.LUNCH_DINNER.value, members, pu_members
+        # 午餐视图不再按工单餐段过滤：次数和午餐暂停已在上面的名单里。
+        if view == DeliverySheetView.LUNCH_DINNER.value:
+            members, pu_members = filter_member_groups_with_dinner_counts(
+                db, d, members, pu_members
             )
     members, pu_members = _merge_extra_delivered_for_sheet_view(
         db,

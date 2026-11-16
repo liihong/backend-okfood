@@ -431,10 +431,13 @@ def _list_dinner_members_insufficient_balance_for_delivery_day(
     tenant_id: int | None = None,
     store_id: int | None = None,
 ) -> list[Member]:
-    """晚餐：0 < dinner_balance < dinner_daily_meal_units 且 dinner_daily_meal_units > 1。"""
-    from app.models.enums import DeliverySheetView, MealPeriod
+    """晚餐：0 < dinner_balance < dinner_daily_meal_units 且 dinner_daily_meal_units > 1。
+
+    与晚餐大表一样不看开卡工单餐段。暂停晚餐且不是指定配送日的人不算「当天该送但次数不够」。
+    """
+    from app.models.enums import MealPeriod
     from app.models.member_meal_period_state import MemberMealPeriodState
-    from app.services.meal_period.card_eligibility import member_entitled_for_sheet
+    from app.services.meal_period.dinner_pause import dinner_schedule_allows_delivery
     from app.services.meal_period.leave import is_dinner_absent_on_delivery_date
     from app.services.meal_period.units import dinner_daily_meal_units_from_state
 
@@ -463,12 +466,17 @@ def _list_dinner_members_insufficient_balance_for_delivery_day(
     )
     out: list[Member] = []
     for m in db.scalars(stmt).all():
-        if not member_entitled_for_sheet(db, int(m.id), DeliverySheetView.DINNER.value):
-            continue
         row = db.get(
             MemberMealPeriodState,
             {"member_id": int(m.id), "meal_period": MealPeriod.DINNER.value},
         )
+        if not dinner_schedule_allows_delivery(
+            entitled=False,
+            dinner_delivery_paused=bool(row.dinner_delivery_paused) if row is not None else False,
+            dinner_deliver_on=row.dinner_deliver_on if row is not None else None,
+            delivery_date=delivery_date,
+        ):
+            continue
         units = dinner_daily_meal_units_from_state(row)
         if units <= 1:
             continue
@@ -907,12 +915,8 @@ def confirm_delivery(db: Session, courier_id: str, member_id: int, delivery_date
     if int(member.tenant_id) != int(courier_row.tenant_id):
         raise HTTPException(status_code=403, detail="无权操作该会员")
 
-    from app.models.enums import DeliverySheetView
-    from app.services.meal_period.card_eligibility import member_entitled_for_sheet
-
-    if not member_entitled_for_sheet(db, int(member.id), DeliverySheetView.LUNCH.value):
-        raise HTTPException(status_code=400, detail="该会员无午餐配送资格，晚餐请由管理端或顺丰履约")
-
+    # 午餐确认送达看剩余次数、请假和起送日，不看开卡工单餐段。
+    # 午餐次数不够的人在下面会被拒绝，纯晚餐且午餐次数为 0 不会扣到午餐。
     allowed_region_ids = {int(r.region_id) for r in regions_for_courier(db, courier_id)}
     if not allowed_region_ids:
         raise HTTPException(status_code=403, detail="账号未分配配送片区")

@@ -1059,28 +1059,40 @@ class MemberMembershipRefundConsumptionRowOut(BaseModel):
 
 
 class MemberMembershipRefundPreviewOut(BaseModel):
-    """会员退卡退款预览：应退 = 剩余次数 × 菜单单价（不按开卡实收，避免外部渠道已退款重复计算）。"""
+    """会员退卡退款预览：应退按最近一次仍有效开卡的实付。没吃退全额，吃过按比例扣。"""
 
     member_id: int = Field(..., ge=1)
     member_name: str | None = None
     member_phone: str | None = None
     plan_type: str | None = None
-    meals_consumed: int = Field(..., ge=0, description="已消费份数（配送扣次）")
-    meals_remaining: int = Field(..., ge=0, description="可退剩余次数")
-    meal_quota_total: int = Field(..., ge=0, description="累计总次数")
-    paid_total_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="已入账开卡实收合计（仅供核对，不参与应退计算）")
-    consumed_value_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="已消费按各日菜单单价合计（仅供核对）")
-    unit_price_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="退款单价（午餐菜单单点价）")
+    meals_consumed: int = Field(..., ge=0, description="最近一次仍有效的午餐开卡入账之后的配送扣次；无此锚点时为 0")
+    meals_remaining: int = Field(..., ge=0, description="可退剩余次数（当前午餐余额）")
+    meal_quota_total: int = Field(..., ge=0, description="档案累计总次数")
+    latest_card_credited_at: datetime | None = Field(
+        None,
+        description="最近一次仍有效的午餐开卡入账时间（北京时间）；已消费只统计此时间之后的配送",
+    )
+    card_paid_yuan: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=14,
+        decimal_places=2,
+        description="最近一次仍有效开卡实收（元），四舍五入到整数元，与开卡工单列表一致",
+    )
+    meals_granted: int = Field(..., ge=0, description="该次开卡入账次数")
+    paid_total_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="本次退卡依据的开卡实付（元），与 card_paid_yuan 相同")
+    consumed_value_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="本卡周期已消费按各日菜单单价合计（仅供核对，不参与应退）")
+    unit_price_yuan: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2, description="本卡单次实付 = 实付 / 入账次数，仅供展示")
     consumption_items: list[MemberMembershipRefundConsumptionRowOut] = Field(
         default_factory=list,
-        description="按消费日列出的菜单单价明细（仅供核对，不从应退中扣减）",
+        description="最近一次开卡入账之后的消费明细（仅供核对，不按菜单价扣应退）",
     )
     refund_amount_yuan: Decimal = Field(
         ...,
         ge=0,
         max_digits=14,
         decimal_places=2,
-        description="应退金额 = 可退剩余次数 × 菜单单价",
+        description="应退金额：开卡后未消费则等于实付全额，否则按已用份数从实付中比例扣除",
     )
 
 
