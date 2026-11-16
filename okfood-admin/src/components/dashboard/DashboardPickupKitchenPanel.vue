@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { Search } from 'lucide-vue-next'
 import { apiJson, adminAccessToken, handleAdminLogout } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
@@ -35,12 +35,12 @@ const emit = defineEmits(['menu-day-stock-saved'])
 /** @typedef {{ kind: 'retail', order_id: number, name: string, phone: string, dish_title: string, quantity: number, is_delivered: boolean }} RetailPickupRow */
 /** @typedef {SubscriptionPickupRow | RetailPickupRow} PickupRow */
 
-const pickupSearch = ref('')
 const pickupLoading = ref(false)
-/** @type {import('vue').Ref<PickupRow[]>} */
-const pickupRows = ref([])
-/** 接口返回的待自提份数合计（订阅 daily_meal_units + 零售 quantity） */
-const pickupPendingCount = ref(0)
+/** 午餐、晚餐各一份名单。订阅自提只出现在午餐。 */
+const pickupCabins = ref([
+  { key: 'lunch', title: '午餐核销仓', search: '', rows: [], pending: 0 },
+  { key: 'dinner', title: '晚餐核销仓', search: '', rows: [], pending: 0 },
+])
 /** 核销中行的唯一键：订阅 sub:{member_id}，零售 retail:{order_id} */
 const markingKey = ref(null)
 
@@ -113,7 +113,20 @@ watch(
   { immediate: true },
 )
 
-const pendingPickupCount = computed(() => pickupPendingCount.value)
+function filteredPickupRows(cabin) {
+  const q = String(cabin.search || '').trim().toLowerCase()
+  if (!q) return cabin.rows
+  return cabin.rows.filter((r) => {
+    const name = String(r.name || '').toLowerCase()
+    const phone = String(r.phone || '')
+    const refNo = pickupRefNo(r)
+    const refText = refNo ? refNo.text.toLowerCase() : ''
+    const refId = String(
+      r.kind === 'retail' ? Math.trunc(Number(r.order_id) || 0) : Math.trunc(Number(r.member_id) || 0),
+    )
+    return name.includes(q) || phone.includes(q) || refText.includes(q) || refId.includes(q)
+  })
+}
 
 /** 单行当日自提份数：订阅取 daily_meal_units，零售取 quantity */
 function pickupPortionCount(row) {
@@ -131,21 +144,6 @@ function formatPickupPortionLabel(row) {
   }
   return `${count} 份`
 }
-
-const filteredPickupRows = computed(() => {
-  const q = pickupSearch.value.trim().toLowerCase()
-  if (!q) return pickupRows.value
-  return pickupRows.value.filter((r) => {
-    const name = String(r.name || '').toLowerCase()
-    const phone = String(r.phone || '')
-    const refNo = pickupRefNo(r)
-    const refText = refNo ? refNo.text.toLowerCase() : ''
-    const refId = String(
-      r.kind === 'retail' ? Math.trunc(Number(r.order_id) || 0) : Math.trunc(Number(r.member_id) || 0),
-    )
-    return name.includes(q) || phone.includes(q) || refText.includes(q) || refId.includes(q)
-  })
-})
 
 /** 卡包展示：有 quota 用 quota 作分母，否则仅展示 balance */
 function formatQuotaDisplay(row) {
@@ -181,19 +179,28 @@ async function fetchPickupList() {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d0)) return
   const today = (props.shanghaiToday || '').trim()
   if (today && d0 > today) {
-    pickupRows.value = []
-    pickupPendingCount.value = 0
+    for (const cabin of pickupCabins.value) {
+      cabin.rows = []
+      cabin.pending = 0
+    }
     return
   }
   pickupLoading.value = true
   try {
-    const data = await apiJson(
-      `/api/admin/pickup-verification-list?delivery_date=${encodeURIComponent(d0)}`,
-      {},
-      { auth: true },
-    )
-    pickupRows.value = Array.isArray(data?.rows) ? data.rows : []
-    pickupPendingCount.value = Math.max(0, Math.trunc(Number(data?.pending_count) || 0))
+    const [lunch, dinner] = await Promise.all([
+      apiJson(
+        `/api/admin/pickup-verification-list?delivery_date=${encodeURIComponent(d0)}&meal_period=lunch`,
+        {},
+        { auth: true },
+      ),
+      apiJson(
+        `/api/admin/pickup-verification-list?delivery_date=${encodeURIComponent(d0)}&meal_period=dinner`,
+        {},
+        { auth: true },
+      ),
+    ])
+    applyPickupCabin('lunch', lunch)
+    applyPickupCabin('dinner', dinner)
   } catch (e) {
     const status = e && typeof e.status === 'number' ? e.status : 0
     if (status === 401) {
@@ -201,12 +208,21 @@ async function fetchPickupList() {
       handleAdminLogout()
       return
     }
-    pickupRows.value = []
-    pickupPendingCount.value = 0
+    for (const cabin of pickupCabins.value) {
+      cabin.rows = []
+      cabin.pending = 0
+    }
     showToast(e instanceof Error ? e.message : '加载自提列表失败', 'error')
   } finally {
     pickupLoading.value = false
   }
+}
+
+function applyPickupCabin(key, data) {
+  const cabin = pickupCabins.value.find((item) => item.key === key)
+  if (!cabin) return
+  cabin.rows = Array.isArray(data?.rows) ? data.rows : []
+  cabin.pending = Math.max(0, Math.trunc(Number(data?.pending_count) || 0))
 }
 
 /** 单行自提核销：订阅走 delivery-mark；单次零售走 mark-delivered */
@@ -263,8 +279,6 @@ async function saveKitchenPlanForDate(businessDate, plannedTotal, mealPeriod = '
     { auth: true },
   )
 }
-
-const KITCHEN_DAY_LABELS = ['今日', '明日', '后天']
 
 /** 保存今日/明日/后天午餐+晚餐日总份数；保存完成后由父组件 await dashboard-summary 全量刷新 */
 async function saveKitchenPlan() {
@@ -388,121 +402,73 @@ watch(
 
 <template>
   <section class="dpk-grid" aria-label="后厨计划与门店自提核销">
-    <!-- 后厨计划管理（左） -->
-    <article class="dpk-card dpk-card--kitchen">
-      <div class="dpk-kitchen-grid">
-        <!-- 标题行与下方输入列同一栅格：左标题 + 右「午餐 / 晚餐」列头 -->
-        <div class="dpk-kitchen-grid__title-row">
-          <div class="dpk-kitchen-grid__title-brand">🍳 后厨计划管理</div>
-          <span class="dpk-kitchen-grid__col">午餐</span>
-          <span class="dpk-kitchen-grid__col dpk-kitchen-grid__col--dinner">晚餐</span>
+    <article class="dpk-card dpk-card--kitchen dpk-kitchen-bar">
+      <div class="dpk-kitchen-bar__title">🍳 后厨计划</div>
+      <div class="dpk-kitchen-bar__days">
+        <div class="dpk-kitchen-day">
+          <span class="dpk-kitchen-day__name">今日</span>
+          <label class="dpk-kitchen-pair">午
+            <input v-model.number="kitchenInput" type="number" class="dpk-form-control" min="0" max="99999" inputmode="numeric" />
+          </label>
+          <label class="dpk-kitchen-pair">晚
+            <input v-model.number="kitchenInputDinner" type="number" class="dpk-form-control dpk-form-control--dinner" min="0" max="99999" inputmode="numeric" />
+          </label>
         </div>
-        <div class="dpk-kitchen-grid__row">
-          <label class="dpk-kitchen-grid__row-label">{{ KITCHEN_DAY_LABELS[0] }}日总份数</label>
-          <div class="dpk-input-row">
-            <input
-              v-model.number="kitchenInput"
-              type="number"
-              class="dpk-form-control"
-              min="0"
-              max="99999"
-              inputmode="numeric"
-            />
-            <span class="dpk-unit">份</span>
-          </div>
-          <div class="dpk-input-row">
-            <input
-              v-model.number="kitchenInputDinner"
-              type="number"
-              class="dpk-form-control dpk-form-control--dinner"
-              min="0"
-              max="99999"
-              inputmode="numeric"
-            />
-            <span class="dpk-unit">份</span>
-          </div>
+        <div class="dpk-kitchen-day">
+          <span class="dpk-kitchen-day__name">明日</span>
+          <label class="dpk-kitchen-pair">午
+            <input v-model.number="kitchenInputTomorrow" type="number" class="dpk-form-control" min="0" max="99999" inputmode="numeric" />
+          </label>
+          <label class="dpk-kitchen-pair">晚
+            <input v-model.number="kitchenInputTomorrowDinner" type="number" class="dpk-form-control dpk-form-control--dinner" min="0" max="99999" inputmode="numeric" />
+          </label>
         </div>
-        <div class="dpk-kitchen-grid__row">
-          <label class="dpk-kitchen-grid__row-label">{{ KITCHEN_DAY_LABELS[1] }}日总份数</label>
-          <div class="dpk-input-row">
-            <input
-              v-model.number="kitchenInputTomorrow"
-              type="number"
-              class="dpk-form-control"
-              min="0"
-              max="99999"
-              inputmode="numeric"
-            />
-            <span class="dpk-unit">份</span>
-          </div>
-          <div class="dpk-input-row">
-            <input
-              v-model.number="kitchenInputTomorrowDinner"
-              type="number"
-              class="dpk-form-control dpk-form-control--dinner"
-              min="0"
-              max="99999"
-              inputmode="numeric"
-            />
-            <span class="dpk-unit">份</span>
-          </div>
-        </div>
-        <div class="dpk-kitchen-grid__row">
-          <label class="dpk-kitchen-grid__row-label">{{ KITCHEN_DAY_LABELS[2] }}日总份数</label>
-          <div class="dpk-input-row">
-            <input
-              v-model.number="kitchenInputDayAfterTomorrow"
-              type="number"
-              class="dpk-form-control"
-              min="0"
-              max="99999"
-              inputmode="numeric"
-            />
-            <span class="dpk-unit">份</span>
-          </div>
-          <div class="dpk-input-row">
-            <input
-              v-model.number="kitchenInputDayAfterTomorrowDinner"
-              type="number"
-              class="dpk-form-control dpk-form-control--dinner"
-              min="0"
-              max="99999"
-              inputmode="numeric"
-            />
-            <span class="dpk-unit">份</span>
-          </div>
+        <div class="dpk-kitchen-day">
+          <span class="dpk-kitchen-day__name">后天</span>
+          <label class="dpk-kitchen-pair">午
+            <input v-model.number="kitchenInputDayAfterTomorrow" type="number" class="dpk-form-control" min="0" max="99999" inputmode="numeric" />
+          </label>
+          <label class="dpk-kitchen-pair">晚
+            <input v-model.number="kitchenInputDayAfterTomorrowDinner" type="number" class="dpk-form-control dpk-form-control--dinner" min="0" max="99999" inputmode="numeric" />
+          </label>
         </div>
       </div>
       <button
         type="button"
-        class="dpk-btn-save"
+        class="dpk-btn-save dpk-kitchen-bar__save"
         :disabled="kitchenSaving"
         @click="saveKitchenPlan"
       >
-        {{ kitchenSaving ? '保存中…' : '确定并保存日总份数' }}
+        {{ kitchenSaving ? '保存中…' : '保存' }}
       </button>
     </article>
-
-    <!-- 门店自提快速核销舱（右）：搜索框与标题同行（标题 ↔ 搜索 ↔ 待自提） -->
-    <article class="dpk-card dpk-card--pickup">
+    <div class="dpk-cabins">
+    <article
+      v-for="cabin in pickupCabins"
+      :key="cabin.key"
+      class="dpk-card dpk-card--pickup"
+      :class="{ 'dpk-card--dinner': cabin.key === 'dinner' }"
+    >
       <div class="dpk-card-title dpk-card-title--pickup-row">
-        <span class="dpk-card-title__pickup-brand">🏪 门店自提快速核销舱</span>
+        <span class="dpk-card-title__pickup-brand">{{ cabin.title }}</span>
         <div class="dpk-search-box dpk-search-box--header">
           <Search :size="14" class="dpk-search-icon" aria-hidden="true" />
           <input
-            v-model="pickupSearch"
+            v-model="cabin.search"
             type="search"
             class="dpk-search-input"
-            placeholder="输入姓名、手机号后四位或单号模糊搜索..."
+            placeholder="姓名、手机后四位或单号"
             autocomplete="off"
           />
         </div>
-        <span class="dpk-pending-label">待自提：{{ pendingPickupCount }} 份</span>
+        <span class="dpk-pending-label">待自提：{{ cabin.pending }} 份</span>
       </div>
 
       <div class="dpk-scroll-wrap">
         <p v-if="pickupLoading" class="dpk-hint">正在加载自提列表…</p>
-        <p v-else-if="!pickupRows.length" class="dpk-hint">当日暂无门店自提客户（含订阅与零售）</p>
+        <p v-else-if="!cabin.rows.length" class="dpk-hint">
+          {{ cabin.key === 'dinner' ? '当日暂无晚餐门店自提' : '当日暂无午餐门店自提' }}
+        </p>
         <table v-else class="dpk-table">
           <thead>
             <tr>
@@ -514,7 +480,7 @@ watch(
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in filteredPickupRows" :key="pickupRowKey(row)">
+            <tr v-for="row in filteredPickupRows(cabin)" :key="pickupRowKey(row)">
               <td class="dpk-td-ref">
                 <template v-if="pickupRefNo(row)">
                   <span class="dpk-ref-no" :title="pickupRefNo(row).title">
@@ -567,27 +533,34 @@ watch(
                 </button>
               </td>
             </tr>
-            <tr v-if="pickupRows.length && !filteredPickupRows.length">
+            <tr v-if="cabin.rows.length && !filteredPickupRows(cabin).length">
               <td colspan="5" class="dpk-empty-filter">无匹配客户，请调整搜索条件</td>
             </tr>
           </tbody>
         </table>
       </div>
     </article>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .dpk-grid {
-  display: grid;
-  grid-template-columns: 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 0.9rem;
   margin-bottom: 1rem;
 }
 
+.dpk-cabins {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.9rem;
+}
+
 @media (min-width: 1024px) {
-  .dpk-grid {
-    grid-template-columns: 1.2fr 1.8fr;
+  .dpk-cabins {
+    grid-template-columns: 1fr 1fr;
     gap: 1rem;
   }
 }
@@ -610,9 +583,65 @@ watch(
 
 /* 与 KPI 卡一致：仅整圈浅描边 + 毛玻璃，无彩色顶线 */
 
-/* 后厨卡：在「日总份数」表格与主按钮之间留出可呼吸间距，避免整卡内容贴顶贴底 */
-.dpk-card--kitchen .dpk-btn-save {
-  margin-top: 0.65rem;
+.dpk-kitchen-bar {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dpk-kitchen-bar__title {
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.dpk-kitchen-bar__days {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dpk-kitchen-day {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.8);
+}
+
+.dpk-kitchen-day__name {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dpk-kitchen-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.dpk-kitchen-bar .dpk-form-control {
+  width: 64px;
+  max-width: 64px;
+  padding: 6px 4px;
+  text-align: center;
+}
+
+.dpk-kitchen-bar .dpk-btn-save {
+  margin-top: 0;
+  width: auto;
+  padding: 8px 16px;
+}
+
+.dpk-card--dinner {
+  background: rgba(255, 247, 237, 0.55);
 }
 
 .dpk-card--pickup {

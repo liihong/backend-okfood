@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>营业概览 · 核销仓预览</title>
+  <style>
+    :root {
+      --canvas: #f4f7fb;
+      --ink: #1d1f21;
+      --muted: #64748b;
+      --line: rgba(15, 23, 42, 0.08);
+      --card: rgba(255, 255, 255, 0.86);
+      --blue: #3b82f6;
+      --sans: "PingFang SC", "Hiragino Sans GB", "SF Pro Text", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--sans);
+      background:
+        radial-gradient(640px 280px at 0% 0%, rgba(255, 214, 196, 0.45), transparent 70%),
+        radial-gradient(520px 320px at 100% 10%, rgba(191, 219, 254, 0.55), transparent 70%),
+        var(--canvas);
+      -webkit-font-smoothing: antialiased;
+    }
+    .note {
+      max-width: 1180px;
+      margin: 18px auto 0;
+      padding: 0 16px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .page {
+      max-width: 1180px;
+      margin: 12px auto 32px;
+      padding: 0 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .kitchen {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: var(--card);
+    }
+    .kitchen h2 {
+      margin: 0;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+    .days {
+      display: flex;
+      flex: 1;
+      gap: 10px;
+      min-width: 0;
+    }
+    .day {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      padding: 6px 8px;
+      border-radius: 12px;
+      background: #f8fafc;
+    }
+    .day b { font-size: 12px; white-space: nowrap; }
+    .pair { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+    .pair input {
+      width: 52px;
+      height: 28px;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      text-align: center;
+      font-weight: 700;
+      font-family: inherit;
+    }
+    .save {
+      height: 34px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 10px;
+      background: var(--blue);
+      color: #fff;
+      font-weight: 700;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .cabins {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .cabin {
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      padding: 12px;
+      min-width: 0;
+    }
+    .cabin--dinner { background: rgba(255, 247, 237, 0.72); }
+    .cabin__head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .cabin__head h3 { margin: 0; font-size: 15px; white-space: nowrap; }
+    .search {
+      flex: 1;
+      min-width: 0;
+      height: 32px;
+      border-radius: 999px;
+      border: 1px solid #e2e8f0;
+      padding: 0 12px;
+      background: #fff;
+      font: inherit;
+      font-size: 12px;
+    }
+    .pending {
+      font-size: 12px;
+      font-weight: 700;
+      color: #c2410c;
+      white-space: nowrap;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left;
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 700;
+      padding: 6px 8px;
+    }
+    td {
+      padding: 8px;
+      font-size: 12px;
+      font-weight: 650;
+      border-top: 1px solid rgba(226, 232, 240, 0.9);
+    }
+    .sub { display: block; font-size: 11px; font-weight: 600; color: #94a3b8; }
+    .wait { color: #ea580c; }
+    .done { color: #64748b; }
+    .btn {
+      border: 0;
+      border-radius: 999px;
+      padding: 4px 10px;
+      background: #fb923c;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .btn--done { background: #e2e8f0; color: #64748b; }
+    .mods {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+    .mod {
+      min-height: 88px;
+      border-radius: 16px;
+      border: 1px dashed rgba(15, 23, 42, 0.16);
+      background: rgba(255, 255, 255, 0.55);
+      padding: 14px;
+    }
+    .mod strong { display: block; font-size: 14px; margin-bottom: 6px; }
+    .mod span { font-size: 12px; color: var(--muted); line-height: 1.5; }
+    @media (max-width: 900px) {
+      .kitchen { flex-wrap: wrap; }
+      .days { flex-wrap: wrap; }
+      .cabins, .mods { grid-template-columns: 1fr; }
+      .save { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <p class="note">布局预览。名单是示意，还没按餐段拆真实数据。下面三个模块的内容还没定，只看高度和位置。</p>
+  <main class="page">
+    <section class="kitchen">
+      <h2>后厨计划</h2>
+      <div class="days">
+        <div class="day">
+          <b>今日</b>
+          <label class="pair">午 <input value="139" /></label>
+          <label class="pair">晚 <input value="17" /></label>
+        </div>
+        <div class="day">
+          <b>明日</b>
+          <label class="pair">午 <input value="125" /></label>
+          <label class="pair">晚 <input value="15" /></label>
+        </div>
+        <div class="day">
+          <b>后天</b>
+          <label class="pair">午 <input value="0" /></label>
+          <label class="pair">晚 <input value="0" /></label>
+        </div>
+      </div>
+      <button class="save" type="button">保存</button>
+    </section>
+
+    <section class="cabins">
+      <article class="cabin">
+        <div class="cabin__head">
+          <h3>午餐核销仓</h3>
+          <input class="search" placeholder="姓名、手机后四位或单号" />
+          <span class="pending">待自提 2 份</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>会员/单号</th><th>名称</th><th>份数</th><th>状态</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>#2156</td>
+              <td>王女士<span class="sub">卡包 2 / 48 次</span></td>
+              <td>1 份</td>
+              <td class="wait">待自提</td>
+              <td><button class="btn" type="button">核销完成</button></td>
+            </tr>
+            <tr>
+              <td>#941</td>
+              <td>范佳楠<span class="sub">卡包 8 / 42 次</span></td>
+              <td>1 份</td>
+              <td class="done">已完成</td>
+              <td><button class="btn btn--done" type="button">已核销</button></td>
+            </tr>
+            <tr>
+              <td>#2326</td>
+              <td>文<span class="sub">腌白菜鲜虾豆腐汤配饭</span></td>
+              <td>1 份</td>
+              <td class="wait">待自提</td>
+              <td><button class="btn" type="button">核销完成</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+      <article class="cabin cabin--dinner">
+        <div class="cabin__head">
+          <h3>晚餐核销仓</h3>
+          <input class="search" placeholder="姓名、手机后四位或单号" />
+          <span class="pending">待自提 1 份</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>会员/单号</th><th>名称</th><th>份数</th><th>状态</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>#2324</td>
+              <td>文<span class="sub">滑蛋蟹柳照烧鸡腿饭</span></td>
+              <td>1 份</td>
+              <td class="done">已完成</td>
+              <td><button class="btn btn--done" type="button">已核销</button></td>
+            </tr>
+            <tr>
+              <td>#2188</td>
+              <td>李先生<span class="sub">卡包 6 / 30 次</span></td>
+              <td>1 份</td>
+              <td class="wait">待自提</td>
+              <td><button class="btn" type="button">核销完成</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="mods">
+      <article class="mod"><strong>模块一</strong><span>短卡片。内容待定，不放长列表。</span></article>
+      <article class="mod"><strong>模块二</strong><span>和左右两块同高，各管一件事。</span></article>
+      <article class="mod"><strong>模块三</strong><span>手机上改成上下三张。</span></article>
+    </section>
+  </main>
+</body>
+</html>

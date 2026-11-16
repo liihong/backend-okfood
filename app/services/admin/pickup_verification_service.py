@@ -86,8 +86,12 @@ def _retail_pickup_rows(
     *,
     store_id: int,
     delivery_date: date,
+    meal_period: str,
 ) -> list[PickupVerificationRetailRowOut]:
-    """单次零售门店自提：单条 SQL 联表，不含分页 count 与地址加载。"""
+    """单次零售门店自提：按订单上的餐段过滤，不含分页 count 与地址加载。"""
+    from app.services.meal_period.normalize import normalize_meal_period
+
+    period = normalize_meal_period(meal_period)
     stmt = (
         select(SingleMealOrder, Member, MenuDish)
         .join(Member, Member.id == SingleMealOrder.member_id)
@@ -95,6 +99,7 @@ def _retail_pickup_rows(
         .where(
             SingleMealOrder.store_id == int(store_id),
             SingleMealOrder.delivery_date == delivery_date,
+            SingleMealOrder.meal_period == period,
             SingleMealOrder.store_pickup.is_(True),
             SingleMealOrder.pay_status == "已支付",
             SingleMealOrder.fulfillment_status.notin_(SINGLE_RETAIL_INVENTORY_EXCLUDED_FULFILLMENT),
@@ -122,10 +127,24 @@ def list_pickup_verification_panel(
     *,
     store_id: int,
     delivery_date: date,
+    meal_period: str = "lunch",
 ) -> PickupVerificationListOut:
-    """首页核销舱专用：订阅 + 零售自提合并列表。"""
-    sub_rows = _subscription_pickup_rows(db, store_id=store_id, delivery_date=delivery_date)
-    retail_rows = _retail_pickup_rows(db, store_id=store_id, delivery_date=delivery_date)
+    """首页核销舱：午餐含订阅自提和午餐零售；晚餐只有零售自提。
+
+    订阅门店自提只走午餐。晚餐订阅是配送到家，不进核销仓。
+    """
+    from app.models.enums import MealPeriod
+    from app.services.meal_period.normalize import normalize_meal_period
+
+    period = normalize_meal_period(meal_period)
+    sub_rows = (
+        _subscription_pickup_rows(db, store_id=store_id, delivery_date=delivery_date)
+        if period == MealPeriod.LUNCH.value
+        else []
+    )
+    retail_rows = _retail_pickup_rows(
+        db, store_id=store_id, delivery_date=delivery_date, meal_period=period
+    )
     combined = [*sub_rows, *retail_rows]
 
     def _row_pending_units(row: PickupVerificationSubscriptionRowOut | PickupVerificationRetailRowOut) -> int:

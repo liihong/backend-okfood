@@ -640,11 +640,14 @@ def pickup_verification_list(
     admin_username: str = Depends(admin_staff_subject),
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
     delivery_date: Annotated[date | None, Query(description="供餐/业务日，默认上海当日")] = None,
+    meal_period: Annotated[str, Query(description="lunch 或 dinner，默认 lunch")] = "lunch",
 ):
-    """首页门店自提快速核销舱：轻量列表（订阅自提 + 单次零售自提，不构建完整配送大表）。"""
+    """首页门店自提快速核销舱：按餐段返回订阅自提与单次零售自提。"""
     _, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
     day = delivery_date or today_shanghai()
-    payload = list_pickup_verification_panel(db, store_id=store_id, delivery_date=day)
+    payload = list_pickup_verification_panel(
+        db, store_id=store_id, delivery_date=day, meal_period=meal_period
+    )
     return success(data=dump_model(payload), msg="获取成功")
 
 
