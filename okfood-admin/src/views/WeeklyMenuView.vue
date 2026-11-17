@@ -218,7 +218,7 @@ function setTotalStockDraft(row, val, mealPeriod) {
   totalStockDraft.value = { ...totalStockDraft.value, [k]: val }
 }
 
-/** 单次余展示文案 @param {'lunch'|'dinner'} mealPeriod */
+/* 零售、剩余依赖后端按天扫配送大表，本页加载时已不算。恢复计算后再打开下面的展示。
 function remainingDisplay(row, mealPeriod) {
   if (!row.dish_id) return '—'
   if (totalStockFieldValue(row, mealPeriod) === '') return '0'
@@ -227,7 +227,6 @@ function remainingDisplay(row, mealPeriod) {
   return String(rem)
 }
 
-/** 单次余徽章样式：未配置 / 有余 / 售罄 @param {'lunch'|'dinner'} mealPeriod */
 function remainingBadgeClass(row, mealPeriod) {
   if (!row.dish_id) return 'wmenu-remain--none'
   if (totalStockFieldValue(row, mealPeriod) === '') return 'wmenu-remain--warn'
@@ -239,7 +238,6 @@ function remainingBadgeClass(row, mealPeriod) {
   return 'wmenu-remain--ok'
 }
 
-/** 单次零售（已支付）份数展示 */
 function singleRetailDisplay(row) {
   if (!row.dish_id) return '—'
   const v = row.single_retail_paid_portions
@@ -247,7 +245,6 @@ function singleRetailDisplay(row) {
   return String(v)
 }
 
-/** 单次零售徽章：有单时高亮，便于核对避免漏单 */
 function singleRetailBadgeClass(row) {
   if (!row.dish_id) return 'wmenu-retail--none'
   const v = row.single_retail_paid_portions
@@ -256,6 +253,7 @@ function singleRetailBadgeClass(row) {
   if (!Number.isFinite(n) || n <= 0) return 'wmenu-retail--zero'
   return 'wmenu-retail--active'
 }
+*/
 
 async function fetchDishes() {
   if (!adminAccessToken.value) return
@@ -600,6 +598,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
               >
                 {{ meal.row.dish_id ? formatSlotPrice(meal.row.single_order_price_yuan) : '—' }}
               </span>
+              <!-- 零售、剩余已暂停计算，避免打开页面时扫配送大表。日总份输入仍在卡片里。
               <span class="wmenu-meal__stats">
                 <span class="wmenu-meta-label">零售</span>
                 <span class="wmenu-retail-badge" :class="singleRetailBadgeClass(meal.row)">
@@ -610,6 +609,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
                   {{ remainingDisplay(meal.row, meal.mealPeriod) }}
                 </span>
               </span>
+              -->
               <el-button
                 v-if="meal.row.dish_id"
                 link

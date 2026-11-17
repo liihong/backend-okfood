@@ -1059,7 +1059,7 @@ class MemberMembershipRefundConsumptionRowOut(BaseModel):
 
 
 class MemberMembershipRefundPreviewOut(BaseModel):
-    """会员退卡退款预览：应退按最近一次仍有效开卡的实付。没吃退全额，吃过按比例扣。"""
+    """会员退卡退款预览：应退 = 最近一次开卡实收 − 开卡后已消费餐品原价。"""
 
     member_id: int = Field(..., ge=1)
     member_name: str | None = None
@@ -1092,7 +1092,7 @@ class MemberMembershipRefundPreviewOut(BaseModel):
         ge=0,
         max_digits=14,
         decimal_places=2,
-        description="应退金额：开卡后未消费则等于实付全额，否则按已用份数从实付中比例扣除",
+        description="应退金额 = 本卡实收 − 开卡后已消费餐品原价；没吃则等于实收",
     )
 
 

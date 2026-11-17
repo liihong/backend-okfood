@@ -64,35 +64,29 @@ def test_douyin_paid_rounds_to_card_order_list_amount() -> None:
 
 
 def test_no_consumption_refunds_full_rounded_paid() -> None:
-    """6 次都还在：退取整后的实收 170，不按菜单价 30 乘出 180。"""
+    """没吃：退实收全额。"""
     refund = refund_yuan_from_latest_card(
         card_paid_yuan=Decimal("170"),
-        meals_granted=6,
-        meals_consumed=0,
-        meals_remaining=6,
+        consumed_original_yuan=Decimal("0"),
     )
     assert refund == Decimal("170.00")
 
 
-def test_one_meal_eaten_deducts_share_of_paid_not_menu_price() -> None:
-    """吃了 1 次：从实收 170 扣 170/6，不是扣菜单价 30。"""
+def test_refund_subtracts_consumed_dish_original_price() -> None:
+    """实收 178，吃过一餐原价 36：应退 142，不按 178×5/6。"""
     refund = refund_yuan_from_latest_card(
-        card_paid_yuan=Decimal("170"),
-        meals_granted=6,
-        meals_consumed=1,
-        meals_remaining=5,
+        card_paid_yuan=Decimal("178"),
+        consumed_original_yuan=Decimal("36"),
     )
-    assert refund == Decimal("141.67")
+    assert refund == Decimal("142.00")
 
 
-def test_stated_170_with_no_consumption_returns_170() -> None:
+def test_consumed_original_above_paid_refunds_zero() -> None:
     refund = refund_yuan_from_latest_card(
-        card_paid_yuan=Decimal("170.00"),
-        meals_granted=6,
-        meals_consumed=0,
-        meals_remaining=6,
+        card_paid_yuan=Decimal("178"),
+        consumed_original_yuan=Decimal("200"),
     )
-    assert refund == Decimal("170.00")
+    assert refund == Decimal("0.00")
 
 
 def test_same_day_units_after_credit_are_summed() -> None:

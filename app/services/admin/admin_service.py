@@ -1800,38 +1800,41 @@ def _weekly_slots_payload(db: Session, anchor: date, store_id: int, *, meal_peri
     ).all()
     from app.services.admin.menu_day_stock_service import weekly_slot_stock_extras
 
-    dates = [anchor + timedelta(days=i) for i in range(7)]
-    metrics_cache: dict = {}
-    sub_by_date, paid_by_date = _weekly_menu_day_stats_by_dates(
-        db, dates, store_id=sid, meal_period=period, metrics_cache=metrics_cache
-    )
+    # 本周菜单只读槽位上已保存的日总份。零售、剩余要按天扫配送大表和单次订单，打开页面时不算。
+    # dates = [anchor + timedelta(days=i) for i in range(7)]
+    # metrics_cache: dict = {}
+    # sub_by_date, paid_by_date = _weekly_menu_day_stats_by_dates(
+    #     db, dates, store_id=sid, meal_period=period, metrics_cache=metrics_cache
+    # )
     return weekly_slot_stock_extras(
         db,
         anchor,
         _weekly_slots_raw(rows),
         store_id=sid,
         meal_period=period,
-        sub_by_date=sub_by_date,
-        paid_by_date=paid_by_date,
+        skip_subscription_stats=True,
+        # sub_by_date=sub_by_date,
+        # paid_by_date=paid_by_date,
     )
 
 
 def _weekly_dual_preview(
     db: Session, this_a: date, next_a: date, *, store_id: int, meal_period: str = "lunch"
 ) -> dict[str, list[dict]]:
-    """本周+下周槽位：仅本周算应配送/单次余；下周只返回槽位与总份配置（同 meal_period 隔离）。"""
+    """本周+下周槽位：只返回菜品和已保存的日总份，不算零售、剩余。"""
     from app.services.meal_period.normalize import normalize_meal_period
 
     sid = int(store_id)
     period = normalize_meal_period(meal_period)
     anchors = [this_a, next_a]
-    this_dates = [this_a + timedelta(days=i) for i in range(7)]
     from app.services.admin.menu_day_stock_service import weekly_slot_stock_extras
 
-    metrics_cache: dict = {}
-    sub_by_date, paid_by_date = _weekly_menu_day_stats_by_dates(
-        db, this_dates, store_id=sid, meal_period=period, metrics_cache=metrics_cache
-    )
+    # 打开本周菜单时不算库存。原先本周 7 天会扫两遍配送大表（统计一次、拆解再一次），午餐晚餐各走一遍。
+    # this_dates = [this_a + timedelta(days=i) for i in range(7)]
+    # metrics_cache: dict = {}
+    # sub_by_date, paid_by_date = _weekly_menu_day_stats_by_dates(
+    #     db, this_dates, store_id=sid, meal_period=period, metrics_cache=metrics_cache
+    # )
     rows = db.execute(
         select(WeeklyMenuSlot, MenuDish, MenuDrink)
         .join(MenuDish, WeeklyMenuSlot.dish_id == MenuDish.id)
@@ -1853,8 +1856,9 @@ def _weekly_dual_preview(
             _weekly_slots_raw(by_anchor.get(this_a, [])),
             store_id=sid,
             meal_period=period,
-            sub_by_date=sub_by_date,
-            paid_by_date=paid_by_date,
+            skip_subscription_stats=True,
+            # sub_by_date=sub_by_date,
+            # paid_by_date=paid_by_date,
         ),
         "next_week": weekly_slot_stock_extras(
             db,

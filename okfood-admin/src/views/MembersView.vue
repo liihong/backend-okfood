@@ -1042,7 +1042,7 @@ async function submitMemberRefund() {
   }
   try {
     await ElMessageBox.confirm(
-      `${u.name || '—'} · ${u.phone || ''}\n\n${refundConsumedChipLabel(p)} ${p.meals_consumed} 次\n本卡实付 ¥ ${fmtRefundYuan(p.card_paid_yuan)}\n应退 ¥ ${fmtRefundYuan(amt)}`,
+      `${u.name || '—'} · ${u.phone || ''}\n\n${refundConsumedChipLabel(p)} ${p.meals_consumed} 次，餐品原价 ¥ ${fmtRefundYuan(p.consumed_value_yuan)}\n本卡实付 ¥ ${fmtRefundYuan(p.card_paid_yuan)}\n应退 ¥ ${fmtRefundYuan(amt)}`,
       '确认退卡退款',
       {
         type: 'warning',
@@ -1845,7 +1845,7 @@ class="balance-triple__n" :class="{
     <OkfoodAdminDialogShell
       v-model:open="showRefundModal"
       title="退卡退款"
-      subtitle="按最近一次开卡实付计算；没吃则退全额"
+      subtitle="本卡实付减去已消费餐品原价"
       size="wide"
       dlg-class="okfood-admin-dlg--refund-fit"
       :close-disabled="refundSubmitting"
@@ -1883,7 +1883,7 @@ class="balance-triple__n" :class="{
         <div class="okfood-dlg-hint-block okfood-refund-hint-static">
           <span class="okfood-dlg-hint-block__label">退款与财务说明</span>
           <p class="okfood-dlg-hint-block__text">
-            已消费只统计最近一次仍有效开卡之后的配送。没吃过则退该工单实付全额；吃过则按已吃份数占本卡次数的比例从实付扣除，不按菜单单价。确认后将清零剩余次数、暂停配送并写入财务扣减；请在线下或微信侧按应退金额退款给用户。
+            已消费只统计最近一次仍有效开卡之后的配送。应退 = 本卡实付 − 这些餐的菜单原价；没吃则退实付全额。确认后将清零剩余次数、暂停配送并写入财务扣减；请在线下或微信侧按应退金额退款给用户。
           </p>
         </div>
         <div

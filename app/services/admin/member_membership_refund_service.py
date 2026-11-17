@@ -1,8 +1,8 @@
 """会员退卡退款：按最近一次仍有效开卡的实付计算应退。
 
 已消费只统计这次开卡入账之后的配送扣次。
-一顿没吃则退该工单实付全额；吃过则按已吃份数占本卡次数的比例从实付扣除。
-不按菜单单价乘剩余次数，避免把 30 元菜价当成会员实际付的钱。
+一顿没吃则退该工单实收全额。
+吃过则从实收中减去这些餐的菜单原价，不再按实收除以次数摊。
 """
 
 from __future__ import annotations
@@ -66,33 +66,22 @@ def card_paid_yuan_for_refund(amount: Decimal) -> Decimal:
 def refund_yuan_from_latest_card(
     *,
     card_paid_yuan: Decimal,
-    meals_granted: int,
-    meals_consumed: int,
-    meals_remaining: int,
+    consumed_original_yuan: Decimal,
 ) -> Decimal:
-    """按最近一张卡的实付算应退。
+    """应退 = 本卡实收 − 开卡后已消费餐品原价。
 
-    本卡一份都没被用掉：退实付全额，不做除法，避免尾差。
-    用掉一部分：已用份数 = 入账次数 − min(剩余, 入账 − 已配送)，按比例从实付扣除，尾差留在应退。
+    没吃：退实收全额。
+    原价合计超过实收：退 0，不再倒贴。
     """
     paid = Decimal(str(card_paid_yuan)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
-    granted = int(meals_granted)
-    if paid <= 0 or granted <= 0:
+    consumed = Decimal(str(consumed_original_yuan)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
+    if paid <= 0:
         return Decimal("0.00")
-    eaten = max(0, int(meals_consumed))
-    remaining = max(0, int(meals_remaining))
-    unused = min(remaining, max(0, granted - eaten))
-    used = granted - unused
-    if used <= 0:
+    if consumed <= 0:
         return paid
-    if unused <= 0:
-        return Decimal("0.00")
-    used_charge = (paid * Decimal(used) / Decimal(granted)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
-    refund = (paid - used_charge).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
+    refund = (paid - consumed).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
     if refund < 0:
         return Decimal("0.00")
-    if refund > paid:
-        return paid
     return refund
 
 
@@ -252,7 +241,7 @@ def _consumption_charge_for_units(
     if not units_by_date:
         return Decimal("0.00"), []
 
-    # 已消费明细按午餐菜单单价列出（仅供核对，不参与应退计算）
+    # 已消费原价参与应退：实收减去这些餐的菜单原价
     dishes_by_date = resolve_dishes_for_dates_batch(
         db, units_by_date.keys(), store_id=int(store_id), meal_period=MealPeriod.LUNCH.value
     )
@@ -263,9 +252,11 @@ def _consumption_charge_for_units(
         units = max(1, int(units_by_date[delivery_date]))
         dish = dishes_by_date.get(delivery_date)
         raw_price = None if dish is None else dish.single_order_price_yuan
-        # 已消费明细仅供核对；缺单价的日期跳过，不阻断按剩余次数退款
         if raw_price is None:
-            continue
+            raise HTTPException(
+                status_code=400,
+                detail=f"{delivery_date.isoformat()} 的已消费餐品未配置原价，无法计算退款",
+            )
         unit_price = Decimal(str(raw_price)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
         line_total = (unit_price * Decimal(units)).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
         total += line_total
@@ -314,9 +305,7 @@ def _compute_refund_preview(db: Session, member: Member) -> MemberMembershipRefu
     )
     refund_yuan = refund_yuan_from_latest_card(
         card_paid_yuan=card.paid_yuan,
-        meals_granted=card.meals_granted,
-        meals_consumed=meals_consumed,
-        meals_remaining=meals_remaining,
+        consumed_original_yuan=consumed_value,
     )
     # 单次实付只用于展示，应退全额时不拿它再乘一次
     unit_price = (card.paid_yuan / Decimal(card.meals_granted)).quantize(
@@ -384,9 +373,8 @@ def member_membership_refund_confirm(
 
     remark = (body.remark or "").strip() or None
     log_bits = [
-        f"退卡按最近开卡实付{preview.card_paid_yuan}元",
-        f"入账{preview.meals_granted}次",
-        f"开卡后已消费{preview.meals_consumed}次",
+        f"退卡按最近开卡实收{preview.card_paid_yuan}元",
+        f"开卡后已消费{preview.meals_consumed}次原价{preview.consumed_value_yuan}元",
         f"应退{preview.refund_amount_yuan}元",
     ]
     if remark:
@@ -446,8 +434,8 @@ def member_membership_refund_confirm(
         source="admin",
         operation_type=OP_MEMBERSHIP_REFUND,
         summary=(
-            f"退卡退款：最近开卡实付{preview.card_paid_yuan}元，"
-            f"开卡后已消费{preview.meals_consumed}次，应退{preview.refund_amount_yuan}元"
+            f"退卡退款：实收{preview.card_paid_yuan}元，"
+            f"已消费原价{preview.consumed_value_yuan}元，应退{preview.refund_amount_yuan}元"
         ),
         before=before_snap,
         after=after_snap,

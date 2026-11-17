@@ -89,7 +89,7 @@ defineProps({
     <el-dropdown-item command="refund" class="members-more-menu__item" :disabled="refundDisabled">
       <span
         class="members-more-menu__inner"
-        title="按最近一次开卡实付计算应退，没吃则退全额"
+        title="按本卡实付减去已消费餐品原价计算应退"
       >
         <span class="members-more-menu__icon members-more-menu__icon--emoji" aria-hidden="true">💳</span>
         <span class="members-more-menu__label">退卡退款</span>
