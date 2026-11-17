@@ -168,6 +168,18 @@ function formatMonthDay(date) {
   return `${date.getMonth() + 1}月${date.getDate()}日`
 }
 
+/**
+ * 某一天的月日。slot 1 是周一，和 weekStart 对齐。
+ * @param {string} weekStart
+ * @param {number} slot
+ */
+function slotMonthDay(weekStart, slot) {
+  const start = parseWeekStart(weekStart)
+  if (!start) return ''
+  const day = new Date(start.getFullYear(), start.getMonth(), start.getDate() + slot - 1)
+  return formatMonthDay(day)
+}
+
 /** 卡片标题行：11月9日 - 11月15日 */
 function weekCardRangeText(weekStart) {
   const range = weekRange(weekStart)
@@ -533,7 +545,12 @@ const dayCards = computed(() => {
         lunch ? { key: 'lunch', label: '午餐', mealPeriod: 'lunch', row: lunch } : null,
         dinner ? { key: 'dinner', label: '晚餐', mealPeriod: 'dinner', row: dinner } : null,
       ].filter(Boolean)
-      return { slot, weekday: sample.weekday, meals }
+      return {
+        slot,
+        weekday: sample.weekday,
+        dateLabel: slotMonthDay(sample.weekStart, slot),
+        meals,
+      }
     })
     .filter(Boolean)
   return cards.filter((day) => day.slot <= 6 || day.meals.some((meal) => meal.row?.dish_id))
@@ -580,11 +597,13 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
         <article v-for="day in dayCards" :key="day.slot" class="wmenu-day-card">
           <header class="wmenu-day-card__head">
             <h3 class="wmenu-day-card__title">{{ day.weekday }}</h3>
+            <span v-if="day.dateLabel" class="wmenu-day-card__date">{{ day.dateLabel }}</span>
           </header>
           <section
             v-for="meal in day.meals"
             :key="`${day.slot}-${meal.key}`"
             class="wmenu-meal"
+            :class="`wmenu-meal--${meal.key}`"
           >
             <div class="wmenu-meal__head">
               <span class="wmenu-meal-tag" :class="`wmenu-meal-tag--${meal.key}`">{{ meal.label }}</span>
@@ -598,110 +617,115 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
               >
                 {{ meal.row.dish_id ? formatSlotPrice(meal.row.single_order_price_yuan) : '—' }}
               </span>
-              <!-- 零售、剩余已暂停计算，避免打开页面时扫配送大表。日总份输入仍在卡片里。
-              <span class="wmenu-meal__stats">
-                <span class="wmenu-meta-label">零售</span>
-                <span class="wmenu-retail-badge" :class="singleRetailBadgeClass(meal.row)">
-                  {{ singleRetailDisplay(meal.row) }}
-                </span>
-                <span class="wmenu-meta-label">剩余</span>
-                <span class="wmenu-remain-badge" :class="remainingBadgeClass(meal.row, meal.mealPeriod)">
-                  {{ remainingDisplay(meal.row, meal.mealPeriod) }}
-                </span>
-              </span>
-              -->
-              <el-button
-                v-if="meal.row.dish_id"
-                link
-                class="wmenu-box-flag"
-                :type="slotHasBoxes(meal.row, meal.mealPeriod) ? 'primary' : 'danger'"
-                @click="openSlotPackaging(meal.row, meal.mealPeriod)"
-              >
-                {{ slotHasBoxes(meal.row, meal.mealPeriod) ? '用盒' : '未设用盒' }}
-              </el-button>
             </div>
             <div class="wmenu-meal__body">
-            <div class="wmenu-dish-cell">
-                      <el-select
-                        :model-value="meal.row.dish_id"
-                        filterable
-                        clearable
-                        placeholder="选择菜品"
-                        class="wmenu-dish-select"
-                        popper-class="wmenu-dish-popper"
-                        :fit-input-width="false"
-                        :loading="savingSlot === `${meal.mealPeriod}-${meal.row.weekStart}-${meal.row.slot}`"
-                        :disabled="isRowBusy(meal.row, meal.mealPeriod)"
-                        @update:model-value="(v) => onDishChange(meal.row, v, meal.mealPeriod)"
-                      >
-                        <template #label="{ value }">
-                          <span class="wmenu-dish-picked">
-                            <img
-                              v-if="dishOptionById[value]?.image"
-                              :src="dishOptionById[value].image"
-                              alt=""
-                              class="wmenu-dish-picked__img"
-                              @error="onDishThumbError"
-                            />
-                            <span v-else class="wmenu-dish-picked__img wmenu-dish-picked__img--empty" />
-                            <span class="wmenu-dish-picked__name">{{ dishOptionById[value]?.name || '' }}</span>
-                          </span>
-                        </template>
-                        <el-option
-                          v-for="opt in dishOptions"
-                          :key="opt.value"
-                          :label="opt.label"
-                          :value="opt.value"
-                          :disabled="opt.disabled"
-                        >
-                          <div class="wmenu-dish-opt">
-                            <img
-                              v-if="opt.image"
-                              :src="opt.image"
-                              alt=""
-                              class="wmenu-dish-opt__img"
-                              @error="onDishThumbError"
-                            />
-                            <span v-else class="wmenu-dish-opt__img wmenu-dish-opt__img--empty" />
-                            <span class="wmenu-dish-opt__name">{{ opt.name }}</span>
-                            <span v-if="opt.price" class="wmenu-dish-opt__price">{{ opt.price }}</span>
-                          </div>
-                        </el-option>
-                      </el-select>
-                    </div>
-            <label class="wmenu-stock">
-                <input
-                  v-if="meal.row.dish_id"
-                  type="number"
-                  min="0"
-                  class="wmenu-total-input"
-                  placeholder="不限"
-                  :value="totalStockFieldValue(meal.row, meal.mealPeriod)"
-                  :disabled="isRowBusy(meal.row, meal.mealPeriod)"
-                  @input="(e) => setTotalStockDraft(meal.row, (e.target).value, meal.mealPeriod)"
-                  @blur="() => onTotalStockCommit(meal.row, meal.mealPeriod)"
-                />
-                <span v-else class="wmenu-dash">—</span>
-              </label>
-              <el-select
-                v-if="meal.row.dish_id"
-                :model-value="meal.row.paired_drink_id"
-                filterable
-                clearable
-                placeholder="随餐饮"
-                class="wmenu-drink-select"
-                :loading="isRowBusy(meal.row, meal.mealPeriod)"
-                :disabled="isRowBusy(meal.row, meal.mealPeriod)"
-                @update:model-value="(v) => onDrinkChange(meal.row, v, meal.mealPeriod)"
-              >
-                <el-option
-                  v-for="opt in drinkOptions"
-                  :key="opt.value"
-                  :label="opt.label"
-                  :value="opt.value"
-                />
-              </el-select>
-              <span v-else class="wmenu-dash">—</span>
+              <div class="wmenu-field">
+                <span class="wmenu-field__label">菜品</span>
+                <div class="wmenu-field__control wmenu-dish-cell">
+                  <el-select
+                    :model-value="meal.row.dish_id"
+                    filterable
+                    clearable
+                    placeholder="选择菜品"
+                    class="wmenu-dish-select"
+                    popper-class="wmenu-dish-popper"
+                    :fit-input-width="false"
+                    :loading="savingSlot === `${meal.mealPeriod}-${meal.row.weekStart}-${meal.row.slot}`"
+                    :disabled="isRowBusy(meal.row, meal.mealPeriod)"
+                    @update:model-value="(v) => onDishChange(meal.row, v, meal.mealPeriod)"
+                  >
+                    <template #label="{ value }">
+                      <span class="wmenu-dish-picked">
+                        <img
+                          v-if="dishOptionById[value]?.image"
+                          :src="dishOptionById[value].image"
+                          alt=""
+                          class="wmenu-dish-picked__img"
+                          @error="onDishThumbError"
+                        />
+                        <span v-else class="wmenu-dish-picked__img wmenu-dish-picked__img--empty" />
+                        <span class="wmenu-dish-picked__name">{{ dishOptionById[value]?.name || '' }}</span>
+                      </span>
+                    </template>
+                    <el-option
+                      v-for="opt in dishOptions"
+                      :key="opt.value"
+                      :label="opt.label"
+                      :value="opt.value"
+                      :disabled="opt.disabled"
+                    >
+                      <div class="wmenu-dish-opt">
+                        <img
+                          v-if="opt.image"
+                          :src="opt.image"
+                          alt=""
+                          class="wmenu-dish-opt__img"
+                          @error="onDishThumbError"
+                        />
+                        <span v-else class="wmenu-dish-opt__img wmenu-dish-opt__img--empty" />
+                        <span class="wmenu-dish-opt__name">{{ opt.name }}</span>
+                        <span v-if="opt.price" class="wmenu-dish-opt__price">{{ opt.price }}</span>
+                      </div>
+                    </el-option>
+                  </el-select>
+                </div>
+              </div>
+              <div class="wmenu-meal__pair">
+                <label class="wmenu-field wmenu-field--stock">
+                  <span class="wmenu-field__label">日总份</span>
+                  <input
+                    v-if="meal.row.dish_id"
+                    type="number"
+                    min="0"
+                    class="wmenu-total-input"
+                    placeholder="不限"
+                    :value="totalStockFieldValue(meal.row, meal.mealPeriod)"
+                    :disabled="isRowBusy(meal.row, meal.mealPeriod)"
+                    @input="(e) => setTotalStockDraft(meal.row, (e.target).value, meal.mealPeriod)"
+                    @blur="() => onTotalStockCommit(meal.row, meal.mealPeriod)"
+                  />
+                  <span v-else class="wmenu-dash">—</span>
+                </label>
+                <div class="wmenu-field">
+                  <span class="wmenu-field__label">用盒</span>
+                  <el-button
+                    v-if="meal.row.dish_id"
+                    size="small"
+                    plain
+                    class="wmenu-box-btn"
+                    :type="slotHasBoxes(meal.row, meal.mealPeriod) ? 'primary' : 'danger'"
+                    :disabled="isRowBusy(meal.row, meal.mealPeriod)"
+                    @click="openSlotPackaging(meal.row, meal.mealPeriod)"
+                  >
+                    {{ slotHasBoxes(meal.row, meal.mealPeriod) ? '已设置' : '未设置' }}
+                  </el-button>
+                  <span v-else class="wmenu-dash">—</span>
+                </div>
+              </div>
+              <div class="wmenu-field">
+                <span class="wmenu-field__label">随餐饮</span>
+                <div class="wmenu-field__control">
+                  <el-select
+                    v-if="meal.row.dish_id"
+                    :model-value="meal.row.paired_drink_id"
+                    filterable
+                    clearable
+                    placeholder="不配饮品"
+                    class="wmenu-drink-select"
+                    :loading="isRowBusy(meal.row, meal.mealPeriod)"
+                    :disabled="isRowBusy(meal.row, meal.mealPeriod)"
+                    @update:model-value="(v) => onDrinkChange(meal.row, v, meal.mealPeriod)"
+                  >
+                    <el-option
+                      v-for="opt in drinkOptions"
+                      :key="opt.value"
+                      :label="opt.label"
+                      :value="opt.value"
+                    />
+                  </el-select>
+                  <span v-else class="wmenu-dash">—</span>
+                </div>
+              </div>
             </div>
           </section>
         </article>
@@ -906,6 +930,13 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   background: #fff;
 }
 
+.wmenu-day-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
 .wmenu-day-card__title {
   margin: 0;
   font-size: 15px;
@@ -913,14 +944,29 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   color: #0f172a;
 }
 
+.wmenu-day-card__date {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--wmenu-muted);
+  white-space: nowrap;
+}
+
 .wmenu-meal {
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-  padding: 8px;
+  padding: 10px 10px 10px 12px;
   border-radius: 12px;
   background: #f8fafc;
+}
+
+.wmenu-meal--lunch {
+  box-shadow: inset 3px 0 0 #fdba74;
+}
+
+.wmenu-meal--dinner {
+  box-shadow: inset 3px 0 0 #93c5fd;
 }
 
 .wmenu-meal__head {
@@ -946,35 +992,36 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 
 .wmenu-meal__body {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(108px, 0.9fr);
-  grid-template-rows: auto auto;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: stretch;
-}
-
-.wmenu-meal__body .wmenu-dish-cell {
-  grid-row: 1 / span 2;
-  width: 100%;
-  max-width: 100%;
-  align-self: stretch;
-}
-
-.wmenu-meal__body .wmenu-stock,
-.wmenu-meal__body .wmenu-drink-select,
-.wmenu-meal__body > .wmenu-dash {
-  width: 100%;
   min-width: 0;
 }
 
-.wmenu-stock {
-  display: flex;
+.wmenu-meal__pair {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 12px;
   align-items: center;
-  gap: 6px;
-  box-sizing: border-box;
+}
+
+.wmenu-field {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wmenu-field__label {
   font-size: 12px;
   font-weight: 700;
-  color: #64748b;
+  color: var(--wmenu-muted);
+  line-height: 1.2;
+}
+
+.wmenu-field__control {
+  min-width: 0;
 }
 
 @media (max-width: 1200px) {
@@ -989,9 +1036,6 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   }
   .wmenu-meal__stats {
     margin-left: 0;
-  }
-  .wmenu-meal__body {
-    grid-template-columns: minmax(0, 1fr) minmax(96px, 0.85fr);
   }
 }
 
@@ -1179,6 +1223,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 
 .wmenu-price {
+  margin-left: auto;
   font-family: var(--okfood-font-number);
   font-size: 13.5px;
   font-weight: 700;
@@ -1190,17 +1235,17 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 
 .wmenu-total-input {
-  width: auto;
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 4px 6px;
+  width: 88px;
+  max-width: 100%;
+  height: 32px;
+  padding: 0 8px;
   border-radius: 8px;
   border: 1px solid var(--wmenu-border);
-  background: #f8fafc;
+  background: #fff;
   text-align: center;
   font-weight: 700;
-  font-size: 12px;
-  line-height: 1.2;
+  font-size: 13px;
+  line-height: 32px;
   outline: none;
   transition: all 0.2s;
   box-sizing: border-box;
@@ -1230,7 +1275,18 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 
 .wmenu-dash {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
   color: var(--wmenu-muted);
+}
+
+.wmenu-box-btn.el-button {
+  height: 32px;
+  margin: 0;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-weight: 700;
 }
 
 .wmenu-retail-badge {
@@ -1298,7 +1354,6 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 .wmenu-meal .wmenu-dish-select.el-select {
   width: 100%;
-  height: 100%;
 }
 .wmenu-meal .wmenu-drink-select.el-select {
   width: 100%;
@@ -1307,7 +1362,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 .wmenu-box-flag {
   flex: 0 0 auto;
-  margin-left: 0;
+  margin-left: auto;
   white-space: nowrap;
   padding: 0;
 }
@@ -1317,7 +1372,7 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
   padding: 6px 12px;
   border-radius: 12px;
   border: 1px solid var(--wmenu-border);
-  background: #f8fafc;
+  background: #fff;
   font-size: 12.5px;
   font-weight: 700;
   box-shadow: none;
@@ -1338,9 +1393,8 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 
 .wmenu-dish-select :deep(.el-select__wrapper) {
-  height: 100%;
-  min-height: 76px;
-  padding: 6px 10px;
+  min-height: 40px;
+  padding: 4px 10px;
 }
 
 .wmenu-dish-select :deep(.el-select__selected-item) {
@@ -1360,9 +1414,9 @@ const hasPreview = computed(() => previewLunch.value != null || previewDinner.va
 }
 
 .wmenu-dish-picked__img {
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   object-fit: cover;
   flex: 0 0 auto;
   background: #f1f5f9;
