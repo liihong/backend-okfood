@@ -41,13 +41,15 @@ def list_dish_recipes(db: Session, *, store_id: int) -> list[dict]:
     grouped: dict[int, list[dict]] = {}
     sku_ids = {int(line.sku_id) for line in lines}
     names = _sku_name_map(db, sku_ids)
+    bags = _meal_bag_ids(db, sku_ids)
     for line in lines:
         grouped.setdefault(int(line.dish_id), []).append(
-            {
-                "sku_id": int(line.sku_id),
-                "sku_name": names.get(int(line.sku_id), ""),
-                "qty_per_portion": int(line.qty_per_portion),
-            }
+            _public_line(
+                sku_id=int(line.sku_id),
+                qty=int(line.qty_per_portion),
+                names=names,
+                bags=bags,
+            )
         )
     return [
         {
@@ -90,15 +92,18 @@ def list_standard_lines(db: Session, *, store_id: int) -> list[dict]:
         .where(PackagingStandardLine.store_id == int(store_id))
         .order_by(PackagingStandardLine.id.asc())
     ).all()
-    names = _sku_name_map(db, {int(row.sku_id) for row in rows})
-    units = _sku_unit_map(db, {int(row.sku_id) for row in rows})
+    sku_ids = {int(row.sku_id) for row in rows}
+    names = _sku_name_map(db, sku_ids)
+    units = _sku_unit_map(db, sku_ids)
+    bags = _meal_bag_ids(db, sku_ids)
     return [
-        {
-            "sku_id": int(row.sku_id),
-            "sku_name": names.get(int(row.sku_id), ""),
-            "unit": units.get(int(row.sku_id), ""),
-            "qty_per_portion": int(row.qty_per_portion),
-        }
+        _public_line(
+            sku_id=int(row.sku_id),
+            qty=int(row.qty_per_portion),
+            names=names,
+            bags=bags,
+            unit=units.get(int(row.sku_id), ""),
+        )
         for row in rows
     ]
 
@@ -135,18 +140,21 @@ def get_slot_lines(
         .where(PackagingSlotLine.slot_id == int(menu_slot.id))
         .order_by(PackagingSlotLine.id.asc())
     ).all()
-    names = _sku_name_map(db, {int(row.sku_id) for row in rows})
+    sku_ids = {int(row.sku_id) for row in rows}
+    names = _sku_name_map(db, sku_ids)
+    bags = _meal_bag_ids(db, sku_ids)
     return {
         "slot_id": int(menu_slot.id),
         "dish_id": int(menu_slot.dish_id),
         "meal_period": period,
         "slot": int(slot),
         "lines": [
-            {
-                "sku_id": int(row.sku_id),
-                "sku_name": names.get(int(row.sku_id), ""),
-                "qty_per_portion": int(row.qty_per_portion),
-            }
+            _public_line(
+                sku_id=int(row.sku_id),
+                qty=int(row.qty_per_portion),
+                names=names,
+                bags=bags,
+            )
             for row in rows
         ],
     }
@@ -328,6 +336,39 @@ def _require_menu_slot(
     if row is None:
         raise HTTPException(status_code=400, detail="请先在本周菜单选择菜品")
     return row
+
+
+def _meal_bag_ids(db: Session, sku_ids: set[int]) -> set[int]:
+    """这些耗材里，哪几只是每餐自动扣的打包袋。前端靠这个标记把袋子从可编辑行拿开。"""
+    if not sku_ids:
+        return set()
+    found = db.scalars(
+        select(PackagingSku.id).where(
+            PackagingSku.id.in_(sku_ids),
+            PackagingSku.bag_flag == BAG_FLAG,
+        )
+    ).all()
+    return {int(item) for item in found}
+
+
+def _public_line(
+    *,
+    sku_id: int,
+    qty: int,
+    names: dict[int, str],
+    bags: set[int],
+    unit: str | None = None,
+) -> dict:
+    """用盒行对外字段。is_meal_bag 让前端自己认出打包袋，不必等保存被拒绝。"""
+    payload = {
+        "sku_id": sku_id,
+        "sku_name": names.get(sku_id, ""),
+        "qty_per_portion": qty,
+        "is_meal_bag": sku_id in bags,
+    }
+    if unit is not None:
+        payload["unit"] = unit
+    return payload
 
 
 def _sku_name_map(db: Session, sku_ids: set[int]) -> dict[int, str]:

@@ -2516,7 +2516,7 @@ def auto_push_sf_today_business_day_for_store(
 ) -> SfNightlyAutoPushStoreResult:
     """
     定时任务（上海 08:50）：向顺丰推送「当日」上海业务日、当前仍待推的配送大表停靠点（与手动推单同一套预览/合并逻辑）。
-    本函数只推大表。主租户当日零售单改由 ``run_sf_nightly_auto_push_for_all_stores`` 另一步推到及时单账号。
+    本函数只推大表。主租户当日零售单改由 ``run_sf_nightly_auto_push_for_all_stores`` 另一步推到接驳账号。
     门店须启用 ``sf_nightly_auto_push_enabled`` 且处于营业状态。
     """
     st = db.get(Store, int(store_id))
@@ -2596,15 +2596,15 @@ def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
     启用自动推单的全部门店依次推当日配送大表，并写入系统消息。
 
     主租户（默认租户 1）额外一步：在大表开推之前，先记下当时已经支付、供餐日为当天、
-    仍待发货的零售单，大表推完后把这些单推到门店及时单账号（零售推顺丰店铺），成功则标为配送中。
-    名单在大表开推前就固定，推单过程中新下的零售单不进入本趟，仍到订单管理手动推。
+    仍待发货的零售单，大表推完后把这些单推到接驳账号（租户对接顺丰店铺，与大表同一账号），成功则标为配送中。
+    不走门店及时单账号（零售推顺丰店铺）。名单在大表开推前就固定，推单过程中新下的零售单不进入本趟，仍到订单管理手动推。
     其它租户只推大表，零售单全部手动。
     """
     from app.core.tenant_scope import legacy_default_tenant_id
     from app.services.admin.admin_system_notification_service import upsert_sf_nightly_push_notification
     from app.services.order.single_meal_order_service import (
-        list_morning_auto_instant_retail_order_ids,
-        push_morning_auto_retail_orders_to_instant_shop,
+        list_morning_auto_retail_order_ids,
+        push_morning_auto_retail_orders_to_relay_shop,
     )
 
     business_date = today_shanghai()
@@ -2632,14 +2632,14 @@ def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
                 if int(tid_raw) != main_tid:
                     continue
                 sid_key = int(sid_raw)
-                retail_ids_by_store[sid_key] = list_morning_auto_instant_retail_order_ids(
+                retail_ids_by_store[sid_key] = list_morning_auto_retail_order_ids(
                     db,
                     store_id=sid_key,
                     delivery_date=business_date,
                     created_before=retail_cutoff,
                 )
                 logger.info(
-                    "08:50 零售单待推及时单 store_id=%s cutoff=%s count=%s",
+                    "08:50 零售单待推接驳账号 store_id=%s cutoff=%s count=%s",
                     sid_key,
                     retail_cutoff.isoformat(sep=" ", timespec="seconds"),
                     len(retail_ids_by_store[sid_key]),
@@ -2675,7 +2675,7 @@ def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
             retail_ids = retail_ids_by_store.get(sid_int) or []
             if retail_ids:
                 try:
-                    retail_out = push_morning_auto_retail_orders_to_instant_shop(
+                    retail_out = push_morning_auto_retail_orders_to_relay_shop(
                         order_ids=retail_ids,
                         store_id=sid_int,
                     )
@@ -2683,7 +2683,7 @@ def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
                     ok_n = sum(1 for item in retail_results if item.get("ok"))
                     bad_n = len(retail_results) - ok_n
                     retail_appendix = (
-                        f"零售单推及时单账号：任务开始前已下单 {len(retail_ids)} 笔，"
+                        f"零售单推接驳账号：任务开始前已下单 {len(retail_ids)} 笔，"
                         f"成功 {ok_n} 笔并标为配送中，失败 {bad_n} 笔。"
                         "此后新下的零售单请在订单管理手动推单。"
                     )
@@ -2694,16 +2694,16 @@ def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
                             f"零售单#{item.get('order_id')}：{item.get('message') or '推送失败'}"
                         )
                     logger.info(
-                        "08:50 零售单推及时单完成 store_id=%s total=%s success=%s failed=%s",
+                        "08:50 零售单推接驳账号完成 store_id=%s total=%s success=%s failed=%s",
                         sid_int,
                         len(retail_ids),
                         ok_n,
                         bad_n,
                     )
                 except Exception:
-                    logger.exception("08:50 零售单推及时单失败 store_id=%s", sid_int)
+                    logger.exception("08:50 零售单推接驳账号失败 store_id=%s", sid_int)
                     retail_appendix = (
-                        "零售单推及时单账号未完成：任务异常，请在订单管理核对后手动推单"
+                        "零售单推接驳账号未完成：任务异常，请在订单管理核对后手动推单"
                     )
             notice_details = list(failure_details or []) if skip_reason is None else []
             notice_details.extend(retail_fail_lines)

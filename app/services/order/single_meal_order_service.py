@@ -226,7 +226,7 @@ _SF_TERMINAL_DELIVERED_STATUS = 17
 _SF_ORDER_STATUS_PICKED_UP = 15  # 顺丰：配送员已取货，配送中
 _FULFILLMENT_SF_AWAITING_PICKUP = "sf_awaiting_pickup"
 # 写在顺丰推单 request_snapshot 上。
-# 08:50 主租户自动推及时单成功后会把零售单标成「配送中」；履约同步看到此键后，
+# 08:50 主租户自动推接驳单成功后会把零售单标成「配送中」；履约同步看到此键后，
 # 顺丰尚未取货也不要改回「待取货」。订单管理手动推单不写此键。
 MORNING_AUTO_IN_DELIVERY_SNAPSHOT_KEY = "morning_auto_in_delivery"
 _SF_CANCEL_CALLBACK_KINDS = frozenset({"cancel_by_sf", "rider_cancel"})
@@ -243,7 +243,7 @@ def keep_morning_auto_retail_in_delivery(
     sf_order_status: int | None,
 ) -> bool:
     """
-    08:50 自动推及时单是故意把零售单标成配送中的。
+    08:50 自动推接驳单是故意把零售单标成配送中的。
 
     顺丰还没取货（无回调状态，或 order_status < 15）时保持配送中，不要改回待取货。
     已取货、妥投、取消不走这个判断，仍由原回调处理。
@@ -461,7 +461,7 @@ def _apply_sf_monitor_status_to_retail_order_no_commit(
         return "updated_cancel" if after == "sf_cancelled" else "skipped_sf_cancel"
 
     # 已推顺丰、回调尚未到取货：纠正误标为「配送中」的历史单。
-    # 08:50 主租户自动推及时单是业务上要求直接标配送中，未取货前不要改回去。
+    # 08:50 主租户自动推接驳单是业务上要求直接标配送中，未取货前不要改回去。
     if n is None or n < _SF_ORDER_STATUS_PICKED_UP:
         if keep_morning_auto_retail_in_delivery(prev_f, pus.request_snapshot, n):
             return "already_accepted"
@@ -2547,7 +2547,7 @@ def bulk_admin_cancel_single_meal_orders(
     return {"results": results}
 
 
-def list_morning_auto_instant_retail_order_ids(
+def list_morning_auto_retail_order_ids(
     db: Session,
     *,
     store_id: int,
@@ -2555,7 +2555,7 @@ def list_morning_auto_instant_retail_order_ids(
     created_before: datetime,
 ) -> list[int]:
     """
-    圈出 08:50 自动推单开始前、已经可以推及时单的当日零售单。
+    圈出 08:50 自动推单开始前、已经可以推接驳单的当日零售单。
 
     只含单次零售（``single_meal_orders``，管理端「零售订单」），不含商城订单。
     同时满足才入选：
@@ -2585,7 +2585,7 @@ def list_morning_auto_instant_retail_order_ids(
 
 def mark_single_meal_in_delivery_after_morning_auto_push(db: Session, order_id: int) -> None:
     """
-    及时单创单成功后，把这笔零售单从「待取货」改成「配送中」。
+    08:50 接驳单创单成功后，把这笔零售单从「待取货」改成「配送中」。
 
     只改刚刚被推成 ``sf_awaiting_pickup`` 的已支付到家单，不覆盖已完成/已取消。
     同时在关联推单快照写入 ``morning_auto_in_delivery``，避免履约同步把状态改回待取货。
@@ -2621,21 +2621,22 @@ def mark_single_meal_in_delivery_after_morning_auto_push(db: Session, order_id: 
     db.commit()
 
 
-def push_morning_auto_retail_orders_to_instant_shop(
+def push_morning_auto_retail_orders_to_relay_shop(
     *,
     order_ids: list[int],
     store_id: int,
 ) -> dict[str, Any]:
     """
-    把已经圈定的零售单推到门店及时单账号，成功后标为配送中。
+    把已经圈定的零售单推到接驳账号，成功后标为配送中。
 
-    及时单账号即门店「零售推顺丰店铺ID」（``sf_retail_push_shop_id``），
-    与 08:50 配送大表使用的租户顺丰店铺不是同一个号。创单过程与订单管理手动推顺丰相同。
+    接驳账号是租户对接里的顺丰店铺，与 08:50 配送大表、订单管理「推送接驳单」是同一个号。
+    不走门店「零售推顺丰店铺ID」（及时单账号）。
     只推传入的订单号，不会再查库扩名单，因此任务开始后新下的单不会被卷进来。
     创单失败的订单保持待发货，可在订单管理手动重推。
     """
     from app.db.session import SessionLocal
     from app.services.delivery.sf_same_city_service import (
+        SF_RETAIL_DISPATCH_RELAY,
         push_single_meal_retail_to_sf_bulk_item,
         run_retail_sf_bulk_in_waves,
     )
@@ -2644,7 +2645,9 @@ def push_morning_auto_retail_orders_to_instant_shop(
     out = run_retail_sf_bulk_in_waves(
         oids,
         push_one=lambda oid: push_single_meal_retail_to_sf_bulk_item(
-            order_id=int(oid), store_id=int(store_id)
+            order_id=int(oid),
+            store_id=int(store_id),
+            dispatch_mode=SF_RETAIL_DISPATCH_RELAY,
         ),
     )
     # 创单成功时本地先写成待取货；这里再改成配送中。改状态失败要让摘要记为失败，方便人工核对。

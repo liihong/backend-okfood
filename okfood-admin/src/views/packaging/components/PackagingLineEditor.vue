@@ -32,7 +32,7 @@ function removeLine(index) {
       <el-input :model-value="fixedBagName" disabled class="pack-lines__sku" />
       <el-input-number :model-value="1" disabled :min="1" :step="1" :precision="0" />
       <span class="pack-lines__unit">每份</span>
-      <span class="pack-lines__fixed">自动扣</span>
+      <span class="pack-lines__fixed" title="晚上按这一餐的出餐份数扣 1 只，不用写进下面的列表">每餐自动扣</span>
     </div>
     <div v-for="(line, index) in modelValue" :key="index" class="pack-lines__row">
       <el-select v-model="line.sku_id" filterable clearable placeholder="选择耗材" class="pack-lines__sku">

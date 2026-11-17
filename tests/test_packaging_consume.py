@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db.packaging_schema import ensure_packaging_schema
 from app.jobs.packaging_consume import dates_to_consume
 from app.models.packaging_sku import PackagingSku
+from app.models.packaging_standard_line import PackagingStandardLine
 from app.models.packaging_stock import PackagingStock
 from app.models.packaging_stock_txn import PackagingStockTxn
 from app.services.packaging import consume_service
@@ -17,7 +18,7 @@ from app.services.packaging.alert_service import build_alert_message
 from app.services.packaging.constants import BAG_FLAG, PORTION_SOURCE_DELIVERED, PORTION_SOURCE_KITCHEN
 from app.services.packaging.deduction import RecipeQty, plan_meal_deduction
 from app.services.packaging.portions import MealPortions, resolve_portion_basis
-from app.services.packaging.recipe_service import RecipeLineIn, _validate_lines
+from app.services.packaging.recipe_service import RecipeLineIn, _validate_lines, list_standard_lines
 from app.services.packaging.stock_command_service import purchase_in, stocktake
 
 DAY = date(2026, 11, 4)
@@ -162,6 +163,18 @@ def test_alert_message_stays_within_column() -> None:
     message = build_alert_message(["午餐未设置用盒，餐盒未扣"], lows)
     assert len(message) <= 2000
     assert "另有" in message
+
+
+def test_standard_lines_tell_frontend_which_row_is_the_bag(db) -> None:
+    """历史数据里若混进打包袋，列表要标出来，前端才能在保存前拿开。"""
+    bag = _sku(db, "打包袋", bag=True)
+    sticks = _sku(db, "筷子")
+    db.add(PackagingStandardLine(store_id=STORE_ID, sku_id=int(bag.id), qty_per_portion=1))
+    db.add(PackagingStandardLine(store_id=STORE_ID, sku_id=int(sticks.id), qty_per_portion=1))
+    db.commit()
+    rows = list_standard_lines(db, store_id=STORE_ID)
+    flags = {row["sku_name"]: row["is_meal_bag"] for row in rows}
+    assert flags == {"打包袋": True, "筷子": False}
 
 
 def test_recipe_rejects_meal_bag(db) -> None:

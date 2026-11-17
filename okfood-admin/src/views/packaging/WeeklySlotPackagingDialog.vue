@@ -9,6 +9,7 @@ import { showToast } from '../../composables/useToast.js'
 import { listPackagingSkus } from '../../api/packaging/sku.js'
 import { getSlotPackaging, saveSlotPackaging } from '../../api/packaging/recipe.js'
 import PackagingLineEditor from './components/PackagingLineEditor.vue'
+import { editablePackagingLines, MEAL_BAG_HINT } from './packagingLines.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -52,10 +53,7 @@ async function load() {
       }),
     ])
     skus.value = skuRows || []
-    lines.value = (slotRow?.lines || []).map((line) => ({
-      sku_id: line.sku_id,
-      qty_per_portion: line.qty_per_portion,
-    }))
+    applyLines(slotRow?.lines || [])
   } catch (error) {
     showToast(error instanceof Error ? error.message : '加载用盒失败', 'error')
   } finally {
@@ -63,8 +61,14 @@ async function load() {
   }
 }
 
+function applyLines(raw) {
+  const split = editablePackagingLines(raw, skus.value)
+  lines.value = split.lines
+  if (split.removedBag) showToast(MEAL_BAG_HINT, 'info')
+}
+
 async function save() {
-  const payload = lines.value
+  const payload = editablePackagingLines(lines.value, skus.value).lines
     .filter((line) => line.sku_id)
     .map((line) => ({ sku_id: line.sku_id, qty_per_portion: line.qty_per_portion || 1 }))
   saving.value = true

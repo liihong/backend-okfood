@@ -5,6 +5,7 @@ import { showToast } from '../../composables/useToast.js'
 import { listPackagingSkus } from '../../api/packaging/sku.js'
 import { listDishPackaging, saveDishPackaging } from '../../api/packaging/recipe.js'
 import PackagingLineEditor from './components/PackagingLineEditor.vue'
+import { editablePackagingLines, MEAL_BAG_HINT } from './packagingLines.js'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -35,16 +36,15 @@ async function load() {
 
 function openDish(row) {
   current.value = row
-  lines.value = (row.lines || []).map((line) => ({
-    sku_id: line.sku_id,
-    qty_per_portion: line.qty_per_portion,
-  }))
+  const split = editablePackagingLines(row.lines || [], skus.value)
+  lines.value = split.lines
   dialogOpen.value = true
+  if (split.removedBag) showToast(MEAL_BAG_HINT, 'info')
 }
 
 async function save() {
   if (!current.value) return
-  const payload = lines.value
+  const payload = editablePackagingLines(lines.value, skus.value).lines
     .filter((line) => line.sku_id)
     .map((line) => ({ sku_id: line.sku_id, qty_per_portion: line.qty_per_portion || 1 }))
   saving.value = true
@@ -62,8 +62,9 @@ async function save() {
 
 function boxText(row) {
   const head = `${fixedBagName.value}×1`
-  if (!row.lines?.length) return `${head}，盒子未设置`
-  return [head, ...row.lines.map((line) => `${line.sku_name}×${line.qty_per_portion}`)].join('、')
+  const rest = editablePackagingLines(row.lines, skus.value).lines
+  if (!rest.length) return `${head}，盒子未设置`
+  return [head, ...rest.map((line) => `${line.sku_name}×${line.qty_per_portion}`)].join('、')
 }
 
 onMounted(load)

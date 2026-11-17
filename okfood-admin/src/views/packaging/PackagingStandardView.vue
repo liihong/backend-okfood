@@ -5,6 +5,7 @@ import { showToast } from '../../composables/useToast.js'
 import { listPackagingSkus } from '../../api/packaging/sku.js'
 import { listStandardPackaging, saveStandardPackaging } from '../../api/packaging/recipe.js'
 import PackagingLineEditor from './components/PackagingLineEditor.vue'
+import { editablePackagingLines, MEAL_BAG_HINT } from './packagingLines.js'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -21,10 +22,9 @@ async function load() {
   try {
     const [skuRows, saved] = await Promise.all([listPackagingSkus(), listStandardPackaging()])
     skus.value = skuRows || []
-    lines.value = (saved || []).map((line) => ({
-      sku_id: line.sku_id,
-      qty_per_portion: line.qty_per_portion,
-    }))
+    const split = editablePackagingLines(saved || [], skus.value)
+    lines.value = split.lines
+    if (split.removedBag) showToast(MEAL_BAG_HINT, 'info')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '加载失败', 'error')
   } finally {
@@ -33,7 +33,7 @@ async function load() {
 }
 
 async function save() {
-  const payload = lines.value
+  const payload = editablePackagingLines(lines.value, skus.value).lines
     .filter((line) => line.sku_id)
     .map((line) => ({ sku_id: line.sku_id, qty_per_portion: line.qty_per_portion || 1 }))
   saving.value = true
