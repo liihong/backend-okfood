@@ -2298,7 +2298,8 @@ def _dashboard_membership_kw(db: Session, *, store_id: int) -> dict[str, int]:
 
 # 按门店 + 锚定日缓存概览结果（进程内，单 worker 有效）
 _dashboard_anchor_summary_cache: dict[tuple[int, date], tuple[float, DashboardMealSummaryOut]] = {}
-_DASHBOARD_ANCHOR_SUMMARY_TTL_TODAY_SEC = 0.0
+# 当日概览允许短缓存：减轻登录进首页时 dashboard-summary 全量重算压力（多 worker 各自缓存）
+_DASHBOARD_ANCHOR_SUMMARY_TTL_TODAY_SEC = 30.0
 _DASHBOARD_ANCHOR_SUMMARY_TTL_OTHER_SEC = 300.0
 
 

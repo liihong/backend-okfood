@@ -2,6 +2,7 @@ from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from sqlalchemy.orm import Session
 from fastapi.responses import Response as PlainResponse
 
 from app.core.admin_access import require_member_in_admin_store, require_sf_push_in_admin_tenant
@@ -23,6 +24,7 @@ from app.core.deps import (
 )
 from app.models.member import Member
 from app.models.enums import PlanType
+from app.core.config import get_settings
 from app.core.limiter import limiter
 from app.core.timeutil import today_shanghai
 from app.schemas.member_address import MemberAddressCreateIn, MemberAddressUpdateIn
@@ -246,6 +248,25 @@ def _normalize_sf_monitor_meal_period(raw: str | None) -> str | None:
     )
 
 
+def _admin_store_branding_out(
+    db: Session, *, admin_username: str, store_id: int
+) -> AdminStoreBrandingOut:
+    """侧栏门店品牌（与 GET /store-branding 同源）。"""
+    tid, resolved_store_id = require_admin_tenant_store(
+        db, admin_username=admin_username, store_id=store_id
+    )
+    cfg = get_store_config(db, store_id=resolved_store_id)
+    store_name = (cfg.store_name or "").strip()
+    if not store_name:
+        tenant = db.get(Tenant, tid)
+        store_name = (tenant.name or "").strip() if tenant else ""
+    return AdminStoreBrandingOut(
+        store_name=store_name or None,
+        store_logo_url=(cfg.store_logo_url or "").strip() or None,
+        tenant_id=int(tid),
+    )
+
+
 @router.post("/login")
 @limiter.limit("30/minute")
 def login(request: Request, body: AdminLoginIn, db: SessionDep):
@@ -264,15 +285,22 @@ def login(request: Request, body: AdminLoginIn, db: SessionDep):
         kind = "full"
         jwt_role = ROLE_ADMIN
     tenant_subscription = None
+    store_branding = None
     if kind != "system":
         tenant = db.get(Tenant, int(u.tenant_id))
         sub_payload = build_tenant_subscription_out(tenant)
         tenant_subscription = AdminTenantSubscriptionOut(**sub_payload)
+        store_branding = _admin_store_branding_out(
+            db,
+            admin_username=body.username,
+            store_id=int(get_settings().DEFAULT_STORE_ID),
+        )
     token = AdminLoginTokenOut(
         access_token=issue_admin_token(body.username, jwt_role=jwt_role),
         admin_kind=kind,
         display_name=(getattr(u, "display_name", None) or "").strip() or None,
         tenant_subscription=tenant_subscription,
+        store_branding=store_branding,
     )
     return success(data=dump_model(token), msg="登录成功")
 
@@ -296,17 +324,7 @@ def admin_store_branding(
     store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
 ):
     """当前门店侧栏品牌：名称与 Logo（未配置时回落租户名称，前端再回落默认 OK饭）。"""
-    tid, store_id = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
-    cfg = get_store_config(db, store_id=store_id)
-    store_name = (cfg.store_name or "").strip()
-    if not store_name:
-        tenant = db.get(Tenant, tid)
-        store_name = (tenant.name or "").strip() if tenant else ""
-    payload = AdminStoreBrandingOut(
-        store_name=store_name or None,
-        store_logo_url=(cfg.store_logo_url or "").strip() or None,
-        tenant_id=int(tid),
-    )
+    payload = _admin_store_branding_out(db, admin_username=admin_username, store_id=store_id)
     return success(data=dump_model(payload), msg="获取成功")
 
 

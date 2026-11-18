@@ -35,6 +35,8 @@ class AdminLoginTokenOut(TokenResponse):
     admin_kind: Literal["full", "delivery", "support", "system"] = "full"
     display_name: str | None = None
     tenant_subscription: AdminTenantSubscriptionOut | None = None
+    # 默认门店侧栏品牌，减少登录后立刻 GET /store-branding 的 RTT
+    store_branding: AdminStoreBrandingOut | None = None
 
 
 class Pagination(BaseModel):

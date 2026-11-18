@@ -39,8 +39,10 @@ import {
   peekAdminJwtUsername,
   adminTenantSubscription,
   fetchAdminTenantSubscription,
+  hasAdminTenantSubscriptionHydrated,
   adminStoreBranding,
   fetchAdminStoreBranding,
+  hasAdminStoreBrandingHydrated,
   DEFAULT_SIDEBAR_STORE_NAME,
   dishImageDisplayUrl,
 } from '../admin/core.js'
@@ -511,8 +513,13 @@ onMounted(() => {
     subscribeLayoutPolling()
   }
   if (!isSystemOnly.value && adminAccessToken.value) {
-    void fetchAdminTenantSubscription()
-    void fetchAdminStoreBranding()
+    // 登录接口已带回订阅/品牌时跳过，减少登录后首屏 RTT；刷新页面无缓存则照常拉取
+    if (!hasAdminTenantSubscriptionHydrated()) {
+      void fetchAdminTenantSubscription()
+    }
+    if (!hasAdminStoreBrandingHydrated()) {
+      void fetchAdminStoreBranding()
+    }
   }
   sidebarMediaQuery = window.matchMedia('(max-width: 900px)')
   syncNarrowScreen()

@@ -157,8 +157,22 @@ function persistAdminDisplayName(name) {
 export function syncAdminKindFromLoginPayload(data) {
   applyAdminKindFromCurrentToken(data && typeof data === 'object' ? data : null)
   syncAdminTenantSubscriptionFromPayload(data)
+  const branding = data && typeof data === 'object' ? data.store_branding : null
+  if (branding && typeof branding === 'object') {
+    syncAdminStoreBrandingFromPayload(branding)
+  }
   const raw = data && typeof data === 'object' ? data.display_name : null
   persistAdminDisplayName(typeof raw === 'string' ? raw : '')
+}
+
+/** 登录响应是否已带回租户订阅（布局可跳过立即拉取） */
+export function hasAdminTenantSubscriptionHydrated() {
+  return adminTenantSubscription.value != null
+}
+
+/** 登录响应是否已带回侧栏品牌（布局可跳过立即拉取） */
+export function hasAdminStoreBrandingHydrated() {
+  return adminStoreBranding.value != null
 }
 
 /** 从登录或订阅接口同步租户续费状态 */

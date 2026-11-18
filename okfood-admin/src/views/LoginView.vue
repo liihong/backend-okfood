@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   apiJson,
@@ -29,6 +29,18 @@ const loginPassword = ref(LOGIN_PRESET_PASSWORD)
 const loginLoading = ref(false)
 const loginError = ref(false)
 
+/** 进入登录页即预拉工作台 chunk，缩短点登录后的路由懒加载等待 */
+function prefetchAdminWorkbenchChunks() {
+  void import('../layouts/AdminLayout.vue')
+  void import('../views/DashboardView.vue')
+  void import('../views/RegionsView.vue')
+  void import('../views/TenantsView.vue')
+}
+
+onMounted(() => {
+  prefetchAdminWorkbenchChunks()
+})
+
 const handleAdminLogin = async () => {
   if (loginLoading.value) return
   if (!loginUsername.value.trim() || !String(loginPassword.value ?? '').trim()) {
@@ -51,14 +63,15 @@ const handleAdminLogin = async () => {
     setAdminToken(token)
     syncAdminKindFromLoginPayload(data)
     showToast('登录成功')
-    await router.replace({
-      name:
-        adminKind.value === 'delivery'
-          ? 'regions'
-          : adminKind.value === 'system'
-            ? 'system-tenants'
-            : 'dashboard',
-    })
+    const targetName =
+      adminKind.value === 'delivery'
+        ? 'regions'
+        : adminKind.value === 'system'
+          ? 'system-tenants'
+          : 'dashboard'
+    // 拿到 token 即结束「登录中」，不把懒加载 chunk / 首屏数据算进登录按钮
+    loginLoading.value = false
+    void router.replace({ name: targetName })
   } catch (e) {
     loginError.value = true
     window.setTimeout(() => {

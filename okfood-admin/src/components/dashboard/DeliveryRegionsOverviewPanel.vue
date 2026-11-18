@@ -5,6 +5,7 @@ import { apiJson, adminAccessToken, dishImageDisplayUrl, handleAdminLogout } fro
 import { showToast } from '../../composables/useToast.js'
 import { useAnimatedInteger } from '../../composables/useAnimatedInteger.js'
 import DashboardPickupKitchenPanel from './DashboardPickupKitchenPanel.vue'
+import DashboardOverviewSkeleton from './DashboardOverviewSkeleton.vue'
 import DayStockAdjustmentModal from './DayStockAdjustmentModal.vue'
 import { useDayStockAdjustments } from '../../composables/useDayStockAdjustments.js'
 
@@ -755,6 +756,11 @@ function yoyShelfText(caption, delta, rolling, pc) {
   return formatYoyWeekHeadsSigned(pc ? rolling : delta)
 }
 
+/** 首屏无数据时展示骨架；有数据后刷新沿用旧内容 + 刷新按钮动画（SWR） */
+const showDashboardOverviewSkeleton = computed(
+  () => dashboardStatsLoading.value && !summaryMeta.value,
+)
+
 const showDashboardOverview = computed(
   () => Boolean(summaryMeta.value) || (!dashboardStatsLoading.value && dashboardStats.value.length > 0),
 )
@@ -781,7 +787,7 @@ onMounted(() => {
       </template>
     </p>
 
-    <p v-if="dashboardStatsLoading && !summaryMeta" class="dro-loading">正在加载营业概览…</p>
+    <DashboardOverviewSkeleton v-if="showDashboardOverviewSkeleton" :pc-meal-shelf="isPcMealShelf" />
     <p v-else-if="!dashboardStats.length && !summaryMeta" class="dro-loading">暂无营业概览数据。</p>
 
     <!-- 今日营业概览：今日（午|晚）+ 明日（午|晚）分栏 + 后厨/自提 -->
