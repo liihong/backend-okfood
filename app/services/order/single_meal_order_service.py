@@ -2555,24 +2555,29 @@ def list_morning_auto_retail_order_ids(
     created_before: datetime,
 ) -> list[int]:
     """
-    圈出 08:50 自动推单开始前、已经可以推接驳单的当日零售单。
+    圈出 08:50 自动推单开始前、已经可以推接驳单的当日**午餐**零售单。
 
     只含单次零售（``single_meal_orders``，管理端「零售订单」），不含商城订单。
     同时满足才入选：
     - 本门店，供餐日为当天
+    - 餐段为午餐（``meal_period=lunch``）；晚餐零售单一律留给订单管理手动推接驳单
     - 已支付、配送到家（非自提）、履约状态为待发货 ``pending``
     - ``created_at`` 不晚于本趟任务开始时刻
 
     不入选、留给订单管理手动处理的：
+    - 晚餐餐段零售单
     - 任务开始之后新下的单
     - 当时还没支付的单
     - 自提、已推过、顺丰取消待重推、已在配送中或已完成的单
     """
+    from app.services.meal_period.constants import DEFAULT_MEAL_PERIOD
+
     rows = db.scalars(
         select(SingleMealOrder.id)
         .where(
             SingleMealOrder.store_id == int(store_id),
             SingleMealOrder.delivery_date == delivery_date,
+            SingleMealOrder.meal_period == DEFAULT_MEAL_PERIOD,
             SingleMealOrder.pay_status == "已支付",
             SingleMealOrder.store_pickup.is_(False),
             SingleMealOrder.fulfillment_status == "pending",

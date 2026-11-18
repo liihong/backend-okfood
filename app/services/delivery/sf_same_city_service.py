@@ -2596,7 +2596,8 @@ def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
     启用自动推单的全部门店依次推当日配送大表，并写入系统消息。
 
     主租户（默认租户 1）额外一步：在大表开推之前，先记下当时已经支付、供餐日为当天、
-    仍待发货的零售单，大表推完后把这些单推到接驳账号（租户对接顺丰店铺，与大表同一账号），成功则标为配送中。
+    餐段为午餐、仍待发货的零售单，大表推完后把这些单推到接驳账号（租户对接顺丰店铺，与大表同一账号），成功则标为配送中。
+    晚餐零售单不在此自动推，请在订单管理手动推接驳单。
     不走门店及时单账号（零售推顺丰店铺）。名单在大表开推前就固定，推单过程中新下的零售单不进入本趟，仍到订单管理手动推。
     其它租户只推大表，零售单全部手动。
     """
@@ -2683,9 +2684,9 @@ def run_sf_nightly_auto_push_for_all_stores(db: Session) -> None:
                     ok_n = sum(1 for item in retail_results if item.get("ok"))
                     bad_n = len(retail_results) - ok_n
                     retail_appendix = (
-                        f"零售单推接驳账号：任务开始前已下单 {len(retail_ids)} 笔，"
+                        f"午餐零售单推接驳账号：任务开始前已下单 {len(retail_ids)} 笔，"
                         f"成功 {ok_n} 笔并标为配送中，失败 {bad_n} 笔。"
-                        "此后新下的零售单请在订单管理手动推单。"
+                        "晚餐零售单及此后新下的零售单请在订单管理手动推单。"
                     )
                     for item in retail_results:
                         if item.get("ok"):
