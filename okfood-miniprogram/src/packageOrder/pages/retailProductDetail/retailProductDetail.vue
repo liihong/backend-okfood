@@ -100,6 +100,14 @@ import { getNavbarLayout } from '@/utils/navbar.js'
 import { optimizeImageUrl } from '@/utils/imageUrl.js'
 import { fitRichTextHtml } from '@/utils/richTextHtml.js'
 import { parseRetailSpuIdFromQuery } from '@/utils/retailSharePoster.js'
+import {
+  buildRetailCartProductFromSpu,
+  formatRetailSkuListPriceText,
+  formatRetailSkuPriceText,
+  isRetailSkuSelectable,
+  nextRetailSkuQuantity,
+  pickDefaultRetailSku,
+} from '@/utils/retailSku/retailSkuModel.js'
 
 const loading = ref(true)
 const detail = ref(null)
@@ -125,24 +133,11 @@ const gallery = computed(() => {
 /** rich-text 不吃页面 CSS，需在 HTML 上写死 max-width 才能横向等比缩放 */
 const detailHtml = computed(() => fitRichTextHtml(detail.value?.detail_html))
 
-const priceText = computed(() => {
-  const s = selectedSku.value
-  if (s?.unit_price_yuan != null) return Number(s.unit_price_yuan).toFixed(2)
-  const min = detail.value?.price_min_yuan
-  return min != null ? Number(min).toFixed(2) : '0.00'
-})
+const priceText = computed(() => formatRetailSkuPriceText(selectedSku.value, detail.value))
 
-const listPriceText = computed(() => {
-  const lp = selectedSku.value?.list_price_yuan
-  if (lp == null || String(lp).trim() === '') return ''
-  return Number(lp).toFixed(2)
-})
+const listPriceText = computed(() => formatRetailSkuListPriceText(selectedSku.value))
 
-function skuSelectable(s) {
-  if (!s?.is_on_shelf) return false
-  if (s.stock_limited && s.stock_remaining != null && Number(s.stock_remaining) <= 0) return false
-  return true
-}
+const skuSelectable = isRetailSkuSelectable
 
 function selectSku(s) {
   if (!skuSelectable(s)) {
@@ -154,35 +149,15 @@ function selectSku(s) {
 }
 
 function changeQty(delta) {
-  const d = Number(delta) || 0
-  let next = Math.max(1, (Number(quantity.value) || 1) + d)
-  const s = selectedSku.value
-  if (s?.stock_limited && s.stock_remaining != null) {
-    next = Math.min(next, Math.max(1, Number(s.stock_remaining)))
-  }
-  next = Math.min(next, 50)
-  quantity.value = next
+  quantity.value = nextRetailSkuQuantity(quantity.value, delta, selectedSku.value)
 }
 
 function buildCartPayload() {
   const s = selectedSku.value
   const d = detail.value
   if (!s || !d) return null
-  const title = s.spec_label ? `${d.title} · ${s.spec_label}` : d.title
   const cover = gallery.value[0] || d.cover_image_url || ''
-  return {
-    retailProductId: Number(s.id),
-    spuId: Number(d.id),
-    spuTitle: d.title,
-    specLabel: s.spec_label || '',
-    title,
-    unitPriceYuan: s.unit_price_yuan,
-    listPriceYuan: s.list_price_yuan,
-    coverImageUrl: cover,
-    stockRemaining: s.stock_remaining != null ? Number(s.stock_remaining) : null,
-    stockLimited: !!s.stock_limited,
-    soldCount: s.sold_count != null ? Number(s.sold_count) : 0,
-  }
+  return buildRetailCartProductFromSpu(d, s, cover)
 }
 
 function addToCart() {
@@ -223,7 +198,7 @@ async function loadDetail(spuId) {
     const data = await fetchRetailSpuDetail(spuId)
     detail.value = data
     const list = Array.isArray(data?.skus) ? data.skus : []
-    const first = list.find(skuSelectable) || list[0]
+    const first = pickDefaultRetailSku(list)
     selectedSkuId.value = first?.id ?? null
     quantity.value = 1
   } finally {

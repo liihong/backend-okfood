@@ -220,6 +220,14 @@ def admin_update_store_retail_order_delivery(
     return _build_admin_list_out(db, o)
 
 
+def apply_retail_pick_summary_order_filters(filters: list) -> None:
+    """厨师看板 / 备货汇总：已支付且已接单、待发货（与订单 Tab「待发货」一致）。"""
+    filters.append(StoreRetailOrder.pay_status == "已支付")
+    filters.append(
+        StoreRetailOrder.fulfillment_status.in_(("pending", "sf_cancelled")),
+    )
+
+
 def _apply_admin_retail_fulfillment_phase_filter(filters: list, fulfillment_phase: str | None) -> None:
     """管理端商城订单：按配送阶段 Tab 过滤。
 

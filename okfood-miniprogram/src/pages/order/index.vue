@@ -61,7 +61,7 @@
               :item="m"
               :show-ingredients="true"
               @tap="() => onItemTap(m)"
-              @add="() => onRetailAdd(m)"
+              @add="() => onCardAdd(m)"
             />
           </view>
         </view>
@@ -82,6 +82,13 @@
       :items="cartItems"
       @checkout="goRetailCheckout"
     />
+
+  <!-- 商城普通商品：列表加号弹出 SKU 选择 -->
+    <RetailSpuSkuSheet
+      v-model:show="retailSkuSheetOpen"
+      :spu-id="retailSkuSheetSpuId"
+      @added="onRetailSkuAdded"
+    />
   </view>
 </template>
 
@@ -96,8 +103,8 @@ import EntryPosterHost from '@/components/EntryPosterHost/EntryPosterHost.vue'
 import MenuPagePosterHost from '@/components/MenuPagePosterHost/MenuPagePosterHost.vue'
 import RetailCartBar from '@/components/RetailCart/RetailCartBar.vue'
 import RetailCartSheet from '@/components/RetailCart/RetailCartSheet.vue'
-import { addCartItem } from '@/utils/retailCart/retailCartStorage.js'
-import { notifyRetailCartChanged, useRetailCart } from '@/utils/retailCart/useRetailCart.js'
+import RetailSpuSkuSheet from '@/components/RetailSpuSkuSheet/RetailSpuSkuSheet.vue'
+import { useRetailCart } from '@/utils/retailCart/useRetailCart.js'
 import { fetchStoreInfo, fetchRetailMenu, mapRetailSpuItem } from '@/utils/catalogApi.js'
 import {
   addDaysIso,
@@ -120,6 +127,9 @@ import { tryShowMenuPagePoster } from '@/utils/menuPagePoster.js'
 
 const couponHostReady = ref(false)
 const cartSheetOpen = ref(false)
+/** 零售 SPU 规格抽屉 */
+const retailSkuSheetOpen = ref(false)
+const retailSkuSheetSpuId = ref(0)
 const { items: cartItems, count: cartCount, subtotalText: cartSubtotalText, visible: cartVisible, refresh: refreshCart } =
   useRetailCart()
 const pageStyle = ref({})
@@ -505,10 +515,19 @@ function goRetailDetail(m) {
   })
 }
 
-/** 商城商品加入本地购物车 */
-function onRetailAdd(m) {
-  const pid = m?.retailProductId != null ? Number(m.retailProductId) : 0
-  if (!Number.isFinite(pid) || pid < 1) {
+/** 列表卡片右下角加号：零售弹规格抽屉，排餐跳转详情 */
+function onCardAdd(m) {
+  if (m?.isRetail) {
+    openRetailSkuSheet(m)
+    return
+  }
+  goDetail(m)
+}
+
+/** 打开零售 SPU 规格选择抽屉 */
+function openRetailSkuSheet(m) {
+  const spuId = m?.retailSpuId != null ? Number(m.retailSpuId) : 0
+  if (!Number.isFinite(spuId) || spuId < 1) {
     uni.showToast({ title: '商品无效', icon: 'none' })
     return
   }
@@ -516,23 +535,12 @@ function onRetailAdd(m) {
     uni.showToast({ title: '商品已售罄', icon: 'none' })
     return
   }
-  const res = addCartItem({
-    retailProductId: pid,
-    title: m.name,
-    unitPriceYuan: m.price,
-    listPriceYuan: m.listPrice,
-    coverImageUrl: m.imgOriginal || m.img,
-    stockRemaining: m.stockRemaining,
-    stockLimited: m.stockLimited,
-    soldCount: m.soldCount,
-  })
-  if (!res.ok) {
-    uni.showToast({ title: res.msg || '加入失败', icon: 'none' })
-    return
-  }
-  notifyRetailCartChanged()
+  retailSkuSheetSpuId.value = spuId
+  retailSkuSheetOpen.value = true
+}
+
+function onRetailSkuAdded() {
   refreshCart()
-  uni.showToast({ title: '已加入购物车', icon: 'none' })
 }
 
 function goRetailCheckout() {

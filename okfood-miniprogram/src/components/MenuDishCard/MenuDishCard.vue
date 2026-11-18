@@ -180,15 +180,6 @@ const showListSoldOut = computed(
   () => showListStockInfo.value && !listStockAvailable.value,
 )
 
-/** 零售商品列表不展示快捷加购，须进详情选规格 */
-const showListSelectAction = computed(() => {
-  if (props.item?.isRetail) {
-    return false
-  }
-  if (!showListStockInfo.value) return true
-  return listStockAvailable.value
-})
-
 /** 商城零售售罄 */
 const showListRetailSoldOut = computed(
   () =>
@@ -197,6 +188,19 @@ const showListRetailSoldOut = computed(
     props.item?.stockRemaining != null &&
     Number(props.item.stockRemaining) <= 0,
 )
+
+/** 商城零售：未售罄时展示右下角加号，点击由父级弹出规格抽屉 */
+const showListRetailAddAction = computed(
+  () => props.item?.isRetail && !showListRetailSoldOut.value,
+)
+
+const showListSelectAction = computed(() => {
+  if (props.item?.isRetail) {
+    return showListRetailAddAction.value
+  }
+  if (!showListStockInfo.value) return true
+  return listStockAvailable.value
+})
 
 const showListRetailStockHint = computed(() => {
   if (!props.item?.isRetail) return false

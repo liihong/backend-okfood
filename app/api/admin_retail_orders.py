@@ -16,6 +16,7 @@ from app.schemas.store_retail_order import (
     StoreRetailOrderIdsIn,
     StoreRetailOrderRemarkPatchIn,
 )
+from app.services.admin.retail_pick_summary_service import build_retail_pick_summary
 from app.services.admin.store_retail_order_admin_service import (
     admin_accept_store_retail_order,
     admin_revoke_accept_store_retail_order,
@@ -74,6 +75,18 @@ def admin_orders_daily_retail_orders(
         page_size=page_size,
         msg="获取成功",
     )
+
+
+@router.get("/orders/retail-orders/pick-summary")
+def admin_retail_orders_pick_summary(
+    db: SessionDep,
+    admin_username: str = Depends(admin_staff_subject),
+    store_id: Annotated[int, Query(description="门店 id，默认 1")] = 1,
+):
+    """厨师看板：按 SKU 汇总待备货盒数（已支付 · 已接单 · 待发货）。"""
+    _, sid = require_admin_tenant_store(db, admin_username=admin_username, store_id=store_id)
+    out = build_retail_pick_summary(db, store_id=int(sid))
+    return success(data=dump_model(out), msg="获取成功")
 
 
 @router.post("/orders/retail-orders")
