@@ -30,6 +30,10 @@ class StoreRetailOrderQuoteOut(BaseModel):
 
     goods_amount_yuan: str
     delivery_fee_yuan: str
+    delivery_fee_strikethrough_yuan: str | None = Field(
+        default=None,
+        description="实收配送费为 0 时展示的划线原价",
+    )
     coupon_discount_yuan: str | None = None
     payable_yuan: str
     delivery_breakdown: list[dict] = Field(default_factory=list)

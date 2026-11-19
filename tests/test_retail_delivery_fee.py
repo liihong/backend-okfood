@@ -10,6 +10,7 @@ from app.services.retail.retail_delivery_fee import (
     MODE_INCLUDED,
     build_category_delivery_hint,
     compute_retail_delivery_fee,
+    strikethrough_delivery_fee_yuan,
 )
 from app.services.retail.retail_order_lines import ResolvedRetailLine
 
@@ -77,6 +78,29 @@ def test_extra_rule_fee_within_threshold():
     assert fee == Decimal("5.00")
     assert len(bd) == 1
     assert bd[0].total_qty == 3
+
+
+def test_strikethrough_when_free_over_threshold():
+    cat = StoreRetailCategory(
+        id=9,
+        store_id=1,
+        name="馄饨",
+        sort_order=0,
+        is_active=True,
+        delivery_pricing_mode=MODE_EXTRA_RULE,
+        delivery_rule={
+            "rule_type": "qty_threshold_fee",
+            "fee_yuan": "5.00",
+            "max_qty_inclusive": 5,
+            "qty_unit_label": "盒",
+        },
+    )
+    db = MagicMock()
+    db.scalars.return_value.all.return_value = [cat]
+    fee, bd = compute_retail_delivery_fee(db, lines=[_line(9, 6)], store_pickup=False, store_id=1)
+    assert fee == Decimal("0.00")
+    assert strikethrough_delivery_fee_yuan(bd) == Decimal("5.00")
+    assert bd[0].list_fee_yuan == Decimal("5.00")
 
 
 def test_extra_rule_free_over_threshold():

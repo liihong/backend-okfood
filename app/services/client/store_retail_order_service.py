@@ -297,6 +297,7 @@ def quote_store_retail_order(
     return StoreRetailOrderQuoteOut(
         goods_amount_yuan=raw["goods_amount_yuan"],
         delivery_fee_yuan=raw["delivery_fee_yuan"],
+        delivery_fee_strikethrough_yuan=raw.get("delivery_fee_strikethrough_yuan"),
         coupon_discount_yuan=raw.get("coupon_discount_yuan"),
         payable_yuan=raw["payable_yuan"],
         delivery_breakdown=list(raw.get("delivery_breakdown") or []),

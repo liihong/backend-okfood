@@ -56,8 +56,10 @@
 
         <view class="card sum-card">
           <view class="sum-row"><text>商品小计</text><text>¥ {{ goodsSubtotalText }}</text></view>
-          <view v-if="deliveryFeeText" class="sum-row">
-            <text>配送费</text><text>¥ {{ deliveryFeeText }}</text>
+          <view v-if="showDeliveryFeeRow" class="sum-row">
+            <text>配送费</text>
+            <text v-if="deliveryFeeText" class="sum-delivery-amt">¥ {{ deliveryFeeText }}</text>
+            <text v-else class="sum-delivery-amt sum-delivery-amt--waived">¥ {{ deliveryFeeStrikethroughText }}</text>
           </view>
           <view v-if="couponSaveText" class="sum-row sum-row--disc">
             <text>优惠券</text><text>- ¥ {{ couponSaveText }}</text>
@@ -150,6 +152,15 @@ const deliveryFeeText = computed(() => {
   const n = Number(v)
   return Number.isFinite(n) && n > 0 ? Number(n).toFixed(2) : ''
 })
+const deliveryFeeStrikethroughText = computed(() => {
+  const v = quoteSnapshot.value?.delivery_fee_strikethrough_yuan
+  if (v == null || v === '') return ''
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? Number(n).toFixed(2) : ''
+})
+const showDeliveryFeeRow = computed(
+  () => !!deliveryFeeText.value || !!deliveryFeeStrikethroughText.value,
+)
 const selectedCoupon = computed(() =>
   availableCoupons.value.find((c) => Number(c.id) === Number(selectedCouponId.value)) || null,
 )
@@ -595,6 +606,12 @@ onShow(() => {
 
 .sum-row--disc {
   color: #ea580c;
+}
+
+.sum-delivery-amt--waived {
+  color: #ef4444;
+  text-decoration: line-through;
+  font-weight: 700;
 }
 
 .sum-row--total {

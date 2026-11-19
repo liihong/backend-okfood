@@ -27,15 +27,20 @@ class RetailDeliveryFeeBreakdownItem:
     total_qty: int
     fee_yuan: Decimal
     rule_type: str
+    # 免配送时展示用：规则定价（划线价）
+    list_fee_yuan: Decimal | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "category_id": int(self.category_id),
             "category_name": str(self.category_name),
             "total_qty": int(self.total_qty),
             "fee_yuan": f"{Decimal(self.fee_yuan).quantize(_TWO):.2f}",
             "rule_type": str(self.rule_type),
         }
+        if self.list_fee_yuan is not None and Decimal(self.list_fee_yuan) > 0:
+            out["list_fee_yuan"] = f"{Decimal(self.list_fee_yuan).quantize(_TWO):.2f}"
+        return out
 
 
 def _parse_qty_threshold_rule(raw: dict | None) -> dict[str, Any] | None:
@@ -136,6 +141,7 @@ def compute_retail_delivery_fee(
                     total_qty=qty,
                     fee_yuan=Decimal("0.00"),
                     rule_type=RULE_QTY_THRESHOLD,
+                    list_fee_yuan=Decimal(parsed["fee_yuan"]).quantize(_TWO),
                 )
             )
             continue
@@ -151,6 +157,17 @@ def compute_retail_delivery_fee(
                 )
             )
     return total_fee.quantize(_TWO), breakdown
+
+
+def strikethrough_delivery_fee_yuan(breakdown: list[RetailDeliveryFeeBreakdownItem]) -> Decimal:
+    """实收配送费为 0 时，汇总应展示的划线配送费。"""
+    total = Decimal("0.00")
+    for item in breakdown:
+        if Decimal(item.fee_yuan) > 0:
+            continue
+        if item.list_fee_yuan is not None and Decimal(item.list_fee_yuan) > 0:
+            total += Decimal(item.list_fee_yuan)
+    return total.quantize(_TWO)
 
 
 def retail_category_api_fields(cat: StoreRetailCategory) -> dict[str, Any]:

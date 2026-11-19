@@ -16,7 +16,10 @@ from app.services.marketing.coupon_checkout_service import (
     _retail_coupon_threshold_yuan,
 )
 from app.services.retail.retail_coupon_context import build_store_retail_coupon_context
-from app.services.retail.retail_delivery_fee import compute_retail_delivery_fee
+from app.services.retail.retail_delivery_fee import (
+    compute_retail_delivery_fee,
+    strikethrough_delivery_fee_yuan,
+)
 from app.services.retail.retail_order_lines import goods_subtotal_yuan, resolve_retail_order_lines
 
 _TWO = Decimal("0.01")
@@ -68,9 +71,11 @@ def resolve_retail_checkout_amounts(
         coupon_discount = disc
 
     payable = (goods_after_coupon + delivery_fee).quantize(_TWO)
+    strike = strikethrough_delivery_fee_yuan(breakdown)
     return {
         "goods_amount_yuan": _format_money(goods),
         "delivery_fee_yuan": _format_money(delivery_fee),
+        "delivery_fee_strikethrough_yuan": _format_money(strike) if strike > 0 else None,
         "coupon_discount_yuan": _format_money(coupon_discount) if coupon_discount > 0 else None,
         "payable_yuan": _format_money(payable),
         "delivery_breakdown": [b.to_dict() for b in breakdown],
