@@ -400,6 +400,78 @@ def ensure_prep_menu_schema(engine: Engine) -> None:
             logger.info("已创建 dish_prep_sop_line")
 
 
+def ensure_retail_delivery_fee_schema(engine: Engine) -> None:
+    """商城分类配送规则 + 订单商品/配送金额字段。"""
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    dialect = engine.dialect.name
+
+    if "store_retail_categories" in tables:
+        cols = {c["name"] for c in insp.get_columns("store_retail_categories")}
+        with engine.begin() as conn:
+            if "delivery_pricing_mode" not in cols:
+                if dialect == "sqlite":
+                    conn.execute(
+                        text(
+                            "ALTER TABLE store_retail_categories "
+                            "ADD COLUMN delivery_pricing_mode VARCHAR(16) NOT NULL DEFAULT 'included'"
+                        )
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE `store_retail_categories` "
+                            "ADD COLUMN `delivery_pricing_mode` VARCHAR(16) NOT NULL DEFAULT 'included' "
+                            "COMMENT 'included=含配送；extra_rule=另计' AFTER `is_active`"
+                        )
+                    )
+                logger.info("已为 store_retail_categories 补 delivery_pricing_mode")
+            if "delivery_rule" not in cols:
+                if dialect == "sqlite":
+                    conn.execute(text("ALTER TABLE store_retail_categories ADD COLUMN delivery_rule JSON"))
+                else:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE `store_retail_categories` "
+                            "ADD COLUMN `delivery_rule` JSON NULL "
+                            "COMMENT 'extra_rule 时生效' AFTER `delivery_pricing_mode`"
+                        )
+                    )
+                logger.info("已为 store_retail_categories 补 delivery_rule")
+
+    if "store_retail_orders" in tables:
+        cols = {c["name"] for c in insp.get_columns("store_retail_orders")}
+        with engine.begin() as conn:
+            if "goods_amount_yuan" not in cols:
+                if dialect == "sqlite":
+                    conn.execute(
+                        text("ALTER TABLE store_retail_orders ADD COLUMN goods_amount_yuan NUMERIC(12, 2)")
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE `store_retail_orders` "
+                            "ADD COLUMN `goods_amount_yuan` DECIMAL(12, 2) NULL "
+                            "COMMENT '商品小计' AFTER `amount_yuan`"
+                        )
+                    )
+                logger.info("已为 store_retail_orders 补 goods_amount_yuan")
+            if "delivery_fee_yuan" not in cols:
+                if dialect == "sqlite":
+                    conn.execute(
+                        text("ALTER TABLE store_retail_orders ADD COLUMN delivery_fee_yuan NUMERIC(12, 2)")
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE `store_retail_orders` "
+                            "ADD COLUMN `delivery_fee_yuan` DECIMAL(12, 2) NULL "
+                            "COMMENT '配送费' AFTER `goods_amount_yuan`"
+                        )
+                    )
+                logger.info("已为 store_retail_orders 补 delivery_fee_yuan")
+
+
 def apply_address_usage_data_backfill(db: Session) -> None:
     """把无餐次用户的地址标为零售，并把商城订单从餐次地址上解绑（复制后改绑）。"""
     from app.services.member.member_address_service import backfill_retail_address_separation

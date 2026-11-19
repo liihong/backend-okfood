@@ -55,7 +55,10 @@
         </view>
 
         <view class="card sum-card">
-          <view class="sum-row"><text>商品小计</text><text>¥ {{ subtotalText }}</text></view>
+          <view class="sum-row"><text>商品小计</text><text>¥ {{ goodsSubtotalText }}</text></view>
+          <view v-if="deliveryFeeText" class="sum-row">
+            <text>配送费</text><text>¥ {{ deliveryFeeText }}</text>
+          </view>
           <view v-if="couponSaveText" class="sum-row sum-row--disc">
             <text>优惠券</text><text>- ¥ {{ couponSaveText }}</text>
           </view>
@@ -106,6 +109,7 @@ import {
   addressListPageUrl,
 } from '@/utils/addressApi.js'
 import { createRetailOrder } from '@/utils/retailOrder/retailOrderApi.js'
+import { quoteRetailOrder } from '@/utils/retailOrder/retailOrderQuoteApi.js'
 import { payRetailOrderWechat } from '@/utils/retailOrder/retailOrderPay.js'
 import { listAvailableMemberCoupons } from '@/utils/memberCouponApi.js'
 import { promptUnpaidOrderConflict } from '@/utils/unpaidOrderPrompt.js'
@@ -131,19 +135,37 @@ const selectedIndex = ref(0)
 const addressSheetVisible = ref(false)
 const availableCoupons = ref([])
 const selectedCouponId = ref(null)
+/** 服务端试算结果（商品/配送/实付） */
+const quoteSnapshot = ref(null)
+const quoteLoading = ref(false)
 
 const selectedAddress = computed(() => addressRows.value[selectedIndex.value] || null)
 const selectedAddressId = computed(() => selectedAddress.value?.id || '')
 
 const subtotalText = computed(() => getCartSubtotalText())
+const goodsSubtotalText = computed(() => quoteSnapshot.value?.goods_amount_yuan || subtotalText.value)
+const deliveryFeeText = computed(() => {
+  const v = quoteSnapshot.value?.delivery_fee_yuan
+  if (v == null || v === '') return ''
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? Number(n).toFixed(2) : ''
+})
 const selectedCoupon = computed(() =>
   availableCoupons.value.find((c) => Number(c.id) === Number(selectedCouponId.value)) || null,
 )
 const couponSaveText = computed(() => {
+  const fromQuote = quoteSnapshot.value?.coupon_discount_yuan
+  if (fromQuote != null && String(fromQuote).trim() !== '') {
+    const n = Number(fromQuote)
+    return Number.isFinite(n) && n > 0 ? n.toFixed(2) : null
+  }
   const n = Number(selectedCoupon.value?.discount_yuan)
   return Number.isFinite(n) && n > 0 ? n.toFixed(2) : null
 })
 const payableText = computed(() => {
+  if (quoteSnapshot.value?.payable_yuan != null) {
+    return String(quoteSnapshot.value.payable_yuan)
+  }
   const base = Number(subtotalText.value)
   const disc = couponSaveText.value ? Number(couponSaveText.value) : 0
   return Math.max(0.01, base - disc).toFixed(2)
@@ -199,6 +221,36 @@ function retailItemsPayload() {
   }))
 }
 
+function buildQuoteBody() {
+  const addrId = getAddressRecordId(rawAddresses.value[selectedIndex.value])
+  if (!addrId || !cartItems.value.length) return null
+  const body = {
+    items: retailItemsPayload(),
+    store_pickup: false,
+    member_address_id: Number(addrId),
+  }
+  if (selectedCouponId.value != null) {
+    body.member_coupon_id = Math.floor(Number(selectedCouponId.value))
+  }
+  return body
+}
+
+async function refreshQuote() {
+  const body = buildQuoteBody()
+  if (!body) {
+    quoteSnapshot.value = null
+    return
+  }
+  quoteLoading.value = true
+  try {
+    quoteSnapshot.value = await quoteRetailOrder(body)
+  } catch {
+    quoteSnapshot.value = null
+  } finally {
+    quoteLoading.value = false
+  }
+}
+
 async function loadCoupons() {
   if (!cartItems.value.length) return
   try {
@@ -227,6 +279,7 @@ async function loadPage() {
     applyAddressList(await request(addressesApiPath('retail'), { method: 'GET', retry: 1 }), null)
     selectedIndex.value = 0
     await loadCoupons()
+    await refreshQuote()
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : '加载失败'
   } finally {
@@ -266,6 +319,7 @@ async function onAddressConfirm(payload) {
       if (idx >= 0) selectedIndex.value = idx
     }
     addressSheetVisible.value = false
+    void refreshQuote()
   } finally {
     finish()
   }
@@ -277,6 +331,7 @@ function onInc(it) {
   void syncCartWithRetailMenu().then(({ items }) => {
     cartItems.value = items
     void loadCoupons()
+    void refreshQuote()
   })
 }
 
@@ -287,6 +342,7 @@ function onDec(it) {
     cartItems.value = items
     if (!items.length) loadError.value = '购物车为空'
     void loadCoupons()
+    void refreshQuote()
   })
 }
 
@@ -294,6 +350,7 @@ function onCouponPick(e) {
   const idx = Number(e?.detail?.value)
   if (idx <= 0) selectedCouponId.value = null
   else selectedCouponId.value = availableCoupons.value[idx - 1]?.id ?? null
+  void refreshQuote()
 }
 
 async function onPay() {

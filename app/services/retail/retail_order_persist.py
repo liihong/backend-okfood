@@ -12,6 +12,7 @@ from app.schemas.store_retail_order import StoreRetailOrderCreateIn
 from app.services.marketing.coupon_checkout_service import lock_member_coupon_for_order
 from app.services.retail.retail_coupon_context import build_store_retail_coupon_context
 from app.services.retail.retail_order_item_repo import build_order_items_summary
+from app.services.retail.retail_delivery_fee import compute_retail_delivery_fee
 from app.services.retail.retail_order_lines import goods_subtotal_yuan, resolve_retail_order_lines
 
 
@@ -39,6 +40,13 @@ def persist_retail_order_with_items(
         store_pickup=bool(body.store_pickup),
     )
     goods_total = goods_subtotal_yuan(lines)
+    delivery_fee, _delivery_bd = compute_retail_delivery_fee(
+        db,
+        lines=lines,
+        store_pickup=bool(body.store_pickup),
+        store_id=int(store_id),
+    )
+    order_total_before_coupon = (goods_total + delivery_fee).quantize(Decimal("0.01"))
     title_qty = [(ln.display_title, int(ln.quantity)) for ln in lines]
     summary_title = build_order_items_summary(title_qty)
     total_qty = sum(int(ln.quantity) for ln in lines)
@@ -56,7 +64,9 @@ def persist_retail_order_with_items(
         quantity=int(total_qty),
         fulfillment_date=fulfillment_date,
         routing_area=routing_area,
-        amount_yuan=goods_total,
+        amount_yuan=order_total_before_coupon,
+        goods_amount_yuan=goods_total,
+        delivery_fee_yuan=delivery_fee,
         pay_status=pay_status,
         pay_channel=pay_channel,
         fulfillment_status=fulfillment_status,
@@ -96,7 +106,8 @@ def persist_retail_order_with_items(
         )
         row.original_amount_yuan = orig
         row.coupon_discount_yuan = disc
-        row.amount_yuan = payable
+        # 券只抵商品小计；配送费不参与满减
+        row.amount_yuan = (payable + delivery_fee).quantize(Decimal("0.01"))
         row.member_coupon_id = int(body.member_coupon_id)
 
     return row

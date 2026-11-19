@@ -11,6 +11,7 @@ from app.models.store_retail_category import StoreRetailCategory
 from app.models.store_retail_product import StoreRetailProduct
 from app.models.store_retail_spu import StoreRetailSpu
 from app.services.admin.retail_category_admin_service import list_retail_categories
+from app.services.retail.retail_delivery_fee import build_category_delivery_hint
 from app.services.retail.retail_catalog_repo import load_skus_by_spu_ids, load_spus_by_ids
 from app.services.retail.retail_display import decimal_to_str_money, retail_gallery_cover, retail_price_range_yuan
 from app.services.retail.retail_stock_service import RetailProductStockSnapshot, get_retail_stock_snapshots
@@ -108,14 +109,16 @@ def list_retail_menu_public(db: Session, *, store_id: int) -> list[dict]:
         items = by_cat.get(int(cat.id), [])
         if not items:
             continue
-        out.append(
-            {
-                "id": int(cat.id),
-                "name": cat.name,
-                "sort_order": int(cat.sort_order),
-                "products": items,
-            }
-        )
+        hint = build_category_delivery_hint(cat)
+        node = {
+            "id": int(cat.id),
+            "name": cat.name,
+            "sort_order": int(cat.sort_order),
+            "products": items,
+        }
+        if hint:
+            node["delivery_hint"] = hint
+        out.append(node)
     return out
 
 

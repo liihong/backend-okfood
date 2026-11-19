@@ -32,8 +32,10 @@ from app.schemas.store_retail_order import (
 )
 from app.services.retail.retail_order_amount import assert_retail_product_orderable, compute_retail_line_amount
 from app.services.retail.retail_order_item_repo import item_row_to_out, load_order_items_map
+from app.services.retail.retail_order_checkout import resolve_retail_checkout_amounts
 from app.services.retail.retail_order_lines import resolve_retail_order_lines
 from app.services.retail.retail_order_persist import persist_retail_order_with_items
+from app.schemas.store_retail_order import StoreRetailOrderQuoteOut
 from app.services.retail.retail_stock_service import assert_retail_stock_available
 from app.services.marketing.coupon_checkout_service import (
     CouponCheckoutContext,
@@ -134,6 +136,16 @@ def _row_to_out(
         fulfillment_date=row.fulfillment_date,
         routing_area=str(row.routing_area or ""),
         amount_yuan=_format_amount_yuan(Decimal(row.amount_yuan)),
+        goods_amount_yuan=(
+            _format_amount_yuan(Decimal(row.goods_amount_yuan))
+            if row.goods_amount_yuan is not None
+            else None
+        ),
+        delivery_fee_yuan=(
+            _format_amount_yuan(Decimal(row.delivery_fee_yuan))
+            if row.delivery_fee_yuan is not None
+            else None
+        ),
         original_amount_yuan=(
             _format_amount_yuan(Decimal(row.original_amount_yuan))
             if row.original_amount_yuan is not None
@@ -265,6 +277,30 @@ def create_paid_store_retail_order_for_douyin_redeem(
     )
     _notify_store_retail_order_paid(db, row)
     return row
+
+
+def quote_store_retail_order(
+    db: Session, member_id: int, body: StoreRetailOrderCreateIn
+) -> StoreRetailOrderQuoteOut:
+    """结算试算：商品 + 配送费 + 券，不写库。"""
+    mem = db.get(Member, member_id)
+    if not mem or mem.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if body.store_pickup:
+        raise HTTPException(status_code=400, detail="购物车结算暂不支持门店自提试算")
+    raw = resolve_retail_checkout_amounts(
+        db,
+        store_id=int(mem.store_id),
+        member_id=int(member_id),
+        body=body,
+    )
+    return StoreRetailOrderQuoteOut(
+        goods_amount_yuan=raw["goods_amount_yuan"],
+        delivery_fee_yuan=raw["delivery_fee_yuan"],
+        coupon_discount_yuan=raw.get("coupon_discount_yuan"),
+        payable_yuan=raw["payable_yuan"],
+        delivery_breakdown=list(raw.get("delivery_breakdown") or []),
+    )
 
 
 def create_store_retail_order(

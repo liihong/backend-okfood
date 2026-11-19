@@ -12,6 +12,7 @@ from app.schemas.store_retail_order import (
     StoreRetailOrderMemberAddressPatchIn,
 )
 from app.services.client.store_retail_order_service import (
+    quote_store_retail_order,
     create_store_retail_order,
     get_member_store_retail_order,
     list_member_store_retail_orders,
@@ -58,6 +59,20 @@ def read_retail_order_me(
     """商城零售订单详情。"""
     out = get_member_store_retail_order(db, member_id, order_id)
     return success(data=dump_model(out), msg="获取成功")
+
+
+@router.post("/retail-orders/quote")
+@limiter.limit("60/minute")
+def quote_retail_order_me(
+    request: Request,
+    body: StoreRetailOrderCreateIn,
+    db: SessionDep,
+    member_id: MemberIdScoped,
+):
+    """商城结算试算（商品小计、配送费、券后应付）。"""
+    _ = request
+    out = quote_store_retail_order(db, member_id, body)
+    return success(data=dump_model(out), msg="试算成功")
 
 
 @router.post("/retail-orders")

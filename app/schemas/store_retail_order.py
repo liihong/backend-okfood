@@ -25,6 +25,16 @@ class StoreRetailOrderItemOut(BaseModel):
     category_id: int | None = None
 
 
+class StoreRetailOrderQuoteOut(BaseModel):
+    """商城结算试算（与创建订单同一套计价）。"""
+
+    goods_amount_yuan: str
+    delivery_fee_yuan: str
+    coupon_discount_yuan: str | None = None
+    payable_yuan: str
+    delivery_breakdown: list[dict] = Field(default_factory=list)
+
+
 class StoreRetailOrderCreateIn(BaseModel):
     """商城购物车结算：多 SKU。"""
 
@@ -57,6 +67,8 @@ class StoreRetailOrderOut(BaseModel):
     fulfillment_date: date
     routing_area: str
     amount_yuan: str
+    goods_amount_yuan: str | None = None
+    delivery_fee_yuan: str | None = None
     original_amount_yuan: str | None = None
     coupon_discount_yuan: str | None = None
     member_coupon_id: int | None = None

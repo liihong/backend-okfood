@@ -60,6 +60,8 @@ from app.services.admin.retail_category_admin_service import (
 
 )
 
+from app.services.retail.retail_delivery_fee import retail_category_api_fields
+
 from app.services.admin.retail_sku_admin_service import (
 
     create_retail_sku,
@@ -218,25 +220,7 @@ def catalog_list_retail_categories(
 
     rows = list_retail_categories(db, store_id=sid, active_only=active_only)
 
-    data = [
-
-        {
-
-            "id": int(r.id),
-
-            "store_id": int(r.store_id),
-
-            "name": r.name,
-
-            "sort_order": int(r.sort_order),
-
-            "is_active": bool(r.is_active),
-
-        }
-
-        for r in rows
-
-    ]
+    data = [retail_category_api_fields(r) for r in rows]
 
     return success(data=data, msg="获取成功")
 
@@ -262,25 +246,7 @@ def catalog_create_retail_category(
 
     row = create_retail_category(db, store_id=sid, body=body)
 
-    return success(
-
-        data={
-
-            "id": int(row.id),
-
-            "store_id": int(row.store_id),
-
-            "name": row.name,
-
-            "sort_order": int(row.sort_order),
-
-            "is_active": bool(row.is_active),
-
-        },
-
-        msg="创建成功",
-
-    )
+    return success(data=retail_category_api_fields(row), msg="创建成功")
 
 
 
@@ -306,25 +272,7 @@ def catalog_patch_retail_category(
 
     row = patch_retail_category(db, category_id=int(category_id), store_id=sid, body=body)
 
-    return success(
-
-        data={
-
-            "id": int(row.id),
-
-            "store_id": int(row.store_id),
-
-            "name": row.name,
-
-            "sort_order": int(row.sort_order),
-
-            "is_active": bool(row.is_active),
-
-        },
-
-        msg="已保存",
-
-    )
+    return success(data=retail_category_api_fields(row), msg="已保存")
 
 
 

@@ -24,6 +24,7 @@ from app.db.schema_patches import (
     ensure_menu_drink_schema,
     ensure_prep_menu_schema,
     ensure_store_sf_merge_same_address_push_schema,
+    ensure_retail_delivery_fee_schema,
 )
 from app.jobs.scheduler import setup_scheduler, shutdown_scheduler
 from app.services.shared.upload_service import ensure_upload_root
@@ -130,6 +131,10 @@ async def lifespan(app: FastAPI):
         ensure_packaging_schema(engine)
     except Exception:
         logger.warning("包装耗材表补丁失败（不影响启动）", exc_info=True)
+    try:
+        ensure_retail_delivery_fee_schema(engine)
+    except Exception:
+        logger.warning("商城配送费列补丁失败（不影响启动）", exc_info=True)
     setup_scheduler()
     _prewarm()
     yield

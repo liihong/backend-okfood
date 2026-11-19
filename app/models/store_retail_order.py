@@ -40,6 +40,8 @@ class StoreRetailOrder(Base):
     fulfillment_date: Mapped[date] = mapped_column(Date, index=True)
     routing_area: Mapped[str] = mapped_column(String(64))
     amount_yuan: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    goods_amount_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    delivery_fee_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     original_amount_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     coupon_discount_yuan: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     member_coupon_id: Mapped[int | None] = mapped_column(

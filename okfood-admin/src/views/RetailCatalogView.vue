@@ -88,17 +88,61 @@ function categoryName(id) {
 const catDialog = ref(false)
 const catSaving = ref(false)
 const catEditingId = ref(null)
-const catForm = ref({ name: '', sort_order: 0, is_active: true })
+function defaultCatForm() {
+  return {
+    name: '',
+    sort_order: 0,
+    is_active: true,
+    extra_delivery_enabled: false,
+    delivery_fee_yuan: 5,
+    delivery_max_qty: 5,
+    delivery_qty_unit: '盒',
+  }
+}
+
+const catForm = ref(defaultCatForm())
+
+function categoryPayloadFromForm() {
+  const name = String(catForm.value.name || '').trim()
+  const base = {
+    name,
+    sort_order: Number(catForm.value.sort_order) || 0,
+    is_active: Boolean(catForm.value.is_active),
+  }
+  if (catForm.value.extra_delivery_enabled) {
+    return {
+      ...base,
+      delivery_pricing_mode: 'extra_rule',
+      delivery_rule: {
+        rule_type: 'qty_threshold_fee',
+        qty_unit_label: String(catForm.value.delivery_qty_unit || '盒').trim() || '盒',
+        fee_yuan: Number(catForm.value.delivery_fee_yuan) || 0,
+        max_qty_inclusive: Math.max(1, Number(catForm.value.delivery_max_qty) || 5),
+      },
+    }
+  }
+  return { ...base, delivery_pricing_mode: 'included' }
+}
 
 function openCatCreate() {
   catEditingId.value = null
-  catForm.value = { name: '', sort_order: 0, is_active: true }
+  catForm.value = defaultCatForm()
   catDialog.value = true
 }
 
 function openCatEdit(row) {
   catEditingId.value = row.id
-  catForm.value = { name: row.name, sort_order: row.sort_order, is_active: row.is_active }
+  const extra = row.delivery_pricing_mode === 'extra_rule'
+  const rule = row.delivery_rule && typeof row.delivery_rule === 'object' ? row.delivery_rule : {}
+  catForm.value = {
+    name: row.name,
+    sort_order: row.sort_order,
+    is_active: row.is_active,
+    extra_delivery_enabled: extra,
+    delivery_fee_yuan: Number(rule.fee_yuan) || 5,
+    delivery_max_qty: Number(rule.max_qty_inclusive) || 5,
+    delivery_qty_unit: rule.qty_unit_label || '盒',
+  }
   catDialog.value = true
 }
 
@@ -111,23 +155,16 @@ async function saveCategory() {
   catSaving.value = true
   const sid = encodeURIComponent(String(storeId.value || 1))
   try {
+    const payload = categoryPayloadFromForm()
     if (catEditingId.value) {
       await apiJson(`/api/admin/catalog/retail-categories/${catEditingId.value}?store_id=${sid}`, {
         method: 'PATCH',
-        body: JSON.stringify({
-          name,
-          sort_order: Number(catForm.value.sort_order) || 0,
-          is_active: Boolean(catForm.value.is_active),
-        }),
+        body: JSON.stringify(payload),
       }, { auth: true })
     } else {
       await apiJson(`/api/admin/catalog/retail-categories?store_id=${sid}`, {
         method: 'POST',
-        body: JSON.stringify({
-          name,
-          sort_order: Number(catForm.value.sort_order) || 0,
-          is_active: Boolean(catForm.value.is_active),
-        }),
+        body: JSON.stringify(payload),
       }, { auth: true })
     }
     showToast('已保存')
@@ -248,6 +285,14 @@ onActivated(() => {
               </el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="配送费" min-width="200">
+            <template #default="{ row }">
+              <span v-if="row.delivery_pricing_mode === 'extra_rule' && row.delivery_hint" class="retail-cat-hint">
+                {{ row.delivery_hint }}
+              </span>
+              <span v-else class="retail-cat-hint retail-cat-hint--muted">含配送</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="140" align="center">
             <template #default="{ row }">
               <el-button type="primary" link size="small" @click="openCatEdit(row)">编辑</el-button>
@@ -340,6 +385,29 @@ onActivated(() => {
         <el-form-item label="启用">
           <el-switch v-model="catForm.is_active" />
         </el-form-item>
+        <el-form-item label="另计配送">
+          <el-switch v-model="catForm.extra_delivery_enabled" />
+          <span class="cat-form-hint">开启后按下方规则加收（单价不含该配送费）</span>
+        </el-form-item>
+        <template v-if="catForm.extra_delivery_enabled">
+          <el-form-item label="未满件数">
+            <el-input-number v-model="catForm.delivery_max_qty" :min="1" :max="100" controls-position="right" />
+            <span class="cat-form-hint">件内收配送费，超出免收</span>
+          </el-form-item>
+          <el-form-item label="单位">
+            <el-input v-model="catForm.delivery_qty_unit" maxlength="16" placeholder="盒" style="max-width:120px" />
+          </el-form-item>
+          <el-form-item label="配送费">
+            <el-input-number
+              v-model="catForm.delivery_fee_yuan"
+              :min="0"
+              :precision="2"
+              :step="1"
+              controls-position="right"
+            />
+            <span class="cat-form-hint">元 / 单（该分类）</span>
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="catDialog = false">取消</el-button>
@@ -350,6 +418,20 @@ onActivated(() => {
 </template>
 
 <style scoped>
+.retail-cat-hint {
+  font-size: 12px;
+  color: var(--retail-primary);
+}
+.retail-cat-hint--muted {
+  color: #94a3b8;
+}
+.cat-form-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+}
 .retail-page {
   --retail-primary: #0d5c46;
   display: flex;

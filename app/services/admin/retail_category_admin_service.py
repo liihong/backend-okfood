@@ -10,6 +10,7 @@ from app.models.store import Store
 from app.models.store_retail_category import StoreRetailCategory
 from app.models.store_retail_spu import StoreRetailSpu
 from app.schemas.catalog_admin import StoreRetailCategoryCreateIn, StoreRetailCategoryPatchIn
+from app.services.retail.retail_delivery_fee import MODE_EXTRA_RULE, MODE_INCLUDED
 
 
 def _is_mysql_dup(e: Exception) -> bool:
@@ -22,6 +23,14 @@ def assert_retail_category_belongs_store(db: Session, *, category_id: int, store
     if not c or int(c.store_id) != store_id:
         raise HTTPException(status_code=404, detail="零售分类不存在或所属门店不匹配")
     return c
+
+
+def _delivery_rule_dict(body_rule) -> dict | None:
+    if body_rule is None:
+        return None
+    if hasattr(body_rule, "model_dump"):
+        return body_rule.model_dump(mode="json")
+    return dict(body_rule)
 
 
 def list_retail_categories(db: Session, *, store_id: int, active_only: bool = False) -> list[StoreRetailCategory]:
@@ -39,11 +48,16 @@ def create_retail_category(
     st = db.get(Store, store_id)
     if not st or not st.is_active:
         raise HTTPException(status_code=404, detail="门店不存在或已停用")
+    mode = str(body.delivery_pricing_mode or MODE_INCLUDED).strip()
+    if mode not in (MODE_INCLUDED, MODE_EXTRA_RULE):
+        raise HTTPException(status_code=400, detail="配送计价模式无效")
     row = StoreRetailCategory(
         store_id=int(store_id),
         name=body.name.strip(),
         sort_order=int(body.sort_order),
         is_active=bool(body.is_active),
+        delivery_pricing_mode=mode,
+        delivery_rule=_delivery_rule_dict(body.delivery_rule) if mode == MODE_EXTRA_RULE else None,
     )
     db.add(row)
     try:
@@ -67,6 +81,16 @@ def patch_retail_category(
         row.sort_order = int(body.sort_order)
     if body.is_active is not None:
         row.is_active = bool(body.is_active)
+    if body.delivery_pricing_mode is not None:
+        mode = str(body.delivery_pricing_mode).strip()
+        if mode not in (MODE_INCLUDED, MODE_EXTRA_RULE):
+            raise HTTPException(status_code=400, detail="配送计价模式无效")
+        row.delivery_pricing_mode = mode
+        if mode == MODE_INCLUDED:
+            row.delivery_rule = None
+    if body.delivery_rule is not None:
+        row.delivery_rule = _delivery_rule_dict(body.delivery_rule)
+        row.delivery_pricing_mode = MODE_EXTRA_RULE
     try:
         db.commit()
     except Exception as e:

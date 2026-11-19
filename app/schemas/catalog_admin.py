@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class MembershipCardTemplateOut(BaseModel):
@@ -88,24 +89,52 @@ class MembershipCardTemplatePatchIn(BaseModel):
     )
 
 
+class RetailQtyThresholdDeliveryRuleIn(BaseModel):
+    """按分类汇总件数：不超过 max_qty_inclusive 收固定配送费，超出免配送。"""
+
+    rule_type: Literal["qty_threshold_fee"] = "qty_threshold_fee"
+    qty_unit_label: str = Field(default="盒", min_length=1, max_length=16)
+    fee_yuan: Decimal = Field(default=Decimal("5.00"), ge=0)
+    max_qty_inclusive: int = Field(default=5, ge=1, le=100)
+
+
 class StoreRetailCategoryOut(BaseModel):
     id: int
     store_id: int
     name: str
     sort_order: int
     is_active: bool
+    delivery_pricing_mode: str = "included"
+    delivery_rule: dict | None = None
+    delivery_hint: str | None = None
 
 
 class StoreRetailCategoryCreateIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     sort_order: int = Field(default=0, ge=0)
     is_active: bool = True
+    delivery_pricing_mode: Literal["included", "extra_rule"] = "included"
+    delivery_rule: RetailQtyThresholdDeliveryRuleIn | None = None
+
+    @model_validator(mode="after")
+    def _delivery_rule_when_extra(self) -> "StoreRetailCategoryCreateIn":
+        if self.delivery_pricing_mode == "extra_rule" and self.delivery_rule is None:
+            raise ValueError("另计配送费时须填写配送规则")
+        return self
 
 
 class StoreRetailCategoryPatchIn(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=128)
     sort_order: int | None = Field(None, ge=0)
     is_active: bool | None = None
+    delivery_pricing_mode: Literal["included", "extra_rule"] | None = None
+    delivery_rule: RetailQtyThresholdDeliveryRuleIn | None = None
+
+    @model_validator(mode="after")
+    def _delivery_rule_consistency(self) -> "StoreRetailCategoryPatchIn":
+        if self.delivery_pricing_mode == "extra_rule" and self.delivery_rule is None:
+            raise ValueError("另计配送费时须填写配送规则")
+        return self
 
 
 class StoreRetailSpuOut(BaseModel):
