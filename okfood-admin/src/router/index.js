@@ -22,6 +22,7 @@ const WeeklyMenuView = () => import('../views/WeeklyMenuView.vue')
 const CardOrdersView = () => import('../views/CardOrdersView.vue')
 const SingleMealOrdersView = () => import('../views/orders/single-meal/SingleMealOrdersView.vue')
 const MallOrdersView = () => import('../views/orders/mall/MallOrdersView.vue')
+const PickBoardView = () => import('../views/orders/pick-board/PickBoardView.vue')
 const CardPackOrdersView = () => import('../views/orders/card-pack/CardPackOrdersView.vue')
 const StoreConfigView = () => import('../views/StoreConfigView.vue')
 const PrinterManageView = () => import('../views/print/PrinterManageView.vue')
@@ -139,6 +140,16 @@ const router = createRouter({
           meta: {
             title: '商城订单',
             pageSubtitle: '按下单日查看普通商品订单，支持配送与退款',
+            fullAdminOnly: true,
+          },
+        },
+        {
+          path: 'orders/pick-board',
+          name: 'orders-pick-board',
+          component: PickBoardView,
+          meta: {
+            title: '备货看板',
+            pageSubtitle: '按商品分类查看已接单、待发货的口味盒数',
             fullAdminOnly: true,
           },
         },

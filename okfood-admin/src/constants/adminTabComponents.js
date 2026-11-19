@@ -15,6 +15,7 @@ export const ADMIN_TAB_COMPONENT_NAMES = {
   'card-orders': 'CardOrdersView',
   'orders-single-meal': 'SingleMealOrdersView',
   'orders-mall': 'MallOrdersView',
+  'orders-pick-board': 'PickBoardView',
   'orders-card-pack': 'CardPackOrdersView',
   delivery: 'DeliveryView',
   regions: 'RegionsView',

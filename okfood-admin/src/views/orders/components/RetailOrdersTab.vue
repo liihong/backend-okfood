@@ -3,7 +3,6 @@ import { ChevronDown, Plus } from 'lucide-vue-next'
 import { nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import AdminTable from '../../../components/AdminTable.vue'
 import RetailManualOrderDialog from './RetailManualOrderDialog.vue'
-import RetailPickSummaryPanel from './RetailPickSummaryPanel.vue'
 import { RETAIL_DELIVERY_TABS } from '../constants.js'
 import {
   retailJuiceDurationBadge,
@@ -49,19 +48,8 @@ const {
 
 const manualOrderOpen = ref(false)
 
-/** 订单列表 | 厨师备货看板 */
-const retailViewMode = ref('orders')
-const pickSummaryRef = ref(null)
-
 function onManualOrderSuccess() {
   void fetchActive()
-  pickSummaryRef.value?.reload?.()
-}
-
-function onRetailViewModeChange(mode) {
-  if (mode === 'pickboard') {
-    void nextTick(() => pickSummaryRef.value?.reload?.())
-  }
 }
 
 /** 窄屏（手机）使用卡片列表，桌面保留表格 */
@@ -135,21 +123,6 @@ function onRetailMobileSelectChange(row, checked) {
 
 <template>
   <div class="retail-orders-tab">
-  <div class="retail-orders-view-switch">
-      <el-radio-group
-        v-model="retailViewMode"
-        size="small"
-        class="retail-orders-view-switch__radios"
-        @change="onRetailViewModeChange"
-      >
-        <el-radio-button value="orders">订单列表</el-radio-button>
-        <el-radio-button value="pickboard">厨师备货看板</el-radio-button>
-      </el-radio-group>
-    </div>
-
-    <RetailPickSummaryPanel v-if="retailViewMode === 'pickboard'" ref="pickSummaryRef" />
-
-    <template v-else>
     <div class="orders-manage-tab-bar retail-orders-tab-bar retail-orders-tab__filter-bar orders-tab-bar--inline">
       <el-tabs
         v-model="retailDeliveryFilter"
@@ -447,7 +420,6 @@ function onRetailMobileSelectChange(row, checked) {
       </article>
     </div>
     </div>
-    </template>
 
     <RetailManualOrderDialog v-model="manualOrderOpen" @success="onManualOrderSuccess" />
   </div>

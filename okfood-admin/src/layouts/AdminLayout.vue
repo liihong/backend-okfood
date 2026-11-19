@@ -910,6 +910,7 @@ function onTabClose(tab) {
           </template>
           <el-menu-item index="/orders/single-meal">零售订单</el-menu-item>
           <el-menu-item index="/orders/mall">商城订单</el-menu-item>
+          <el-menu-item index="/orders/pick-board">备货看板</el-menu-item>
           <el-menu-item index="/orders/card-pack">卡包订单</el-menu-item>
         </el-sub-menu>
         <el-sub-menu index="sub-delivery">
