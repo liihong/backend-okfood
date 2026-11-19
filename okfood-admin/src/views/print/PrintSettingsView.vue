@@ -126,7 +126,7 @@ onMounted(() => {
               本模板按 75×50mm 单张输出（不沿用面单纸高度）。请在「打印机管理」中把纸张规格改为 75×50mm，避免走纸不准。已去掉加好友二维码。
             </template>
             <template v-else>
-              推荐使用 76×130mm 顺丰面单纸，须与「打印机管理」中纸张规格一致；推单成功后条码为顺丰运单号，可扫码。配送标签订单号为片区编码+序号（如 ZX001）；零售/商城与配送同款面单，右上角分别为「零售订单」「商城订单」，餐品行显示商品详情。若未单独配置「商城零售标签」，将自动使用配送标签的打印机。
+              推荐使用 76×130mm 顺丰面单纸，须与「打印机管理」中纸张规格一致；推单成功后条码为顺丰运单号，可扫码。配送标签订单号为片区编码+序号（如 ZX001）；零售/商城与配送同款面单，右上角分别为「零售订单」「商城订单」，商品区按「SKU名 × 数量」一行一条。若未单独配置「商城零售标签」，将自动使用配送标签的打印机。
             </template>
           </p>
           <div
@@ -155,15 +155,28 @@ onMounted(() => {
               </div>
               <table class="ps-preview__sf-table">
                 <tbody>
-                  <tr><td class="ps-preview__sf-order-no">订单号：{{ activeScene === 'store_retail' ? 'OKF12345' : 'ZX001' }}</td></tr>
-                  <tr><td class="ps-preview__sf-region">{{ activeScene === 'store_retail' ? '东区' : '中心医院' }}</td></tr>
-                  <tr><td class="ps-preview__sf-member">李女士 · 132****6633</td></tr>
-                  <tr><td class="ps-preview__sf-meal">{{
-                    activeScene === 'store_retail' ? '餐品：冷萃果蔬汁 500ml' : '餐别：午+晚'
-                  }}</td></tr>
-                  <tr><td class="ps-preview__sf-meal">数量：1份</td></tr>
-                  <tr><td class="ps-preview__sf-remark">备注：少辣</td></tr>
-                  <tr><td>tips：1.若暂不吃，优先建议冷藏保存！</td></tr>
+                  <tr>
+                    <td class="ps-preview__sf-order-no">
+                      订单号：{{ activeScene === 'store_retail' ? 'OKF12345' : 'ZX001' }}
+                    </td>
+                    <td class="ps-preview__sf-region-inline">
+                      {{ activeScene === 'store_retail' ? '东区' : '中心医院' }}
+                    </td>
+                  </tr>
+                  <tr><td class="ps-preview__sf-member" colspan="2">李女士 · 132****6633</td></tr>
+                  <template v-if="activeScene === 'store_retail'">
+                    <tr>
+                      <td class="ps-preview__sf-sku" colspan="2">
+                        冷萃果蔬汁 500ml ×1<br>鸡胸肉沙拉 ×2
+                      </td>
+                    </tr>
+                  </template>
+                  <template v-else>
+                    <tr><td class="ps-preview__sf-meal" colspan="2">餐别：午+晚</td></tr>
+                    <tr><td class="ps-preview__sf-meal" colspan="2">数量：1份</td></tr>
+                  </template>
+                  <tr><td class="ps-preview__sf-remark" colspan="2">备注：少辣</td></tr>
+                  <tr><td colspan="2">tips：1.若暂不吃，优先建议冷藏保存！</td></tr>
                 </tbody>
               </table>
               <div class="ps-preview__sf-barcode">
@@ -474,15 +487,19 @@ onMounted(() => {
 }
 .ps-preview__sf-order-no {
   font-weight: 800;
-  font-size: 0.88rem;
-  padding: 0.45rem 0.35rem !important;
-  line-height: 1.45;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.35rem !important;
+  line-height: 1.35;
+  width: 62%;
+  border-right: none !important;
 }
-.ps-preview__sf-region {
-  text-align: center;
-  font-size: 1rem;
+.ps-preview__sf-region-inline {
+  text-align: right;
+  font-size: 0.92rem;
   font-weight: 900;
-  padding: 0.4rem 0.25rem !important;
+  padding: 0.35rem 0.35rem !important;
+  line-height: 1.35;
+  width: 38%;
 }
 .ps-preview__sf-member {
   font-weight: 700;
@@ -494,6 +511,12 @@ onMounted(() => {
   font-weight: 700;
   font-size: 0.98rem;
   padding: 0.5rem 0.35rem !important;
+}
+.ps-preview__sf-sku {
+  font-weight: 600;
+  font-size: 0.78rem;
+  padding: 0.28rem 0.35rem !important;
+  line-height: 1.45;
 }
 .ps-preview__sf-remark {
   font-weight: 700;

@@ -27,10 +27,14 @@ export function mallOrderToLabelItem(row, opts = {}) {
       .map((it) => {
         const t = String(it.product_title || '').trim() || '商品'
         const q = Math.max(1, Number(it.quantity) || 1)
-        return q > 1 ? `${t} ×${q}` : t
+        return `${t} ×${q}`
       })
       .join('\n')
     units = items.reduce((sum, it) => sum + Math.max(1, Number(it.quantity) || 1), 0)
+  } else if (productTitle) {
+    const t = String(productTitle).trim()
+    const q = Math.max(1, units)
+    productTitle = `${t} ×${q}`
   }
   return {
     region: row.routing_area || '',
@@ -76,7 +80,9 @@ export function singleMealOrderToLabelItem(row, opts = {}) {
     remark: row.address_remarks || '',
     delivery_date: row.delivery_date || '',
     route_seq: null,
-    product_title: row.dish_title || '',
+    product_title: row.dish_title
+      ? `${String(row.dish_title).trim()} ×${Math.max(1, Number(row.quantity) || 1)}`
+      : '',
     order_no: String(row.out_trade_no || '').trim() || (row.id != null ? `OKF${row.id}` : ''),
     shop_order_id: '',
     sf_order_id: row.sf_order_id != null ? String(row.sf_order_id) : '',

@@ -166,6 +166,44 @@ def _product_detail_text(item: LabelItemIn) -> str:
     return title
 
 
+def _parse_sku_qty_line(line: str) -> tuple[str, int | None]:
+    """解析单行「名称 ×2」或「名称 x2」。"""
+    s = (line or "").strip()
+    for sep in ("×", "x", "X"):
+        if sep not in s:
+            continue
+        name, tail = s.rsplit(sep, 1)
+        name = name.strip()
+        try:
+            return name, max(1, int(tail.strip()))
+        except ValueError:
+            continue
+    return s, None
+
+
+def _retail_mall_sku_lines(item: LabelItemIn) -> list[str]:
+    """零售/商城备餐面单：每行「SKU名 ×数量」，不含餐品前缀。"""
+    raw = (item.product_title or item.meal_category or "").strip()
+    if not raw:
+        return ["—"]
+    parts = [ln.strip() for ln in raw.replace("\r\n", "\n").split("\n") if ln.strip()]
+    if not parts:
+        return ["—"]
+
+    lines: list[str] = []
+    for part in parts:
+        name, q = _parse_sku_qty_line(part)
+        if q is None:
+            q = max(1, int(item.units or 1)) if len(parts) == 1 else 1
+        lines.append(f"{name} ×{q}")
+    return lines
+
+
+def _is_retail_mall_order(item: LabelItemIn) -> bool:
+    kind = (item.order_kind or "").strip().lower()
+    return kind in ("retail", "mall")
+
+
 def _meal_row_value(item: LabelItemIn) -> str:
     kind = (item.order_kind or "").strip().lower()
     if kind in ("retail", "mall"):
@@ -192,37 +230,59 @@ def _build_sf_waybill_table_html(item: LabelItemIn) -> str:
     remark = (item.remark or "").strip() or "无"
     tips = DELIVERY_MEAL_FULL_TIPS
     order_no = _order_no_display(item)
+    retail_mall = _is_retail_mall_order(item)
     border = "0.25mm solid #111"
     cell = f"border:{border};padding:1.2mm 2mm;word-break:break-all;line-height:1.25;"
-    cell_order = (
-        f"border:{border};padding:2.8mm 2mm;word-break:break-all;"
-        f"line-height:1.45;font-size:12px;font-weight:700;"
-    )
     cell_lg = f"border:{border};padding:3.5mm 2mm;word-break:break-all;line-height:1.45;"
+    cell_sku = (
+        f"border:{border};padding:2.4mm 2mm;word-break:break-all;"
+        f"line-height:1.45;font-size:11px;font-weight:600;"
+    )
+    cell_order_l = (
+        f"border:{border};border-right:0;padding:2mm 2mm;word-break:break-all;"
+        f"line-height:1.35;font-size:12px;font-weight:700;width:62%;"
+    )
+    cell_order_r = (
+        f"border:{border};padding:2mm 2mm;word-break:break-all;text-align:right;"
+        f"line-height:1.35;font-size:15px;font-weight:700;width:38%;"
+    )
     rows: list[str] = [
-        f'<tr><td style="{cell_order}">订单号：{escape(order_no)}</td></tr>',
         (
-            f'<tr><td style="{cell}text-align:center;font-size:17px;font-weight:700;'
-            f'padding:2.5mm 1mm;">{escape(region)}</td></tr>'
+            f"<tr>"
+            f'<td style="{cell_order_l}">订单号：{escape(order_no)}</td>'
+            f'<td style="{cell_order_r}">{escape(region)}</td>'
+            f"</tr>"
         ),
         (
-            f'<tr><td style="{cell_lg}font-size:14px;font-weight:700;">'
+            f'<tr><td colspan="2" style="{cell_lg}font-size:14px;font-weight:700;">'
             f'{escape(member_line or "—")}</td></tr>'
         ),
-        (
-            f'<tr><td style="{cell_lg}font-size:16px;font-weight:700;">'
-            f'{escape(meal_label)}：{escape(meal_val)}</td></tr>'
-        ),
-        (
-            f'<tr><td style="{cell_lg}font-size:16px;font-weight:700;">'
-            f'数量：{units_n}份</td></tr>'
-        ),
-        (
-            f'<tr><td style="{cell_lg}font-size:16px;font-weight:700;">'
-            f'备注：{escape(remark[:120])}</td></tr>'
-        ),
-        f'<tr><td style="{cell}font-size:9px;">tips：{escape(tips)}</td></tr>',
     ]
+    if retail_mall:
+        sku_html = "<br>".join(escape(ln) for ln in _retail_mall_sku_lines(item))
+        rows.append(f'<tr><td colspan="2" style="{cell_sku}">{sku_html}</td></tr>')
+    else:
+        rows.extend(
+            [
+                (
+                    f'<tr><td colspan="2" style="{cell_lg}font-size:16px;font-weight:700;">'
+                    f'{escape(meal_label)}：{escape(meal_val)}</td></tr>'
+                ),
+                (
+                    f'<tr><td colspan="2" style="{cell_lg}font-size:16px;font-weight:700;">'
+                    f'数量：{units_n}份</td></tr>'
+                ),
+            ]
+        )
+    rows.extend(
+        [
+            (
+                f'<tr><td colspan="2" style="{cell_lg}font-size:16px;font-weight:700;">'
+                f'备注：{escape(remark[:120])}</td></tr>'
+            ),
+            f'<tr><td colspan="2" style="{cell}font-size:9px;">tips：{escape(tips)}</td></tr>',
+        ]
+    )
     table = (
         f'<table style="width:100%;border-collapse:collapse;border:{border};">'
         + "".join(rows)
@@ -251,6 +311,7 @@ def _build_meal_full_lines(item: LabelItemIn) -> list[_RenderLine]:
     meal_label = _meal_row_label(item)
     meal_val = _meal_row_value(item)
     units_n = max(1, int(item.units or 1))
+    retail_mall = _is_retail_mall_order(item)
     sf_no = (item.sf_order_id or "").strip()
     lines: list[_RenderLine] = [
         _RenderLine(
@@ -265,15 +326,27 @@ def _build_meal_full_lines(item: LabelItemIn) -> list[_RenderLine]:
             f"订单号：{_order_no_display(item)}",
             font_pt=12,
             bold=True,
-            line_mm=6.5,
+            line_mm=6.0,
+            right_text=region or "未分配片区",
         ),
-        _RenderLine(region or "未分配片区", font_pt=18, bold=True, line_mm=9, align="center"),
         _RenderLine(member_line or "—", font_pt=14, bold=True, line_mm=7.5),
-        _RenderLine(f"{meal_label}：{meal_val}", font_pt=16, bold=True, line_mm=8),
-        _RenderLine(f"数量：{units_n}份", font_pt=16, bold=True, line_mm=8),
-        _RenderLine(f"备注：{remark[:100]}", font_pt=16, bold=True, line_mm=10),
-        _RenderLine(f"tips：{DELIVERY_MEAL_FULL_TIPS}", font_pt=9, bold=False, line_mm=5.5),
     ]
+    if retail_mall:
+        for sku in _retail_mall_sku_lines(item):
+            lines.append(_RenderLine(sku, font_pt=11, bold=False, line_mm=5.2))
+    else:
+        lines.extend(
+            [
+                _RenderLine(f"{meal_label}：{meal_val}", font_pt=16, bold=True, line_mm=8),
+                _RenderLine(f"数量：{units_n}份", font_pt=16, bold=True, line_mm=8),
+            ]
+        )
+    lines.extend(
+        [
+            _RenderLine(f"备注：{remark[:100]}", font_pt=16, bold=True, line_mm=10),
+            _RenderLine(f"tips：{DELIVERY_MEAL_FULL_TIPS}", font_pt=9, bold=False, line_mm=5.5),
+        ]
+    )
     if sf_no:
         lines.append(_RenderLine(f"顺丰单号：{sf_no}", font_pt=8, bold=False, line_mm=5, align="center"))
     return lines
