@@ -3,6 +3,7 @@ import { ChevronDown, Plus } from 'lucide-vue-next'
 import { nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import AdminTable from '../../../components/AdminTable.vue'
 import RetailManualOrderDialog from './RetailManualOrderDialog.vue'
+import OrdersRetailItemsDialog from './OrdersRetailItemsDialog.vue'
 import { RETAIL_DELIVERY_TABS } from '../constants.js'
 import {
   retailJuiceDurationBadge,
@@ -47,6 +48,20 @@ const {
 } = useOrdersManageInject()
 
 const manualOrderOpen = ref(false)
+
+/** 商品列：查看 SKU 盒数明细 */
+const retailItemsDialogOpen = ref(false)
+/** @type {import('vue').Ref<Record<string, unknown> | null>} */
+const retailItemsDialogOrder = ref(null)
+
+function openRetailItemsDialog(row) {
+  retailItemsDialogOrder.value = row
+  retailItemsDialogOpen.value = true
+}
+
+function onRetailItemsDialogClosed() {
+  retailItemsDialogOrder.value = null
+}
 
 function onManualOrderSuccess() {
   void fetchActive()
@@ -210,9 +225,14 @@ function onRetailMobileSelectChange(row, checked) {
           <span v-if="row.member_phone" class="td-mono">{{ row.member_phone }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="商品" min-width="180">
+      <el-table-column label="商品" min-width="180" class-name="retail-product-col">
         <template #default="{ row }">
-          <div class="retail-product-cell">
+          <button
+            type="button"
+            class="retail-product-cell retail-product-cell--btn"
+            :title="(row.product_title || '查看 SKU 明细').trim()"
+            @click.stop="openRetailItemsDialog(row)"
+          >
             <template
               v-for="badge in [retailJuiceDurationBadge(row.product_title)]"
               :key="badge?.days ?? 'plain'"
@@ -221,13 +241,12 @@ function onRetailMobileSelectChange(row, checked) {
                 v-if="badge"
                 class="retail-juice-duration-badge"
                 :class="badge.className"
-                :title="row.product_title"
               >
                 {{ badge.badge }}
               </span>
               <span v-else class="retail-product-title">{{ row.product_title || '—' }}</span>
             </template>
-          </div>
+          </button>
         </template>
       </el-table-column>
       <el-table-column label="数量" width="72" align="center">
@@ -330,7 +349,11 @@ function onRetailMobileSelectChange(row, checked) {
         <!-- 商品区 -->
         <section class="retail-order-card__goods">
           <div class="retail-order-card__goods-info">
-            <div class="retail-product-cell">
+            <button
+              type="button"
+              class="retail-product-cell retail-product-cell--btn"
+              @click.stop="openRetailItemsDialog(row)"
+            >
               <template
                 v-for="badge in [retailJuiceDurationBadge(row.product_title)]"
                 :key="badge?.days ?? 'plain-m'"
@@ -339,13 +362,12 @@ function onRetailMobileSelectChange(row, checked) {
                   v-if="badge"
                   class="retail-juice-duration-badge"
                   :class="badge.className"
-                  :title="row.product_title"
                 >
                   {{ badge.badge }}
                 </span>
                 <span v-else class="retail-product-title">{{ row.product_title || '—' }}</span>
               </template>
-            </div>
+            </button>
           </div>
           <div class="retail-order-card__goods-meta">
             <span class="retail-order-card__amount">{{ row.amount_yuan }}</span>
@@ -422,5 +444,10 @@ function onRetailMobileSelectChange(row, checked) {
     </div>
 
     <RetailManualOrderDialog v-model="manualOrderOpen" @success="onManualOrderSuccess" />
+    <OrdersRetailItemsDialog
+      v-model:open="retailItemsDialogOpen"
+      :order="retailItemsDialogOrder"
+      @closed="onRetailItemsDialogClosed"
+    />
   </div>
 </template>

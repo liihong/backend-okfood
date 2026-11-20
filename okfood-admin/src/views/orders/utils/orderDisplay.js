@@ -87,3 +87,43 @@ export function retailJuiceDurationBadge(title) {
   }
   return null
 }
+
+/**
+ * 将商城订单行解析为可展示的 SKU 明细（列表接口已附带 items）。
+ * @typedef {{ title: string, specLabel: string, quantity: number, unitPriceYuan: string, lineAmountYuan: string }} RetailOrderLineItem
+ * @param {Record<string, unknown> | null | undefined} row
+ * @returns {RetailOrderLineItem[]}
+ */
+export function resolveRetailOrderLineItems(row) {
+  const raw = Array.isArray(row?.items) ? row.items : []
+  if (raw.length) {
+    return raw.map((it) => {
+      const spu = String(it.spu_title || '').trim()
+      const product = String(it.product_title || '').trim()
+      const title = spu || product || '商品'
+      return {
+        title,
+        specLabel: String(it.spec_label || '').trim(),
+        quantity: Math.max(1, Number(it.quantity) || 1),
+        unitPriceYuan: String(it.unit_price_yuan || '').trim(),
+        lineAmountYuan: String(it.line_amount_yuan || '').trim(),
+      }
+    })
+  }
+  const title = String(row?.product_title || '商品').trim() || '商品'
+  const quantity = Math.max(1, Number(row?.quantity) || 1)
+  return [
+    {
+      title,
+      specLabel: '',
+      quantity,
+      unitPriceYuan: '',
+      lineAmountYuan: '',
+    },
+  ]
+}
+
+/** 订单行 SKU 总盒数（与备货汇总一致按 quantity 求和）。 */
+export function retailOrderTotalBoxes(row) {
+  return resolveRetailOrderLineItems(row).reduce((sum, line) => sum + line.quantity, 0)
+}
