@@ -1054,6 +1054,7 @@ def list_members_paged(
         load_member_plan_type_display_map,
         meal_scope_label_from_periods,
     )
+    from app.services.member.member_daily_meal_units_service import pending_daily_meal_units
     from app.services.meal_period.dinner_units import pending_dinner_daily_meal_units
     from app.services.meal_period.units import (
         dinner_daily_meal_units_from_state,
@@ -1126,6 +1127,7 @@ def list_members_paged(
                 remarks=m.remarks,
                 balance=m.balance,
                 daily_meal_units=effective_daily_meal_units(m),
+                daily_meal_units_pending=pending_daily_meal_units(m),
                 meal_quota_total=m.meal_quota_total,
                 plan_type=m.plan_type,
                 entitled_meal_periods=sorted(periods),

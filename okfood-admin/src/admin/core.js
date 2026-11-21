@@ -847,6 +847,7 @@ export function mapAdminUserToRow(raw, idx) {
       meal_scope_label: '午餐',
       remarks: '',
       daily_meal_units: 1,
+      daily_meal_units_pending: null,
       dinner_daily_meal_units: 1,
       dinner_daily_meal_units_pending: null,
       meal_quota_total: 0,
@@ -917,6 +918,15 @@ export function mapAdminUserToRow(raw, idx) {
   }
 
   const leaveList = buildLeaveListFields(raw)
+  const lunchUnitsPendingRaw = raw.daily_meal_units_pending
+  const lunchUnitsPendingNum =
+    lunchUnitsPendingRaw == null || lunchUnitsPendingRaw === ''
+      ? null
+      : Math.floor(Number(lunchUnitsPendingRaw))
+  const dailyMealUnitsPending =
+    lunchUnitsPendingNum != null && lunchUnitsPendingNum >= 1 && lunchUnitsPendingNum <= 50
+      ? lunchUnitsPendingNum
+      : null
   const dinnerUnitsPendingRaw = raw.dinner_daily_meal_units_pending
   const dinnerUnitsPendingNum =
     dinnerUnitsPendingRaw == null || dinnerUnitsPendingRaw === ''
@@ -977,6 +987,7 @@ export function mapAdminUserToRow(raw, idx) {
     dinner_leave_range_end: adminUserYmd(raw.dinner_leave_range_end),
     remarks: raw.remarks ?? '',
     daily_meal_units: Math.max(1, Math.min(50, Number(raw.daily_meal_units) || 1)),
+    daily_meal_units_pending: dailyMealUnitsPending,
     dinner_daily_meal_units: Math.max(1, Math.min(50, Number(raw.dinner_daily_meal_units) || 1)),
     dinner_daily_meal_units_pending: dinnerDailyMealUnitsPending,
     meal_quota_total: hasPersistedTotal ? mealQuotaTotal : 0,

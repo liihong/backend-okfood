@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch, onActivated } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { apiJson, handleAdminLogout, mapAdminUserToRow, memberShowsDinnerRemain } from '../../admin/core.js'
 import { showToast } from '../../composables/useToast.js'
 import OkfoodAdminDialogShell from '../../components/OkfoodAdminDialogShell.vue'
@@ -27,7 +28,10 @@ const initial = ref({
   daily_meal_units: 1,
   dinner_daily_meal_units: 1,
 })
-/** 已预约、下一配送日生效的午餐份数；仅作提示，输入框仍展示当日生效份数 */
+/** 打开时是否存在午餐 / 晚餐份数预约（用于取消预约与提交判断） */
+const initialPendingLunch = ref(null)
+const initialPendingDinner = ref(null)
+/** 已预约、下一配送日生效的午餐份数；输入框仍展示当日生效份数 */
 const pendingUnits = ref(null)
 /** 已预约、下一配送日生效的晚餐份数；与午餐预约互不影响 */
 const pendingDinnerUnits = ref(null)
@@ -42,6 +46,20 @@ const showDinnerRemain = computed(() => memberShowsDinnerRemain(profile.value ||
 
 const displayMember = computed(() => profile.value || props.member)
 
+/** 午餐份数预约说明文案 */
+const lunchPendingBannerText = computed(() => {
+  if (pendingUnits.value == null) return ''
+  const current = initial.value.daily_meal_units
+  const label = showDinnerRemain.value ? '午餐' : ''
+  return `已预约从下一配送日起 ${label}每配送日改为 ${pendingUnits.value} 份（当日仍为 ${current} 份）。保存为 ${current} 份可取消预约。`
+})
+
+const dinnerPendingBannerText = computed(() => {
+  if (pendingDinnerUnits.value == null) return ''
+  const current = initial.value.dinner_daily_meal_units
+  return `已预约从下一配送日起晚餐每配送日改为 ${pendingDinnerUnits.value} 份（当日仍为 ${current} 份）。保存为 ${current} 份可取消预约。`
+})
+
 function normalizeBalance(v) {
   return Math.max(0, Math.min(999999, Math.floor(Number(v) || 0)))
 }
@@ -50,13 +68,18 @@ function normalizeUnits(v) {
   return Math.max(1, Math.min(50, Math.floor(Number(v) || 1)))
 }
 
-/**
- * @param {Record<string, unknown>} row
- * @param {Record<string, unknown> | null | undefined} raw
- */
+/** @param {unknown} rawPending @param {number} currentUnits */
 function pendingUnitsOrNull(rawPending, currentUnits) {
   const pendingNum = rawPending == null || rawPending === '' ? null : Math.floor(Number(rawPending))
   return pendingNum != null && pendingNum >= 1 && pendingNum !== currentUnits ? pendingNum : null
+}
+
+/** 从列表行或接口原始项解析午餐 pending */
+function resolveLunchPendingRaw(row, raw) {
+  if (raw && typeof raw === 'object' && raw.daily_meal_units_pending != null) {
+    return raw.daily_meal_units_pending
+  }
+  return row?.daily_meal_units_pending
 }
 
 function applySnapshot(row, raw) {
@@ -76,12 +99,27 @@ function applySnapshot(row, raw) {
     daily_meal_units: units,
     dinner_daily_meal_units: dinnerUnits,
   }
-  pendingUnits.value = pendingUnitsOrNull(raw?.daily_meal_units_pending, units)
-  pendingDinnerUnits.value = pendingUnitsOrNull(
+  const lunchPending = pendingUnitsOrNull(resolveLunchPendingRaw(row, raw), units)
+  pendingUnits.value = lunchPending
+  initialPendingLunch.value = lunchPending
+  const dinnerPending = pendingUnitsOrNull(
     row?.dinner_daily_meal_units_pending ?? raw?.dinner_daily_meal_units_pending,
     dinnerUnits,
   )
+  pendingDinnerUnits.value = dinnerPending
+  initialPendingDinner.value = dinnerPending
   profile.value = row
+}
+
+/** 当日份数未改但存在预约时，仍需提交当日值以清空 pending 或改预约 */
+function lunchUnitsNeedsSubmit(unitsVal) {
+  if (unitsVal !== initial.value.daily_meal_units) return true
+  return initialPendingLunch.value != null && unitsVal === initial.value.daily_meal_units
+}
+
+function dinnerUnitsNeedsSubmit(dinnerUnitsVal) {
+  if (dinnerUnitsVal !== initial.value.dinner_daily_meal_units) return true
+  return initialPendingDinner.value != null && dinnerUnitsVal === initial.value.dinner_daily_meal_units
 }
 
 /** 打开时拉最新档案，避免列表缓存的剩余次数被整单覆盖 */
@@ -131,31 +169,11 @@ function close() {
   open.value = false
 }
 
-async function submit() {
-  const row = profile.value || props.member
-  const phone = String(row?.phone || '').trim()
-  if (!phone || loading.value || saving.value) return
-  const unitsVal = normalizeUnits(form.value.daily_meal_units)
-  const balanceVal = normalizeBalance(form.value.balance)
-  /** @type {Record<string, unknown>} */
-  const payload = { phone }
-  if (showDinnerRemain.value) {
-    // 晚餐次数与份数单独提交；午餐字段仍只在自身变化时提交
-    const dinnerUnitsVal = normalizeUnits(form.value.dinner_daily_meal_units)
-    if (dinnerUnitsVal !== initial.value.dinner_daily_meal_units) {
-      payload.dinner_daily_meal_units = dinnerUnitsVal
-    }
-    const dinnerBalanceVal = normalizeBalance(form.value.dinner_balance)
-    if (dinnerBalanceVal !== initial.value.dinner_balance) {
-      payload.dinner_balance = dinnerBalanceVal
-    }
-  }
-  if (unitsVal !== initial.value.daily_meal_units) payload.daily_meal_units = unitsVal
-  if (balanceVal !== initial.value.balance) payload.balance = balanceVal
-  if (Object.keys(payload).length === 1) {
-    showToast('未修改剩余次数或每日份数', 'error')
-    return
-  }
+/**
+ * @param {Record<string, unknown>} payload
+ * @param {{ clearingLunchPending?: boolean, clearingDinnerPending?: boolean }} opts
+ */
+async function postProfilePatch(payload, opts = {}) {
   const changedBalance = 'balance' in payload || 'dinner_balance' in payload
   const changedUnits = 'daily_meal_units' in payload || 'dinner_daily_meal_units' in payload
   saving.value = true
@@ -169,12 +187,14 @@ async function submit() {
       { auth: true },
     )
     open.value = false
-    const savedMsg =
-      changedBalance && changedUnits
-        ? '剩余次数与每日份数已更新'
-        : changedBalance
-          ? '剩余次数已更新'
-          : '每日份数已更新'
+    let savedMsg = '每日份数已更新'
+    if (opts.clearingLunchPending || opts.clearingDinnerPending) {
+      savedMsg = '份数预约已取消'
+    } else if (changedBalance && changedUnits) {
+      savedMsg = '剩余次数与每日份数已更新'
+    } else if (changedBalance) {
+      savedMsg = '剩余次数已更新'
+    }
     showToast(savedMsg, 'success')
     emit('saved')
   } catch (e) {
@@ -188,6 +208,80 @@ async function submit() {
   } finally {
     saving.value = false
   }
+}
+
+async function cancelPendingLunch() {
+  if (loading.value || saving.value || pendingUnits.value == null) return
+  const row = profile.value || props.member
+  const phone = String(row?.phone || '').trim()
+  if (!phone) return
+  const keep = initial.value.daily_meal_units
+  try {
+    await ElMessageBox.confirm(
+      `下一配送日将改为 ${pendingUnits.value} 份。确认取消预约，继续按每配送日 ${keep} 份？`,
+      '取消份数预约',
+      { confirmButtonText: '取消预约', cancelButtonText: '返回', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  form.value.daily_meal_units = keep
+  await postProfilePatch({ phone, daily_meal_units: keep }, { clearingLunchPending: true })
+}
+
+async function cancelPendingDinner() {
+  if (loading.value || saving.value || pendingDinnerUnits.value == null) return
+  const row = profile.value || props.member
+  const phone = String(row?.phone || '').trim()
+  if (!phone) return
+  const keep = initial.value.dinner_daily_meal_units
+  try {
+    await ElMessageBox.confirm(
+      `下一配送日晚餐将改为 ${pendingDinnerUnits.value} 份。确认取消预约，继续按每配送日 ${keep} 份？`,
+      '取消晚餐份数预约',
+      { confirmButtonText: '取消预约', cancelButtonText: '返回', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  form.value.dinner_daily_meal_units = keep
+  await postProfilePatch({ phone, dinner_daily_meal_units: keep }, { clearingDinnerPending: true })
+}
+
+async function submit() {
+  const row = profile.value || props.member
+  const phone = String(row?.phone || '').trim()
+  if (!phone || loading.value || saving.value) return
+  const unitsVal = normalizeUnits(form.value.daily_meal_units)
+  const balanceVal = normalizeBalance(form.value.balance)
+  /** @type {Record<string, unknown>} */
+  const payload = { phone }
+  if (showDinnerRemain.value) {
+    // 晚餐次数与份数单独提交；午餐字段仍只在自身变化时提交
+    const dinnerUnitsVal = normalizeUnits(form.value.dinner_daily_meal_units)
+    if (dinnerUnitsNeedsSubmit(dinnerUnitsVal)) {
+      payload.dinner_daily_meal_units = dinnerUnitsVal
+    }
+    const dinnerBalanceVal = normalizeBalance(form.value.dinner_balance)
+    if (dinnerBalanceVal !== initial.value.dinner_balance) {
+      payload.dinner_balance = dinnerBalanceVal
+    }
+  }
+  if (lunchUnitsNeedsSubmit(unitsVal)) payload.daily_meal_units = unitsVal
+  if (balanceVal !== initial.value.balance) payload.balance = balanceVal
+  if (Object.keys(payload).length === 1) {
+    showToast('未修改剩余次数或每日份数', 'error')
+    return
+  }
+  const clearingLunchPending =
+    'daily_meal_units' in payload &&
+    payload.daily_meal_units === initial.value.daily_meal_units &&
+    initialPendingLunch.value != null
+  const clearingDinnerPending =
+    'dinner_daily_meal_units' in payload &&
+    payload.dinner_daily_meal_units === initial.value.dinner_daily_meal_units &&
+    initialPendingDinner.value != null
+  await postProfilePatch(payload, { clearingLunchPending, clearingDinnerPending })
 }
 </script>
 
@@ -226,6 +320,23 @@ async function submit() {
       </div>
       <div class="form-group">
         <label for="member-units-lunch">{{ showDinnerRemain ? '午餐每配送日份数' : '每配送日份数' }}</label>
+        <div
+          v-if="pendingUnits != null"
+          class="okfood-dlg-hint-block member-balance-pending-banner"
+          role="status"
+        >
+          <span class="okfood-dlg-hint-block__label">份数预约</span>
+          <p class="okfood-dlg-hint-block__text">{{ lunchPendingBannerText }}</p>
+          <el-button
+            round
+            size="small"
+            :disabled="loading || saving"
+            class="member-balance-pending-banner__btn"
+            @click="cancelPendingLunch"
+          >
+            取消预约（改回 {{ initial.daily_meal_units }} 份）
+          </el-button>
+        </div>
         <el-input-number
           id="member-units-lunch"
           v-model="form.daily_meal_units"
@@ -242,7 +353,6 @@ async function submit() {
               ? '只改午餐份数。当日午餐大表已推单时，从下一配送日起生效。'
               : '当日大表已推单时，修改从下一配送日起生效，当日备餐份数不变。'
           }}
-          <template v-if="pendingUnits != null">已预约次日改为 {{ pendingUnits }} 份。</template>
         </p>
       </div>
       <div v-if="showDinnerRemain" class="form-group">
@@ -264,6 +374,23 @@ async function submit() {
       </div>
       <div v-if="showDinnerRemain" class="form-group">
         <label for="member-units-dinner">晚餐每配送日份数</label>
+        <div
+          v-if="pendingDinnerUnits != null"
+          class="okfood-dlg-hint-block member-balance-pending-banner"
+          role="status"
+        >
+          <span class="okfood-dlg-hint-block__label">晚餐份数预约</span>
+          <p class="okfood-dlg-hint-block__text">{{ dinnerPendingBannerText }}</p>
+          <el-button
+            round
+            size="small"
+            :disabled="loading || saving"
+            class="member-balance-pending-banner__btn"
+            @click="cancelPendingDinner"
+          >
+            取消预约（改回 {{ initial.dinner_daily_meal_units }} 份）
+          </el-button>
+        </div>
         <el-input-number
           id="member-units-dinner"
           v-model="form.dinner_daily_meal_units"
@@ -276,7 +403,6 @@ async function submit() {
         />
         <p class="okfood-dlg-field-hint balance-hint">
           只改晚餐份数，不影响午餐。当日晚餐大表已推单时，从下一配送日起生效。
-          <template v-if="pendingDinnerUnits != null">已预约次日改为 {{ pendingDinnerUnits }} 份。</template>
         </p>
       </div>
     </div>
@@ -289,3 +415,16 @@ async function submit() {
   </OkfoodAdminDialogShell>
 </template>
 
+<style scoped>
+.member-balance-pending-banner {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--el-color-warning-light-9, #fdf6ec);
+  border: 1px solid var(--el-color-warning-light-5, #f5dab1);
+}
+
+.member-balance-pending-banner__btn {
+  margin-top: 8px;
+}
+</style>

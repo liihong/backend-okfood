@@ -461,6 +461,10 @@ class MemberAdminOut(BaseModel):
     remarks: str | None = None
     balance: int
     daily_meal_units: int = Field(1, ge=1, description="每配送日份数；与配送扣次、备餐统计一致")
+    daily_meal_units_pending: int | None = Field(
+        None,
+        description="午餐已预约、下一配送日生效的份数；无预约为 null",
+    )
     meal_quota_total: int = Field(
         0,
         ge=0,
