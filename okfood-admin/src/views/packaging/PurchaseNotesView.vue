@@ -31,8 +31,6 @@ const loaded = ref(false)
 const saving = ref(false)
 const rows = ref([])
 const keyword = ref('')
-const category = ref('')
-const method = ref('')
 const rollKey = ref(0)
 const drawerOpen = ref(false)
 const editingId = ref(null)
@@ -51,7 +49,7 @@ const form = reactive({
 
 const countValue = computed(() => (loaded.value ? rows.value.length : null))
 const emptyText = computed(() => {
-  if (keyword.value.trim() || category.value || method.value) return '没有符合条件的资料'
+  if (keyword.value.trim()) return '没有符合条件的资料'
   return '还没有采购资料'
 })
 const drawerTitle = computed(() => (editingId.value ? '编辑资料' : '新增资料'))
@@ -104,8 +102,6 @@ function queryString() {
   const params = new URLSearchParams()
   const q = keyword.value.trim()
   if (q) params.set('q', q)
-  if (category.value) params.set('category', category.value)
-  if (method.value) params.set('record_method', method.value)
   const text = params.toString()
   return text ? `?${text}` : ''
 }
@@ -267,7 +263,7 @@ function methodTagType(value) {
   return 'primary'
 }
 
-watch([keyword, category, method], () => {
+watch(keyword, () => {
   window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(() => {
     void load()
@@ -311,12 +307,6 @@ onBeforeUnmount(() => {
         <p class="mkt-intro">独立记录食材和耗材的采购链接或联系方式，不关联菜品、库存和供应商。</p>
       </div>
       <div class="purchase-notes-head__side">
-        <el-button type="primary" round @click="openCreate">新增资料</el-button>
-      </div>
-    </header>
-
-    <div class="table-container table-container--members-fill purchase-notes-card">
-      <div class="purchase-notes-toolbar">
         <el-input
           v-model="keyword"
           clearable
@@ -327,18 +317,11 @@ onBeforeUnmount(() => {
             <Search :size="15" :stroke-width="2.25" aria-hidden="true" />
           </template>
         </el-input>
-        <el-select v-model="category" clearable placeholder="全部分类" class="purchase-notes-select">
-          <el-option v-for="item in CATEGORIES" :key="item.value" :label="item.label" :value="item.value" />
-        </el-select>
-        <el-select v-model="method" clearable placeholder="全部方式" class="purchase-notes-select">
-          <el-option v-for="item in METHODS" :key="item.value" :label="item.label" :value="item.value" />
-        </el-select>
-        <p class="purchase-notes-shown">
-          显示
-          <StatRollNumber :value="countValue" :replay-key="rollKey" />
-          条
-        </p>
+        <el-button type="primary" round @click="openCreate">新增资料</el-button>
       </div>
+    </header>
+
+    <div class="table-container table-container--members-fill purchase-notes-card">
       <div ref="tableHostRef" class="members-table-host">
         <AdminTable
           variant="members"
@@ -539,11 +522,18 @@ onBeforeUnmount(() => {
 }
 
 .purchase-notes-head__copy {
+  flex: 0 1 auto;
   min-width: 0;
 }
 
 .purchase-notes-head__side {
-  flex-shrink: 0;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  margin-bottom: 2px;
 }
 
 .purchase-notes-title-row {
@@ -553,8 +543,7 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-.purchase-notes-count,
-.purchase-notes-shown {
+.purchase-notes-count {
   display: inline-flex;
   align-items: baseline;
   gap: 0.15rem;
@@ -570,8 +559,7 @@ onBeforeUnmount(() => {
   font-weight: 800;
 }
 
-.purchase-notes-count :deep(.stat-roll),
-.purchase-notes-shown :deep(.stat-roll) {
+.purchase-notes-count :deep(.stat-roll) {
   font-weight: 800;
   color: var(--el-color-primary);
 }
@@ -584,31 +572,11 @@ onBeforeUnmount(() => {
   content: none;
 }
 
-.purchase-notes-toolbar {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  overflow-x: auto;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
-}
-
 .purchase-notes-search {
-  width: 280px;
-  flex: 0 0 280px;
-}
-
-.purchase-notes-select {
-  width: 132px;
-  flex: 0 0 132px;
-}
-
-.purchase-notes-shown {
-  margin-left: auto;
-  color: #64748b;
-  font-size: 13px;
-  font-weight: 700;
+  flex: 1 1 280px;
+  width: auto;
+  min-width: 220px;
+  max-width: 560px;
 }
 
 .purchase-notes-page :deep(.el-table__header th.el-table__cell:hover) {
@@ -677,6 +645,14 @@ onBeforeUnmount(() => {
   .purchase-notes-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .purchase-notes-head__side {
+    justify-content: stretch;
+  }
+
+  .purchase-notes-search {
+    max-width: none;
   }
 }
 </style>
