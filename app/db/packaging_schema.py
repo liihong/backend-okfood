@@ -124,6 +124,24 @@ _MYSQL_STATEMENTS: tuple[str, ...] = (
       UNIQUE KEY `uk_packaging_consume_run` (`store_id`, `biz_date`, `meal_period`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     """,
+    """
+    CREATE TABLE IF NOT EXISTS `purchase_note` (
+      `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      `store_id` BIGINT UNSIGNED NOT NULL,
+      `category` VARCHAR(16) NOT NULL,
+      `name` VARCHAR(64) NOT NULL,
+      `record_method` VARCHAR(16) NOT NULL,
+      `contact_value` VARCHAR(500) NOT NULL,
+      `platform` VARCHAR(32) NULL,
+      `supplier_label` VARCHAR(64) NULL,
+      `remark` VARCHAR(500) NULL,
+      `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (`id`),
+      KEY `idx_purchase_note_store` (`store_id`, `category`),
+      CONSTRAINT `fk_purchase_note_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON UPDATE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
 )
 
 
@@ -244,6 +262,21 @@ def _ensure_sqlite(engine: Engine) -> None:
           note VARCHAR(500),
           created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           UNIQUE (store_id, biz_date, meal_period)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS purchase_note (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          store_id BIGINT NOT NULL,
+          category VARCHAR(16) NOT NULL,
+          name VARCHAR(64) NOT NULL,
+          record_method VARCHAR(16) NOT NULL,
+          contact_value VARCHAR(500) NOT NULL,
+          platform VARCHAR(32),
+          supplier_label VARCHAR(64),
+          remark VARCHAR(500),
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """,
     )

@@ -959,6 +959,7 @@ function onTabClose(tab) {
             </div>
           </template>
           <el-menu-item index="/packaging/skus">库存品类管理</el-menu-item>
+          <el-menu-item index="/packaging/purchase-notes">采购资料</el-menu-item>
           <el-menu-item index="/packaging/dish-boxes">菜品用盒</el-menu-item>
           <el-menu-item index="/packaging/standard">每份标配</el-menu-item>
           <el-menu-item index="/packaging/stock">库存结存</el-menu-item>

@@ -52,6 +52,7 @@ from app.models.packaging_dish_line import PackagingDishLine
 from app.models.packaging_slot_line import PackagingSlotLine
 from app.models.packaging_standard_line import PackagingStandardLine
 from app.models.packaging_consume_run import PackagingConsumeRun
+from app.models.purchase_note import PurchaseNote
 
 __all__ = [
     "DayStockAdjustmentLog",
@@ -108,6 +109,7 @@ __all__ = [
     "PackagingSlotLine",
     "PackagingStandardLine",
     "PackagingConsumeRun",
+    "PurchaseNote",
     "SfSameCityCallback",
     "SfSameCityPush",
 ]

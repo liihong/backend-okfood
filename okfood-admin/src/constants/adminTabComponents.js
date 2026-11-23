@@ -30,6 +30,7 @@ export const ADMIN_TAB_COMPONENT_NAMES = {
   'menu-drinks': 'DrinksView',
   'weekly-menu': 'WeeklyMenuView',
   'packaging-skus': 'PackagingSkuView',
+  'packaging-purchase-notes': 'PurchaseNotesView',
   'packaging-dish-boxes': 'PackagingDishRecipeView',
   'packaging-standard': 'PackagingStandardView',
   'packaging-stock': 'PackagingStockView',

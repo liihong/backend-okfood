@@ -1,0 +1,938 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>采购资料 · 结构讨论稿</title>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <style>
+      :root {
+        --canvas: #f7fafb;
+        --surface: #ffffff;
+        --surface-soft: #f8fafc;
+        --ink: #1d1f21;
+        --muted: #66717b;
+        --line: #e6eaee;
+        --line-strong: #d7dde2;
+        --primary: #e8927c;
+        --primary-hover: #dd7f68;
+        --primary-soft: #fff2ee;
+        --green: #0e5a44;
+        --green-soft: #eaf6f1;
+        --blue: #2678d8;
+        --blue-soft: #edf5ff;
+        --amber: #a76616;
+        --amber-soft: #fff6e8;
+        --danger: #c44747;
+        --shadow: 0 14px 38px rgba(25, 45, 55, 0.08), 0 4px 12px rgba(25, 45, 55, 0.04);
+        --radius: 14px;
+        --font: "PingFang SC", "Hiragino Sans GB", "SF Pro Text", system-ui, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body { height: 100%; }
+
+      body {
+        margin: 0;
+        overflow: hidden;
+        color: var(--ink);
+        background: var(--canvas);
+        font-family: var(--font);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button, input, select, textarea { font: inherit; }
+
+      button { color: inherit; }
+
+      [hidden] { display: none !important; }
+
+      .app {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: 60px minmax(0, 1fr);
+      }
+
+      .topbar {
+        position: relative;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding: 0 18px;
+        background: rgba(255, 255, 255, 0.9);
+        border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+        box-shadow: 0 5px 18px rgba(25, 45, 55, 0.05);
+      }
+
+      .brand {
+        width: 236px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .brand-mark {
+        width: 38px;
+        height: 38px;
+        flex: 0 0 38px;
+        display: grid;
+        place-items: center;
+        border-radius: 11px;
+        background: var(--primary);
+        color: white;
+        font-weight: 900;
+        box-shadow: 0 8px 18px rgba(232, 146, 124, 0.24);
+      }
+
+      .brand-copy { min-width: 0; }
+
+      .brand-copy strong,
+      .brand-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      .brand-copy strong { font-size: 14px; }
+
+      .brand-copy span { margin-top: 2px; color: var(--muted); font-size: 11px; }
+
+      .top-tabs {
+        flex: 1;
+        display: flex;
+        align-self: stretch;
+        align-items: end;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .top-tab {
+        height: 42px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 14px;
+        border: 0;
+        border-radius: 10px 10px 0 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .top-tab.active { background: var(--surface); color: var(--ink); box-shadow: 0 -1px 0 var(--line); }
+
+      .top-actions { display: flex; align-items: center; gap: 8px; }
+
+      .clock { padding-right: 10px; text-align: right; border-right: 1px solid var(--line); }
+
+      .clock strong, .clock span { display: block; white-space: nowrap; }
+
+      .clock strong { font-size: 13px; }
+
+      .clock span { margin-top: 2px; color: var(--muted); font-size: 11px; }
+
+      .user-pill {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px 6px 6px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: white;
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .avatar { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--green-soft); color: var(--green); }
+
+      .workspace {
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 250px minmax(0, 1fr);
+        gap: 12px;
+        padding: 16px 12px 12px;
+      }
+
+      .sidebar {
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        padding: 12px 10px;
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: var(--shadow);
+      }
+
+      .nav-scroll { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+
+      .nav-item, .nav-parent, .nav-child {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        border: 0;
+        background: transparent;
+        text-align: left;
+        cursor: default;
+      }
+
+      .nav-item, .nav-parent { min-height: 42px; padding: 7px 9px; border-radius: 10px; color: #3e4851; font-size: 13px; font-weight: 750; }
+
+      .nav-icon {
+        width: 29px;
+        height: 29px;
+        flex: 0 0 29px;
+        display: grid;
+        place-items: center;
+        border-radius: 9px;
+        background: #eef3f7;
+        color: #687681;
+      }
+
+      .nav-parent.open { color: var(--green); }
+
+      .nav-parent.open .nav-icon { background: var(--amber-soft); color: var(--amber); }
+
+      .nav-parent .chevron { margin-left: auto; color: #99a2aa; }
+
+      .nav-children { margin: 2px 0 7px 38px; padding-left: 9px; border-left: 1px solid #e0e6ea; }
+
+      .nav-child { min-height: 34px; padding: 5px 9px; border-radius: 8px; color: var(--muted); font-size: 12px; font-weight: 650; }
+
+      .nav-child.active { background: var(--primary-soft); color: #b95e49; font-weight: 800; }
+
+      .nav-spacer { flex: 1; }
+
+      .sidebar-note { margin: 10px 4px 2px; padding: 10px 11px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.55; }
+
+      .main {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+
+      .page-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 18px 22px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .breadcrumb { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; color: #8a949d; font-size: 11px; font-weight: 650; }
+
+      .page-title-row { display: flex; align-items: center; gap: 10px; }
+
+      .page-title-row h1 { margin: 0; font-size: 23px; line-height: 1.25; letter-spacing: 0; }
+
+      .count-badge { padding: 3px 8px; border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 11px; font-weight: 850; }
+
+      .page-intro { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+
+      .btn {
+        height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 0 14px;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        background: white;
+        color: #39434b;
+        font-size: 12px;
+        font-weight: 800;
+        cursor: pointer;
+        transition: 0.16s ease;
+      }
+
+      .btn:hover { border-color: #bfc7cd; background: #fbfcfd; }
+
+      .btn-primary { border-color: var(--primary); background: var(--primary); color: white; box-shadow: 0 7px 16px rgba(232, 146, 124, 0.22); }
+
+      .btn-primary:hover { border-color: var(--primary-hover); background: var(--primary-hover); }
+
+      .btn-danger { border-color: var(--danger); background: var(--danger); color: white; }
+
+      .design-switcher {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 9px 22px;
+        background: #fbfcfd;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .design-switcher__label { color: var(--muted); font-size: 11px; font-weight: 800; white-space: nowrap; }
+
+      .segmented { display: inline-flex; align-items: center; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: #f2f5f7; }
+
+      .segment {
+        min-height: 29px;
+        padding: 0 11px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 750;
+        cursor: pointer;
+      }
+
+      .segment.active { background: white; color: var(--ink); box-shadow: 0 2px 7px rgba(15, 23, 42, 0.08); }
+
+      .recommend { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; color: var(--green); font-size: 11px; font-weight: 800; }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 11px 22px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .search-wrap { position: relative; width: min(340px, 34vw); }
+
+      .search-wrap > svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #8f99a1; }
+
+      .control {
+        height: 36px;
+        border: 1px solid var(--line-strong);
+        border-radius: 9px;
+        background: white;
+        color: var(--ink);
+        outline: none;
+        font-size: 12px;
+      }
+
+      .control:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(232, 146, 124, 0.14); }
+
+      .search-input { width: 100%; padding: 0 34px 0 34px; }
+
+      .search-clear { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); width: 25px; height: 25px; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: #a0a8ae; cursor: pointer; }
+
+      select.control { min-width: 118px; padding: 0 28px 0 10px; }
+
+      .toolbar-result { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+      .view-host { min-height: 0; flex: 1; overflow: hidden; }
+
+      .view { height: 100%; min-height: 0; }
+
+      .table-scroll { height: 100%; overflow: auto; }
+
+      table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+
+      thead th {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        height: 39px;
+        padding: 0 13px;
+        background: var(--green);
+        color: rgba(255, 255, 255, 0.96);
+        text-align: left;
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0;
+      }
+
+      tbody td { height: 62px; padding: 9px 13px; border-bottom: 1px solid var(--line); background: white; vertical-align: middle; font-size: 12px; }
+
+      tbody tr:hover td { background: #fafcfc; }
+
+      .name-cell strong, .name-cell span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      .name-cell strong { font-size: 13px; }
+
+      .name-cell span { margin-top: 4px; color: var(--muted); font-size: 11px; }
+
+      .type-tag, .platform-tag, .channel-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        max-width: 100%;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .type-tag.ingredient { background: var(--green-soft); color: var(--green); }
+
+      .type-tag.consumable { background: var(--amber-soft); color: var(--amber); }
+
+      .platform-tag { background: #f0f3f5; color: #59656e; }
+
+      .contact-cell { min-width: 0; }
+
+      .contact-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+      .channel-tag { flex: 0 0 auto; background: var(--blue-soft); color: var(--blue); }
+
+      .channel-tag.wechat { background: var(--green-soft); color: #16824e; }
+
+      .contact-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #34404a; }
+
+      .link-value { color: var(--blue); font-weight: 700; }
+
+      .note-cell { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+
+      .row-actions { display: flex; justify-content: flex-end; gap: 4px; }
+
+      .icon-btn {
+        width: 31px;
+        height: 31px;
+        display: inline-grid;
+        place-items: center;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: #64717a;
+        cursor: pointer;
+      }
+
+      .icon-btn:hover { border-color: var(--line); background: #f2f5f7; color: var(--ink); }
+
+      .icon-btn.danger:hover { background: #fff0f0; color: var(--danger); }
+
+      .split-view { display: grid; grid-template-columns: 232px minmax(0, 1fr); }
+
+      .split-filter { padding: 13px; border-right: 1px solid var(--line); background: #fbfcfd; }
+
+      .split-filter h3 { margin: 0 0 9px; font-size: 12px; }
+
+      .split-category { width: 100%; display: flex; align-items: center; gap: 9px; min-height: 48px; margin-bottom: 6px; padding: 7px 9px; border: 1px solid transparent; border-radius: 10px; background: transparent; cursor: pointer; text-align: left; }
+
+      .split-category.active { border-color: #f1c9bd; background: var(--primary-soft); }
+
+      .split-category__icon { width: 32px; height: 32px; flex: 0 0 32px; display: grid; place-items: center; border-radius: 9px; background: white; color: var(--green); box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06); }
+
+      .split-category:nth-of-type(3) .split-category__icon { color: var(--amber); }
+
+      .split-category strong, .split-category span { display: block; }
+
+      .split-category strong { font-size: 12px; }
+
+      .split-category span { margin-top: 2px; color: var(--muted); font-size: 10px; }
+
+      .split-category b { margin-left: auto; color: #7d8790; font-size: 11px; }
+
+      .split-content { min-width: 0; min-height: 0; overflow: auto; }
+
+      .split-content-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; min-height: 47px; padding: 0 15px; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, 0.96); }
+
+      .split-content-head strong { font-size: 13px; }
+
+      .compact-list { list-style: none; margin: 0; padding: 0; }
+
+      .compact-row { display: grid; grid-template-columns: minmax(150px, 0.9fr) minmax(220px, 2fr) 100px 96px; align-items: center; gap: 12px; min-height: 64px; padding: 8px 15px; border-bottom: 1px solid var(--line); }
+
+      .compact-row:hover { background: #fafcfc; }
+
+      .compact-row__name strong, .compact-row__name span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      .compact-row__name strong { font-size: 12px; }
+
+      .compact-row__name span { margin-top: 3px; color: var(--muted); font-size: 10px; }
+
+      .grouped-view { padding: 13px; overflow: auto; background: #f8fafb; }
+
+      .grouped-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+
+      .group-panel { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: white; }
+
+      .group-head { display: flex; align-items: center; gap: 9px; min-height: 50px; padding: 0 13px; border-bottom: 1px solid var(--line); }
+
+      .group-head__icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: var(--green-soft); color: var(--green); }
+
+      .group-panel.consumable .group-head__icon { background: var(--amber-soft); color: var(--amber); }
+
+      .group-head strong { font-size: 13px; }
+
+      .group-head span { color: var(--muted); font-size: 10px; }
+
+      .group-head b { margin-left: auto; color: #7c8790; font-size: 11px; }
+
+      .group-row { display: grid; grid-template-columns: minmax(118px, 0.9fr) minmax(160px, 1.5fr) 76px; align-items: center; gap: 10px; min-height: 64px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+
+      .group-row:last-child { border-bottom: 0; }
+
+      .group-row:hover { background: #fafcfc; }
+
+      .empty { height: 100%; min-height: 240px; display: grid; place-items: center; color: var(--muted); text-align: center; }
+
+      .empty svg { margin: 0 auto 9px; color: #a8b2b9; }
+
+      .empty strong { display: block; color: #4a555e; font-size: 13px; }
+
+      .empty span { display: block; margin-top: 4px; font-size: 11px; }
+
+      .scrim { position: fixed; inset: 0; z-index: 80; background: rgba(23, 31, 38, 0.28); opacity: 0; pointer-events: none; transition: opacity 0.18s ease; }
+
+      .scrim.open { opacity: 1; pointer-events: auto; }
+
+      .drawer {
+        position: fixed;
+        top: 0;
+        right: 0;
+        z-index: 90;
+        width: min(520px, 94vw);
+        height: 100vh;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        background: white;
+        box-shadow: -18px 0 48px rgba(15, 23, 42, 0.15);
+        transform: translateX(104%);
+        transition: transform 0.22s ease;
+      }
+
+      .drawer.open { transform: translateX(0); }
+
+      .drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 20px 21px 15px; border-bottom: 1px solid var(--line); }
+
+      .drawer-kicker { margin: 0 0 5px; color: var(--primary-hover); font-size: 10px; font-weight: 900; }
+
+      .drawer-head h2 { margin: 0; font-size: 19px; }
+
+      .drawer-subtitle { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+      .drawer-body { min-height: 0; overflow-y: auto; padding: 17px 21px; background: #f8fafb; }
+
+      .form-section { margin-bottom: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+
+      .form-section h3 { margin: 0 0 13px; font-size: 12px; }
+
+      .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+      .field { min-width: 0; }
+
+      .field.full { grid-column: 1 / -1; }
+
+      .field label { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; color: #4f5a63; font-size: 11px; font-weight: 800; }
+
+      .required { color: var(--danger); }
+
+      .field input, .field select, .field textarea { width: 100%; padding: 0 10px; }
+
+      .field textarea { min-height: 76px; padding-top: 9px; resize: vertical; line-height: 1.5; }
+
+      .contact-mode { width: 100%; display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: #f2f5f7; }
+
+      .contact-mode button { min-width: 0; height: 30px; padding: 0 5px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 10px; font-weight: 750; cursor: pointer; }
+
+      .contact-mode button.active { background: white; color: var(--ink); box-shadow: 0 2px 7px rgba(15, 23, 42, 0.08); }
+
+      .drawer-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 21px; border-top: 1px solid var(--line); background: white; }
+
+      .dialog-wrap { position: fixed; inset: 0; z-index: 110; display: grid; place-items: center; padding: 20px; background: rgba(23, 31, 38, 0.28); opacity: 0; pointer-events: none; transition: opacity 0.16s ease; }
+
+      .dialog-wrap.open { opacity: 1; pointer-events: auto; }
+
+      .dialog { width: min(390px, 100%); overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.8); border-radius: 16px; background: white; box-shadow: 0 22px 60px rgba(15, 23, 42, 0.18); transform: translateY(8px); transition: transform 0.16s ease; }
+
+      .dialog-wrap.open .dialog { transform: translateY(0); }
+
+      .dialog-body { padding: 20px; }
+
+      .dialog-icon { width: 38px; height: 38px; display: grid; place-items: center; margin-bottom: 12px; border-radius: 11px; background: #fff0f0; color: var(--danger); }
+
+      .dialog h3 { margin: 0; font-size: 16px; }
+
+      .dialog p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+      .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 11px 16px; border-top: 1px solid var(--line); background: #f8fafb; }
+
+      .toast { position: fixed; top: 18px; left: 50%; z-index: 140; display: flex; align-items: center; gap: 9px; max-width: min(90vw, 360px); padding: 10px 14px; border: 1px solid rgba(255, 255, 255, 0.84); border-radius: 13px; background: rgba(255, 255, 255, 0.92); box-shadow: 0 14px 38px rgba(25, 45, 55, 0.12); color: #3d4850; font-size: 12px; font-weight: 750; opacity: 0; transform: translate(-50%, -10px); pointer-events: none; transition: 0.2s ease; }
+
+      .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+      .toast svg { color: #16824e; }
+
+      @media (max-width: 1050px) {
+        .workspace { grid-template-columns: 70px minmax(0, 1fr); }
+        .sidebar { padding: 12px 8px; }
+        .nav-item, .nav-parent { justify-content: center; padding: 7px; }
+        .nav-item > span:not(.nav-icon), .nav-parent > span:not(.nav-icon), .nav-parent .chevron, .nav-children, .sidebar-note { display: none; }
+        .brand { width: 58px; }
+        .brand-copy { display: none; }
+        .grouped-grid { grid-template-columns: 1fr; }
+      }
+
+      @media (max-width: 760px) {
+        body { overflow: auto; }
+        .app { min-width: 680px; }
+        .top-actions { display: none; }
+        .workspace { min-height: calc(100vh - 60px); grid-template-columns: minmax(0, 1fr); }
+        .sidebar { display: none; }
+        .main { min-height: 720px; }
+        .page-head { align-items: center; }
+        .page-intro { max-width: 430px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">OK</div>
+          <div class="brand-copy"><strong>OK 饭健康餐</strong><span>会员制经营系统</span></div>
+        </div>
+        <div class="top-tabs">
+          <button class="top-tab"><i data-lucide="layout-dashboard" width="15"></i>今日营业概览</button>
+          <button class="top-tab active"><i data-lucide="notebook-tabs" width="15"></i>采购资料</button>
+        </div>
+        <div class="top-actions">
+          <div class="clock"><strong id="clockTime">10:24</strong><span id="clockDate">11月23日 星期一</span></div>
+          <button class="icon-btn" type="button" title="系统消息" aria-label="系统消息"><i data-lucide="bell" width="17"></i></button>
+          <div class="user-pill"><span class="avatar"><i data-lucide="user-round" width="15"></i></span>门店管理员<i data-lucide="chevron-down" width="13"></i></div>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar">
+          <div class="nav-scroll">
+            <button class="nav-item"><span class="nav-icon"><i data-lucide="layout-dashboard" width="16"></i></span><span>营业概览</span></button>
+            <button class="nav-item"><span class="nav-icon"><i data-lucide="users" width="16"></i></span><span>会员档案</span></button>
+            <button class="nav-item"><span class="nav-icon"><i data-lucide="clipboard-list" width="16"></i></span><span>订单管理</span></button>
+            <button class="nav-item"><span class="nav-icon"><i data-lucide="truck" width="16"></i></span><span>配送管理</span></button>
+            <button class="nav-item"><span class="nav-icon"><i data-lucide="utensils" width="16"></i></span><span>菜单管理</span></button>
+            <button class="nav-parent open"><span class="nav-icon"><i data-lucide="boxes" width="16"></i></span><span>库存管理</span><i class="chevron" data-lucide="chevron-down" width="14"></i></button>
+            <div class="nav-children">
+              <button class="nav-child">库存品类管理</button>
+              <button class="nav-child active">采购资料</button>
+              <button class="nav-child">菜品用盒</button>
+              <button class="nav-child">每份标配</button>
+              <button class="nav-child">库存结存</button>
+              <button class="nav-child">库存流水</button>
+              <button class="nav-child">库存校对</button>
+            </div>
+            <button class="nav-item"><span class="nav-icon"><i data-lucide="megaphone" width="16"></i></span><span>小程序营销</span></button>
+            <button class="nav-item"><span class="nav-icon"><i data-lucide="settings" width="16"></i></span><span>系统管理</span></button>
+          </div>
+          <div class="nav-spacer"></div>
+          <p class="sidebar-note">入口建议：放在“库存管理”下，名称用“采购资料”，比“物料链接”更能覆盖微信和手机号。</p>
+        </aside>
+
+        <main class="main">
+          <header class="page-head">
+            <div>
+              <div class="breadcrumb"><span>库存管理</span><i data-lucide="chevron-right" width="12"></i><strong>采购资料</strong></div>
+              <div class="page-title-row"><h1>采购资料</h1><span class="count-badge" id="totalBadge">8 条</span></div>
+              <p class="page-intro">独立记录食材与耗材的采购链接或联系方式，不关联菜品、库存和供应商档案。</p>
+            </div>
+            <button class="btn btn-primary" id="createBtn" type="button"><i data-lucide="plus" width="16"></i>新增资料</button>
+          </header>
+
+          <div class="design-switcher">
+            <span class="design-switcher__label">结构讨论稿</span>
+            <div class="segmented" role="tablist" aria-label="页面结构方案">
+              <button class="segment active" data-view="table" role="tab">A · 统一列表</button>
+              <button class="segment" data-view="split" role="tab">B · 左右分栏</button>
+              <button class="segment" data-view="grouped" role="tab">C · 双类分组</button>
+            </div>
+            <span class="recommend"><i data-lucide="sparkles" width="13"></i>A 更适合日常维护</span>
+          </div>
+
+          <div class="toolbar">
+            <div class="search-wrap">
+              <i data-lucide="search" width="15"></i>
+              <input id="searchInput" class="control search-input" type="search" placeholder="搜索名称、链接、微信或备注" />
+              <button class="search-clear" id="clearSearch" type="button" title="清空搜索" aria-label="清空搜索"><i data-lucide="x" width="14"></i></button>
+            </div>
+            <select id="typeFilter" class="control" aria-label="资料分类">
+              <option value="all">全部分类</option>
+              <option value="ingredient">食材类</option>
+              <option value="consumable">耗材类</option>
+            </select>
+            <select id="channelFilter" class="control" aria-label="联系方式">
+              <option value="all">全部方式</option>
+              <option value="link">采购链接</option>
+              <option value="wechat">微信</option>
+              <option value="phone">手机号</option>
+              <option value="other">其他</option>
+            </select>
+            <span class="toolbar-result" id="resultText">显示 8 条</span>
+          </div>
+
+          <section class="view-host">
+            <div class="view" id="tableView">
+              <div class="table-scroll">
+                <table aria-label="采购资料列表">
+                  <colgroup><col style="width: 19%" /><col style="width: 11%" /><col style="width: 31%" /><col style="width: 11%" /><col style="width: 16%" /><col style="width: 12%" /></colgroup>
+                  <thead><tr><th>名称</th><th>分类</th><th>采购信息</th><th>平台</th><th>备注</th><th style="text-align:right">操作</th></tr></thead>
+                  <tbody id="tableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="view split-view" id="splitView" hidden>
+              <aside class="split-filter">
+                <h3>按分类查看</h3>
+                <button class="split-category active" data-category="all"><span class="split-category__icon"><i data-lucide="layers-3" width="16"></i></span><span><strong>全部资料</strong><span>食材和耗材</span></span><b id="splitAllCount">8</b></button>
+                <button class="split-category" data-category="ingredient"><span class="split-category__icon"><i data-lucide="wheat" width="16"></i></span><span><strong>食材类</strong><span>原料与调味</span></span><b id="splitIngredientCount">4</b></button>
+                <button class="split-category" data-category="consumable"><span class="split-category__icon"><i data-lucide="package-open" width="16"></i></span><span><strong>耗材类</strong><span>包装与工具</span></span><b id="splitConsumableCount">4</b></button>
+              </aside>
+              <div class="split-content">
+                <div class="split-content-head"><strong id="splitTitle">全部资料</strong><span class="toolbar-result" id="splitResult">共 8 条</span></div>
+                <ul class="compact-list" id="splitList"></ul>
+              </div>
+            </div>
+
+            <div class="view grouped-view" id="groupedView" hidden>
+              <div class="grouped-grid" id="groupedGrid"></div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="scrim" id="scrim"></div>
+    <aside class="drawer" id="drawer" aria-hidden="true">
+      <header class="drawer-head">
+        <div><p class="drawer-kicker">采购资料</p><h2 id="drawerTitle">新增资料</h2><p class="drawer-subtitle">只记录查找与联系信息，保存后不会影响库存或菜品。</p></div>
+        <button class="icon-btn" id="closeDrawer" type="button" title="关闭" aria-label="关闭"><i data-lucide="x" width="18"></i></button>
+      </header>
+      <div class="drawer-body">
+        <section class="form-section">
+          <h3>基本信息</h3>
+          <div class="form-grid">
+            <div class="field"><label>分类 <span class="required">*</span></label><select id="formType" class="control"><option value="ingredient">食材类</option><option value="consumable">耗材类</option></select></div>
+            <div class="field"><label>名称 <span class="required">*</span></label><input id="formName" class="control" maxlength="60" placeholder="如：螺旋意面" /></div>
+          </div>
+        </section>
+        <section class="form-section">
+          <h3>采购信息</h3>
+          <div class="form-grid">
+            <div class="field full">
+              <label>记录方式</label>
+              <div class="contact-mode" id="contactMode">
+                <button class="active" type="button" data-channel="link">采购链接</button><button type="button" data-channel="wechat">微信</button><button type="button" data-channel="phone">手机号</button><button type="button" data-channel="other">其他</button>
+              </div>
+            </div>
+            <div class="field full"><label id="contactLabel">链接 <span class="required">*</span></label><input id="formContact" class="control" placeholder="粘贴淘宝、拼多多或 1688 链接" /></div>
+            <div class="field"><label>平台</label><input id="formPlatform" class="control" maxlength="30" placeholder="如：淘宝、微信" /></div>
+            <div class="field"><label>简称 / 供应方</label><input id="formSource" class="control" maxlength="40" placeholder="选填，便于辨认" /></div>
+          </div>
+        </section>
+        <section class="form-section">
+          <h3>补充说明</h3>
+          <div class="field"><label>备注</label><textarea id="formNote" class="control" maxlength="200" placeholder="如规格、包装数量、联系时要说明的内容"></textarea></div>
+        </section>
+      </div>
+      <footer class="drawer-foot"><button class="btn" id="cancelDrawer" type="button">取消</button><button class="btn btn-primary" id="saveBtn" type="button"><i data-lucide="check" width="15"></i>保存</button></footer>
+    </aside>
+
+    <div class="dialog-wrap" id="deleteDialog" aria-hidden="true">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="deleteTitle">
+        <div class="dialog-body"><div class="dialog-icon"><i data-lucide="trash-2" width="18"></i></div><h3 id="deleteTitle">删除这条采购资料？</h3><p id="deleteDetail">删除后无法从列表中找回，但不会影响库存、菜品或历史记录。</p></div>
+        <div class="dialog-foot"><button class="btn" id="cancelDelete" type="button">取消</button><button class="btn btn-danger" id="confirmDelete" type="button">删除</button></div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"><i data-lucide="circle-check" width="17"></i><span id="toastText">已保存</span></div>
+
+    <script>
+      const records = [
+        { id: 1, type: 'ingredient', name: '螺旋意面', source: '安卡拉食品', channel: 'link', contact: 'https://e.tb.cn/example-pasta', platform: '淘宝', note: '500g × 20 袋整箱' },
+        { id: 2, type: 'ingredient', name: '藕根粉', source: '常用采购', channel: 'link', contact: 'https://mobile.yangkeduo.com/example-root', platform: '拼多多', note: '先核对生产日期' },
+        { id: 3, type: 'ingredient', name: '韩式肥牛汁', source: '郑州调味食品', channel: 'wechat', contact: 'okfood_supplier_01', platform: '微信', note: '整箱询价，发货前确认库存' },
+        { id: 4, type: 'ingredient', name: '太阳蛋 24 连', source: '餐饮用蛋供应', channel: 'link', contact: 'https://e.tb.cn/example-eggs', platform: '淘宝', note: '8cm 规格' },
+        { id: 5, type: 'consumable', name: '800 安全扣汤碗', source: '餐盒耗材店', channel: 'link', contact: 'https://e.tb.cn/example-bowl-800', platform: '淘宝', note: '透明圆形，先确认配套盖' },
+        { id: 6, type: 'consumable', name: '双格方盒', source: '常用采购', channel: 'link', contact: 'https://mobile.yangkeduo.com/example-box', platform: '拼多多', note: '整箱采购' },
+        { id: 7, type: 'consumable', name: '打包台工作台', source: '本地设备商', channel: 'phone', contact: '138 0000 2468', platform: '手机号', note: '不锈钢台，含裁剪桌' },
+        { id: 8, type: 'consumable', name: '六角餐盒', source: '餐盒供应商', channel: 'wechat', contact: 'okfood_packaging_02', platform: '微信', note: '可询问 500 套阶梯价' },
+      ]
+
+      const state = { view: 'table', search: '', type: 'all', channel: 'all', splitCategory: 'all', editingId: null, channelMode: 'link', deleteId: null }
+
+      const byId = (id) => document.getElementById(id)
+      const labels = { ingredient: '食材类', consumable: '耗材类', link: '链接', wechat: '微信', phone: '手机', other: '其他' }
+      const icons = { link: 'link-2', wechat: 'message-circle', phone: 'phone', other: 'notebook-pen' }
+
+      function refreshIcons() {
+        if (window.lucide?.createIcons) window.lucide.createIcons()
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char])
+      }
+
+      function filteredRecords() {
+        const query = state.search.trim().toLowerCase()
+        return records.filter((item) => {
+          const matchesSearch = !query || [item.name, item.source, item.contact, item.platform, item.note].some((value) => String(value).toLowerCase().includes(query))
+          return matchesSearch && (state.type === 'all' || item.type === state.type) && (state.channel === 'all' || item.channel === state.channel)
+        })
+      }
+
+      function contactMarkup(item) {
+        const valueClass = item.channel === 'link' ? 'contact-value link-value' : 'contact-value'
+        return `<div class="contact-line"><span class="channel-tag ${item.channel}"><i data-lucide="${icons[item.channel]}" width="12"></i>${labels[item.channel]}</span><span class="${valueClass}" title="${escapeHtml(item.contact)}">${escapeHtml(item.contact)}</span></div>`
+      }
+
+      function actionMarkup(item) {
+        const open = item.channel === 'link' ? `<button class="icon-btn" data-action="open" data-id="${item.id}" title="打开链接" aria-label="打开链接"><i data-lucide="external-link" width="15"></i></button>` : ''
+        return `<div class="row-actions">${open}<button class="icon-btn" data-action="copy" data-id="${item.id}" title="复制采购信息" aria-label="复制采购信息"><i data-lucide="copy" width="15"></i></button><button class="icon-btn" data-action="edit" data-id="${item.id}" title="编辑" aria-label="编辑"><i data-lucide="pencil" width="15"></i></button><button class="icon-btn danger" data-action="delete" data-id="${item.id}" title="删除" aria-label="删除"><i data-lucide="trash-2" width="15"></i></button></div>`
+      }
+
+      function emptyMarkup() {
+        return `<div class="empty"><div><i data-lucide="search-x" width="30"></i><strong>没有找到匹配资料</strong><span>换个关键词或清空筛选条件</span></div></div>`
+      }
+
+      function render() {
+        const rows = filteredRecords()
+        byId('totalBadge').textContent = `${records.length} 条`
+        byId('resultText').textContent = `显示 ${rows.length} 条`
+        byId('tableBody').innerHTML = rows.length ? rows.map((item) => `<tr><td><div class="name-cell"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.source || '未填写简称')}</span></div></td><td><span class="type-tag ${item.type}">${labels[item.type]}</span></td><td>${contactMarkup(item)}</td><td><span class="platform-tag">${escapeHtml(item.platform || '未标注')}</span></td><td class="note-cell" title="${escapeHtml(item.note)}">${escapeHtml(item.note || '—')}</td><td>${actionMarkup(item)}</td></tr>`).join('') : `<tr><td colspan="6">${emptyMarkup()}</td></tr>`
+
+        const splitRows = state.splitCategory === 'all' ? rows : rows.filter((item) => item.type === state.splitCategory)
+        byId('splitTitle').textContent = state.splitCategory === 'all' ? '全部资料' : labels[state.splitCategory]
+        byId('splitResult').textContent = `共 ${splitRows.length} 条`
+        byId('splitList').innerHTML = splitRows.length ? splitRows.map((item) => `<li class="compact-row"><div class="compact-row__name"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.source)}</span></div><div>${contactMarkup(item)}</div><span class="platform-tag">${escapeHtml(item.platform)}</span>${actionMarkup(item)}</li>`).join('') : `<li>${emptyMarkup()}</li>`
+
+        const ingredientRows = rows.filter((item) => item.type === 'ingredient')
+        const consumableRows = rows.filter((item) => item.type === 'consumable')
+        byId('groupedGrid').innerHTML = [
+          { type: 'ingredient', title: '食材类', subtitle: '原料与调味', icon: 'wheat', list: ingredientRows },
+          { type: 'consumable', title: '耗材类', subtitle: '包装与工具', icon: 'package-open', list: consumableRows },
+        ].map((group) => `<section class="group-panel ${group.type}"><header class="group-head"><span class="group-head__icon"><i data-lucide="${group.icon}" width="15"></i></span><span><strong>${group.title}</strong><br><span>${group.subtitle}</span></span><b>${group.list.length} 条</b></header>${group.list.length ? group.list.map((item) => `<div class="group-row"><div class="compact-row__name"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.source)}</span></div><div>${contactMarkup(item)}</div>${actionMarkup(item)}</div>`).join('') : emptyMarkup()}</section>`).join('')
+
+        byId('splitAllCount').textContent = rows.length
+        byId('splitIngredientCount').textContent = ingredientRows.length
+        byId('splitConsumableCount').textContent = consumableRows.length
+        refreshIcons()
+      }
+
+      function setView(view) {
+        state.view = view
+        document.querySelectorAll('.segment').forEach((button) => button.classList.toggle('active', button.dataset.view === view))
+        byId('tableView').hidden = view !== 'table'
+        byId('splitView').hidden = view !== 'split'
+        byId('groupedView').hidden = view !== 'grouped'
+      }
+
+      function setChannelMode(mode) {
+        state.channelMode = mode
+        document.querySelectorAll('#contactMode button').forEach((button) => button.classList.toggle('active', button.dataset.channel === mode))
+        const field = byId('formContact')
+        const copy = {
+          link: ['链接', '粘贴淘宝、拼多多或 1688 链接'],
+          wechat: ['微信号', '填写供应方微信号'],
+          phone: ['手机号', '填写供应方手机号'],
+          other: ['采购信息', '填写其他可联系或查找的信息'],
+        }[mode]
+        byId('contactLabel').innerHTML = `${copy[0]} <span class="required">*</span>`
+        field.placeholder = copy[1]
+      }
+
+      function openDrawer(item = null) {
+        state.editingId = item?.id ?? null
+        byId('drawerTitle').textContent = item ? '编辑资料' : '新增资料'
+        byId('formType').value = item?.type ?? 'ingredient'
+        byId('formName').value = item?.name ?? ''
+        byId('formContact').value = item?.contact ?? ''
+        byId('formPlatform').value = item?.platform ?? ''
+        byId('formSource').value = item?.source ?? ''
+        byId('formNote').value = item?.note ?? ''
+        setChannelMode(item?.channel ?? 'link')
+        byId('scrim').classList.add('open')
+        byId('drawer').classList.add('open')
+        byId('drawer').setAttribute('aria-hidden', 'false')
+        setTimeout(() => byId('formName').focus(), 220)
+      }
+
+      function closeDrawer() {
+        byId('scrim').classList.remove('open')
+        byId('drawer').classList.remove('open')
+        byId('drawer').setAttribute('aria-hidden', 'true')
+      }
+
+      function showToast(message) {
+        byId('toastText').textContent = message
+        byId('toast').classList.add('show')
+        clearTimeout(showToast.timer)
+        showToast.timer = setTimeout(() => byId('toast').classList.remove('show'), 1800)
+      }
+
+      function saveRecord() {
+        const name = byId('formName').value.trim()
+        const contact = byId('formContact').value.trim()
+        if (!name || !contact) { showToast(name ? '请填写采购信息' : '请填写名称'); return }
+        const payload = { type: byId('formType').value, name, source: byId('formSource').value.trim(), channel: state.channelMode, contact, platform: byId('formPlatform').value.trim() || labels[state.channelMode], note: byId('formNote').value.trim() }
+        if (state.editingId) Object.assign(records.find((item) => item.id === state.editingId), payload)
+        else records.unshift({ id: Math.max(...records.map((item) => item.id), 0) + 1, ...payload })
+        closeDrawer(); render(); showToast(state.editingId ? '资料已更新' : '资料已新增')
+      }
+
+      async function copyText(text) {
+        try { await navigator.clipboard.writeText(text); showToast('采购信息已复制') }
+        catch { showToast('浏览器未允许复制，请手动选择') }
+      }
+
+      function handleAction(event) {
+        const button = event.target.closest('[data-action]')
+        if (!button) return
+        const item = records.find((record) => record.id === Number(button.dataset.id))
+        if (!item) return
+        if (button.dataset.action === 'copy') copyText(item.contact)
+        if (button.dataset.action === 'edit') openDrawer(item)
+        if (button.dataset.action === 'open') window.open(item.contact, '_blank', 'noopener,noreferrer')
+        if (button.dataset.action === 'delete') {
+          state.deleteId = item.id
+          byId('deleteTitle').textContent = `删除“${item.name}”？`
+          byId('deleteDialog').classList.add('open')
+          byId('deleteDialog').setAttribute('aria-hidden', 'false')
+        }
+      }
+
+      function updateClock() {
+        const now = new Date()
+        byId('clockTime').textContent = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(now)
+        byId('clockDate').textContent = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }).format(now)
+      }
+
+      document.querySelectorAll('.segment').forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)))
+      document.querySelectorAll('.split-category').forEach((button) => button.addEventListener('click', () => {
+        state.splitCategory = button.dataset.category
+        document.querySelectorAll('.split-category').forEach((item) => item.classList.toggle('active', item === button))
+        render()
+      }))
+      document.querySelectorAll('#contactMode button').forEach((button) => button.addEventListener('click', () => setChannelMode(button.dataset.channel)))
+      byId('searchInput').addEventListener('input', (event) => { state.search = event.target.value; render() })
+      byId('clearSearch').addEventListener('click', () => { byId('searchInput').value = ''; state.search = ''; render(); byId('searchInput').focus() })
+      byId('typeFilter').addEventListener('change', (event) => { state.type = event.target.value; render() })
+      byId('channelFilter').addEventListener('change', (event) => { state.channel = event.target.value; render() })
+      byId('createBtn').addEventListener('click', () => openDrawer())
+      byId('closeDrawer').addEventListener('click', closeDrawer)
+      byId('cancelDrawer').addEventListener('click', closeDrawer)
+      byId('scrim').addEventListener('click', closeDrawer)
+      byId('saveBtn').addEventListener('click', saveRecord)
+      byId('tableBody').addEventListener('click', handleAction)
+      byId('splitList').addEventListener('click', handleAction)
+      byId('groupedGrid').addEventListener('click', handleAction)
+      byId('cancelDelete').addEventListener('click', () => byId('deleteDialog').classList.remove('open'))
+      byId('confirmDelete').addEventListener('click', () => {
+        const index = records.findIndex((item) => item.id === state.deleteId)
+        if (index >= 0) records.splice(index, 1)
+        byId('deleteDialog').classList.remove('open')
+        render(); showToast('资料已删除')
+      })
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return
+        if (byId('deleteDialog').classList.contains('open')) byId('deleteDialog').classList.remove('open')
+        else closeDrawer()
+      })
+
+      updateClock(); setInterval(updateClock, 30000); render(); setView('table'); refreshIcons()
+    </script>
+  </body>
+</html>

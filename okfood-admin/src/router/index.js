@@ -46,6 +46,7 @@ const GiftCouponsView = () => import('../views/marketing/GiftCouponsView.vue')
 const DouyinProductMappingsView = () => import('../views/marketing/douyin/DouyinProductMappingsView.vue')
 const DouyinRedemptionsView = () => import('../views/marketing/douyin/DouyinRedemptionsView.vue')
 const PackagingSkuView = () => import('../views/packaging/PackagingSkuView.vue')
+const PurchaseNotesView = () => import('../views/packaging/PurchaseNotesView.vue')
 const PackagingDishRecipeView = () => import('../views/packaging/PackagingDishRecipeView.vue')
 const PackagingStandardView = () => import('../views/packaging/PackagingStandardView.vue')
 const PackagingStockView = () => import('../views/packaging/PackagingStockView.vue')
@@ -245,6 +246,12 @@ const router = createRouter({
           name: 'packaging-skus',
           component: PackagingSkuView,
           meta: { title: '库存品类管理', fullAdminOnly: true },
+        },
+        {
+          path: 'packaging/purchase-notes',
+          name: 'packaging-purchase-notes',
+          component: PurchaseNotesView,
+          meta: { title: '采购资料', fullAdminOnly: true },
         },
         {
           path: 'packaging/dish-boxes',
