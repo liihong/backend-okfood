@@ -773,11 +773,6 @@ def list_available_member_coupons_me(
                 spu = db.get(StoreRetailSpu, int(prod.spu_id))
                 q = max(1, int(it.quantity))
                 unit = Decimal(prod.unit_price_yuan)
-                if store_pickup:
-                    from app.services.shared.store_config_service import get_store_base_delivery_fee_yuan
-
-                    fee = get_store_base_delivery_fee_yuan(db, store_id=store_id)
-                    unit = max(Decimal("0.01"), (unit - fee).quantize(Decimal("0.01")))
                 line_amt = compute_retail_line_amount(
                     db,
                     unit_price=unit,

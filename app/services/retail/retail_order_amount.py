@@ -10,9 +10,6 @@ from sqlalchemy.orm import Session
 from app.models.store_retail_category import StoreRetailCategory
 from app.models.store_retail_product import StoreRetailProduct
 from app.models.store_retail_spu import StoreRetailSpu
-from app.services.shared.store_config_service import get_store_base_delivery_fee_yuan
-
-
 def assert_retail_product_orderable(
     db: Session, *, product: StoreRetailProduct, store_id: int, spu: StoreRetailSpu | None = None
 ) -> StoreRetailSpu:
@@ -37,9 +34,12 @@ def assert_retail_product_orderable(
 def compute_retail_line_amount(
     db: Session, *, unit_price: Decimal, quantity: int, store_pickup: bool, store_id: int
 ) -> Decimal:
-    """与单次点餐一致：销售价为配送价；自提时减门店固定配送费。"""
+    """行商品金额：SKU 单价 × 数量。配送费在订单头按整单另计，与各行无关。
+
+    store_pickup / store_id 保留入参以兼容既有调用方，不参与计算。
+    """
+    _ = db
+    _ = store_pickup
+    _ = store_id
     unit_dec = Decimal(unit_price).quantize(Decimal("0.01"))
-    if store_pickup:
-        fee = get_store_base_delivery_fee_yuan(db, store_id=int(store_id))
-        unit_dec = max(Decimal("0.01"), (unit_dec - fee).quantize(Decimal("0.01")))
     return (unit_dec * Decimal(int(quantity))).quantize(Decimal("0.01"))

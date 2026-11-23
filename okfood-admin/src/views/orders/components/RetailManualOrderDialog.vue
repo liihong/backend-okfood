@@ -595,7 +595,7 @@ const dialogWide = computed(
               <el-input v-model="manualForm.amount_yuan" clearable placeholder="留空按售价" />
             </el-form-item>
             <p v-if="selectedProduct && !manualForm.amount_yuan" class="retail-manual-price">
-              参考 ¥{{ selectedProduct.unit_price_yuan }}{{ manualForm.store_pickup ? '，自提减配送费' : '' }}
+              参考 ¥{{ selectedProduct.unit_price_yuan }}（配送费按整单另计，与 SKU 无关）
             </p>
             <el-form-item label="备注">
               <el-input v-model="manualForm.remark" maxlength="500" clearable placeholder="可留空，仅管理端可见" />
