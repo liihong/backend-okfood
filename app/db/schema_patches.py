@@ -477,3 +477,18 @@ def apply_address_usage_data_backfill(db: Session) -> None:
     from app.services.member.member_address_service import backfill_retail_address_separation
 
     backfill_retail_address_separation(db)
+
+
+def apply_store_retail_pickup_line_backfill(db: Session) -> None:
+    """门店自提商城订单：行小计纠正为单价×数量（幂等）。"""
+    from app.services.retail.store_retail_pickup_line_backfill_service import (
+        backfill_store_retail_pickup_line_amounts,
+    )
+
+    report = backfill_store_retail_pickup_line_amounts(db, dry_run=False)
+    if report.orders_updated or report.items_updated:
+        logger.info(
+            "商城自提行金额回填完成: orders_updated=%s items_updated=%s",
+            report.orders_updated,
+            report.items_updated,
+        )

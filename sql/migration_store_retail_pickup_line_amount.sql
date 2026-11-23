@@ -1,0 +1,11 @@
+-- 商城门店自提：行小计误按 SKU 扣基础配送费的历史数据
+-- 应用内幂等回填见 app.services.retail.store_retail_pickup_line_backfill_service
+-- 启动时 schema_patches.apply_store_retail_pickup_line_backfill 会自动执行
+
+-- 仅预览受影响行（MySQL）：
+-- SELECT o.id, i.id AS item_id, i.unit_price_yuan, i.quantity, i.line_amount_yuan,
+--        (i.unit_price_yuan * i.quantity) AS expected
+-- FROM store_retail_orders o
+-- JOIN store_retail_order_items i ON i.order_id = o.id
+-- WHERE o.store_pickup = 1
+--   AND i.line_amount_yuan < (i.unit_price_yuan * i.quantity);

@@ -25,6 +25,7 @@ from app.db.schema_patches import (
     ensure_prep_menu_schema,
     ensure_store_sf_merge_same_address_push_schema,
     ensure_retail_delivery_fee_schema,
+    apply_store_retail_pickup_line_backfill,
 )
 from app.jobs.scheduler import setup_scheduler, shutdown_scheduler
 from app.services.shared.upload_service import ensure_upload_root
@@ -135,6 +136,14 @@ async def lifespan(app: FastAPI):
         ensure_retail_delivery_fee_schema(engine)
     except Exception:
         logger.warning("商城配送费列补丁失败（不影响启动）", exc_info=True)
+    try:
+        pickup_backfill_db = SessionLocal()
+        try:
+            apply_store_retail_pickup_line_backfill(pickup_backfill_db)
+        finally:
+            pickup_backfill_db.close()
+    except Exception:
+        logger.warning("商城自提行金额回填失败（不影响启动）", exc_info=True)
     setup_scheduler()
     _prewarm()
     yield

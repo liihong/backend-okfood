@@ -24,12 +24,23 @@ const items = computed(() => {
   return Array.isArray(list) ? list : []
 })
 
-const deliveryTotal = computed(() =>
-  items.value.reduce((n, row) => n + Number(row.delivery_boxes || 0), 0),
-)
-const pickupTotal = computed(() =>
-  items.value.reduce((n, row) => n + Number(row.pickup_boxes || 0), 0),
-)
+/** 卡片只展示规格名 */
+function cardTitle(row) {
+  const spec = String(row.spec_label || '').trim()
+  if (spec) return spec
+  const display = String(row.display_title || '').trim()
+  const dot = display.indexOf(' · ')
+  if (dot >= 0) return display.slice(dot + 3).trim() || display
+  return display || '商品'
+}
+
+const sharedSpuTitle = computed(() => {
+  const titles = new Set(
+    items.value.map((row) => String(row.spu_title || '').trim()).filter(Boolean),
+  )
+  if (titles.size === 1) return [...titles][0]
+  return ''
+})
 
 async function load() {
   if (loading.value) return
@@ -68,6 +79,9 @@ onActivated(() => {
         <el-tag size="small" effect="plain" round class="retail-pick-board__scope">
           {{ summary?.scope_label || '已支付 · 已接单 · 待发货' }}
         </el-tag>
+        <span v-if="sharedSpuTitle" class="retail-pick-board__spu" :title="sharedSpuTitle">
+          {{ sharedSpuTitle }}
+        </span>
       </div>
       <div class="retail-pick-board__head-actions">
         <el-button size="small" round :loading="loading" @click="load">刷新</el-button>
@@ -92,27 +106,6 @@ onActivated(() => {
           <span class="retail-pick-stat__unit">种</span>
         </strong>
       </span>
-      <span class="retail-pick-stat">
-        <span class="retail-pick-stat__label">订单</span>
-        <strong class="retail-pick-stat__num">
-          <StatRollNumber :value="metric(summary.order_count)" :replay-key="rollKey" />
-          <span class="retail-pick-stat__unit">笔</span>
-        </strong>
-      </span>
-      <span class="retail-pick-stat">
-        <span class="retail-pick-stat__label">配送</span>
-        <strong class="retail-pick-stat__num retail-pick-stat__num--ship">
-          <StatRollNumber :value="deliveryTotal" :replay-key="rollKey" />
-          <span class="retail-pick-stat__unit">盒</span>
-        </strong>
-      </span>
-      <span class="retail-pick-stat">
-        <span class="retail-pick-stat__label">自提</span>
-        <strong class="retail-pick-stat__num retail-pick-stat__num--pickup">
-          <StatRollNumber :value="pickupTotal" :replay-key="rollKey" />
-          <span class="retail-pick-stat__unit">盒</span>
-        </strong>
-      </span>
     </div>
 
     <div class="retail-pick-board__body">
@@ -128,38 +121,22 @@ onActivated(() => {
           class="retail-pick-card"
           role="listitem"
         >
+          <div class="retail-pick-card__head">
+            <el-tooltip
+              :content="String(row.display_title || cardTitle(row))"
+              placement="top"
+              :show-after="400"
+            >
+              <h3 class="retail-pick-card__name">{{ cardTitle(row) }}</h3>
+            </el-tooltip>
+            <span v-if="row.sku_code" class="retail-pick-card__code" :title="`编码 ${row.sku_code}`">
+              {{ row.sku_code }}
+            </span>
+          </div>
           <strong class="retail-pick-card__qty" :title="`${row.total_boxes} 盒`">
             <StatRollNumber :value="metric(row.total_boxes)" :replay-key="rollKey" />
             <span class="retail-pick-card__unit">盒</span>
           </strong>
-          <el-tooltip :content="String(row.display_title || '')" placement="top" :show-after="300">
-            <h3 class="retail-pick-card__name">{{ row.display_title }}</h3>
-          </el-tooltip>
-          <p class="retail-pick-card__code">{{ row.sku_code ? `编码 ${row.sku_code}` : ' ' }}</p>
-          <div class="retail-pick-card__split">
-            <el-tag
-              v-if="row.delivery_boxes > 0"
-              size="small"
-              effect="plain"
-              round
-              class="retail-pick-card__tag retail-pick-card__tag--ship"
-            >
-              配送 {{ row.delivery_boxes }}
-            </el-tag>
-            <el-tag
-              v-if="row.pickup_boxes > 0"
-              size="small"
-              effect="plain"
-              round
-              type="success"
-              class="retail-pick-card__tag"
-            >
-              自提 {{ row.pickup_boxes }}
-            </el-tag>
-            <el-tag size="small" effect="plain" round type="info" class="retail-pick-card__tag">
-              {{ row.order_count }} 单
-            </el-tag>
-          </div>
         </article>
       </div>
     </div>
