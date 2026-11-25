@@ -217,9 +217,9 @@ onActivated(() => {
       <header class="pick-board__head">
         <div class="pick-board__titles">
           <h2 class="pick-board__title">备货看板</h2>
-          <el-tag size="small" effect="plain" round class="pick-board__scope">
+          <!-- <el-tag size="small" effect="plain" round class="pick-board__scope">
             {{ summary?.scope_label || '已支付 · 已接单 · 待发货' }}
-          </el-tag>
+          </el-tag> -->
           <div class="pick-board__cats">
             <span v-if="sharedSpuTitle" class="pick-board__spu" :title="sharedSpuTitle">
               {{ sharedSpuTitle }}
@@ -357,6 +357,8 @@ onActivated(() => {
   gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
+  /* 单选边线画在盒外，滚动裁切会吃掉上下边，留出空隙 */
+  padding: 2px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;

@@ -586,24 +586,22 @@ onActivated(() => {
       </article>
 
       <article class="finance-stat-card" style="--finance-card-delay: 90ms">
-        <div class="finance-stat-top">
+        <div class="finance-stat-top finance-stat-top--month">
           <div class="finance-stat-title">
             <p class="finance-eyebrow">月净收入</p>
-            <div class="finance-stat-title-row">
-              <h2 class="finance-card-heading">{{ monthHeading }}</h2>
-              <label class="finance-month-picker" :title="`查看${formatMonthLabel(selectedMonth)}已收`">
-                <input
-                  v-model="selectedMonth"
-                  type="month"
-                  class="finance-month-picker-input"
-                  aria-label="月份"
-                  :max="currentCalendarMonth || undefined"
-                  :disabled="monthCardBusy || !currentCalendarMonth"
-                  @change="onMonthPickerChange"
-                />
-              </label>
-            </div>
+            <h2 class="finance-card-heading">{{ monthHeading }}</h2>
           </div>
+          <label class="finance-month-picker" :title="`查看${formatMonthLabel(selectedMonth)}已收`">
+            <input
+              v-model="selectedMonth"
+              type="month"
+              class="finance-month-picker-input"
+              aria-label="月份"
+              :max="currentCalendarMonth || undefined"
+              :disabled="monthCardBusy || !currentCalendarMonth"
+              @change="onMonthPickerChange"
+            />
+          </label>
           <span class="finance-interval-badge">
             <span class="finance-metric finance-metric--badge">
               <template v-if="monthCardBusy || !monthKpi.ready">…</template>
@@ -995,6 +993,39 @@ onActivated(() => {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   column-gap: 10px;
+}
+
+/* 月份标题不换行；中间的月份选择变窄，把宽度让给标题 */
+.finance-stat-top--month {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.finance-stat-top--month .finance-stat-title {
+  flex: 0 0 auto;
+}
+
+.finance-stat-top--month .finance-card-heading {
+  white-space: nowrap;
+}
+
+.finance-stat-top--month .finance-month-picker {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 7.4rem;
+  margin-left: auto;
+  padding: 0 6px 0 8px;
+}
+
+.finance-stat-top--month .finance-month-picker-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.finance-stat-top--month .finance-interval-badge {
+  flex: 0 0 auto;
 }
 
 .finance-stat-title {
