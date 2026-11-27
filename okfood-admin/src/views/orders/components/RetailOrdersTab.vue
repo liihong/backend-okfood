@@ -38,6 +38,7 @@ const {
   batchDispatchLoading,
   batchActionBusy,
   selectedRetailDispatchableRows,
+  batchSfDispatchMode,
   onRetailSelectionChange,
   onBatchPushSfRetailOrders,
   onBatchPrintRetailOrders,
@@ -161,11 +162,21 @@ function onRetailMobileSelectChange(row, checked) {
         <el-button
           type="primary"
           size="small"
-          :loading="batchDispatchLoading"
+          :loading="batchDispatchLoading && batchSfDispatchMode === 'relay'"
           :disabled="!selectedRetailDispatchableRows.length || batchActionBusy"
-          @click="onBatchPushSfRetailOrders"
+          @click="onBatchPushSfRetailOrders('relay')"
         >
-          批量推送到顺丰
+          推送接驳单
+        </el-button>
+        <el-button
+          type="primary"
+          size="small"
+          plain
+          :loading="batchDispatchLoading && batchSfDispatchMode === 'temp'"
+          :disabled="!selectedRetailDispatchableRows.length || batchActionBusy"
+          @click="onBatchPushSfRetailOrders('temp')"
+        >
+          推送临时单
         </el-button>
         <el-button
           size="small"
@@ -289,8 +300,11 @@ function onRetailMobileSelectChange(row, checked) {
                 <el-dropdown-item command="revokeAccept" :disabled="!canRevokeAcceptRetailOrder(row)">
                   取消接单
                 </el-dropdown-item>
-                <el-dropdown-item command="sf" :disabled="!canDispatchActions(row) || row.store_pickup">
-                  推送到顺丰
+                <el-dropdown-item command="sf-relay" :disabled="!canDispatchActions(row) || row.store_pickup">
+                  推送接驳单
+                </el-dropdown-item>
+                <el-dropdown-item command="sf-temp" :disabled="!canDispatchActions(row) || row.store_pickup">
+                  推送临时单
                 </el-dropdown-item>
                 <el-dropdown-item command="courier" :disabled="!canDispatchActions(row)">
                   门店自配送
@@ -418,8 +432,11 @@ function onRetailMobileSelectChange(row, checked) {
                 <el-dropdown-item command="revokeAccept" :disabled="!canRevokeAcceptRetailOrder(row)">
                   取消接单
                 </el-dropdown-item>
-                <el-dropdown-item command="sf" :disabled="!canDispatchActions(row) || row.store_pickup">
-                  推送到顺丰
+                <el-dropdown-item command="sf-relay" :disabled="!canDispatchActions(row) || row.store_pickup">
+                  推送接驳单
+                </el-dropdown-item>
+                <el-dropdown-item command="sf-temp" :disabled="!canDispatchActions(row) || row.store_pickup">
+                  推送临时单
                 </el-dropdown-item>
                 <el-dropdown-item command="courier" :disabled="!canDispatchActions(row)">
                   门店自配送

@@ -228,7 +228,7 @@ export function useOrdersManage(orderKind = 'single') {
   const batchActionBusy = computed(
     () => batchDispatchLoading.value || batchCancelLoading.value || batchMarkCompleteLoading.value,
   )
-  /** 当前正在批量推的顺丰类型：instant 及时单 / relay 接驳单，用来只让被点的按钮转圈 */
+  /** 当前正在批量推的顺丰类型：instant 及时单 / temp 临时单 / relay 接驳单，用来只让被点的按钮转圈 */
   const batchSfDispatchMode = ref('')
 
   async function loadCouriers() {
@@ -702,7 +702,8 @@ export function useOrdersManage(orderKind = 'single') {
     if (cmd === 'modify') openEditOrder(row, 'retail')
     else if (cmd === 'accept') void onAcceptRetailOrder(row)
     else if (cmd === 'revokeAccept') void onRevokeAcceptRetailOrder(row)
-    else if (cmd === 'sf') void onPushSfRetailOrder(row)
+    else if (cmd === 'sf' || cmd === 'sf-temp') void onPushSfRetailOrder(row, 'temp')
+    else if (cmd === 'sf-relay') void onPushSfRetailOrder(row, 'relay')
     else if (cmd === 'courier') openAssignCourierRetail(row)
     else if (cmd === 'complete') void onMarkRetailOrderComplete(row)
     else if (cmd === 'cancel') void onCancelRetailOrder(row)
@@ -872,26 +873,56 @@ export function useOrdersManage(orderKind = 'single') {
     }
   }
 
-  async function onPushSfRetailOrder(row) {
+  async function onPushSfRetailOrder(row, mode = 'temp') {
+    const isRelay = mode === 'relay'
+    const kindLabel = isRelay ? '接驳单' : '临时单'
     if (!canDispatchActions(row)) {
-      showToast('仅「待发货」或「顺丰取消」且已支付订单可推送顺丰', 'error')
+      showToast(`仅「待发货」或「顺丰取消」且已支付订单可推送${kindLabel}`, 'error')
       return
     }
     if (row.store_pickup) {
       showToast('门店自提订单不发顺丰', 'error')
       return
     }
+    const isRetry = isSfCancelledRedispatch(row)
+    const shopHint = isRelay
+      ? '使用租户对接中的顺丰店铺（与配送大表同一账号）。'
+      : '使用门店「零售推顺丰店铺ID」（临时单账号）。'
+    const subject = isRetry ? `重新向顺丰创建${kindLabel}？` : `向顺丰创建${kindLabel}？`
+    const detail = isRetry ? `该订单此前顺丰侧已取消。${shopHint}` : shopHint
+    try {
+      await ElMessageBox.confirm(
+        `<p class="okfood-message-box__subject">${escapeMessageBoxHtml(subject)}</p><p class="okfood-message-box__detail">${escapeMessageBoxHtml(detail)}</p>`,
+        isRetry ? `重新推送${kindLabel}` : `推送${kindLabel}`,
+        {
+          customClass: 'okfood-message-box',
+          confirmButtonText: '确定推送',
+          cancelButtonText: '取消',
+          cancelButtonClass: 'okfood-message-box__cancel',
+          distinguishCancelAndClose: true,
+          dangerouslyUseHTMLString: true,
+        },
+      )
+    } catch {
+      return
+    }
     dispatchLoadingId.value = Number(row.id)
     try {
+      const query = isRelay ? '?dispatch_mode=relay' : '?dispatch_mode=temp'
       const r = await apiJson(
-        `/api/admin/orders/retail-orders/${row.id}/dispatch/sf-retail`,
+        `/api/admin/orders/retail-orders/${row.id}/dispatch/sf-retail${query}`,
         { method: 'POST' },
         { auth: true },
       )
-      showToast(r?.message || r?.data?.message || '已推送顺丰', 'success')
+      showToast((r && r.message) || `已提交顺丰${kindLabel}`, 'success')
       await fetchRetailOrders()
     } catch (e) {
-      toastSfPushError(e)
+      const status = e && typeof e.status === 'number' ? e.status : 0
+      if (status === 401) {
+        handleAdminLogout()
+        return
+      }
+      toastSfPushError(e instanceof Error ? e.message : '推送失败', showToast)
     } finally {
       dispatchLoadingId.value = 0
     }
@@ -1159,33 +1190,53 @@ export function useOrdersManage(orderKind = 'single') {
     }
   }
 
-  async function onBatchPushSfRetailOrders() {
+  async function onBatchPushSfRetailOrders(mode = 'relay') {
+    const isTemp = mode === 'temp'
+    const kindLabel = isTemp ? '临时单' : '接驳单'
     const rows = selectedRetailDispatchableRows.value
     if (!rows.length) {
-      showToast('请勾选可推顺丰的订单（待发货或顺丰已取消，不含门店自提）', 'error')
+      showToast(`请勾选可推${kindLabel}的订单（待发货或顺丰已取消，不含门店自提）`, 'error')
       return
     }
+    const shopHint = isTemp
+      ? '使用门店「零售推顺丰店铺ID」（临时单账号）。'
+      : '使用租户对接中的顺丰店铺（与配送大表同一账号）。'
+    const subject = `将为 ${rows.length} 笔商城订单创建顺丰${kindLabel}？`
     try {
       await ElMessageBox.confirm(
-        `将为 ${rows.length} 笔商城订单调用顺丰创单（使用门店「零售推顺丰店铺ID」）。是否继续？`,
-        '批量推送到顺丰',
-        { type: 'warning', confirmButtonText: '确定推送', cancelButtonText: '取消' },
+        `<p class="okfood-message-box__subject">${escapeMessageBoxHtml(subject)}</p><p class="okfood-message-box__detail">${escapeMessageBoxHtml(shopHint)}</p>`,
+        `推送${kindLabel}`,
+        {
+          customClass: 'okfood-message-box',
+          confirmButtonText: '确定推送',
+          cancelButtonText: '取消',
+          cancelButtonClass: 'okfood-message-box__cancel',
+          distinguishCancelAndClose: true,
+          dangerouslyUseHTMLString: true,
+        },
       )
     } catch {
       return
     }
+    batchSfDispatchMode.value = isTemp ? 'temp' : 'relay'
     batchDispatchLoading.value = true
     try {
       const ids = rows.map((r) => Number(r.id)).filter((id) => id > 0)
       const data = await apiJson(
         '/api/admin/orders/retail-orders/batch-dispatch/sf-retail',
-        { method: 'POST', body: JSON.stringify({ order_ids: ids }) },
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            order_ids: ids,
+            dispatch_mode: isTemp ? 'temp' : 'relay',
+          }),
+        },
         { auth: true },
       )
       const results = Array.isArray(data?.results) ? data.results : []
       const okCount = results.filter((x) => x && x.ok).length
       toastSfPushBatchOutcome(data, showToast, {
-        successText: `已全部提交顺丰（${okCount} 笔）`,
+        successText: `已全部提交${kindLabel}（${okCount} 笔）`,
         formatFailLine: (f) => `#${f.order_id}: ${f.message || ''}`,
       })
       clearRetailSelection()
@@ -1199,6 +1250,7 @@ export function useOrdersManage(orderKind = 'single') {
       toastSfPushError(e instanceof Error ? e.message : '批量推送失败', showToast)
     } finally {
       batchDispatchLoading.value = false
+      batchSfDispatchMode.value = ''
     }
   }
 

@@ -386,7 +386,7 @@ onMounted(() => {
           <span class="sc-card__hint">单次点餐</span>
         </header>
         <p class="sc-hint sc-hint--card">
-          <strong>零售推顺丰店铺ID</strong>用于订单管理「推送及时单」以及配送大表「推送及时单」。订单管理「推送接驳单」不用这里，改走<strong>租户对接</strong>里的顺丰店铺（与配送大表同一账号）。开发者 ID、密钥、取件电话/地址仍使用租户对接或 .env（与大表店铺可填不同值，例如
+          <strong>零售推顺丰店铺ID</strong>用于订单管理「推送及时单」、商城订单「推送临时单」以及配送大表「推送及时单」。订单管理「推送接驳单」不用这里，改走<strong>租户对接</strong>里的顺丰店铺（与配送大表同一账号）。开发者 ID、密钥、取件电话/地址仍使用租户对接或 .env（与大表店铺可填不同值，例如
           <code class="sc-code">6284388701377</code>）。
         </p>
         <div class="sc-coord-grid">
