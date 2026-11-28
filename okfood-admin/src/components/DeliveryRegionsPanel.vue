@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, onActivated, nextTick, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import { MapPin, Trash2, Plus, Save, X } from 'lucide-vue-next'
+import { MapPin, Trash2, Plus, Save, X, Search } from 'lucide-vue-next'
 
 /** 新乡市城区中心（GCJ-02）；门店未配置经纬度时兜底 */
 const XINXIANG_CENTER = [113.9268, 35.303]
@@ -61,6 +61,17 @@ const newRegionAwaitingMeta = ref(false)
 const vertexEditActive = ref(false)
 /** 当前左侧正在编辑的区域 id；新建时为 null */
 const editingId = ref(null)
+
+/** 地图上的城市/地点搜索框，供高德 AutoComplete 绑定 */
+const MAP_SEARCH_INPUT_ID = 'regions-map-city-search'
+const mapSearchKeyword = ref('')
+const mapSearching = ref(false)
+/** 连续定位时只保留最后一次结果，避免联想和回车各弹一次 */
+let mapLocateSeq = 0
+let mapPlaceSearch = null
+let mapAutoComplete = null
+let mapGeocoder = null
+let mapDistrictSearch = null
 
 function showToast(msg, kind = 'success') {
   emit('toast', msg, kind)
@@ -243,6 +254,7 @@ async function initMap() {
   }
   try {
     await loadAmapScript()
+    disposeMapSearch()
     disposeMapResizeObserver()
     if (map) {
       closePolygonEditor()
@@ -284,6 +296,7 @@ async function initMap() {
       })
       mapResizeObserver.observe(mapEl.value)
     }
+    await setupMapSearch()
   } catch (e) {
     map = null
     const msg = e instanceof Error ? e.message : '地图加载失败'
@@ -296,6 +309,345 @@ function centerMapToStoreOrFallback() {
   if (!map) return
   map.setCenter(defaultMapCenter())
   map.setZoom(defaultMapZoom())
+}
+
+function disposeMapSearch() {
+  if (mapAutoComplete) {
+    try {
+      mapAutoComplete.off?.('select')
+    } catch {
+      /* ignore */
+    }
+    mapAutoComplete = null
+  }
+  mapPlaceSearch = null
+  mapGeocoder = null
+  mapDistrictSearch = null
+}
+
+/** el-input 的 id 可能落在外层，高德要绑到真正的 input */
+function nativeMapSearchInput() {
+  const el = document.getElementById(MAP_SEARCH_INPUT_ID)
+  if (!el) return null
+  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return el
+  return el.querySelector('input, textarea')
+}
+
+function readLngLat(loc) {
+  if (!loc) return null
+  const lng = typeof loc.getLng === 'function' ? Number(loc.getLng()) : Number(loc.lng)
+  const lat = typeof loc.getLat === 'function' ? Number(loc.getLat()) : Number(loc.lat)
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null
+  return { lng, lat }
+}
+
+function flyTo(lng, lat, zoom) {
+  if (!map || !Number.isFinite(lng) || !Number.isFinite(lat)) return false
+  const z = Number.isFinite(zoom) ? zoom : 12
+  if (typeof map.setZoomAndCenter === 'function') {
+    map.setZoomAndCenter(z, [lng, lat])
+  } else {
+    map.setZoom(z)
+    map.setCenter([lng, lat])
+  }
+  return true
+}
+
+/** 省 / 市 / 区县用行政区名结尾判断，避免把「某某商场」当成整座城市去包视野 */
+function isAdminPlaceName(name) {
+  const s = String(name || '').trim()
+  return /(?:省|市|自治区|自治州|地区|盟|区|县|旗)$/.test(s)
+}
+
+/** 「郑州」对上「郑州市」；「西湖」不会误配到「西湖区」，区县必须写全称 */
+function districtNameMatches(keyword, districtName) {
+  const k = String(keyword || '').replace(/\s+/g, '')
+  const n = String(districtName || '').replace(/\s+/g, '')
+  if (k.length < 2 || n.length < 2) return false
+  if (k === n) return true
+  const suffixes = ['特别行政区', '自治区', '自治州', '地区', '省', '市', '盟']
+  return suffixes.some((suf) => n === k + suf || k === n + suf)
+}
+
+function zoomForGeocodeLevel(level) {
+  const lv = String(level || '')
+  if (lv.includes('省')) return 7
+  if (lv.includes('市')) return 11
+  if (lv.includes('区') || lv.includes('县')) return 13
+  if (lv.includes('乡') || lv.includes('镇') || lv.includes('街道')) return 15
+  return 16
+}
+
+function zoomForDistrictLevel(level) {
+  const lv = String(level || '')
+  if (lv === 'province') return 7
+  if (lv === 'city') return 11
+  if (lv === 'district') return 13
+  return 12
+}
+
+/** 行政区边界只用来算包围盒，不画到配送图上 */
+function boundsFromPaths(paths) {
+  let minLng = Infinity
+  let minLat = Infinity
+  let maxLng = -Infinity
+  let maxLat = -Infinity
+  let count = 0
+  for (const path of paths) {
+    if (!Array.isArray(path)) continue
+    for (const p of path) {
+      const pt = Array.isArray(p) ? readLngLat({ lng: p[0], lat: p[1] }) : readLngLat(p)
+      if (!pt) continue
+      count += 1
+      if (pt.lng < minLng) minLng = pt.lng
+      if (pt.lng > maxLng) maxLng = pt.lng
+      if (pt.lat < minLat) minLat = pt.lat
+      if (pt.lat > maxLat) maxLat = pt.lat
+    }
+  }
+  if (!count || !window.AMap) return null
+  return { count, bounds: new window.AMap.Bounds([minLng, minLat], [maxLng, maxLat]) }
+}
+
+function applyDistrictView(district) {
+  if (!map || !district) return false
+  const paths = Array.isArray(district.boundaries) ? district.boundaries : []
+  const boxed = boundsFromPaths(paths)
+  if (boxed && boxed.count <= 20000 && typeof map.setBounds === 'function') {
+    map.setBounds(boxed.bounds, false, [56, 56, 56, 56])
+    return true
+  }
+  const pos = readLngLat(district.center)
+  if (!pos) return false
+  return flyTo(pos.lng, pos.lat, zoomForDistrictLevel(district.level))
+}
+
+/** 按省 / 市 / 区名称把整片视野框进来；名称对不上就返回 null，交给地理编码 */
+function fitAdminDivision(keyword) {
+  return new Promise((resolve) => {
+    if (!mapDistrictSearch || typeof mapDistrictSearch.search !== 'function') {
+      resolve(null)
+      return
+    }
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      resolve(null)
+    }, 8000)
+    mapDistrictSearch.search(keyword, (status, result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      const list = status === 'complete' && Array.isArray(result?.districtList) ? result.districtList : []
+      const hit = list.find((d) => districtNameMatches(keyword, d?.name))
+      if (!hit || !applyDistrictView(hit)) {
+        resolve(null)
+        return
+      }
+      resolve(String(hit.name || keyword))
+    })
+  })
+}
+
+function geocodeKeyword(keyword) {
+  return new Promise((resolve) => {
+    if (!mapGeocoder || typeof mapGeocoder.getLocation !== 'function') {
+      resolve(null)
+      return
+    }
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      resolve(null)
+    }, 8000)
+    mapGeocoder.getLocation(keyword, (status, result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      const g = status === 'complete' ? result?.geocodes?.[0] : null
+      const pos = readLngLat(g?.location)
+      if (!pos) {
+        resolve(null)
+        return
+      }
+      resolve({
+        ...pos,
+        level: g.level,
+        label: String(g.formattedAddress || keyword),
+      })
+    })
+  })
+}
+
+function searchFirstPoi(keyword) {
+  return new Promise((resolve) => {
+    if (!mapPlaceSearch || typeof mapPlaceSearch.search !== 'function') {
+      resolve(null)
+      return
+    }
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      resolve(null)
+    }, 8000)
+    mapPlaceSearch.search(keyword, (status, result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      const p0 = status === 'complete' ? result?.poiList?.pois?.[0] : null
+      const pos = readLngLat(p0?.location)
+      if (!pos) {
+        resolve(null)
+        return
+      }
+      resolve({ ...pos, name: String(p0.name || '') })
+    })
+  })
+}
+
+/**
+ * 定位到关键字：城市先按行政区包住整座城，其余走地理编码 / 地点搜索。
+ * @param {string} raw
+ */
+async function locateKeyword(raw) {
+  const kw = String(raw ?? '').trim()
+  if (!kw) {
+    showToast('请输入要定位的城市或地点', 'warning')
+    return
+  }
+  if (!map) {
+    showToast('地图尚未加载完成，请稍后再搜', 'warning')
+    return
+  }
+  const seq = ++mapLocateSeq
+  mapSearching.value = true
+  try {
+    const adminName = await fitAdminDivision(kw)
+    if (seq !== mapLocateSeq) return
+    if (adminName) {
+      mapSearchKeyword.value = adminName
+      showToast(`已定位到${adminName}`)
+      return
+    }
+    const geo = await geocodeKeyword(kw)
+    if (seq !== mapLocateSeq) return
+    if (geo) {
+      flyTo(geo.lng, geo.lat, zoomForGeocodeLevel(geo.level))
+      showToast(`已定位到${geo.label || kw}`)
+      return
+    }
+    const poi = await searchFirstPoi(kw)
+    if (seq !== mapLocateSeq) return
+    if (poi) {
+      flyTo(poi.lng, poi.lat, 16)
+      if (poi.name) mapSearchKeyword.value = poi.name
+      showToast(`已定位到${poi.name || kw}`)
+      return
+    }
+    showToast('没有找到这个城市或地点，换个更完整的名称试试', 'warning')
+  } catch (e) {
+    if (seq !== mapLocateSeq) return
+    console.error(e)
+    showToast('定位失败，请稍后重试', 'error')
+  } finally {
+    if (seq === mapLocateSeq) mapSearching.value = false
+  }
+}
+
+function runMapSearch() {
+  void locateKeyword(mapSearchKeyword.value)
+}
+
+/** 联想选中：行政区仍包整片视野，具体地点用返回的坐标 */
+async function locateFromSuggestion(name, location) {
+  const seq = ++mapLocateSeq
+  mapSearching.value = true
+  try {
+    if (isAdminPlaceName(name)) {
+      const adminName = await fitAdminDivision(name)
+      if (seq !== mapLocateSeq) return
+      if (adminName) {
+        mapSearchKeyword.value = adminName
+        showToast(`已定位到${adminName}`)
+        return
+      }
+    }
+    const pos = readLngLat(location)
+    if (seq !== mapLocateSeq) return
+    if (pos) {
+      flyTo(pos.lng, pos.lat, isAdminPlaceName(name) ? 12 : 16)
+      showToast(`已定位到${name || '所选地点'}`)
+      return
+    }
+    mapSearching.value = false
+    await locateKeyword(name)
+  } catch (e) {
+    if (seq !== mapLocateSeq) return
+    console.error(e)
+    showToast('定位失败，请稍后重试', 'error')
+  } finally {
+    if (seq === mapLocateSeq) mapSearching.value = false
+  }
+}
+
+async function setupMapSearch() {
+  const AMap = window.AMap
+  if (!AMap || typeof AMap.plugin !== 'function') return
+  try {
+    await new Promise((resolve, reject) => {
+      try {
+        AMap.plugin(
+          ['AMap.AutoComplete', 'AMap.PlaceSearch', 'AMap.Geocoder', 'AMap.DistrictSearch'],
+          () => resolve(),
+        )
+      } catch (err) {
+        reject(err)
+      }
+    })
+  } catch (e) {
+    console.error(e)
+    showToast('城市搜索插件加载失败，请刷新页面重试', 'error')
+    return
+  }
+  disposeMapSearch()
+  if (typeof AMap.DistrictSearch === 'function') {
+    mapDistrictSearch = new AMap.DistrictSearch({
+      subdistrict: 0,
+      extensions: 'all',
+    })
+  }
+  if (typeof AMap.Geocoder === 'function') {
+    mapGeocoder = new AMap.Geocoder({ city: '全国' })
+  }
+  if (typeof AMap.PlaceSearch === 'function') {
+    mapPlaceSearch = new AMap.PlaceSearch({
+      city: '全国',
+      citylimit: false,
+      pageSize: 5,
+      pageIndex: 1,
+    })
+  }
+  await nextTick()
+  const inputEl = nativeMapSearchInput()
+  if (!inputEl || typeof AMap.AutoComplete !== 'function') return
+  mapAutoComplete = new AMap.AutoComplete({
+    input: inputEl,
+    city: '全国',
+    citylimit: false,
+  })
+  mapAutoComplete.on('select', (e) => {
+    const poi = e?.poi
+    if (!poi) return
+    const name = String(poi.name || '').trim()
+    if (name) {
+      mapSearchKeyword.value = name
+      inputEl.value = name
+    }
+    void locateFromSuggestion(name, poi.location)
+  })
 }
 
 function closePolygonEditor() {
@@ -642,6 +994,7 @@ onActivated(() => {
 })
 
 onUnmounted(() => {
+  disposeMapSearch()
   disposeMapResizeObserver()
   closePolygonEditor()
   if (mouseTool) mouseTool.close()
@@ -757,6 +1110,21 @@ onUnmounted(() => {
         </p>
       </aside>
       <div class="regions-main">
+        <div v-if="amapKey" class="regions-map-search" role="search" aria-label="定位城市">
+          <el-input
+            :id="MAP_SEARCH_INPUT_ID"
+            v-model="mapSearchKeyword"
+            class="regions-map-search__input"
+            placeholder="搜索城市或地点，如：郑州市"
+            clearable
+            autocomplete="off"
+            @keydown.enter.prevent="runMapSearch"
+          />
+          <el-button type="primary" round :loading="mapSearching" @click="runMapSearch">
+            <Search :size="15" />
+            搜索
+          </el-button>
+        </div>
         <div v-if="formDrawerOpen && vertexEditActive" class="regions-map-edit-hint">
           拖动多边形上的<strong>折点</strong>即可调整边界；编辑完成后点击左侧「保存」。
         </div>
@@ -896,11 +1264,51 @@ onUnmounted(() => {
   min-width: 0;
   position: relative;
 }
+.regions-map-search {
+  position: absolute;
+  z-index: 8;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+.regions-map-search__input {
+  width: 240px;
+}
+.regions-map-search :deep(.el-input__wrapper) {
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08) inset;
+}
+.regions-map-search :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+.regions-map-search :deep(.el-button) {
+  height: 36px;
+  padding: 0 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.regions-map-search :deep(.el-button svg) {
+  margin-right: 4px;
+}
+@media (max-width: 600px) {
+  .regions-map-search__input {
+    width: 160px;
+  }
+}
 .regions-map-edit-hint {
   position: absolute;
   z-index: 6;
   left: 50%;
-  top: 12px;
+  top: 64px;
   transform: translateX(-50%);
   max-width: calc(100% - 24px);
   padding: 8px 14px;
@@ -922,7 +1330,7 @@ onUnmounted(() => {
   position: absolute;
   z-index: 5;
   left: 50%;
-  top: 12px;
+  top: 64px;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
